@@ -104,7 +104,7 @@
 //!   single loud log line instead of a silent brick.
 //! - `tmux_probe`: the pure search order behind macOS's tmux discovery
 //!   (TODO.md's 2026-08-22 tmux floor decision, part 2) — GUI apps do not
-//!   inherit the shell PATH, so `desktop.rs` locates a Homebrew/MacPorts tmux
+//!   inherit the shell PATH, so `desktop/tmux_preflight.rs` locates a Homebrew/MacPorts tmux
 //!   by checking known prefixes itself; this module is only the ordered
 //!   search, kept free of any filesystem or platform check so it is tested
 //!   on Linux CI rather than only on a Mac nobody runs in CI.
@@ -136,7 +136,7 @@ mod api;
 mod app_bar;
 mod attachments;
 mod auth;
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 pub mod desktop;
 mod feed;
 mod github_checkout;
@@ -1084,7 +1084,7 @@ declare_assets! {
 /// rule wearing this one's clothes.
 #[component]
 pub fn App() -> Element {
-    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    #[cfg(native_desktop)]
     {
         // FIRST hook in the desktop branch, and that ordering is
         // load-bearing: everything this component renders below —
@@ -1117,7 +1117,7 @@ pub fn App() -> Element {
         };
     }
 
-    #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
+    #[cfg(not(native_desktop))]
     return rsx! { window_chrome::WindowFrame { AppBody {} } };
 }
 

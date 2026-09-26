@@ -294,11 +294,6 @@ are large mostly because of their tests.
   one-render lag the form then patches over (`:1653-1661`). Fix: a shared `SeededField` type, one source of truth for
   the folder, a `use_memo` for the target in `ListView`, then split destination/browse, composer search, and submit out
   of the component.
-- **`desktop.rs` bundle.** Low-medium effort. ~2,450 production lines covering window geometry, the asset server, device
-  token exchange, supervisor lifecycle, tmux preflight, clipboard, and state. `write_window_state` (`:701`) and
-  `write_state` (`:2428`) are diverged copies of the atomic-write helper (only one fsyncs the parent, only the other
-  cleans up its temp file and avoids the rename behaviour its own doc warns about). The desktop cfg predicate is written
-  out 30 times. Fix: split into submodules, one `atomic_write_json`, and a cfg alias.
 
 ### Duplicated infrastructure
 

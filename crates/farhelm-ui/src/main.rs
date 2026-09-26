@@ -22,7 +22,7 @@
 
 /// Desktop: hand off immediately. Everything this used to do inline now
 /// lives in `desktop::run`, which `crates/farhelm-desktop` calls too.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 fn main() -> anyhow::Result<()> {
     farhelm_ui::desktop::run()
 }
@@ -34,10 +34,7 @@ fn main() -> anyhow::Result<()> {
 /// compiled for a given target: with both features on, a native build takes
 /// the desktop arm above and a wasm build takes this one, since the desktop
 /// arm excludes wasm outright.
-#[cfg(all(
-    feature = "web",
-    not(all(feature = "desktop", not(target_arch = "wasm32")))
-))]
+#[cfg(all(feature = "web", not(native_desktop)))]
 fn main() {
     use farhelm_ui::{ApiBase, App};
 

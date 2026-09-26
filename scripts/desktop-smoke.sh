@@ -389,7 +389,7 @@ FARHELM_TMUX="$MISSING_TMUX" \
 TMUX_PREFLIGHT_STATUS=$?
 [ "$TMUX_PREFLIGHT_STATUS" -eq 1 ] ||
   fail "farhelm-desktop exited $TMUX_PREFLIGHT_STATUS with no tmux on FARHELM_TMUX (expected exactly 1)"
-# The exact text `tmux_refusal_message` (desktop.rs) renders for this case:
+# The exact text `tmux_refusal_message` (desktop/tmux_preflight.rs) renders for this case:
 # an ambient `FARHELM_TMUX` override is probed ALONE (resolve_supervisor_tmux
 # skips every other probe once one is set) and is what selected this missing
 # program, so the override-remedy clause applies; the program never existed

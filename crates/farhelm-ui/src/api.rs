@@ -915,14 +915,14 @@ fn encode_bytes(value: &str, keep: impl Fn(u8) -> bool) -> String {
 /// request before adding the explicit Authorization header. A shared client
 /// would therefore add connection pooling, not authentication semantics.
 fn client() -> reqwest::Client {
-    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    #[cfg(native_desktop)]
     {
         reqwest::Client::builder()
             .no_proxy()
             .build()
             .expect("proxy-free desktop HTTP client construction is infallible")
     }
-    #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
+    #[cfg(not(native_desktop))]
     reqwest::Client::new()
 }
 
@@ -1183,16 +1183,16 @@ async fn send_inner(
     mut request: reqwest::RequestBuilder,
     timeout: std::time::Duration,
 ) -> Result<reqwest::Response, SendError> {
-    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    #[cfg(native_desktop)]
     let deadline = tokio::time::Instant::now() + timeout;
     if let Some(secret) = crate::auth::device_secret() {
         request = request.bearer_auth(secret);
     }
-    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    #[cfg(native_desktop)]
     let retry = request.try_clone();
-    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    #[cfg(native_desktop)]
     let request_timeout = remaining(deadline)?;
-    #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
+    #[cfg(not(native_desktop))]
     let request_timeout = timeout;
     let (client, built) = request.timeout(request_timeout).build_split();
     let built = built.map_err(|error| SendError::Request(error.to_string()))?;
@@ -1204,18 +1204,18 @@ async fn send_inner(
     // the value is unchanged and the point is entirely the side effect.
     skew::note_build(&resp);
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+        #[cfg(native_desktop)]
         let body = tokio::time::timeout_at(deadline, resp.text())
             .await
             .map_err(|_| SendError::Request("request deadline elapsed".to_string()))?
             .map_err(|error| SendError::Request(error.to_string()))?;
-        #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
+        #[cfg(not(native_desktop))]
         let body = resp
             .text()
             .await
             .map_err(|error| SendError::Request(error.to_string()))?;
         if device_auth_required(&body) {
-            #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+            #[cfg(native_desktop)]
             if !skew::build_skew_detected_now()
                 && let Some(retry) = retry
             {
@@ -1231,7 +1231,7 @@ async fn send_inner(
             // skew prompt wins and this one stays dormant. Only the browser
             // owns the token prompt; desktop recovery is native and the
             // webview gate cannot repair the native request from that form.
-            #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
+            #[cfg(not(native_desktop))]
             if !skew::build_skew_detected_now() {
                 crate::auth::require_token();
             }
@@ -1251,7 +1251,7 @@ async fn send_inner(
 ///
 /// The injected refresh future is a narrow test seam for the deadline span;
 /// production still has exactly one caller and one native refresh operation.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 async fn retry_desktop_request<Refresh, Refreshed>(
     retry: reqwest::RequestBuilder,
     deadline: tokio::time::Instant,
@@ -1297,7 +1297,7 @@ where
 
 /// Remaining time in one request's absolute budget, including desktop
 /// credential recovery and its single retry.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 fn remaining(deadline: tokio::time::Instant) -> Result<std::time::Duration, SendError> {
     deadline
         .checked_duration_since(tokio::time::Instant::now())
@@ -1481,7 +1481,7 @@ pub(crate) async fn fetch_sessions(
     sort: ListSort,
 ) -> Result<SessionListing, String> {
     let query = list_query(filter, sort);
-    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    #[cfg(native_desktop)]
     crate::desktop::log_smoke_session_query(&query);
     // No empty-query case: `list_query` always carries the order, so every
     // request this UI makes has at least one parameter.
@@ -3392,7 +3392,7 @@ mod tests {
     /// The bound listener never accepts or answers. Only deadline accounting
     /// matters here, not which socket phase reaches the timeout. Tokio's paused
     /// clock removes scheduler load from the elapsed-time assertion.
-    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    #[cfg(native_desktop)]
     #[farhelm_testtrace::test(start_paused = true)]
     async fn desktop_refresh_and_retry_share_the_original_deadline() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

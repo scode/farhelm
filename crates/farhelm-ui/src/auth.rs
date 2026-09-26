@@ -9,7 +9,7 @@
 use crate::{ApiBase, api};
 use dioxus::prelude::*;
 
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 #[derive(Debug, serde::Deserialize)]
 struct DesktopExchange {
     secret: Option<String>,
@@ -24,10 +24,10 @@ struct DesktopExchange {
 /// gate reacts by cancelling its completed authentication future and running
 /// a new validation/exchange inside the webview context, replacing that
 /// client's independently revoked WebSocket credential too.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 pub(crate) static DESKTOP_AUTH_GENERATION: GlobalSignal<u64> = Signal::global(|| 0);
 
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 pub(crate) fn require_desktop_webview_reauth() {
     *DESKTOP_AUTH_GENERATION.write() += 1;
 }
@@ -42,7 +42,7 @@ pub(crate) fn require_desktop_webview_reauth() {
 /// WebSocket greetings return visibly over IPC and leave the device table
 /// alone. The generation signal explicitly restarts this future after token
 /// rotation; component-key remount behavior is not part of the contract.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 #[component]
 pub(crate) fn DesktopBootstrapGate() -> Element {
     let config = use_context::<crate::desktop::WebviewBootstrap>();
@@ -227,7 +227,7 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
 /// unchanged: `None` in every real run, `Some` only under
 /// `scripts/desktop-smoke.sh`, which is what lets the shim prove its own
 /// pipeline by echoing the marker back through `console.error` once armed.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 fn arm_client_log_shim(base: &str, secret: &str, marker: Option<&str>) {
     document::eval(&arm_client_log_script(base, secret, marker));
 }
@@ -238,7 +238,7 @@ fn arm_client_log_shim(base: &str, secret: &str, marker: Option<&str>) {
 /// touches the one origin able to reach the helm's API — is pinned by a
 /// unit test with hostile punctuation, and a later edit cannot quietly
 /// regress to interpolation without that test noticing.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 fn arm_client_log_script(base: &str, secret: &str, marker: Option<&str>) -> String {
     // A `None` marker serializes as `"smokeMarker": null`, which the shim's
     // `if (config.smokeMarker)` guard treats identically to an absent key —
@@ -279,7 +279,7 @@ fn arm_client_log_script(base: &str, secret: &str, marker: Option<&str>) -> Stri
 /// silent best-effort contract SPEC.md sets for every clipboard operation
 /// and terminal.js's own provider documents; a 401 during the
 /// reauthentication window is lost exactly like any other refused write.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 fn arm_native_clipboard(base: &str, secret: &str) {
     document::eval(&arm_native_clipboard_script(base, secret));
 }
@@ -288,7 +288,7 @@ fn arm_native_clipboard(base: &str, secret: &str) {
 /// property as [`arm_client_log_script`]: every value crosses through
 /// `serde_json`, never string interpolation, and the unit test below feeds
 /// it hostile punctuation so a regression cannot land quietly.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 fn arm_native_clipboard_script(base: &str, secret: &str) -> String {
     let payload = serde_json::to_string(&serde_json::json!({ "base": base, "secret": secret }))
         .expect("an object of strings is always serializable");
@@ -352,7 +352,7 @@ static NATIVE_DEVICE_SECRET: std::sync::OnceLock<std::sync::RwLock<Option<String
     std::sync::OnceLock::new();
 
 /// Replace the credential read by subsequent native REST requests.
-#[cfg(all(not(target_arch = "wasm32"), feature = "desktop"))]
+#[cfg(native_desktop)]
 pub(crate) fn install_native_device_secret(secret: String) {
     let slot = NATIVE_DEVICE_SECRET.get_or_init(|| std::sync::RwLock::new(None));
     *slot
@@ -384,10 +384,7 @@ fn store_device_secret(_secret: &str) -> Result<(), String> {
 pub(crate) static TOKEN_REQUIRED: GlobalSignal<bool> = Signal::global(|| false);
 
 /// Raise the token surface once. Repeated 401s do not dirty the signal again.
-#[cfg_attr(
-    all(feature = "desktop", not(target_arch = "wasm32")),
-    allow(dead_code)
-)]
+#[cfg_attr(native_desktop, allow(dead_code))]
 pub(crate) fn require_token() {
     if !*TOKEN_REQUIRED.peek() {
         *TOKEN_REQUIRED.write() = true;
@@ -476,7 +473,7 @@ pub(crate) fn TokenPrompt() -> Element {
     }
 }
 
-#[cfg(all(test, feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(all(test, native_desktop))]
 mod arm_script_tests {
     use super::arm_client_log_script;
 
