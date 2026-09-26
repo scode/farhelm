@@ -3538,9 +3538,9 @@ mod tests {
 
     /// An ownership lookup that FAILS must stop both panel paths before
     /// any transport work. A permission error or an undecodable unit file
-    /// is not evidence that the machine is free to provision — treating
-    /// it as absence is how a protected unit gets overwritten by a helm
-    /// that merely could not read it.
+    /// is not evidence that there is no unit — treating it as absence
+    /// would tell the user to run setup over a unit the helm merely could
+    /// not read.
     #[farhelm_testtrace::test]
     async fn an_unreadable_local_unit_stops_both_panel_paths() {
         let harness = harness().await;
