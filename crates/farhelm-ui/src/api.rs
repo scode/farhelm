@@ -2423,11 +2423,14 @@ pub(crate) async fn open_tab(base: &str, session_id: &str) -> Result<Tab, String
 /// likely to mean the id was wrong (a bug) as to mean another client got
 /// there first. Reporting it lets the user see something disagreed, while
 /// the read that follows reconciles the list either way.
-pub(crate) async fn close_tab(base: &str, session_id: &str, tab_id: &str) -> Result<(), String> {
+///
+/// Takes the tab as a [`Tab`] rather than a second `&str` id beside the
+/// session's, so the two ids cannot be passed in the wrong order.
+pub(crate) async fn close_tab(base: &str, session_id: &str, tab: &Tab) -> Result<(), String> {
     let url = format!(
         "{base}/api/sessions/{}/tabs/{}",
         encode_path_segment(session_id),
-        encode_path_segment(tab_id)
+        encode_path_segment(&tab.id)
     );
     let resp = send(client().delete(&url)).await?;
     if !resp.status().is_success() {

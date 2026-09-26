@@ -354,15 +354,45 @@ fn accepts_listing(
 fn clone_is_refused(
     busy: bool,
     session_id: &str,
-    pending: &HashSet<String>,
-    confirming: &HashSet<String>,
-    confirming_replace: &HashSet<String>,
+    row_phases: &HashMap<String, RowPhase>,
     renaming: Option<&str>,
 ) -> bool {
-    busy || pending.contains(session_id)
-        || confirming.contains(session_id)
-        || confirming_replace.contains(session_id)
-        || renaming == Some(session_id)
+    busy || row_phases.contains_key(session_id) || renaming == Some(session_id)
+}
+
+/// What a session row is doing beyond being shown: an operation in flight, or
+/// one of the two inline confirmation prompts replacing its actions.
+///
+/// One phase per row, held in a single map, because the three are mutually
+/// exclusive: a row with a delete prompt open must not start a stop, a row
+/// with a stop in flight must not open a prompt, and a delete prompt and a
+/// replace prompt cannot both hold the same action area. As separate sets
+/// that rule held only by each handler remembering to check the other two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowPhase {
+    /// A stop, delete, replace, or rename is in flight for this row.
+    Pending,
+    /// The inline "confirm delete?" prompt is showing.
+    ConfirmingDelete,
+    /// The inline replace confirmation is showing.
+    ConfirmingReplace,
+}
+
+/// Whether `id`'s row is in exactly `phase`.
+fn row_is(row_phases: &HashMap<String, RowPhase>, id: &str, phase: RowPhase) -> bool {
+    row_phases.get(id) == Some(&phase)
+}
+
+/// End `id`'s `phase`, returning whether the row was in it. A row in any other
+/// phase is left alone, which is what makes a stale confirm or cancel click a
+/// no-op.
+fn leave_phase(row_phases: &mut HashMap<String, RowPhase>, id: &str, phase: RowPhase) -> bool {
+    if row_is(row_phases, id, phase) {
+        row_phases.remove(id);
+        true
+    } else {
+        false
+    }
 }
 
 /// The flat session list: host, title, cwd, invocation, and a truthful
@@ -581,14 +611,18 @@ pub(crate) fn ListView(
     // do on every write regardless of which session it was about. Keyed
     // by session id so each row renders only its own entry.
     let mut errors = use_signal(HashMap::<String, String>::new);
-    // Which sessions have a stop/delete in flight right now (also keyed
-    // by id): both disables that row's buttons (so a second click can't
-    // race the first) and is the re-entry guard the click handlers check
-    // before doing anything — belt-and-suspenders, since a disabled
-    // button should already stop the click from firing, but the DOM
-    // update disabling it is not synchronous with the click handler
-    // itself.
-    let mut pending = use_signal(HashSet::<String>::new);
+    // Each row's current phase, if any: an operation in flight
+    // (`RowPhase::Pending`, which disables that row's buttons and is the
+    // re-entry guard the click handlers check, since the DOM update disabling
+    // a button is not synchronous with its click handler) or one of the two
+    // inline confirmation prompts. See `RowPhase` for why one map.
+    //
+    // The prompts are deliberately client-side with no timeout and no
+    // refresh-driven reset: a listing refresh must leave an in-progress
+    // confirmation alone (the user is mid-decision, not mid-refresh). The one
+    // reconciliation is in `commit_listing`, which drops a prompt once its
+    // session is no longer in the listing at all.
+    let mut row_phases = use_signal(HashMap::<String, RowPhase>::new);
     // The profiles popup is the remaining page-level transient surface. The
     // host filter is a native in-flow control, so it has no open state or
     // focus lifecycle to coordinate with row menus.
@@ -606,32 +640,21 @@ pub(crate) fn ListView(
         if ops.busy_now() {
             return false;
         }
-        if !pending.write().insert(id.clone()) {
-            return false;
+        {
+            let mut phases = row_phases.write();
+            if phases.contains_key(id) {
+                return false;
+            }
+            phases.insert(id.clone(), RowPhase::Pending);
         }
         row_ops += 1;
         true
     };
     let mut end_row_op = move |id: &String| {
-        if pending.write().remove(id) {
+        if leave_phase(&mut row_phases.write(), id, RowPhase::Pending) {
             row_ops -= 1;
         }
     };
-    // Which sessions are showing the inline "confirm delete?" prompt in
-    // place of their normal stop/delete buttons — see `on_delete` below.
-    // Deliberately a plain client-side set with no timeout and no
-    // refresh-driven reset: a listing refresh must leave an in-progress
-    // confirmation alone (the user is mid-decision, not mid-refresh), so
-    // this is intentionally NOT derived from `listing` on every render.
-    // The one reconciliation that does happen is in `commit_listing`,
-    // which drops an entry once its session is no longer in the listing
-    // at all (deleted from elsewhere, say) — there is no row left for a
-    // dangling entry to ever affect, so this is tidiness, not correctness.
-    let mut confirming = use_signal(HashSet::<String>::new);
-    // Replace's own prompt, on the same footing as the one above. It
-    // reconciles the same way `confirming` does: only a row that leaves the
-    // listing entirely drops its pending replace confirmation.
-    let mut confirming_replace = use_signal(HashSet::<String>::new);
     // At most one row's actions menu is open, and this parent owns which.
     // A per-row boolean would let two menus fight, and the parent is the
     // only place "opening yours closes mine" can live. Defined up here with
@@ -1061,12 +1084,9 @@ pub(crate) fn ListView(
             // externally-imposed departure the `retain` below cannot
             // distinguish from the id simply never having existed).
             let live_ids: HashSet<&str> = listing.sessions.iter().map(|s| s.id.as_str()).collect();
-            confirming
+            row_phases
                 .write()
-                .retain(|id| live_ids.contains(id.as_str()));
-            confirming_replace
-                .write()
-                .retain(|id| live_ids.contains(id.as_str()));
+                .retain(|id, phase| *phase == RowPhase::Pending || live_ids.contains(id.as_str()));
             // A complete committed fleet read is the only absence proof
             // strong enough to change an editor. It does not close one: a
             // user may still need its draft. If the exact source returns on
@@ -1386,8 +1406,8 @@ pub(crate) fn ListView(
         //
         // The same argument covers an open RENAME field, which replaces
         // the same buttons for the same reason.
-        if confirming.read().contains(&id)
-            || confirming_replace.read().contains(&id)
+        if row_is(&row_phases.read(), &id, RowPhase::ConfirmingDelete)
+            || row_is(&row_phases.read(), &id, RowPhase::ConfirmingReplace)
             || rename_editor
                 .read()
                 .as_ref()
@@ -1585,8 +1605,8 @@ pub(crate) fn ListView(
     // means the prompt never opens in the first place.
     let mut do_delete_on_confirm = do_delete.clone();
     let on_delete = move |target: DeleteTarget| {
-        if pending.read().contains(&target.id)
-            || confirming_replace.read().contains(&target.id)
+        if row_is(&row_phases.read(), &target.id, RowPhase::Pending)
+            || row_is(&row_phases.read(), &target.id, RowPhase::ConfirmingReplace)
             || rename_editor
                 .read()
                 .as_ref()
@@ -1641,7 +1661,9 @@ pub(crate) fn ListView(
             // captured here, since a status that changes while a
             // confirmation sits open (a session stopped from another
             // client, say) should be reflected in the prompt too.
-            confirming.write().insert(target.id);
+            row_phases
+                .write()
+                .insert(target.id, RowPhase::ConfirmingDelete);
         }
     };
 
@@ -1672,7 +1694,7 @@ pub(crate) fn ListView(
         if ops.busy_now() {
             return;
         }
-        if !confirming.write().remove(&id) {
+        if !leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingDelete) {
             return;
         }
         do_delete(id);
@@ -1682,7 +1704,7 @@ pub(crate) fn ListView(
     // call, no `pending` involvement — cancelling was never in flight to
     // begin with.
     let cancel_delete = move |id: String| {
-        confirming.write().remove(&id);
+        leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingDelete);
     };
 
     // Replace shares the per-row operation gate with stop, rename, and
@@ -1749,9 +1771,7 @@ pub(crate) fn ListView(
         if clone_is_refused(
             ops.busy_now(),
             &session.id,
-            &pending.read(),
-            &confirming.read(),
-            &confirming_replace.read(),
+            &row_phases.read(),
             rename_editor
                 .read()
                 .as_ref()
@@ -1759,7 +1779,9 @@ pub(crate) fn ListView(
         ) {
             return;
         }
-        confirming_replace.write().insert(session.id);
+        row_phases
+            .write()
+            .insert(session.id, RowPhase::ConfirmingReplace);
     };
     let confirm_replace = move |id: String| {
         // Same shared-token refusal as `confirm_delete`, for the same
@@ -1767,12 +1789,12 @@ pub(crate) fn ListView(
         if ops.busy_now() {
             return;
         }
-        if confirming_replace.write().remove(&id) {
+        if leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingReplace) {
             do_replace(id);
         }
     };
     let cancel_replace = move |id: String| {
-        confirming_replace.write().remove(&id);
+        leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingReplace);
     };
 
     // The "clone" menu item's click. It never calls the API itself — it
@@ -1812,9 +1834,7 @@ pub(crate) fn ListView(
         if clone_is_refused(
             ops.busy_now(),
             &session.id,
-            &pending.read(),
-            &confirming.read(),
-            &confirming_replace.read(),
+            &row_phases.read(),
             rename_editor
                 .read()
                 .as_ref()
@@ -1848,9 +1868,7 @@ pub(crate) fn ListView(
         if clone_is_refused(
             ops.busy_now(),
             &session.id,
-            &pending.read(),
-            &confirming.read(),
-            &confirming_replace.read(),
+            &row_phases.read(),
             rename_editor
                 .read()
                 .as_ref()
@@ -1883,9 +1901,7 @@ pub(crate) fn ListView(
         if clone_is_refused(
             ops.busy_now(),
             &session.id,
-            &pending.read(),
-            &confirming.read(),
-            &confirming_replace.read(),
+            &row_phases.read(),
             rename_editor
                 .read()
                 .as_ref()
@@ -1922,9 +1938,9 @@ pub(crate) fn ListView(
         // pane's operation owns the gate would present an editor whose
         // submit is guaranteed to be refused.
         if ops.busy_now()
-            || pending.read().contains(&id)
-            || confirming.read().contains(&id)
-            || confirming_replace.read().contains(&id)
+            || row_is(&row_phases.read(), &id, RowPhase::Pending)
+            || row_is(&row_phases.read(), &id, RowPhase::ConfirmingDelete)
+            || row_is(&row_phases.read(), &id, RowPhase::ConfirmingReplace)
             || rename_editor.peek().is_some()
         {
             return;
@@ -2059,7 +2075,12 @@ pub(crate) fn ListView(
     // handler that outlives this render, so a borrow cannot serve.
     let open_base = base.clone();
     let guarded_open = move |session: Session| {
-        if ops.busy_now() || !pending.peek().is_empty() {
+        if ops.busy_now()
+            || row_phases
+                .peek()
+                .values()
+                .any(|phase| *phase == RowPhase::Pending)
+        {
             return;
         }
         // A USER-initiated selection is what gets remembered — the
@@ -2152,7 +2173,12 @@ pub(crate) fn ListView(
         let candidate = in_page.or_else(|| newest_created_fallback(&listing_ok.sessions));
         if let Some(session) = candidate {
             // The same synchronous handler-time guard a click gets.
-            if ops.busy_now() || !pending.peek().is_empty() {
+            if ops.busy_now()
+                || row_phases
+                    .peek()
+                    .values()
+                    .any(|phase| *phase == RowPhase::Pending)
+            {
                 return;
             }
             on_open.call(session.clone());
@@ -2246,7 +2272,7 @@ pub(crate) fn ListView(
         let current_editor = rename_editor.peek().clone();
         if let Some(editor) = current_editor
             && editor.generation == generation
-            && !pending.read().contains(&editor.id)
+            && !row_is(&row_phases.read(), &editor.id, RowPhase::Pending)
         {
             // Both cancellation paths originate inside the dialog: a click
             // on Cancel or an ordinary Escape from one of its controls.
@@ -2258,7 +2284,11 @@ pub(crate) fn ListView(
     // Cosmetic reflection of the same conditions, for the disabled
     // attributes. Not the guard — see `ops`.
     let busy = ops.busy();
-    let nav_locked = busy || !pending.read().is_empty();
+    let nav_locked = busy
+        || row_phases
+            .read()
+            .values()
+            .any(|phase| *phase == RowPhase::Pending);
     // EVERY host is offered as a create target, whatever phase it is in.
     // Filtering to connected hosts — which this used to do — quietly
     // rewrites SPEC.md's default: the local row is the fallback
@@ -2653,11 +2683,9 @@ pub(crate) fn ListView(
                                     // holds it, `begin_row_op` refuses row
                                     // ops anyway, and the disabled state is
                                     // that refusal made visible.
-                                    busy: busy || pending.read().contains(&session.id),
-                                    confirming: confirming.read().contains(&session.id),
-                                    confirming_replace: confirming_replace
-                                        .read()
-                                        .contains(&session.id),
+                                    busy: busy || row_is(&row_phases.read(), &session.id, RowPhase::Pending),
+                                    confirming: row_is(&row_phases.read(), &session.id, RowPhase::ConfirmingDelete),
+                                    confirming_replace: row_is(&row_phases.read(), &session.id, RowPhase::ConfirmingReplace),
                                     renaming: rename_editor
                                         .read()
                                         .as_ref()
@@ -2708,10 +2736,10 @@ pub(crate) fn ListView(
         if let Some(editor) = rename_editor() {
             RenameDialog {
                 draft: rename_draft,
-                busy: pending.read().contains(&editor.id),
+                busy: row_is(&row_phases.read(), &editor.id, RowPhase::Pending),
                 busy_now: {
                     let id = editor.id.clone();
-                    Callback::new(move |_| pending.read().contains(&id))
+                    Callback::new(move |_| row_is(&row_phases.read(), &id, RowPhase::Pending))
                 },
                 unavailable: editor.unavailable,
                 current_title: editor.current_title,
@@ -2836,40 +2864,41 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_clone_is_refused_by_any_one_of_its_guards() {
         let id = "session-1";
-        let empty = HashSet::new();
-        let holding = HashSet::from([id.to_string()]);
+        let empty = HashMap::new();
+        let holding = |phase| HashMap::from([(id.to_string(), phase)]);
 
         assert!(
-            !clone_is_refused(false, id, &empty, &empty, &empty, None),
+            !clone_is_refused(false, id, &empty, None),
             "nothing is holding this row, so the clone must proceed"
         );
         assert!(
-            clone_is_refused(true, id, &empty, &empty, &empty, None),
+            clone_is_refused(true, id, &empty, None),
             "the shared page-wide lock alone must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &holding, &empty, &empty, None),
+            clone_is_refused(false, id, &holding(RowPhase::Pending), None),
             "a stop or delete already in flight for THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &empty, &holding, &empty, None),
+            clone_is_refused(false, id, &holding(RowPhase::ConfirmingDelete), None),
             "an open delete confirmation on THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &empty, &empty, &holding, None),
+            clone_is_refused(false, id, &holding(RowPhase::ConfirmingReplace), None),
             "an open replace confirmation on THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &empty, &empty, &empty, Some(id)),
+            clone_is_refused(false, id, &empty, Some(id)),
             "this row's own open rename editor must refuse it"
         );
         // A guard keyed to a DIFFERENT row must never refuse this one —
-        // the per-row sets are per-row for exactly this reason, and a
+        // the per-row phases are per-row for exactly this reason, and a
         // guard that read them as a single shared flag would block every
         // clone in the list the instant any one row was mid-operation.
+        let other = HashMap::from([("other-row".to_string(), RowPhase::Pending)]);
         assert!(
-            !clone_is_refused(false, id, &empty, &empty, &empty, Some("other-row")),
-            "another row's rename must not block this row's clone"
+            !clone_is_refused(false, id, &other, Some("other-row")),
+            "another row's phase or rename must not block this row's clone"
         );
     }
 
