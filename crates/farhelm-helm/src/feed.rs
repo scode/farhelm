@@ -20,8 +20,8 @@ use tokio::sync::watch;
 ///   a subscriber that was busy through fifty bumps wakes once and re-reads
 ///   once. A lagged subscriber is therefore not a case to handle; it is the
 ///   ordinary case observed at a different speed.
-/// - **Bumps are CHANGE-only, without exception, by contract of the
-///   callers.** Nothing here can tell a real change from a no-op, so every
+/// - **Bumps are CHANGE-only, by contract of the callers.** Nothing here
+///   can tell a real change from a no-op, so every
 ///   publisher is responsible for calling [`Self::bump`] only when something
 ///   a client could observe actually differs. That rule is load-bearing
 ///   rather than tidy: the session-cache refresh runs every few seconds per
@@ -30,19 +30,23 @@ use tokio::sync::watch;
 ///   a three-second timer and be strictly worse than the polling it
 ///   replaces.
 ///
-///   Every publisher meets it by comparing, not by assuming a mutation
-///   changed something: the cache writes compare stored rows inside their
-///   own transaction, the actor's publication compares the value it is about
-///   to publish, the remembered-default write compares the stored id, and
-///   profile edits compare the submitted definition against the catalog
-///   before forwarding (`crate::profiles::update_profile`). A caller that
-///   cannot tell must not bump.
+///   The frequent publishers meet it by comparing, not by assuming a
+///   mutation changed something: the cache writes compare stored rows
+///   inside their own transaction, the actor's publication compares the
+///   value it is about to publish, and the remembered-default write compares
+///   the stored id. A caller that cannot tell must not bump.
+///
+///   Profile edits are a deliberate exception: an edit to an existing
+///   profile bumps even when it resubmits exactly what is stored
+///   (`crate::profiles`'s module docs say so). The rule exists to stop a
+///   timer waking the fleet on no-ops; a user-initiated edit is not on a
+///   timer, so an occasional redundant edit costs every client one re-read.
 ///
 /// Owned by the [`crate::manager::ConnectionManager`] because that is where
 /// the chokepoints are — actor state transitions, cache writes, registry
 /// reconciliation — and reachable from the REST edge through
 /// [`crate::manager::ConnectionManager::events`]
-/// for the publishers that live there (profile mutations and
+/// for the publishers that live there (among them profile mutations and
 /// remembered-default writes).
 pub struct FleetEvents {
     /// Starts at zero and only ever increases. Wrapping is not a case: at
@@ -179,11 +183,13 @@ impl FleetEvents {
     /// It is also process-local and restarts at zero, so equality across a
     /// helm restart means nothing at all.
     ///
-    /// What it CAN qualify is state that lives in this process and is
-    /// published under the same discipline — the identity-less hosts'
-    /// in-memory session lists, which are only ever changed by a publication
-    /// that bumps this. `crate::aggregate` uses it for exactly that half and
-    /// takes the store's own generation for the other.
+    /// The same window exists for state that lives in this process: the
+    /// identity-less hosts' in-memory session lists are published first and
+    /// bumped after, which is why the aggregate's revision-keyed count cache
+    /// was removed (see its test
+    /// `a_live_change_before_the_snapshot_is_counted_by_the_reply_that_returns_it`).
+    /// So this is an invalidation signal only. No production code reads it;
+    /// tests read it to observe that a bump happened.
     pub fn revision(&self) -> u64 {
         *self.revision.borrow()
     }
