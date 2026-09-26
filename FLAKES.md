@@ -1114,3 +1114,22 @@ Disposition: open (TODO.md); retain the trace and inspect listing interception a
 Class: unknown
 
 Cause: unknown
+
+## 2026-09-25 — Replace refusal row reproduces in whole-file WebKit runs (e2e/tests/terminal-restart.spec.ts)
+
+`Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal` failed the same way as the
+earlier entry (60-second timeout locating the second, route-injected refusal row) in every one of three runs of the
+whole `terminal-restart.spec.ts` file on the WebKit project alone at clean `main` commit
+`1867aeddbd997df0c6fdba9d34c3f0cb826442bf`, first run `85814340-1ac0-48a4-beb1-1ed468c26d7b`, and in three more such
+runs on an unmerged UI stack built on it (first run `b4279fc7-97db-4003-8eed-f0795f84b2d3`). In the same session the
+test passed six times out of six on both engines when selected alone (repetition
+`51a974c0-332d-40c5-9ac4-85fb18da8d15`), and failed twice in larger multi-file WebKit selections. So the failure depends
+on the tests that run before it in the file, not on load: it is reproducible on demand with the whole file on WebKit,
+which is the useful step for the open TODO.md entry. Linux x86_64, one browser worker, zero retries, pinned tmux 3.7c,
+executable SHA256 `49acd3312738da4447a018cf1c37e23270404b90fc53f6a396f2c25e113f2190`, locale `C.UTF-8`; ambient
+`FARHELM_*` scrubbed by the recorder, which ran in generic mode with tmux validation downgraded to a warning because it
+could not locate the repository-owned tmux from a jj workspace. Disposition: open (existing TODO.md entry).
+
+Class: unknown
+
+Cause: unknown
