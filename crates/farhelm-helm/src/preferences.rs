@@ -41,9 +41,9 @@
 //!
 //! ## Why no CORS layer
 //!
-//! The desktop webview's JavaScript reaches exactly four helm routes across
+//! The desktop webview's JavaScript reaches exactly five helm routes across
 //! origins (the device validation, the token exchange, attachment uploads,
-//! and the console log), and this is deliberately not a fifth: the desktop
+//! the console log, and the clipboard), and this is deliberately not a sixth: the desktop
 //! UI's preference read and write go through the same native reqwest
 //! funnel every other REST call does (`farhelm-ui`'s `api::send`), so the
 //! route sits inside the ordinary protected group with nothing special
@@ -104,7 +104,10 @@ pub(crate) async fn put_preferences(
             kind: ErrorKind::InvalidRequest,
             message: format!(
                 "{word:?} is not a remembered structured-launch permissions mode; this helm \
-                 serves yolo"
+                 serves {}",
+                farhelm_proto::LaunchPermission::ALL
+                    .map(farhelm_proto::LaunchPermission::wire_word)
+                    .join(", ")
             ),
         }));
     }
@@ -291,6 +294,16 @@ mod tests {
             response.status(),
             StatusCode::BAD_REQUEST,
             "a permissions word this helm does not serve is refused at the write"
+        );
+        // The refusal names every word it would have accepted; it used to
+        // name only `yolo` after the vocabulary had grown to four.
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            body.contains("this helm serves yolo, approve, smart_approve, chat"),
+            "{body}"
         );
         assert_eq!(
             read(&harness).await.remembered_permissions,
