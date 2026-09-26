@@ -520,7 +520,7 @@ fn hook_command(
     // adapter; the Goose helper supplies its value internally instead.
     let mut command = format!(
         "{} internal hook --vendor {vendor}",
-        shell_words::quote(hook_exe)
+        farhelm_proto::text::shell_quote(hook_exe)
     );
     if instructions.announces() {
         command.push_str(" --announce");

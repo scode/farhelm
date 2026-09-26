@@ -457,7 +457,10 @@ impl SystemBackend {
         // ssh concatenates its trailing argv and reparses it remotely. Keep
         // the complete `sh -c` invocation in one shell-quoted string so the
         // script cannot absorb words from a destination or path.
-        command.arg(format!("sh -c {}", shell_words::quote(&remote_command)));
+        command.arg(format!(
+            "sh -c {}",
+            crate::ssh::shell_quote(&remote_command)
+        ));
         Ok(command)
     }
 
@@ -770,7 +773,7 @@ impl SystemBackend {
                                printf '%s\\n' 'uploaded payload digest mismatch' >&2; exit 76; \
                              }}; chmod {mode:o} -- {} && mv -f -- {} {}",
                             remote_sha256sum(&shell_path(temporary)?),
-                            shell_words::quote(source_hash),
+                            crate::ssh::shell_quote(source_hash),
                             shell_path(temporary)?,
                             shell_path(temporary)?,
                             shell_path(destination)?
@@ -841,7 +844,7 @@ impl SystemBackend {
                        printf '%s\\n' 'uploaded payload digest mismatch' >&2; exit 76; \
                      }}",
                     remote_sha256sum(&shell_path(temporary)?),
-                    shell_words::quote(source_hash)
+                    crate::ssh::shell_quote(source_hash)
                 ),
                 "verifying the uploaded payload",
             )
@@ -895,7 +898,7 @@ impl SystemBackend {
                        printf '%s\\n' 'uploaded payload digest mismatch' >&2; exit 76; \
                      }}; chmod {mode:o} -- {} && mv -f -- {} {}",
                     remote_sha256sum(&shell_path(temporary)?),
-                    shell_words::quote(source_hash),
+                    crate::ssh::shell_quote(source_hash),
                     shell_path(temporary)?,
                     shell_path(temporary)?,
                     shell_path(destination)?
@@ -1035,8 +1038,8 @@ impl SystemBackend {
                      then resolved=\"$HOME/.local/lib/farhelm/farhelm\"; fi; \
                      if [ -n \"$resolved\" ]; then printf '%s%s\\n' {resolved_prefix} \"$resolved\" >&2; \
                      exec \"$resolved\" internal stdio{state_arg}; fi; exit {POSITIVE_ABSENCE_EXIT}",
-                    marker = shell_words::quote(REMOTE_PROBE_MARKER),
-                    resolved_prefix = shell_words::quote(REMOTE_RESOLVED_PREFIX),
+                    marker = crate::ssh::shell_quote(REMOTE_PROBE_MARKER),
+                    resolved_prefix = crate::ssh::shell_quote(REMOTE_RESOLVED_PREFIX),
                 );
                 self.ssh_command(destination, script).map_err(|error| {
                     BackendFailure::new("building the ssh probe", error.to_string())
@@ -1062,7 +1065,7 @@ impl SystemBackend {
 /// Render the bounded remote sweep used for one destination directory.
 pub(super) fn orphan_cleanup_script(parent: &Path, prefix: &str) -> anyhow::Result<String> {
     let parent = shell_path(parent)?;
-    let prefix = shell_words::quote(prefix);
+    let prefix = crate::ssh::shell_quote(prefix);
     Ok(format!(
         "prefix={prefix}; for path in {parent}/\"$prefix\"*; do [ -f \"$path\" ] && [ ! -L \"$path\" ] || continue; base=${{path##*/}}; suffix=${{base#\"$prefix\"}}; printf '%s' \"$suffix\" | grep -Eq '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$' || continue; rm -f -- \"$path\" || exit 1; done",
     ))
@@ -1937,7 +1940,7 @@ impl ProvisioningBackend for SystemBackend {
         let enable_target = if self.runtime_units {
             shell_path(unit_path)?
         } else {
-            shell_words::quote(unit).into_owned()
+            crate::ssh::shell_quote(unit)
         };
         let runtime = if self.runtime_units { " --runtime" } else { "" };
         self.require_shell(
@@ -1986,7 +1989,7 @@ impl ProvisioningBackend for SystemBackend {
         target: &ProvisioningTarget,
         unit: &str,
     ) -> Result<ActionOutcome, BackendFailure> {
-        let unit = shell_words::quote(unit);
+        let unit = crate::ssh::shell_quote(unit);
         self.require_shell(
             target,
             &format!("systemctl --user restart -- {unit}"),

@@ -137,13 +137,10 @@ pub(crate) fn ssh_stdio_args(
     Ok(args)
 }
 
-/// Encode one word for the remote login shell with a representation that
-/// never leaves shell syntax active. Always using single quotes matters here:
-/// `shell_words::quote` deliberately leaves some shell syntax, including
-/// braces, bare even though OpenSSH gives the joined command to `sh -c`.
-pub(crate) fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
+/// Encode one word for the remote login shell (OpenSSH hands the joined
+/// command to it) with no shell syntax left active; see
+/// [`farhelm_proto::text::shell_quote`] for why this never leaves a word bare.
+pub(crate) use farhelm_proto::text::shell_quote;
 
 /// Encode a ControlPath for OpenSSH's config-value parser.
 ///

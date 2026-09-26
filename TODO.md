@@ -257,12 +257,6 @@ are large mostly because of their tests.
 
 ### Diverged copies of the same rule
 
-- **Shell quoting.** Low effort. `farhelm-helm/src/ssh.rs:141-146` documents that `shell_words::quote` leaves some shell
-  syntax bare and uses its own always-single-quote helper. `farhelm-supervisor/src/launch.rs:604` still builds the
-  `$SHELL -l -i -c` command with `shell_words::quote` while its comment claims the same encoding, and
-  `farhelm-helm/src/provisioning/backend.rs:460` does too; `farhelm-ui/src/profiles.rs:615` has a third quoter. Low risk
-  today since most inputs are Farhelm-controlled, but `--state-dir` is user-chosen. Fix: one always-single-quote helper
-  for every string that reaches a shell.
 - **Helm error construction and unexpected replies.** Medium effort. Six supervisor-client calls
   (`farhelm-helm/src/client.rs:2840, 2872, 2903, 3033, 3227, 3451`) fail with `bail!("unexpected reply …: {other:?}")`,
   the unbounded Debug rendering that `wrong_reply` was introduced to replace, and which can reach HTTP bodies through
