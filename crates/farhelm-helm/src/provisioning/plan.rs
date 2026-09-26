@@ -488,11 +488,7 @@ fn unit_failure(error: anyhow::Error) -> BackendFailure {
 ///
 /// A thin adapter over [`crate::units::render_supervisor_unit`], which
 /// `farhelm helm setup` shares: one renderer means remote provisioning and
-/// local setup cannot ship different lifecycle behaviour. Release
-/// packaging is NOT yet in that set — `release/` still holds its own
-/// copies of these files, and the distribution plan's Step 5 is what
-/// deletes them and makes packaging consume the shared templates. Until
-/// then the two have to be changed together.
+/// local setup cannot ship different lifecycle behaviour.
 ///
 /// The unit is deliberately left UNMARKED — the managed-by marker means
 /// "setup owns this file", and provisioning's remote units are owned by
