@@ -27,6 +27,7 @@ use farhelm_proto::{AgentOutcome, AgentReply, ControlMsg, SessionAuth};
 use farhelm_supervisor::launch::{
     SESSION_ID_ENV_VAR, SESSION_TOKEN_ENV_VAR, SUPERVISOR_SOCK_ENV_VAR,
 };
+use farhelm_supervisor::service::hook_log_path;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -131,8 +132,10 @@ impl SessionEnv {
     /// `<state_dir>/hook-log/<session>.log`, where the state directory is
     /// the socket's own directory.
     ///
-    /// The supervisor mirrors this derivation in `hook_log_path`; change
-    /// one and you must change the other. Needs only the id and the socket,
+    /// The file name under the state directory comes from the supervisor's
+    /// own `hook_log_path`, the function its delete uses to remove the file,
+    /// so the two cannot disagree; this side only supplies the state
+    /// directory, as the socket's parent. Needs only the id and the socket,
     /// not the token, on purpose: a half-configured environment (id and
     /// socket present, token missing) is exactly the situation whose only
     /// evidence is this file, so it must still get one. A non-UTF-8 value
@@ -141,7 +144,7 @@ impl SessionEnv {
     pub(crate) fn hook_log(&self) -> Option<PathBuf> {
         let id = self.session_id.as_ref()?.to_str()?;
         let socket = std::path::Path::new(self.socket.as_ref()?.to_str()?);
-        Some(socket.parent()?.join("hook-log").join(format!("{id}.log")))
+        Some(hook_log_path(socket.parent()?, id))
     }
 
     /// The credential the hook reports with, or `None` unless all three
@@ -640,6 +643,26 @@ mod tests {
     /// A value no UTF-8 decoder accepts.
     fn not_utf8() -> OsString {
         OsString::from_vec(vec![0x66, 0xff, 0x6f])
+    }
+
+    /// Spec: the hook log path computed from a session's environment is the
+    /// file the supervisor's delete removes for that session.
+    ///
+    /// Why: delete ignores a missing file, so if the writer and the deleter
+    /// ever disagreed, hook logs would pile up with nothing failing. The
+    /// file name comes from the shared `hook_log_path`; this pins the one
+    /// assumption left on this side, that the state directory is the
+    /// socket's parent, against the supervisor's own `socket_path`.
+    #[farhelm_testtrace::test]
+    fn the_hook_log_is_the_file_the_supervisor_deletes() {
+        let state_dir = std::path::Path::new("/state");
+        let env = SessionEnv {
+            socket: Some(
+                farhelm_supervisor::service::Supervisor::socket_path(state_dir).into_os_string(),
+            ),
+            ..full_env()
+        };
+        assert_eq!(env.hook_log(), Some(hook_log_path(state_dir, "s-1")));
     }
 
     /// Spec: the hook log sits in `hook-log/<session>.log` beside the
