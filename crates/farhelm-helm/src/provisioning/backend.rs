@@ -253,15 +253,16 @@ pub(super) trait ProvisioningBackend: Send + Sync {
     ///
     /// Takes no target on purpose: the only question it answers is about
     /// the helm's own machine, where `farhelm helm setup` — not the hosts
-    /// panel — owns the units (D9). The local row consults it before
-    /// probing so a supervisor unit setup wrote can never be overwritten
-    /// from the panel.
+    /// panel — owns the units (D9). The panel never installs on the local
+    /// row; the local row consults this only AFTER a probe found no
+    /// supervisor (or to refuse an update), to choose what to tell the user:
+    /// run `farhelm helm setup`, or leave the existing unit alone.
     ///
     /// `None` means one thing only: no such file. Every other outcome —
     /// an unreadable file, contents that are not UTF-8, a unit directory
     /// that cannot be located — is an error, because the caller reads
-    /// `None` as "there is nothing here to protect" and would go on to
-    /// install over whatever it could not read.
+    /// `None` as "there is no unit here" and would tell the user to run
+    /// setup over a unit it merely failed to read.
     async fn read_user_unit(&self, name: &str) -> Result<Option<String>, BackendFailure>;
 
     /// Let a deliberately injected backend complete attachment without a
@@ -2016,9 +2017,9 @@ impl ProvisioningBackend for SystemBackend {
     ///
     /// Everything short of a confirmed absence is an error. A missing
     /// `HOME` with no absolute `XDG_CONFIG_HOME`, a file this process may
-    /// not read, contents that are not UTF-8 — none of those mean "no
-    /// protected unit exists", and answering `None` for them would let
-    /// the panel install over a unit it merely failed to inspect.
+    /// not read, contents that are not UTF-8 — none of those mean "no unit
+    /// exists", and answering `None` for them would have the panel tell the
+    /// user to run setup over a unit it merely failed to inspect.
     async fn read_user_unit(&self, name: &str) -> Result<Option<String>, BackendFailure> {
         let home = std::env::var_os("HOME").filter(|value| !value.is_empty());
         let directory = crate::units::user_unit_dir_for(
