@@ -46,9 +46,10 @@ use farhelm_proto::ErrorKind;
 
 /// The marker an incarnation-precondition refusal ends with.
 ///
-/// Stable across releases: it is API, not diagnostics. Bracketed and trailing
-/// so the prose in front of it stays the sentence a user is shown.
-pub(crate) const INCARNATION_MARKER: &str = "[farhelm:precondition/incarnation]";
+/// Stable across releases: it is API, not diagnostics. Defined in
+/// `farhelm-proto` so the UI, which branches on it, reads the same constant
+/// this module appends.
+pub(crate) const INCARNATION_MARKER: &str = farhelm_proto::http::INCARNATION_MARKER;
 
 /// Refuse unless `expected` names the connection `claim` was taken on.
 ///

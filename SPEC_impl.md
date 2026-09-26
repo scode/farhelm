@@ -62,7 +62,8 @@ framework for every externally supplied value.
 - `crates/farhelm-supervisor` — session management, tmux driver, agent-kind integrations, SQLite state.
 - `crates/farhelm-helm` — the host registry (SPEC.md's term: the helm's record of registered hosts and their SSH
   destinations), SSH transport, aggregation, axum API, static UI serving.
-- `crates/farhelm-proto` — wire types and protocol version, shared by both ends and by tests.
+- `crates/farhelm-proto` — wire types and protocol version, shared by both ends and by tests; also the few HTTP tokens
+  the UI branches on in the helm's replies.
 - `crates/farhelm-ui` — the Dioxus application, built for web (wasm32) and desktop from the same crate.
 - `crates/farhelm-desktop` — the macOS webview shell (D6): a `main` that calls farhelm-ui's desktop entry point and
   nothing else. It exists as its own package because only a package can enable farhelm-ui's `desktop` feature
