@@ -75,9 +75,17 @@
 //! means a JSON string: a `source` that is `null`, a number, or any other
 //! shape renders as `-` exactly like an absent one, because the field is
 //! diagnostic-only and refusing a report over its TYPE would trade a
-//! working resume for a log nicety. There is
-//! deliberately no separate "reported" line ahead of the outcome: one line
-//! per run is the whole promise, so the outcome word is always the
+//! working resume for a log nicety.
+//!
+//! Grok's payloads are the exception. Its `SessionStart` must carry a
+//! `source` of `new` or `load`, and one without it (absent or `null`) is
+//! `bad-payload unsupported-session-source`. Separately, `parse_grok_payload`
+//! refuses a `source` that is present but not a string (a number, an object)
+//! on every Grok event as `bad-payload source-not-a-string`; an absent or
+//! `null` one on the other events still renders as `-`.
+//!
+//! There is deliberately no separate "reported" line ahead of the outcome:
+//! one line per run is the whole promise, so the outcome word is always the
 //! *terminal* outcome, and the identity rides along in the detail.
 //!
 //! Outcome words, and the detail each carries:
