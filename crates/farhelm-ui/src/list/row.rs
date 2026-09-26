@@ -217,7 +217,8 @@ fn menu_label(title: &str) -> String {
 /// ordinary text runs, which prevents a relayed value from reordering them.
 fn menu_header_summary_parts(session: &Session, state: Option<&str>) -> Vec<DetailPart> {
     let values = if let Some(launch) = &session.launch {
-        let mut values = vec![format!("{:?}", launch.harness).to_lowercase()];
+        let mut values =
+            vec![crate::launch_composer::harness_label(launch.harness).to_ascii_lowercase()];
         let permission = selection_permission_value(launch);
         if permission != "default" {
             values.push(permission.to_string());

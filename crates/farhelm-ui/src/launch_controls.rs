@@ -9,7 +9,7 @@
 use dioxus::prelude::*;
 
 use crate::api::LaunchCatalogModel;
-use crate::launch_composer::{self, ModelEnterTarget, ModelOption};
+use crate::launch_composer::{self, ModelEnterTarget, ModelOption, harness_label};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
@@ -103,11 +103,12 @@ pub(crate) fn LaunchControls(
     let model_hint = harness
         .map(|harness| {
             format!(
-                "{} for {harness:?}",
+                "{} for {}",
                 catalog
                     .iter()
                     .filter(|model| model.harness == harness)
-                    .count()
+                    .count(),
+                harness_label(harness)
             )
         })
         .unwrap_or_else(|| "choose a harness".to_string());
@@ -248,7 +249,7 @@ pub(crate) fn LaunchControls(
                                         ModelOption::HarnessDefault => rsx! { "harness default" },
                                         ModelOption::Model { id, harness: owner } => rsx! {
                                             "{display_peer(id)}"
-                                            if model_show_all || harness.is_none() { " ({owner:?})" }
+                                            if model_show_all || harness.is_none() { " ({harness_label(*owner)})" }
                                         },
                                         ModelOption::ShowAll => rsx! {
                                             if model_show_all {
