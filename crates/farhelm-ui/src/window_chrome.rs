@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 /// The target OS alone is insufficient: the desktop feature distinguishes
 /// native window chrome from the shared UI rendered in an ordinary browser.
 pub(crate) const fn shell_class() -> &'static str {
-    if cfg!(all(feature = "desktop", target_os = "macos")) {
+    if cfg!(all(native_desktop, target_os = "macos")) {
         "app-shell macos-window"
     } else {
         "app-shell"
@@ -26,7 +26,7 @@ pub(crate) const fn shell_class() -> &'static str {
 /// startup and mismatch messages, which render outside the ordinary shell.
 #[component]
 pub(crate) fn WindowFrame(children: Element) -> Element {
-    #[cfg(all(feature = "desktop", target_os = "macos"))]
+    #[cfg(all(native_desktop, target_os = "macos"))]
     {
         let window = dioxus::desktop::use_window();
         use_hook(move || {
@@ -46,7 +46,7 @@ pub(crate) fn WindowFrame(children: Element) -> Element {
         // the bridge route registered here stays until the window closes.
         use_click_detail_bridge();
     }
-    let native = cfg!(all(feature = "desktop", target_os = "macos"));
+    let native = cfg!(all(native_desktop, target_os = "macos"));
     rsx! {
         if native {
             // Bootstrap failures must receive layout before AppBody mounts
@@ -67,7 +67,7 @@ pub(crate) fn WindowFrame(children: Element) -> Element {
 // The decision helpers below are called only from the macOS desktop
 // press path, but stay compiled everywhere so Linux unit tests cover
 // the truth table; outside that path they are test-only by design.
-#[cfg_attr(not(all(feature = "desktop", target_os = "macos")), allow(dead_code))]
+#[cfg_attr(not(all(native_desktop, target_os = "macos")), allow(dead_code))]
 pub(crate) enum PressAction {
     /// AppKit classified this press as a repeat click: zoom/restore once.
     ToggleMaximized,
@@ -87,7 +87,7 @@ pub(crate) enum PressAction {
 /// repeat); eligibility classifies targeting (both presses belong here).
 /// The two arrive in one header value so they cannot split.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(not(all(feature = "desktop", target_os = "macos")), allow(dead_code))]
+#[cfg_attr(not(all(native_desktop, target_os = "macos")), allow(dead_code))]
 pub(crate) struct ClickReport {
     pub detail: i32,
     pub eligible: bool,
@@ -124,7 +124,7 @@ pub(crate) struct ClickReport {
 ///
 /// Pure and platform-free so the truth table is unit-tested on Linux; the
 /// macOS call site supplies the three inputs and performs the action.
-#[cfg_attr(not(all(feature = "desktop", target_os = "macos")), allow(dead_code))]
+#[cfg_attr(not(all(native_desktop, target_os = "macos")), allow(dead_code))]
 pub(crate) fn decide_press(
     primary: bool,
     report: Option<ClickReport>,
@@ -153,7 +153,7 @@ pub(crate) fn decide_press(
 /// The header value is `<detail>:<eligible>` — one DOM `detail` as ASCII
 /// digits plus `1` or `0`. Anything else — absent, unparseable, negative,
 /// a second colon — is `None`, which decides as an ordinary drag.
-#[cfg_attr(not(all(feature = "desktop", target_os = "macos")), allow(dead_code))]
+#[cfg_attr(not(all(native_desktop, target_os = "macos")), allow(dead_code))]
 pub(crate) fn parse_click_report(value: &str) -> Option<ClickReport> {
     let (detail, eligible) = value.trim().split_once(':')?;
     let detail = detail
@@ -175,7 +175,7 @@ pub(crate) fn parse_click_report(value: &str) -> Option<ClickReport> {
 /// first path segment (`protocol.rs`), so this must not collide with the
 /// `assets` route or the exact-matched `__events`/`__file_dialog` paths.
 /// The JS half derives the same URL from the interpreter's events path.
-#[cfg(all(feature = "desktop", target_os = "macos"))]
+#[cfg(all(native_desktop, target_os = "macos"))]
 const CLICK_DETAIL_ROUTE: &str = "fh-click-detail";
 
 /// The header carrying one press's bridge report.
@@ -185,7 +185,7 @@ const CLICK_DETAIL_ROUTE: &str = "fh-click-detail";
 /// headers provably arrive — every `__events` send depends on one —
 /// which is more than this bridge claims to know about custom-scheme
 /// POST bodies on macOS.
-#[cfg(all(feature = "desktop", target_os = "macos"))]
+#[cfg(all(native_desktop, target_os = "macos"))]
 const CLICK_DETAIL_HEADER: &str = "x-fh-click-detail";
 
 /// The latest bridge report, awaiting its own mousedown event.
@@ -209,7 +209,7 @@ const CLICK_DETAIL_HEADER: &str = "x-fh-click-detail";
 ///
 /// A mutex, not a cell: the route handler and the event handler run on
 /// scheme-handler threads, and those are not guaranteed to be one.
-#[cfg(all(feature = "desktop", target_os = "macos"))]
+#[cfg(all(native_desktop, target_os = "macos"))]
 static CLICK_DETAIL: std::sync::Mutex<Option<ClickReport>> = std::sync::Mutex::new(None);
 
 /// Claim the bridge route for the window's lifetime.
@@ -219,7 +219,7 @@ static CLICK_DETAIL: std::sync::Mutex<Option<ClickReport>> = std::sync::Mutex::n
 /// the count synchronously and answers immediately — the response IS the
 /// ordering edge the spacer's event handler pairs on, so nothing here
 /// may await or defer.
-#[cfg(all(feature = "desktop", target_os = "macos"))]
+#[cfg(all(native_desktop, target_os = "macos"))]
 pub(crate) fn use_click_detail_bridge() {
     dioxus::desktop::use_asset_handler(CLICK_DETAIL_ROUTE, |request, responder| {
         let report = request
@@ -245,7 +245,7 @@ pub(crate) fn use_click_detail_bridge() {
 /// Always consumes, even when the caller will ignore the value: leaving
 /// a report behind is how a later press would borrow the wrong one.
 /// `None` on a poisoned lock, which decides as an ordinary drag.
-#[cfg(all(feature = "desktop", target_os = "macos"))]
+#[cfg(all(native_desktop, target_os = "macos"))]
 fn take_click_detail() -> Option<ClickReport> {
     CLICK_DETAIL.lock().ok().and_then(|mut slot| slot.take())
 }
@@ -277,7 +277,7 @@ pub(crate) fn WindowDragRegion() -> Element {
             class: "window-drag-region",
             aria_hidden: "true",
             onmousedown: move |event: MouseEvent| {
-                #[cfg(all(feature = "desktop", target_os = "macos"))]
+                #[cfg(all(native_desktop, target_os = "macos"))]
                 {
                     let window = dioxus::desktop::window();
                     let report = take_click_detail();
@@ -292,7 +292,7 @@ pub(crate) fn WindowDragRegion() -> Element {
                         PressAction::None => {}
                     }
                 }
-                #[cfg(not(all(feature = "desktop", target_os = "macos")))]
+                #[cfg(not(all(native_desktop, target_os = "macos")))]
                 let _ = event;
             },
         }

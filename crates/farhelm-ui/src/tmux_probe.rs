@@ -15,7 +15,7 @@
 //! `cfg(target_os = "macos")`, no filesystem access, no desktop feature gate —
 //! specifically so its behavior (search order, no-match fallback, an empty
 //! prefix list on non-macOS) is exercised by plain `cargo test` on Linux CI,
-//! which is where this workspace's tests actually run. `desktop.rs` is the
+//! which is where this workspace's tests actually run. `desktop/tmux_preflight.rs` is the
 //! only caller that knows about the actual filesystem and the actual
 //! platform: it decides which prefix list applies (`cfg!(target_os =
 //! "macos")`, not a `cfg` attribute, again so this stays testable everywhere)
@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 /// Homebrew and MacPorts tmux locations to check, in the order TODO.md's
 /// floor decision specifies: Apple Silicon Homebrew, Intel Homebrew, then
-/// MacPorts. Only consulted on macOS (see `desktop.rs`'s call site); kept as
+/// MacPorts. Only consulted on macOS (see `desktop/tmux_preflight.rs`); kept as
 /// a plain constant here, rather than behind a `cfg`, so a test can assert
 /// against its exact contents and order.
 pub(crate) const MACOS_TMUX_PREFIXES: &[&str] =
@@ -39,7 +39,7 @@ pub(crate) const MACOS_TMUX_PREFIXES: &[&str] =
 /// check so this search order — the actual behavior worth pinning — can be
 /// tested with a fake predicate, independent of any real binary existing on
 /// the test machine. Real callers pass a predicate that checks both
-/// existence and the execute bit; see `desktop.rs`'s `is_executable_file`.
+/// existence and the execute bit; see `desktop/tmux_preflight.rs`'s `is_executable_file`.
 pub(crate) fn find_tmux_in_prefixes(
     prefixes: &[&str],
     mut is_executable: impl FnMut(&Path) -> bool,

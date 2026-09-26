@@ -170,7 +170,7 @@ fn transition(state: Health, outcome: TickOutcome) -> (Health, LogAction) {
 /// See the module docs for why this issues a BRAND NEW `document::eval`
 /// every call rather than reusing one across ticks, and for what it costs
 /// (a leaked query slab entry) on a miss.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 async fn probe_once() -> TickOutcome {
     use dioxus::prelude::document;
     let eval = document::eval(HEARTBEAT_SCRIPT);
@@ -198,7 +198,7 @@ async fn probe_once() -> TickOutcome {
 /// "suspect" reading PLAN_desktop_web_bug_triage.md's known risks warn
 /// about, for a window of time that tells nobody anything they need to
 /// know this early.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(native_desktop)]
 pub(crate) fn use_webview_watchdog() {
     use dioxus::prelude::*;
     use_hook(|| {
