@@ -175,12 +175,19 @@ pub(crate) fn phase_class(state: &HostPhase) -> &'static str {
 /// that has never seen it, where it is not idempotent at all: a second real
 /// agent, silently.
 ///
-/// Composed from what the hosts snapshot exposes rather than from a server
-/// token, because the frozen `/api/hosts` contract has no incarnation of its
-/// own; if it grows one, this is the single place that changes. Serialized
-/// as JSON rather than joined with a separator so no field's contents can
-/// impersonate a boundary — `a|b` and `a` + `|b` are the same string, and
-/// these are peer-supplied values.
+/// Composed from the row's fields rather than taken from any single server
+/// token, because none of them means "the same target": `identity` names
+/// the install but survives a pure address retarget, which has to change
+/// this fingerprint. The row's `incarnation` field
+/// ([`crate::Host::incarnation`]) must NOT be folded in either: it is the
+/// helm's per-CONNECTION counter, which changes on every reconnect, while
+/// this fingerprint has to stay the same across a reconnect to the same
+/// target (that counter travels separately, as the create's
+/// `expected_incarnation`).
+///
+/// Serialized as JSON rather than joined with a separator so no field's
+/// contents can impersonate a boundary — `a|b` and `a` + `|b` are the same
+/// string, and these are peer-supplied values.
 ///
 /// Compared, never parsed or displayed.
 pub(crate) fn host_incarnation(host: &Host) -> String {
