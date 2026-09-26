@@ -389,11 +389,6 @@ are large mostly because of their tests.
   copied between `tests/agent_cli.rs` and `tests/spawn_cli.rs` despite `tests/cli_support/`. A wire or handshake change
   fans out across hundreds of test bodies. Fix: a shared scripted fake in `rest_harness`, a `harness::raw_peer`, and the
   CLI mock moved into `cli_support`.
-- **UI wire-type mirrors without a contract test.** Medium effort. `farhelm-ui` hand-mirrors 16 proto/helm types (plus
-  `effective_activity` logic) because `farhelm-proto` pulls tokio net and process for its I/O and cannot build for wasm.
-  Nothing decodes a real helm reply with the UI types; only Playwright would catch drift. Fix: gate `proto/io.rs` behind
-  a default feature so the UI can share types, or at minimum add serialize-with-helm, decode-with-UI contract tests on
-  the native side.
 
 ### Invariants held by convention
 

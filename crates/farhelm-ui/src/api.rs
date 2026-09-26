@@ -3267,6 +3267,10 @@ pub(crate) fn restart_mode_for(offer: RestartOffer) -> &'static str {
     }
 }
 
+/// Decodes the helm's golden HTTP fixtures with this module's envelopes.
+#[cfg(test)]
+mod http_contract_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

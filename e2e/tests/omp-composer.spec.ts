@@ -98,7 +98,6 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
     model: "x-ai/grok-4.6",
     effort: "max",
     permissions: "approve",
-    workspace_trust: null,
   });
   await expect(form).toContainText("fixture captured launch");
 });

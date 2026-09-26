@@ -1,0 +1,65 @@
+{
+  "matching": 1,
+  "sessions": [
+    {
+      "annotation": "left a note",
+      "canonical_cwd": "/home/user/src/widgets",
+      "created_at": 1700000000,
+      "creation_seq": 7,
+      "cwd": "~/src/widgets",
+      "github_repo": {
+        "name": "widgets",
+        "owner": "octo"
+      },
+      "host": 2,
+      "host_identity": "install-identity",
+      "host_name": "buildbox",
+      "id": "fh-0123abcd",
+      "invocation": "codex --model gpt-5",
+      "last_activity_at": 1700000100,
+      "last_work_started_at": 1700000050000,
+      "launch": {
+        "effort": "high",
+        "harness": "codex",
+        "model": "gpt-5",
+        "permissions": "smart_approve",
+        "workspace_trust": true
+      },
+      "parent": "fh-89abcdef",
+      "restart_offer": "resume",
+      "resume_template": [
+        "codex",
+        "resume",
+        "{conversation}"
+      ],
+      "seen_activity_at": 1700000090,
+      "source_profile": {
+        "existence": "renamed",
+        "id": "profile-1",
+        "name": "Codex"
+      },
+      "stale": true,
+      "status": {
+        "exit_code": 3,
+        "state": "exited"
+      },
+      "tabs": [
+        {
+          "id": "tab-1"
+        }
+      ],
+      "title": "Fix the widget",
+      "working_copy": {
+        "canonical_path": "/home/user/src/widgets",
+        "id": "wc-1",
+        "origin_session_id": "fh-0123abcd",
+        "repo": {
+          "name": "widgets",
+          "owner": "octo"
+        }
+      }
+    }
+  ],
+  "total": 5,
+  "truncated": true
+}

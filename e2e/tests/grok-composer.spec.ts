@@ -70,7 +70,6 @@ test("the Grok composer clears and hides unsupported model and effort choices", 
     model: null,
     effort: null,
     permissions: null,
-    workspace_trust: null,
   });
   await expect(form).toContainText("fixture captured launch");
 });

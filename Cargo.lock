@@ -1901,6 +1901,7 @@ dependencies = [
  "arboard",
  "dioxus",
  "farhelm-helm",
+ "farhelm-proto",
  "farhelm-supervisor",
  "farhelm-teststate",
  "farhelm-testtrace",
