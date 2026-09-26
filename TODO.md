@@ -314,12 +314,11 @@ are large mostly because of their tests.
 
 ### Duplicated infrastructure
 
-- **SQLite store plumbing, twice.** Medium effort. Both stores hand-write `Arc::clone` → `spawn_blocking` →
-  `lock().expect(..)` about 123 times (helm 70, supervisor 53) and separately reimplement busy timeout, open flags with
-  the 0600 fix, and the `user_version` migration chain with its fresh-equals-migrated test. They have drifted:
-  `foreign_keys` is on only in the helm, and only the helm has an open-existing-never-migrate mode. The supervisor's
-  `working_copies` also queries the store's connection directly, so table ownership is split. Fix: a shared
-  `Db::call`/`with_tx`, `open(path, OpenMode)`, and migration runner, with consistent pragmas.
+- **Working-copy tables live in two modules.** Low effort. The supervisor's `working_copies` module runs its queries on
+  `SessionStore`'s connection directly (for example `origin_working_copy(&conn, ..)` from inside store methods), so
+  which module owns those tables' schema and invariants is split. Fix: move the working-copy SQL into a store submodule,
+  or give `working_copies` a narrow trait over the store. The shared connection plumbing that used to share this entry
+  (`farhelm_supervisor::db`) is done; the migration ladders stay per store with the held-out HelmStore split.
 - **Two helm session caches with one set of rules.** Medium-high effort. Hosts with an identity cache sessions in SQLite
   (`store::remember_session`, `farhelm-helm/src/store.rs:4575`), hosts without keep them in memory
   (`manager::remember_session`, `manager.rs:1834`), and merge, sort, cap, eviction, and the truncated flag are written

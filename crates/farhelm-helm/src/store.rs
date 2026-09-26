@@ -81,8 +81,6 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use subtle::ConstantTimeEq;
 
 /// Maximum number of authenticated browser profiles retained by one helm.
@@ -146,20 +144,6 @@ pub struct FolderHistoryEntry {
     pub created_at: i64,
     pub creation_seq: Option<u64>,
 }
-
-/// How long a query waits on `SQLITE_BUSY` before giving up.
-///
-/// Mirrors `farhelm-supervisor/src/store.rs`'s own constant, but the
-/// justification is narrower here: SPEC.md's single-helm invariant means
-/// this module never sees the handoff-restart overlap that motivates the
-/// supervisor's identical value. The overlap this module DOES see is
-/// entirely a test artifact — the concurrent-double-open tests below open
-/// two independent `Connection`s against one file on purpose, to pin the
-/// local row's uniqueness under a genuine second writer — and a bare
-/// `SQLITE_BUSY` there would turn a timing-sensitive test flaky instead of
-/// deterministic. Kept at the same five seconds as the supervisor's for no
-/// reason other than one fewer arbitrary constant in the codebase.
-const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
@@ -1387,7 +1371,7 @@ pub enum FirstContactOutcome {
 /// runtime for the duration of one write.
 #[derive(Clone, Debug)]
 pub struct HelmStore {
-    conn: Arc<Mutex<Connection>>,
+    conn: farhelm_supervisor::db::Db,
     schema_version: i64,
 }
 
@@ -2683,8 +2667,8 @@ impl HelmStore {
     /// failures in tests. Release the mutex before awaiting store work:
     /// its blocking tasks acquire the same mutex.
     #[cfg(test)]
-    pub(crate) fn connection_for_test(&self) -> Arc<Mutex<Connection>> {
-        Arc::clone(&self.conn)
+    pub(crate) fn connection_for_test(&self) -> farhelm_supervisor::db::Db {
+        self.conn.clone()
     }
 
     /// Open (or create) `helm.db` at `path`, applying the schema and
@@ -2722,8 +2706,8 @@ impl HelmStore {
     /// that own their own tables' SQL — `checkout_config` writes its config
     /// tables beside the methods here without this file having to grow a
     /// pass-through method for each.
-    pub(crate) fn conn(&self) -> Arc<Mutex<Connection>> {
-        Arc::clone(&self.conn)
+    pub(crate) fn conn(&self) -> farhelm_supervisor::db::Db {
+        self.conn.clone()
     }
 
     /// Open an existing database without migrating or initializing rows.
@@ -2796,7 +2780,7 @@ impl HelmStore {
                 };
                 let conn = Connection::open_with_flags(&path, flags)
                     .with_context(|| format!("opening helm database {}", path.display()))?;
-                conn.busy_timeout(BUSY_TIMEOUT)
+                conn.busy_timeout(farhelm_supervisor::db::BUSY_TIMEOUT)
                     .context("setting sqlite busy timeout")?;
                 // Per-connection like every other open of this schema; the
                 // override table's ON DELETE CASCADE depends on it.
@@ -2818,7 +2802,7 @@ impl HelmStore {
             .await
             .context("helm store open task panicked")??;
         Ok(HelmStore {
-            conn: Arc::new(Mutex::new(conn)),
+            conn: farhelm_supervisor::db::Db::new(conn, "helm db"),
             schema_version,
         })
     }
@@ -2833,20 +2817,7 @@ impl HelmStore {
             // feature this module wants regardless) and why
             // `SQLITE_OPEN_NO_MUTEX` is correct (this module already
             // serializes every access through its own `Mutex`).
-            let mut conn = Connection::open_with_flags(
-                &path,
-                OpenFlags::SQLITE_OPEN_READ_WRITE
-                    | OpenFlags::SQLITE_OPEN_CREATE
-                    | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-            )
-            .with_context(|| format!("opening helm database {}", path.display()))?;
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                    .with_context(|| format!("restricting mode of {}", path.display()))?;
-            }
-            conn.busy_timeout(BUSY_TIMEOUT)
-                .context("setting sqlite busy timeout")?;
+            let mut conn = farhelm_supervisor::db::open_private(&path, "helm database")?;
             // Not durable in the database file — SQLite enforces foreign
             // keys only when a connection has asked for it, so every open
             // must set this pragma itself. See the module docs'
@@ -2876,7 +2847,7 @@ impl HelmStore {
         .await
         .context("helm store open task panicked")??;
         Ok(HelmStore {
-            conn: Arc::new(Mutex::new(conn)),
+            conn: farhelm_supervisor::db::Db::new(conn, "helm db"),
             schema_version,
         })
     }
@@ -2899,20 +2870,20 @@ impl HelmStore {
                 self.schema_version
             );
         }
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
-            conn.lock()
-                .expect("helm db mutex poisoned")
-                .query_row(
-                    "SELECT token FROM web_token WHERE singleton = 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .optional()
-                .context("reading the web token")
-        })
-        .await
-        .context("web token read task panicked")?
+        self.conn
+            .call(
+                "web token read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<String>> {
+                    conn.query_row(
+                        "SELECT token FROM web_token WHERE singleton = 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .context("reading the web token")
+                },
+            )
+            .await
     }
 
     /// Commit `candidate` only if the singleton token was still absent.
@@ -2925,30 +2896,31 @@ impl HelmStore {
         candidate: String,
         created_at: i64,
     ) -> anyhow::Result<String> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .context("beginning web-token transaction")?;
-            tx.execute(
-                "INSERT INTO web_token (singleton, token, created_at) VALUES (1, ?1, ?2) \
+        self.conn
+            .call(
+                "web token task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<String> {
+                    let tx = conn
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .context("beginning web-token transaction")?;
+                    tx.execute(
+                        "INSERT INTO web_token (singleton, token, created_at) VALUES (1, ?1, ?2) \
                  ON CONFLICT (singleton) DO NOTHING",
-                rusqlite::params![candidate, created_at],
+                        rusqlite::params![candidate, created_at],
+                    )
+                    .context("minting the web token")?;
+                    let token = tx
+                        .query_row(
+                            "SELECT token FROM web_token WHERE singleton = 1",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .context("reading the web token")?;
+                    tx.commit().context("committing the web token")?;
+                    Ok(token)
+                },
             )
-            .context("minting the web token")?;
-            let token = tx
-                .query_row(
-                    "SELECT token FROM web_token WHERE singleton = 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .context("reading the web token")?;
-            tx.commit().context("committing the web token")?;
-            Ok(token)
-        })
-        .await
-        .context("web token task panicked")?
+            .await
     }
 
     /// Replace the web token and invalidate every device session atomically.
@@ -2962,26 +2934,27 @@ impl HelmStore {
         replacement: String,
         created_at: i64,
     ) -> anyhow::Result<String> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .context("beginning web-token rotation")?;
-            tx.execute(
-                "INSERT INTO web_token (singleton, token, created_at) VALUES (1, ?1, ?2) \
+        self.conn
+            .call(
+                "web token rotation task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<String> {
+                    let tx = conn
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .context("beginning web-token rotation")?;
+                    tx.execute(
+                        "INSERT INTO web_token (singleton, token, created_at) VALUES (1, ?1, ?2) \
                  ON CONFLICT (singleton) DO UPDATE SET token = excluded.token, \
                      created_at = excluded.created_at",
-                rusqlite::params![replacement, created_at],
+                        rusqlite::params![replacement, created_at],
+                    )
+                    .context("replacing the web token")?;
+                    tx.execute("DELETE FROM device_sessions", [])
+                        .context("deleting device sessions during token rotation")?;
+                    tx.commit().context("committing web-token rotation")?;
+                    Ok(replacement)
+                },
             )
-            .context("replacing the web token")?;
-            tx.execute("DELETE FROM device_sessions", [])
-                .context("deleting device sessions during token rotation")?;
-            tx.commit().context("committing web-token rotation")?;
-            Ok(replacement)
-        })
-        .await
-        .context("web token rotation task panicked")?
+            .await
     }
 
     /// Validate a bootstrap token and record its device credential atomically.
@@ -3028,75 +3001,80 @@ impl HelmStore {
         created_at: i64,
         after_validation: Option<Box<dyn FnOnce() + Send>>,
     ) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .context("beginning device exchange")?;
-            let expected: Option<String> = tx
-                .query_row(
-                    "SELECT token FROM web_token WHERE singleton = 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .optional()
-                .context("reading the web token during device exchange")?;
-            let accepted = expected.is_some_and(|expected| {
-                Sha256::digest(expected.as_bytes())
-                    .ct_eq(&Sha256::digest(supplied_token.as_bytes()))
-                    .into()
-            });
-            if !accepted {
-                return Ok(false);
-            }
-            if let Some(after_validation) = after_validation {
-                after_validation();
-            }
-            tx.execute(
-                "INSERT INTO device_sessions (cookie_hash, created_at) VALUES (?1, ?2) \
+        self.conn
+            .call(
+                "device exchange task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .context("beginning device exchange")?;
+                    let expected: Option<String> = tx
+                        .query_row(
+                            "SELECT token FROM web_token WHERE singleton = 1",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .context("reading the web token during device exchange")?;
+                    let accepted = expected.is_some_and(|expected| {
+                        Sha256::digest(expected.as_bytes())
+                            .ct_eq(&Sha256::digest(supplied_token.as_bytes()))
+                            .into()
+                    });
+                    if !accepted {
+                        return Ok(false);
+                    }
+                    if let Some(after_validation) = after_validation {
+                        after_validation();
+                    }
+                    tx.execute(
+                        "INSERT INTO device_sessions (cookie_hash, created_at) VALUES (?1, ?2) \
                      ON CONFLICT (cookie_hash) DO NOTHING",
-                rusqlite::params![device_hash.as_slice(), created_at],
-            )
-            .context("recording a device session")?;
-            // Eviction is by INSERTION order (`rowid`), never by the
-            // caller-supplied `created_at`: the row just inserted is the
-            // newest by construction and must survive its own exchange. A
-            // clock rollback, or a tie on `created_at` broken by the hash,
-            // would otherwise rank the fresh row past the cap and delete it
-            // in the same transaction that reports success, handing the
-            // browser a secret no later request can present.
-            tx.execute(
-                "DELETE FROM device_sessions WHERE cookie_hash IN (\
+                        rusqlite::params![device_hash.as_slice(), created_at],
+                    )
+                    .context("recording a device session")?;
+                    // Eviction is by INSERTION order (`rowid`), never by the
+                    // caller-supplied `created_at`: the row just inserted is the
+                    // newest by construction and must survive its own exchange. A
+                    // clock rollback, or a tie on `created_at` broken by the hash,
+                    // would otherwise rank the fresh row past the cap and delete it
+                    // in the same transaction that reports success, handing the
+                    // browser a secret no later request can present.
+                    tx.execute(
+                        "DELETE FROM device_sessions WHERE cookie_hash IN (\
                      SELECT cookie_hash FROM device_sessions \
                      ORDER BY rowid DESC LIMIT -1 OFFSET ?1\
                  )",
-                [i64::try_from(MAX_DEVICE_SESSIONS).expect("device-session cap fits i64")],
+                        [
+                            i64::try_from(MAX_DEVICE_SESSIONS)
+                                .expect("device-session cap fits i64"),
+                        ],
+                    )
+                    .context("evicting old device sessions")?;
+                    tx.commit().context("committing device exchange")?;
+                    Ok(true)
+                },
             )
-            .context("evicting old device sessions")?;
-            tx.commit().context("committing device exchange")?;
-            Ok(true)
-        })
-        .await
-        .context("device exchange task panicked")?
+            .await
     }
 
     /// Test whether an exact device digest is present through its primary-key
     /// index. The digest is public output of SHA-256, so SQLite's equality
     /// lookup reveals no useful secret-dependent prefix information.
     pub async fn has_device_session(&self, device_hash: [u8; 32]) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM device_sessions WHERE cookie_hash = ?1)",
-                [device_hash.as_slice()],
-                |row| row.get(0),
+        self.conn
+            .call(
+                "device-session read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    conn.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM device_sessions WHERE cookie_hash = ?1)",
+                        [device_hash.as_slice()],
+                        |row| row.get(0),
+                    )
+                    .context("looking up a device session")
+                },
             )
-            .context("looking up a device session")
-        })
-        .await
-        .context("device-session read task panicked")?
+            .await
     }
 
     /// Insert a device digest without token validation for storage fixtures.
@@ -3106,72 +3084,72 @@ impl HelmStore {
         device_hash: [u8; 32],
         created_at: i64,
     ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            conn.lock()
-                .expect("helm db mutex poisoned")
-                .execute(
-                    "INSERT INTO device_sessions (cookie_hash, created_at) VALUES (?1, ?2)",
-                    rusqlite::params![device_hash.as_slice(), created_at],
-                )
-                .context("inserting a fixture device session")?;
-            Ok(())
-        })
-        .await
-        .context("fixture device-session insert task panicked")?
+        self.conn
+            .call(
+                "fixture device-session insert task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "INSERT INTO device_sessions (cookie_hash, created_at) VALUES (?1, ?2)",
+                        rusqlite::params![device_hash.as_slice(), created_at],
+                    )
+                    .context("inserting a fixture device session")?;
+                    Ok(())
+                },
+            )
+            .await
     }
 
     /// Decode every digest for storage tests that assert exact rotation rows.
     #[cfg(test)]
     pub(crate) async fn device_session_hashes(&self) -> anyhow::Result<Vec<[u8; 32]>> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<[u8; 32]>> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            let mut stmt = conn
-                .prepare("SELECT cookie_hash FROM device_sessions ORDER BY cookie_hash")
-                .context("preparing fixture device-session read")?;
-            stmt.query_map([], |row| {
-                let bytes: Vec<u8> = row.get(0)?;
-                bytes.try_into().map_err(|bytes: Vec<u8>| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        0,
-                        rusqlite::types::Type::Blob,
-                        format!("device-session digest is {} bytes", bytes.len()).into(),
-                    )
-                })
-            })
-            .context("reading fixture device sessions")?
-            .collect::<Result<Vec<_>, _>>()
-            .context("decoding fixture device-session digests")
-        })
-        .await
-        .context("fixture device-session read task panicked")?
+        self.conn
+            .call(
+                "fixture device-session read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Vec<[u8; 32]>> {
+                    let mut stmt = conn
+                        .prepare("SELECT cookie_hash FROM device_sessions ORDER BY cookie_hash")
+                        .context("preparing fixture device-session read")?;
+                    stmt.query_map([], |row| {
+                        let bytes: Vec<u8> = row.get(0)?;
+                        bytes.try_into().map_err(|bytes: Vec<u8>| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Blob,
+                                format!("device-session digest is {} bytes", bytes.len()).into(),
+                            )
+                        })
+                    })
+                    .context("reading fixture device sessions")?
+                    .collect::<Result<Vec<_>, _>>()
+                    .context("decoding fixture device-session digests")
+                },
+            )
+            .await
     }
 
     /// Count retained device credentials for rotation and bound tests.
     #[cfg(test)]
     pub(crate) async fn device_session_count(&self) -> anyhow::Result<usize> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
-            let count: i64 = conn
-                .lock()
-                .expect("helm db mutex poisoned")
-                .query_row("SELECT COUNT(*) FROM device_sessions", [], |row| row.get(0))
-                .context("counting device sessions")?;
-            usize::try_from(count).context("device-session count does not fit usize")
-        })
-        .await
-        .context("device-session count task panicked")?
+        self.conn
+            .call(
+                "device-session count task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<usize> {
+                    let count: i64 = conn
+                        .query_row("SELECT COUNT(*) FROM device_sessions", [], |row| row.get(0))
+                        .context("counting device sessions")?;
+                    usize::try_from(count).context("device-session count does not fit usize")
+                },
+            )
+            .await
     }
 
     /// Install a deterministic device-insert failure for authentication error
     /// surface tests.
     #[cfg(test)]
     pub(crate) async fn refuse_device_inserts_for_test(&self) {
-        let conn = Arc::clone(&self.conn);
+        let conn = self.conn.clone();
         tokio::task::spawn_blocking(move || {
             conn.lock()
-                .expect("helm db mutex poisoned")
                 .execute_batch(
                     "CREATE TRIGGER refuse_auth_insert BEFORE INSERT ON device_sessions \
                      BEGIN SELECT RAISE(ABORT, 'secret database detail'); END;",
@@ -3191,10 +3169,8 @@ impl HelmStore {
     /// its list order and auto-select from whatever comes back, and neither
     /// answer should make it behave differently from a fresh install.
     pub async fn preferences(&self) -> anyhow::Result<Preferences> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Preferences> {
-            conn.lock()
-                .expect("helm db mutex poisoned")
+        self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
+            conn
                 .query_row(
                     "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust \
                      FROM preferences WHERE singleton = 1",
@@ -3223,8 +3199,7 @@ impl HelmStore {
                 .map(Option::unwrap_or_default)
                 .context("reading the client preference")
         })
-        .await
-        .context("preference read task panicked")?
+.await
     }
 
     /// Merge `patch` into the preference row: an absent field is left as it
@@ -3243,8 +3218,7 @@ impl HelmStore {
     /// the handler, not here: the store records what it is told, exactly as
     /// it does for every other table.
     pub async fn update_preferences(&self, patch: PreferencePatch) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        self.conn.call("preference write task panicked", move |conn: &mut Connection| -> anyhow::Result<()> {
             // Each field travels as (present, value): `CASE WHEN present`
             // is what lets a NULL value mean "clear" rather than "keep",
             // which a COALESCE could not express.
@@ -3258,8 +3232,7 @@ impl HelmStore {
             let compact = patch.compact.flatten();
             let remembered_permissions = patch.remembered_permissions.flatten();
             let remembered_workspace_trust = patch.remembered_workspace_trust.flatten();
-            conn.lock()
-                .expect("helm db mutex poisoned")
+            conn
                 .execute(
                     "INSERT INTO preferences \
                          (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust) \
@@ -3289,8 +3262,7 @@ impl HelmStore {
                 .context("writing the client preference")?;
             Ok(())
         })
-        .await
-        .context("preference write task panicked")?
+.await
     }
 
     // ---- Per-session "seen" state ---------------------------------------
@@ -3314,11 +3286,11 @@ impl HelmStore {
         if ids.is_empty() {
             return Ok(std::collections::HashMap::new());
         }
-        let conn = Arc::clone(&self.conn);
+        let conn = self.conn.clone();
         let ids = ids.to_vec();
         tokio::task::spawn_blocking(
             move || -> anyhow::Result<std::collections::HashMap<String, i64>> {
-                let conn = conn.lock().expect("helm db mutex poisoned");
+                let conn = conn.lock();
                 let placeholders = (1..=ids.len())
                     .map(|index| format!("?{index}"))
                     .collect::<Vec<_>>()
@@ -3360,12 +3332,9 @@ impl HelmStore {
     /// would re-bump the revision for nothing, waking every other
     /// connected client to redraw a dot that never moved.
     pub async fn mark_seen(&self, session_id: &str, activity_at: i64) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+        self.conn.call("seen-stamp write task panicked", move |conn: &mut Connection| -> anyhow::Result<bool> {
             let changed = conn
-                .lock()
-                .expect("helm db mutex poisoned")
                 .execute(
                     "INSERT INTO session_seen (session_id, seen_activity_at) VALUES (?1, ?2) \
                      ON CONFLICT (session_id) DO UPDATE SET seen_activity_at = excluded.seen_activity_at \
@@ -3375,8 +3344,7 @@ impl HelmStore {
                 .context("writing the seen stamp")?;
             Ok(changed > 0)
         })
-        .await
-        .context("seen-stamp write task panicked")?
+.await
     }
 
     /// Delete `session_id`'s seen stamp — a manual "mark unread", which
@@ -3392,21 +3360,21 @@ impl HelmStore {
     /// itself is deleted — see SPEC_impl.md's `session_seen` paragraph for
     /// why a deleted session's row does not simply cascade away on its own.
     pub async fn clear_seen(&self, session_id: &str) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let changed = conn
-                .lock()
-                .expect("helm db mutex poisoned")
-                .execute(
-                    "DELETE FROM session_seen WHERE session_id = ?1",
-                    rusqlite::params![session_id],
-                )
-                .context("clearing the seen stamp")?;
-            Ok(changed > 0)
-        })
-        .await
-        .context("seen-stamp clear task panicked")?
+        self.conn
+            .call(
+                "seen-stamp clear task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let changed = conn
+                        .execute(
+                            "DELETE FROM session_seen WHERE session_id = ?1",
+                            rusqlite::params![session_id],
+                        )
+                        .context("clearing the seen stamp")?;
+                    Ok(changed > 0)
+                },
+            )
+            .await
     }
 
     /// Test-only failure-injection seam: drop `session_seen` out from under
@@ -3424,15 +3392,15 @@ impl HelmStore {
     /// schema ladder itself, not a caller's error handling).
     #[cfg(test)]
     pub(crate) async fn break_session_seen_table_for_test(&self) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            conn.lock()
-                .expect("helm db mutex poisoned")
-                .execute_batch("DROP TABLE session_seen;")
-                .context("dropping session_seen for a failure-injection test")
-        })
-        .await
-        .context("session_seen drop task panicked")?
+        self.conn
+            .call(
+                "session_seen drop task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute_batch("DROP TABLE session_seen;")
+                        .context("dropping session_seen for a failure-injection test")
+                },
+            )
+            .await
     }
 
     /// Every registered host, local row included, ordered by [`HostId`] —
@@ -3449,59 +3417,60 @@ impl HelmStore {
     /// so a corrupt row here must surface as an error a caller can act on
     /// instead of silently vanishing from the list.
     pub async fn list_hosts(&self) -> anyhow::Result<Vec<HostRow>> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<HostRow>> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            let mut stmt = conn
+        self.conn
+            .call(
+                "list hosts task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Vec<HostRow>> {
+                    let mut stmt = conn
                 .prepare(
                     "SELECT id, kind, destination, alias, remote_farhelm, remote_state_dir, \
                      host_identity, cache_truncated FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
-            let raw: Vec<RawHostRow> = stmt
-                .query_map([], |r| {
-                    Ok((
-                        r.get(0)?,
-                        r.get(1)?,
-                        r.get(2)?,
-                        r.get(3)?,
-                        r.get(4)?,
-                        r.get(5)?,
-                        r.get(6)?,
-                        r.get(7)?,
-                    ))
-                })
-                .context("querying hosts")?
-                .collect::<Result<_, _>>()
-                .context("reading host rows")?;
-            raw.into_iter()
-                .map(
-                    |(
-                        id,
-                        kind,
-                        destination,
-                        alias,
-                        remote_farhelm,
-                        remote_state_dir,
-                        host_identity,
-                        cache_truncated,
-                    )| {
-                        Ok(HostRow {
-                            id,
-                            kind: HostKind::from_column(&kind)?,
-                            destination,
-                            alias,
-                            remote_farhelm,
-                            remote_state_dir,
-                            host_identity,
-                            cache_truncated,
+                    let raw: Vec<RawHostRow> = stmt
+                        .query_map([], |r| {
+                            Ok((
+                                r.get(0)?,
+                                r.get(1)?,
+                                r.get(2)?,
+                                r.get(3)?,
+                                r.get(4)?,
+                                r.get(5)?,
+                                r.get(6)?,
+                                r.get(7)?,
+                            ))
                         })
-                    },
-                )
-                .collect()
-        })
-        .await
-        .context("list hosts task panicked")?
+                        .context("querying hosts")?
+                        .collect::<Result<_, _>>()
+                        .context("reading host rows")?;
+                    raw.into_iter()
+                        .map(
+                            |(
+                                id,
+                                kind,
+                                destination,
+                                alias,
+                                remote_farhelm,
+                                remote_state_dir,
+                                host_identity,
+                                cache_truncated,
+                            )| {
+                                Ok(HostRow {
+                                    id,
+                                    kind: HostKind::from_column(&kind)?,
+                                    destination,
+                                    alias,
+                                    remote_farhelm,
+                                    remote_state_dir,
+                                    host_identity,
+                                    cache_truncated,
+                                })
+                            },
+                        )
+                        .collect()
+                },
+            )
+            .await
     }
 
     /// Register a new ssh host, returning its assigned [`HostId`].
@@ -3549,7 +3518,7 @@ impl HelmStore {
         remote_farhelm: Option<&str>,
         remote_state_dir: Option<&str>,
     ) -> anyhow::Result<HostId> {
-        let conn = Arc::clone(&self.conn);
+        let conn = self.conn.clone();
         let destination = destination.to_string();
         if !destination_is_usable(&destination) {
             return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
@@ -3566,7 +3535,7 @@ impl HelmStore {
         let remote_farhelm = remote_farhelm.map(str::to_string);
         let remote_state_dir = remote_state_dir.map(str::to_string);
         tokio::task::spawn_blocking(move || -> anyhow::Result<HostId> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let mut conn = conn.lock();
             let tx = conn
                 .transaction()
                 .context("beginning add ssh host transaction")?;
@@ -3635,89 +3604,95 @@ impl HelmStore {
                 remote_farhelm.to_string(),
             )));
         }
-        let conn = Arc::clone(&self.conn);
         let destination = destination.to_string();
         let remote_farhelm = remote_farhelm.map(str::to_string);
         let remote_state_dir = remote_state_dir.map(str::to_string);
         let host_identity = host_identity.map(str::to_string);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<(HostId, bool)> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .context("beginning discovered-host registration")?;
-            let existing: Option<(HostId, Option<String>)> = tx
-                .query_row(
-                    "SELECT id, host_identity FROM hosts \
-                     WHERE kind = 'ssh' AND destination = ?1",
-                    rusqlite::params![destination],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()
-                .context("looking up a discovered ssh destination")?;
-
-            let (host, inserted) = if let Some((host, recorded)) = existing {
-                if let (Some(recorded), Some(reported)) = (&recorded, &host_identity)
-                    && recorded != reported
-                {
-                    return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
-                        host,
-                        expected: reported.clone(),
-                        actual: Some(recorded.clone()),
-                    }));
-                }
-                if recorded.is_none()
-                    && let Some(identity) = &host_identity
-                    && let Some(owner) = claimant_of(&tx, host, identity)?
-                {
-                    return Err(anyhow::Error::new(HostStoreError::IdentityClaimed {
-                        host,
-                        identity: identity.clone(),
-                        owner,
-                    }));
-                }
-                tx.execute(
-                    "UPDATE hosts SET remote_farhelm = ?2, remote_state_dir = ?3, \
-                     host_identity = COALESCE(host_identity, ?4) WHERE id = ?1",
-                    rusqlite::params![host, remote_farhelm, remote_state_dir, host_identity],
-                )
-                .context("converging the discovered ssh host")?;
-                (host, false)
-            } else {
-                if let Some(identity) = &host_identity {
-                    let owner: Option<HostId> = tx
+        self.conn
+            .call(
+                "register discovered ssh host task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<(HostId, bool)> {
+                    let tx = conn
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .context("beginning discovered-host registration")?;
+                    let existing: Option<(HostId, Option<String>)> = tx
                         .query_row(
-                            "SELECT id FROM hosts WHERE host_identity = ?1",
-                            rusqlite::params![identity],
-                            |row| row.get(0),
+                            "SELECT id, host_identity FROM hosts \
+                     WHERE kind = 'ssh' AND destination = ?1",
+                            rusqlite::params![destination],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
                         )
                         .optional()
-                        .context("checking the discovered identity claim")?;
-                    if let Some(owner) = owner {
-                        return Err(anyhow::Error::new(
-                            HostStoreError::IdentityClaimedBeforeRegistration {
+                        .context("looking up a discovered ssh destination")?;
+
+                    let (host, inserted) = if let Some((host, recorded)) = existing {
+                        if let (Some(recorded), Some(reported)) = (&recorded, &host_identity)
+                            && recorded != reported
+                        {
+                            return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
+                                host,
+                                expected: reported.clone(),
+                                actual: Some(recorded.clone()),
+                            }));
+                        }
+                        if recorded.is_none()
+                            && let Some(identity) = &host_identity
+                            && let Some(owner) = claimant_of(&tx, host, identity)?
+                        {
+                            return Err(anyhow::Error::new(HostStoreError::IdentityClaimed {
+                                host,
                                 identity: identity.clone(),
                                 owner,
-                            },
-                        ));
-                    }
-                }
-                if let Some(name) = alias_collision(&tx, None, &destination)? {
-                    return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
-                }
-                tx.execute(
+                            }));
+                        }
+                        tx.execute(
+                            "UPDATE hosts SET remote_farhelm = ?2, remote_state_dir = ?3, \
+                     host_identity = COALESCE(host_identity, ?4) WHERE id = ?1",
+                            rusqlite::params![
+                                host,
+                                remote_farhelm,
+                                remote_state_dir,
+                                host_identity
+                            ],
+                        )
+                        .context("converging the discovered ssh host")?;
+                        (host, false)
+                    } else {
+                        if let Some(identity) = &host_identity {
+                            let owner: Option<HostId> = tx
+                                .query_row(
+                                    "SELECT id FROM hosts WHERE host_identity = ?1",
+                                    rusqlite::params![identity],
+                                    |row| row.get(0),
+                                )
+                                .optional()
+                                .context("checking the discovered identity claim")?;
+                            if let Some(owner) = owner {
+                                return Err(anyhow::Error::new(
+                                    HostStoreError::IdentityClaimedBeforeRegistration {
+                                        identity: identity.clone(),
+                                        owner,
+                                    },
+                                ));
+                            }
+                        }
+                        if let Some(name) = alias_collision(&tx, None, &destination)? {
+                            return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
+                        }
+                        tx.execute(
                     "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, \
                      host_identity) VALUES ('ssh', ?1, ?2, ?3, ?4)",
                     rusqlite::params![destination, remote_farhelm, remote_state_dir, host_identity],
                 )
                 .context("inserting the discovered ssh host")?;
-                (tx.last_insert_rowid(), true)
-            };
-            tx.commit()
-                .context("committing discovered-host registration")?;
-            Ok((host, inserted))
-        })
-        .await
-        .context("register discovered ssh host task panicked")?
+                        (tx.last_insert_rowid(), true)
+                    };
+                    tx.commit()
+                        .context("committing discovered-host registration")?;
+                    Ok((host, inserted))
+                },
+            )
+            .await
     }
 
     /// Register every destination in `entries` that is not registered
@@ -3781,43 +3756,44 @@ impl HelmStore {
                 )));
             }
         }
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<HostId>> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the ensure-hosts transaction")?;
-            let mut added = Vec::new();
-            for entry in &entries {
-                // Newness is checked FIRST, and separately from the
-                // conditional insert below, specifically so the alias
-                // check that follows applies only to entries this call
-                // would actually create — see this method's own doc for
-                // why an already-registered entry must not be blamed for a
-                // collision it did not introduce.
-                let already_registered = tx
-                    .query_row(
-                        "SELECT 1 FROM hosts WHERE kind = 'ssh' AND destination = ?1",
-                        rusqlite::params![entry.destination],
-                        |_| Ok(()),
-                    )
-                    .optional()
-                    .with_context(|| {
-                        format!(
-                            "checking whether {:?} is already registered",
-                            entry.destination
-                        )
-                    })?
-                    .is_some();
-                if !already_registered
-                    && let Some(name) = alias_collision(&tx, None, &entry.destination)?
-                {
-                    return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
-                }
-                // The same conditional insert `add_ssh_host` uses, for the
-                // same reason: "already registered" is the ordinary,
-                // expected outcome here, not an error to catch.
-                let inserted = tx
+        self.conn
+            .call(
+                "ensure ssh hosts task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Vec<HostId>> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the ensure-hosts transaction")?;
+                    let mut added = Vec::new();
+                    for entry in &entries {
+                        // Newness is checked FIRST, and separately from the
+                        // conditional insert below, specifically so the alias
+                        // check that follows applies only to entries this call
+                        // would actually create — see this method's own doc for
+                        // why an already-registered entry must not be blamed for a
+                        // collision it did not introduce.
+                        let already_registered = tx
+                            .query_row(
+                                "SELECT 1 FROM hosts WHERE kind = 'ssh' AND destination = ?1",
+                                rusqlite::params![entry.destination],
+                                |_| Ok(()),
+                            )
+                            .optional()
+                            .with_context(|| {
+                                format!(
+                                    "checking whether {:?} is already registered",
+                                    entry.destination
+                                )
+                            })?
+                            .is_some();
+                        if !already_registered
+                            && let Some(name) = alias_collision(&tx, None, &entry.destination)?
+                        {
+                            return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
+                        }
+                        // The same conditional insert `add_ssh_host` uses, for the
+                        // same reason: "already registered" is the ordinary,
+                        // expected outcome here, not an error to catch.
+                        let inserted = tx
                     .execute(
                         "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir) \
                          VALUES ('ssh', ?1, ?2, ?3) \
@@ -3831,15 +3807,15 @@ impl HelmStore {
                     .with_context(|| {
                         format!("registering guaranteed host {:?}", entry.destination)
                     })?;
-                if inserted > 0 {
-                    added.push(tx.last_insert_rowid());
-                }
-            }
-            tx.commit().context("committing the ensure-hosts batch")?;
-            Ok(added)
-        })
-        .await
-        .context("ensure ssh hosts task panicked")?
+                        if inserted > 0 {
+                            added.push(tx.last_insert_rowid());
+                        }
+                    }
+                    tx.commit().context("committing the ensure-hosts batch")?;
+                    Ok(added)
+                },
+            )
+            .await
     }
 
     /// Change an ssh host's destination in place, refusing the local row
@@ -3880,7 +3856,7 @@ impl HelmStore {
         host: HostId,
         destination: &str,
     ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
+        let conn = self.conn.clone();
         let destination = destination.to_string();
         if !destination_is_usable(&destination) {
             return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
@@ -3888,7 +3864,7 @@ impl HelmStore {
             )));
         }
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let mut conn = conn.lock();
             let tx = conn
                 .transaction()
                 .context("beginning update destination transaction")?;
@@ -3962,77 +3938,80 @@ impl HelmStore {
     /// host registered that name; clearing must not make both display it.
     pub async fn update_alias(&self, host: HostId, alias: Option<&str>) -> anyhow::Result<bool> {
         let alias = validate_alias(alias).map_err(anyhow::Error::new)?;
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning update alias transaction")?;
-            let current: Option<(String, Option<String>, Option<String>)> = tx
-                .query_row(
-                    "SELECT kind, destination, alias FROM hosts WHERE id = ?1",
-                    rusqlite::params![host],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-                .optional()
-                .context("looking up host before updating its alias")?;
-            let Some((kind, destination, current_alias)) = current else {
-                return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
-            };
-            let kind = HostKind::from_column(&kind)?;
-            if current_alias == alias {
-                tx.commit().context("committing unchanged alias")?;
-                return Ok(false);
-            }
-            let candidate = match alias.as_deref() {
-                Some(alias) => std::borrow::Cow::Borrowed(alias),
-                None => {
-                    std::borrow::Cow::Owned(host_display_name(kind, destination.as_deref(), None))
-                }
-            };
-            let mut other = tx
-                .prepare("SELECT kind, destination, alias FROM hosts WHERE id != ?1")
-                .context("reading display names before updating an alias")?;
-            let rows = other
-                .query_map(rusqlite::params![host], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                })
-                .context("querying other host display names")?
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(other);
-            // A row whose `kind` this build cannot decode is a
-            // reason to REFUSE the write, not to silently drop that
-            // row from the comparison: `list_hosts` fails the whole
-            // registry read on the identical corruption, and an
-            // alias committed against a registry this function
-            // could not fully interpret is exactly the kind of
-            // state the later manager sync would then fail to
-            // reconcile against.
-            let names = rows
-                .into_iter()
-                .map(|(kind, destination, alias)| {
-                    HostKind::from_column(&kind).map(|kind| {
-                        host_display_name(kind, destination.as_deref(), alias.as_deref())
-                    })
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?;
-            if let Some(name) = names.into_iter().find(|name| name == candidate.as_ref()) {
-                return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
-            }
-            tx.execute(
-                "UPDATE hosts SET alias = ?2 WHERE id = ?1",
-                rusqlite::params![host, alias],
+        self.conn
+            .call(
+                "update alias task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning update alias transaction")?;
+                    let current: Option<(String, Option<String>, Option<String>)> = tx
+                        .query_row(
+                            "SELECT kind, destination, alias FROM hosts WHERE id = ?1",
+                            rusqlite::params![host],
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                        )
+                        .optional()
+                        .context("looking up host before updating its alias")?;
+                    let Some((kind, destination, current_alias)) = current else {
+                        return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+                    };
+                    let kind = HostKind::from_column(&kind)?;
+                    if current_alias == alias {
+                        tx.commit().context("committing unchanged alias")?;
+                        return Ok(false);
+                    }
+                    let candidate = match alias.as_deref() {
+                        Some(alias) => std::borrow::Cow::Borrowed(alias),
+                        None => std::borrow::Cow::Owned(host_display_name(
+                            kind,
+                            destination.as_deref(),
+                            None,
+                        )),
+                    };
+                    let mut other = tx
+                        .prepare("SELECT kind, destination, alias FROM hosts WHERE id != ?1")
+                        .context("reading display names before updating an alias")?;
+                    let rows = other
+                        .query_map(rusqlite::params![host], |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                            ))
+                        })
+                        .context("querying other host display names")?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    drop(other);
+                    // A row whose `kind` this build cannot decode is a
+                    // reason to REFUSE the write, not to silently drop that
+                    // row from the comparison: `list_hosts` fails the whole
+                    // registry read on the identical corruption, and an
+                    // alias committed against a registry this function
+                    // could not fully interpret is exactly the kind of
+                    // state the later manager sync would then fail to
+                    // reconcile against.
+                    let names = rows
+                        .into_iter()
+                        .map(|(kind, destination, alias)| {
+                            HostKind::from_column(&kind).map(|kind| {
+                                host_display_name(kind, destination.as_deref(), alias.as_deref())
+                            })
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()?;
+                    if let Some(name) = names.into_iter().find(|name| name == candidate.as_ref()) {
+                        return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
+                    }
+                    tx.execute(
+                        "UPDATE hosts SET alias = ?2 WHERE id = ?1",
+                        rusqlite::params![host, alias],
+                    )
+                    .context("updating host alias")?;
+                    tx.commit().context("committing alias update")?;
+                    Ok(true)
+                },
             )
-            .context("updating host alias")?;
-            tx.commit().context("committing alias update")?;
-            Ok(true)
-        })
-        .await
-        .context("update alias task panicked")?
+            .await
     }
 
     /// Forget a registered ssh host — SPEC.md's remove-merely-forgets
@@ -4047,32 +4026,36 @@ impl HelmStore {
     /// (PLAN_M6.md item 4) — and [`HostStoreError::HostNotFound`] for an
     /// id nothing currently holds.
     pub async fn remove_ssh_host(&self, host: HostId) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            let kind: Option<String> = conn
-                .query_row(
-                    "SELECT kind FROM hosts WHERE id = ?1",
-                    rusqlite::params![host],
-                    |r| r.get(0),
-                )
-                .optional()
-                .context("looking up host before removing it")?;
-            let kind = kind.map(|k| HostKind::from_column(&k)).transpose()?;
-            match kind {
-                None => Err(anyhow::Error::new(HostStoreError::HostNotFound(host))),
-                Some(HostKind::Local) => {
-                    Err(anyhow::Error::new(HostStoreError::LocalHostImmutable))
-                }
-                Some(HostKind::Ssh) => {
-                    conn.execute("DELETE FROM hosts WHERE id = ?1", rusqlite::params![host])
-                        .context("removing ssh host")?;
-                    Ok(())
-                }
-            }
-        })
-        .await
-        .context("remove ssh host task panicked")?
+        self.conn
+            .call(
+                "remove ssh host task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let kind: Option<String> = conn
+                        .query_row(
+                            "SELECT kind FROM hosts WHERE id = ?1",
+                            rusqlite::params![host],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .context("looking up host before removing it")?;
+                    let kind = kind.map(|k| HostKind::from_column(&k)).transpose()?;
+                    match kind {
+                        None => Err(anyhow::Error::new(HostStoreError::HostNotFound(host))),
+                        Some(HostKind::Local) => {
+                            Err(anyhow::Error::new(HostStoreError::LocalHostImmutable))
+                        }
+                        Some(HostKind::Ssh) => {
+                            conn.execute(
+                                "DELETE FROM hosts WHERE id = ?1",
+                                rusqlite::params![host],
+                            )
+                            .context("removing ssh host")?;
+                            Ok(())
+                        }
+                    }
+                },
+            )
+            .await
     }
 
     /// Record `identity` as learned at this host's first-ever successful
@@ -4120,50 +4103,51 @@ impl HelmStore {
         dialed: &DialedAs,
         identity: &str,
     ) -> anyhow::Result<FirstContactOutcome> {
-        let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
         let dialed = dialed.clone();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<FirstContactOutcome> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .context("beginning first-contact transaction")?;
-            let Some((current, configured)) = read_identity_and_config(&tx, host)? else {
-                return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
-            };
-            let outcome = if configured != dialed {
-                FirstContactOutcome::StaleAttempt {
-                    current: configured,
-                }
-            } else {
-                match current {
-                    Some(recorded) if recorded == identity => FirstContactOutcome::Recorded,
-                    Some(recorded) => FirstContactOutcome::Mismatch {
-                        recorded,
-                        reported: identity,
-                    },
-                    None => match claimant_of(&tx, host, &identity)? {
-                        Some(owner) => FirstContactOutcome::Collision { owner },
-                        None => {
-                            tx.execute(
-                                "UPDATE hosts SET host_identity = ?2 WHERE id = ?1",
-                                rusqlite::params![host, identity],
-                            )
-                            .context("recording first-contact identity")?;
-                            FirstContactOutcome::Recorded
+        self.conn
+            .call(
+                "record first contact task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<FirstContactOutcome> {
+                    let tx = conn
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .context("beginning first-contact transaction")?;
+                    let Some((current, configured)) = read_identity_and_config(&tx, host)? else {
+                        return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+                    };
+                    let outcome = if configured != dialed {
+                        FirstContactOutcome::StaleAttempt {
+                            current: configured,
                         }
-                    },
-                }
-            };
-            // Committed on every path, including the ones that wrote
-            // nothing: an explicit commit releases the write lock this
-            // transaction took at BEGIN IMMEDIATE, rather than leaving it
-            // to a rollback on drop.
-            tx.commit().context("committing first contact")?;
-            Ok(outcome)
-        })
-        .await
-        .context("record first contact task panicked")?
+                    } else {
+                        match current {
+                            Some(recorded) if recorded == identity => FirstContactOutcome::Recorded,
+                            Some(recorded) => FirstContactOutcome::Mismatch {
+                                recorded,
+                                reported: identity,
+                            },
+                            None => match claimant_of(&tx, host, &identity)? {
+                                Some(owner) => FirstContactOutcome::Collision { owner },
+                                None => {
+                                    tx.execute(
+                                        "UPDATE hosts SET host_identity = ?2 WHERE id = ?1",
+                                        rusqlite::params![host, identity],
+                                    )
+                                    .context("recording first-contact identity")?;
+                                    FirstContactOutcome::Recorded
+                                }
+                            },
+                        }
+                    };
+                    // Committed on every path, including the ones that wrote
+                    // nothing: an explicit commit releases the write lock this
+                    // transaction took at BEGIN IMMEDIATE, rather than leaving it
+                    // to a rollback on drop.
+                    tx.commit().context("committing first contact")?;
+                    Ok(outcome)
+                },
+            )
+            .await
     }
 
     /// Compare-and-swap a host's identity: succeeds ONLY when the currently
@@ -4213,68 +4197,73 @@ impl HelmStore {
         expected_old: &str,
         new: &str,
     ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let expected_old = expected_old.to_string();
         let new = new.to_string();
         let dialed = dialed.clone();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .context("beginning identity adoption transaction")?;
-            let Some((current, configured)) = read_identity_and_config(&tx, host)? else {
-                return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
-            };
-            if configured != dialed {
-                return Err(anyhow::Error::new(HostStoreError::StaleAttempt { host }));
-            }
-            if current.as_deref() != Some(expected_old.as_str()) {
-                return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
-                    host,
-                    expected: expected_old,
-                    actual: current,
-                }));
-            }
-            if let Some(owner) = claimant_of(&tx, host, &new)? {
-                return Err(anyhow::Error::new(HostStoreError::IdentityClaimed {
-                    host,
-                    identity: new,
-                    owner,
-                }));
-            }
-            // `cache_truncated` is reset with the cache it describes: the
-            // flag was the PREDECESSOR install's word about the rows being
-            // purged below, and an empty successor cache marked incomplete
-            // would show the notice indefinitely if the first refresh under
-            // the new identity failed.
-            tx.execute(
-                "UPDATE hosts SET host_identity = ?2, cache_truncated = 0 WHERE id = ?1",
-                rusqlite::params![host, new],
+        self.conn
+            .call(
+                "adopt identity task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let tx = conn
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .context("beginning identity adoption transaction")?;
+                    let Some((current, configured)) = read_identity_and_config(&tx, host)? else {
+                        return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+                    };
+                    if configured != dialed {
+                        return Err(anyhow::Error::new(HostStoreError::StaleAttempt { host }));
+                    }
+                    if current.as_deref() != Some(expected_old.as_str()) {
+                        return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
+                            host,
+                            expected: expected_old,
+                            actual: current,
+                        }));
+                    }
+                    if let Some(owner) = claimant_of(&tx, host, &new)? {
+                        return Err(anyhow::Error::new(HostStoreError::IdentityClaimed {
+                            host,
+                            identity: new,
+                            owner,
+                        }));
+                    }
+                    // `cache_truncated` is reset with the cache it describes: the
+                    // flag was the PREDECESSOR install's word about the rows being
+                    // purged below, and an empty successor cache marked incomplete
+                    // would show the notice indefinitely if the first refresh under
+                    // the new identity failed.
+                    tx.execute(
+                        "UPDATE hosts SET host_identity = ?2, cache_truncated = 0 WHERE id = ?1",
+                        rusqlite::params![host, new],
+                    )
+                    .context("adopting new host identity")?;
+                    tx.execute(
+                        "DELETE FROM session_cache WHERE host_id = ?1",
+                        rusqlite::params![host],
+                    )
+                    .context("purging the superseded identity's cached sessions")?;
+                    for table in [
+                        "launch_history",
+                        "folder_history",
+                        "create_history_sessions",
+                        "create_history_cutoffs",
+                        "create_history_partitions",
+                    ] {
+                        tx.execute(
+                            &format!(
+                                "DELETE FROM {table} WHERE host_id = ?1 AND host_identity <> ?2"
+                            ),
+                            rusqlite::params![host, new],
+                        )
+                        .with_context(|| {
+                            format!("purging retired identity partitions from {table}")
+                        })?;
+                    }
+                    tx.commit().context("committing identity adoption")?;
+                    Ok(())
+                },
             )
-            .context("adopting new host identity")?;
-            tx.execute(
-                "DELETE FROM session_cache WHERE host_id = ?1",
-                rusqlite::params![host],
-            )
-            .context("purging the superseded identity's cached sessions")?;
-            for table in [
-                "launch_history",
-                "folder_history",
-                "create_history_sessions",
-                "create_history_cutoffs",
-                "create_history_partitions",
-            ] {
-                tx.execute(
-                    &format!("DELETE FROM {table} WHERE host_id = ?1 AND host_identity <> ?2"),
-                    rusqlite::params![host, new],
-                )
-                .with_context(|| format!("purging retired identity partitions from {table}"))?;
-            }
-            tx.commit().context("committing identity adoption")?;
-            Ok(())
-        })
-        .await
-        .context("adopt identity task panicked")?
+            .await
     }
 
     /// Replace one host's ENTIRE cached session list, atomically — the
@@ -4359,10 +4348,8 @@ impl HelmStore {
         entries: Vec<SessionInfo>,
         truncated: bool,
     ) -> anyhow::Result<CacheReplacement> {
-        let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<CacheReplacement> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
+        self.conn.call("replace host sessions task panicked", move |conn: &mut Connection| -> anyhow::Result<CacheReplacement> {
             let tx = conn
                 .transaction()
                 .context("beginning cache replace transaction")?;
@@ -4535,8 +4522,7 @@ impl HelmStore {
                 contested,
             })
         })
-        .await
-        .context("replace host sessions task panicked")?
+.await
     }
 
     /// Add ONE session to a host's cache slice, leaving the rest of it
@@ -4590,11 +4576,9 @@ impl HelmStore {
             entry.id.len(),
             crate::manager::MAX_SESSION_ID_BYTES
         );
-        let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
         let entry = entry.clone();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
+        self.conn.call("remember session task panicked", move |conn: &mut Connection| -> anyhow::Result<bool> {
             let tx = conn
                 .transaction()
                 .context("beginning cache seed transaction")?;
@@ -4712,8 +4696,7 @@ impl HelmStore {
             };
             Ok(changed)
         })
-        .await
-        .context("remember session task panicked")?
+.await
     }
 
     /// Record one accepted create for composer suggestions.
@@ -4833,13 +4816,11 @@ impl HelmStore {
             .transpose()
             .context("validating accepted repository history intent")?;
         let (canonical_cwd, display_cwd) = paths;
-        let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
         let entry = entry.clone();
         let canonical_cwd = canonical_cwd.to_string();
         let display_cwd = display_cwd.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
+        self.conn.call("record create history task panicked", move |conn: &mut Connection| -> anyhow::Result<bool> {
             let tx = conn
                 .transaction()
                 .context("beginning create-history transaction")?;
@@ -5206,8 +5187,7 @@ impl HelmStore {
             tx.commit().context("committing create history")?;
             Ok(folder_changed || launch_changed || github_repo.is_some())
         })
-        .await
-        .context("record create history task panicked")?
+.await
     }
 
     /// Refine a stored folder's canonical identity after a host-side browse.
@@ -5224,12 +5204,10 @@ impl HelmStore {
         display_cwd: &str,
         canonical_cwd: &str,
     ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
         let display_cwd = display_cwd.to_string();
         let canonical_cwd = canonical_cwd.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
+        self.conn.call("folder refinement task panicked", move |conn: &mut Connection| -> anyhow::Result<()> {
             let tx = conn
                 .transaction()
                 .context("beginning folder-refinement transaction")?;
@@ -5323,8 +5301,7 @@ impl HelmStore {
             tx.commit().context("committing folder refinement")?;
             Ok(())
         })
-        .await
-        .context("folder refinement task panicked")?
+.await
     }
 
     /// Read reusable structured launches for one still-matching installation.
@@ -5338,10 +5315,8 @@ impl HelmStore {
         host: HostId,
         identity: &str,
     ) -> anyhow::Result<Vec<LaunchHistoryEntry>> {
-        let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<LaunchHistoryEntry>> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
+        self.conn.call("launch history task panicked", move |conn: &mut Connection| -> anyhow::Result<Vec<LaunchHistoryEntry>> {
             let mut stmt = conn
                 .prepare(
                     "SELECT cwd, canonical_cwd, launch_json, launch_history.created_at, launch_history.creation_seq,
@@ -5406,8 +5381,7 @@ impl HelmStore {
             }
             Ok(entries)
         })
-        .await
-        .context("launch history task panicked")?
+.await
     }
 
     /// Return distinct accepted repos in the installation's create order.
@@ -5422,33 +5396,34 @@ impl HelmStore {
         host: HostId,
         identity: &str,
     ) -> anyhow::Result<Vec<farhelm_proto::GithubRepo>> {
-        let conn = Arc::clone(&self.conn);
         let identity = identity.to_owned();
-        tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            let mut stmt = conn.prepare(
-                "SELECT github_repo FROM create_history_sessions
+        self.conn
+            .call(
+                "repository history task panicked",
+                move |conn: &mut Connection| {
+                    let mut stmt = conn.prepare(
+                        "SELECT github_repo FROM create_history_sessions
                  WHERE host_id = ?1 AND host_identity = ?2 AND github_repo IS NOT NULL
                    AND EXISTS (SELECT 1 FROM hosts WHERE id = ?1 AND host_identity = ?2)
                  ORDER BY ordering_kind DESC, ordering_value DESC, session_id ASC",
-            )?;
-            let rows = stmt.query_map(rusqlite::params![host, identity], |row| {
-                row.get::<_, String>(0)
-            })?;
-            let mut repos = Vec::new();
-            let mut seen = std::collections::HashSet::new();
-            for row in rows {
-                let Ok(repo) = farhelm_proto::parse_github_repo(&row?) else {
-                    continue;
-                };
-                if seen.insert((repo.owner.clone(), repo.name.clone())) {
-                    repos.push(repo);
-                }
-            }
-            Ok(repos)
-        })
-        .await
-        .context("repository history task panicked")?
+                    )?;
+                    let rows = stmt.query_map(rusqlite::params![host, identity], |row| {
+                        row.get::<_, String>(0)
+                    })?;
+                    let mut repos = Vec::new();
+                    let mut seen = std::collections::HashSet::new();
+                    for row in rows {
+                        let Ok(repo) = farhelm_proto::parse_github_repo(&row?) else {
+                            continue;
+                        };
+                        if seen.insert((repo.owner.clone(), repo.name.clone())) {
+                            repos.push(repo);
+                        }
+                    }
+                    Ok(repos)
+                },
+            )
+            .await
     }
 
     /// Read folder suggestions for one still-matching installation.
@@ -5460,11 +5435,12 @@ impl HelmStore {
         host: HostId,
         identity: &str,
     ) -> anyhow::Result<Vec<FolderHistoryEntry>> {
-        let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<FolderHistoryEntry>> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            let mut stmt = conn
+        self.conn
+            .call(
+                "folder history task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Vec<FolderHistoryEntry>> {
+                    let mut stmt = conn
                 .prepare(
                     "SELECT canonical_cwd, canonical_proven, display_cwd, created_at, creation_seq
                      FROM folder_history
@@ -5472,44 +5448,52 @@ impl HelmStore {
                      ORDER BY ordering_kind DESC, ordering_value DESC, ordering_session_id ASC",
                 )
                 .context("preparing folder history read")?;
-            let rows = stmt
-                .query_map(rusqlite::params![host, identity], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)? != 0,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, Option<i64>>(4)?,
-                    ))
-                })
-                .context("reading folder history")?;
-            let mut entries = Vec::new();
-            for row in rows {
-                let (canonical_cwd, canonical_proven, display_cwd, created_at, creation_seq) =
-                    row.context("decoding folder history row")?;
-                let creation_seq = match creation_seq {
-                    Some(sequence) => match u64::try_from(sequence) {
-                        Ok(sequence) => Some(sequence),
-                        Err(_) => {
-                            tracing::warn!(host, "a stored folder-history sequence is negative");
-                            continue;
-                        }
-                    },
-                    None => None,
-                };
-                entries.push(FolderHistoryEntry {
-                    host,
-                    canonical_cwd,
-                    canonical_proven,
-                    display_cwd,
-                    created_at,
-                    creation_seq,
-                });
-            }
-            Ok(entries)
-        })
-        .await
-        .context("folder history task panicked")?
+                    let rows = stmt
+                        .query_map(rusqlite::params![host, identity], |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, i64>(1)? != 0,
+                                row.get::<_, String>(2)?,
+                                row.get::<_, i64>(3)?,
+                                row.get::<_, Option<i64>>(4)?,
+                            ))
+                        })
+                        .context("reading folder history")?;
+                    let mut entries = Vec::new();
+                    for row in rows {
+                        let (
+                            canonical_cwd,
+                            canonical_proven,
+                            display_cwd,
+                            created_at,
+                            creation_seq,
+                        ) = row.context("decoding folder history row")?;
+                        let creation_seq = match creation_seq {
+                            Some(sequence) => match u64::try_from(sequence) {
+                                Ok(sequence) => Some(sequence),
+                                Err(_) => {
+                                    tracing::warn!(
+                                        host,
+                                        "a stored folder-history sequence is negative"
+                                    );
+                                    continue;
+                                }
+                            },
+                            None => None,
+                        };
+                        entries.push(FolderHistoryEntry {
+                            host,
+                            canonical_cwd,
+                            canonical_proven,
+                            display_cwd,
+                            created_at,
+                            creation_seq,
+                        });
+                    }
+                    Ok(entries)
+                },
+            )
+            .await
     }
 
     /// Drop ONE session from a host's cache slice — the delete's counterpart
@@ -5536,46 +5520,47 @@ impl HelmStore {
         identity: &str,
         session_id: &str,
     ) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
         let session_id = session_id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning cache forget transaction")?;
-            let current: Option<Option<String>> = tx
-                .query_row(
-                    "SELECT host_identity FROM hosts WHERE id = ?1",
-                    rusqlite::params![host],
-                    |r| r.get(0),
-                )
-                .optional()
-                .context("reading current host identity")?;
-            let Some(current) = current else {
-                return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
-            };
-            if current.as_deref() != Some(identity.as_str()) {
-                return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
-                    host,
-                    expected: identity,
-                    actual: current,
-                }));
-            }
-            let removed = tx
-                .execute(
-                    "DELETE FROM session_cache WHERE host_id = ?1 AND session_id = ?2",
-                    rusqlite::params![host, session_id],
-                )
-                .context("forgetting a cached session")?;
-            tx.commit().context("committing cache forget")?;
-            // Removing a row that was not there is still success (see
-            // above), but it is not a CHANGE: nothing any client could read
-            // says anything different than it did before.
-            Ok(removed > 0)
-        })
-        .await
-        .context("forget session task panicked")?
+        self.conn
+            .call(
+                "forget session task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning cache forget transaction")?;
+                    let current: Option<Option<String>> = tx
+                        .query_row(
+                            "SELECT host_identity FROM hosts WHERE id = ?1",
+                            rusqlite::params![host],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .context("reading current host identity")?;
+                    let Some(current) = current else {
+                        return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+                    };
+                    if current.as_deref() != Some(identity.as_str()) {
+                        return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
+                            host,
+                            expected: identity,
+                            actual: current,
+                        }));
+                    }
+                    let removed = tx
+                        .execute(
+                            "DELETE FROM session_cache WHERE host_id = ?1 AND session_id = ?2",
+                            rusqlite::params![host, session_id],
+                        )
+                        .context("forgetting a cached session")?;
+                    tx.commit().context("committing cache forget")?;
+                    // Removing a row that was not there is still success (see
+                    // above), but it is not a CHANGE: nothing any client could read
+                    // says anything different than it did before.
+                    Ok(removed > 0)
+                },
+            )
+            .await
     }
 
     /// One host's cached sessions, in creation order (`created_at`
@@ -5608,47 +5593,49 @@ impl HelmStore {
     /// loudly on a corrupt registry row instead: see that method's own
     /// docs for why the two reads deliberately disagree.
     pub async fn cached_sessions(&self, host: HostId) -> anyhow::Result<Vec<SessionInfo>> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<SessionInfo>> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            let mut stmt = conn
-                .prepare(
-                    "SELECT session_id, created_at, info_json FROM session_cache \
+        self.conn
+            .call(
+                "cached sessions task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Vec<SessionInfo>> {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT session_id, created_at, info_json FROM session_cache \
                      WHERE host_id = ?1",
-                )
-                .context("preparing cached session query")?;
-            let mut rows: Vec<(String, i64, String)> = stmt
-                .query_map(rusqlite::params![host], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-                })
-                .context("querying cached sessions")?
-                .collect::<Result<_, _>>()
-                .context("reading cached session rows")?;
-            rows.sort_by(|a, b| {
-                (std::cmp::Reverse(a.1), a.0.as_str()).cmp(&(std::cmp::Reverse(b.1), b.0.as_str()))
-            });
-            Ok(rows
-                .into_iter()
-                .filter_map(|(session_id, _, json)| match serde_json::from_str(&json) {
-                    Ok(info) => Some(info),
-                    Err(error) => {
-                        // See this method's own docs for why a decode
-                        // failure here is skipped-and-logged rather than
-                        // propagated: unlike `list_hosts`, this cache is
-                        // not authority for anything.
-                        tracing::warn!(
-                            host,
-                            session_id = session_id.as_str(),
-                            error = %error,
-                            "skipping a cached session whose info_json no longer decodes"
-                        );
-                        None
-                    }
-                })
-                .collect())
-        })
-        .await
-        .context("cached sessions task panicked")?
+                        )
+                        .context("preparing cached session query")?;
+                    let mut rows: Vec<(String, i64, String)> = stmt
+                        .query_map(rusqlite::params![host], |r| {
+                            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                        })
+                        .context("querying cached sessions")?
+                        .collect::<Result<_, _>>()
+                        .context("reading cached session rows")?;
+                    rows.sort_by(|a, b| {
+                        (std::cmp::Reverse(a.1), a.0.as_str())
+                            .cmp(&(std::cmp::Reverse(b.1), b.0.as_str()))
+                    });
+                    Ok(rows
+                        .into_iter()
+                        .filter_map(|(session_id, _, json)| match serde_json::from_str(&json) {
+                            Ok(info) => Some(info),
+                            Err(error) => {
+                                // See this method's own docs for why a decode
+                                // failure here is skipped-and-logged rather than
+                                // propagated: unlike `list_hosts`, this cache is
+                                // not authority for anything.
+                                tracing::warn!(
+                                    host,
+                                    session_id = session_id.as_str(),
+                                    error = %error,
+                                    "skipping a cached session whose info_json no longer decodes"
+                                );
+                                None
+                            }
+                        })
+                        .collect())
+                },
+            )
+            .await
     }
 
     /// Every cached row of the given hosts, decoded where possible — the
@@ -5701,39 +5688,40 @@ impl HelmStore {
         if hosts.is_empty() {
             return Ok(CachedSlice::default());
         }
-        let conn = Arc::clone(&self.conn);
         let hosts = hosts.to_vec();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<CachedSlice> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            let placeholders = (1..=hosts.len())
-                .map(|index| format!("?{index}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT host_id, session_id, created_at, info_json \
+        self.conn
+            .call(
+                "cached slice task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<CachedSlice> {
+                    let placeholders = (1..=hosts.len())
+                        .map(|index| format!("?{index}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let mut stmt = conn
+                        .prepare(&format!(
+                            "SELECT host_id, session_id, created_at, info_json \
                      FROM session_cache WHERE host_id IN ({placeholders})"
-                ))
-                .context("preparing the cached rows query")?;
-            let rows: Vec<(HostId, String, i64, String)> = stmt
-                .query_map(rusqlite::params_from_iter(hosts.iter()), |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-                })
-                .context("querying cached rows")?
-                .collect::<Result<_, _>>()
-                .context("reading cached rows")?;
-            // Same lock hold as the rows, per this method's contract.
-            let mut flags = conn
-                .prepare(&format!(
-                    "SELECT id FROM hosts WHERE cache_truncated AND id IN ({placeholders})"
-                ))
-                .context("preparing the cache flag query")?;
-            let truncated_hosts: Vec<HostId> = flags
-                .query_map(rusqlite::params_from_iter(hosts.iter()), |r| r.get(0))
-                .context("querying cache flags")?
-                .collect::<Result<_, _>>()
-                .context("reading cache flags")?;
-            let rows = rows
+                        ))
+                        .context("preparing the cached rows query")?;
+                    let rows: Vec<(HostId, String, i64, String)> = stmt
+                        .query_map(rusqlite::params_from_iter(hosts.iter()), |r| {
+                            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                        })
+                        .context("querying cached rows")?
+                        .collect::<Result<_, _>>()
+                        .context("reading cached rows")?;
+                    // Same lock hold as the rows, per this method's contract.
+                    let mut flags = conn
+                        .prepare(&format!(
+                            "SELECT id FROM hosts WHERE cache_truncated AND id IN ({placeholders})"
+                        ))
+                        .context("preparing the cache flag query")?;
+                    let truncated_hosts: Vec<HostId> = flags
+                        .query_map(rusqlite::params_from_iter(hosts.iter()), |r| r.get(0))
+                        .context("querying cache flags")?
+                        .collect::<Result<_, _>>()
+                        .context("reading cache flags")?;
+                    let rows = rows
                 .into_iter()
                 .filter_map(|(host, session_id, created_at, json)| {
                     let info = match serde_json::from_str::<SessionInfo>(&json) {
@@ -5762,13 +5750,13 @@ impl HelmStore {
                     Some(CachedRow { host, info })
                 })
                 .collect();
-            Ok(CachedSlice {
-                rows,
-                truncated_hosts,
-            })
-        })
-        .await
-        .context("cached slice task panicked")?
+                    Ok(CachedSlice {
+                        rows,
+                        truncated_hosts,
+                    })
+                },
+            )
+            .await
     }
 
     /// One host's cached entry for `session_id`, if it has one and it still
@@ -5785,11 +5773,12 @@ impl HelmStore {
         host: HostId,
         session_id: &str,
     ) -> anyhow::Result<Option<SessionInfo>> {
-        let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<SessionInfo>> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            let json: Option<String> = conn
+        self.conn
+            .call(
+                "cached session task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<SessionInfo>> {
+                    let json: Option<String> = conn
                 .query_row(
                     "SELECT info_json FROM session_cache WHERE host_id = ?1 AND session_id = ?2",
                     rusqlite::params![host, session_id],
@@ -5797,7 +5786,7 @@ impl HelmStore {
                 )
                 .optional()
                 .context("reading one cached session")?;
-            Ok(json.and_then(|json| match serde_json::from_str::<SessionInfo>(&json) {
+                    Ok(json.and_then(|json| match serde_json::from_str::<SessionInfo>(&json) {
                 // The payload must AGREE with the id it was filed under.
                 // Serving a row whose own id says something else would show
                 // the caller one session's metadata under another's name —
@@ -5824,9 +5813,9 @@ impl HelmStore {
                     None
                 }
             }))
-        })
-        .await
-        .context("cached session task panicked")?
+                },
+            )
+            .await
     }
 
     /// Which host holds `session_id` in its cache — the owner lookup every
@@ -5850,35 +5839,36 @@ impl HelmStore {
     /// lower host id, would mean silently routing a stop at whichever of two
     /// machines sorted first.
     pub async fn host_of_session(&self, session_id: &str) -> anyhow::Result<Option<HostId>> {
-        let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<HostId>> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            let mut stmt = conn
-                .prepare(
-                    "SELECT host_id FROM session_cache WHERE session_id = ?1 \
+        self.conn
+            .call(
+                "session owner lookup task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<HostId>> {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT host_id FROM session_cache WHERE session_id = ?1 \
                      ORDER BY host_id ASC LIMIT 2",
-                )
-                .context("preparing the session owner query")?;
-            let owners: Vec<HostId> = stmt
-                .query_map(rusqlite::params![session_id], |r| r.get(0))
-                .context("looking up a cached session's host")?
-                .collect::<Result<_, _>>()
-                .context("reading session owner rows")?;
-            match owners.as_slice() {
-                [] => Ok(None),
-                [only] => Ok(Some(*only)),
-                [first, second, ..] => {
-                    Err(anyhow::Error::new(HostStoreError::SessionOwnerAmbiguous {
-                        session: session_id,
-                        first: *first,
-                        second: *second,
-                    }))
-                }
-            }
-        })
-        .await
-        .context("session owner lookup task panicked")?
+                        )
+                        .context("preparing the session owner query")?;
+                    let owners: Vec<HostId> = stmt
+                        .query_map(rusqlite::params![session_id], |r| r.get(0))
+                        .context("looking up a cached session's host")?
+                        .collect::<Result<_, _>>()
+                        .context("reading session owner rows")?;
+                    match owners.as_slice() {
+                        [] => Ok(None),
+                        [only] => Ok(Some(*only)),
+                        [first, second, ..] => {
+                            Err(anyhow::Error::new(HostStoreError::SessionOwnerAmbiguous {
+                                session: session_id,
+                                first: *first,
+                                second: *second,
+                            }))
+                        }
+                    }
+                },
+            )
+            .await
     }
 
     /// Return the usable portion of the helm-owned catalog in stable id order.
@@ -5889,9 +5879,7 @@ impl HelmStore {
     /// profile, but one bad row must not make the rest of the catalog
     /// unavailable to host refresh or session creation.
     pub async fn profiles(&self) -> anyhow::Result<Vec<farhelm_proto::Profile>> {
-        let conn = Arc::clone(&self.conn);
-        let stored: Vec<farhelm_proto::Profile> = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
+        let stored: Vec<farhelm_proto::Profile> = self.conn.call("profile list task panicked", move |conn: &mut Connection| -> anyhow::Result<_> {
             let mut statement = conn
                 .prepare("SELECT id, name, invocation, agent_kind, resume_template FROM profiles ORDER BY id")
                 .context("preparing profile list query")?;
@@ -5909,8 +5897,7 @@ impl HelmStore {
             }
             Ok(profiles)
         })
-        .await
-        .context("profile list task panicked")?
+.await
         ?;
         let mut profiles = builtin_profiles();
         profiles.extend(stored);
@@ -5924,10 +5911,8 @@ impl HelmStore {
         if let Some(profile) = builtin_profile(id) {
             return Ok(Some(profile));
         }
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
+        self.conn.call("profile read task panicked", move |conn: &mut Connection| -> anyhow::Result<_> {
             let row = conn
                 .query_row(
                     "SELECT id, name, invocation, agent_kind, resume_template FROM profiles WHERE id = ?1",
@@ -5938,8 +5923,7 @@ impl HelmStore {
                 .context("reading one profile")?;
             row.map(decode_profile_row).transpose()
         })
-        .await
-        .context("profile read task panicked")?
+.await
     }
 
     /// Insert a validated profile while enforcing the catalog bound in the
@@ -5958,9 +5942,7 @@ impl HelmStore {
             resume_template.as_deref(),
         )
         .map_err(|message| anyhow::anyhow!("refusing to store this profile: {message}"))?;
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
+        self.conn.call("profile create task panicked", move |conn: &mut Connection| -> anyhow::Result<_> {
             let tx = conn.transaction().context("beginning profile create transaction")?;
             let count: i64 = tx
                 .query_row("SELECT COUNT(*) FROM profiles", [], |row| row.get(0))
@@ -5990,8 +5972,7 @@ impl HelmStore {
             tx.commit().context("committing profile create")?;
             Ok(ProfileCreation::Created(profile))
         })
-        .await
-        .context("profile create task panicked")?
+.await
     }
 
     /// Replace a complete profile definition, preserving its immutable id so
@@ -6010,9 +5991,7 @@ impl HelmStore {
             profile.resume_template.as_deref(),
         )
         .map_err(|message| anyhow::anyhow!("refusing to store this profile: {message}"))?;
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
+        self.conn.call("profile update task panicked", move |conn: &mut Connection| -> anyhow::Result<_> {
             let changed = conn.execute(
                 "UPDATE profiles SET name = ?2, invocation = ?3, agent_kind = ?4, resume_template = ?5 WHERE id = ?1",
                 rusqlite::params![
@@ -6025,8 +6004,7 @@ impl HelmStore {
             ).context("updating profile row")?;
             Ok((changed > 0).then_some(profile))
         })
-        .await
-        .context("profile update task panicked")?
+.await
     }
 
     /// Make every profile catalog read fail without touching anything else.
@@ -6041,18 +6019,19 @@ impl HelmStore {
     /// joins the profiles table, so routing stays real.
     #[cfg(test)]
     pub(crate) async fn break_profile_catalog_for_test(&self) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            conn.execute(
-                "ALTER TABLE profiles RENAME TO profiles_broken_for_test",
-                [],
+        self.conn
+            .call(
+                "broken catalog fixture task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "ALTER TABLE profiles RENAME TO profiles_broken_for_test",
+                        [],
+                    )
+                    .context("renaming the profiles table away")?;
+                    Ok(())
+                },
             )
-            .context("renaming the profiles table away")?;
-            Ok(())
-        })
-        .await
-        .context("broken catalog fixture task panicked")?
+            .await
     }
 
     /// Delete one profile and report whether its id existed; the raw
@@ -6061,31 +6040,36 @@ impl HelmStore {
         if is_builtin_profile_id(id) {
             anyhow::bail!("built-in profiles are read-only");
         }
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            Ok(conn.execute("DELETE FROM profiles WHERE id = ?1", rusqlite::params![id])? > 0)
-        })
-        .await
-        .context("profile delete task panicked")?
+        self.conn
+            .call(
+                "profile delete task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<_> {
+                    Ok(
+                        conn.execute("DELETE FROM profiles WHERE id = ?1", rusqlite::params![id])?
+                            > 0,
+                    )
+                },
+            )
+            .await
     }
 
     /// Read the raw remembered id, including an id whose profile was deleted.
     pub async fn remembered_profile(&self) -> anyhow::Result<Option<String>> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
-            conn.query_row(
-                "SELECT profile_id FROM remembered_profile WHERE singleton = 1",
-                [],
-                |r| r.get(0),
+        self.conn
+            .call(
+                "remembered profile task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<String>> {
+                    conn.query_row(
+                        "SELECT profile_id FROM remembered_profile WHERE singleton = 1",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .context("reading the remembered default profile")
+                },
             )
-            .optional()
-            .context("reading the remembered default profile")
-        })
-        .await
-        .context("remembered profile task panicked")?
+            .await
     }
 
     /// Remember `profile_id` without a session provenance marker.
@@ -6167,32 +6151,33 @@ impl HelmStore {
         source_created_at: Option<i64>,
         source_session_id: Option<&str>,
     ) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let profile_id = profile_id.to_string();
         let source_session_id = source_session_id.map(str::to_string);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let stored_source_creation_seq = source_creation_seq
-                .map(i64::try_from)
-                .transpose()
-                .context("creation sequence exceeds SQLite's integer range")?;
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning remembered-default transaction")?;
-            // The profile id alone controls client invalidation. Provenance
-            // is diagnostic, so a later user choice always replaces it even
-            // when its supervisor timestamp is older than an earlier one.
-            let previous_profile: Option<String> = tx
-                .query_row(
-                    "SELECT profile_id FROM remembered_profile WHERE singleton = 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .optional()
-                .context("checking the remembered default row")?;
-            let changed = previous_profile.as_deref() != Some(profile_id.as_str());
-            tx.execute(
-                "INSERT INTO remembered_profile (\
+        self.conn
+            .call(
+                "remember profile default task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let stored_source_creation_seq = source_creation_seq
+                        .map(i64::try_from)
+                        .transpose()
+                        .context("creation sequence exceeds SQLite's integer range")?;
+                    let tx = conn
+                        .transaction()
+                        .context("beginning remembered-default transaction")?;
+                    // The profile id alone controls client invalidation. Provenance
+                    // is diagnostic, so a later user choice always replaces it even
+                    // when its supervisor timestamp is older than an earlier one.
+                    let previous_profile: Option<String> = tx
+                        .query_row(
+                            "SELECT profile_id FROM remembered_profile WHERE singleton = 1",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .context("checking the remembered default row")?;
+                    let changed = previous_profile.as_deref() != Some(profile_id.as_str());
+                    tx.execute(
+                        "INSERT INTO remembered_profile (\
                      singleton, profile_id, source_host_id, source_creation_seq, \
                      source_created_at, source_session_id\
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
@@ -6201,21 +6186,21 @@ impl HelmStore {
                      source_creation_seq = excluded.source_creation_seq, \
                      source_created_at = excluded.source_created_at, \
                      source_session_id = excluded.source_session_id",
-                rusqlite::params![
-                    1,
-                    profile_id,
-                    source_host,
-                    stored_source_creation_seq,
-                    source_created_at,
-                    source_session_id
-                ],
+                        rusqlite::params![
+                            1,
+                            profile_id,
+                            source_host,
+                            stored_source_creation_seq,
+                            source_created_at,
+                            source_session_id
+                        ],
+                    )
+                    .context("remembering the default profile")?;
+                    tx.commit().context("committing the remembered default")?;
+                    Ok(changed)
+                },
             )
-            .context("remembering the default profile")?;
-            tx.commit().context("committing the remembered default")?;
-            Ok(changed)
-        })
-        .await
-        .context("remember profile default task panicked")?
+            .await
     }
 }
 
@@ -6237,7 +6222,7 @@ mod tests {
     /// diagnostics API. Bound tests use this to prove that one accepted
     /// create transaction leaves every durable projection in lockstep.
     fn history_counts(store: &HelmStore, host: HostId, identity: &str) -> (i64, i64, i64, i64) {
-        let conn = store.conn.lock().expect("helm db mutex poisoned");
+        let conn = store.conn.lock();
         let count = |table: &str| {
             conn.query_row(
                 &format!("SELECT COUNT(*) FROM {table} WHERE host_id = ?1 AND host_identity = ?2"),
@@ -6267,7 +6252,7 @@ mod tests {
         selection: &LaunchSelection,
     ) {
         let stale_json = serde_json::to_string(selection).expect("serialize selection");
-        let conn = store.conn.lock().expect("helm db mutex poisoned");
+        let conn = store.conn.lock();
         conn.execute(
             "INSERT INTO create_history_sessions
              (host_id, host_identity, session_id, created_at, creation_seq, ordering_kind, ordering_value)
@@ -6603,9 +6588,9 @@ mod tests {
             .await
             .unwrap();
         let folders = store.folder_history(host, "identity-a").await.unwrap();
-        let schema = schema_objects(&store.conn.lock().unwrap());
+        let schema = schema_objects(&store.conn.lock());
         {
-            let conn = store.conn.lock().unwrap();
+            let conn = store.conn.lock();
             // Restore the historical cache column as well: the upgrade must
             // cross its removal after adding repository intent to history.
             conn.execute_batch(
@@ -6641,7 +6626,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert_eq!(schema_objects(&migrated.conn.lock().unwrap()), schema);
+        assert_eq!(schema_objects(&migrated.conn.lock()), schema);
     }
 
     /// A replay of a successful structured create is the same session, not a
@@ -7956,7 +7941,7 @@ mod tests {
             "the previously evicted structured session cannot regain frequency by its clock"
         );
         let (retained_before_replay, admissions_before_replay) = {
-            let conn = reopened.conn.lock().expect("helm db mutex poisoned");
+            let conn = reopened.conn.lock();
             let retained: (i64, i64, String, i64, String) = conn
                 .query_row(
                     "SELECT cutoff_kind, cutoff_value, cutoff_session_id,
@@ -7991,7 +7976,7 @@ mod tests {
             "the replay remains a refusal after inspecting the persisted frontier"
         );
         let (retained_after_replay, admissions_after_replay) = {
-            let conn = reopened.conn.lock().expect("helm db mutex poisoned");
+            let conn = reopened.conn.lock();
             let retained: (i64, i64, String, i64, String) = conn
                 .query_row(
                     "SELECT cutoff_kind, cutoff_value, cutoff_session_id,
@@ -8061,7 +8046,7 @@ mod tests {
         }
         let before = history_counts(&store, host, "identity-a");
         {
-            let conn = store.conn.lock().expect("helm db mutex poisoned");
+            let conn = store.conn.lock();
             conn.execute_batch(
                 "CREATE TRIGGER fail_history_eviction BEFORE DELETE ON create_history_sessions
                  BEGIN SELECT RAISE(ABORT, 'injected history eviction failure'); END;",
@@ -8684,10 +8669,9 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn fresh_open_creates_the_current_schema_with_the_local_row_present() {
         let (_dir, store) = fresh_store().await;
-        let conn = Arc::clone(&store.conn);
+        let conn = store.conn.clone();
         let version: i64 = tokio::task::spawn_blocking(move || {
             conn.lock()
-                .unwrap()
                 .query_row("PRAGMA user_version", [], |r| r.get(0))
                 .unwrap()
         })
@@ -8718,7 +8702,7 @@ mod tests {
         let malformed = "{not-json";
         let non_object = r#"["retained-array"]"#;
         {
-            let conn = store.conn.lock().expect("db mutex");
+            let conn = store.conn.lock();
             conn.execute_batch(
                 "ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
@@ -8751,7 +8735,7 @@ mod tests {
         drop(store);
 
         let migrated = HelmStore::open(&db_path).await.expect("migrate schema 28");
-        let conn = migrated.conn.lock().expect("db mutex");
+        let conn = migrated.conn.lock();
         let retained: String = conn
             .query_row(
                 "SELECT info_json FROM session_cache WHERE session_id = 'retained'",
@@ -9149,8 +9133,8 @@ mod tests {
             .expect("create");
 
         let read = |store: &HelmStore| {
-            let conn = Arc::clone(&store.conn);
-            tokio::task::spawn_blocking(move || schema_objects(&conn.lock().unwrap()))
+            let conn = store.conn.clone();
+            tokio::task::spawn_blocking(move || schema_objects(&conn.lock()))
         };
         let (migrated, fresh) = tokio::join!(read(&migrated), read(&fresh));
         assert_eq!(
@@ -9285,7 +9269,6 @@ mod tests {
         let version: i64 = migrated
             .conn
             .lock()
-            .expect("helm db mutex poisoned")
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("read migrated schema version");
         assert_eq!(
@@ -9297,8 +9280,8 @@ mod tests {
             .await
             .expect("create fresh schema 23");
         assert_eq!(
-            schema_objects(&migrated.conn.lock().expect("helm db mutex poisoned")),
-            schema_objects(&fresh.conn.lock().expect("helm db mutex poisoned")),
+            schema_objects(&migrated.conn.lock()),
+            schema_objects(&fresh.conn.lock()),
             "the history migrations recreate the exact current tables and indexes after discarding schema-22 history"
         );
 
@@ -9744,10 +9727,9 @@ mod tests {
             "first-token"
         );
 
-        let conn = Arc::clone(&store.conn);
+        let conn = store.conn.clone();
         let created_at: i64 = tokio::task::spawn_blocking(move || {
             conn.lock()
-                .unwrap()
                 .query_row(
                     "SELECT created_at FROM web_token WHERE singleton = 1",
                     [],
@@ -9858,10 +9840,9 @@ mod tests {
             .await
             .unwrap();
         store.insert_device_session([7; 32], 101).await.unwrap();
-        let conn = Arc::clone(&store.conn);
+        let conn = store.conn.clone();
         tokio::task::spawn_blocking(move || {
             conn.lock()
-                .unwrap()
                 .execute_batch(
                     "CREATE TRIGGER refuse_device_delete BEFORE DELETE ON device_sessions \
                      BEGIN SELECT RAISE(ABORT, 'scripted delete refusal'); END;",
@@ -10078,9 +10059,9 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn schema_check_rejects_a_malformed_row_shape() {
         let (_dir, store) = fresh_store().await;
-        let conn = Arc::clone(&store.conn);
+        let conn = store.conn.clone();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock();
             conn.execute(
                 "INSERT INTO hosts (kind, destination) VALUES ('local', 'not-allowed')",
                 [],
@@ -10100,9 +10081,9 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn schema_index_rejects_a_duplicate_destination_bypassing_the_api() {
         let (_dir, store) = fresh_store().await;
-        let conn = Arc::clone(&store.conn);
+        let conn = store.conn.clone();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock();
             conn.execute(
                 "INSERT INTO hosts (kind, destination) VALUES ('ssh', 'raw@host')",
                 [],
@@ -10129,9 +10110,9 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn schema_index_rejects_a_duplicate_identity_bypassing_the_api() {
         let (_dir, store) = fresh_store().await;
-        let conn = Arc::clone(&store.conn);
+        let conn = store.conn.clone();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock();
             conn.execute(
                 "INSERT INTO hosts (kind, destination, host_identity) \
                  VALUES ('ssh', 'claim-a@host', 'one-identity')",
@@ -10175,9 +10156,9 @@ mod tests {
     async fn list_hosts_fails_loudly_on_a_corrupt_kind_bypassing_the_check() {
         let (_dir, store) = fresh_store().await;
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().unwrap();
+                let conn = conn.lock();
                 conn.pragma_update(None, "ignore_check_constraints", true)
                     .expect("disable CHECK enforcement for this connection");
                 conn.execute(
@@ -11244,9 +11225,9 @@ mod tests {
         // point of this fixup round), to stand in for a state from before
         // this write path was hardened, e.g. a hand-edited database.
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
-                conn.lock().unwrap().execute(
+                conn.lock().execute(
                     "UPDATE hosts SET alias = 'converge-owner@host' WHERE id = ?1",
                     rusqlite::params![local_id],
                 )
@@ -11388,9 +11369,9 @@ mod tests {
         // hardened: a hand-edited database, or one aliased before this
         // check existed.
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
-                conn.lock().unwrap().execute(
+                conn.lock().execute(
                     "UPDATE hosts SET alias = 'Pre Existing Name' WHERE id = ?1",
                     rusqlite::params![owner],
                 )
@@ -11567,9 +11548,9 @@ mod tests {
             // raw `INSERT`), so reaching the row this fixture needs means
             // disabling CHECK enforcement on this one connection first —
             // standing in for a hand-edited or pre-CHECK database file.
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().unwrap();
+                let conn = conn.lock();
                 conn.pragma_update(None, "ignore_check_constraints", true)
                     .expect("disable CHECK enforcement for this connection");
                 conn.execute(
@@ -11602,9 +11583,9 @@ mod tests {
         // Read the alias column directly, bypassing the broken decode
         // path entirely, since `list_hosts` cannot serve this host's row
         // in isolation once ANY row in the registry is corrupt.
-        let conn = Arc::clone(&store.conn);
+        let conn = store.conn.clone();
         let alias: Option<String> = tokio::task::spawn_blocking(move || {
-            conn.lock().unwrap().query_row(
+            conn.lock().query_row(
                 "SELECT alias FROM hosts WHERE id = ?1",
                 rusqlite::params![host],
                 |row| row.get(0),
@@ -11636,11 +11617,10 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = store.add_ssh_host("id@host", None, None).await.unwrap();
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             let json = serde_json::to_string(&session("s1", 100)).unwrap();
             tokio::task::spawn_blocking(move || {
                 conn.lock()
-                    .unwrap()
                     .execute(
                         "INSERT INTO session_cache (host_id, session_id, created_at, info_json) \
                          VALUES (?1, 's1', 100, ?2)",
@@ -11908,10 +11888,9 @@ mod tests {
         // that does not touch `destination` at all.
         let stale_for_adopt = dialed_as(&store, host).await;
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
                 conn.lock()
-                    .unwrap()
                     .execute(
                         "UPDATE hosts SET remote_state_dir = '/elsewhere' WHERE id = ?1",
                         rusqlite::params![host],
@@ -12128,10 +12107,9 @@ mod tests {
             .unwrap();
 
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
                 conn.lock()
-                    .unwrap()
                     .execute_batch(
                         "CREATE TEMP TRIGGER abort_cache_purge
                              BEFORE DELETE ON session_cache
@@ -12347,10 +12325,9 @@ mod tests {
         // created_at COLUMN for "first" to something newer, leaving its
         // info_json (whose embedded created_at still says 100) untouched.
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
                 conn.lock()
-                    .unwrap()
                     .execute(
                         "UPDATE session_cache SET created_at = 999 \
                          WHERE session_id = 'first'",
@@ -12557,10 +12534,9 @@ mod tests {
             .await
             .unwrap();
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
                 conn.lock()
-                    .unwrap()
                     .execute(
                         "UPDATE session_cache SET info_json = 'not valid json' \
                          WHERE session_id = 'cached-sessions-poisoned'",
@@ -12632,10 +12608,9 @@ mod tests {
             .await
             .unwrap();
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
                 conn.lock()
-                    .unwrap()
                     .execute(
                         "UPDATE session_cache SET info_json = 'not valid json' \
                          WHERE session_id = 'cached-rows-poisoned'",
@@ -12837,10 +12812,9 @@ mod tests {
         // by writing behind this module's back — exactly the provenance the
         // schema's own comments say the read path must tolerate.
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
                 conn.lock()
-                    .unwrap()
                     .execute(
                         "UPDATE session_cache SET created_at = 999 WHERE session_id = 's-1'",
                         [],
@@ -12995,10 +12969,9 @@ mod tests {
             .await
             .unwrap();
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
                 conn.lock()
-                    .unwrap()
                     .execute(
                         "UPDATE session_cache SET created_at = 999 WHERE session_id = 's-2'",
                         [],
@@ -13186,9 +13159,9 @@ mod tests {
             .await
             .expect("seed the cache");
         {
-            let conn = Arc::clone(&store.conn);
+            let conn = store.conn.clone();
             tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().unwrap();
+                let conn = conn.lock();
                 conn.execute(
                     "UPDATE session_cache SET info_json = 'not valid json' \
                      WHERE session_id = 'undecodable'",
@@ -13651,7 +13624,7 @@ mod tests {
         expected_builtins.sort_by(|left, right| left.id.cmp(&right.id));
         assert_eq!(store.profiles().await.unwrap(), expected_builtins);
         {
-            let conn = store.conn.lock().unwrap();
+            let conn = store.conn.lock();
             for profile in &starters {
                 conn.execute(
                     "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
@@ -13732,7 +13705,7 @@ mod tests {
         for (id, name, invocation, kind, template, reason) in cases {
             let (_dir, store) = fresh_store().await;
             {
-                let conn = store.conn.lock().unwrap();
+                let conn = store.conn.lock();
                 conn.execute(
                     "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
                      VALUES (?1, ?2, ?3, ?4, ?5)",

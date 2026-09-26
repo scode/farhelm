@@ -1383,7 +1383,7 @@ mod tests {
         std::fs::create_dir_all(&root).expect("the checkout root");
         let team_id;
         {
-            let conn = sup.store.conn.lock().expect("db mutex");
+            let conn = sup.store.conn.lock();
             let team = crate::working_copies::record_planned(
                 &conn,
                 &crate::working_copies::PlannedWorkingCopy {
@@ -1565,7 +1565,7 @@ mod tests {
         std::fs::create_dir_all(&root).expect("the checkout root");
         let checkout_id;
         {
-            let conn = sup.store.conn.lock().expect("db mutex");
+            let conn = sup.store.conn.lock();
             let plan = crate::working_copies::record_planned(
                 &conn,
                 &crate::working_copies::PlannedWorkingCopy {
@@ -1681,7 +1681,7 @@ mod tests {
         let entry = seeded_session(&sup, "planned-origin", unknown.to_str().unwrap()).await;
         let checkout_id = uuid::Uuid::new_v4().to_string();
         {
-            let conn = sup.store.conn.lock().unwrap();
+            let conn = sup.store.conn.lock();
             let plan = crate::working_copies::record_planned(
                 &conn,
                 &crate::working_copies::PlannedWorkingCopy {
@@ -1772,7 +1772,7 @@ mod tests {
                 ),
             ] {
                 let accepted = {
-                    let conn = sup.store.conn.lock().unwrap();
+                    let conn = sup.store.conn.lock();
                     let plan = crate::working_copies::record_planned(
                         &conn,
                         &crate::working_copies::PlannedWorkingCopy {
@@ -1798,7 +1798,7 @@ mod tests {
             let archive_root = root.join(crate::working_copies::ARCHIVE_DIR_NAME);
             let destination = archive_root.join("outer-journaled");
             {
-                let conn = sup.store.conn.lock().unwrap();
+                let conn = sup.store.conn.lock();
                 assert_eq!(conn.execute(
                     "UPDATE working_copies SET allocation_state = 'archive_pending', archive_destination = 'outer-journaled' WHERE id = ?1",
                     [&outer.row.id],
@@ -1924,7 +1924,7 @@ mod tests {
                 .unwrap();
             let checkout_id = uuid::Uuid::new_v4().to_string();
             let accepted = {
-                let conn = sup.store.conn.lock().unwrap();
+                let conn = sup.store.conn.lock();
                 crate::working_copies::record_planned(
                     &conn,
                     &crate::working_copies::PlannedWorkingCopy {
@@ -2113,7 +2113,7 @@ mod tests {
             .unwrap();
             let checkout_id = uuid::Uuid::new_v4().to_string();
             let owned_identity = {
-                let conn = sup.store.conn.lock().unwrap();
+                let conn = sup.store.conn.lock();
                 crate::working_copies::record_planned(
                     &conn,
                     &crate::working_copies::PlannedWorkingCopy {
@@ -2309,7 +2309,7 @@ mod tests {
             .unwrap();
         let checkout_id = uuid::Uuid::new_v4().to_string();
         let owned_identity = {
-            let conn = sup.store.conn.lock().unwrap();
+            let conn = sup.store.conn.lock();
             crate::working_copies::record_planned(
                 &conn,
                 &crate::working_copies::PlannedWorkingCopy {
@@ -2338,7 +2338,7 @@ mod tests {
         std::fs::write(source.join("owned"), b"original checkout").unwrap();
         std::fs::create_dir(&archive_root).unwrap();
         {
-            let conn = sup.store.conn.lock().unwrap();
+            let conn = sup.store.conn.lock();
             assert_eq!(conn.execute(
                 "UPDATE working_copies SET allocation_state = 'archive_pending', archive_destination = ?2 WHERE id = ?1",
                 rusqlite::params![checkout_id, "checkout-journaled"],
@@ -2501,7 +2501,7 @@ mod tests {
         std::fs::create_dir_all(&root).expect("the checkout root");
         let working_copy_id;
         {
-            let conn = sup.store.conn.lock().expect("db mutex");
+            let conn = sup.store.conn.lock();
             let plan = crate::working_copies::record_planned(
                 &conn,
                 &crate::working_copies::PlannedWorkingCopy {

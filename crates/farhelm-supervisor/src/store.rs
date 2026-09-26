@@ -88,31 +88,17 @@
 //! The recorded crash-safety/atomicity policy (PLAN_M3.md item 5,
 //! implemented in `crate::files`) governs the directly written state
 //! FILES; the database's durability settings stay stock (the one
-//! deliberate knob is `BUSY_TIMEOUT`, which is about handoff overlap,
+//! deliberate knob is `db::BUSY_TIMEOUT`, which is about handoff overlap,
 //! not durability), and this module does not invent a stricter policy
 //! than the plan records.
 
 use anyhow::Context;
 use base64::Engine as _;
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::Arc;
 use subtle::ConstantTimeEq;
-
-/// How long a query waits on `SQLITE_BUSY` before giving up.
-///
-/// A brief window where two supervisor processes both hold this database
-/// open is the normal shape of a handoff restart (the old process still
-/// running while the new one constructs — see `Supervisor::serve`'s
-/// second `reload_sessions` call). Without a busy timeout, SQLite returns
-/// `SQLITE_BUSY` to the loser of that overlap immediately, turning an
-/// ordinary handoff into a spurious open/query failure; a bounded wait
-/// instead lets the loser's request go through once the winner's
-/// transaction releases the lock, at the cost of stalling that one call
-/// for up to this long in the pathological case.
-const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. Bumping this requires a matching migration
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
@@ -1522,7 +1508,7 @@ pub struct SessionStore {
     // pub(crate) for the service-layer tests that plant registry fixtures
     // directly through `working_copies`' `&Connection` primitives (no FKs,
     // no counter columns — tests compose the same helpers production does).
-    pub(crate) conn: Arc<Mutex<Connection>>,
+    pub(crate) conn: crate::db::Db,
 }
 
 /// Bring the database up to [`SCHEMA_VERSION`], creating it from scratch
@@ -2764,43 +2750,16 @@ impl SessionStore {
     pub async fn open(path: &Path, may_migrate: bool) -> anyhow::Result<SessionStore> {
         let path = path.to_path_buf();
         let conn = tokio::task::spawn_blocking(move || -> anyhow::Result<Connection> {
-            // Explicit flags, not `Connection::open`'s default set: that
-            // default includes `SQLITE_OPEN_URI`, which reinterprets a
-            // path starting with `file:` as a URI (query parameters,
-            // `?mode=...`, and all) instead of a plain filesystem path.
-            // `state_dir` is fixed by this process, not attacker input, but
-            // a state directory can end up somewhere a caller named after
-            // something that happens to start with `file:` regardless —
-            // and URI mode is not a feature this module wants at all, so
-            // it is left out rather than relied upon to stay harmless.
-            // `SQLITE_OPEN_NO_MUTEX` matches `Connection::open`'s own
-            // default: this module already serializes every access
-            // through its own `Mutex`, so SQLite's internal connection
-            // mutex would be redundant locking for no added safety.
-            let conn = Connection::open_with_flags(
-                &path,
-                OpenFlags::SQLITE_OPEN_READ_WRITE
-                    | OpenFlags::SQLITE_OPEN_CREATE
-                    | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-            )
-            .with_context(|| format!("opening session database {}", path.display()))?;
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                    .with_context(|| format!("restricting mode of {}", path.display()))?;
-            }
-            // See `BUSY_TIMEOUT`'s docs: this is what turns a handoff-
-            // restart's overlapping access into a brief wait instead of an
-            // immediate `SQLITE_BUSY` failure.
-            conn.busy_timeout(BUSY_TIMEOUT)
-                .context("setting sqlite busy timeout")?;
+            // Flags, 0600 permissions, and the busy timeout: see
+            // `db::open_private`.
+            let conn = crate::db::open_private(&path, "session database")?;
             apply_schema(&conn, may_migrate)?;
             Ok(conn)
         })
         .await
         .context("session store open task panicked")??;
         Ok(SessionStore {
-            conn: Arc::new(Mutex::new(conn)),
+            conn: crate::db::Db::new(conn, "session db"),
         })
     }
 
@@ -2859,80 +2818,83 @@ impl SessionStore {
         claim: Option<IntentClaim>,
         plan: Option<crate::working_copies::PlannedWorkingCopy>,
     ) -> anyhow::Result<Claimed> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Claimed> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the session insert transaction")?;
-            if let Some(claim) = &claim {
-                // The claim goes FIRST so a lost race costs nothing: the
-                // session row is only written once the key is provably
-                // ours. `DO NOTHING` (rather than a bare insert) is what
-                // turns "someone else has it" into an answer instead of a
-                // constraint error there would be no way to inspect.
-                let (state, error_kind, error_detail) = ReservationOutcome::Pending.columns();
-                let claimed = tx
-                    .execute(
-                        "INSERT INTO create_reservations \
+        self.conn
+            .call(
+                "session insert task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Claimed> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the session insert transaction")?;
+                    if let Some(claim) = &claim {
+                        // The claim goes FIRST so a lost race costs nothing: the
+                        // session row is only written once the key is provably
+                        // ours. `DO NOTHING` (rather than a bare insert) is what
+                        // turns "someone else has it" into an answer instead of a
+                        // constraint error there would be no way to inspect.
+                        let (state, error_kind, error_detail) =
+                            ReservationOutcome::Pending.columns();
+                        let claimed = tx
+                            .execute(
+                                "INSERT INTO create_reservations \
                          (intent_key, fingerprint, state, session_id, tmux_name, \
                           error_kind, error_detail, created_at, dedup_scope) \
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
                          ON CONFLICT(intent_key) DO NOTHING",
-                        rusqlite::params![
-                            claim.intent_key,
-                            claim.fingerprint,
-                            state,
-                            row.id,
-                            row.tmux_name,
-                            error_kind,
-                            error_detail,
-                            now_unix(),
-                            claim.dedup_scope.column(),
-                        ],
-                    )
-                    .context("claiming the create reservation")?;
-                if claimed == 0 {
-                    let winner = read_reservation(&tx, &claim.intent_key)?.ok_or_else(|| {
+                                rusqlite::params![
+                                    claim.intent_key,
+                                    claim.fingerprint,
+                                    state,
+                                    row.id,
+                                    row.tmux_name,
+                                    error_kind,
+                                    error_detail,
+                                    now_unix(),
+                                    claim.dedup_scope.column(),
+                                ],
+                            )
+                            .context("claiming the create reservation")?;
+                        if claimed == 0 {
+                            let winner = read_reservation(&tx, &claim.intent_key)?.ok_or_else(|| {
                         anyhow::anyhow!(
                             "intent key {} refused the claim but has no reservation row",
                             claim.intent_key
                         )
                     })?;
-                    // Rolled back, not committed: no session row, no claim.
-                    return Ok(Claimed::TakenBy(Box::new(winner)));
-                }
-            }
-            let inserted = insert_session_row(&tx, &row, None)?;
-            if let Some(plan) = &plan {
-                crate::working_copies::record_planned(&tx, plan)
-                    .context("recording the planned working-copy row with the launching session")?;
-                tx.execute(
-                    "UPDATE sessions SET fresh_checkout_id = ?2 WHERE id = ?1",
-                    rusqlite::params![row.id, plan.id],
-                )
-                .context("recording independent fresh-create provenance")?;
-                // Origin-session membership, committed with the plan. It
-                // duplicates `allocate`'s own origin insert (which no-ops
-                // on conflict) so that a crash BETWEEN the plan and the
-                // allocation still leaves the ownership link in place —
-                // the ambiguous-Planned recovery reads it.
-                crate::working_copies::add_member(&tx, &row.id, &plan.id)
-                    .context("recording the origin-session membership")?;
-            } else if let Some(cwd) = row.canonical_cwd.as_deref() {
-                // A crash must not expose the session without the reference
-                // that prevents last-member deletion from archiving its cwd.
-                crate::working_copies::attach_existing_ancestors(&tx, &row.id, cwd)
-                    .context("recording managed ancestors with the session")?;
-            }
-            tx.commit().context("committing the session insert")?;
-            Ok(Claimed::Ours {
-                session_token: inserted.session_token,
-                creation_seq: inserted.creation_seq,
-            })
-        })
-        .await
-        .context("session insert task panicked")?
+                            // Rolled back, not committed: no session row, no claim.
+                            return Ok(Claimed::TakenBy(Box::new(winner)));
+                        }
+                    }
+                    let inserted = insert_session_row(&tx, &row, None)?;
+                    if let Some(plan) = &plan {
+                        crate::working_copies::record_planned(&tx, plan).context(
+                            "recording the planned working-copy row with the launching session",
+                        )?;
+                        tx.execute(
+                            "UPDATE sessions SET fresh_checkout_id = ?2 WHERE id = ?1",
+                            rusqlite::params![row.id, plan.id],
+                        )
+                        .context("recording independent fresh-create provenance")?;
+                        // Origin-session membership, committed with the plan. It
+                        // duplicates `allocate`'s own origin insert (which no-ops
+                        // on conflict) so that a crash BETWEEN the plan and the
+                        // allocation still leaves the ownership link in place —
+                        // the ambiguous-Planned recovery reads it.
+                        crate::working_copies::add_member(&tx, &row.id, &plan.id)
+                            .context("recording the origin-session membership")?;
+                    } else if let Some(cwd) = row.canonical_cwd.as_deref() {
+                        // A crash must not expose the session without the reference
+                        // that prevents last-member deletion from archiving its cwd.
+                        crate::working_copies::attach_existing_ancestors(&tx, &row.id, cwd)
+                            .context("recording managed ancestors with the session")?;
+                    }
+                    tx.commit().context("committing the session insert")?;
+                    Ok(Claimed::Ours {
+                        session_token: inserted.session_token,
+                        creation_seq: inserted.creation_seq,
+                    })
+                },
+            )
+            .await
     }
 
     /// [`working_copies::allocate`] through the store's connection: the
@@ -2949,14 +2911,14 @@ impl SessionStore {
         crate::working_copies::AcceptedDirectory,
         crate::working_copies::AllocationFailure,
     > {
-        let conn = Arc::clone(&self.conn);
+        let conn = self.conn.clone();
         let working_copy_id = working_copy_id.to_string();
         tokio::task::spawn_blocking(
             move || -> std::result::Result<
                 crate::working_copies::AcceptedDirectory,
                 crate::working_copies::AllocationFailure,
             > {
-                let conn = conn.lock().expect("session db mutex poisoned");
+                let conn = conn.lock();
                 crate::working_copies::allocate_with_fault(
                     &conn,
                     &working_copy_id,
@@ -2980,10 +2942,8 @@ impl SessionStore {
         &self,
         session_id: &str,
     ) -> anyhow::Result<Option<crate::working_copies::WorkingCopyRow>> {
-        let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().expect("session db mutex poisoned");
+        self.conn.call("working-copy origin read task panicked", move |conn: &mut Connection| {
             let recorded: Option<String> = conn
                 .query_row(
                     "SELECT fresh_checkout_id FROM sessions WHERE id = ?1",
@@ -2992,7 +2952,7 @@ impl SessionStore {
                 )
                 .optional()?
                 .flatten();
-            let origin = crate::working_copies::origin_working_copy(&conn, &session_id)
+            let origin = crate::working_copies::origin_working_copy(conn, &session_id)
                 .context("reading the session's original checkout")?;
             match (recorded, origin) {
                 (None, None) => Ok(None),
@@ -3002,8 +2962,7 @@ impl SessionStore {
                 ),
             }
         })
-        .await
-        .context("working-copy origin read task panicked")?
+.await
     }
 
     /// Claim the only initial preparation publication before touching its
@@ -3011,34 +2970,36 @@ impl SessionStore {
     /// authorize a second clone because its earlier state file disappeared.
     /// Returns false when an earlier attempt already crossed this boundary.
     pub async fn claim_preparation_publication(&self, id: &str) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let row = crate::working_copies::get_working_copy(&conn, &id)?
-                .context("missing checkout registry evidence")?;
-            let mut snapshot: crate::working_copies::PreparationSnapshot = serde_json::from_str(
-                row.preparation_snapshot
-                    .as_deref()
-                    .context("missing checkout preparation snapshot")?,
+        self.conn
+            .call(
+                "preparation publication claim task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let row = crate::working_copies::get_working_copy(conn, &id)?
+                        .context("missing checkout registry evidence")?;
+                    let mut snapshot: crate::working_copies::PreparationSnapshot =
+                        serde_json::from_str(
+                            row.preparation_snapshot
+                                .as_deref()
+                                .context("missing checkout preparation snapshot")?,
+                        )
+                        .context("invalid checkout preparation snapshot")?;
+                    if snapshot.publication_started {
+                        return Ok(false);
+                    }
+                    snapshot.publication_started = true;
+                    let updated = conn.execute(
+                        "UPDATE working_copies SET preparation_snapshot = ?2 WHERE id = ?1",
+                        rusqlite::params![id, serde_json::to_string(&snapshot)?],
+                    )?;
+                    anyhow::ensure!(
+                        updated == 1,
+                        "checkout vanished before preparation publication"
+                    );
+                    Ok(true)
+                },
             )
-            .context("invalid checkout preparation snapshot")?;
-            if snapshot.publication_started {
-                return Ok(false);
-            }
-            snapshot.publication_started = true;
-            let updated = conn.execute(
-                "UPDATE working_copies SET preparation_snapshot = ?2 WHERE id = ?1",
-                rusqlite::params![id, serde_json::to_string(&snapshot)?],
-            )?;
-            anyhow::ensure!(
-                updated == 1,
-                "checkout vanished before preparation publication"
-            );
-            Ok(true)
-        })
-        .await
-        .context("preparation publication claim task panicked")?
+            .await
     }
 
     /// First lifetime membership in stable creation order. This does not
@@ -3048,11 +3009,11 @@ impl SessionStore {
         &self,
         session_id: &str,
     ) -> anyhow::Result<Option<crate::working_copies::WorkingCopyRow>> {
-        let conn = Arc::clone(&self.conn);
+        let conn = self.conn.clone();
         let session_id = session_id.to_string();
         tokio::task::spawn_blocking(
             move || -> anyhow::Result<Option<crate::working_copies::WorkingCopyRow>> {
-                let conn = conn.lock().expect("session db mutex poisoned");
+                let conn = conn.lock();
                 let mut rows = crate::working_copies::member_working_copies(&conn, &session_id)
                     .context("reading the session's working-copy membership")?;
                 Ok(if rows.is_empty() {
@@ -3079,45 +3040,50 @@ impl SessionStore {
         &self,
         mut sessions: Vec<farhelm_proto::SessionInfo>,
     ) -> anyhow::Result<Vec<farhelm_proto::SessionInfo>> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn.transaction()?;
-            for session in &mut sessions {
-                let origin = crate::working_copies::origin_working_copy(&tx, &session.id)?;
-                session.github_repo = origin.map(|row| farhelm_proto::GithubRepo {
-                    owner: row.repo_owner,
-                    name: row.repo_name,
-                });
-                session.working_copy =
-                    crate::working_copies::member_working_copies(&tx, &session.id)?
-                        .into_iter()
-                        .filter_map(|row| {
-                            row.canonical_path.map(|canonical_path| {
-                                farhelm_proto::WorkingCopyInfo {
-                                    id: row.id,
-                                    repo: farhelm_proto::GithubRepo {
-                                        owner: row.repo_owner,
-                                        name: row.repo_name,
-                                    },
-                                    canonical_path,
-                                    origin_session_id: row.origin_session_id,
-                                }
-                            })
-                        })
-                        .max_by(|a, b| {
-                            std::path::Path::new(&a.canonical_path)
-                                .components()
-                                .count()
-                                .cmp(&std::path::Path::new(&b.canonical_path).components().count())
-                                .then_with(|| a.id.cmp(&b.id))
+        self.conn
+            .call(
+                "checkout reply projection task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<_> {
+                    let tx = conn.transaction()?;
+                    for session in &mut sessions {
+                        let origin = crate::working_copies::origin_working_copy(&tx, &session.id)?;
+                        session.github_repo = origin.map(|row| farhelm_proto::GithubRepo {
+                            owner: row.repo_owner,
+                            name: row.repo_name,
                         });
-            }
-            tx.commit()?;
-            Ok(sessions)
-        })
-        .await
-        .context("checkout reply projection task panicked")?
+                        session.working_copy =
+                            crate::working_copies::member_working_copies(&tx, &session.id)?
+                                .into_iter()
+                                .filter_map(|row| {
+                                    row.canonical_path.map(|canonical_path| {
+                                        farhelm_proto::WorkingCopyInfo {
+                                            id: row.id,
+                                            repo: farhelm_proto::GithubRepo {
+                                                owner: row.repo_owner,
+                                                name: row.repo_name,
+                                            },
+                                            canonical_path,
+                                            origin_session_id: row.origin_session_id,
+                                        }
+                                    })
+                                })
+                                .max_by(|a, b| {
+                                    std::path::Path::new(&a.canonical_path)
+                                        .components()
+                                        .count()
+                                        .cmp(
+                                            &std::path::Path::new(&b.canonical_path)
+                                                .components()
+                                                .count(),
+                                        )
+                                        .then_with(|| a.id.cmp(&b.id))
+                                });
+                    }
+                    tx.commit()?;
+                    Ok(sessions)
+                },
+            )
+            .await
     }
 
     /// Atomically undo a fresh create that positively failed before mkdir.
@@ -3134,35 +3100,36 @@ impl SessionStore {
         settlement: Option<Settlement>,
         fault: Option<PreMkdirRollbackFault>,
     ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
         let working_copy_id = working_copy_id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the pre-mkdir create rollback transaction")?;
-            crate::working_copies::remove_member(&tx, &session_id, &working_copy_id)
-                .context("removing the refused plan's origin membership")?;
-            if let Some(fault) = fault {
-                fault(PreMkdirRollbackStage::AfterMemberRemoval)?;
-            }
-            crate::working_copies::delete_planned(&tx, &working_copy_id)
-                .context("deleting the refused create's planned checkout row")?;
-            tx.execute(
-                "DELETE FROM sessions WHERE id = ?1",
-                rusqlite::params![session_id],
+        self.conn
+            .call(
+                "pre-mkdir create rollback task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the pre-mkdir create rollback transaction")?;
+                    crate::working_copies::remove_member(&tx, &session_id, &working_copy_id)
+                        .context("removing the refused plan's origin membership")?;
+                    if let Some(fault) = fault {
+                        fault(PreMkdirRollbackStage::AfterMemberRemoval)?;
+                    }
+                    crate::working_copies::delete_planned(&tx, &working_copy_id)
+                        .context("deleting the refused create's planned checkout row")?;
+                    tx.execute(
+                        "DELETE FROM sessions WHERE id = ?1",
+                        rusqlite::params![session_id],
+                    )
+                    .context("deleting the pre-mkdir refused session row")?;
+                    if let Some(settlement) = &settlement {
+                        settle_within(&tx, settlement)?;
+                    }
+                    tx.commit()
+                        .context("committing the pre-mkdir create rollback transaction")?;
+                    Ok(())
+                },
             )
-            .context("deleting the pre-mkdir refused session row")?;
-            if let Some(settlement) = &settlement {
-                settle_within(&tx, settlement)?;
-            }
-            tx.commit()
-                .context("committing the pre-mkdir create rollback transaction")?;
-            Ok(())
-        })
-        .await
-        .context("pre-mkdir create rollback task panicked")?
+            .await
     }
 
     /// Every registry row this session is a member of — the delete path's
@@ -3175,11 +3142,11 @@ impl SessionStore {
         &self,
         session_id: &str,
     ) -> anyhow::Result<Vec<crate::working_copies::WorkingCopyRow>> {
-        let conn = Arc::clone(&self.conn);
+        let conn = self.conn.clone();
         let session_id = session_id.to_string();
         tokio::task::spawn_blocking(
             move || -> anyhow::Result<Vec<crate::working_copies::WorkingCopyRow>> {
-                let conn = conn.lock().expect("session db mutex poisoned");
+                let conn = conn.lock();
                 crate::working_copies::member_working_copies(&conn, &session_id)
                     .context("reading the session's working-copy memberships")
             },
@@ -3194,10 +3161,10 @@ impl SessionStore {
     pub async fn working_copy_rows(
         &self,
     ) -> anyhow::Result<Vec<crate::working_copies::WorkingCopyRow>> {
-        let conn = Arc::clone(&self.conn);
+        let conn = self.conn.clone();
         tokio::task::spawn_blocking(
             move || -> anyhow::Result<Vec<crate::working_copies::WorkingCopyRow>> {
-                let conn = conn.lock().expect("session db mutex poisoned");
+                let conn = conn.lock();
                 crate::working_copies::all_working_copies(&conn)
                     .context("reading the working-copy registry")
             },
@@ -3213,11 +3180,11 @@ impl SessionStore {
         working_copy_id: &str,
         parent_sync: Option<crate::working_copies::ArchiveParentSync>,
     ) -> anyhow::Result<crate::working_copies::ArchiveOutcome> {
-        let conn = Arc::clone(&self.conn);
+        let conn = self.conn.clone();
         let working_copy_id = working_copy_id.to_string();
         tokio::task::spawn_blocking(
             move || -> anyhow::Result<crate::working_copies::ArchiveOutcome> {
-                let conn = conn.lock().expect("session db mutex poisoned");
+                let conn = conn.lock();
                 crate::working_copies::archive_move_with_parent_sync(
                     &conn,
                     &working_copy_id,
@@ -3238,11 +3205,11 @@ impl SessionStore {
         working_copy_id: &str,
         parent_sync: Option<crate::working_copies::ArchiveParentSync>,
     ) -> anyhow::Result<crate::working_copies::ReconcileOutcome> {
-        let conn = Arc::clone(&self.conn);
+        let conn = self.conn.clone();
         let working_copy_id = working_copy_id.to_string();
         tokio::task::spawn_blocking(
             move || -> anyhow::Result<crate::working_copies::ReconcileOutcome> {
-                let conn = conn.lock().expect("session db mutex poisoned");
+                let conn = conn.lock();
                 crate::working_copies::reconcile_archive_with_parent_sync(
                     &conn,
                     &working_copy_id,
@@ -3266,31 +3233,37 @@ impl SessionStore {
         session_id: &str,
         canonical_cwd: &str,
     ) -> anyhow::Result<usize> {
-        let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
         let canonical_cwd = canonical_cwd.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            crate::working_copies::attach_existing_ancestors(&conn, &session_id, &canonical_cwd)
-                .context("attaching the create to its managed ancestor checkouts")
-        })
-        .await
-        .context("ancestor-attachment task panicked")?
+        self.conn
+            .call(
+                "ancestor-attachment task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<usize> {
+                    crate::working_copies::attach_existing_ancestors(
+                        conn,
+                        &session_id,
+                        &canonical_cwd,
+                    )
+                    .context("attaching the create to its managed ancestor checkouts")
+                },
+            )
+            .await
     }
 
     /// [`working_copies::member_count`] through the store's connection:
     /// the delete path's last-reference check, counted from ACTUAL
     /// membership rows (never a counter column).
     pub async fn working_copy_member_count(&self, working_copy_id: &str) -> anyhow::Result<i64> {
-        let conn = Arc::clone(&self.conn);
         let working_copy_id = working_copy_id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<i64> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            crate::working_copies::member_count(&conn, &working_copy_id)
-                .context("counting the checkout's membership rows")
-        })
-        .await
-        .context("member-count task panicked")?
+        self.conn
+            .call(
+                "member-count task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<i64> {
+                    crate::working_copies::member_count(conn, &working_copy_id)
+                        .context("counting the checkout's membership rows")
+                },
+            )
+            .await
     }
 
     /// The delete path's FINAL transaction (Design E step 5), one commit
@@ -3322,77 +3295,83 @@ impl SessionStore {
         &self,
         id: &str,
     ) -> anyhow::Result<Vec<String>> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<String>> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the session delete transaction")?;
-            tx.execute(
-                "DELETE FROM create_reservations \
+        self.conn
+            .call(
+                "session delete task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Vec<String>> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the session delete transaction")?;
+                    tx.execute(
+                        "DELETE FROM create_reservations \
                  WHERE session_id = ?1 AND dedup_scope = 'session_lifetime'",
-                rusqlite::params![id],
-            )
-            .context("pruning the deleted spawn's bounded reservation")?;
-            tx.execute(
-                "UPDATE create_reservations SET state = 'created' \
+                        rusqlite::params![id],
+                    )
+                    .context("pruning the deleted spawn's bounded reservation")?;
+                    tx.execute(
+                        "UPDATE create_reservations SET state = 'created' \
                  WHERE session_id = ?1 AND state = 'pending' \
                  AND dedup_scope = 'permanent'",
-                rusqlite::params![id],
-            )
-            .context("settling the deleted interactive session's reservations")?;
-            let membership_ids: Vec<String> = {
-                let mut stmt = tx
+                        rusqlite::params![id],
+                    )
+                    .context("settling the deleted interactive session's reservations")?;
+                    let membership_ids: Vec<String> = {
+                        let mut stmt = tx
                     .prepare(
                         "SELECT working_copy_id FROM working_copy_members WHERE session_id = ?1",
                     )
                     .context("listing the deleted session's memberships")?;
-                stmt.query_map(rusqlite::params![id], |row| row.get(0))
-                    .context("reading the deleted session's memberships")?
-                    .collect::<std::result::Result<Vec<_>, _>>()
-                    .context("reading the deleted session's memberships")?
-            };
-            let mut retired = Vec::new();
-            for working_copy_id in membership_ids {
-                crate::working_copies::remove_member(&tx, &id, &working_copy_id)
-                    .context("removing the deleted session's membership")?;
-                if crate::working_copies::member_count(&tx, &working_copy_id)
-                    .context("counting the checkout's remaining members")?
-                    == 0
-                {
-                    let state = crate::working_copies::get_working_copy(&tx, &working_copy_id)
-                        .context("reading the zero-member registry row")?
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "membership {working_copy_id} names a missing registry row"
+                        stmt.query_map(rusqlite::params![id], |row| row.get(0))
+                            .context("reading the deleted session's memberships")?
+                            .collect::<std::result::Result<Vec<_>, _>>()
+                            .context("reading the deleted session's memberships")?
+                    };
+                    let mut retired = Vec::new();
+                    for working_copy_id in membership_ids {
+                        crate::working_copies::remove_member(&tx, &id, &working_copy_id)
+                            .context("removing the deleted session's membership")?;
+                        if crate::working_copies::member_count(&tx, &working_copy_id)
+                            .context("counting the checkout's remaining members")?
+                            == 0
+                        {
+                            let state = crate::working_copies::get_working_copy(
+                                &tx,
+                                &working_copy_id,
                             )
-                        })?;
-                    match state.allocation_state {
-                        crate::working_copies::AllocationState::ArchivePending => {
-                            crate::working_copies::retire(&tx, &working_copy_id)
-                                .context("retiring the archived checkout's record")?;
+                            .context("reading the zero-member registry row")?
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "membership {working_copy_id} names a missing registry row"
+                                )
+                            })?;
+                            match state.allocation_state {
+                                crate::working_copies::AllocationState::ArchivePending => {
+                                    crate::working_copies::retire(&tx, &working_copy_id)
+                                        .context("retiring the archived checkout's record")?;
+                                }
+                                crate::working_copies::AllocationState::Planned => {
+                                    crate::working_copies::delete_planned(&tx, &working_copy_id)
+                                        .context("retiring the unresolved plan's record")?;
+                                }
+                                crate::working_copies::AllocationState::Allocated => {
+                                    crate::working_copies::retire_missing(&tx, &working_copy_id)
+                                        .context(
+                                            "retiring the confirmed-missing checkout's record",
+                                        )?;
+                                }
+                                crate::working_copies::AllocationState::Retired => {}
+                            }
+                            retired.push(working_copy_id);
                         }
-                        crate::working_copies::AllocationState::Planned => {
-                            crate::working_copies::delete_planned(&tx, &working_copy_id)
-                                .context("retiring the unresolved plan's record")?;
-                        }
-                        crate::working_copies::AllocationState::Allocated => {
-                            crate::working_copies::retire_missing(&tx, &working_copy_id)
-                                .context("retiring the confirmed-missing checkout's record")?;
-                        }
-                        crate::working_copies::AllocationState::Retired => {}
                     }
-                    retired.push(working_copy_id);
-                }
-            }
-            tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
-                .context("deleting session row")?;
-            tx.commit().context("committing the session delete")?;
-            Ok(retired)
-        })
-        .await
-        .context("session delete task panicked")?
+                    tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
+                        .context("deleting session row")?;
+                    tx.commit().context("committing the session delete")?;
+                    Ok(retired)
+                },
+            )
+            .await
     }
 
     /// Record a fresh create's ACCEPTED directory on its launching row:
@@ -3408,29 +3387,30 @@ impl SessionStore {
         cwd: &str,
         canonical_cwd: &str,
     ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
         let cwd = cwd.to_string();
         let canonical_cwd = canonical_cwd.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let updated = conn
-                .execute(
-                    "UPDATE sessions SET cwd = ?2, canonical_cwd = ?3 \
+        self.conn
+            .call(
+                "accept-working-directory task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let updated = conn
+                        .execute(
+                            "UPDATE sessions SET cwd = ?2, canonical_cwd = ?3 \
                      WHERE id = ?1 AND outcome_state = 'launching'",
-                    rusqlite::params![session_id, cwd, canonical_cwd],
-                )
-                .context("recording the accepted working directory")?;
-            if updated == 0 {
-                anyhow::bail!(
-                    "session {session_id} is not launching; its accepted working directory \
+                            rusqlite::params![session_id, cwd, canonical_cwd],
+                        )
+                        .context("recording the accepted working directory")?;
+                    if updated == 0 {
+                        anyhow::bail!(
+                            "session {session_id} is not launching; its accepted working directory \
                      cannot be recorded"
-                );
-            }
-            Ok(())
-        })
-        .await
-        .context("accept-working-directory task panicked")?
+                        );
+                    }
+                    Ok(())
+                },
+            )
+            .await
     }
 
     /// The R1.2 retained-create-refusal settlement: ONE transaction that
@@ -3460,52 +3440,54 @@ impl SessionStore {
         settlement: Option<Settlement>,
         fault: Option<RetainedRefusalFault>,
     ) -> anyhow::Result<StoredSession> {
-        let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
         let refusal_detail = refusal_detail.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<StoredSession> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the retained-create-refusal transaction")?;
-            let updated = tx
-                .execute(
-                    "UPDATE sessions SET outcome_state = 'error', error_detail = ?2 \
+        self.conn
+            .call(
+                "retained-create-refusal task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<StoredSession> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the retained-create-refusal transaction")?;
+                    let updated = tx
+                        .execute(
+                            "UPDATE sessions SET outcome_state = 'error', error_detail = ?2 \
                      WHERE id = ?1 AND outcome_state IN ('launching', 'interrupted')",
-                    rusqlite::params![session_id, refusal_detail],
-                )
-                .context("retaining the refused create's session row as a visible error")?;
-            if updated == 0 {
-                anyhow::bail!(
-                    "session {session_id} is not an un-launched launching row; refusing to \
+                            rusqlite::params![session_id, refusal_detail],
+                        )
+                        .context("retaining the refused create's session row as a visible error")?;
+                    if updated == 0 {
+                        anyhow::bail!(
+                            "session {session_id} is not an un-launched launching row; refusing to \
                      turn it into a retained error"
-                );
-            }
-            if let Some(fault) = fault {
-                fault()?;
-            }
-            if let Some(settlement) = &settlement {
-                settle_within(&tx, settlement)?;
-            }
-            // Read through the transaction before committing. The caller
-            // needs the exact row this decision made visible, while a later
-            // independent read could fail and leave that durable row absent
-            // from this supervisor's live session map.
-            let raw = tx
-                .query_row(
-                    &format!("SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1"),
-                    rusqlite::params![session_id],
-                    read_session_columns,
-                )
-                .context("reading the retained-create-refusal session snapshot")?;
-            let row = decode_session_row(raw)
-                .context("decoding the committed retained-create-refusal session snapshot")?;
-            tx.commit()
-                .context("committing the retained-create-refusal transaction")?;
-            Ok(row)
-        })
-        .await
-        .context("retained-create-refusal task panicked")?
+                        );
+                    }
+                    if let Some(fault) = fault {
+                        fault()?;
+                    }
+                    if let Some(settlement) = &settlement {
+                        settle_within(&tx, settlement)?;
+                    }
+                    // Read through the transaction before committing. The caller
+                    // needs the exact row this decision made visible, while a later
+                    // independent read could fail and leave that durable row absent
+                    // from this supervisor's live session map.
+                    let raw = tx
+                        .query_row(
+                            &format!("SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1"),
+                            rusqlite::params![session_id],
+                            read_session_columns,
+                        )
+                        .context("reading the retained-create-refusal session snapshot")?;
+                    let row = decode_session_row(raw).context(
+                        "decoding the committed retained-create-refusal session snapshot",
+                    )?;
+                    tx.commit()
+                        .context("committing the retained-create-refusal transaction")?;
+                    Ok(row)
+                },
+            )
+            .await
     }
 
     /// Record an intent that failed BEFORE it ever had a session row —
@@ -3537,37 +3519,38 @@ impl SessionStore {
         if claim.dedup_scope == DedupScope::SessionLifetime {
             return Ok(());
         }
-        let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
         let tmux_name = tmux_name.to_string();
         let message = message.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let outcome = ReservationOutcome::Failed { kind, message };
-            let (state, error_kind, error_detail) = outcome.columns();
-            conn.execute(
-                "INSERT INTO create_reservations \
+        self.conn
+            .call(
+                "failed-intent record task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let outcome = ReservationOutcome::Failed { kind, message };
+                    let (state, error_kind, error_detail) = outcome.columns();
+                    conn.execute(
+                        "INSERT INTO create_reservations \
                  (intent_key, fingerprint, state, session_id, tmux_name, \
                   error_kind, error_detail, created_at, dedup_scope) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
                  ON CONFLICT(intent_key) DO NOTHING",
-                rusqlite::params![
-                    claim.intent_key,
-                    claim.fingerprint,
-                    state,
-                    session_id,
-                    tmux_name,
-                    error_kind,
-                    error_detail,
-                    now_unix(),
-                    claim.dedup_scope.column(),
-                ],
+                        rusqlite::params![
+                            claim.intent_key,
+                            claim.fingerprint,
+                            state,
+                            session_id,
+                            tmux_name,
+                            error_kind,
+                            error_detail,
+                            now_unix(),
+                            claim.dedup_scope.column(),
+                        ],
+                    )
+                    .context("recording a refused create against its intent key")?;
+                    Ok(())
+                },
             )
-            .context("recording a refused create against its intent key")?;
-            Ok(())
-        })
-        .await
-        .context("failed-intent record task panicked")?
+            .await
     }
 
     /// Take over a pending reservation for a RELAUNCH, atomically
@@ -3610,221 +3593,227 @@ impl SessionStore {
         row: StoredSession,
         intent_key: &str,
     ) -> anyhow::Result<RetryClaim> {
-        let conn = Arc::clone(&self.conn);
         let intent_key = intent_key.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<RetryClaim> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the relaunch takeover transaction")?;
-            let reservation = read_reservation(&tx, &intent_key)?.ok_or_else(|| {
-                anyhow::anyhow!("create reservation {intent_key} vanished before its relaunch")
-            })?;
-            if reservation.outcome != ReservationOutcome::Pending
-                || reservation.session_id != row.id
-            {
-                return Ok(RetryClaim::Resolved(Box::new(reservation)));
-            }
-            let current: Option<LaunchTakeoverColumns> = tx
-                .query_row(
-                    "SELECT outcome_state, pane, created_at, title, session_token, \
+        self.conn
+            .call(
+                "relaunch takeover task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<RetryClaim> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the relaunch takeover transaction")?;
+                    let reservation = read_reservation(&tx, &intent_key)?.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "create reservation {intent_key} vanished before its relaunch"
+                        )
+                    })?;
+                    if reservation.outcome != ReservationOutcome::Pending
+                        || reservation.session_id != row.id
+                    {
+                        return Ok(RetryClaim::Resolved(Box::new(reservation)));
+                    }
+                    let current: Option<LaunchTakeoverColumns> = tx
+                        .query_row(
+                            "SELECT outcome_state, pane, created_at, title, session_token, \
                      creation_seq, last_activity_at, generation, conversation_source FROM sessions \
                      WHERE id = ?1",
-                    rusqlite::params![row.id],
-                    |r| {
-                        Ok((
-                            r.get(0)?,
-                            r.get(1)?,
-                            r.get(2)?,
-                            r.get(3)?,
-                            r.get(4)?,
-                            r.get(5)?,
-                            r.get(6)?,
-                            r.get(7)?,
-                            r.get(8)?,
-                        ))
-                    },
-                )
-                .optional()
-                .context("reading the reserved session's current state")?;
-            // The same durable-row predicate `service`'s
-            // `reserved_launch_evidence` applies, restated here because
-            // this is where it becomes a TRANSITION rather than a reading:
-            // a recorded pane means something saw this session in tmux, and
-            // any outcome past `launching` means the same — except
-            // `interrupted`, which the reboot conversion blankets over
-            // never-launched rows too and which therefore proves nothing on
-            // its own. Anything showing evidence refuses the takeover, so
-            // the caller replays instead of starting a second agent.
-            //
-            // R1.2's retained-create-refusal rows are the one exception:
-            // an `error` outcome with an EMPTY pane (and no conversation
-            // report) is a refusal the refusal transaction wrote over a
-            // launch that provably never reached tmux — it is NOT launch
-            // evidence, and a retry whose durability was unresolved may
-            // still take the launch over. Anything the shim actually ran
-            // leaves a pane, a sentinel, a scope, or a conversation report
-            // behind, and those all still refuse the takeover below.
-            //
-            // A non-NULL `conversation_source` is evidence of the same
-            // kind, arriving by a different road: only the launch hook
-            // writes it, and that hook runs INSIDE the agent process this
-            // reservation started. A report is therefore proof the launch
-            // happened even when the pane column has not been written yet
-            // — the agent reached the point of announcing its conversation
-            // before anything recorded where it lives. Rechecking it here,
-            // in the transaction, is what covers the report landing between
-            // the caller's evidence probe and this takeover; a takeover
-            // that ignored it would start a second agent against a session
-            // that already has a live one.
-            //
-            // `created_at` and `generation` ride along in the same read as
-            // a matched pair with `outcome_state`/`pane`: whichever row this
-            // transaction is about to act on (refuse, or replace) is also
-            // the row whose timestamp and launch fence the caller must
-            // honor. Reading them from one committed snapshot rules out a
-            // second query disagreeing about which row it saw.
-            let (
-                preserved_created_at,
-                preserved_title,
-                preserved_token,
-                preserved_sequence,
-                preserved_last_activity_at,
-                preserved_generation,
-            ) = match current {
-                Some((
-                    state,
-                    pane,
-                    created_at,
-                    title,
-                    token,
-                    sequence,
-                    last_activity_at,
-                    generation,
-                    conversation_source,
-                )) => {
-                    if !pane.is_empty()
-                        || !matches!(state.as_str(), "launching" | "interrupted" | "error")
-                        || conversation_source.is_some()
-                    {
-                        return Ok(RetryClaim::Launched);
-                    }
-                    (
-                        created_at,
-                        title,
-                        Some(token),
-                        Some(u64::try_from(sequence).context("negative creation sequence")?),
-                        last_activity_at,
-                        generation,
+                            rusqlite::params![row.id],
+                            |r| {
+                                Ok((
+                                    r.get(0)?,
+                                    r.get(1)?,
+                                    r.get(2)?,
+                                    r.get(3)?,
+                                    r.get(4)?,
+                                    r.get(5)?,
+                                    r.get(6)?,
+                                    r.get(7)?,
+                                    r.get(8)?,
+                                ))
+                            },
+                        )
+                        .optional()
+                        .context("reading the reserved session's current state")?;
+                    // The same durable-row predicate `service`'s
+                    // `reserved_launch_evidence` applies, restated here because
+                    // this is where it becomes a TRANSITION rather than a reading:
+                    // a recorded pane means something saw this session in tmux, and
+                    // any outcome past `launching` means the same — except
+                    // `interrupted`, which the reboot conversion blankets over
+                    // never-launched rows too and which therefore proves nothing on
+                    // its own. Anything showing evidence refuses the takeover, so
+                    // the caller replays instead of starting a second agent.
+                    //
+                    // R1.2's retained-create-refusal rows are the one exception:
+                    // an `error` outcome with an EMPTY pane (and no conversation
+                    // report) is a refusal the refusal transaction wrote over a
+                    // launch that provably never reached tmux — it is NOT launch
+                    // evidence, and a retry whose durability was unresolved may
+                    // still take the launch over. Anything the shim actually ran
+                    // leaves a pane, a sentinel, a scope, or a conversation report
+                    // behind, and those all still refuse the takeover below.
+                    //
+                    // A non-NULL `conversation_source` is evidence of the same
+                    // kind, arriving by a different road: only the launch hook
+                    // writes it, and that hook runs INSIDE the agent process this
+                    // reservation started. A report is therefore proof the launch
+                    // happened even when the pane column has not been written yet
+                    // — the agent reached the point of announcing its conversation
+                    // before anything recorded where it lives. Rechecking it here,
+                    // in the transaction, is what covers the report landing between
+                    // the caller's evidence probe and this takeover; a takeover
+                    // that ignored it would start a second agent against a session
+                    // that already has a live one.
+                    //
+                    // `created_at` and `generation` ride along in the same read as
+                    // a matched pair with `outcome_state`/`pane`: whichever row this
+                    // transaction is about to act on (refuse, or replace) is also
+                    // the row whose timestamp and launch fence the caller must
+                    // honor. Reading them from one committed snapshot rules out a
+                    // second query disagreeing about which row it saw.
+                    let (
+                        preserved_created_at,
+                        preserved_title,
+                        preserved_token,
+                        preserved_sequence,
+                        preserved_last_activity_at,
+                        preserved_generation,
+                    ) = match current {
+                        Some((
+                            state,
+                            pane,
+                            created_at,
+                            title,
+                            token,
+                            sequence,
+                            last_activity_at,
+                            generation,
+                            conversation_source,
+                        )) => {
+                            if !pane.is_empty()
+                                || !matches!(state.as_str(), "launching" | "interrupted" | "error")
+                                || conversation_source.is_some()
+                            {
+                                return Ok(RetryClaim::Launched);
+                            }
+                            (
+                                created_at,
+                                title,
+                                Some(token),
+                                Some(
+                                    u64::try_from(sequence)
+                                        .context("negative creation sequence")?,
+                                ),
+                                last_activity_at,
+                                generation,
+                            )
+                        }
+                        // Contradicts `SessionStore::insert_session`'s own
+                        // invariant — a Pending reservation's row is committed in
+                        // the SAME transaction as the reservation itself, so one
+                        // can never durably exist without the other. Handled
+                        // rather than asserted for the same reason the relaunch
+                        // takeover as a whole re-checks its conditions instead of
+                        // trusting the caller's evidence: "cannot happen" is a
+                        // poor thing to stake a duplicate agent on, and here that
+                        // would extend to a lost timestamp too. Falls back to the
+                        // caller's own freshly minted `row.created_at` — the
+                        // least-wrong answer when the row this takeover was
+                        // supposed to preserve cannot be found at all. (The
+                        // original `current.is_some_and(..)` check this replaces
+                        // took the same "nothing found, proceed anyway" branch for
+                        // `None`, so this preserves that behavior rather than
+                        // introducing a new refusal path.)
+                        None => (
+                            row.created_at,
+                            row.title.clone(),
+                            None,
+                            None,
+                            row.last_activity_at,
+                            row.generation,
+                        ),
+                    };
+                    // Provenance belongs to the original create, not this launch
+                    // generation. Preserve it even when its registry is damaged.
+                    let preserved_checkout: Option<String> = tx
+                        .query_row(
+                            "SELECT fresh_checkout_id FROM sessions WHERE id = ?1",
+                            [&row.id],
+                            |row| row.get(0),
+                        )
+                        .optional()?
+                        .flatten();
+                    tx.execute(
+                        "DELETE FROM sessions WHERE id = ?1",
+                        rusqlite::params![row.id],
                     )
-                }
-                // Contradicts `SessionStore::insert_session`'s own
-                // invariant — a Pending reservation's row is committed in
-                // the SAME transaction as the reservation itself, so one
-                // can never durably exist without the other. Handled
-                // rather than asserted for the same reason the relaunch
-                // takeover as a whole re-checks its conditions instead of
-                // trusting the caller's evidence: "cannot happen" is a
-                // poor thing to stake a duplicate agent on, and here that
-                // would extend to a lost timestamp too. Falls back to the
-                // caller's own freshly minted `row.created_at` — the
-                // least-wrong answer when the row this takeover was
-                // supposed to preserve cannot be found at all. (The
-                // original `current.is_some_and(..)` check this replaces
-                // took the same "nothing found, proceed anyway" branch for
-                // `None`, so this preserves that behavior rather than
-                // introducing a new refusal path.)
-                None => (
-                    row.created_at,
-                    row.title.clone(),
-                    None,
-                    None,
-                    row.last_activity_at,
-                    row.generation,
-                ),
-            };
-            // Provenance belongs to the original create, not this launch
-            // generation. Preserve it even when its registry is damaged.
-            let preserved_checkout: Option<String> = tx
-                .query_row(
-                    "SELECT fresh_checkout_id FROM sessions WHERE id = ?1",
-                    [&row.id],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .flatten();
-            tx.execute(
-                "DELETE FROM sessions WHERE id = ?1",
-                rusqlite::params![row.id],
+                    .context("clearing the interrupted attempt's launching row")?;
+                    // The title comes from the ROW being replaced, not from the
+                    // caller's snapshot, and for a sharper reason than `created_at`
+                    // above: `title` is the one field a USER can change after
+                    // creation (`set_session_title`), and this takeover is a
+                    // delete-and-reinsert. A rename that landed between the crashed
+                    // attempt and this retry would otherwise be silently undone —
+                    // the user's rename accepted, acknowledged, and then reverted
+                    // by a relaunch that had no idea it happened. Taking it from
+                    // the same committed snapshot the other two conditions are
+                    // read from is what makes that atomic rather than a second
+                    // read racing the first.
+                    let mut row = StoredSession {
+                        conversation_source: None,
+                        capture_ownership_version: 0,
+                        omp_reporter_asset: None,
+                        omp_launch_program: None,
+                        created_at: preserved_created_at,
+                        // Carried for `created_at`'s reason and with the same
+                        // reach: the replaced row provably never launched (an
+                        // empty pane is what let the takeover happen at all), so
+                        // this is its seed value — but reading it rather than
+                        // re-deriving it keeps the two columns preserved by one
+                        // rule instead of by a coincidence a later change could
+                        // break.
+                        last_activity_at: preserved_last_activity_at,
+                        last_work_started_at: 0,
+                        creation_seq: 0,
+                        title: preserved_title,
+                        // A retry repeats the launch generation already assigned
+                        // to this create. Only `begin_relaunch` may advance it;
+                        // replacing it with the caller's usual zero would move a
+                        // durable generation fence backwards.
+                        generation: preserved_generation,
+                        ..row
+                    };
+                    let inserted = insert_session_row(
+                        &tx,
+                        &row,
+                        preserved_token.as_deref().zip(preserved_sequence),
+                    )
+                    .context("re-inserting the launching row for a relaunch")?;
+                    tx.execute(
+                        "UPDATE sessions SET fresh_checkout_id = ?2 WHERE id = ?1",
+                        rusqlite::params![row.id, preserved_checkout],
+                    )
+                    .context("preserving fresh-create provenance during takeover")?;
+                    if let Some(cwd) = row.canonical_cwd.as_deref() {
+                        crate::working_copies::attach_existing_ancestors(&tx, &row.id, cwd)
+                            .context("preserving managed ancestors during launch takeover")?;
+                    }
+                    tx.commit().context("committing the relaunch takeover")?;
+                    // Insertion assigns the ordering key independently of the input
+                    // placeholder. Retention must mirror that committed value too.
+                    row.creation_seq = inserted.creation_seq;
+                    let snapshot = row.clone();
+                    let preserved_title = std::mem::take(&mut row.title);
+                    Ok(RetryClaim::Acquired {
+                        snapshot: Box::new(snapshot),
+                        created_at: preserved_created_at,
+                        creation_seq: inserted.creation_seq,
+                        title: preserved_title,
+                        session_token: inserted.session_token,
+                        generation: preserved_generation,
+                    })
+                },
             )
-            .context("clearing the interrupted attempt's launching row")?;
-            // The title comes from the ROW being replaced, not from the
-            // caller's snapshot, and for a sharper reason than `created_at`
-            // above: `title` is the one field a USER can change after
-            // creation (`set_session_title`), and this takeover is a
-            // delete-and-reinsert. A rename that landed between the crashed
-            // attempt and this retry would otherwise be silently undone —
-            // the user's rename accepted, acknowledged, and then reverted
-            // by a relaunch that had no idea it happened. Taking it from
-            // the same committed snapshot the other two conditions are
-            // read from is what makes that atomic rather than a second
-            // read racing the first.
-            let mut row = StoredSession {
-                conversation_source: None,
-                capture_ownership_version: 0,
-                omp_reporter_asset: None,
-                omp_launch_program: None,
-                created_at: preserved_created_at,
-                // Carried for `created_at`'s reason and with the same
-                // reach: the replaced row provably never launched (an
-                // empty pane is what let the takeover happen at all), so
-                // this is its seed value — but reading it rather than
-                // re-deriving it keeps the two columns preserved by one
-                // rule instead of by a coincidence a later change could
-                // break.
-                last_activity_at: preserved_last_activity_at,
-                last_work_started_at: 0,
-                creation_seq: 0,
-                title: preserved_title,
-                // A retry repeats the launch generation already assigned
-                // to this create. Only `begin_relaunch` may advance it;
-                // replacing it with the caller's usual zero would move a
-                // durable generation fence backwards.
-                generation: preserved_generation,
-                ..row
-            };
-            let inserted = insert_session_row(
-                &tx,
-                &row,
-                preserved_token.as_deref().zip(preserved_sequence),
-            )
-            .context("re-inserting the launching row for a relaunch")?;
-            tx.execute(
-                "UPDATE sessions SET fresh_checkout_id = ?2 WHERE id = ?1",
-                rusqlite::params![row.id, preserved_checkout],
-            )
-            .context("preserving fresh-create provenance during takeover")?;
-            if let Some(cwd) = row.canonical_cwd.as_deref() {
-                crate::working_copies::attach_existing_ancestors(&tx, &row.id, cwd)
-                    .context("preserving managed ancestors during launch takeover")?;
-            }
-            tx.commit().context("committing the relaunch takeover")?;
-            // Insertion assigns the ordering key independently of the input
-            // placeholder. Retention must mirror that committed value too.
-            row.creation_seq = inserted.creation_seq;
-            let snapshot = row.clone();
-            let preserved_title = std::mem::take(&mut row.title);
-            Ok(RetryClaim::Acquired {
-                snapshot: Box::new(snapshot),
-                created_at: preserved_created_at,
-                creation_seq: inserted.creation_seq,
-                title: preserved_title,
-                session_token: inserted.session_token,
-                generation: preserved_generation,
-            })
-        })
-        .await
-        .context("relaunch takeover task panicked")?
+            .await
     }
 
     /// Open a NEW launch generation on an existing session (PLAN_M3.md item
@@ -3927,69 +3916,76 @@ impl SessionStore {
         reset_capture: bool,
         scope_available: bool,
     ) -> anyhow::Result<RelaunchDecision> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<RelaunchDecision> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the relaunch generation transaction")?;
-            let current: Option<RelaunchBasisColumns> = tx
-                .query_row(
-                    "SELECT outcome_state, exit_code, annotation, error_detail, pane, \
+        self.conn
+            .call(
+                "relaunch generation task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<RelaunchDecision> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the relaunch generation transaction")?;
+                    let current: Option<RelaunchBasisColumns> = tx
+                        .query_row(
+                            "SELECT outcome_state, exit_code, annotation, error_detail, pane, \
                      generation, captured_conversation, capture_ambiguous, launch_scoped, \
                      capture_ownership_version \
                      FROM sessions WHERE id = ?1",
-                    rusqlite::params![id],
-                    |r| {
-                        Ok((
-                            (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?),
-                            r.get(4)?,
-                            r.get(5)?,
-                            r.get(6)?,
-                            r.get(7)?,
-                            r.get(8)?,
-                            r.get(9)?,
-                        ))
-                    },
-                )
-                .optional()
-                .context("reading the session a restart is about to relaunch")?;
-            let Some((
-                (state, exit_code, annotation, error_detail),
-                pane,
-                generation,
-                captured_conversation,
-                capture_ambiguous,
-                scoped,
-                capture_ownership_version,
-            )) = current
-            else {
-                return Ok(RelaunchDecision::Gone);
-            };
-            if captured_conversation != basis.captured_conversation
-                || (capture_ambiguous != 0) != basis.capture_ambiguous
-                || capture_ownership_version != basis.capture_ownership_version
-            {
-                return Ok(RelaunchDecision::OfferChanged);
-            }
-            let prior = PriorRun {
-                outcome: LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
-                    .with_context(|| format!("session {id}"))?,
-                pane,
-                scoped: scoped != 0,
-            };
-            let generation = generation + 1;
-            let (state, exit_code, annotation, error_detail) = LastOutcome::Launching.columns();
-            // One statement rather than two near-identical ones: the capture
-            // columns are cleared by an expression that is a no-op when the
-            // relaunch is resuming, so the SQL cannot drift between the two
-            // cases the way two copies of it could. The OMP launch-provenance
-            // columns beside them clear unconditionally — they describe the
-            // launch, not the conversation, so even a Resume must not inherit
-            // them.
-            tx.execute(
-                "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
+                            rusqlite::params![id],
+                            |r| {
+                                Ok((
+                                    (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?),
+                                    r.get(4)?,
+                                    r.get(5)?,
+                                    r.get(6)?,
+                                    r.get(7)?,
+                                    r.get(8)?,
+                                    r.get(9)?,
+                                ))
+                            },
+                        )
+                        .optional()
+                        .context("reading the session a restart is about to relaunch")?;
+                    let Some((
+                        (state, exit_code, annotation, error_detail),
+                        pane,
+                        generation,
+                        captured_conversation,
+                        capture_ambiguous,
+                        scoped,
+                        capture_ownership_version,
+                    )) = current
+                    else {
+                        return Ok(RelaunchDecision::Gone);
+                    };
+                    if captured_conversation != basis.captured_conversation
+                        || (capture_ambiguous != 0) != basis.capture_ambiguous
+                        || capture_ownership_version != basis.capture_ownership_version
+                    {
+                        return Ok(RelaunchDecision::OfferChanged);
+                    }
+                    let prior = PriorRun {
+                        outcome: LastOutcome::from_columns(
+                            &state,
+                            exit_code,
+                            annotation,
+                            error_detail,
+                        )
+                        .with_context(|| format!("session {id}"))?,
+                        pane,
+                        scoped: scoped != 0,
+                    };
+                    let generation = generation + 1;
+                    let (state, exit_code, annotation, error_detail) =
+                        LastOutcome::Launching.columns();
+                    // One statement rather than two near-identical ones: the capture
+                    // columns are cleared by an expression that is a no-op when the
+                    // relaunch is resuming, so the SQL cannot drift between the two
+                    // cases the way two copies of it could. The OMP launch-provenance
+                    // columns beside them clear unconditionally — they describe the
+                    // launch, not the conversation, so even a Resume must not inherit
+                    // them.
+                    tx.execute(
+                        "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
                  omp_reporter_asset = NULL, omp_launch_program = NULL, \
                  first_input_at = CASE WHEN ?8 THEN NULL ELSE first_input_at END, \
@@ -4002,27 +3998,27 @@ impl SessionStore {
                  capture_ownership_version = \
                      CASE WHEN ?8 THEN 0 ELSE capture_ownership_version END \
                  WHERE id = ?1",
-                rusqlite::params![
-                    id,
-                    state,
-                    exit_code,
-                    annotation,
-                    error_detail,
-                    generation,
-                    i64::from(scope_available),
-                    i64::from(reset_capture),
-                ],
+                        rusqlite::params![
+                            id,
+                            state,
+                            exit_code,
+                            annotation,
+                            error_detail,
+                            generation,
+                            i64::from(scope_available),
+                            i64::from(reset_capture),
+                        ],
+                    )
+                    .context("opening a new launch generation for a restart")?;
+                    tx.commit().context("committing the launch generation")?;
+                    Ok(RelaunchDecision::Claimed(RelaunchClaim {
+                        generation,
+                        prior,
+                        scoped: scope_available,
+                    }))
+                },
             )
-            .context("opening a new launch generation for a restart")?;
-            tx.commit().context("committing the launch generation")?;
-            Ok(RelaunchDecision::Claimed(RelaunchClaim {
-                generation,
-                prior,
-                scoped: scope_available,
-            }))
-        })
-        .await
-        .context("relaunch generation task panicked")?
+            .await
     }
 
     /// Put back the outcome a [`SessionStore::begin_relaunch`] replaced,
@@ -4058,7 +4054,6 @@ impl SessionStore {
         generation: i64,
         prior: &PriorRun,
     ) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         let (state, exit_code, annotation, error_detail) = prior.outcome.columns();
         let (state, annotation, error_detail) = (
@@ -4068,9 +4063,11 @@ impl SessionStore {
         );
         let pane = prior.pane.clone();
         let scoped = i64::from(prior.scoped);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let restored = conn
+        self.conn
+            .call(
+                "relaunch abort task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let restored = conn
                 .execute(
                     "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                      error_detail = ?5, pane = ?6, launch_scoped = ?8 \
@@ -4087,10 +4084,10 @@ impl SessionStore {
                     ],
                 )
                 .context("restoring the outcome a failed restart replaced")?;
-            Ok(restored > 0)
-        })
-        .await
-        .context("relaunch abort task panicked")?
+                    Ok(restored > 0)
+                },
+            )
+            .await
     }
 
     /// One session's stored row, if it still exists.
@@ -4101,25 +4098,26 @@ impl SessionStore {
     /// otherwise hand back a live-looking session whose row is already
     /// gone.
     pub async fn session(&self, id: &str) -> anyhow::Result<Option<StoredSession>> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<StoredSession>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            // Two stages for the same reason `load_all` uses them: a
-            // corrupt outcome must be refused with its own message rather
-            // than flattened into a rusqlite decode failure.
-            let raw = conn
-                .query_row(
-                    &format!("SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1"),
-                    rusqlite::params![id],
-                    read_session_columns,
-                )
-                .optional()
-                .context("reading a session row")?;
-            raw.map(decode_session_row).transpose()
-        })
-        .await
-        .context("session read task panicked")?
+        self.conn
+            .call(
+                "session read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<StoredSession>> {
+                    // Two stages for the same reason `load_all` uses them: a
+                    // corrupt outcome must be refused with its own message rather
+                    // than flattened into a rusqlite decode failure.
+                    let raw = conn
+                        .query_row(
+                            &format!("SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1"),
+                            rusqlite::params![id],
+                            read_session_columns,
+                        )
+                        .optional()
+                        .context("reading a session row")?;
+                    raw.map(decode_session_row).transpose()
+                },
+            )
+            .await
     }
 
     /// The durable tmux session name recorded for `id`, or `None` when no
@@ -4134,20 +4132,21 @@ impl SessionStore {
     /// side of exactly such a row — a row it cannot decode is one the user
     /// can only get rid of by deleting it.
     pub async fn tmux_name(&self, id: &str) -> anyhow::Result<Option<String>> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            conn.query_row(
-                "SELECT tmux_name FROM sessions WHERE id = ?1",
-                rusqlite::params![id],
-                |row| row.get(0),
+        self.conn
+            .call(
+                "tmux name read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<String>> {
+                    conn.query_row(
+                        "SELECT tmux_name FROM sessions WHERE id = ?1",
+                        rusqlite::params![id],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .context("reading a session's tmux name")
+                },
             )
-            .optional()
-            .context("reading a session's tmux name")
-        })
-        .await
-        .context("tmux name read task panicked")?
+            .await
     }
 
     /// Recover the credential one session's current and future launches use.
@@ -4157,20 +4156,21 @@ impl SessionStore {
     /// it out of `StoredSession` prevents an innocent `Debug` or log of that
     /// metadata type from exposing it.
     pub async fn session_token(&self, id: &str) -> anyhow::Result<Option<String>> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            conn.query_row(
-                "SELECT session_token FROM sessions WHERE id = ?1",
-                rusqlite::params![id],
-                |row| row.get(0),
+        self.conn
+            .call(
+                "session credential read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<String>> {
+                    conn.query_row(
+                        "SELECT session_token FROM sessions WHERE id = ?1",
+                        rusqlite::params![id],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .context("reading a session credential")
+                },
             )
-            .optional()
-            .context("reading a session credential")
-        })
-        .await
-        .context("session credential read task panicked")?
+            .await
     }
 
     /// Validate a hello's session attribution without exposing the stored
@@ -4187,14 +4187,15 @@ impl SessionStore {
     /// state machine runs before deciding whether a create is a first
     /// attempt, a replay, or a retry with reconciling to do.
     pub async fn reservation(&self, intent_key: &str) -> anyhow::Result<Option<Reservation>> {
-        let conn = Arc::clone(&self.conn);
         let intent_key = intent_key.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Reservation>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            read_reservation(&conn, &intent_key)
-        })
-        .await
-        .context("reservation read task panicked")?
+        self.conn
+            .call(
+                "reservation read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<Reservation>> {
+                    read_reservation(conn, &intent_key)
+                },
+            )
+            .await
     }
 
     /// Every reservation still `Pending` — the reconciliation worklist
@@ -4206,41 +4207,41 @@ impl SessionStore {
     /// them anyway would mean scanning every create this state directory
     /// has ever done, on every startup, forever.
     pub async fn pending_reservations(&self) -> anyhow::Result<Vec<Reservation>> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<Reservation>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let mut stmt = conn
-                .prepare(
-                    "SELECT intent_key, fingerprint, session_id, tmux_name, dedup_scope \
+        self.conn
+            .call(
+                "pending reservation query task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Vec<Reservation>> {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT intent_key, fingerprint, session_id, tmux_name, dedup_scope \
                      FROM create_reservations WHERE state = 'pending'",
-                )
-                .context("preparing the pending-reservation query")?;
-            let rows = stmt
-                .query_map([], |r| {
-                    Ok(Reservation {
-                        intent_key: r.get(0)?,
-                        fingerprint: r.get(1)?,
-                        session_id: r.get(2)?,
-                        tmux_name: r.get(3)?,
-                        dedup_scope: DedupScope::from_column(&r.get::<_, String>(4)?).map_err(
-                            |error| {
-                                rusqlite::Error::FromSqlConversionFailure(
-                                    4,
-                                    rusqlite::types::Type::Text,
-                                    error.into(),
-                                )
-                            },
-                        )?,
-                        outcome: ReservationOutcome::Pending,
-                    })
-                })
-                .context("querying pending reservations")?
-                .collect::<Result<Vec<_>, rusqlite::Error>>()
-                .context("decoding pending reservations")?;
-            Ok(rows)
-        })
-        .await
-        .context("pending reservation query task panicked")?
+                        )
+                        .context("preparing the pending-reservation query")?;
+                    let rows = stmt
+                        .query_map([], |r| {
+                            Ok(Reservation {
+                                intent_key: r.get(0)?,
+                                fingerprint: r.get(1)?,
+                                session_id: r.get(2)?,
+                                tmux_name: r.get(3)?,
+                                dedup_scope: DedupScope::from_column(&r.get::<_, String>(4)?)
+                                    .map_err(|error| {
+                                        rusqlite::Error::FromSqlConversionFailure(
+                                            4,
+                                            rusqlite::types::Type::Text,
+                                            error.into(),
+                                        )
+                                    })?,
+                                outcome: ReservationOutcome::Pending,
+                            })
+                        })
+                        .context("querying pending reservations")?
+                        .collect::<Result<Vec<_>, rusqlite::Error>>()
+                        .context("decoding pending reservations")?;
+                    Ok(rows)
+                },
+            )
+            .await
     }
 
     /// Record the outcome of one or more reservations, in ONE transaction.
@@ -4273,20 +4274,21 @@ impl SessionStore {
         if settlements.is_empty() {
             return Ok(());
         }
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the reservation settlement transaction")?;
-            for settlement in settlements {
-                settle_within(&tx, &settlement)?;
-            }
-            tx.commit().context("committing reservation settlements")?;
-            Ok(())
-        })
-        .await
-        .context("reservation settlement task panicked")?
+        self.conn
+            .call(
+                "reservation settlement task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the reservation settlement transaction")?;
+                    for settlement in settlements {
+                        settle_within(&tx, &settlement)?;
+                    }
+                    tx.commit().context("committing reservation settlements")?;
+                    Ok(())
+                },
+            )
+            .await
     }
 
     /// Preserve a generation-zero sentinel's accepted-create evidence before
@@ -4306,36 +4308,37 @@ impl SessionStore {
         &self,
         session_id: &str,
     ) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let session_id = session_id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning sentinel create settlement")?;
-            let matches: bool = tx
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sessions \
+        self.conn
+            .call(
+                "sentinel create settlement task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning sentinel create settlement")?;
+                    let matches: bool = tx
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM sessions \
                      WHERE id = ?1 AND generation = 0 AND outcome_state = 'error')",
-                    [&session_id],
-                    |row| row.get(0),
-                )
-                .context("checking the sentinel's durable error generation")?;
-            if !matches {
-                return Ok(false);
-            }
-            tx.execute(
-                "UPDATE create_reservations SET state = 'created' \
+                            [&session_id],
+                            |row| row.get(0),
+                        )
+                        .context("checking the sentinel's durable error generation")?;
+                    if !matches {
+                        return Ok(false);
+                    }
+                    tx.execute(
+                        "UPDATE create_reservations SET state = 'created' \
                  WHERE session_id = ?1 AND state = 'pending'",
-                [&session_id],
+                        [&session_id],
+                    )
+                    .context("preserving the sentinel's accepted create before cleanup")?;
+                    tx.commit()
+                        .context("committing sentinel create settlement")?;
+                    Ok(true)
+                },
             )
-            .context("preserving the sentinel's accepted create before cleanup")?;
-            tx.commit()
-                .context("committing sentinel create settlement")?;
-            Ok(true)
-        })
-        .await
-        .context("sentinel create settlement task panicked")?
+            .await
     }
 
     /// [`SessionStore::delete_session`] for the user-visible DELETE path.
@@ -4363,33 +4366,34 @@ impl SessionStore {
     /// launch provably did not happen and settling its reservation
     /// `Created` would be a lie in the opposite direction.
     pub async fn delete_session_settling_reservations(&self, id: &str) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the session delete transaction")?;
-            tx.execute(
-                "DELETE FROM create_reservations \
+        self.conn
+            .call(
+                "session delete task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the session delete transaction")?;
+                    tx.execute(
+                        "DELETE FROM create_reservations \
                  WHERE session_id = ?1 AND dedup_scope = 'session_lifetime'",
-                rusqlite::params![id],
-            )
-            .context("pruning the deleted spawn's bounded reservation")?;
-            tx.execute(
-                "UPDATE create_reservations SET state = 'created' \
+                        rusqlite::params![id],
+                    )
+                    .context("pruning the deleted spawn's bounded reservation")?;
+                    tx.execute(
+                        "UPDATE create_reservations SET state = 'created' \
                  WHERE session_id = ?1 AND state = 'pending' \
                  AND dedup_scope = 'permanent'",
-                rusqlite::params![id],
+                        rusqlite::params![id],
+                    )
+                    .context("settling the deleted interactive session's reservations")?;
+                    tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
+                        .context("deleting session row")?;
+                    tx.commit().context("committing the session delete")?;
+                    Ok(())
+                },
             )
-            .context("settling the deleted interactive session's reservations")?;
-            tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
-                .context("deleting session row")?;
-            tx.commit().context("committing the session delete")?;
-            Ok(())
-        })
-        .await
-        .context("session delete task panicked")?
+            .await
     }
 
     /// Offer one witnessed [`Transition`] to a session, returning the
@@ -4444,15 +4448,16 @@ impl SessionStore {
         if transitions.is_empty() {
             return Ok(HashMap::new());
         }
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<HashMap<String, LastOutcome>> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning outcome transition transaction")?;
-            let mut committed = HashMap::new();
-            for (id, generation, transition) in transitions {
-                let current: Option<(OutcomeColumns, i64)> = tx
+        self.conn
+            .call(
+                "outcome transition task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<HashMap<String, LastOutcome>> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning outcome transition transaction")?;
+                    let mut committed = HashMap::new();
+                    for (id, generation, transition) in transitions {
+                        let current: Option<(OutcomeColumns, i64)> = tx
                     .query_row(
                         "SELECT outcome_state, exit_code, annotation, error_detail, generation \
                              FROM sessions WHERE id = ?1",
@@ -4461,66 +4466,68 @@ impl SessionStore {
                     )
                     .optional()
                     .context("reading the current outcome")?;
-                let Some(((state, exit_code, annotation, error_detail), current_generation)) =
-                    current
-                else {
-                    continue;
-                };
-                let current =
-                    LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
-                        .with_context(|| format!("session {id}"))?;
-                // The generation fence (see `StoredSession::generation`).
-                // Reported as the CURRENT outcome rather than as an error
-                // or an absence: the caller's observation was simply about
-                // a run this session has moved past, and what it should
-                // mirror is what is true now.
-                if generation != current_generation {
-                    committed.insert(id, current);
-                    continue;
-                }
-                let next = transition.apply(&current);
-                // The pane rides the same statement as the outcome it
-                // belongs to (see `Transition::pane`), and is written
-                // even when the outcome itself does not move: a
-                // rediscovered pane is still worth recording under an
-                // outcome that already knew how the session ended.
-                match (&next, transition.pane()) {
-                    (Some(next), Some(pane)) => {
-                        let (state, code, ann, detail) = next.columns();
-                        tx.execute(
-                            "UPDATE sessions SET pane = ?2, outcome_state = ?3, \
+                        let Some((
+                            (state, exit_code, annotation, error_detail),
+                            current_generation,
+                        )) = current
+                        else {
+                            continue;
+                        };
+                        let current =
+                            LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
+                                .with_context(|| format!("session {id}"))?;
+                        // The generation fence (see `StoredSession::generation`).
+                        // Reported as the CURRENT outcome rather than as an error
+                        // or an absence: the caller's observation was simply about
+                        // a run this session has moved past, and what it should
+                        // mirror is what is true now.
+                        if generation != current_generation {
+                            committed.insert(id, current);
+                            continue;
+                        }
+                        let next = transition.apply(&current);
+                        // The pane rides the same statement as the outcome it
+                        // belongs to (see `Transition::pane`), and is written
+                        // even when the outcome itself does not move: a
+                        // rediscovered pane is still worth recording under an
+                        // outcome that already knew how the session ended.
+                        match (&next, transition.pane()) {
+                            (Some(next), Some(pane)) => {
+                                let (state, code, ann, detail) = next.columns();
+                                tx.execute(
+                                    "UPDATE sessions SET pane = ?2, outcome_state = ?3, \
                                  exit_code = ?4, annotation = ?5, error_detail = ?6 \
                                  WHERE id = ?1",
-                            rusqlite::params![id, pane, state, code, ann, detail],
-                        )
-                        .context("recording a transition with its pane")?;
-                    }
-                    (Some(next), None) => {
-                        let (state, code, ann, detail) = next.columns();
-                        tx.execute(
-                            "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, \
+                                    rusqlite::params![id, pane, state, code, ann, detail],
+                                )
+                                .context("recording a transition with its pane")?;
+                            }
+                            (Some(next), None) => {
+                                let (state, code, ann, detail) = next.columns();
+                                tx.execute(
+                                    "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, \
                                  annotation = ?4, error_detail = ?5 WHERE id = ?1",
-                            rusqlite::params![id, state, code, ann, detail],
-                        )
-                        .context("recording a transition")?;
+                                    rusqlite::params![id, state, code, ann, detail],
+                                )
+                                .context("recording a transition")?;
+                            }
+                            (None, Some(pane)) => {
+                                tx.execute(
+                                    "UPDATE sessions SET pane = ?2 WHERE id = ?1",
+                                    rusqlite::params![id, pane],
+                                )
+                                .context("recording a rediscovered pane")?;
+                            }
+                            (None, None) => {}
+                        }
+                        committed.insert(id, next.unwrap_or(current));
                     }
-                    (None, Some(pane)) => {
-                        tx.execute(
-                            "UPDATE sessions SET pane = ?2 WHERE id = ?1",
-                            rusqlite::params![id, pane],
-                        )
-                        .context("recording a rediscovered pane")?;
-                    }
-                    (None, None) => {}
-                }
-                committed.insert(id, next.unwrap_or(current));
-            }
-            tx.commit()
-                .context("committing outcome transitions")
-                .map(|()| committed)
-        })
-        .await
-        .context("outcome transition task panicked")?
+                    tx.commit()
+                        .context("committing outcome transitions")
+                        .map(|()| committed)
+                },
+            )
+            .await
     }
 
     /// Set a session's title (PLAN_M5.md item 3's durable half), reporting
@@ -4548,21 +4555,22 @@ impl SessionStore {
     /// caller. Reported rather than swallowed so the handler can answer
     /// `NotFound` instead of confirming a rename that changed nothing.
     pub async fn set_session_title(&self, id: &str, title: &str) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         let title = title.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            Ok(conn
-                .execute(
-                    "UPDATE sessions SET title = ?2 WHERE id = ?1",
-                    rusqlite::params![id, title],
-                )
-                .context("renaming a session")?
-                > 0)
-        })
-        .await
-        .context("session rename task panicked")?
+        self.conn
+            .call(
+                "session rename task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    Ok(conn
+                        .execute(
+                            "UPDATE sessions SET title = ?2 WHERE id = ?1",
+                            rusqlite::params![id, title],
+                        )
+                        .context("renaming a session")?
+                        > 0)
+                },
+            )
+            .await
     }
 
     /// Record when this session first had input forwarded to it
@@ -4593,20 +4601,21 @@ impl SessionStore {
         generation: i64,
         at_unix: i64,
     ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            conn.execute(
-                "UPDATE sessions SET first_input_at = ?2 \
+        self.conn
+            .call(
+                "first-input record task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "UPDATE sessions SET first_input_at = ?2 \
                  WHERE id = ?1 AND first_input_at IS NULL AND generation = ?3",
-                rusqlite::params![id, at_unix, generation],
+                        rusqlite::params![id, at_unix, generation],
+                    )
+                    .context("recording a session's first-input time")?;
+                    Ok(())
+                },
             )
-            .context("recording a session's first-input time")?;
-            Ok(())
-        })
-        .await
-        .context("first-input record task panicked")?
+            .await
     }
 
     /// Persist restart-with's new structured bundle only after its process
@@ -4622,7 +4631,6 @@ impl SessionStore {
         launch: &farhelm_proto::LaunchSelection,
         resume_template: Option<&[String]>,
     ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         let invocation = invocation.to_string();
         let launch = serde_json::to_string(launch).context("serializing restart-with launch")?;
@@ -4630,23 +4638,25 @@ impl SessionStore {
             .map(serde_json::to_string)
             .transpose()
             .context("serializing restart-with resume template")?;
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let changed = conn
+        self.conn
+            .call(
+                "restart-with bundle task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let changed = conn
                 .execute(
                     "UPDATE sessions SET invocation = ?1, launch = ?2, resume_template = ?3 \
                  WHERE id = ?4 AND generation = ?5",
                     rusqlite::params![invocation, launch, resume_template, id, generation],
                 )
                 .context("persisting restart-with launch bundle")?;
-            anyhow::ensure!(
-                changed == 1,
-                "restart-with bundle update did not match its launch generation"
-            );
-            Ok(())
-        })
-        .await
-        .context("restart-with bundle task panicked")?
+                    anyhow::ensure!(
+                        changed == 1,
+                        "restart-with bundle update did not match its launch generation"
+                    );
+                    Ok(())
+                },
+            )
+            .await
     }
 
     /// Move a session's [`StoredSession::last_activity_at`] forward to
@@ -4680,20 +4690,21 @@ impl SessionStore {
     /// correctness one, and it belongs where the sampling cadence is
     /// known.
     pub async fn record_activity(&self, id: &str, at_unix: i64) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            conn.execute(
-                "UPDATE sessions SET last_activity_at = ?2 \
+        self.conn
+            .call(
+                "activity record task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "UPDATE sessions SET last_activity_at = ?2 \
                  WHERE id = ?1 AND last_activity_at < ?2",
-                rusqlite::params![id, at_unix],
+                        rusqlite::params![id, at_unix],
+                    )
+                    .context("recording a session's last observed activity")?;
+                    Ok(())
+                },
             )
-            .context("recording a session's last observed activity")?;
-            Ok(())
-        })
-        .await
-        .context("activity record task panicked")?
+            .await
     }
 
     /// Persist a sampler-observed work burst only for the generation that
@@ -4705,20 +4716,20 @@ impl SessionStore {
         at_millis: i64,
     ) -> anyhow::Result<()> {
         let id = id.to_string();
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || {
-            conn.lock()
-                .expect("session-store mutex poisoned")
-                .execute(
-                    "UPDATE sessions SET last_work_started_at = ?3
+        self.conn
+            .call(
+                "waiting for work-start write",
+                move |conn: &mut Connection| {
+                    conn.execute(
+                        "UPDATE sessions SET last_work_started_at = ?3
                      WHERE id = ?1 AND generation = ?2 AND last_work_started_at < ?3",
-                    rusqlite::params![id, generation, at_millis],
-                )
-                .context("recording work-start time")?;
-            Ok(())
-        })
-        .await
-        .context("waiting for work-start write")?
+                        rusqlite::params![id, generation, at_millis],
+                    )
+                    .context("recording work-start time")?;
+                    Ok(())
+                },
+            )
+            .await
     }
 
     /// Claim a conversation identity for a session (PLAN_M3.md item 8), if
@@ -4785,35 +4796,36 @@ impl SessionStore {
         conversation: &str,
         record: &Path,
     ) -> anyhow::Result<Option<String>> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         let conversation = conversation.to_string();
         let record = record.to_string_lossy().into_owned();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the capture transaction")?;
-            tx.execute(
-                "UPDATE sessions SET captured_conversation = ?2, captured_record = ?3 \
+        self.conn
+            .call(
+                "capture record task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<String>> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the capture transaction")?;
+                    tx.execute(
+                        "UPDATE sessions SET captured_conversation = ?2, captured_record = ?3 \
                  WHERE id = ?1 AND captured_conversation IS NULL AND capture_ambiguous = 0 \
                  AND generation = ?4",
-                rusqlite::params![id, conversation, record, generation],
+                        rusqlite::params![id, conversation, record, generation],
+                    )
+                    .context("recording a captured conversation identity")?;
+                    let committed: Option<Option<String>> = tx
+                        .query_row(
+                            "SELECT captured_conversation FROM sessions WHERE id = ?1",
+                            rusqlite::params![id],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .context("reading back the captured conversation identity")?;
+                    tx.commit().context("committing the capture")?;
+                    Ok(committed.flatten())
+                },
             )
-            .context("recording a captured conversation identity")?;
-            let committed: Option<Option<String>> = tx
-                .query_row(
-                    "SELECT captured_conversation FROM sessions WHERE id = ?1",
-                    rusqlite::params![id],
-                    |r| r.get(0),
-                )
-                .optional()
-                .context("reading back the captured conversation identity")?;
-            tx.commit().context("committing the capture")?;
-            Ok(committed.flatten())
-        })
-        .await
-        .context("capture record task panicked")?
+            .await
     }
 
     /// Record the identity the agent itself reported through its
@@ -4864,12 +4876,13 @@ impl SessionStore {
         generation: i64,
         conversation: &str,
     ) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         let conversation = conversation.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let changed = conn
+        self.conn
+            .call(
+                "reported-conversation record task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let changed = conn
                 .execute(
                     "UPDATE sessions SET captured_conversation = ?2, captured_record = NULL, \
                      conversation_source = 'hook', capture_ambiguous = 0 \
@@ -4877,10 +4890,10 @@ impl SessionStore {
                     rusqlite::params![id, conversation, generation],
                 )
                 .context("recording a reported conversation identity")?;
-            Ok(changed > 0)
-        })
-        .await
-        .context("reported-conversation record task panicked")?
+                    Ok(changed > 0)
+                },
+            )
+            .await
     }
 
     /// Commit a reported locator only if its complete prior capture still matches.
@@ -4897,13 +4910,14 @@ impl SessionStore {
         expected: Option<&str>,
         replacement: &str,
     ) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         let expected = expected.map(str::to_owned);
         let replacement = replacement.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let changed = conn
+        self.conn
+            .call(
+                "stale reported-conversation replacement task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let changed = conn
                 .execute(
                     "UPDATE sessions SET captured_conversation = ?4, captured_record = NULL, \
                      conversation_source = 'hook', capture_ambiguous = 0 \
@@ -4911,10 +4925,10 @@ impl SessionStore {
                     rusqlite::params![id, generation, expected, replacement],
                 )
                 .context("replacing a stale reported conversation locator")?;
-            Ok(changed > 0)
-        })
-        .await
-        .context("stale reported-conversation replacement task panicked")?
+                    Ok(changed > 0)
+                },
+            )
+            .await
     }
 
     /// Commit an ownership-proven identity: conversation, exact locator,
@@ -4938,13 +4952,14 @@ impl SessionStore {
         expected_version: i64,
         replacement: &str,
     ) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         let expected_conversation = expected_conversation.map(str::to_owned);
         let replacement = replacement.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let changed = conn
+        self.conn
+            .call(
+                "ownership-proven admission task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let changed = conn
                 .execute(
                     "UPDATE sessions SET captured_conversation = ?5, captured_record = NULL, \
                      conversation_source = 'hook', capture_ambiguous = 0, \
@@ -4960,10 +4975,10 @@ impl SessionStore {
                     ],
                 )
                 .context("admitting an ownership-proven conversation identity")?;
-            Ok(changed > 0)
-        })
-        .await
-        .context("ownership-proven admission task panicked")?
+                    Ok(changed > 0)
+                },
+            )
+            .await
     }
 
     /// Record one OMP launch's provenance: which gated reporter asset it
@@ -4994,22 +5009,23 @@ impl SessionStore {
         asset: Option<&str>,
         program: &str,
     ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         let asset = asset.map(str::to_owned);
         let program = program.to_owned();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            conn.execute(
-                "UPDATE sessions SET omp_reporter_asset = ?3, omp_launch_program = ?4 \
+        self.conn
+            .call(
+                "OMP provenance record task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "UPDATE sessions SET omp_reporter_asset = ?3, omp_launch_program = ?4 \
                  WHERE id = ?1 AND generation = ?2",
-                rusqlite::params![id, generation, asset, program],
+                        rusqlite::params![id, generation, asset, program],
+                    )
+                    .context("recording the launch's OMP provenance")?;
+                    Ok(())
+                },
             )
-            .context("recording the launch's OMP provenance")?;
-            Ok(())
-        })
-        .await
-        .context("OMP provenance record task panicked")?
+            .await
     }
 
     /// Record durably that this session's correlation was AMBIGUOUS, so no
@@ -5059,21 +5075,22 @@ impl SessionStore {
     /// established about one run says nothing about the next one, and a
     /// relaunch that opened a fresh capture window has already cleared it.
     pub async fn record_capture_ambiguous(&self, id: &str, generation: i64) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            conn.execute(
-                "UPDATE sessions SET capture_ambiguous = 1, captured_conversation = NULL, \
+        self.conn
+            .call(
+                "capture ambiguity task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "UPDATE sessions SET capture_ambiguous = 1, captured_conversation = NULL, \
                  captured_record = NULL WHERE id = ?1 AND conversation_source IS NULL \
                  AND generation = ?2",
-                rusqlite::params![id, generation],
+                        rusqlite::params![id, generation],
+                    )
+                    .context("recording an ambiguous conversation correlation")?;
+                    Ok(())
+                },
             )
-            .context("recording an ambiguous conversation correlation")?;
-            Ok(())
-        })
-        .await
-        .context("capture ambiguity task panicked")?
+            .await
     }
 
     /// The boot id stored by the last supervisor that ran against this
@@ -5085,21 +5102,22 @@ impl SessionStore {
     /// no-guessing rule cuts both ways, so the caller takes the same-boot
     /// path and stores the id from then on (PLAN_M3.md item 2).
     pub async fn boot_id(&self) -> anyhow::Result<Option<String>> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let stored: Option<Option<String>> = conn
-                .query_row(
-                    "SELECT boot_id FROM supervisor_meta WHERE id = ?1",
-                    rusqlite::params![META_ROW_ID],
-                    |r| r.get(0),
-                )
-                .optional()
-                .context("reading stored boot id")?;
-            Ok(stored.flatten())
-        })
-        .await
-        .context("boot id read task panicked")?
+        self.conn
+            .call(
+                "boot id read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<String>> {
+                    let stored: Option<Option<String>> = conn
+                        .query_row(
+                            "SELECT boot_id FROM supervisor_meta WHERE id = ?1",
+                            rusqlite::params![META_ROW_ID],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .context("reading stored boot id")?;
+                    Ok(stored.flatten())
+                },
+            )
+            .await
     }
 
     /// Read this host's identity, minting and persisting a fresh UUIDv4 on
@@ -5157,40 +5175,41 @@ impl SessionStore {
     /// each one observe the actual winner rather than trust its own
     /// (possibly losing) candidate.
     pub async fn ensure_host_identity(&self) -> anyhow::Result<String> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let existing: Option<Option<String>> = conn
-                .query_row(
-                    "SELECT host_identity FROM supervisor_meta WHERE id = ?1",
-                    rusqlite::params![META_ROW_ID],
-                    |r| r.get(0),
-                )
-                .optional()
-                .context("reading stored host identity")?;
-            if let Some(Some(id)) = existing {
-                return Ok(id);
-            }
-            let candidate = uuid::Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO supervisor_meta (id, host_identity) VALUES (?1, ?2) \
+        self.conn
+            .call(
+                "host identity mint task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<String> {
+                    let existing: Option<Option<String>> = conn
+                        .query_row(
+                            "SELECT host_identity FROM supervisor_meta WHERE id = ?1",
+                            rusqlite::params![META_ROW_ID],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .context("reading stored host identity")?;
+                    if let Some(Some(id)) = existing {
+                        return Ok(id);
+                    }
+                    let candidate = uuid::Uuid::new_v4().to_string();
+                    conn.execute(
+                        "INSERT INTO supervisor_meta (id, host_identity) VALUES (?1, ?2) \
                  ON CONFLICT(id) DO UPDATE SET host_identity = excluded.host_identity \
                  WHERE supervisor_meta.host_identity IS NULL",
-                rusqlite::params![META_ROW_ID, candidate],
+                        rusqlite::params![META_ROW_ID, candidate],
+                    )
+                    .context("minting host identity")?;
+                    // Re-read rather than trust `candidate`: see the doc comment
+                    // above on why a concurrent winner's value, not this call's own
+                    // proposal, must be what gets returned.
+                    conn.query_row(
+                        "SELECT host_identity FROM supervisor_meta WHERE id = ?1",
+                        rusqlite::params![META_ROW_ID],
+                        |r| r.get(0),
+                    )
+                    .context("reading back host identity after minting")
+                },
             )
-            .context("minting host identity")?;
-            // Re-read rather than trust `candidate`: see the doc comment
-            // above on why a concurrent winner's value, not this call's own
-            // proposal, must be what gets returned.
-            conn.query_row(
-                "SELECT host_identity FROM supervisor_meta WHERE id = ?1",
-                rusqlite::params![META_ROW_ID],
-                |r| r.get(0),
-            )
-            .context("reading back host identity after minting")
-        })
-        .await
-        .context("host identity mint task panicked")?
+            .await
     }
 
     /// Read this host's identity WITHOUT minting one — `Ok(None)` when the
@@ -5207,21 +5226,22 @@ impl SessionStore {
     /// value the eventual owner will), but leaves the row alone — including
     /// leaving it `NULL` — when nothing has been minted yet.
     pub async fn read_host_identity(&self) -> anyhow::Result<Option<String>> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let stored: Option<Option<String>> = conn
-                .query_row(
-                    "SELECT host_identity FROM supervisor_meta WHERE id = ?1",
-                    rusqlite::params![META_ROW_ID],
-                    |r| r.get(0),
-                )
-                .optional()
-                .context("reading stored host identity")?;
-            Ok(stored.flatten())
-        })
-        .await
-        .context("host identity read task panicked")?
+        self.conn
+            .call(
+                "host identity read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Option<String>> {
+                    let stored: Option<Option<String>> = conn
+                        .query_row(
+                            "SELECT host_identity FROM supervisor_meta WHERE id = ?1",
+                            rusqlite::params![META_ROW_ID],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .context("reading stored host identity")?;
+                    Ok(stored.flatten())
+                },
+            )
+            .await
     }
 
     /// Store `boot_id` and — when `interrupt_live` — convert every session
@@ -5273,53 +5293,54 @@ impl SessionStore {
         sentinel_overrides: HashMap<String, String>,
         fault: Option<BootTxFault>,
     ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let boot_id = boot_id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn.transaction().context("beginning boot transaction")?;
-            tx.execute(
-                "INSERT INTO supervisor_meta (id, boot_id) VALUES (?1, ?2) \
-                 ON CONFLICT(id) DO UPDATE SET boot_id = excluded.boot_id",
-                rusqlite::params![META_ROW_ID, boot_id],
-            )
-            .context("storing boot id")?;
-            if interrupt_live {
-                // Sentinel overrides FIRST: each affected row leaves the
-                // 'launching'/'running'/'stop_requested' states before the
-                // blanket UPDATE below ever runs, which is what makes the
-                // two statements mutually exclusive without an explicit
-                // `NOT IN` — see this method's own docs.
-                for (id, detail) in &sentinel_overrides {
+        self.conn
+            .call(
+                "boot record task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let tx = conn.transaction().context("beginning boot transaction")?;
                     tx.execute(
-                        "UPDATE sessions SET outcome_state = 'error', exit_code = NULL, \
+                        "INSERT INTO supervisor_meta (id, boot_id) VALUES (?1, ?2) \
+                 ON CONFLICT(id) DO UPDATE SET boot_id = excluded.boot_id",
+                        rusqlite::params![META_ROW_ID, boot_id],
+                    )
+                    .context("storing boot id")?;
+                    if interrupt_live {
+                        // Sentinel overrides FIRST: each affected row leaves the
+                        // 'launching'/'running'/'stop_requested' states before the
+                        // blanket UPDATE below ever runs, which is what makes the
+                        // two statements mutually exclusive without an explicit
+                        // `NOT IN` — see this method's own docs.
+                        for (id, detail) in &sentinel_overrides {
+                            tx.execute(
+                                "UPDATE sessions SET outcome_state = 'error', exit_code = NULL, \
                          annotation = NULL, error_detail = ?2 \
                          WHERE id = ?1 \
                          AND outcome_state IN ('launching', 'running', 'stop_requested')",
-                        rusqlite::params![id, detail],
-                    )
-                    .context("applying a sentinel override ahead of the boot conversion")?;
-                }
-                // The fault seam's exact position: after the overrides have
-                // been applied, before the blanket conversion runs — see
-                // `BootTxFault`'s own docs for why this specific boundary
-                // is the one worth a dedicated injection point.
-                if let Some(fault) = fault {
-                    fault()?;
-                }
-                tx.execute(
-                    "UPDATE sessions SET outcome_state = 'interrupted', exit_code = NULL, \
+                                rusqlite::params![id, detail],
+                            )
+                            .context("applying a sentinel override ahead of the boot conversion")?;
+                        }
+                        // The fault seam's exact position: after the overrides have
+                        // been applied, before the blanket conversion runs — see
+                        // `BootTxFault`'s own docs for why this specific boundary
+                        // is the one worth a dedicated injection point.
+                        if let Some(fault) = fault {
+                            fault()?;
+                        }
+                        tx.execute(
+                            "UPDATE sessions SET outcome_state = 'interrupted', exit_code = NULL, \
                      annotation = NULL, error_detail = NULL \
                      WHERE outcome_state IN ('launching', 'running', 'stop_requested')",
-                    [],
-                )
-                .context("converting live sessions to interrupted")?;
-            }
-            tx.commit().context("committing boot transaction")?;
-            Ok(())
-        })
-        .await
-        .context("boot record task panicked")?
+                            [],
+                        )
+                        .context("converting live sessions to interrupted")?;
+                    }
+                    tx.commit().context("committing boot transaction")?;
+                    Ok(())
+                },
+            )
+            .await
     }
 
     /// Remove a session's row, if any. Deleting an id with no matching row
@@ -5348,10 +5369,8 @@ impl SessionStore {
         id: &str,
         settlement: Option<Settlement>,
     ) -> anyhow::Result<()> {
-        let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
+        self.conn.call("session delete task panicked", move |conn: &mut Connection| -> anyhow::Result<()> {
             let tx = conn
                 .transaction()
                 .context("beginning the launch rollback transaction")?;
@@ -5389,8 +5408,7 @@ impl SessionStore {
             tx.commit().context("committing the launch rollback")?;
             Ok(())
         })
-        .await
-        .context("session delete task panicked")?
+.await
     }
 
     /// Remove a bounded reservation after its child has disappeared.
@@ -5403,24 +5421,25 @@ impl SessionStore {
         intent_key: &str,
         session_id: &str,
     ) -> anyhow::Result<bool> {
-        let conn = Arc::clone(&self.conn);
         let intent_key = intent_key.to_string();
         let session_id = session_id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let removed = conn
-                .execute(
-                    "DELETE FROM create_reservations
+        self.conn
+            .call(
+                "bounded-reservation prune task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let removed = conn
+                        .execute(
+                            "DELETE FROM create_reservations
                      WHERE intent_key = ?1 AND session_id = ?2
                        AND dedup_scope = 'session_lifetime'
                        AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = ?2)",
-                    rusqlite::params![intent_key, session_id],
-                )
-                .context("pruning an orphaned bounded reservation")?;
-            Ok(removed != 0)
-        })
-        .await
-        .context("bounded-reservation prune task panicked")?
+                            rusqlite::params![intent_key, session_id],
+                        )
+                        .context("pruning an orphaned bounded reservation")?;
+                    Ok(removed != 0)
+                },
+            )
+            .await
     }
 
     /// Load every persisted session, for `Supervisor::reload_sessions`
@@ -5429,28 +5448,29 @@ impl SessionStore {
     /// less (the restart gap) otherwise. Order is unspecified; the
     /// in-memory map this feeds is keyed by id anyway.
     pub async fn load_all(&self) -> anyhow::Result<Vec<StoredSession>> {
-        let conn = Arc::clone(&self.conn);
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<StoredSession>> {
-            let conn = conn.lock().expect("session db mutex poisoned");
-            let mut stmt = conn
-                .prepare(&format!("SELECT {SESSION_COLUMNS} FROM sessions"))
-                .context("preparing session load query")?;
-            // Two stages, not one: the outcome, kind, and template columns
-            // are reassembled by functions that return `anyhow::Error` for
-            // a corrupt row and so cannot live inside a rusqlite row mapper
-            // (whose error type is rusqlite's own). Collecting the raw
-            // tuples first keeps the refusal-to-guess behavior and its
-            // message intact instead of flattening it into a generic decode
-            // failure.
-            let raw = stmt
-                .query_map([], read_session_columns)
-                .context("querying sessions")?
-                .collect::<Result<Vec<_>, rusqlite::Error>>()
-                .context("decoding session rows")?;
-            raw.into_iter().map(decode_session_row).collect()
-        })
-        .await
-        .context("session load task panicked")?
+        self.conn
+            .call(
+                "session load task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<Vec<StoredSession>> {
+                    let mut stmt = conn
+                        .prepare(&format!("SELECT {SESSION_COLUMNS} FROM sessions"))
+                        .context("preparing session load query")?;
+                    // Two stages, not one: the outcome, kind, and template columns
+                    // are reassembled by functions that return `anyhow::Error` for
+                    // a corrupt row and so cannot live inside a rusqlite row mapper
+                    // (whose error type is rusqlite's own). Collecting the raw
+                    // tuples first keeps the refusal-to-guess behavior and its
+                    // message intact instead of flattening it into a generic decode
+                    // failure.
+                    let raw = stmt
+                        .query_map([], read_session_columns)
+                        .context("querying sessions")?
+                        .collect::<Result<Vec<_>, rusqlite::Error>>()
+                        .context("decoding session rows")?;
+                    raw.into_iter().map(decode_session_row).collect()
+                },
+            )
+            .await
     }
 }
 
@@ -5781,7 +5801,7 @@ mod tests {
     /// either impossible (nothing writes `Error` yet) or would smuggle the
     /// behavior under test into the setup.
     fn force_outcome(store: &SessionStore, id: &str, outcome: &LastOutcome) {
-        let conn = store.conn.lock().expect("db mutex");
+        let conn = store.conn.lock();
         let (state, code, annotation, detail) = outcome.columns();
         conn.execute(
             "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
@@ -6176,7 +6196,7 @@ mod tests {
         );
 
         let created_at: Vec<i64> = {
-            let conn = store.conn.lock().expect("db mutex");
+            let conn = store.conn.lock();
             let mut stmt = conn
                 .prepare("SELECT created_at FROM sessions ORDER BY id")
                 .expect("prepare");
@@ -6207,7 +6227,7 @@ mod tests {
         let reopened = SessionStore::open(&db_path, true).await.expect("reopen");
         assert_eq!(reopened.load_all().await.expect("load").len(), 1);
         let version: i64 = {
-            let conn = reopened.conn.lock().expect("db mutex");
+            let conn = reopened.conn.lock();
             conn.query_row("PRAGMA user_version", [], |r| r.get(0))
                 .expect("read version")
         };
@@ -6335,7 +6355,7 @@ mod tests {
             .await
             .expect("migrating open");
         let version: i64 = {
-            let conn = migrated.conn.lock().expect("db mutex");
+            let conn = migrated.conn.lock();
             conn.query_row("PRAGMA user_version", [], |r| r.get(0))
                 .expect("read version")
         };
@@ -7899,7 +7919,7 @@ mod tests {
             // tests preservation across 17 -> 18, not historical schema parity;
             // the separate migration-ladder tests cover the latter. Restore
             // archived too, since schema 17 still carried that column.
-            let conn = store.conn.lock().expect("db mutex");
+            let conn = store.conn.lock();
             conn.execute_batch(
                 "DROP TABLE working_copy_members;
                  DROP TABLE working_copies;
@@ -7945,10 +7965,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
         let store = SessionStore::open(&db_path, true).await.expect("open");
-        let conn = Arc::clone(&store.conn);
+        let conn = store.conn.clone();
         let version: i64 = tokio::task::spawn_blocking(move || {
             conn.lock()
-                .unwrap()
                 .query_row("PRAGMA user_version", [], |r| r.get(0))
                 .unwrap()
         })
@@ -7973,7 +7992,7 @@ mod tests {
             .expect("create attachment directory");
         std::fs::write(&attachment, b"retained attachment").expect("write attachment");
         {
-            let conn = store.conn.lock().expect("db mutex");
+            let conn = store.conn.lock();
             conn.execute_batch(
                 "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE sessions DROP COLUMN capture_ownership_version;
@@ -8045,7 +8064,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["checkout"]
         );
-        let conn = migrated.conn.lock().expect("db mutex");
+        let conn = migrated.conn.lock();
         let columns: Vec<String> = conn
             .prepare("PRAGMA table_info(sessions)")
             .expect("prepare schema read")
@@ -8100,10 +8119,9 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn host_identity_is_null_until_ensure_host_identity_is_called() {
         let (_dir, store) = fresh_store().await;
-        let conn = Arc::clone(&store.conn);
+        let conn = store.conn.clone();
         let stored: Option<Option<String>> = tokio::task::spawn_blocking(move || {
             conn.lock()
-                .unwrap()
                 .query_row(
                     "SELECT host_identity FROM supervisor_meta WHERE id = ?1",
                     rusqlite::params![META_ROW_ID],
@@ -8361,9 +8379,9 @@ mod tests {
             .await
             .expect("insert");
 
-        let conn = Arc::clone(&store.conn);
+        let conn = store.conn.clone();
         let created_at: i64 = tokio::task::spawn_blocking(move || {
-            conn.lock().unwrap().query_row(
+            conn.lock().query_row(
                 "SELECT created_at FROM sessions WHERE id = ?1",
                 ["s1"],
                 |r| r.get(0),
@@ -8482,7 +8500,7 @@ mod tests {
         );
 
         {
-            let conn = store.conn.lock().expect("db mutex");
+            let conn = store.conn.lock();
             conn.execute(
                 "UPDATE sessions SET agent_kind = 'ompish' WHERE id = 's-omp'",
                 [],
@@ -9067,7 +9085,7 @@ mod tests {
         let (dir, store) = fresh_store().await;
         let cwd = allocated_membership_fixture(&store, dir.path()).await;
         {
-            let conn = store.conn.lock().unwrap();
+            let conn = store.conn.lock();
             conn.execute_batch(
                 "CREATE TRIGGER refuse_borrower BEFORE INSERT ON working_copy_members
                  WHEN NEW.session_id = 'borrower'
@@ -9320,7 +9338,7 @@ mod tests {
         ));
         insert_reserved(&store, "s5", "rebooted-live", "fp").await;
         {
-            let conn = store.conn.lock().expect("db mutex");
+            let conn = store.conn.lock();
             conn.execute("UPDATE sessions SET pane = '%7' WHERE id = 's5'", [])
                 .expect("record a pane");
         }
@@ -11356,7 +11374,7 @@ mod tests {
         );
 
         {
-            let conn = store.conn.lock().expect("db mutex");
+            let conn = store.conn.lock();
             conn.execute(
                 "UPDATE sessions SET source_profile_name = NULL WHERE id = ?1",
                 rusqlite::params!["s1"],
@@ -11377,7 +11395,7 @@ mod tests {
         // with no id is worse, because the id is the only key existence can
         // be derived by, so the row could never be described at all.
         {
-            let conn = store.conn.lock().expect("db mutex");
+            let conn = store.conn.lock();
             conn.execute(
                 "UPDATE sessions SET source_profile_id = NULL, source_profile_name = 'orphan' \
                  WHERE id = ?1",
