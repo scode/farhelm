@@ -10,17 +10,15 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use farhelm_proto::{GithubRepo, parse_github_repo};
-use tokio::io::AsyncReadExt;
-use tokio::process::Child;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, timeout_at};
 
+use crate::bounded_command::{Ended, GroupChild, OutputCaps};
 use crate::working_copies::ARCHIVE_DIR_NAME;
 
 /// Maximum immediate entries examined during one discovery request.
@@ -237,11 +235,7 @@ impl RepositoryScanner {
             .map_err(|_| anyhow::anyhow!("repository discovery deadline elapsed waiting for Git"))?
             .map_err(|_| anyhow::anyhow!("repository discovery scanner was shut down"))?;
         let mut command = tokio::process::Command::new(&self.git);
-        command
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+        command.args(args);
         command.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE");
         command.env_remove("GIT_COMMON_DIR");
         for (name, _) in std::env::vars_os()
@@ -258,46 +252,50 @@ impl RepositoryScanner {
                 command.env(name, value);
             }
         }
+        // Its own process group, stdout capped one byte past the limit, and
+        // stderr never read: see `crate::bounded_command`. A Git that forks
+        // (a credential or config helper) is killed along with everything it
+        // started when the deadline or the cap ends the command.
+        let caps = OutputCaps {
+            stdout: GIT_STDOUT_CAP,
+            stderr: None,
+        };
         let mut child = ChildCleanup::new(
-            command.spawn().context("spawn Git discovery child")?,
+            GroupChild::spawn(&mut command, caps).context("spawn Git discovery child")?,
             permit,
         );
         #[cfg(test)]
         {
             child.before_reap = self.cleanup_gate.clone();
         }
-        let stdout = child
+        let command_deadline =
+            std::cmp::min(deadline, Instant::now() + self.limits.command_deadline);
+        let ended = child
             .child
             .as_mut()
             .expect("new cleanup owns the spawned child")
-            .stdout
-            .take()
-            .expect("piped stdout is present after successful spawn");
-        let command_deadline =
-            std::cmp::min(deadline, Instant::now() + self.limits.command_deadline);
-        let read = read_stdout(stdout);
-        tokio::pin!(read);
-        let output = tokio::select! {
-            output = &mut read => output,
-            _ = tokio::time::sleep_until(command_deadline) => return Ok(child.kill_reap().await),
-        };
-        let output = match output {
-            Ok(output) => output,
+            .finish(command_deadline, caps)
+            .await;
+        let output = match ended {
+            Ok(Ended::Exited(output)) => {
+                child.child.take();
+                child.disarm();
+                output
+            }
+            // Killed and reaped by `finish`: the slot is free.
+            Ok(Ended::TimedOut | Ended::OutputOverCap) => {
+                child.child.take();
+                child.disarm();
+                return Ok(CommandResult::Incomplete);
+            }
+            // A read or wait failure. The group was signalled; reap it here,
+            // or leave the owner armed for Drop's retry if even that fails.
             Err(_) => return Ok(child.kill_reap().await),
         };
-        if output.len() > GIT_STDOUT_CAP {
-            return Ok(child.kill_reap().await);
+        if output.status.success() {
+            return Ok(CommandResult::Value(output.stdout));
         }
-        let status = tokio::select! {
-            status = child.child.as_mut().expect("live cleanup owns one child").wait() => status.context("wait for Git discovery child")?,
-            _ = tokio::time::sleep_until(command_deadline) => return Ok(child.kill_reap().await),
-        };
-        child.disarm();
-        child.child.take();
-        if status.success() {
-            return Ok(CommandResult::Value(output));
-        }
-        if status.code() == Some(1) {
+        if output.status.code() == Some(1) {
             return Ok(CommandResult::MissingConfig);
         }
         Ok(CommandResult::Incomplete)
@@ -335,7 +333,7 @@ enum CommandResult {
 /// task instead, preventing a cancelled scan from detaching a process or
 /// freeing a permit while that process still consumes the two-child budget.
 struct ChildCleanup {
-    child: Option<Child>,
+    child: Option<GroupChild>,
     permit: Option<OwnedSemaphorePermit>,
     #[cfg(test)]
     before_reap: Option<Arc<CleanupGate>>,
@@ -352,7 +350,7 @@ struct CleanupGate {
 
 impl ChildCleanup {
     /// Transfer exclusive child and budget ownership into cancellation cleanup.
-    fn new(child: Child, permit: OwnedSemaphorePermit) -> Self {
+    fn new(child: GroupChild, permit: OwnedSemaphorePermit) -> Self {
         Self {
             child: Some(child),
             permit: Some(permit),
@@ -365,8 +363,7 @@ impl ChildCleanup {
     /// establishes exit; a wait error leaves the owner armed for Drop's retry.
     async fn kill_reap(&mut self) -> CommandResult {
         let child = self.child.as_mut().expect("live cleanup owns one child");
-        let _ = child.start_kill();
-        if child.wait().await.is_ok() {
+        if child.kill_and_reap().await.is_ok() {
             self.child.take();
             self.disarm();
         }
@@ -388,7 +385,7 @@ impl Drop for ChildCleanup {
             drop(permit);
             return;
         };
-        let _ = child.start_kill();
+        child.kill_group();
         #[cfg(test)]
         let gate = self.before_reap.take();
         tokio::spawn(async move {
@@ -397,7 +394,7 @@ impl Drop for ChildCleanup {
                 gate.entered.notify_one();
                 gate.release.notified().await;
             }
-            match child.wait().await {
+            match child.kill_and_reap().await {
                 Ok(_) => drop(permit),
                 Err(_) => {
                     // Unknown exit cannot free a slot: another scan would
@@ -410,24 +407,6 @@ impl Drop for ChildCleanup {
                 }
             }
         });
-    }
-}
-
-/// Read at most one byte beyond the cap so oversized output is classified
-/// without accumulating an attacker-controlled stream in memory.
-async fn read_stdout(mut stdout: tokio::process::ChildStdout) -> io::Result<Vec<u8>> {
-    let mut output = Vec::with_capacity(GIT_STDOUT_CAP + 1);
-    let mut chunk = [0_u8; 1024];
-    loop {
-        let read = stdout.read(&mut chunk).await?;
-        if read == 0 {
-            return Ok(output);
-        }
-        let remaining = GIT_STDOUT_CAP + 1 - output.len();
-        output.extend_from_slice(&chunk[..read.min(remaining)]);
-        if output.len() > GIT_STDOUT_CAP {
-            return Ok(output);
-        }
     }
 }
 

@@ -307,11 +307,6 @@ are large mostly because of their tests.
   live in `farhelm-helm/src/session_cache.rs`. What remains is the plumbing: `remember_session`, `forget_session`, and
   `refresh_once` in `manager.rs` each branch on whether the host has an identity and carry a storage-specific body per
   branch. Fix: a cache type with the two backends behind it, so the manager calls one interface.
-- **Subprocess runners.** Medium-high effort. At least four timeout-and-cap runners with different kill semantics:
-  `farhelm-supervisor/src/tmux.rs:663` (sync, process-group kill), `farhelm-helm/src/provisioning/backend.rs:1474`
-  (async, process-group kill), `farhelm-supervisor/src/repository_discovery.rs:234` (async, output cap, no process
-  group), and `farhelm-teststate/src/process.rs:234`; `farhelm-supervisor/src/scope.rs:1271` uses bare `.output()` with
-  no cap. Fix: one async runner with process-group kill and output caps as options. Payoff grows with each new caller.
 - **Hand-rolled fake supervisors in tests.** Medium effort, test code only. About 180 inline duplex + handshake +
   hand-matched reply setups in the helm (`sessions_tests.rs` ~65, `client.rs` 49, `agent_requests.rs` 23, `uploads.rs`
   19, `terminal.rs` 13) while only `manager.rs` has a reusable scripted peer; about 16 more in the e2e tests (`RawPeer`,
