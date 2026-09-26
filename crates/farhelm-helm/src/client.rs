@@ -200,9 +200,11 @@ static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 /// A supervisor-side request failure, carried through as a distinct type
 /// (rather than a bare string `anyhow` error) so callers above this client
 /// — the HTTP layer's `http_error`, in particular — can recover `kind`
-/// without parsing `message`. `request()` is the one place this gets
-/// constructed, from the `kind` a `ControlMsg::Error` reply already
-/// carries; from there it rides the ordinary `anyhow::Error` chain, so a
+/// without parsing `message`. `request()` builds it from the `kind` a
+/// `ControlMsg::Error` reply already carries, and helm code that refuses a
+/// request itself (a validation failure in `sessions`, say) builds one
+/// directly so the HTTP layer classifies both the same way; nothing
+/// downstream distinguishes the two origins. From there it rides the ordinary `anyhow::Error` chain, so a
 /// caller downcasts with `error.downcast_ref::<SupervisorError>()` —
 /// `anyhow`'s own `downcast_ref` searches the root cause and every
 /// `.context(...)` layer above it, so this finds a `SupervisorError`
@@ -983,21 +985,18 @@ fn not_ready(message: &str) -> farhelm_proto::AgentOutcome {
     }
 }
 
-/// The error for a MUTATING request answered with a correlated reply of
+/// The error for any request answered with a correlated reply of
 /// the wrong variant — see [`SupervisorTransportError::SentWrongReply`].
 ///
-/// A function rather than an inline construction at each site because the
-/// phase claim it makes is the load-bearing part and must be made
-/// identically by every wrapper that makes it: `stop`, `rename`, `restart`
-/// and the three creates are the verbs an agent can drive across two hops,
-/// so each of them is a place where a wrong answer has to keep the
-/// request's own "it was sent" fact rather than degrading into an untyped
-/// protocol complaint. A create is the sharpest case of it — a peer that
-/// answered `CreateSession` with something other than `SessionCreated` may
-/// still have started a session, whose id the caller now has no way to
-/// learn. Verbs whose wrong replies stay untyped (`list_sessions`,
-/// `restart`, the tab and upload calls) are deliberately not routed here;
-/// nothing above them turns the distinction into advice.
+/// Every request wrapper that checks its reply variant routes a mismatch
+/// here, so no wrong reply is ever rendered with `{:?}` (see `reply` below
+/// for what that cost). The phase claim it makes ("it was sent") is true of
+/// all of them, and it is load-bearing for the verbs an agent can drive
+/// across two hops (`stop`, `rename`, `restart`, the creates): there a wrong
+/// answer has to keep that fact rather than degrade into an untyped protocol
+/// complaint, because a peer that answered `CreateSession` with something
+/// other than `SessionCreated` may still have started a session whose id the
+/// caller can no longer learn.
 ///
 /// BOTH sides are `ControlMsg` variant NAMES rather than messages, because
 /// this string is rendered into an agent-facing error chain and re-encoded
@@ -2921,7 +2920,7 @@ impl SupervisorClient {
             .await?
         {
             ControlMsg::SessionDeleted { .. } => Ok(()),
-            other => bail!("unexpected reply to delete_session: {other:?}"),
+            other => Err(wrong_reply("DeleteSession", &other)),
         }
     }
 
@@ -2953,7 +2952,7 @@ impl SupervisorClient {
             .await?
         {
             ControlMsg::TabOpened { tab, .. } => Ok(tab),
-            other => bail!("unexpected reply to open_tab: {other:?}"),
+            other => Err(wrong_reply("OpenTab", &other)),
         }
     }
 
@@ -2984,7 +2983,7 @@ impl SupervisorClient {
             .await?
         {
             ControlMsg::TabClosed { .. } => Ok(()),
-            other => bail!("unexpected reply to close_tab: {other:?}"),
+            other => Err(wrong_reply("CloseTab", &other)),
         }
     }
 
@@ -3115,7 +3114,7 @@ impl SupervisorClient {
             ControlMsg::Attached { .. } => Ok((channel, stream)),
             other => {
                 self.terminals.lock().await.remove(&channel);
-                bail!("unexpected reply to attach: {other:?}")
+                Err(wrong_reply("Attach", &other))
             }
         }
     }
@@ -3241,9 +3240,12 @@ impl SupervisorClient {
     ///   [`SupervisorError`] carrying the message verbatim and a `kind` to
     ///   map to a status. Nothing exists on disk (`ControlMsg::
     ///   UploadStarted`'s own words), so nothing is aborted.
-    /// - The exchange never completed: a dead connection, or a reply that
-    ///   is not an `UploadStarted` for this channel. These are plain
-    ///   `anyhow` errors with no `kind` to recover, and map to a 500.
+    /// - The exchange never completed as asked: a dead connection, a reply
+    ///   of the wrong variant, or an `UploadStarted` for another channel.
+    ///   The wrong variant is a typed
+    ///   [`SupervisorTransportError::SentWrongReply`] (the request was sent,
+    ///   so the outcome is unknown); the other two are plain `anyhow` errors.
+    ///   None carries a `kind`, and all map to a 500.
     ///
     /// A filename is never in either set: per `ControlMsg::BeginUpload`,
     /// a proposed name is only ever sanitized or replaced.
@@ -3309,7 +3311,7 @@ impl SupervisorClient {
             } => {
                 bail!("supervisor started upload on channel {started}, not the requested {channel}")
             }
-            other => bail!("unexpected reply to begin_upload: {other:?}"),
+            other => Err(wrong_reply("BeginUpload", &other)),
         }
     }
 }
@@ -3533,7 +3535,7 @@ impl UploadGuard {
         self.retire().await;
         match reply? {
             ControlMsg::UploadCommitted { path, .. } => Ok(path),
-            other => bail!("unexpected reply to commit_upload: {other:?}"),
+            other => Err(wrong_reply("CommitUpload", &other)),
         }
     }
 
@@ -4231,6 +4233,60 @@ mod tests {
                 error.downcast_ref::<SupervisorTransportError>(),
                 Some(SupervisorTransportError::SentWrongReply { request, reply })
                     if *request == "ListSessions" && *reply == "SessionRenamed"
+            ),
+            "the wrong reply must be named by variant: {error:#}"
+        );
+        let rendered = format!("{error:#}");
+        assert!(!rendered.contains("super-secret"), "{rendered}");
+        assert!(!rendered.contains("/private/secret-project"), "{rendered}");
+        peer.await.expect("peer task");
+    }
+
+    /// Why this matters: delete, tab, attach, and upload calls used to fail
+    /// a wrong reply with its whole `{:?}` rendering, which is unbounded (a
+    /// near-limit listing) and carries session invocations and working
+    /// directories into an error the HTTP layer shows verbatim.
+    ///
+    /// Specification: a wrong reply to `delete_session` fails as
+    /// `SentWrongReply` naming both sides by variant only, and none of the
+    /// wrong reply's session details appear in the rendered error.
+    #[farhelm_testtrace::test]
+    async fn delete_session_names_a_wrong_reply_by_variant_only() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::DeleteSession { req_id, .. } = request else {
+                panic!("unexpected request: {request:?}");
+            };
+            let mut wrong = session("s1");
+            wrong.invocation = "agent --api-key super-secret".to_string();
+            wrong.cwd = "/private/secret-project".to_string();
+            writer
+                .write_control(&ControlMsg::SessionRenamed {
+                    req_id,
+                    session: wrong,
+                })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let error = client
+            .delete_session("s1")
+            .await
+            .expect_err("a wrong reply cannot succeed");
+        assert!(
+            matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentWrongReply { request, reply })
+                    if *request == "DeleteSession" && *reply == "SessionRenamed"
             ),
             "the wrong reply must be named by variant: {error:#}"
         );

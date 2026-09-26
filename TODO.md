@@ -257,14 +257,6 @@ are large mostly because of their tests.
 
 ### Diverged copies of the same rule
 
-- **Helm error construction and unexpected replies.** Medium effort. Six supervisor-client calls
-  (`farhelm-helm/src/client.rs:2840, 2872, 2903, 3033, 3227, 3451`) fail with `bail!("unexpected reply …: {other:?}")`,
-  the unbounded Debug rendering that `wrong_reply` was introduced to replace, and which can reach HTTP bodies through
-  `http_error`. Separately, the docs at `client.rs:200-212` say `request()` is the only constructor of
-  `SupervisorError`, but it is built about 61 more times across `sessions.rs`, `agent_requests.rs`, `profiles.rs` and
-  others, so a helm-originated refusal is indistinguishable from a supervisor reply; `client.rs:960-971` also
-  contradicts itself about which calls are routed. Fix: one `expect_reply!` path for all request wrappers, and a neutral
-  helm-side classified error distinct from the supervisor's.
 - **Harness-to-agent-kind tables.** Low effort. The `LaunchHarness` → `AgentKind` match is written out five times
   (`farhelm-supervisor/src/service/handlers.rs:332` and `:456`, `farhelm-supervisor/src/store.rs:2627`,
   `farhelm-helm/src/launches.rs:464`, `farhelm-helm/src/sessions.rs:2027`); the workspace-trust harness set is repeated
