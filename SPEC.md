@@ -351,12 +351,14 @@ checkout; the agent choice is independent of that destination:
   Cursor have no supported interactive workspace-trust switch. "reset choices" returns both segments to their remembered
   values rather than to harness defaults, and a recent-setup row's own saved choice overrides it when used. The
   launch-composer search matches harnesses, `other / command`, models scoped by the chosen harness, effort words offered
-  by that harness and model, supported trust actions, host and name actions, folders, and recent setups. `name:foo`
-  applies the entire value as the session name. `host:foo` filters host choices, and `host:local` selects the helm-local
-  host even if it has an alias. The default local host label in the GUI is `local (this machine)`. Accepting a result
-  applies it and clears the box while keeping focus there. Enter on an empty box launches only a complete, valid
-  selection through the ordinary Launch path; Enter on a non-empty query with no result never launches, and Escape
-  closes the result list without clearing the query, so Enter after Escape does nothing until the box is emptied.
+  by that harness and model, `yolo` plus the `perms:yolo` and `perms:default` permission actions, supported trust
+  actions, host and name actions, folders, and recent setups. Permission actions are offered only when the selected
+  harness can represent them; `perms:default` is not offered for Pi's mandatory YOLO mode. `name:foo` applies the entire
+  value as the session name. `host:foo` filters host choices, and `host:local` selects the helm-local host even if it
+  has an alias. The default local host label in the GUI is `local (this machine)`. Accepting a result applies it and
+  clears the box while keeping focus there. Enter on an empty box launches only a complete, valid selection through the
+  ordinary Launch path; Enter on a non-empty query with no result never launches, and Escape closes the result list
+  without clearing the query, so Enter after Escape does nothing until the box is emptied.
 - Legacy agent profile or arbitrary command: `other / command` is a harness-picker choice in the same composer. It
   replaces only the model, effort, permissions, and workspace-trust controls with the profile picker and raw invocation
   field. Existing callers, profiles, and their helm-wide last-used profile behavior remain compatible, but New does not
@@ -467,8 +469,8 @@ entered pair. A saved repository setup remembers repository intent and agent cho
 creates a new checkout, rather than reopening its prior directory. Fresh creates do not populate ordinary folder history
 with ephemeral paths; an explicit existing-directory launch can still do so.
 
-Unlabelled search retains ordinary matching. Leading `name:`, `host:`, `harness:`, `model:`, `effort:`, `trust:`,
-`folder:`, `recent:` and `gh:` labels offer or filter their respective single actions, case-insensitively; unknown
+Unlabelled search retains ordinary matching. Leading `name:`, `host:`, `harness:`, `model:`, `effort:`, `perms:`,
+`trust:`, `folder:`, `recent:` and `gh:` labels offer or filter their respective actions, case-insensitively; unknown
 labels and colons inside model IDs retain ordinary meaning. Accepting a name or host action clears search without
 launching. Invalid `gh:` input cannot launch a hidden existing directory. Host, installation, destination, title, agent
 choice and observed configuration changes invalidate an undispatched preview. Late responses cannot restore its

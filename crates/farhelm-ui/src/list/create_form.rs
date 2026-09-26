@@ -333,6 +333,17 @@ fn apply_composer_search_result(
             structured_workspace_trust.set(Some(trust));
             structured_workspace_trust_is_explicit.set(true);
         }
+        crate::launch_composer::ComposerSearchResult::Permissions(permission) => {
+            match permission {
+                crate::launch_composer::ComposerPermission::Default => {
+                    structured_permissions.set(None);
+                }
+                crate::launch_composer::ComposerPermission::Yolo => {
+                    structured_permissions.set(Some(LaunchPermission::Yolo));
+                }
+            }
+            structured_permissions_is_explicit.set(true);
+        }
         crate::launch_composer::ComposerSearchResult::Recent(entry) => {
             creation_surface.set(CreationSurface::Structured);
             composer_reset_reason.set(None);
@@ -4009,6 +4020,13 @@ pub(super) fn CreateSessionForm(
                                                         crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Fresh checkout: {repo.identifier()}" },
                                                         crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({harness:?})" },
                                                         crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! { "Effort: {crate::launch_composer::effort_value(*effort)}" },
+                                                        crate::launch_composer::ComposerSearchResult::Permissions(permission) => rsx! {
+                                                            "Permissions: "
+                                                            {match permission {
+                                                                crate::launch_composer::ComposerPermission::Default => "default",
+                                                                crate::launch_composer::ComposerPermission::Yolo => "yolo",
+                                                            }}
+                                                        },
                                                         crate::launch_composer::ComposerSearchResult::Trust(value) => rsx! { "Trust workspace: {value}" },
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => rsx! {
                                                             span { class: "launch-composer-search-recent-destination", "Recent setup: {display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label}" }

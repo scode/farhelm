@@ -55,9 +55,9 @@ async function listedSessions(request: APIRequestContext) {
 }
 
 /**
- * The complete word path applies harness, model, and effort in sequence,
- * then launches through the ordinary button path with the stored selection
- * intact. Each Enter is preceded by an assertion that the intended option
+ * The complete word path applies harness, model, effort, and both permission
+ * shorthand choices in sequence, then launches through the ordinary button
+ * path with the stored selection intact. Each Enter is preceded by an assertion that the intended option
  * is the preselected one: the Enter handler takes whatever row the last
  * render highlighted, so the premise has to hold before the key. The full
  * model id is typed so the option Enter will accept is the one named; with
@@ -97,6 +97,25 @@ test("composer word search drives a structured launch", async ({ page, request }
   await expect(form.getByRole("option", { name: `Effort: ${effort}`, exact: true })).toHaveAttribute("aria-selected", "true");
   await search.press("Enter");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: effort, exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+
+  await search.fill("perms:yolo");
+  await expect(form.getByRole("group", { name: "Permissions" })).toBeVisible();
+  await expect(form.getByRole("option", { name: "Permissions: yolo", exact: true, selected: true }))
+    .toBeVisible();
+  await search.press("Enter");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+
+  await search.fill("perms:default");
+  await expect(form.getByRole("option", { name: "Permissions: default", exact: true, selected: true }))
+    .toBeVisible();
+  await search.press("Enter");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
