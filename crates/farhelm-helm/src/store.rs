@@ -987,8 +987,9 @@ pub struct Preferences {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compact: Option<bool>,
     /// The wire word for the permissions mode of the last successful
-    /// structured launch (currently only `"yolo"`), or `None` when nothing
-    /// is remembered. A word this build does not recognize reads back as
+    /// structured launch (a `LaunchPermission` wire word, see
+    /// [`is_known_remembered_permissions_word`]), or `None` when nothing is
+    /// remembered. A word this build does not recognize reads back as
     /// `None` (see [`HelmStore::preferences`]) rather than being forwarded
     /// to a client that could not act on it.
     #[serde(skip_serializing_if = "Option::is_none")]

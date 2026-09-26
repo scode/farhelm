@@ -165,6 +165,17 @@ pub enum LaunchPermission {
 }
 
 impl LaunchPermission {
+    /// Every permission, for places that name the whole vocabulary to a
+    /// person, like the helm's refusal of an
+    /// unknown remembered-permissions word, so the list they print grows with
+    /// the enum instead of being retyped.
+    pub const ALL: [LaunchPermission; 4] = [
+        LaunchPermission::Yolo,
+        LaunchPermission::Approve,
+        LaunchPermission::SmartApprove,
+        LaunchPermission::Chat,
+    ];
+
     /// The wire spelling (the serde `snake_case` name), for places that store
     /// or compare the choice as text, like the helm's remembered-permissions
     /// preference.
@@ -206,6 +217,32 @@ pub struct LaunchSelection {
 #[cfg(test)]
 mod tests {
     use super::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
+
+    /// Spec: `LaunchPermission::ALL` lists every variant exactly once.
+    ///
+    /// Why: callers print it as "the words this helm accepts"; a variant
+    /// missing from it would be accepted but never mentioned. The exhaustive
+    /// match below fails to compile when a variant is added, which is the
+    /// reminder to extend `ALL` as well; it cannot check that on its own.
+    #[test]
+    fn all_permissions_lists_every_variant_once() {
+        for permission in LaunchPermission::ALL {
+            match permission {
+                LaunchPermission::Yolo
+                | LaunchPermission::Approve
+                | LaunchPermission::SmartApprove
+                | LaunchPermission::Chat => {}
+            }
+            assert_eq!(
+                LaunchPermission::ALL
+                    .iter()
+                    .filter(|other| **other == permission)
+                    .count(),
+                1,
+                "{permission:?}"
+            );
+        }
+    }
 
     /// Spec: Goose offers every explicit permission, OMP offers YOLO and
     /// Approve, and every other harness offers only YOLO (SPEC.md's
