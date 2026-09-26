@@ -1,0 +1,179 @@
+{
+  "hosts": [
+    {
+      "alias": null,
+      "destination": null,
+      "id": 1,
+      "identity": "identity1",
+      "incarnation": 4,
+      "kind": "local",
+      "name": "host1",
+      "remote_farhelm": null,
+      "remote_state_dir": null,
+      "state": {
+        "build_version": "0.16.0",
+        "identity": "identity1",
+        "old_version": false,
+        "phase": "connected",
+        "refresh": {
+          "sessions": 3,
+          "status": "ok"
+        }
+      }
+    },
+    {
+      "alias": "alias2",
+      "destination": "user@host2",
+      "id": 2,
+      "identity": "identity2",
+      "incarnation": 4,
+      "kind": "ssh",
+      "name": "host2",
+      "remote_farhelm": "~/.local/bin/farhelm",
+      "remote_state_dir": "~/.local/state/farhelm",
+      "state": {
+        "attempt": 2,
+        "last_error": "connection refused",
+        "phase": "connecting"
+      }
+    },
+    {
+      "alias": "alias3",
+      "destination": "user@host3",
+      "id": 3,
+      "identity": "identity3",
+      "incarnation": 4,
+      "kind": "ssh",
+      "name": "host3",
+      "remote_farhelm": "~/.local/bin/farhelm",
+      "remote_state_dir": "~/.local/state/farhelm",
+      "state": {
+        "cause": "transport-failure",
+        "last_error": "timed out",
+        "phase": "unreachable-reprobing"
+      }
+    },
+    {
+      "alias": "alias4",
+      "destination": "user@host4",
+      "id": 4,
+      "identity": "identity4",
+      "incarnation": 4,
+      "kind": "ssh",
+      "name": "host4",
+      "remote_farhelm": "~/.local/bin/farhelm",
+      "remote_state_dir": "~/.local/state/farhelm",
+      "state": {
+        "our_build": "0.16.0",
+        "our_protocol": 29,
+        "peer_build": "0.15.0",
+        "peer_protocol": 28,
+        "phase": "version-skew",
+        "remediation": "Update the host."
+      }
+    },
+    {
+      "alias": "alias5",
+      "destination": "user@host5",
+      "id": 5,
+      "identity": "identity5",
+      "incarnation": 4,
+      "kind": "ssh",
+      "name": "host5",
+      "remote_farhelm": "~/.local/bin/farhelm",
+      "remote_state_dir": "~/.local/state/farhelm",
+      "state": {
+        "phase": "identity-mismatch",
+        "recorded": "old",
+        "reported": "new"
+      }
+    },
+    {
+      "alias": "alias6",
+      "destination": "user@host6",
+      "id": 6,
+      "identity": "identity6",
+      "incarnation": 4,
+      "kind": "ssh",
+      "name": "host6",
+      "remote_farhelm": "~/.local/bin/farhelm",
+      "remote_state_dir": "~/.local/state/farhelm",
+      "state": {
+        "phase": "identity-unverified",
+        "recorded": "old"
+      }
+    },
+    {
+      "alias": "alias7",
+      "destination": "user@host7",
+      "id": 7,
+      "identity": "identity7",
+      "incarnation": 4,
+      "kind": "ssh",
+      "name": "host7",
+      "remote_farhelm": "~/.local/bin/farhelm",
+      "remote_state_dir": "~/.local/state/farhelm",
+      "state": {
+        "identity": "identity2",
+        "phase": "duplicate",
+        "twin": 2
+      }
+    },
+    {
+      "alias": "alias8",
+      "destination": "user@host8",
+      "id": 8,
+      "identity": "identity8",
+      "incarnation": 4,
+      "kind": "ssh",
+      "name": "host8",
+      "remote_farhelm": "~/.local/bin/farhelm",
+      "remote_state_dir": "~/.local/state/farhelm",
+      "state": {
+        "phase": "retired",
+        "reason": "removed"
+      }
+    },
+    {
+      "alias": "alias9",
+      "destination": "user@host9",
+      "id": 9,
+      "identity": "identity9",
+      "incarnation": 4,
+      "kind": "ssh",
+      "name": "host9",
+      "remote_farhelm": "~/.local/bin/farhelm",
+      "remote_state_dir": "~/.local/state/farhelm",
+      "state": {
+        "build_version": "0.15.0",
+        "identity": null,
+        "old_version": true,
+        "phase": "connected",
+        "refresh": {
+          "error": "list failed",
+          "status": "failed"
+        }
+      }
+    },
+    {
+      "alias": "alias10",
+      "destination": "user@host10",
+      "id": 10,
+      "identity": "identity10",
+      "incarnation": 4,
+      "kind": "ssh",
+      "name": "host10",
+      "remote_farhelm": "~/.local/bin/farhelm",
+      "remote_state_dir": "~/.local/state/farhelm",
+      "state": {
+        "build_version": "0.16.0",
+        "identity": null,
+        "old_version": false,
+        "phase": "connected",
+        "refresh": {
+          "status": "pending"
+        }
+      }
+    }
+  ]
+}

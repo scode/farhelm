@@ -129,7 +129,7 @@
 //! here.
 
 use dioxus::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 mod activity;
 mod api;
@@ -193,240 +193,24 @@ use session_view::SessionView;
 #[derive(Clone, PartialEq)]
 pub struct ApiBase(pub String);
 
-/// Mirror of the helm's session status JSON (farhelm-proto
-/// `SessionStatus`). Kept local for the same reason `Session` is — the UI
-/// depends on the HTTP contract, not on proto internals.
+/// The wire types the helm passes through to the browser unchanged, shared
+/// with the helm and supervisor rather than mirrored.
 ///
-/// `#[serde(default)]` on every `Session::status` field (below) is what
-/// makes an old-shaped reply — one with no `status` at all — decode as
-/// `Unknown` rather than fail; this mirrors `SessionStatus`'s own
-/// wire-tolerance contract in farhelm-proto. `#[default]` on the
-/// `Unknown` variant is what backs that: a reply that predates this
-/// field must decode as "not yet known", never as a fabricated liveness
-/// claim in either direction.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum SessionStatus {
-    /// Not yet known one way or the other — never a guess. See
-    /// farhelm-proto's `SessionStatus::Unknown` for the full rationale;
-    /// this mirror exists only to give the UI something to match on.
-    ///
-    /// **Never rendered as a badge** (PLAN_M6_75.md item 3): `status`'s
-    /// wording module returns no badge at all for this variant, so a row
-    /// whose status nothing has classified yet simply shows none rather
-    /// than a word that reads like a verdict. This is the UI half of a
-    /// two-part rule — the helm's never-overwrite-definite merge covers the
-    /// restart case, where a prior classification still exists to keep on
-    /// screen; this covers the create case, where none does.
-    #[default]
-    Unknown,
-    /// The agent is alive and appears to be working — and the status a
-    /// live session carries whenever nothing more specific has been
-    /// established.
-    ///
-    /// Two of those cases are worth knowing when reading a screen: a
-    /// session the supervisor has not yet sampled twice (it has no
-    /// comparison to draw a conclusion from, and a just-launched agent is
-    /// working), and one whose screen changed at its last sample. See
-    /// farhelm-proto's `SessionStatus::Running` for the full contract; the
-    /// rule that matters here is that all three live statuses are
-    /// heuristic and cosmetic, so nothing in this UI may gate on which one
-    /// it is.
-    Running,
-    /// The agent is alive and appears to be blocked on the user — a
-    /// detected question or approval prompt with no answer yet. The status
-    /// SPEC.md's fleet list exists to surface.
-    Waiting,
-    /// The agent is alive and at rest. Distinct from `Exited`: the session
-    /// is still there and still takes input.
-    Idle,
-    /// The agent's process has ended. `exit_code` is `None` when tmux
-    /// could not reduce the death to a plain code (a signal, or no live
-    /// pane to ask at all).
-    Exited { exit_code: Option<i32> },
-    /// The host rebooted while this session was still live — launching,
-    /// running, or with a stop in flight — so its terminal is gone and
-    /// nothing can ever be asked about the agent again (PLAN_M3.md item
-    /// 2). Deliberately its own state rather than folded into `Exited`:
-    /// the user is being told the system LOST TRACK, not that their agent
-    /// finished — the two call for different actions (restart-with-resume
-    /// vs. nothing).
-    Interrupted,
-    /// The agent could not be started at all — the launch shim's
-    /// exec-failure sentinel (PLAN_M3.md item 3), read by the supervisor
-    /// and surfaced here with `detail` carrying its own recorded report
-    /// (errno, argv0, or which pre-exec step failed) verbatim. Distinct
-    /// from `Exited`: the agent never ran, so there is nothing to say it
-    /// "finished" — a failed exec and a command that ran and died look
-    /// identical to tmux, and only the supervisor's own sentinel read
-    /// tells them apart (see farhelm-proto's `SessionStatus::Error`).
-    Error { detail: String },
-}
-
-impl SessionStatus {
-    /// Whether the agent behind this session is still running.
-    ///
-    /// A predicate rather than an equality against one live variant at each
-    /// site, and that is about the SHAPE of this enum, not about brevity.
-    /// M6.75's status work replaced the single live status with a
-    /// running/waiting/idle discrimination (PLAN_M6_75.md item 3) — three
-    /// statuses that are ALL live, differing only in what the agent is
-    /// doing. That day has arrived, and this predicate is why it cost one
-    /// edit here instead of a hunt for every `== Alive` in the tree, each of
-    /// which would have quietly started answering `false` for a session that
-    /// is very much alive, with nothing failing to compile to say so. The
-    /// same argument holds unchanged for the next status ever added.
-    ///
-    /// Written as an exhaustive `match` rather than a `matches!`, and that is
-    /// the half that actually holds the line: `matches!` would send every
-    /// future variant to `false` by default, which is the exact silent
-    /// mis-answer this predicate exists to prevent — it would move the trap
-    /// rather than remove it. Spelling out every arm makes a new status a
-    /// compile error here, and here is where the decision belongs.
-    ///
-    /// The motivating site is `session_view`'s restart gate, which decides
-    /// whether a restart click opens a confirmation or restarts outright.
-    /// A stale `false` there would restart a live agent WITHOUT asking —
-    /// killing it — which is precisely what the confirmation exists to
-    /// prevent.
-    ///
-    /// `Unknown` is deliberately NOT live. SPEC.md's no-guessing rule says
-    /// an unresolved status is presented as uncertain, and rounding it up
-    /// to a liveness claim is precisely the guess that rule forbids.
-    pub(crate) fn is_live(&self) -> bool {
-        match self {
-            SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => true,
-            SessionStatus::Unknown
-            | SessionStatus::Exited { .. }
-            | SessionStatus::Interrupted
-            | SessionStatus::Error { .. } => false,
-        }
-    }
-
-    /// Whether the agent behind this session is definitively finished —
-    /// exited, lost to a reboot, or never started at all.
-    ///
-    /// The complement of [`SessionStatus::is_live`] over the KNOWN states,
-    /// not its logical negation: `Unknown` is neither, for the same
-    /// no-guessing reason. Callers that must do something for every status
-    /// therefore still need a third branch, which is the point — a status
-    /// nobody has resolved yet is a real case, and a two-way split would
-    /// quietly file it under one of the answers.
-    ///
-    /// Exhaustive for the same reason `is_live` is, with one extra edge: a
-    /// default-`false` here reads as "not finished", which for a delete
-    /// confirmation means a new status would start prompting rather than
-    /// silently skipping the prompt. That is the safe direction, which is
-    /// exactly why it would go unnoticed — so this side gets the compile
-    /// error too, not just the side whose failure is loud.
-    ///
-    /// Existed alongside `is_live` before the M6.75 status split precisely
-    /// so that split would be a single edit for BOTH questions rather than
-    /// one that fixed the live-side call sites and left every ended-side
-    /// match quietly stale. It was, and the pair stays for the same reason.
-    pub(crate) fn has_ended(&self) -> bool {
-        match self {
-            SessionStatus::Exited { .. }
-            | SessionStatus::Interrupted
-            | SessionStatus::Error { .. } => true,
-            SessionStatus::Running
-            | SessionStatus::Waiting
-            | SessionStatus::Idle
-            | SessionStatus::Unknown => false,
-        }
-    }
-}
-
-/// Mirror of the helm's restart-offer JSON (farhelm-proto `RestartOffer`):
-/// what restarting THIS session would do to its conversation, as the
-/// supervisor currently understands it (PLAN_M3.md items 7-9).
+/// These are the leaf types whose JSON the helm forwards verbatim from
+/// farhelm-proto, so a second copy here could only ever drift. Everything the
+/// helm itself shapes for HTTP ([`Session`], [`Host`], [`Profile`],
+/// [`SourceProfile`] and the reply envelopes) stays a local mirror, pinned by
+/// the helm-to-UI contract tests below, because those types deliberately
+/// tolerate words a newer helm may send and a stale browser tab must not fail
+/// on. UI-side rules for these types live at their use sites: `status.rs`
+/// renders no badge for `SessionStatus::Unknown`, and restart gating reads
+/// only `SessionStatus::is_live`.
 ///
-/// The UI never derives this — it cannot see a session's integration
-/// snapshot or its captured conversation identity — so the only honest
-/// thing it can do with a reply that carries no `restart_offer` at all is
-/// take the same safe default the wire type takes: `FreshOnly`. Defaulting
-/// toward "captured" would let the UI offer a resume the supervisor would
-/// then refuse.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum RestartOffer {
-    /// Nothing captured and no configured fallback: restart can only
-    /// launch a fresh agent.
-    #[default]
-    FreshOnly,
-    /// This session's own conversation was captured; restart resumes
-    /// exactly it.
-    Resume,
-    /// No captured identity, but the session carries an explicit
-    /// placeholder-free resume command that restart runs verbatim. Kept
-    /// distinct from `FreshOnly` because the user configured it — SPEC.md
-    /// requires it be labeled honestly rather than as a plain fresh launch.
-    FallbackTemplate,
-}
-
-/// Browser-facing mirror of one structured composer choice.
-///
-/// It crosses the HTTP boundary unchanged. Command construction remains
-/// helm-owned, so a browser value can never become an argv fragment.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct LaunchSelection {
-    pub harness: LaunchHarness,
-    pub model: Option<String>,
-    pub effort: Option<LaunchEffort>,
-    pub permissions: Option<LaunchPermission>,
-    /// A per-run project-resource trust choice, independent of tool permissions.
-    /// Older history rows have no such choice and use the harness default.
-    #[serde(default)]
-    pub workspace_trust: Option<bool>,
-}
-
-/// The interactive harness selected in the launch composer.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum LaunchHarness {
-    /// Cursor has launch support but no conversation tracking or automatic Resume.
-    Cursor,
-    Codex,
-    Claude,
-    Muse,
-    Goose,
-    Pi,
-    /// OMP's OpenRouter-backed terminal command — the Pi fork's launch
-    /// surface, compiled beside Pi's with OMP's own approval-mode and
-    /// thinking flags.
-    Omp,
-    /// OpenCode's generic integration has no captured conversation or
-    /// synthesized resume command, despite being a first-class composer row.
-    OpenCode,
-    /// Grok's native tracked launch; model and effort choices are not exposed
-    /// until their CLI contract is verified.
-    Grok,
-}
-
-/// A literal reasoning effort understood by the selected harness.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum LaunchEffort {
-    Off,
-    Minimal,
-    Low,
-    Medium,
-    High,
-    Xhigh,
-    Max,
-    Ultra,
-}
-
-/// A deliberate permission override for an interactive harness launch.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum LaunchPermission {
-    Yolo,
-    Approve,
-    SmartApprove,
-    Chat,
-}
+/// `TabInfo` keeps its UI name `Tab`: the tab strip calls it that throughout.
+pub use farhelm_proto::{
+    LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer, SessionStatus,
+    TabInfo as Tab,
+};
 
 /// Mirror of the helm's session JSON (farhelm-proto `SessionInfo`). Kept
 /// as a local type so the UI depends on the HTTP contract, not on proto
@@ -617,25 +401,16 @@ impl Session {
     /// The activity stamp to DISPLAY by: [`Session::last_activity_at`] when
     /// the helm supplied one, [`Session::created_at`] when it did not.
     ///
-    /// A deliberate copy of `farhelm_proto::SessionInfo::effective_activity`,
-    /// which is the same rule on the other side of the wire. Copied rather
-    /// than shared because this crate mirrors the HTTP CONTRACT rather than
-    /// depending on proto internals (see `Session`'s own docs) — but the two
-    /// must not drift: the helm ORDERS an activity-sorted list by its
-    /// version of this rule, and a client that rendered ages by a different
-    /// one would print a column that contradicted the order it was printed
-    /// in. If the proto's fallback changes, this changes with it.
+    /// The rule is `farhelm_proto::effective_activity`, shared rather than
+    /// copied: every reader that renders an age or decides seen/unseen must
+    /// apply the same fallback, and a copy is how two readers drift.
     ///
     /// A zero here is "this helm predates the field", never 1970 — the
     /// fallback exists for exactly that compatibility case. When both are
     /// zero the answer stays zero, and `activity::ActivityStamp` renders
     /// nothing at all rather than an age counted from the epoch.
     pub(crate) fn effective_activity(&self) -> i64 {
-        if self.last_activity_at > 0 {
-            self.last_activity_at
-        } else {
-            self.created_at
-        }
+        farhelm_proto::effective_activity(self.last_activity_at, self.created_at)
     }
 
     /// Whether this session has output nobody has looked at yet (SPEC.md,
@@ -1008,19 +783,6 @@ pub enum RefreshHealth {
     /// Not a `Default`, for the reason recorded there.
     #[serde(other)]
     Unrecognized,
-}
-
-/// Mirror of the helm's tab JSON (farhelm-proto `TabInfo`): an opaque,
-/// supervisor-minted id and nothing else.
-///
-/// Deliberately as minimal as the wire type. SPEC.md gives tabs no names
-/// and close is their only operation, so an id is the whole identity —
-/// labels are positional and computed at render time (see
-/// `tabs::tab_label`). The id is echoed back verbatim on the terminal
-/// WebSocket's `?tab=` and on the close request; this UI never parses it.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct Tab {
-    pub id: String,
 }
 
 /// Declare an `asset!()` and enrol it in this crate's asset inventory in one
@@ -1912,89 +1674,6 @@ mod tests {
         Tab { id: id.into() }
     }
 
-    /// Every `SessionStatus` variant, once, with the answer both predicates
-    /// owe it.
-    ///
-    /// A table rather than scattered asserts so that adding a status forces
-    /// a row here — the compiler already forces the two `match`es to grow,
-    /// and this is what forces someone to say out loud what the new status
-    /// MEANS rather than picking whichever arm compiles.
-    fn status_truth_table() -> Vec<(SessionStatus, bool, bool)> {
-        vec![
-            // All three live statuses answer alike, which is the property
-            // that matters: they differ in what the agent is DOING, never
-            // in whether it is there, and a predicate that told them apart
-            // would leak a cosmetic distinction into a destructive gate.
-            (SessionStatus::Running, true, false),
-            (SessionStatus::Waiting, true, false),
-            (SessionStatus::Idle, true, false),
-            (SessionStatus::Unknown, false, false),
-            (SessionStatus::Exited { exit_code: Some(0) }, false, true),
-            (SessionStatus::Exited { exit_code: None }, false, true),
-            (SessionStatus::Interrupted, false, true),
-            (
-                SessionStatus::Error {
-                    detail: "exec_failed".to_string(),
-                },
-                false,
-                true,
-            ),
-        ]
-    }
-
-    /// Pins both predicates against every variant, because the whole reason
-    /// they exist is that a WRONG answer here is silent everywhere else.
-    ///
-    /// `is_live` gates `session_view`'s restart confirmation: a false
-    /// negative restarts a running agent without asking, killing it.
-    /// `has_ended` gates `list`'s delete confirmation: a false positive
-    /// deletes a live session with no prompt at all. Neither failure shows
-    /// up as a crash or a failed request — the UI just quietly does the
-    /// destructive thing — so the table is the only place either is caught.
-    #[farhelm_testtrace::test]
-    fn each_status_answers_both_liveness_predicates() {
-        for (status, live, ended) in status_truth_table() {
-            assert_eq!(
-                status.is_live(),
-                live,
-                "{status:?} must{} be live",
-                if live { "" } else { " not" }
-            );
-            assert_eq!(
-                status.has_ended(),
-                ended,
-                "{status:?} must{} have ended",
-                if ended { "" } else { " not" }
-            );
-        }
-    }
-
-    /// The two predicates are not each other's negation, and that gap is
-    /// deliberate: `Unknown` answers `false` to BOTH.
-    ///
-    /// SPEC.md's no-guessing rule is what puts it there — an unresolved
-    /// status is presented as uncertain rather than rounded toward either
-    /// answer. A future refactor that "simplifies" one predicate into
-    /// `!other()` would erase exactly that, and would do it silently, since
-    /// every other variant agrees. Asserting the gap explicitly is what
-    /// makes such a change fail here instead of in a confirmation prompt.
-    #[farhelm_testtrace::test]
-    fn an_unresolved_status_is_neither_live_nor_ended() {
-        assert!(!SessionStatus::Unknown.is_live());
-        assert!(!SessionStatus::Unknown.has_ended());
-        // And no OTHER variant shares that gap: every resolved status
-        // answers exactly one of the two.
-        for (status, live, ended) in status_truth_table() {
-            if status == SessionStatus::Unknown {
-                continue;
-            }
-            assert!(
-                live != ended,
-                "{status:?} is resolved, so exactly one predicate must claim it"
-            );
-        }
-    }
-
     /// A `Session` JSON with no `annotation` key (every session that was
     /// never stopped, and every reply from a helm predating PLAN_M3.md
     /// item 4) must decode as `None` rather than failing the whole
@@ -2051,59 +1730,6 @@ mod tests {
         assert_eq!(origin.github_repo.unwrap().identifier(), "acme/bar");
         assert_eq!(origin.working_copy.unwrap(), association);
         assert_eq!(origin.cwd, "/work/bar-1");
-    }
-
-    /// Every live status the helm can send, decoded through the REAL
-    /// `Session` — the UI's half of PLAN_M6_75.md item 3's live split.
-    ///
-    /// This crate carries its OWN mirror of `SessionStatus` (see that
-    /// type's docs for why), which means farhelm-proto's golden tests
-    /// cannot see a drift here: rename a variant in this file, or drop the
-    /// `rename_all`, and the proto suite stays green while every live
-    /// session in the browser fails to decode and the whole listing
-    /// disappears. Pinning the wire SPELLINGS against this decoder is the
-    /// only place that failure is catchable.
-    ///
-    /// Decoded from a whole `Session` object rather than from the status
-    /// alone, because the nesting is part of what a drift would break —
-    /// the status arrives as a field of a listing row, never on its own.
-    #[farhelm_testtrace::test]
-    fn every_live_status_spelling_decodes_through_the_ui_mirror() {
-        for (state, expected) in [
-            ("running", SessionStatus::Running),
-            ("waiting", SessionStatus::Waiting),
-            ("idle", SessionStatus::Idle),
-        ] {
-            let json = serde_json::json!({
-                "id": "s1",
-                "title": "demo",
-                "cwd": "/tmp",
-                "invocation": "agent",
-                "status": { "state": state },
-            });
-            let decoded: Session = serde_json::from_value(json)
-                .unwrap_or_else(|e| panic!("the helm's `{state}` must decode here: {e}"));
-            assert_eq!(decoded.status, expected);
-            assert!(
-                decoded.status.is_live(),
-                "`{state}` is a live status; a mirror that decoded it as anything else would \
-                 make the delete and restart gates lie"
-            );
-        }
-
-        // And the status this UI no longer understands: `alive` was
-        // REPLACED, so a helm still sending it is a version skew the build
-        // stamp is supposed to have caught. Failing the decode is what
-        // keeps that from being mistaken for a session with no status.
-        let stale = serde_json::json!({
-            "id": "s1",
-            "title": "demo",
-            "cwd": "/tmp",
-            "invocation": "agent",
-            "status": { "state": "alive" },
-        });
-        serde_json::from_value::<Session>(stale)
-            .expect_err("`alive` was replaced at PROTOCOL_VERSION 10, not kept as an alias");
     }
 
     /// `host_identity`'s three wire shapes decode to three DISTINCT values:

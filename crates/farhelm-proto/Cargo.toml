@@ -16,7 +16,18 @@ serde.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+# Only the async frame reader/writer (`io.rs`) needs tokio. It is optional so
+# `farhelm-ui`'s wasm build can depend on the wire types themselves: the
+# workspace's tokio features (net, process) do not build for wasm32.
+tokio = { workspace = true, optional = true }
+
+[features]
+# Every native consumer wants the frame I/O, so it stays on by default; only the
+# browser build turns it off. The test module exercises `io.rs` and assumes this
+# default, so `--no-default-features` is a build configuration (checked by
+# compiling farhelm-ui for wasm32), not a supported test configuration.
+default = ["io"]
+io = ["dep:tokio"]
 
 [dev-dependencies]
 farhelm-testtrace.workspace = true

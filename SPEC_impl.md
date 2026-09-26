@@ -216,15 +216,20 @@ multi-host fleet is several of them at once. The UI corrects for none of that. T
 the helm's own clock, off an HTTP `Date` header — would fix at most one of the N edges involved and would lend the rest
 a precision they do not have, so the code instead refuses to print nonsense (a stamp in the future reads `now` rather
 than a negative age) and keeps the raw stamp one hover away. The `Session` mirror decodes `last_activity_at` for this
-and applies the proto's own fallback rule, `last_activity_at` when positive and `created_at` otherwise, copied into
-`Session::effective_activity` rather than shared: this crate mirrors the HTTP contract rather than depending on proto
-internals. That rule governs the displayed age and the seen/unseen comparison only — the helm orders an activity-sorted
-list by reported status first and the work-start key inside each group, so the age column is deliberately not a rank
-column: a row above another can show an older age, and that is the contract rather than a contradiction. A zero means
-"this helm predates the field" and renders no age at all rather than an age counted from 1970. The viewer's end of the
-subtraction can go missing too — a platform clock that will not answer, or one sitting at or before the epoch — and that
-is carried as an absent value rather than as a zero, because subtracting a good host stamp from a zero "now" would clamp
-every session in the fleet to `now` and paint a dormant fleet as a busy one.
+and applies the proto's own fallback rule, `last_activity_at` when positive and `created_at` otherwise, by calling
+`farhelm_proto::effective_activity` rather than keeping a copy. The UI depends on farhelm-proto with its tokio-based
+frame I/O feature turned off, so it builds for wasm, and shares the leaf wire types the helm forwards verbatim (session
+status, restart offer, tab, launch selection). It keeps its own decoders for what the helm shapes for HTTP (session
+rows, hosts, profiles and the reply envelopes), because those tolerate words a newer helm may send to a browser tab
+still running older code; shared golden files under `crates/farhelm-helm/http-contract/`, serialized by the helm's tests
+and decoded by the UI's, keep the two sides from drifting. That rule governs the displayed age and the seen/unseen
+comparison only — the helm orders an activity-sorted list by reported status first and the work-start key inside each
+group, so the age column is deliberately not a rank column: a row above another can show an older age, and that is the
+contract rather than a contradiction. A zero means "this helm predates the field" and renders no age at all rather than
+an age counted from 1970. The viewer's end of the subtraction can go missing too — a platform clock that will not
+answer, or one sitting at or before the epoch — and that is carried as an absent value rather than as a zero, because
+subtracting a good host stamp from a zero "now" would clamp every session in the fleet to `now` and paint a dormant
+fleet as a busy one.
 
 Ages advance on a dedicated 30-second tick — one page-wide signal, written by a component mounted beside the
 invalidation feed and read by the list and the open session's header. The listing's fallback poll was the obvious thing

@@ -268,7 +268,7 @@ test("structured checkout previews, launches, and reuses a recent as a fresh clo
     expect(first.body).toMatchObject({ cwd: named, title: "fix", launch: { harness: "codex" }, github_checkout: { repo: fixture.repo } });
     const persisted = await assertCheckout(page, request, fixture, first.session.id, named, true);
     // Requests encode an unset trust choice as null; persisted replies omit it.
-    expect({ workspace_trust: null, ...persisted.launch }).toEqual(first.body.launch);
+    expect(persisted.launch).toEqual(first.body.launch);
 
     form = await openComposer(page, host);
     const recent = form.locator(".launch-composer-recents").getByRole("button", { name: new RegExp(`gh:${fixture.repo}`) });

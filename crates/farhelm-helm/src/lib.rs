@@ -216,6 +216,10 @@ mod rest_harness;
 #[cfg(test)]
 mod test_capture;
 
+/// Golden JSON shared with `farhelm-ui` for the HTTP views it mirrors.
+#[cfg(test)]
+mod http_contract_tests;
+
 /// CLI arguments for `farhelm helm run`. Lives here (not in the bin
 /// crate) so the helm's surface and its implementation evolve together.
 ///

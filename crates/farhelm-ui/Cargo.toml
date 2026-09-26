@@ -16,6 +16,13 @@ dist = false
 
 [dependencies]
 dioxus.workspace = true
+# The wire types the helm passes through to the browser unchanged (session
+# status, restart offer, tab, launch selection). Named by path rather than
+# through the workspace entry because a member cannot turn off default features
+# the workspace entry leaves on, and the default `io` feature pulls in tokio's
+# net and process support, which does not build for wasm32. Native builds get
+# `io` back anyway through farhelm-helm; nothing in this crate uses it.
+farhelm-proto = { path = "../farhelm-proto", default-features = false }
 # Races renderer bridge calls against one deadline on both wasm and desktop.
 # The JavaScript commit still guards its own side effect because dropping the
 # Rust future cannot cancel script that the renderer has already started.

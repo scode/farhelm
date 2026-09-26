@@ -161,7 +161,7 @@ test("restart with shows fixed context and submits one edited resume", async ({ 
   expect(bodies, "one consent must send one restart request").toEqual([{
     mode: "resume",
     stop_if_running: false,
-    with: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "yolo", workspace_trust: null },
+    with: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "yolo" },
   }]);
 });
 

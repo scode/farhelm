@@ -67,6 +67,7 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "io")]
 pub mod io;
 pub mod launch;
 pub use launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
@@ -772,8 +773,7 @@ impl SessionStatus {
     /// no compile error to announce it. Routing the question through one
     /// predicate is what makes the NEXT such split a single edit.
     ///
-    /// Written as an exhaustive `match` rather than a `matches!` for the
-    /// same reason farhelm-ui's mirror of this predicate is: `matches!`
+    /// Written as an exhaustive `match` rather than a `matches!`: `matches!`
     /// would send every future variant to `false` by default, moving the
     /// trap rather than removing it. Spelling out every arm makes a new
     /// status a compile error here, which is where the decision belongs.
@@ -788,6 +788,34 @@ impl SessionStatus {
             | SessionStatus::Exited { .. }
             | SessionStatus::Error { .. }
             | SessionStatus::Interrupted => false,
+        }
+    }
+
+    /// Whether the agent behind this session is definitively finished:
+    /// exited, lost to a reboot, or never started at all.
+    ///
+    /// The complement of [`SessionStatus::is_live`] over the KNOWN states,
+    /// not its logical negation: `Unknown` is neither, for the same
+    /// no-guessing reason. Callers that must act on every status therefore
+    /// still need a third branch, which is the point: a status nobody has
+    /// resolved yet is a real case, and a two-way split would quietly file
+    /// it under one of the answers.
+    ///
+    /// Exhaustive for the same reason `is_live` is, with one extra edge: a
+    /// default-`false` here reads as "not finished", which for the browser's
+    /// delete confirmation means a new status would start prompting rather
+    /// than silently skipping the prompt. That is the safe direction, which is
+    /// exactly why it would go unnoticed, so this side gets the compile error
+    /// too.
+    pub fn has_ended(&self) -> bool {
+        match self {
+            SessionStatus::Exited { .. }
+            | SessionStatus::Interrupted
+            | SessionStatus::Error { .. } => true,
+            SessionStatus::Running
+            | SessionStatus::Waiting
+            | SessionStatus::Idle
+            | SessionStatus::Unknown => false,
         }
     }
 }
@@ -1029,6 +1057,22 @@ pub struct SessionInfo {
     pub working_copy: Option<WorkingCopyInfo>,
 }
 
+/// The activity stamp a reader should display and compare by: `last_activity_at`
+/// when the sender supplied one (positive), `created_at` otherwise.
+///
+/// A free function rather than only [`SessionInfo::effective_activity`] because
+/// the browser's session row is the helm's HTTP view, not a `SessionInfo`, and
+/// it must apply exactly this fallback: the seen/unseen comparison and the
+/// rendered age would otherwise drift from every other reader. Both zero stays
+/// zero, which callers read as "no stamp", never as 1970.
+pub fn effective_activity(last_activity_at: i64, created_at: i64) -> i64 {
+    if last_activity_at > 0 {
+        last_activity_at
+    } else {
+        created_at
+    }
+}
+
 impl SessionInfo {
     /// The activity stamp to DISPLAY by and to compare seen state against:
     /// [`Self::last_activity_at`] when the sender supplied one, and
@@ -1048,11 +1092,7 @@ impl SessionInfo {
     /// `farhelm-helm`'s `merge_cached_session`, which keeps the raw value
     /// monotonic). Derive it at read time, every time.
     pub fn effective_activity(&self) -> i64 {
-        if self.last_activity_at > 0 {
-            self.last_activity_at
-        } else {
-            self.created_at
-        }
+        effective_activity(self.last_activity_at, self.created_at)
     }
 
     /// The within-group ordering key for recent work, with a legacy
@@ -4973,37 +5013,81 @@ mod tests {
         }
     }
 
-    /// [`SessionStatus::is_live`] answers for every variant, once.
+    /// Every `SessionStatus` variant, once, with the answer both liveness
+    /// predicates owe it: `(status, is_live, has_ended)`.
     ///
-    /// A table rather than scattered asserts, mirroring farhelm-ui's
-    /// `status_truth_table`: the compiler already forces the predicate's
-    /// match to grow when a status is added, and this is what forces
-    /// someone to say out loud what the new status MEANS rather than
-    /// picking whichever arm compiles. The three live statuses answering
-    /// alike is the whole point — a consumer must never be able to tell
-    /// them apart through this predicate.
-    #[farhelm_testtrace::test]
-    fn is_live_answers_for_every_status() {
-        for (status, live) in [
-            (SessionStatus::Running, true),
-            (SessionStatus::Waiting, true),
-            (SessionStatus::Idle, true),
-            (SessionStatus::Unknown, false),
-            (SessionStatus::Exited { exit_code: Some(0) }, false),
-            (SessionStatus::Exited { exit_code: None }, false),
+    /// A table rather than scattered asserts so that adding a status forces
+    /// a row here. The compiler already forces the two `match`es to grow;
+    /// this is what forces someone to say out loud what the new status
+    /// MEANS rather than picking whichever arm compiles.
+    fn status_truth_table() -> Vec<(SessionStatus, bool, bool)> {
+        vec![
+            // All three live statuses answer alike, which is the property
+            // that matters: they differ in what the agent is DOING, never in
+            // whether it is there, and a predicate that told them apart would
+            // leak a cosmetic distinction into a destructive gate.
+            (SessionStatus::Running, true, false),
+            (SessionStatus::Waiting, true, false),
+            (SessionStatus::Idle, true, false),
+            (SessionStatus::Unknown, false, false),
+            (SessionStatus::Exited { exit_code: Some(0) }, false, true),
+            (SessionStatus::Exited { exit_code: None }, false, true),
+            (SessionStatus::Interrupted, false, true),
             (
                 SessionStatus::Error {
                     detail: "exec failed".to_string(),
                 },
                 false,
+                true,
             ),
-            (SessionStatus::Interrupted, false),
-        ] {
+        ]
+    }
+
+    /// Why this matters: a WRONG answer from either predicate is silent
+    /// everywhere else. The browser's restart gate reads `is_live`, where a
+    /// false negative restarts a running agent without asking; its delete
+    /// gate reads `has_ended`, where a false positive deletes a live session
+    /// with no prompt. Neither shows up as a crash or a failed request.
+    ///
+    /// Specification: [`SessionStatus::is_live`] and
+    /// [`SessionStatus::has_ended`] answer every variant as the truth table
+    /// says.
+    #[farhelm_testtrace::test]
+    fn each_status_answers_both_liveness_predicates() {
+        for (status, live, ended) in status_truth_table() {
             assert_eq!(
                 status.is_live(),
                 live,
                 "{status:?} must{} be live",
                 if live { "" } else { " not" }
+            );
+            assert_eq!(
+                status.has_ended(),
+                ended,
+                "{status:?} must{} have ended",
+                if ended { "" } else { " not" }
+            );
+        }
+    }
+
+    /// Why this matters: SPEC.md's no-guessing rule presents an unresolved
+    /// status as uncertain rather than rounding it toward either answer. A
+    /// refactor that "simplifies" one predicate into `!other()` would erase
+    /// that silently, since every other variant agrees.
+    ///
+    /// Specification: `Unknown` answers `false` to both predicates, and every
+    /// resolved status answers `true` to exactly one.
+    #[farhelm_testtrace::test]
+    fn an_unresolved_status_is_neither_live_nor_ended() {
+        assert!(!SessionStatus::Unknown.is_live());
+        assert!(!SessionStatus::Unknown.has_ended());
+        for (status, live, ended) in status_truth_table() {
+            if status == SessionStatus::Unknown {
+                continue;
+            }
+            assert!(
+                live != ended,
+                "{status:?} is resolved, so exactly one predicate must claim it"
             );
         }
     }

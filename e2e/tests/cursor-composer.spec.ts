@@ -34,7 +34,7 @@ test("Cursor launches without claiming session tracking", async ({ page, request
   );
   await form.locator(".create-session-submit").click();
   expect((await submitted).postDataJSON().launch).toEqual({
-    harness: "cursor", model: "composer-2.5", effort: null, permissions: "yolo", workspace_trust: null,
+    harness: "cursor", model: "composer-2.5", effort: null, permissions: "yolo",
   });
   await expect(form).toContainText("fixture captured Cursor launch");
 

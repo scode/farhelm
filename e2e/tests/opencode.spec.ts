@@ -67,7 +67,6 @@ test("OpenCode keeps composer controls while offering default and explicit Zen m
   await form.locator(".create-session-submit").click();
   expect((await submitted).postDataJSON().launch).toEqual({
     harness: "open_code", model: "custom'42;$literal", effort: null, permissions: null,
-    workspace_trust: null,
   });
   await expect(form).toContainText("fixture captured launch");
   await harness.getByRole("button", { name: "other / command", exact: true }).click();

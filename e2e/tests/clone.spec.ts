@@ -143,7 +143,7 @@ test("a structured GUI clone pre-fills without launching, then starts its ready 
         ),
         form.locator(".create-session-submit").click(),
       ]);
-      expect(response.request().postDataJSON().launch).toEqual({ ...selection, workspace_trust: null });
+      expect(response.request().postDataJSON().launch).toEqual(selection);
       const child = await response.json();
       childId = child.id;
       expect(childId).not.toBe(parentId);
