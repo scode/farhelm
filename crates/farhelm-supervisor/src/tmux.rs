@@ -1649,8 +1649,8 @@ impl PaneState {
 /// state-dir path that tmux itself bakes into its own text) risks a false
 /// match whenever that path happens to CONTAIN one of the recognized
 /// phrases as a substring. Matching against this untouched stderr instead
-/// closes that hole; see [`is_tolerated_list_panes_diagnostic`]'s own docs
-/// for the anchored comparison this makes possible.
+/// closes that hole; see [`TmuxRefusal`] for the anchored comparisons this
+/// makes possible.
 #[derive(Debug)]
 struct TmuxCommandFailure {
     stderr: Vec<u8>,
@@ -1671,11 +1671,10 @@ impl TmuxCommandFailure {
         }
     }
 
-    /// tmux's stderr with surrounding whitespace stripped — the exact text
-    /// every diagnostic [`is_tolerated_list_panes_diagnostic`] recognizes
-    /// must equal VERBATIM (never merely contain), since tmux emits each
-    /// of those diagnostics as a complete, standalone message with nothing
-    /// else on the line.
+    /// tmux's stderr with surrounding whitespace stripped — the text
+    /// [`classify_tmux_refusal`] anchors every recognized diagnostic
+    /// against, since tmux emits each of them as a complete, standalone
+    /// message with nothing else on the line.
     fn stderr_trimmed(&self) -> String {
         String::from_utf8_lossy(&self.stderr).trim().to_string()
     }
@@ -2470,9 +2469,15 @@ impl TmuxDriver {
     pub async fn has_session(&self, name: &str) -> anyhow::Result<bool> {
         match self.run(&["has-session", "-t", &format!("={name}")]).await {
             Ok(_) => Ok(true),
+            // Read from tmux's raw stderr, never the rendered error: the
+            // rendered chain embeds the target name and this driver's
+            // socket path, either of which could contain one of these
+            // phrases and turn a real failure into "absent".
             Err(e)
-                if e.to_string().contains("can't find session")
-                    || e.to_string().contains("no current target") =>
+                if matches!(
+                    self.refusal(&e),
+                    Some(TmuxRefusal::SessionMissing | TmuxRefusal::EmptyServer)
+                ) =>
             {
                 Ok(false)
             }
@@ -2491,13 +2496,21 @@ impl TmuxDriver {
     /// at the driver boundary, where typed raw stderr is still available,
     /// rather than searching the rendered error chain in teardown.
     pub async fn has_session_for_terminal_less_delete(&self, name: &str) -> anyhow::Result<bool> {
-        // Do not delegate to `has_session`: its historical rendered-error
-        // compatibility checks are intentionally retained for its existing
-        // callers, but a socket path containing one of those phrases would
-        // make an inaccessible server look absent here.
+        // Wider than `has_session` by exactly the two absent-server
+        // refusals, which only this caller may read as "no session".
         match self.run(&["has-session", "-t", &format!("={name}")]).await {
             Ok(_) => Ok(true),
-            Err(error) if session_is_absent_for_terminal_less_delete(&error, &self.socket) => {
+            Err(error)
+                if matches!(
+                    self.refusal(&error),
+                    Some(
+                        TmuxRefusal::SessionMissing
+                            | TmuxRefusal::EmptyServer
+                            | TmuxRefusal::NoServer
+                            | TmuxRefusal::SocketMissing
+                    )
+                ) =>
+            {
                 Ok(false)
             }
             Err(error) => {
@@ -2549,13 +2562,19 @@ impl TmuxDriver {
     /// the private server is not Farhelm's alone: anything running in a
     /// pane inherits `TMUX` and can create or rename sessions on it.
     /// The tolerated diagnostics are matched against tmux's raw stderr
-    /// through [`tmux_said_any`], never the rendered error, because the
+    /// through [`TmuxDriver::refusal`], never the rendered error, because the
     /// rendered chain embeds the target name and a session named after
     /// one of these phrases would otherwise launder a real failure.
     pub async fn kill_session(&self, name: &str) -> anyhow::Result<()> {
         match self.run(&["kill-session", "-t", &format!("={name}")]).await {
             Ok(_) => Ok(()),
-            Err(e) if tmux_said_any(&e, TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS) => Ok(()),
+            Err(e)
+                if self
+                    .refusal(&e)
+                    .is_some_and(TmuxRefusal::means_session_gone) =>
+            {
+                Ok(())
+            }
             Err(e) => Err(e),
         }
     }
@@ -2780,11 +2799,10 @@ impl TmuxDriver {
             // rendered form embeds this driver's formatting AND the
             // caller-controlled target string, so a session named after
             // one of these phrases could make an unrelated failure look
-            // tolerated (the hazard `is_tolerated_list_panes_diagnostic`
-            // documents in full). Each of these is a complete tmux
+            // tolerated (the hazard `TmuxRefusal` documents in full). Each of these is a complete tmux
             // message; the ones naming a target continue past the phrase,
             // which is why this anchors rather than compares whole.
-            Err(e) if tmux_said_any(&e, TmuxDriver::WINDOW_ALREADY_GONE_DIAGNOSTICS) => Ok(()),
+            Err(e) if self.refusal(&e).is_some_and(TmuxRefusal::means_window_gone) => Ok(()),
             Err(e) => Err(e).context("killing a terminal tab's window"),
         }
     }
@@ -2931,7 +2949,11 @@ impl TmuxDriver {
             // own context, so a state-directory path or session name that
             // merely mentions one of these phrases must not turn a real
             // query failure into "the pane is gone".
-            Err(e) if tmux_said_any(&e, TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS) => {
+            Err(e)
+                if self
+                    .refusal(&e)
+                    .is_some_and(TmuxRefusal::means_session_gone) =>
+            {
                 return Ok(PaneProbe::Gone);
             }
             Err(e) => return Err(e).context("querying pane process state"),
@@ -3221,86 +3243,6 @@ impl TmuxDriver {
         Ok(tail)
     }
 
-    /// The tmux diagnostics that all mean "the window this names is
-    /// already gone" — the tolerated outcomes of [`Self::kill_window`],
-    /// which is what makes `CloseTab` safe to retry after a partial
-    /// failure.
-    ///
-    /// The target is expressed as a pane within a session, so tmux
-    /// reports a vanished window through whichever part of that pairing
-    /// it failed to resolve first; all four spellings, plus the whole
-    /// server being gone, are the same fact for a caller.
-    const WINDOW_ALREADY_GONE_DIAGNOSTICS: &[&str] = &[
-        "can't find pane",
-        "can't find session",
-        "can't find window",
-        "no such window",
-        "no current target",
-        "no server running",
-    ];
-
-    /// The tmux diagnostics that all mean "the session this names is
-    /// already gone" — the tolerated outcomes of [`Self::kill_session`]
-    /// and the [`PaneProbe::Gone`] answer of [`Self::pane_process`].
-    /// Each is the START of a complete standalone tmux message (verified
-    /// empirically on 3.4 and 3.7b): `"can't find session"` when the
-    /// server has other sessions but not this one, `"no current target"`
-    /// when it has none at all, and `"no server running"` when the whole
-    /// private server is gone. Matched with [`tmux_said_any`], so a
-    /// target or path that merely contains one of these phrases never
-    /// counts.
-    const SESSION_ALREADY_GONE_DIAGNOSTICS: &[&str] = &[
-        "can't find session",
-        "no current target",
-        "no server running",
-    ];
-
-    /// A genuinely empty server (started, but nothing created on it yet)
-    /// answers `list-panes -a` with EXACTLY this diagnostic and nothing
-    /// else on the line (verified empirically against both tmux 3.4 and
-    /// 3.7b) — distinct from [`Self::LIST_PANES_NO_SERVER_PREFIX`] and
-    /// [`Self::LIST_PANES_SERVER_EXITED_DIAGNOSTIC`], which mean the
-    /// private tmux server process itself is gone. All three are tolerated
-    /// by `pane_states` today (see its own docs), but are kept as separate
-    /// constants because they answer different questions: this one is "the
-    /// server exists but has nothing on it", the other two are "there is no
-    /// server left to ask at all", reached via two different tmux code
-    /// paths (a clean absence vs. a server that died mid-request).
-    const LIST_PANES_EMPTY_SERVER_DIAGNOSTIC: &str = "no current target";
-
-    /// tmux's `list-panes -a` diagnostic PREFIX when the private tmux
-    /// server process itself is gone (crash, OOM, an operator killing it
-    /// out from under a still-running supervisor) — as opposed to
-    /// [`Self::LIST_PANES_EMPTY_SERVER_DIAGNOSTIC`], where a server is up
-    /// but empty. Verified empirically (both tmux 3.4 and 3.7b) to always
-    /// be followed by the exact socket path passed via `-S`, with nothing
-    /// else on the line — never a bare, path-free message — which is why
-    /// [`is_tolerated_list_panes_diagnostic`] anchors against this prefix
-    /// PLUS this driver's own known socket, rather than a substring search:
-    /// the socket path is caller-controlled (it derives from the
-    /// supervisor's state dir), so a naive `contains("no server running")`
-    /// over the rendered error could misfire if that path happened to
-    /// embed the phrase itself, folding an unrelated failure into "the
-    /// server is gone". See `pane_states`'s own docs for why this
-    /// diagnostic is tolerated exactly like the empty-server case rather
-    /// than propagated as an error.
-    const LIST_PANES_NO_SERVER_PREFIX: &str = "no server running on ";
-
-    /// tmux's `list-panes -a` diagnostic when a request RACES a dying
-    /// server — the exact crash/OOM/`kill-server` timing this fix exists
-    /// for, where the server is mid-teardown rather than already fully
-    /// gone (verified empirically against both tmux 3.4 and 3.7b: racing a
-    /// `kill-server` with a concurrent query reliably produces this
-    /// message on both, standalone with nothing else on the line). The
-    /// harness's own `kill_tmux_server_and_wait` helper (crate `farhelm`'s
-    /// e2e tests) documents seeing this exact text while polling for a
-    /// server to finish dying. Tolerated identically to
-    /// [`Self::LIST_PANES_NO_SERVER_PREFIX`]: both are tmux's own
-    /// definitive statement that no pane can be answered for right now,
-    /// which is the same "no panes exist" fact `pane_states` treats as an
-    /// honest empty map either way.
-    const LIST_PANES_SERVER_EXITED_DIAGNOSTIC: &str = "server exited unexpectedly";
-
     /// Every pane's liveness state, in ONE tmux round trip.
     ///
     /// `ListSessions` needs this per-session (PLAN_M2.md's "Proto growth":
@@ -3322,9 +3264,9 @@ impl TmuxDriver {
     /// identity across a server restart for `session_status` to trust
     /// blindly — it cross-checks the session name too.
     ///
-    /// A genuinely empty server ([`LIST_PANES_EMPTY_SERVER_DIAGNOSTIC`]), a
-    /// genuinely ABSENT server ([`LIST_PANES_NO_SERVER_PREFIX`]), and a
-    /// server caught mid-teardown ([`LIST_PANES_SERVER_EXITED_DIAGNOSTIC`])
+    /// A genuinely empty server ([`TmuxRefusal::EmptyServer`]), a
+    /// genuinely ABSENT server ([`TmuxRefusal::NoServer`]), and a
+    /// server caught mid-teardown ([`TmuxRefusal::ServerExited`])
     /// all degrade to an empty map rather than an error — mirroring
     /// `pane_process`'s own empty-expansion handling for the same "nothing
     /// to inspect" case. `kill_session` tolerates the same "no server
@@ -3375,8 +3317,8 @@ impl TmuxDriver {
     /// works hard everywhere else to avoid. The match is against tmux's OWN
     /// raw stderr (recovered via `downcast_ref::<TmuxCommandFailure>`, not
     /// a substring search over the rendered error) and anchored to the
-    /// EXACT recognized shapes — see [`is_tolerated_list_panes_diagnostic`]
-    /// for why a substring search is unsafe here.
+    /// EXACT recognized shapes — see [`TmuxRefusal`] for why a substring
+    /// search is unsafe here.
     ///
     /// A pane absent from the returned map — or present under this pane
     /// id but for a DIFFERENT session name than the caller remembers
@@ -3419,7 +3361,7 @@ impl TmuxDriver {
                 // Classify against tmux's own RAW stderr, recovered from
                 // the error chain rather than pattern-matched off the
                 // rendered message — see `TmuxCommandFailure`'s and
-                // `is_tolerated_list_panes_diagnostic`'s docs for why. An
+                // `TmuxRefusal`'s docs for why. An
                 // error with no `TmuxCommandFailure` in its chain at all
                 // (a spawn failure, say) is never tolerated: there is no
                 // tmux diagnostic to even inspect.
@@ -3478,13 +3420,17 @@ impl TmuxDriver {
     /// apart from "the query failed" can ask the same question this
     /// module answers internally, against tmux's own raw stderr rather
     /// than a substring search over a rendered error (see
-    /// [`is_tolerated_list_panes_diagnostic`]).
+    /// [`TmuxRefusal`]).
     pub fn is_definitively_empty(&self, error: &anyhow::Error) -> bool {
-        error
-            .downcast_ref::<TmuxCommandFailure>()
-            .is_some_and(|failure| {
-                is_tolerated_list_panes_diagnostic(&failure.stderr_trimmed(), &self.socket)
-            })
+        self.refusal(error).is_some_and(TmuxRefusal::means_no_panes)
+    }
+
+    /// What tmux's own raw stderr says about a failed command's target, when
+    /// it says one of the few things a caller may read as "already gone".
+    /// `None` for every other failure, including errors that carry no tmux
+    /// stderr at all (a spawn failure).
+    fn refusal(&self, error: &anyhow::Error) -> Option<TmuxRefusal> {
+        classify_tmux_refusal(error, &self.socket)
     }
 }
 
@@ -3557,102 +3503,111 @@ async fn shutdown_output_control_client(
         .with_context(|| format!("killing and reaping the {kind}"))
 }
 
-/// Whether `stderr` — tmux's own RAW stderr from a failed `list-panes -a`,
-/// already trimmed by [`TmuxCommandFailure::stderr_trimmed`] — is one of
-/// the three diagnostics [`TmuxDriver::pane_states`] tolerates as "nothing
-/// to report" rather than a real failure: a genuinely empty server
-/// ([`TmuxDriver::LIST_PANES_EMPTY_SERVER_DIAGNOSTIC`]), a genuinely absent
-/// one ([`TmuxDriver::LIST_PANES_NO_SERVER_PREFIX`] followed by `socket`),
-/// or one caught mid-teardown
-/// ([`TmuxDriver::LIST_PANES_SERVER_EXITED_DIAGNOSTIC`]).
+/// What tmux's own raw stderr says about a failed command's target, reduced to
+/// the handful of answers some caller may read as "already gone".
 ///
-/// EVERY comparison here is an exact match against the WHOLE trimmed
-/// string, never a substring search — `stderr.contains(diagnostic)` would
-/// look tempting, but `socket` is a caller-controlled path (it derives from
-/// the supervisor's state dir) that tmux's own "no server running on
-/// `<path>`" diagnostic bakes verbatim into its message. A state dir an
-/// operator happened to name so its path CONTAINS one of these phrases —
-/// `/tmp/no server running/tmux.sock`, however unlikely — would make an
-/// entirely unrelated failure (a permission error, a corrupted socket file)
-/// that merely MENTIONS that same path look like a tolerated diagnostic
-/// under a substring search, silently laundering a genuine fault into "the
-/// server is gone; report everyone exited". Anchoring to the exact,
-/// complete message tmux is verified (both tmux 3.4 and 3.7b) to emit for
-/// each of these three cases — and nothing else — closes that hole:
-/// something merely CONTAINING one of these phrases inside a longer,
-/// differently-shaped message is never one of them.
+/// Every classification in this module goes through
+/// [`classify_tmux_refusal`], which reads [`TmuxCommandFailure`]'s untouched
+/// stderr and never the rendered `anyhow` chain. The rendered chain embeds
+/// this driver's formatting, the caller's target string, and the socket path
+/// (derived from the user's state directory), so a session or path named after
+/// one of these phrases would otherwise make an unrelated failure look
+/// tolerated. Each caller then decides which variants it tolerates; they
+/// differ on purpose (see [`TmuxDriver::has_session`] for why a vanished
+/// server is an error there).
 ///
-/// Split out from [`TmuxDriver::pane_states`] purely so this classification
-/// is unit-testable against constructed strings, without spawning tmux or
-/// killing a real server to provoke any of the three — the same reasoning
-/// [`parse_pane_facts`] and `PaneModes::parse` split their own parsing out
-/// for elsewhere in this module. Any OTHER message returns `false`, which is
-/// what sends an unclassified failure down `pane_states`'s error path
-/// instead of being silently folded into an empty (and therefore
-/// all-exited) map.
-/// Whether `error` carries tmux's own stderr and it BEGINS with any of
-/// `prefixes`.
-///
-/// Anchored at the START rather than searched anywhere in the message,
-/// and read off [`TmuxCommandFailure`] rather than off the rendered
-/// `anyhow` chain. Both halves matter for the same reason
-/// [`is_tolerated_list_panes_diagnostic`] spells out at length: the
-/// rendered error embeds this driver's own formatting and the target
-/// string the caller supplied, and a session or path named after one of
-/// these phrases would otherwise make an unrelated failure look
-/// tolerated. tmux emits each of these as a complete standalone message
-/// beginning with the phrase, sometimes continuing with the target it
-/// could not find — hence a prefix rather than an equality.
-fn tmux_said_any(error: &anyhow::Error, prefixes: &[&str]) -> bool {
-    error
-        .downcast_ref::<TmuxCommandFailure>()
-        .is_some_and(|failure| {
-            let stderr = failure.stderr_trimmed();
-            prefixes.iter().any(|prefix| stderr.starts_with(prefix))
-        })
+/// Every diagnostic below was verified empirically against tmux 3.4 and 3.7b
+/// as a complete, standalone message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TmuxRefusal {
+    /// `can't find session…`: the server has other sessions but not this
+    /// one. tmux continues the message with the target it could not find,
+    /// hence a prefix match.
+    SessionMissing,
+    /// `can't find pane…`, `can't find window…`, or `no such window…`: a
+    /// pane-within-session target whose window is gone. tmux reports it
+    /// through whichever half of the pairing it failed to resolve first, so
+    /// [`TmuxRefusal::SessionMissing`] can also mean a vanished window.
+    WindowMissing,
+    /// Exactly `no current target`: the server is up with no sessions at all.
+    /// `has-session -t =name` and `list-panes -a` both degrade to this generic
+    /// message once there is nothing to compare a target against, which is
+    /// the shape of a freshly restarted supervisor's tmux server.
+    EmptyServer,
+    /// Exactly `no server running on <this driver's socket>`: the private
+    /// server process is gone (crash, OOM, an operator killing it). Anchored
+    /// to the whole message with this driver's own socket rather than to the
+    /// phrase, because the socket path is caller-controlled.
+    NoServer,
+    /// Exactly `error connecting to <this driver's socket> (No such file or
+    /// directory)`: the socket file itself does not exist. A permission
+    /// failure on the same socket is NOT this; it proves only that liveness
+    /// is unknown.
+    SocketMissing,
+    /// Exactly `server exited unexpectedly`: a request raced a dying server
+    /// mid-teardown (a `kill-server` with a concurrent query reliably produces
+    /// it; the e2e harness's `kill_tmux_server_and_wait` sees it while polling).
+    ServerExited,
 }
 
-/// Whether raw `has-session` stderr proves the named session or its private
-/// server is absent for terminal-less deletion.
+impl TmuxRefusal {
+    /// The session a target named no longer exists: tolerated by
+    /// [`TmuxDriver::kill_session`] and answered as [`PaneProbe::Gone`] by
+    /// `pane_process`. A vanished server counts, since there is nothing left
+    /// to kill or ask either way.
+    fn means_session_gone(self) -> bool {
+        matches!(
+            self,
+            TmuxRefusal::SessionMissing | TmuxRefusal::EmptyServer | TmuxRefusal::NoServer
+        )
+    }
+
+    /// The window a pane-within-session target named no longer exists: the
+    /// tolerated outcomes of [`TmuxDriver::kill_window`], which is what makes
+    /// `CloseTab` safe to retry after a partial failure.
+    fn means_window_gone(self) -> bool {
+        self == TmuxRefusal::WindowMissing || self.means_session_gone()
+    }
+
+    /// No pane exists to answer for right now: the empty map
+    /// [`TmuxDriver::pane_states`] returns instead of an error. An empty
+    /// server, an absent one, and one caught mid-teardown are the same "no
+    /// panes" fact for a status query.
+    fn means_no_panes(self) -> bool {
+        matches!(
+            self,
+            TmuxRefusal::EmptyServer | TmuxRefusal::NoServer | TmuxRefusal::ServerExited
+        )
+    }
+}
+
+/// Classify a failed tmux command by its raw stderr, or `None` when the error
+/// carries no tmux stderr (a spawn failure, say) or says anything else.
 ///
-/// A missing-session response names the requested target and an empty server
-/// has one fixed message; whole-server absence uses its ordinary message or an
-/// ENOENT while connecting to this driver's socket. Permission failures prove
-/// only that liveness is unknown, and caller-controlled text never contributes
-/// because this reads typed stderr rather than rendered command context.
-fn session_is_absent_for_terminal_less_delete(error: &anyhow::Error, socket: &Path) -> bool {
-    error
-        .downcast_ref::<TmuxCommandFailure>()
-        .is_some_and(|failure| {
-            let stderr = failure.stderr_trimmed();
-            stderr.starts_with("can't find session")
-                || stderr == "no current target"
-                || server_is_absent_for_terminal_less_delete(error, socket)
-        })
-}
-
-/// Whether a failed `has-session` proves its server, rather than merely its
-/// named session, is absent for terminal-less deletion.
-fn server_is_absent_for_terminal_less_delete(error: &anyhow::Error, socket: &Path) -> bool {
-    error
-        .downcast_ref::<TmuxCommandFailure>()
-        .is_some_and(|failure| {
-            let stderr = failure.stderr_trimmed();
-            let socket = socket.display();
-            stderr == format!("no server running on {socket}")
-                || stderr == format!("error connecting to {socket} (No such file or directory)")
-        })
-}
-
-fn is_tolerated_list_panes_diagnostic(stderr: &str, socket: &Path) -> bool {
-    stderr == TmuxDriver::LIST_PANES_EMPTY_SERVER_DIAGNOSTIC
-        || stderr == TmuxDriver::LIST_PANES_SERVER_EXITED_DIAGNOSTIC
-        || stderr
-            == format!(
-                "{}{}",
-                TmuxDriver::LIST_PANES_NO_SERVER_PREFIX,
-                socket.display()
-            )
+/// Prefix matches are anchored at the START of tmux's own message, and the
+/// server-level diagnostics compare the whole message against `socket`, so
+/// text a caller supplied can never supply the match. See [`TmuxRefusal`].
+fn classify_tmux_refusal(error: &anyhow::Error, socket: &Path) -> Option<TmuxRefusal> {
+    let stderr = error.downcast_ref::<TmuxCommandFailure>()?.stderr_trimmed();
+    let socket = socket.display();
+    if stderr.starts_with("can't find session") {
+        Some(TmuxRefusal::SessionMissing)
+    } else if ["can't find pane", "can't find window", "no such window"]
+        .iter()
+        .any(|prefix| stderr.starts_with(prefix))
+    {
+        Some(TmuxRefusal::WindowMissing)
+    } else if stderr == "no current target" {
+        Some(TmuxRefusal::EmptyServer)
+    } else if stderr == format!("no server running on {socket}") {
+        Some(TmuxRefusal::NoServer)
+    } else if stderr == format!("error connecting to {socket} (No such file or directory)") {
+        Some(TmuxRefusal::SocketMissing)
+    } else if stderr == "server exited unexpectedly" {
+        Some(TmuxRefusal::ServerExited)
+    } else {
+        None
+    }
 }
 
 /// Turn raw `capture-pane` output into replayable terminal content.
@@ -5070,63 +5025,141 @@ mod tests {
         assert!(PaneModes::parse("").cursor_visible);
     }
 
-    /// Pins `pane_states`'s diagnostic classification
-    /// (`is_tolerated_list_panes_diagnostic`) directly against tmux's OWN
-    /// raw stderr — not a rendered error string — since provoking every
-    /// case against a real tmux server would require either killing one
-    /// mid-test (slow, and already covered end to end by the e2e
-    /// `list_sessions_survives_when_the_tmux_server_is_gone` test) or
-    /// racing a `kill-server` closely enough to hit the mid-teardown
-    /// shape reliably. Covers all three tolerated diagnostics — a
-    /// genuinely empty server, a genuinely ABSENT one (the behavior this
-    /// change adds), and one caught mid-teardown (ALSO new) — plus a
-    /// plain unclassified failure.
+    /// A tmux command failure carrying exactly `stderr`, as `run` builds one.
+    fn tmux_failure(stderr: &str) -> anyhow::Error {
+        anyhow::Error::new(TmuxCommandFailure::new(
+            format!("{stderr}\n").into_bytes(),
+            &[],
+        ))
+    }
+
+    /// Why this matters: every "already gone" tolerance in this module
+    /// (kill_session, kill_window, pane_process, pane_states, both liveness
+    /// probes) reads this one classification, so a misclassified diagnostic
+    /// either launders a real failure into success or turns a harmless
+    /// absence into an error. Provoking each shape against a real server
+    /// would mean killing one mid-test; the e2e
+    /// `list_sessions_survives_when_the_tmux_server_is_gone` test covers the
+    /// end-to-end path.
+    ///
+    /// Specification: each verified tmux diagnostic maps to its variant,
+    /// target-bearing ones by prefix and server-level ones only as the whole
+    /// message with this driver's own socket; anything else is `None`; and
+    /// each caller's tolerated set is exactly what its docs promise.
     #[farhelm_testtrace::test]
-    fn is_tolerated_list_panes_diagnostic_pins_all_three_tolerated_cases() {
+    fn refusal_classification_pins_every_recognized_diagnostic() {
         let socket = Path::new("/tmp/fh/tmux.sock");
-        assert!(
-            is_tolerated_list_panes_diagnostic("no current target", socket),
-            "a genuinely empty server must tolerate"
+        for (stderr, expected) in [
+            (
+                "can't find session: fh-abcd1234",
+                Some(TmuxRefusal::SessionMissing),
+            ),
+            ("can't find pane: %7", Some(TmuxRefusal::WindowMissing)),
+            ("can't find window: @3", Some(TmuxRefusal::WindowMissing)),
+            ("no such window: @3", Some(TmuxRefusal::WindowMissing)),
+            ("no current target", Some(TmuxRefusal::EmptyServer)),
+            (
+                "no server running on /tmp/fh/tmux.sock",
+                Some(TmuxRefusal::NoServer),
+            ),
+            (
+                "error connecting to /tmp/fh/tmux.sock (No such file or directory)",
+                Some(TmuxRefusal::SocketMissing),
+            ),
+            (
+                "server exited unexpectedly",
+                Some(TmuxRefusal::ServerExited),
+            ),
+            // Another socket's absence is not this driver's server.
+            ("no server running on /tmp/other/tmux.sock", None),
+            (
+                "error connecting to /tmp/fh/tmux.sock (Permission denied)",
+                None,
+            ),
+            ("no current target here", None),
+            ("unexpected tmux failure", None),
+        ] {
+            assert_eq!(
+                classify_tmux_refusal(&tmux_failure(stderr), socket),
+                expected,
+                "{stderr}"
+            );
+        }
+
+        use TmuxRefusal::*;
+        let all = [
+            SessionMissing,
+            WindowMissing,
+            EmptyServer,
+            NoServer,
+            SocketMissing,
+            ServerExited,
+        ];
+        let tolerated = |pred: fn(TmuxRefusal) -> bool| -> Vec<TmuxRefusal> {
+            all.into_iter().filter(|r| pred(*r)).collect()
+        };
+        assert_eq!(
+            tolerated(TmuxRefusal::means_session_gone),
+            [SessionMissing, EmptyServer, NoServer]
         );
-        assert!(
-            is_tolerated_list_panes_diagnostic("no server running on /tmp/fh/tmux.sock", socket),
-            "a genuinely absent server must ALSO tolerate — the behavior this change adds"
+        assert_eq!(
+            tolerated(TmuxRefusal::means_window_gone),
+            [SessionMissing, WindowMissing, EmptyServer, NoServer]
         );
-        assert!(
-            is_tolerated_list_panes_diagnostic("server exited unexpectedly", socket),
-            "a server caught mid-teardown must ALSO tolerate — the same 'no panes exist' fact"
-        );
-        assert!(
-            !is_tolerated_list_panes_diagnostic("unexpected tmux failure", socket),
-            "an unclassified failure must not be laundered into an empty (all-exited) map"
+        assert_eq!(
+            tolerated(TmuxRefusal::means_no_panes),
+            [EmptyServer, NoServer, ServerExited]
         );
     }
 
-    /// The anchoring this classifier exists for, pinned directly: a
-    /// caller-controlled socket PATH that happens to CONTAIN the tolerated
-    /// "no server running" phrase must not make an unrelated failure
-    /// mentioning that same path look tolerated. An indiscriminate
-    /// `stderr.contains(diagnostic)` classifier — the bug this test would
-    /// have missed entirely, since its own inputs never embedded the
-    /// phrase anywhere but at the front — passes this exact string (it
-    /// DOES contain "no server running"), so asserting `!tolerated` here
-    /// only means something because the phrase is genuinely present, just
-    /// not as the whole, anchored message tmux actually emits for that
-    /// diagnostic.
+    /// Why this matters: the socket path derives from the user's state
+    /// directory, and tmux bakes it into its own messages. A classifier that
+    /// searched for a phrase anywhere in the text would turn an unrelated
+    /// failure (a permission error on a socket under
+    /// `/tmp/no server running/`) into "the server is gone", reporting every
+    /// session as exited.
+    ///
+    /// Specification: a message that merely CONTAINS a recognized phrase, in
+    /// a path or a target, is not classified; neither is a rendered error
+    /// with no tmux stderr behind it; and wrapping a real diagnostic in
+    /// context does not hide it.
     #[farhelm_testtrace::test]
-    fn is_tolerated_list_panes_diagnostic_rejects_a_path_that_merely_contains_a_tolerated_phrase() {
+    fn refusal_classification_ignores_phrases_outside_the_anchored_position() {
         let socket = Path::new("/tmp/no server running/tmux.sock");
         let unrelated_failure = "can't stat socket /tmp/no server running/tmux.sock: \
                                   Permission denied";
         assert!(
             unrelated_failure.contains("no server running"),
-            "test premise: the unrelated message must genuinely contain the tolerated phrase, \
-             or this test is not exercising the anchoring bug it claims to"
+            "test premise: the unrelated message must genuinely contain the tolerated phrase"
         );
-        assert!(
-            !is_tolerated_list_panes_diagnostic(unrelated_failure, socket),
-            "a permission failure that merely MENTIONS a path containing the phrase must still \
-             propagate as a real error, not be folded into an empty (all-exited) map"
+        assert_eq!(
+            classify_tmux_refusal(&tmux_failure(unrelated_failure), socket),
+            None
+        );
+        assert_eq!(
+            classify_tmux_refusal(
+                &tmux_failure("invalid target: =no server running here"),
+                socket
+            ),
+            None,
+            "a target whose text contains a diagnostic is not a diagnostic"
+        );
+        assert_eq!(
+            classify_tmux_refusal(
+                &anyhow::anyhow!("display-message -t %7: can't find session"),
+                socket
+            ),
+            None,
+            "a rendered error with no tmux stderr behind it never matches"
+        );
+        assert_eq!(
+            classify_tmux_refusal(
+                &tmux_failure("can't find session: fh-abcd1234")
+                    .context("killing tmux session fh-abcd1234"),
+                socket
+            ),
+            Some(TmuxRefusal::SessionMissing),
+            "context layered on top must not hide tmux's own diagnostic"
         );
     }
 
@@ -5397,46 +5430,6 @@ mod tests {
         );
     }
 
-    /// The "session already gone" diagnostics are recognized on tmux's raw
-    /// stderr, anchored at its start, never by searching the rendered error
-    /// chain. The rendered chain embeds the caller's target and this
-    /// driver's own context, so a session name or state-directory path
-    /// that merely mentions a diagnostic would otherwise turn a genuine
-    /// failure into "gone" (for `kill_session`, a silent success; for
-    /// `pane_process`, a false `PaneProbe::Gone`). This is the property
-    /// the substring match this replaced did not have.
-    #[test]
-    fn session_gone_diagnostics_match_raw_stderr_prefixes_only() {
-        let gone = anyhow::Error::new(TmuxCommandFailure::new(
-            b"can't find session: fh-abcd1234\n".to_vec(),
-            &[],
-        ))
-        .context("killing tmux session fh-abcd1234");
-        assert!(tmux_said_any(
-            &gone,
-            TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS
-        ));
-
-        // The phrase appears, but not at the start of tmux's own message:
-        // a target whose text contains a diagnostic is not a diagnostic.
-        let laundered = anyhow::Error::new(TmuxCommandFailure::new(
-            b"invalid target: =no server running here\n".to_vec(),
-            &[],
-        ));
-        assert!(!tmux_said_any(
-            &laundered,
-            TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS
-        ));
-
-        // A rendered error with no tmux stderr behind it never matches,
-        // however much its text resembles a diagnostic.
-        let rendered_only = anyhow::anyhow!("display-message -t %7: can't find session");
-        assert!(!tmux_said_any(
-            &rendered_only,
-            TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS
-        ));
-    }
-
     /// Terminal-less delete must ask its own raw-stderr classifier, rather
     /// than inheriting `has_session`'s rendered-error compatibility path.
     ///
@@ -5509,6 +5502,14 @@ mod tests {
                 ),
             );
             let driver = TmuxDriver::new_with_program(&state, TmuxBudgets::default(), fake.clone());
+            // The ordinary liveness probe used to search the rendered error,
+            // which carries this stderr and therefore the state directory's
+            // name ("no current target"): a permission failure read as
+            // "session absent" there.
+            driver
+                .has_session("missing")
+                .await
+                .expect_err("has_session must not read a phrase inside the socket path as absence");
             let error = driver
                 .has_session_for_terminal_less_delete("missing")
                 .await

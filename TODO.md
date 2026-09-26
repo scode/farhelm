@@ -257,13 +257,6 @@ are large mostly because of their tests.
 
 ### Diverged copies of the same rule
 
-- **tmux "session absent" by error-text match.** Low-medium effort. `has_session`
-  (`farhelm-supervisor/src/tmux.rs:2470`) decides absence with `e.to_string().contains("can't find session")` on the
-  rendered error. The function right below it documents why that is unsafe: the rendered text includes a
-  caller-controlled socket path, so the other paths classify typed raw stderr instead. The tolerated-phrase lists also
-  live separately (`WINDOW_ALREADY_GONE_DIAGNOSTICS`, `SESSION_ALREADY_GONE_DIAGNOSTICS`, three `LIST_PANES_*`
-  constants, the terminal-less-delete prefixes). Fix: one `classify(&TmuxCommandFailure) -> TmuxRefusal` enum and let
-  each caller pick which variants it tolerates.
 - **Takeover and stall detected by comparing English sentences.** Medium effort. The helm
   (`farhelm-helm/src/terminal.rs:295`) and `farhelm-ui/assets/terminal.js:982` both compare message text against
   `ATTACH_REFUSED_TAKEN_OVER`; `DETACH_REASON_STALLED` works the same way, and `Detached { reason: String }` carries no
