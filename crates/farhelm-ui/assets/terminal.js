@@ -153,7 +153,7 @@
 //   reconnecting into the same wedge helps nobody; a closed (or reaped)
 //   tab has nothing left to reconnect to. The first two keep the surface
 //   they were given (`decisionDetach`); the closed tab paints NOTHING, per
-//   SPEC.md's silent reap (see TAB_CLOSED_DETACH_REASON).
+//   SPEC.md's silent reap (see DETACH_CODE_TAB_CLOSED).
 // - INFRASTRUCTURE — the helm losing its supervisor, a host that went
 //   away, an attach refused because the host is unreachable — is transport
 //   loss one layer up, and RECOVERS. This is SPEC.md's "comes back
@@ -965,48 +965,34 @@
   // wherever the user just put it.
   let focusedEl = null;
 
-  // The reason string the supervisor sends every channel a SESSION-SCOPED
-  // takeover displaced (its `DETACH_REASON_TAKEOVER`), relayed verbatim by
-  // the helm. Matched exactly, and only this one: a stall detach, a
-  // restart's own teardown, a closed tab, and the same client's reconnect
-  // (`DETACH_REASON_REPLACED`) are all detaches this view either caused or
-  // recovers from by itself, and latching on them would freeze a view that
-  // has nothing to reclaim.
+  // The `code` field of a detached notice (farhelm_proto's `DetachCode`,
+  // relayed by the helm beside the human-readable `reason`). This view
+  // decides behavior from the code alone and only ever SHOWS the reason, so
+  // rewording a reason cannot change what the view does. The spellings are
+  // pinned on the Rust side by `detach_code_spellings_are_pinned`.
   //
-  // This is a cross-language coupling to a string that is private to the
-  // supervisor, so nothing in either language forces the two to move
-  // together — what pins it is the browser suite's two-client takeover
-  // test, which provokes a REAL takeover through the real stack and fails
-  // if the loser does not latch. That test is the contract; this constant
-  // is only its client-side half.
-  const TAKEOVER_DETACH_REASON = "another client attached";
-
-  // The reason a client is detached for not consuming its output
-  // (`farhelm_proto::DETACH_REASON_STALLED`, emitted by both the
-  // supervisor's stall timer and the helm's channel bound — which is
-  // exactly why that crate names it).
+  // TAKEN_OVER: another client attached (a session-scoped takeover), or a
+  // non-displacing reconnect was refused because another client holds the
+  // session. Only this one latches: a stall, a restart's own teardown, a
+  // closed tab, and the same client's reconnect (`replaced`) are detaches
+  // this view either caused or recovers from by itself, and latching on
+  // them would freeze a view that has nothing to reclaim.
   //
-  // Matched here for ONE purpose: PLAN_M6.md item 7's stall carve-out. A
-  // stalled client's wedge is the reason it was detached, so reconnecting
-  // into the same wedge helps nobody and the user acts first. Like the
-  // takeover string above this is a cross-language coupling with nothing
-  // in either language forcing the two to move together; what pins it is
-  // the browser suite's stall test, which provokes a REAL stall detach
-  // through the real stack and fails if the client starts recovering from
-  // it.
-  const STALL_DETACH_REASON = "terminal stopped consuming output (stalled)";
-
-  // The reason a tab's viewer is detached when the tab itself is removed —
-  // a manual close from another client, or the supervisor reaping a tab
-  // whose shell exited (the same close flow either way). Handled SILENTLY:
-  // SPEC.md's tab reap promises the tab disappears with no notice, and the
-  // strip refresh unmounts this island moments later, so a "Detached:"
-  // banner here would be a flash of alarm about a removal the user either
-  // asked for or caused by exiting the shell. Cross-language coupling like
-  // the two strings above (the supervisor's `detach_closed_tab` emits it);
-  // pinned by the browser suite's reaped-tab test, which fails if the
-  // removal stops being silent.
-  const TAB_CLOSED_DETACH_REASON = "terminal tab closed";
+  // STALLED: this client stopped consuming output (the supervisor's stall
+  // timer or the helm's channel bound). PLAN_M6.md item 7's stall
+  // carve-out: reconnecting into the same wedge helps nobody, so the user
+  // acts first.
+  //
+  // TAB_CLOSED: the tab itself was removed (a manual close from another
+  // client, or the supervisor reaping a tab whose shell exited). Handled
+  // SILENTLY: SPEC.md's tab reap promises the tab disappears with no
+  // notice, and the strip refresh unmounts this island moments later.
+  //
+  // The browser suite's two-client takeover, stall, and reaped-tab tests
+  // provoke each through the real stack and remain the end-to-end contract.
+  const DETACH_CODE_TAKEN_OVER = "taken_over";
+  const DETACH_CODE_STALLED = "stalled";
+  const DETACH_CODE_TAB_CLOSED = "tab_closed";
 
   // Non-null once a takeover-reason `Detached` has arrived on any of this
   // view's terminals: the reason string, used both as the latch flag and as
@@ -3478,7 +3464,7 @@
         // - A closed tab: the terminal itself is being removed (a manual
         //   close from any client, or the reap of an exited shell), so
         //   there is nothing to reconnect to — and per SPEC.md the removal
-        //   is silent (see TAB_CLOSED_DETACH_REASON).
+        //   is silent (see DETACH_CODE_TAB_CLOSED).
         //
         // Every other detach notice a browser can receive is INFRASTRUCTURE
         // failing, and vetoing on those was a real bug in the first version
@@ -3503,7 +3489,7 @@
         // first rung — the exact opposite of the behavior above.
         let decisionDetach = false;
         // A detach whose whole point is that the terminal is GOING AWAY
-        // silently (a closed or reaped tab — see TAB_CLOSED_DETACH_REASON).
+        // silently (a closed or reaped tab — see DETACH_CODE_TAB_CLOSED).
         // `socketEnded` consults it because the server closes the socket
         // right after such a notice, and the generic "Connection closed"
         // banner leaking through would undo the silence the skipped
@@ -4075,10 +4061,10 @@
               // decision notice: whatever else was decided while this
               // client was away, it cannot take the session back by
               // accident.
-              const lost = msg.reason === TAKEOVER_DETACH_REASON;
-              const tabClosed = msg.reason === TAB_CLOSED_DETACH_REASON;
+              const lost = msg.code === DETACH_CODE_TAKEN_OVER;
+              const tabClosed = msg.code === DETACH_CODE_TAB_CLOSED;
               if (tabClosed) silentDetach = true;
-              decisionDetach = lost || tabClosed || msg.reason === STALL_DETACH_REASON;
+              decisionDetach = lost || tabClosed || msg.code === DETACH_CODE_STALLED;
               // Only a decision ends an in-flight recovery. Anything else
               // — a host that went away, the helm losing its supervisor —
               // is one more failed attempt, and cancelling here would stop
@@ -4100,7 +4086,7 @@
               // A closed tab is DISAPPEARING — the strip refresh unmounts
               // this island moments after the notice — and SPEC.md's tab
               // reap promises silence, so it is the one detach that paints
-              // nothing (see TAB_CLOSED_DETACH_REASON).
+              // nothing (see DETACH_CODE_TAB_CLOSED).
               if (!tabClosed) showBanner(`Detached: ${msg.reason}`, lost);
             }
             return;

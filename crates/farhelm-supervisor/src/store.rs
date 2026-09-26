@@ -1007,6 +1007,9 @@ fn error_kind_column(kind: farhelm_proto::ErrorKind) -> &'static str {
         // a panic in the one place a persisted row is being written.
         K::Unavailable => "unavailable",
         K::Timeout => "timeout",
+        // An attach refusal, never a create outcome; spelled for the same
+        // no-panic-on-write reason as the two above.
+        K::TakenOver => "taken_over",
     }
 }
 
@@ -1024,6 +1027,7 @@ fn error_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::ErrorKind
         "unauthorized" => K::Unauthorized,
         "unavailable" => K::Unavailable,
         "timeout" => K::Timeout,
+        "taken_over" => K::TakenOver,
         other => anyhow::bail!("reservation row has unrecognized error kind {other:?}"),
     })
 }

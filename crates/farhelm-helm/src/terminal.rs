@@ -290,10 +290,17 @@ const REPLAY_COMPLETE_TEXT_MESSAGE: &str = r#"{"type":"replay_complete"}"#;
 fn refused_as_taken_over(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<SupervisorError>()
-        .is_some_and(|supervised| {
-            supervised.kind == ErrorKind::Conflict
-                && supervised.message == farhelm_proto::ATTACH_REFUSED_TAKEN_OVER
-        })
+        .is_some_and(|supervised| supervised.kind == ErrorKind::TakenOver)
+}
+
+/// The browser's `{"type":"detached","reason":...,"code":...}` notice.
+///
+/// `code` is the [`farhelm_proto::DetachCode`] spelling `terminal.js`
+/// decides from (latch a takeover, hold a stall, hide a closed tab);
+/// `reason` is only ever shown. One builder so every exit from this socket
+/// carries both.
+fn detached_notice(detach: &crate::client::Detach) -> serde_json::Value {
+    serde_json::json!({"type": "detached", "reason": detach.reason, "code": detach.code})
 }
 
 pub(crate) async fn term_ws(
@@ -366,10 +373,9 @@ fn serve_term_upgrade(
                 // supervisor failure's kind, rather than by comparing the
                 // rendered message: `{e:#}` folds in every `.context(...)`
                 // layer, so a caller adding one anywhere above this would
-                // silently promote a routine refusal back to ERROR. The
-                // kind is checked alongside the reason because the reason
-                // is user-facing prose and the kind is what makes it a
-                // refusal rather than a coincidence.
+                // silently promote a routine refusal back to ERROR. Only the
+                // kind (`ErrorKind::TakenOver`) is checked: the message is
+                // user-facing prose and decides nothing.
                 if refused_as_taken_over(&e) {
                     info!(session = %id_for_log, "terminal reconnect refused: another client holds this session");
                 } else {
@@ -499,7 +505,15 @@ async fn serve_term(
             match attached {
             Ok(parts) => parts,
             Err(e) => {
-                let notice = serde_json::json!({"type": "detached", "reason": format!("{e:#}")});
+                let code = if refused_as_taken_over(&e) {
+                    farhelm_proto::DetachCode::TakenOver
+                } else {
+                    farhelm_proto::DetachCode::Other
+                };
+                let notice = detached_notice(&crate::client::Detach {
+                    reason: format!("{e:#}"),
+                    code,
+                });
                 // Bound this notice because a peer that cannot accept a
                 // hundred-byte notice within the grace period is one the
                 // reason would never have reached anyway.
@@ -585,7 +599,7 @@ async fn serve_term(
                     ws::Message::Text(REPLAY_COMPLETE_TEXT_MESSAGE.into())
                 }
                 Some(TermEvent::Detached(reason)) => {
-                    let notice = serde_json::json!({"type": "detached", "reason": reason});
+                    let notice = detached_notice(&reason);
                     // Bound this notice because a peer that cannot accept a
                     // hundred-byte notice within the grace period is one the
                     // reason would never have reached anyway.
@@ -608,8 +622,9 @@ async fn serve_term(
                     // still queued behind it: this viewer is gone, and the
                     // backlog is exactly the data it already proved it was
                     // not reading.
-                    let reason = reason.unwrap_or_else(|| "detached".to_string());
-                    let notice = serde_json::json!({"type": "detached", "reason": reason});
+                    let reason =
+                        reason.unwrap_or_else(|| crate::client::Detach::other("detached"));
+                    let notice = detached_notice(&reason);
                     // Bound this notice because the peer was just proven not
                     // to read, and a peer that cannot accept a hundred-byte
                     // notice within the grace period is one the reason would
@@ -1208,6 +1223,7 @@ mod tests {
             .write_control(&ControlMsg::Detached {
                 channel,
                 reason: farhelm_proto::DETACH_REASON_STALLED.to_string(),
+                code: farhelm_proto::DetachCode::Stalled,
             })
             .await
             .unwrap();

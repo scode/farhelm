@@ -257,12 +257,6 @@ are large mostly because of their tests.
 
 ### Diverged copies of the same rule
 
-- **Takeover and stall detected by comparing English sentences.** Medium effort. The helm
-  (`farhelm-helm/src/terminal.rs:295`) and `farhelm-ui/assets/terminal.js:982` both compare message text against
-  `ATTACH_REFUSED_TAKEN_OVER`; `DETACH_REASON_STALLED` works the same way, and `Detached { reason: String }` carries no
-  code. Rewording the message silently breaks takeover latching and the stall carve-out, and only the browser suite
-  (disabled in CI) would notice. Fix: a reason code on the wire (a new `ErrorKind` or a `reason_code` enum), text for
-  display only. The handshake is exact-match, so this is an ordinary protocol bump.
 - **Shell quoting.** Low effort. `farhelm-helm/src/ssh.rs:141-146` documents that `shell_words::quote` leaves some shell
   syntax bare and uses its own always-single-quote helper. `farhelm-supervisor/src/launch.rs:604` still builds the
   `$SHELL -l -i -c` command with `shell_words::quote` while its comment claims the same encoding, and

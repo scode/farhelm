@@ -93,7 +93,7 @@ use tracing::warn;
 
 mod client;
 pub use client::{
-    CreateExtras, PeerHello, SessionListing, SupervisorClient, SupervisorError,
+    CreateExtras, Detach, PeerHello, SessionListing, SupervisorClient, SupervisorError,
     SupervisorTransportError, TermDetachSignal, TermEvent, TermStream,
 };
 
@@ -1830,7 +1830,9 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
         // fingerprint. 409 is the standard HTTP reading of "this identifier
         // already means something else"; `error_kind`'s own docs are where
         // the full classification table lives.
-        ErrorKind::Conflict | ErrorKind::CheckoutConflict => axum::http::StatusCode::CONFLICT,
+        ErrorKind::Conflict | ErrorKind::CheckoutConflict | ErrorKind::TakenOver => {
+            axum::http::StatusCode::CONFLICT
+        }
         ErrorKind::Unauthorized => axum::http::StatusCode::UNAUTHORIZED,
         ErrorKind::Unavailable => axum::http::StatusCode::SERVICE_UNAVAILABLE,
         ErrorKind::Timeout => axum::http::StatusCode::GATEWAY_TIMEOUT,

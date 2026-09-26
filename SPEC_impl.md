@@ -953,6 +953,14 @@ as the protocol grows. The identity hook's pair — `ControlMsg::ReportConversat
 other way and took the protocol to version 12, since two new tagged variants are exactly what an older decoder refuses
 outright instead of ignoring.
 
+Protocol version 31 gives every terminal detach a code beside its reason. `ControlMsg::Detached` carries a `DetachCode`
+(`taken_over`, `stalled`, `tab_closed`, `replaced`, `other`), a non-displacing attach refused because another client
+holds the terminal is `ErrorKind::TakenOver` rather than a `Conflict` recognized by its message, and the helm forwards
+the code in the browser's `detached` notice. Clients decide behavior from the code only (the browser latches a takeover,
+holds a stall, and hides a closed tab) and show the reason as text, so reason wording is free to change. Before 31 the
+helm and `terminal.js` compared English sentences they each kept a copy of, and only the disabled browser suite would
+have noticed a rewording.
+
 `SessionInfo::last_work_started_at` is the millisecond ordering key for the session list's stable work bursts. It was
 added within protocol version 20 under the same additive rule: absent decodes to zero, and zero falls back to
 `created_at * 1000` with saturating integer arithmetic. It never falls back to `last_activity_at`, because continued

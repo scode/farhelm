@@ -218,7 +218,7 @@ pub(crate) async fn drain_for(
             // replay_marker.rs and, helm-side, in farhelm-helm's
             // client.rs/lib.rs.
             Ok(Some(TermEvent::ReplayComplete)) => {}
-            Ok(Some(TermEvent::Detached(reason))) => return Some(reason),
+            Ok(Some(TermEvent::Detached(detach))) => return Some(detach.reason),
             Ok(None) => return Some("closed".to_string()),
             Err(_) => return None,
         }
@@ -1408,8 +1408,11 @@ async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
     h.client.pause_output(stalling_chan).await;
     let reason = expect_detached(&mut stalling_rx, 15).await;
     assert_eq!(
-        reason,
-        farhelm_proto::DETACH_REASON_STALLED,
+        (reason.reason.as_str(), reason.code),
+        (
+            farhelm_proto::DETACH_REASON_STALLED,
+            farhelm_proto::DetachCode::Stalled
+        ),
         "the paused attachment must take the stall detach"
     );
 

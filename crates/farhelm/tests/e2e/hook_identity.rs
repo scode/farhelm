@@ -277,11 +277,11 @@ pub(crate) async fn wait_for_after_from(
             // Presentation-only metadata, carrying no bytes for a text
             // scan to consider (see `wait_for`'s twin arm).
             Ok(Some(TermEvent::ReplayComplete)) => {}
-            Ok(Some(TermEvent::Detached(reason))) => {
+            Ok(Some(TermEvent::Detached(detach))) => {
                 while let Ok(TermEvent::Data(bytes)) = rx.try_recv() {
                     seen.extend_from_slice(&bytes);
                 }
-                ended = Some(reason);
+                ended = Some(detach.reason);
             }
             Ok(None) => ended = Some("closed".to_string()),
             Err(_) => panic!(

@@ -56,8 +56,8 @@ use crate::store::{
 use crate::tmux::{AGENT_WINDOW_OPTION, PaneProbe, PaneState, TAB_WINDOW_OPTION, TmuxDriver};
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ControlMsg, ErrorKind, Frame, ProfileExistence, RestartMode, RestartOffer,
-    SessionInfo, SessionStatus, SourceProfile, TabInfo,
+    AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, ProfileExistence, RestartMode,
+    RestartOffer, SessionInfo, SessionStatus, SourceProfile, TabInfo,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -11434,7 +11434,7 @@ impl Supervisor {
             Some(failure) => format!("session ended; restart failed: {failure}"),
             None => "session restarted".to_string(),
         };
-        notify_detached(&notify, channel, reason);
+        notify_detached(&notify, channel, reason, DetachCode::Other);
         if let Some(failure) = restart_failure {
             anyhow::bail!("{failure}");
         }
@@ -12383,7 +12383,12 @@ impl Supervisor {
             .err();
         let reaping = self.has_output_reap_for_key(&key);
         drop(sink);
-        notify_detached(&notify, channel, "terminal tab closed".to_string());
+        notify_detached(
+            &notify,
+            channel,
+            "terminal tab closed".to_string(),
+            DetachCode::TabClosed,
+        );
         if let Some(cleanup) = cleanup {
             return Err(RequestError::new(ErrorKind::Internal, cleanup.to_string()));
         }

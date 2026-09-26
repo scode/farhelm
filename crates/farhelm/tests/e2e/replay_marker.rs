@@ -335,7 +335,9 @@ impl MarkerPeer {
     fn record_control(&mut self, msg: ControlMsg) {
         match msg {
             ControlMsg::ReplayComplete { channel } => self.arrivals.push(Arrival::Marker(channel)),
-            ControlMsg::Detached { channel, reason } if channel == self.channel => {
+            ControlMsg::Detached {
+                channel, reason, ..
+            } if channel == self.channel => {
                 self.detached = Some(reason);
             }
             _ => {}

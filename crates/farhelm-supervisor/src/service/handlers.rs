@@ -68,8 +68,8 @@ impl CreateAdmission {
 }
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, AgentOutcome, AgentReply, AgentVerb, ControlMsg, ErrorKind, Frame, LaunchHarness,
-    LaunchSelection, MAX_SESSION_ID_BYTES, ProfileSnapshot as WireProfileSnapshot,
+    AgentKind, AgentOutcome, AgentReply, AgentVerb, ControlMsg, DetachCode, ErrorKind, Frame,
+    LaunchHarness, LaunchSelection, MAX_SESSION_ID_BYTES, ProfileSnapshot as WireProfileSnapshot,
     ResolvedGithubCheckout, RestartMode, SessionInfo, TerminalSelector,
     github_checkout::GithubPreviewRequest,
 };
@@ -1810,7 +1810,7 @@ async fn handle_attach(
         permit.send(reply_frame(&ControlMsg::Error {
             req_id,
             message: farhelm_proto::ATTACH_REFUSED_TAKEN_OVER.to_string(),
-            kind: ErrorKind::Conflict,
+            kind: ErrorKind::TakenOver,
         }));
         return;
     }
@@ -1837,11 +1837,11 @@ async fn handle_attach(
     let mut notices = Vec::with_capacity(displaced.len() + usize::from(incumbent.is_some()));
     let doomed = displaced
         .into_iter()
-        .map(|(key, old)| (key, old, DETACH_REASON_TAKEOVER))
+        .map(|(key, old)| (key, old, (DETACH_REASON_TAKEOVER, DetachCode::TakenOver)))
         .chain(
             incumbent
                 .into_iter()
-                .map(|(key, old)| (key, old, DETACH_REASON_REPLACED)),
+                .map(|(key, old)| (key, old, (DETACH_REASON_REPLACED, DetachCode::Replaced))),
         );
     let mut forwarders = tokio::task::JoinSet::new();
     for (old_key, old, reason) in doomed {
@@ -1885,7 +1885,7 @@ async fn handle_attach(
     if let Some(error) = cleanup_error {
         drop(attachments);
         for (channel, notify, reason) in notices {
-            notify_detached(&notify, channel, reason.to_string());
+            notify_detached(&notify, channel, reason.0.to_string(), reason.1);
         }
         permit.send(reply_frame(&ControlMsg::Error {
             req_id,
@@ -1897,7 +1897,7 @@ async fn handle_attach(
     if sup.has_output_reap_for_key(&key) {
         drop(attachments);
         for (channel, notify, reason) in notices {
-            notify_detached(&notify, channel, reason.to_string());
+            notify_detached(&notify, channel, reason.0.to_string(), reason.1);
         }
         permit.send(reply_frame(&ControlMsg::Error {
             req_id,
@@ -1923,7 +1923,7 @@ async fn handle_attach(
     // freeze every session's attach behind the `attachments`
     // mutex.
     for (channel, notify, reason) in notices {
-        notify_detached(&notify, channel, reason.to_string());
+        notify_detached(&notify, channel, reason.0.to_string(), reason.1);
     }
 
     // Size the window now, not during prep: resizing is a

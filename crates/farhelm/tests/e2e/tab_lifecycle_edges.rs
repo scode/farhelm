@@ -325,7 +325,7 @@ async fn a_closed_tabs_channel_receives_its_detached_notice() {
         .expect("close the tab");
     let reason = expect_detached(&mut rx, 15).await;
     assert!(
-        reason.contains("tab"),
+        reason.code == farhelm_proto::DetachCode::TabClosed,
         "the notice must say the tab closed, got: {reason:?}"
     );
 }
@@ -458,7 +458,7 @@ async fn a_second_lease_takes_over_both_terminals_of_one_session_only() {
          client coalesce them into one banner"
     );
     assert!(
-        agent_reason.contains("another client"),
+        agent_reason.code == farhelm_proto::DetachCode::TakenOver,
         "the reason must name a takeover, got: {agent_reason:?}"
     );
 
@@ -570,7 +570,7 @@ async fn deleting_a_session_detaches_every_channel_and_reaps_scrubbed_tab_daemon
     }
     let agent_reason = expect_detached(&mut agent_rx, 15).await;
     assert!(
-        agent_reason.contains("deleted"),
+        agent_reason.reason.contains("deleted"),
         "the agent's channel must be told the session was deleted, got: {agent_reason:?}"
     );
     for (index, mut rx) in tab_streams.into_iter().enumerate() {
@@ -791,7 +791,7 @@ async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
 
     let reason = expect_detached(&mut stalling_rx, 60).await;
     assert!(
-        reason.contains("stall"),
+        reason.code == farhelm_proto::DetachCode::Stalled,
         "the stalled tab must be detached as stalled, got: {reason:?}"
     );
 

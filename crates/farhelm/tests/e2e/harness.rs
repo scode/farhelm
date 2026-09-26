@@ -15,7 +15,7 @@
 //! `use crate::harness::*;`, matching what the pre-split file offered
 //! implicitly through shared top-of-file imports.
 
-pub(crate) use farhelm_helm::{SupervisorClient, SupervisorError, TermEvent, TermStream};
+pub(crate) use farhelm_helm::{Detach, SupervisorClient, SupervisorError, TermEvent, TermStream};
 pub(crate) use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 pub(crate) use farhelm_proto::{
     ControlMsg, ErrorKind, Frame, FrameKind, LIST_SESSIONS_CAP, SessionInfo, SessionStatus,
@@ -1510,11 +1510,11 @@ pub(crate) async fn wait_until<S: TermSource>(
             Ok(Some(TermEvent::ReplayComplete)) => {}
             // Drain whatever is already queued behind the notice before
             // deciding the needle never arrived.
-            Ok(Some(TermEvent::Detached(reason))) => {
+            Ok(Some(TermEvent::Detached(detach))) => {
                 while let Ok(TermEvent::Data(bytes)) = rx.try_recv() {
                     seen.extend_from_slice(&bytes);
                 }
-                ended = Some(reason);
+                ended = Some(detach.reason);
             }
             Ok(None) => ended = Some("closed".to_string()),
             Err(_) => panic!(
@@ -1772,7 +1772,7 @@ pub(crate) fn counter_records(transcript: &[u8]) -> Vec<u64> {
     records
 }
 
-/// Wait for an attachment's `Detached` notice and return its reason.
+/// Wait for an attachment's `Detached` notice and return it (reason and code).
 ///
 /// Every takeover test needs this same wait, and the two failure modes it
 /// distinguishes are exactly the ones a bug in the takeover path
@@ -1780,7 +1780,7 @@ pub(crate) fn counter_records(transcript: &[u8]) -> Vec<u64> {
 /// torn down silently) versus one that simply never hears anything (the
 /// incumbent was never kicked). Panicking with that distinction is the
 /// point — an `Option` return would let a caller blur them.
-pub(crate) async fn expect_detached(rx: &mut TermStream, secs: u64) -> String {
+pub(crate) async fn expect_detached(rx: &mut TermStream, secs: u64) -> Detach {
     tokio::time::timeout(Duration::from_secs(secs), async {
         while let Some(ev) = rx.recv().await {
             if let TermEvent::Detached(reason) = ev {
@@ -2654,7 +2654,7 @@ mod tests {
     async fn wait_for_replay_complete_reports_missing_marker_rule() {
         let mut source = ScriptedSource::new([
             TermEvent::Data(b"snapshot".to_vec()),
-            TermEvent::Detached("taken over".to_string()),
+            TermEvent::Detached(Detach::other("taken over")),
         ]);
         let mut seen = Vec::new();
         let _ = wait_for_replay_complete_inner(&mut source, &mut seen, 1).await;
@@ -2747,7 +2747,7 @@ mod tests {
     async fn wait_for_finds_a_needle_queued_behind_detached() {
         let mut source = ScriptedSource::new([
             TermEvent::Data(b"bye".to_vec()),
-            TermEvent::Detached("pane died".to_string()),
+            TermEvent::Detached(Detach::other("pane died")),
             TermEvent::Data(b" needle".to_vec()),
         ]);
         let mut seen = Vec::new();
