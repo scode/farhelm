@@ -6007,9 +6007,12 @@ impl Supervisor {
                 // longer launch evidence BY ITSELF. A retained
                 // create-refusal row is an Error row with an EMPTY pane —
                 // exactly the shape this condition now excludes — and a
-                // genuine launch's evidence is its pane, its sentinel, its
-                // scope, or its conversation report, all of which the
-                // pending loop below re-probes before settling anything.
+                // genuine launch's other traces (its sentinel and its scope)
+                // are what the pending loop below re-probes before settling
+                // anything. A conversation report is evidence too, but only
+                // a retry's `reserved_launch_evidence` reads it; a
+                // reservation whose only trace is a report stays pending
+                // here and settles on that retry.
                 launched.insert(row.id.clone());
             }
             // Rebuilt from the stored columns rather than re-derived from
@@ -6195,9 +6198,15 @@ impl Supervisor {
         // parallel probe: a pending reservation whose launching row this
         // pass resolved is the SAME case a retry sees from the other side
         // (`reserved_launch_evidence`, which carries the full rationale for
-        // the provenance rule both share). Settling here is what makes the
-        // crash windows survivable across a RESTART with no retry in sight
-        // — by the time a client retries, the answer is already recorded.
+        // the provenance rule). This pass reads a SUBSET of that function's
+        // sources: pane, sentinel, scope, but not the conversation report,
+        // and its tmux reading is the pane scan taken at the start of this
+        // pass rather than `has_session` asked as each reservation is
+        // decided. That errs the safe way: a reservation this pass cannot
+        // settle stays pending for the retry. Settling here is what
+        // makes the crash windows survivable across a RESTART with no retry
+        // in sight — by the time a client retries, the answer is already
+        // recorded.
         //
         // Settlement requires PROVENANCE, not merely a non-launching
         // status. A pane (recorded, or found by this pass) means something
@@ -6210,7 +6219,7 @@ impl Supervisor {
         // whose launch left no trace, stay pending: only a retry can create
         // the session the client asked for, under the identities the
         // reservation already holds.
-        // The cgroup is a FOURTH source of provenance, asked here rather than
+        // The cgroup is a third source of provenance, asked here rather than
         // in the row loop above because it costs a D-Bus round trip per
         // question and only pending reservations have a question worth
         // asking: a live scope with the reserved launch's name can only have
