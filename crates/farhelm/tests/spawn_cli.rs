@@ -15,14 +15,29 @@ use std::time::Duration;
 mod cli_support;
 use cli_support::output_with_timeout;
 
+/// Serve one authenticated request and answer it with `respond`'s reply.
+fn mock_supervisor(
+    socket: &std::path::Path,
+    respond: impl FnOnce(ControlMsg) -> ControlMsg + Send + 'static,
+) -> (
+    std::sync::mpsc::Receiver<Result<(), String>>,
+    farhelm_teststate::thread::FixtureThread,
+) {
+    mock_supervisor_or_close(socket, move |request| Some(respond(request)))
+}
+
 /// Serve one authenticated request with cancellation across the entire exchange.
+///
+/// `respond` returning `None` closes the connection after reading the
+/// request, without answering: the "supervisor died after the request went
+/// out" ending.
 ///
 /// The returned owner cancels blocked handshake and reply writes during unwind.
 /// A six-second transaction allowance fits inside finish_server's seven-second
 /// result wait, which still requires protocol success before observing the join.
-fn mock_supervisor(
+fn mock_supervisor_or_close(
     socket: &std::path::Path,
-    respond: impl FnOnce(ControlMsg) -> ControlMsg + Send + 'static,
+    respond: impl FnOnce(ControlMsg) -> Option<ControlMsg> + Send + 'static,
 ) -> (
     std::sync::mpsc::Receiver<Result<(), String>>,
     farhelm_teststate::thread::FixtureThread,
@@ -81,8 +96,9 @@ fn mock_supervisor(
                                     .expect("spawn did not send create")
                                     .unwrap()
                                     .expect("create request");
-                                    let reply = respond(parse_control(&frame).unwrap());
-                                    writer.write_control(&reply).await.unwrap();
+                                    if let Some(reply) = respond(parse_control(&frame).unwrap()) {
+                                        writer.write_control(&reply).await.unwrap();
+                                    }
                                 };
                                 tokio::select! {
                                     _ = cancel_rx => Err("mock supervisor cancelled".to_string()),
@@ -592,6 +608,11 @@ fn supervisor_error_replies_exit_nonzero_with_empty_stdout() {
 
 /// A syntactically valid reply for another request is a protocol error, not
 /// an event to discard while waiting forever for a reply that may never come.
+///
+/// It is also an answer that says nothing about whether the create landed,
+/// so it carries the same outcome-unknown warning as a lost reply: a peer
+/// broken enough to mis-correlate is as likely to have started the child
+/// as not.
 #[farhelm_testtrace::test]
 fn an_unexpected_reply_fails_instead_of_hanging() {
     let temp = farhelm_teststate::tempdir().unwrap();
@@ -610,10 +631,81 @@ fn an_unexpected_reply_fails_instead_of_hanging() {
     finish_server(done, server);
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("unexpected spawn reply"), "{stderr}");
     assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("unexpected spawn reply")
+        stderr.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+        "{stderr}"
+    );
+}
+
+/// Spec: a spawn whose reply is lost after the request went out says the
+/// outcome is unknown and tells the caller to look before retrying.
+///
+/// The supervisor may have created the child before dying, so a bare
+/// "connection closed" invites a retry that starts a second one. `farhelm
+/// agent create` has always said this; `spawn` used to exit with only the
+/// transport error.
+#[farhelm_testtrace::test]
+fn a_lost_reply_says_the_child_may_already_exist() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, server) = mock_supervisor_or_close(&socket, |request| {
+        assert!(matches!(request, ControlMsg::CreateSession { .. }));
+        None
+    });
+    let mut command = spawn_command();
+    command
+        .args(["--cwd", "/tmp", "--inherit-agent"])
+        .env("FARHELM_SESSION_ID", "parent-123")
+        .env("FARHELM_SESSION_TOKEN", "secret")
+        .env("FARHELM_SUPERVISOR_SOCK", &socket);
+    let output = output_with_timeout(command);
+    finish_server(done, server);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("outcome is unknown"), "{stderr}");
+    assert!(
+        stderr.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+        "{stderr}"
+    );
+}
+
+/// Spec: a supervisor's refusal is printed with control and invisible
+/// characters escaped, like every other piece of peer text the CLI shows.
+///
+/// The message is free text from the supervisor and ends up on the
+/// caller's terminal through `main`'s error printer, which escapes
+/// nothing; an unescaped escape sequence there can rewrite what the user
+/// sees. `farhelm agent` already escaped its refusals; `spawn` did not.
+#[farhelm_testtrace::test]
+fn a_refusal_is_printed_escaped() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, server) = mock_supervisor(&socket, |_| ControlMsg::Error {
+        req_id: 1,
+        kind: farhelm_proto::ErrorKind::Conflict,
+        message: "refused\u{1b}[2J\nforged line".to_string(),
+    });
+    let mut command = spawn_command();
+    command
+        .args(["--cwd", "/tmp", "--inherit-agent"])
+        .env("FARHELM_SESSION_ID", "parent-123")
+        .env("FARHELM_SESSION_TOKEN", "secret")
+        .env("FARHELM_SUPERVISOR_SOCK", &socket);
+    let output = output_with_timeout(command);
+    finish_server(done, server);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(!stderr.contains('\u{1b}'), "{stderr:?}");
+    assert!(
+        stderr.contains("refused\\x1b[2J\\nforged line"),
+        "{stderr:?}"
+    );
+    assert!(
+        !stderr.contains("outcome is unknown"),
+        "a refusal is a definite answer: {stderr}"
     );
 }
 

@@ -294,12 +294,6 @@ are large mostly because of their tests.
   one-render lag the form then patches over (`:1653-1661`). Fix: a shared `SeededField` type, one source of truth for
   the folder, a `use_memo` for the target in `ListView`, then split destination/browse, composer search, and submit out
   of the component.
-- **CLI `main.rs`.** Medium effort. `main()` is ~540 lines (`farhelm/src/main.rs:688-1225`) mixing dispatch with env
-  reads and the hook-log path derivation copied between `Hook` and `GooseHook`. `spawn_session` and `agent_request` each
-  hand-roll connect, handshake, one request, one reply, but treat failures differently: `spawn` prints the supervisor's
-  message unescaped and gives no "outcome unknown" warning on a lost reply to a mutating create, where `agent create`
-  does. About 400 lines of table rendering live alongside. Fix: an agent-client module with one `one_shot_request`, a
-  render module, and a `SessionEnv::from_env()`.
 - **`desktop.rs` bundle.** Low-medium effort. ~2,450 production lines covering window geometry, the asset server, device
   token exchange, supervisor lifecycle, tmux preflight, clipboard, and state. `write_window_state` (`:701`) and
   `write_state` (`:2428`) are diverged copies of the atomic-write helper (only one fsyncs the parent, only the other
