@@ -220,16 +220,6 @@ pub enum IdentityStatus {
     NoCapturedIdentity,
 }
 
-/// What [`lowest_free_suffix`] concluded about a canonical root.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OccupancyOutcome {
-    /// `{basename}` itself is unoccupied; the plain name may be used.
-    BasenameAvailable,
-    /// `{basename}` is taken; the lowest free numeric name is
-    /// `{basename}-{n}`.
-    LowestFree(u32),
-}
-
 /// What [`allocate`] did: won the exclusive mkdir and captured identity.
 #[derive(Clone, Debug)]
 pub struct AcceptedDirectory {
@@ -426,8 +416,9 @@ pub struct PreparationSnapshot {
 /// row + membership, one commit, no FKs to lean on).
 ///
 /// `original_basename` is the FINAL name including any `-N` suffix the
-/// occupancy scan ([`lowest_free_suffix`]) chose; allocation does not
-/// rename, it creates exactly this name.
+/// preview chose ([`farhelm_proto::github_checkout::checkout_basename`]
+/// over [`occupied_related_names`]); allocation does not rename, it creates
+/// exactly this name.
 pub fn record_planned(conn: &Connection, spec: &PlannedWorkingCopy) -> Result<WorkingCopyRow> {
     conn.execute(
         "INSERT INTO working_copies \
@@ -689,20 +680,6 @@ pub fn attach_existing_ancestors(
 // Naming: occupancy scan
 // ---------------------------------------------------------------------------
 
-/// Find the lowest free `{basename}-N` name under `root`.
-///
-/// Every directory entry except [`ARCHIVE_DIR_NAME`] occupies its exact
-/// name — files, real directories, and symlinks alike, including DANGLING
-/// symlinks (a name claimed on disk is claimed as far as mkdir is
-/// concerned, whatever the entry points at). The preview path calls this
-/// before suggesting a name; [`allocate`] remains the actual arbitration
-/// because only the exclusive mkdir can race.
-///
-/// `cap` is injected so tests can exercise the refusal path; production
-/// passes [`OCCUPANCY_SCAN_CAP`]. Hitting the cap yields
-/// [`WorkingCopyError::IncompleteScan`] — a wrong "lowest free" would
-/// collapse two creates onto one name, and the explicit refusal is
-/// cheaper than the repair.
 /// The result of [`occupied_related_names`]: every directory entry under
 /// `root` related to `basename` (the plain name and any `basename-...`), plus
 /// whether the scan stayed under its cap. A `complete == false` scan means
@@ -715,10 +692,14 @@ pub struct OccupiedScan {
 /// Scan `root` once and collect every entry related to `basename` — the
 /// plain name and every name beginning with `basename-`, including titled
 /// names with arbitrary suffixes. The reserved archive directory is skipped
-/// exactly like the allocator skips it. This is the preview-side complement
-/// of [`lowest_free_suffix`]: the naming helper's `occupied_names` callback
-/// needs a SET because titled names check arbitrary candidates, while the
-/// allocator only needs the lowest free number.
+/// exactly like the allocator skips it. Every other entry occupies its exact
+/// name — files, directories, and symlinks alike, including DANGLING ones (a
+/// name claimed on disk is claimed as far as mkdir is concerned). It returns
+/// a SET because the naming helper's `occupied_names` callback checks
+/// arbitrary candidates for titled names. The preview uses it to propose a
+/// name and the create path re-runs it to confirm the proposal still holds;
+/// [`allocate`] remains the actual arbitration because only the exclusive
+/// mkdir can race.
 ///
 /// `cap` bounds iterator calls, including the call needed to prove EOF.
 /// Exhausting it without EOF yields [`WorkingCopyError::IncompleteScan`]
@@ -766,93 +747,6 @@ where
         }
     }
     Err(WorkingCopyError::IncompleteScan { scanned: cap })
-}
-
-/// Propose the lowest free `basename-N` (or that `basename` itself is
-/// free) by scanning `root` once: every entry occupying a related shape —
-/// name — files, real directories, and symlinks alike, including DANGLING
-/// symlinks (a name claimed on disk is claimed as far as mkdir is
-/// concerned, whatever the entry points at). The preview path calls this
-/// before suggesting a name; [`allocate`] remains the actual arbitration
-/// because only the exclusive mkdir can race.
-///
-pub fn lowest_free_suffix(root: &Path, basename: &str, cap: usize) -> Result<OccupancyOutcome> {
-    let entries = match fs::read_dir(root) {
-        Ok(entries) => entries,
-        // A missing canonical root has nothing in it — the plain basename
-        // is trivially free. Any other read failure is real and surfaces.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(OccupancyOutcome::BasenameAvailable);
-        }
-        Err(e) => return Err(e.into()),
-    };
-    let mut plain_occupied = false;
-    let mut occupied: Vec<u32> = Vec::new();
-    let mut scanned = 0usize;
-    for entry in entries {
-        scanned += 1;
-        if scanned > cap {
-            return Err(WorkingCopyError::IncompleteScan { scanned });
-        }
-        let Ok(entry) = entry else {
-            // The root's contents churned under us (or the entry was
-            // unreadable). Naming stays best-effort — allocate still
-            // arbitrates the truth with the exclusive mkdir.
-            continue;
-        };
-        let Some(name) = entry.file_name().into_string().ok() else {
-            continue;
-        };
-        if name == basename {
-            plain_occupied = true;
-        }
-        if name == ARCHIVE_DIR_NAME {
-            continue;
-        }
-        let Some(suffix) = name
-            .strip_prefix(basename)
-            .and_then(|s| s.strip_prefix('-'))
-        else {
-            continue;
-        };
-        // A leading '+' would make u32 parsing accept what the user never
-        // typed as a suffix (`bar-+5`); anything else unparseable is just
-        // an unrelated entry, not an occupancy.
-        if !suffix.starts_with('+')
-            && let Ok(n) = suffix.parse::<u32>()
-        {
-            occupied.push(n);
-        }
-    }
-    // Any occupied related shape — the plain name itself OR a numeric
-    // suffix — makes the answer the lowest free suffix. `bar-1` existing
-    // with `bar` free still means the next create should take a numbered
-    // name, not silently reuse the unnumbered one.
-    if plain_occupied || !occupied.is_empty() {
-        Ok(OccupancyOutcome::LowestFree(lowest_absent(&mut occupied)))
-    } else {
-        Ok(OccupancyOutcome::BasenameAvailable)
-    }
-}
-
-/// The smallest POSITIVE integer absent from a list (which is sorted in
-/// place). Numbered names start at 1 — `bar-0` is not a shape the naming
-/// scheme ever suggests — so `[1, 3]` → 2 and `[]` → 1.
-fn lowest_absent(occupied: &mut [u32]) -> u32 {
-    occupied.sort_unstable();
-    let mut expected = 1u32;
-    for &n in occupied.iter() {
-        if n != expected {
-            return expected;
-        }
-        if n == u32::MAX {
-            // Every positive number is taken; callers cannot use another
-            // suffix. Returning MAX keeps this total.
-            return u32::MAX;
-        }
-        expected += 1;
-    }
-    expected
 }
 
 // ---------------------------------------------------------------------------
@@ -1880,80 +1774,6 @@ mod tests {
             occupied_related_names(dir.path(), "bar", 1),
             Err(WorkingCopyError::IncompleteScan { scanned: 1 })
         ));
-    }
-
-    /// The A2 occupancy shape: files, directories, and DANGLING symlinks
-    /// all occupy their exact name, and the lowest numeric gap wins.
-    #[test]
-    fn occupancy_finds_lowest_free_gap_between_files_dirs_and_dangling_symlinks() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        fs::write(root.join("bar-1"), b"file").expect("file at bar-1");
-        fs::create_dir(root.join("bar-3")).expect("dir at bar-3");
-        std::os::unix::fs::symlink("/nowhere/at/all", root.join("bar-5"))
-            .expect("dangling symlink at bar-5");
-        assert_eq!(
-            lowest_free_suffix(root, "bar", OCCUPANCY_SCAN_CAP).expect("scan"),
-            OccupancyOutcome::LowestFree(2)
-        );
-    }
-
-    /// When the plain basename is itself occupied (whatever the entry
-    /// kind), the answer is the lowest free suffix starting at zero.
-    #[test]
-    fn occupancy_counts_a_plain_file_directory_and_dangling_symlink_as_occupied() {
-        for shape in ["file", "dir", "dangling-symlink"] {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let root = dir.path();
-            match shape {
-                "file" => fs::write(root.join("bar"), b"").expect("file"),
-                "dir" => fs::create_dir(root.join("bar")).expect("dir"),
-                _ => std::os::unix::fs::symlink("/nowhere", root.join("bar"))
-                    .expect("dangling symlink"),
-            }
-            assert_eq!(
-                lowest_free_suffix(root, "bar", OCCUPANCY_SCAN_CAP).expect("scan"),
-                OccupancyOutcome::LowestFree(1),
-                "shape {shape} must occupy the plain name"
-            );
-        }
-    }
-
-    /// The reserved archive directory name never participates in naming.
-    #[test]
-    fn occupancy_skips_the_reserved_archive_directory_name() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        fs::create_dir(dir.path().join(ARCHIVE_DIR_NAME)).expect("archive dir");
-        assert_eq!(
-            lowest_free_suffix(dir.path(), "bar", OCCUPANCY_SCAN_CAP).expect("scan"),
-            OccupancyOutcome::BasenameAvailable
-        );
-    }
-
-    /// A missing root scans as empty rather than erroring: the plain name
-    /// is trivially free.
-    #[test]
-    fn occupancy_of_a_missing_root_reports_the_basename_free() {
-        assert_eq!(
-            lowest_free_suffix(Path::new("/nowhere/definitely-missing"), "bar", 10).expect("scan"),
-            OccupancyOutcome::BasenameAvailable
-        );
-    }
-
-    /// The cap is enforced by REFUSAL: an over-cap root yields
-    /// IncompleteScan rather than a possibly-wrong lowest number. The cap
-    /// is an injected parameter precisely so this path is testable at a
-    /// small size.
-    #[test]
-    fn occupancy_refuses_to_answer_when_the_entry_cap_is_hit() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        for n in 0..5 {
-            fs::write(dir.path().join(format!("other-{n}")), b"").expect("entry");
-        }
-        match lowest_free_suffix(dir.path(), "bar", 4) {
-            Err(WorkingCopyError::IncompleteScan { scanned }) => assert_eq!(scanned, 5),
-            other => panic!("expected IncompleteScan, got {other:?}"),
-        }
     }
 
     // -- allocation: the one-winner contract ------------------------------
