@@ -1675,7 +1675,7 @@ pub(crate) fn SessionView(
                             onclick: move |_| {
                                 if lifecycle.claim() { confirming_header_replace.set(true); }
                             },
-                            "Replace"
+                            "replace"
                         }
                         if confirming_header_replace() {
                             div { class: "header-confirm header-replace-confirm",
@@ -1708,14 +1708,14 @@ pub(crate) fn SessionView(
                         class: "btn btn-primary header-clone",
                         disabled: lifecycle.busy(),
                         onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::Clone(header_session.clone()))),
-                        "Clone"
+                        "clone"
                     }
                     button {
                         r#type: "button",
                         class: "btn btn-primary header-replace-with",
                         disabled: lifecycle.busy(),
                         onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(header_replace_session.clone()))),
-                        "Replace with"
+                        "replace with"
                     }
                 }
             }
@@ -1812,7 +1812,7 @@ pub(crate) fn SessionView(
                             }
                             notice_restart(false);
                         },
-                        "Restart"
+                        "restart"
                     }
                     button {
                         r#type: "button",
@@ -1825,7 +1825,7 @@ pub(crate) fn SessionView(
                             }
                             confirming_replace.set(true);
                         },
-                        "Replace"
+                        "replace"
                     }
                     if confirming_replace() {
                         div { class: "replace-confirm",

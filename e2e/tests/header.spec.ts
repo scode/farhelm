@@ -197,9 +197,9 @@ test("header actions stay ordered, copy full values, and open the right flows", 
     );
     expect(actionNames, "pointer and keyboard users must receive the same action order").toEqual([
       "restart",
-      "Replace",
-      "Clone",
-      "Replace with",
+      "replace",
+      "clone",
+      "replace with",
     ]);
 
     await page.evaluate(() => {
@@ -225,7 +225,7 @@ test("header actions stay ordered, copy full values, and open the right flows", 
       .toEqual([cwd, invocation]);
     await expect(copyButtons.nth(1)).toContainText("copied");
 
-    const replace = page.getByRole("button", { name: "Replace", exact: true });
+    const replace = page.getByRole("button", { name: "replace", exact: true });
     await replace.click();
     const confirmation = page.locator(".header-replace-confirm");
     await expect(confirmation).toBeVisible();
@@ -236,13 +236,13 @@ test("header actions stay ordered, copy full values, and open the right flows", 
     await expect(confirmation).toHaveCount(0);
 
     const form = page.locator(".create-session-form");
-    await page.getByRole("button", { name: "Clone", exact: true }).click();
+    await page.getByRole("button", { name: "clone", exact: true }).click();
     await expect(form).toBeVisible();
     await expect(form.locator('input[aria-label="folder"]')).toHaveValue(cwd);
     await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Replace with", exact: true }).click();
+    await page.getByRole("button", { name: "replace with", exact: true }).click();
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-submit")).toHaveText(/^replace\s+local \(this machine\) · \/tmp$/);
     await form.getByRole("button", { name: "cancel", exact: true }).click();
