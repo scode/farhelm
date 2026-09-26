@@ -250,7 +250,7 @@ fn absolute_stamp(secs: i64) -> String {
     // lands on the right day. Nothing should produce one — `ActivityStamp`
     // rejects everything at or below zero — but a formatter that silently
     // reflects around the epoch is a trap for whoever calls this next.
-    let (year, month, day) = civil_from_days(secs.div_euclid(SECS_PER_DAY));
+    let (year, month, day) = farhelm_proto::time::civil_from_days(secs.div_euclid(SECS_PER_DAY));
     let seconds_of_day = secs.rem_euclid(SECS_PER_DAY);
     let (hour, minute, second) = (
         seconds_of_day / 3_600,
@@ -258,50 +258,6 @@ fn absolute_stamp(secs: i64) -> String {
         seconds_of_day % 60,
     );
     format!("last activity {year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} UTC")
-}
-
-/// Days since the Unix epoch to a proleptic Gregorian `(year, month, day)`.
-///
-/// Howard Hinnant's `civil_from_days`, which is the standard closed-form
-/// inverse of the day count and is what a date crate would run here. Carried
-/// as ten lines rather than as a dependency because this is the only calendar
-/// arithmetic in the whole UI, and pulling `chrono`/`time` into the wasm
-/// bundle to format one tooltip is not a trade worth making.
-///
-/// Two of the magic numbers have a plain meaning: 719468 shifts the epoch to
-/// 0000-03-01 (March-first years make the leap day the LAST day, so no month
-/// length depends on it), and 146097 is the number of days in a 400-year
-/// Gregorian era. The 1460 / 36524 / 146096 divisors in the year-of-era line
-/// do NOT: they are that formula's leap-day corrections over a zero-based
-/// day-of-era count, and reading them as cycle lengths is wrong (a Gregorian
-/// four-year cycle is 1461 days, not 1460). Copy them from Hinnant rather
-/// than re-deriving them from a calendar.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let shifted = days + 719_468;
-    let era = if shifted >= 0 {
-        shifted
-    } else {
-        shifted - 146_096
-    } / 146_097;
-    let day_of_era = shifted - era * 146_097; // [0, 146096]
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365; // [0, 399]
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100); // [0, 365]
-    let month_prime = (5 * day_of_year + 2) / 153; // [0, 11], March = 0
-    let day = day_of_year - (153 * month_prime + 2) / 5 + 1; // [1, 31]
-    let month = if month_prime < 10 {
-        month_prime + 3
-    } else {
-        month_prime - 9
-    };
-    // January and February belong to the NEXT calendar year in the
-    // March-first numbering the algorithm works in.
-    (
-        if month <= 2 { year + 1 } else { year },
-        month as u32,
-        day as u32,
-    )
 }
 
 #[cfg(test)]
@@ -406,7 +362,7 @@ mod tests {
     /// leave the reader guessing which machine's idea of the day that is.
     ///
     /// The leap-year and month-boundary cases are here because the calendar
-    /// arithmetic is hand-carried (see `civil_from_days`): a date crate would
+    /// arithmetic is hand-carried (see farhelm-proto's `time::civil_from_days`): a date crate would
     /// come with its own tests, and this does not.
     ///
     /// The cases are chosen at the three places the Gregorian leap rule

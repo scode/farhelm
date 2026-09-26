@@ -2306,7 +2306,12 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
 /// order's descending-by-`created_at` walk), and total order survives
 /// regardless because the `id` tiebreak never depends on `created_at`
 /// being distinct.
-pub(crate) fn now_unix() -> i64 {
+///
+/// The supervisor's one wall-clock reading in whole seconds: every row stamp,
+/// capture window, and working-copy record reads it through here (the capture
+/// module re-exports it as `agent_kind::now_unix` for the e2e harness and the
+/// fake agent).
+pub fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)

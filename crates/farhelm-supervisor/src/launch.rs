@@ -1070,7 +1070,8 @@ pub fn write_preparation_state(
         version: PREPARATION_STATE_VERSION,
         working_copy_id: working_copy_id.to_string(),
         state: state.clone(),
-        updated_at_unix_seconds: unix_seconds_now(),
+        // A pre-epoch clock reads as 0 either way.
+        updated_at_unix_seconds: crate::store::now_unix().max(0) as u64,
     };
     let bytes = serde_json::to_vec(&record)
         .map_err(|e| std::io::Error::other(format!("serializing preparation state: {e}")))?;
@@ -1125,14 +1126,6 @@ pub fn read_preparation_state(
         );
     }
     Ok(Some(record))
-}
-
-/// Seconds since the unix epoch for [`PreparationRecord`]'s timestamp.
-fn unix_seconds_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// The flock target for one working copy's preparation: a lock file

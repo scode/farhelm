@@ -63,6 +63,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
+
+use crate::store::now_unix;
 use rusqlite::Connection;
 use thiserror::Error;
 
@@ -562,12 +564,6 @@ pub fn all_working_copies(conn: &Connection) -> Result<Vec<WorkingCopyRow>> {
         .query_map([], decode_row)?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
-}
-
-fn now_unix() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
 }
 
 /// Compare recorded paths by components for the corrupt-registry guard.
@@ -1601,7 +1597,7 @@ pub fn retire(conn: &Connection, working_copy_id: &str) -> Result<()> {
 fn utc_compact(unix_seconds: i64) -> String {
     let days = unix_seconds.div_euclid(86_400);
     let secs_of_day = unix_seconds.rem_euclid(86_400);
-    let (year, month, day) = civil_from_days(days);
+    let (year, month, day) = farhelm_proto::time::civil_from_days(days);
     format!(
         "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
         year,
@@ -1611,21 +1607,6 @@ fn utc_compact(unix_seconds: i64) -> String {
         (secs_of_day % 3600) / 60,
         secs_of_day % 60
     )
-}
-
-/// Howard Hinnant's `civil_from_days`: days since 1970-01-01 to
-/// (year, month, day) in the proleptic Gregorian calendar.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
 }
 
 #[cfg(test)]

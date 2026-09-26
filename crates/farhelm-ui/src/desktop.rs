@@ -1261,7 +1261,7 @@ impl DesktopBootstrap {
         // only stats candidate paths (`is_executable_file`), which is silent
         // on stderr regardless of the tracing filter `init_tracing` already
         // installed in `run`.
-        let ambient_tmux = std::env::var_os("FARHELM_TMUX");
+        let ambient_tmux = std::env::var_os(farhelm_supervisor::tmux::TMUX_PROGRAM_ENV);
         let tmux_prefixes = macos_tmux_prefixes();
         let supervisor_tmux =
             resolve_supervisor_tmux(ambient_tmux.clone(), tmux_prefixes, is_executable_file);
@@ -1323,7 +1323,7 @@ impl DesktopBootstrap {
                     .stdout(Stdio::null())
                     .stderr(Stdio::inherit());
                 if let Some(tmux) = &supervisor_tmux {
-                    command.env("FARHELM_TMUX", tmux);
+                    command.env(farhelm_supervisor::tmux::TMUX_PROGRAM_ENV, tmux);
                 }
                 command.spawn().with_context(|| {
                     format!(
@@ -2031,7 +2031,7 @@ fn tmux_probe_targets(ambient: Option<&std::ffi::OsStr>, prefixes: &[&str]) -> V
     if let Some(value) = ambient.filter(|value| !value.is_empty()) {
         return vec![value.to_string_lossy().into_owned()];
     }
-    let mut targets = vec!["FARHELM_TMUX".to_string()];
+    let mut targets = vec![farhelm_supervisor::tmux::TMUX_PROGRAM_ENV.to_string()];
     targets.extend(prefixes.iter().map(|&prefix| {
         if prefix == "/opt/local/bin" {
             "MacPorts".to_string()

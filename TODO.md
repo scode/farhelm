@@ -289,11 +289,6 @@ are large mostly because of their tests.
   `farhelm-helm/src/launches.rs:464`, `farhelm-helm/src/sessions.rs:2027`); the workspace-trust harness set is repeated
   at `launches.rs:506` and helm `store.rs:5049`, and the permission words at helm `store.rs:795` and `:5045`. Fix:
   `LaunchHarness::agent_kind()` in `farhelm-proto`, and expose the other two from `launches.rs`.
-- **Small shared helpers.** Low effort. `civil_from_days` exists three times (`farhelm-ui/src/activity.rs:279`,
-  `farhelm-supervisor/src/working_copies.rs:1618`, `farhelm-supervisor/src/agent_kind/capture.rs:839`), a Unix-now
-  helper five times (one returning `u64`, the rest `i64`), and env var names such as `FARHELM_SESSION_ID`,
-  `FARHELM_TMUX` are spelled as literals next to existing constants. Fold into whichever shared home the escaping
-  predicate gets.
 
 ### Oversized modules and functions
 
