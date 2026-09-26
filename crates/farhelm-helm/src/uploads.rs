@@ -365,7 +365,8 @@ enum UploadStep {
 
 #[cfg(test)]
 mod tests {
-    use crate::{BUILD_STAMP_HEADER, rest_harness};
+    use crate::BUILD_STAMP_HEADER;
+    use crate::rest_harness::{self, FakeSupervisor};
     use std::time::Duration;
 
     /// `POST /api/sessions/{id}/attachments` happy path (PLAN_M4.md item
@@ -384,7 +385,6 @@ mod tests {
     /// `upload_attachment_rechunks_irregular_streaming_body_chunks`.
     #[farhelm_testtrace::test]
     async fn upload_attachment_happy_path_streams_chunks_and_returns_the_path() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES};
         use tower::ServiceExt;
 
@@ -395,13 +395,8 @@ mod tests {
         let peer = tokio::spawn({
             let content = content.clone();
             async move {
-                let (r, w) = tokio::io::split(peer_side);
-                let mut reader = FrameReader::new(r);
-                let mut writer = FrameWriter::new(w);
-                handshake(&mut reader, &mut writer, "supervisor")
-                    .await
-                    .unwrap();
-                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let mut peer = FakeSupervisor::accept(peer_side).await;
+                let request = peer.recv().await;
                 let ControlMsg::BeginUpload {
                     req_id,
                     session_id,
@@ -417,10 +412,8 @@ mod tests {
                     size, total as u64,
                     "declared size must be the request's Content-Length"
                 );
-                writer
-                    .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                    .await
-                    .unwrap();
+                peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                    .await;
 
                 // Read every data frame until the whole body is accounted
                 // for, checking the split points and byte-for-byte
@@ -430,7 +423,7 @@ mod tests {
                 let mut reassembled = Vec::new();
                 let mut lens = Vec::new();
                 while reassembled.len() < content.len() {
-                    let frame = reader.read_frame().await.unwrap().unwrap();
+                    let frame = peer.recv_frame().await;
                     assert_eq!(frame.channel, channel);
                     lens.push(frame.body.len());
                     reassembled.extend_from_slice(&frame.body);
@@ -443,17 +436,15 @@ mod tests {
                 );
                 assert_eq!(reassembled, content);
 
-                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let request = peer.recv().await;
                 let ControlMsg::CommitUpload { req_id, .. } = request else {
                     panic!("expected CommitUpload, got {request:?}");
                 };
-                writer
-                    .write_control(&ControlMsg::UploadCommitted {
-                        req_id,
-                        path: "/data/sessions/sess-1/attachments/screenshot.png".to_string(),
-                    })
-                    .await
-                    .unwrap();
+                peer.send(&ControlMsg::UploadCommitted {
+                    req_id,
+                    path: "/data/sessions/sess-1/attachments/screenshot.png".to_string(),
+                })
+                .await;
             }
         });
 
@@ -496,7 +487,6 @@ mod tests {
     /// aligned inputs fails here.
     #[farhelm_testtrace::test]
     async fn upload_attachment_rechunks_irregular_streaming_body_chunks() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES};
         use tower::ServiceExt;
 
@@ -524,28 +514,21 @@ mod tests {
         let peer = tokio::spawn({
             let content = content.clone();
             async move {
-                let (r, w) = tokio::io::split(peer_side);
-                let mut reader = FrameReader::new(r);
-                let mut writer = FrameWriter::new(w);
-                handshake(&mut reader, &mut writer, "supervisor")
-                    .await
-                    .unwrap();
-                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let mut peer = FakeSupervisor::accept(peer_side).await;
+                let request = peer.recv().await;
                 let ControlMsg::BeginUpload {
                     req_id, channel, ..
                 } = request
                 else {
                     panic!("expected BeginUpload, got {request:?}");
                 };
-                writer
-                    .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                    .await
-                    .unwrap();
+                peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                    .await;
 
                 let mut lens = Vec::new();
                 let mut reassembled = Vec::new();
                 while reassembled.len() < content.len() {
-                    let frame = reader.read_frame().await.unwrap().unwrap();
+                    let frame = peer.recv_frame().await;
                     lens.push(frame.body.len());
                     reassembled.extend_from_slice(&frame.body);
                 }
@@ -559,17 +542,15 @@ mod tests {
                     "rechunking must preserve every byte in order"
                 );
 
-                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let request = peer.recv().await;
                 let ControlMsg::CommitUpload { req_id, .. } = request else {
                     panic!("expected CommitUpload, got {request:?}");
                 };
-                writer
-                    .write_control(&ControlMsg::UploadCommitted {
-                        req_id,
-                        path: "/tmp/pub.bin".to_string(),
-                    })
-                    .await
-                    .unwrap();
+                peer.send(&ControlMsg::UploadCommitted {
+                    req_id,
+                    path: "/tmp/pub.bin".to_string(),
+                })
+                .await;
             }
         });
 
@@ -672,7 +653,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_successful_upload_is_readable_by_the_desktop_webview() {
         use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
         use tower::ServiceExt;
 
         let content = b"desktop-upload".to_vec();
@@ -680,38 +661,29 @@ mod tests {
         let peer = tokio::spawn({
             let len = content.len();
             async move {
-                let (r, w) = tokio::io::split(peer_side);
-                let mut reader = FrameReader::new(r);
-                let mut writer = FrameWriter::new(w);
-                handshake(&mut reader, &mut writer, "supervisor")
-                    .await
-                    .unwrap();
-                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let mut peer = FakeSupervisor::accept(peer_side).await;
+                let request = peer.recv().await;
                 let ControlMsg::BeginUpload {
                     req_id, channel, ..
                 } = request
                 else {
                     panic!("expected BeginUpload, got {request:?}");
                 };
-                writer
-                    .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                    .await
-                    .unwrap();
+                peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                    .await;
                 let mut received = 0;
                 while received < len {
-                    received += reader.read_frame().await.unwrap().unwrap().body.len();
+                    received += peer.recv_frame().await.body.len();
                 }
-                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let request = peer.recv().await;
                 let ControlMsg::CommitUpload { req_id, .. } = request else {
                     panic!("expected CommitUpload, got {request:?}");
                 };
-                writer
-                    .write_control(&ControlMsg::UploadCommitted {
-                        req_id,
-                        path: "/state/attachments/sess-1/shot.png".to_string(),
-                    })
-                    .await
-                    .unwrap();
+                peer.send(&ControlMsg::UploadCommitted {
+                    req_id,
+                    path: "/state/attachments/sess-1/shot.png".to_string(),
+                })
+                .await;
             }
         });
 
@@ -750,7 +722,6 @@ mod tests {
     /// body) never reach the user.
     #[farhelm_testtrace::test]
     async fn a_refused_upload_is_readable_by_the_desktop_webview_too() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, ErrorKind};
         use tower::ServiceExt;
 
@@ -761,24 +732,17 @@ mod tests {
         const SENTINEL: &str = "the session's attachments directory is gone";
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let mut peer = FakeSupervisor::accept(peer_side).await;
+            let request = peer.recv().await;
             let ControlMsg::BeginUpload { req_id, .. } = request else {
                 panic!("expected BeginUpload, got {request:?}");
             };
-            writer
-                .write_control(&ControlMsg::Error {
-                    req_id,
-                    message: SENTINEL.to_string(),
-                    kind: ErrorKind::NotFound,
-                })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::Error {
+                req_id,
+                message: SENTINEL.to_string(),
+                kind: ErrorKind::NotFound,
+            })
+            .await;
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;
@@ -862,18 +826,13 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn upload_attachment_zero_byte_body_publishes() {
         use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
         use tower::ServiceExt;
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let mut peer = FakeSupervisor::accept(peer_side).await;
+            let request = peer.recv().await;
             let ControlMsg::BeginUpload {
                 req_id,
                 channel,
@@ -884,24 +843,20 @@ mod tests {
                 panic!("expected BeginUpload, got {request:?}");
             };
             assert_eq!(size, 0, "an empty body must declare a size of zero");
-            writer
-                .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                .await;
 
             // The very next frame must be the commit: an empty upload
             // sends no data frames at all.
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let request = peer.recv().await;
             let ControlMsg::CommitUpload { req_id, .. } = request else {
                 panic!("expected CommitUpload with no data frames before it, got {request:?}");
             };
-            writer
-                .write_control(&ControlMsg::UploadCommitted {
-                    req_id,
-                    path: "/tmp/empty.txt".to_string(),
-                })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::UploadCommitted {
+                req_id,
+                path: "/tmp/empty.txt".to_string(),
+            })
+            .await;
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;
@@ -938,7 +893,6 @@ mod tests {
     /// more data and not a commit.
     #[farhelm_testtrace::test]
     async fn upload_attachment_body_longer_than_content_length_is_refused() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES};
         use tower::ServiceExt;
 
@@ -948,13 +902,8 @@ mod tests {
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let mut peer = FakeSupervisor::accept(peer_side).await;
+            let request = peer.recv().await;
             let ControlMsg::BeginUpload {
                 req_id,
                 channel,
@@ -965,16 +914,14 @@ mod tests {
                 panic!("expected BeginUpload, got {request:?}");
             };
             assert_eq!(size, declared);
-            writer
-                .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                .await;
 
             // The first piece fits the declaration and is forwarded...
-            let frame = reader.read_frame().await.unwrap().unwrap();
+            let frame = peer.recv_frame().await;
             assert_eq!(frame.body.len(), declared as usize);
             // ...and the overrun ends the transfer instead of extending it.
-            let next = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let next = peer.recv().await;
             assert!(
                 matches!(next, ControlMsg::AbortUpload { channel: c } if c == channel),
                 "an overlong body must abort, never commit or forward the excess: {next:?}"
@@ -1027,7 +974,6 @@ mod tests {
     /// commit refusal whichever way the counts disagreed.
     #[farhelm_testtrace::test]
     async fn upload_attachment_commit_mismatch_passes_the_sentinel_through() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, ErrorKind};
         use tower::ServiceExt;
 
@@ -1037,40 +983,31 @@ mod tests {
         for sentinel in [SHORT, LONG] {
             let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
             let peer = tokio::spawn(async move {
-                let (r, w) = tokio::io::split(peer_side);
-                let mut reader = FrameReader::new(r);
-                let mut writer = FrameWriter::new(w);
-                handshake(&mut reader, &mut writer, "supervisor")
-                    .await
-                    .unwrap();
-                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let mut peer = FakeSupervisor::accept(peer_side).await;
+                let request = peer.recv().await;
                 let ControlMsg::BeginUpload {
                     req_id, channel, ..
                 } = request
                 else {
                     panic!("expected BeginUpload, got {request:?}");
                 };
-                writer
-                    .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                    .await
-                    .unwrap();
+                peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                    .await;
 
                 // The short body still reaches commit — the helm never
                 // second-guesses a body that simply ended.
-                let frame = reader.read_frame().await.unwrap().unwrap();
+                let frame = peer.recv_frame().await;
                 assert_eq!(frame.body.len(), 4);
-                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let request = peer.recv().await;
                 let ControlMsg::CommitUpload { req_id, .. } = request else {
                     panic!("expected CommitUpload, got {request:?}");
                 };
-                writer
-                    .write_control(&ControlMsg::Error {
-                        req_id,
-                        message: sentinel.to_string(),
-                        kind: ErrorKind::InvalidRequest,
-                    })
-                    .await
-                    .unwrap();
+                peer.send(&ControlMsg::Error {
+                    req_id,
+                    message: sentinel.to_string(),
+                    kind: ErrorKind::InvalidRequest,
+                })
+                .await;
             });
 
             let harness = rest_harness::spliced_helm(client_side).await;
@@ -1340,7 +1277,6 @@ mod tests {
     /// is about to delete.
     #[farhelm_testtrace::test]
     async fn upload_attachment_client_disconnect_mid_body_sends_abort_upload() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES};
         use tower::ServiceExt;
 
@@ -1349,13 +1285,8 @@ mod tests {
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let mut peer = FakeSupervisor::accept(peer_side).await;
+            let request = peer.recv().await;
             let ControlMsg::BeginUpload {
                 req_id,
                 channel,
@@ -1366,20 +1297,18 @@ mod tests {
                 panic!("expected BeginUpload, got {request:?}");
             };
             assert_eq!(size, declared_size);
-            writer
-                .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                .await;
 
             // The partial bytes arrive as ordinary data frames...
-            let frame = reader.read_frame().await.unwrap().unwrap();
+            let frame = peer.recv_frame().await;
             assert_eq!(frame.body.len(), UPLOAD_CHUNK_BYTES);
             assert!(frame.body.iter().all(|b| *b == 5));
 
             // ...and then the disconnect must show up as AbortUpload,
             // never a CommitUpload for the (never fully sent) declared
             // size.
-            let next = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let next = peer.recv().await;
             assert!(
                 matches!(next, ControlMsg::AbortUpload { channel: c } if c == channel),
                 "expected AbortUpload after a mid-body disconnect, got {next:?}"
@@ -1421,7 +1350,6 @@ mod tests {
     /// a bare disconnect or a success.
     #[farhelm_testtrace::test]
     async fn upload_attachment_aborted_mid_stream_maps_to_an_error_with_the_reason() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES};
         use tower::ServiceExt;
 
@@ -1431,39 +1359,30 @@ mod tests {
 
         let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
         let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let mut peer = FakeSupervisor::accept(peer_side).await;
+            let request = peer.recv().await;
             let ControlMsg::BeginUpload {
                 req_id, channel, ..
             } = request
             else {
                 panic!("expected BeginUpload, got {request:?}");
             };
-            writer
-                .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                .await;
 
             // Drain exactly the initial window, then give up instead of
             // acking — the relay must still be mid-transfer (parked on
             // credit for the chunk past the window) when this arrives.
             let mut received = 0u64;
             while received < UPLOAD_WINDOW_BYTES {
-                let frame = reader.read_frame().await.unwrap().unwrap();
+                let frame = peer.recv_frame().await;
                 received += frame.body.len() as u64;
             }
-            writer
-                .write_control(&ControlMsg::UploadAborted {
-                    channel,
-                    reason: SENTINEL.to_string(),
-                })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::UploadAborted {
+                channel,
+                reason: SENTINEL.to_string(),
+            })
+            .await;
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;
@@ -1509,41 +1428,32 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn upload_attachment_abort_while_awaiting_the_body_ends_the_request() {
         use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
         use tower::ServiceExt;
 
         const SENTINEL: &str = "SENTINEL-abort-awaiting-body: storage went away";
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let mut peer = FakeSupervisor::accept(peer_side).await;
+            let request = peer.recv().await;
             let ControlMsg::BeginUpload {
                 req_id, channel, ..
             } = request
             else {
                 panic!("expected BeginUpload, got {request:?}");
             };
-            writer
-                .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                .await;
 
-            let frame = reader.read_frame().await.unwrap().unwrap();
+            let frame = peer.recv_frame().await;
             assert_eq!(frame.body.len(), 4);
-            writer
-                .write_control(&ControlMsg::UploadAborted {
-                    channel,
-                    reason: SENTINEL.to_string(),
-                })
-                .await
-                .unwrap();
-            (reader, writer)
+            peer.send(&ControlMsg::UploadAborted {
+                channel,
+                reason: SENTINEL.to_string(),
+            })
+            .await;
+            peer
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;
@@ -1601,40 +1511,31 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn upload_attachment_abort_racing_the_commit_surfaces_the_abort_reason() {
         use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
         use tower::ServiceExt;
 
         const SENTINEL: &str = "SENTINEL-abort-racing-commit: session deleted mid-transfer";
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let mut peer = FakeSupervisor::accept(peer_side).await;
+            let request = peer.recv().await;
             let ControlMsg::BeginUpload {
                 req_id, channel, ..
             } = request
             else {
                 panic!("expected BeginUpload, got {request:?}");
             };
-            writer
-                .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                .await
-                .unwrap();
-            let frame = reader.read_frame().await.unwrap().unwrap();
+            peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                .await;
+            let frame = peer.recv_frame().await;
             assert_eq!(frame.body.len(), 4);
-            writer
-                .write_control(&ControlMsg::UploadAborted {
-                    channel,
-                    reason: SENTINEL.to_string(),
-                })
-                .await
-                .unwrap();
-            (reader, writer)
+            peer.send(&ControlMsg::UploadAborted {
+                channel,
+                reason: SENTINEL.to_string(),
+            })
+            .await;
+            peer
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;
@@ -1682,30 +1583,23 @@ mod tests {
     #[farhelm_testtrace::test(start_paused = true)]
     async fn upload_attachment_endless_empty_body_chunks_stall_out() {
         use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
         use tower::ServiceExt;
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let mut peer = FakeSupervisor::accept(peer_side).await;
+            let request = peer.recv().await;
             let ControlMsg::BeginUpload {
                 req_id, channel, ..
             } = request
             else {
                 panic!("expected BeginUpload, got {request:?}");
             };
-            writer
-                .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                .await;
 
-            let next = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let next = peer.recv().await;
             assert!(
                 matches!(next, ControlMsg::AbortUpload { channel: c } if c == channel),
                 "a body that never delivers a byte must be abandoned, not fed to a commit: \
@@ -1761,36 +1655,27 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn upload_attachment_immediately_ready_empty_items_observe_supervisor_abort() {
         use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
         use tower::ServiceExt;
 
         const SENTINEL: &str = "supervisor ended during empty upload items";
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let mut peer = FakeSupervisor::accept(peer_side).await;
+            let request = peer.recv().await;
             let ControlMsg::BeginUpload {
                 req_id, channel, ..
             } = request
             else {
                 panic!("expected BeginUpload, got {request:?}");
             };
-            writer
-                .write_control(&ControlMsg::UploadStarted { req_id, channel })
-                .await
-                .unwrap();
-            writer
-                .write_control(&ControlMsg::UploadAborted {
-                    channel,
-                    reason: SENTINEL.to_string(),
-                })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::UploadStarted { req_id, channel })
+                .await;
+            peer.send(&ControlMsg::UploadAborted {
+                channel,
+                reason: SENTINEL.to_string(),
+            })
+            .await;
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;
@@ -1925,7 +1810,6 @@ mod tests {
     /// exists to pin.
     #[farhelm_testtrace::test]
     async fn upload_attachment_begin_error_reply_passes_through_the_sentinel_message() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, ErrorKind};
         use tower::ServiceExt;
 
@@ -1933,24 +1817,17 @@ mod tests {
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let mut peer = FakeSupervisor::accept(peer_side).await;
+            let request = peer.recv().await;
             let ControlMsg::BeginUpload { req_id, .. } = request else {
                 panic!("expected BeginUpload, got {request:?}");
             };
-            writer
-                .write_control(&ControlMsg::Error {
-                    req_id,
-                    message: SENTINEL.to_string(),
-                    kind: ErrorKind::NotFound,
-                })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::Error {
+                req_id,
+                message: SENTINEL.to_string(),
+                kind: ErrorKind::NotFound,
+            })
+            .await;
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;
@@ -1986,19 +1863,13 @@ mod tests {
     /// own test.
     #[farhelm_testtrace::test]
     async fn upload_attachment_absent_filename_forwards_as_the_empty_proposal() {
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::{ControlMsg, ErrorKind};
         use tower::ServiceExt;
 
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let mut peer = FakeSupervisor::accept(peer_side).await;
+            let request = peer.recv().await;
             let ControlMsg::BeginUpload {
                 req_id, filename, ..
             } = request
@@ -2009,15 +1880,12 @@ mod tests {
                 filename, "",
                 "an absent ?filename= must forward as the empty proposal, never a made-up name"
             );
-            writer
-                .write_control(&ControlMsg::Error {
-                    req_id,
-                    message: "stop here; the filename assertion above is this test's point"
-                        .to_string(),
-                    kind: ErrorKind::Internal,
-                })
-                .await
-                .unwrap();
+            peer.send(&ControlMsg::Error {
+                req_id,
+                message: "stop here; the filename assertion above is this test's point".to_string(),
+                kind: ErrorKind::Internal,
+            })
+            .await;
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;

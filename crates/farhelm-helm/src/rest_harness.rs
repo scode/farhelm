@@ -1291,6 +1291,63 @@ pub(crate) async fn silent_supervisor(peer_side: tokio::io::DuplexStream) {
     );
 }
 
+/// The supervisor end of a spliced host, as a test script drives it: the
+/// handshake already answered, then one control message in and one out at
+/// a time.
+///
+/// The REST tests used to open-code this for every exchange: split the
+/// duplex, wrap both halves, answer the hello, read a frame, decode it,
+/// write a reply. That is five lines of plumbing per peer and about a
+/// hundred and eighty copies across the helm's tests, all of which a
+/// handshake or framing change would have to touch. A test now writes only
+/// what it is about: which request it expects and what it answers.
+///
+/// Reads wait without a deadline of their own, as the code this replaced
+/// did: many of these tests run on a paused clock, where any timeout would
+/// fire in virtual time long before the helm's own deadlines. A request
+/// that never comes is bounded by the test runner's per-test timeout.
+pub(crate) struct FakeSupervisor {
+    reader: FrameReader<tokio::io::ReadHalf<DuplexStream>>,
+    writer: FrameWriter<tokio::io::WriteHalf<DuplexStream>>,
+}
+
+impl FakeSupervisor {
+    /// Answer the helm's handshake on `peer_side` as a supervisor.
+    pub(crate) async fn accept(peer_side: DuplexStream) -> FakeSupervisor {
+        let (read, write) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(read);
+        let mut writer = FrameWriter::new(write);
+        farhelm_proto::io::handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .expect("the helm's handshake");
+        FakeSupervisor { reader, writer }
+    }
+
+    /// The helm's next frame, of any kind. Panics if the stream closes
+    /// first.
+    pub(crate) async fn recv_frame(&mut self) -> farhelm_proto::Frame {
+        self.reader
+            .read_frame()
+            .await
+            .expect("reading the helm's frame")
+            .expect("the helm closed the connection")
+    }
+
+    /// The helm's next frame, decoded as a control message.
+    pub(crate) async fn recv(&mut self) -> ControlMsg {
+        let frame = self.recv_frame().await;
+        parse_control(&frame).expect("a control frame")
+    }
+
+    /// Send one control message to the helm.
+    pub(crate) async fn send(&mut self, message: &ControlMsg) {
+        self.writer
+            .write_control(message)
+            .await
+            .expect("writing to the helm");
+    }
+}
+
 /// A deliberately minimal WebSocket client: enough to complete the
 /// upgrade, send text/binary frames, and — crucially — to STOP
 /// READING whenever a test wants to model a wedged browser.

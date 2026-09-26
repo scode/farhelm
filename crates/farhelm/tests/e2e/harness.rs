@@ -38,6 +38,8 @@ pub(crate) use std::task::{Context, Poll};
 pub(crate) use std::time::Duration;
 pub(crate) use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+mod raw_peer;
+pub(crate) use raw_peer::RawPeer;
 mod tmux_guard;
 pub(crate) use tmux_guard::{
     TmuxServerGuard, for_supervisor_child as tmux_guard_for_supervisor_child,

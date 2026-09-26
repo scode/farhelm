@@ -14,19 +14,6 @@ use crate::harness::*;
 // that simply stops mid-transfer), which is exactly what has to be pinned.
 // ---------------------------------------------------------------------
 
-/// One connection to a supervisor, spoken as frames rather than through
-/// `SupervisorClient`.
-///
-/// Owns both halves of an in-process duplex pipe, like `connect_client`,
-/// so a test can send anything the protocol can express and observe every
-/// frame that comes back — including the unsolicited `UploadAck` and
-/// `UploadAborted` events, which correlate by channel and which a
-/// request/reply client API would have no place to surface.
-struct RawPeer {
-    reader: FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
-    writer: FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
-}
-
 /// A filesystem that takes its time at one named stage.
 ///
 /// The only way to reach the supervisor's own time bounds and
@@ -213,62 +200,12 @@ async fn upload_harness(
     .await
 }
 
+/// The upload-specific half of [`RawPeer`]: the transport half lives in
+/// the shared harness.
 impl RawPeer {
-    /// Connect and complete the hello, leaving the peer ready to send.
-    async fn connect(sup: &Arc<Supervisor>) -> RawPeer {
-        RawPeer::connect_with_buffer(sup, 1 << 20).await
-    }
-
-    /// [`RawPeer::connect`] with an explicit transport buffer.
-    ///
-    /// A small buffer is how a test observes the supervisor's own
-    /// queueing: with a megabyte of slack, everything the writer produces
-    /// disappears into the pipe and nothing about its ORDERING is
-    /// visible.
-    async fn connect_with_buffer(sup: &Arc<Supervisor>, bytes: usize) -> RawPeer {
-        let (client_side, server_side) = tokio::io::duplex(bytes);
-        let sup = Arc::clone(sup);
-        tokio::spawn(async move {
-            let _ = handle_connection(sup, server_side, None).await;
-        });
-        let (read_half, write_half) = tokio::io::split(client_side);
-        let mut peer = RawPeer {
-            reader: FrameReader::new(read_half),
-            writer: FrameWriter::new(write_half),
-        };
-        handshake(&mut peer.reader, &mut peer.writer, "helm")
-            .await
-            .expect("handshake");
-        peer
-    }
-
-    async fn control(&mut self, msg: &ControlMsg) {
-        self.writer.write_control(msg).await.expect("write control");
-    }
-
     /// Send one upload chunk as a data frame on `channel`.
     async fn chunk(&mut self, channel: u32, bytes: Vec<u8>) {
-        self.writer
-            .write_frame(&Frame::data(channel, bytes))
-            .await
-            .expect("write chunk");
-    }
-
-    /// The next control message, failing the test rather than hanging if
-    /// none arrives.
-    async fn next_control(&mut self, secs: u64) -> ControlMsg {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-        loop {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            let frame = tokio::time::timeout(remaining, self.reader.read_frame())
-                .await
-                .expect("timed out waiting for a control message")
-                .expect("read frame")
-                .expect("connection closed while waiting for a control message");
-            if frame.kind == FrameKind::Control {
-                return parse_control(&frame).expect("parse control");
-            }
-        }
+        self.data(channel, bytes).await;
     }
 
     /// The next control message that is not an `UploadAck`.
