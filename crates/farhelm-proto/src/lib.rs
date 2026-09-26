@@ -104,178 +104,48 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// clear error per SPEC.md's version-skew rule. Build versions travel
 /// alongside for diagnostics only and never gate anything.
 ///
-/// Within version 21 the additive discipline of every prior version
-/// continues to apply, with version 9's sharper reading intact: new
-/// optional fields with decode defaults are fine WHEN ignoring one is
-/// harmless; a field whose omission changes behavior, a new tagged variant,
-/// a new REQUIRED field, or a field REMOVAL earns the next bump.
+/// There is no compatibility across protocol versions (SPEC.md): a bump
+/// requires upgrading every supervisor, and a peer on another version is
+/// refused at the hello before any other message is exchanged. Nothing in
+/// this crate, the helm, or the supervisor decodes, tests, or shims another
+/// version's messages; the hello itself is the one exception, because it is
+/// what carries the version a peer is refused by.
 ///
-/// A field whose whole purpose is to CHANGE what the receiver does is not
-/// additive, whatever serde makes of it. SPEC.md's version rule
-/// ("Incompatible versions refuse to connect with a clear, actionable
-/// error; there is no silent degradation") is the standard being met
-/// here, and the hello refusal is the machinery that meets it — a helm on
-/// 9 and a supervisor on 8 refuse each other at connect, and the host
-/// surfaces `version-skew` with both builds named and the helm's own
-/// remediation sentence, instead of quietly running a fleet where
-/// automatic reconnects steal sessions.
+/// Builds that share a protocol version do talk to each other (an older
+/// supervisor build shows as `old version` but stays connected), so within
+/// one version the additive discipline applies: new optional fields with
+/// decode defaults are fine WHEN ignoring one is harmless; a field whose
+/// omission changes behavior, a new tagged variant, a new REQUIRED field,
+/// or a field REMOVAL earns the next bump. A field whose whole purpose is
+/// to CHANGE what the receiver does is not additive, whatever serde makes
+/// of it: SPEC.md's "Incompatible versions refuse to connect with a clear,
+/// actionable error; there is no silent degradation" is the standard, and
+/// the hello refusal is the machinery that meets it.
 ///
 /// The browser edge cannot use the hello, having none: it is gated on the
 /// helm's build stamp instead (farhelm-ui's `skew` module), which refuses
 /// unattended attaches whenever the helm answering is not the build this
-/// bundle was made for. Same rule, same milestone, different handshake.
+/// bundle was made for.
 ///
-/// What version 10 deliberately does NOT carry, decided in PLAN_M6_75.md item
-/// 3 so it is not re-litigated per PR: any supervisor-edge PUSH channel. The
-/// helm keeps its 3-second drain plus the existing post-write wake,
-/// accepting one drain interval of status staleness; the push problem M6.75
-/// solves is the CLIENT edge, where the helm coalesces revisions it would
-/// have had to build regardless. Also absent: remembered profile defaults,
-/// which the helm owns in helm.db and resolves into a concrete launch bundle
-/// before it ever sends a create — there is nothing for this protocol to
-/// carry.
+/// Two standing decisions shape what this protocol carries. There is no
+/// supervisor-to-helm push channel except [`ControlMsg::AgentRequest`]
+/// (answered by [`ControlMsg::AgentResponse`]), which exists because an
+/// agent inside a session has no route back to the helm's machine; the helm
+/// learns session and terminal state by drain and post-write wake. And
+/// remembered profile defaults never travel here: the helm resolves them
+/// into a concrete launch bundle before it sends a create.
 ///
-/// Version 13 narrows that "no supervisor-edge push channel" statement
-/// rather than reversing it, and the distinction is worth keeping exact.
-/// It adds exactly ONE request shape that travels supervisor→helm
-/// ([`ControlMsg::AgentRequest`], answered by
-/// [`ControlMsg::AgentResponse`]), and nothing else changes direction: the
-/// helm still learns about session and terminal state by drain and by the
-/// existing post-write wake, so the staleness trade version 10 accepted is
-/// untouched. What forced an upward request at all is that an agent inside
-/// a session has no route, address, or credential back to the machine
-/// running the helm, so the supervisor it CAN reach has to carry the
-/// question the rest of the way — see [`ControlMsg::AgentRequest`].
+/// `protocol_version_is_pinned_at_30` (renamed at every bump) and
+/// `unknown_control_message_tag_fails_decode` below, plus the loop-level
+/// teardown test in the farhelm crate's e2e suite, pin the number and the
+/// fact that an unknown message tag is fatal rather than ignored.
 ///
-/// Version 14 REMOVES session-list pagination from this wire.
-/// [`ControlMsg::ListSessions`] lost its `cursor` and `limit`, and
-/// [`ControlMsg::SessionList`] lost `total` and `next_cursor` and gained
-/// `truncated`: a supervisor now answers with its whole session set in one
-/// reply, cut only at [`LIST_SESSIONS_CAP`]. Field removals are the
-/// non-additive case by this constant's own rule, hence the bump. The
-/// contract behind the change is SPEC.md's Session list section: the fleet
-/// this product is for is tens of sessions, and no layer is to paginate,
-/// cursor, stream, or index the list on the server's side.
-///
-/// Version 15 removes the supervisor-owned profile CRUD vocabulary and the
-/// `CreateSession::profile_id` selector. Creates now carry the helm-resolved
-/// launch bundle, including a snapshot of the profile identity when one was
-/// selected. It also adds [`ProfileExistence::Unresolved`]: supervisors emit
-/// that placeholder because only a helm has the catalog needed to derive the
-/// browser-facing state. [`AgentVerb::ResolveProfile`] and
-/// [`AgentReply::ResolvedProfile`] add the upward relay used when
-/// `farhelm spawn --agent` asks an attached helm to resolve a name.
-///
-/// Version 17 adds host-directory browsing. A helm asks the selected
-/// supervisor rather than reading its own filesystem, so a remote composer
-/// never receives paths from the wrong machine.
-///
-/// Version 16 adds the structured launch snapshot carried by
-/// [`ControlMsg::CreateSession`] and [`SessionInfo`]. A helm depends on the
-/// supervisor retaining it through retry, clone, and restart, so a peer that
-/// would silently discard this lifecycle data is not protocol-compatible.
-///
-/// Version 18 carries the supervisor's accepted canonical working-directory
-/// fact in [`SessionInfo::canonical_cwd`]. Although the JSON field is
-/// optional for old durable rows, a helm uses it to decide folder-history
-/// identity. An older helm silently ignoring it would retain and merge a
-/// different history, so this is not the harmless optional-field case.
-///
-/// Version 19 adds OpenCode to [`LaunchHarness`]. The harness lives in a
-/// structured create and session snapshot, so an older supervisor could not
-/// decode its new enum tag. Refusing this version mismatch is preferable to
-/// accepting a create whose durable launch provenance has been lost.
-///
-/// Version 20 makes every consequential agent selector explicit, adds
-/// profile discovery and stable host ids, carries arbitrary clone sources,
-/// and adds the expected-title precondition used by agent rename. It also
-/// Version 20 makes lifecycle targets, create and clone hosts, clone sources,
-/// and create selectors explicit; adds conditional agent rename and discovery
-/// envelopes; and carries an explicit inheritance selector for local spawn.
-/// Older peers would silently apply the defaults these fields remove, so the
-/// exact-match handshake must refuse mixed versions.
-///
-/// Version 21 adds Goose and Pi structured harnesses, their native effort and
-/// permission vocabulary, and their dedicated agent kinds. Those enum tags are
-/// durable launch provenance and capture policy; an older peer cannot safely
-/// decode or retain them, so mixed versions must refuse the hello rather than
-/// silently compiling another harness or dropping exact-resume behavior.
-///
-/// Version 22 adds the OMP agent kind (`omp`) to the closed [`AgentKind`]
-/// vocabulary. The kind decides which conversation reports a supervisor
-/// accepts (OMP reports a typed locator under its own `omp:` prefix) and
-/// which hook injection its launches receive; an older peer cannot decode
-/// the new enum tag at all, so mixed versions must refuse the hello rather
-/// than silently dropping exact-resume behavior or accepting a report
-/// against the wrong integration.
-///
-/// Version 23 adds the OMP structured harness (`omp`) to the closed
-/// [`LaunchHarness`] vocabulary. The harness tag is durable launch
-/// provenance — it is stored beside the resolved invocation, replayed by
-/// clone and history, and its strict stored-row decoding pairs it with
-/// `AgentKind::Omp` — so an older peer that could not decode the tag could
-/// neither retain a stored launch nor validate a new create, and mixed
-/// versions must refuse the hello rather than silently losing the recorded
-/// launch selection. (The split from version 22 is deliberate: each closed
-/// wire vocabulary grows in its own reviewed step.)
-///
-/// Version 24 adds the owned-GitHub-checkout wire vocabulary:
-/// [`ControlMsg::GithubCheckoutPreview`]/[`ControlMsg::GithubCheckoutPreviewed`]
-/// and [`ControlMsg::GithubRepoSearch`]/[`ControlMsg::GithubRepoResults`], the
-/// optional [`ControlMsg::CreateSession::github_checkout`] create payload, and
-/// the [`SessionInfo::github_repo`]/[`SessionInfo::working_copy`] provenance
-/// fields. [`ErrorKind::CheckoutConflict`] distinguishes a durably refused
-/// fresh allocation from an ambiguous or previously accepted intent. These
-/// additions share this feature's version bump. The create payload is why
-/// this is a bump and not an additive drift:
-/// a fresh-checkout create names an intent (clone a repository the user has
-/// never materialized) that an older supervisor cannot see in its
-/// create-pipeline at all. Silent tolerance would mean an old peer dropping
-/// the intent while reporting an ordinary create — exactly the outcome the
-/// handshake exists to make impossible — so an older peer must refuse the
-/// hello rather than half-serve the request.
-///
-/// The published v0.10.0-rc.3 used 22 for the checkout vocabulary from a
-/// stale base without OMP. Its number does not identify the OMP vocabulary
-/// described above; version 24 refuses both that build and OMP-only peers.
-///
-/// Version 25 adds the tagged `AgentVerb::Restart` request and the
-/// non-secret `AgentSession::restart_offer` discovery field. Both change
-/// what an attached-session caller can safely request, so serde tolerance
-/// is not compatibility: the exact-version handshake refuses an older peer
-/// before it can ignore the capability or reject the new verb mid-relay.
-///
-/// Version 26 removes session-archive state and operations from every wire
-/// shape. Exact-version negotiation keeps an older peer from presenting or
-/// accepting that removed lifecycle vocabulary.
-///
-/// Version 27 adds Cursor to the structured launch vocabulary. Older peers
-/// cannot decode that harness, even though it uses the existing Generic runtime.
-///
-/// Version 28 requires a vendor discriminator on conversation reports and
-/// adds optional subagent identity evidence.
-/// Exact-version negotiation prevents older peers from bypassing that contract.
-///
-/// Version 29 adds Grok to the structured launch and durable agent-kind
-/// vocabularies. Older peers cannot retain its tracked launch policy.
-///
-/// Version 30 adds optional compiled structured launch fields to
-/// `RestartSession`; older peers must refuse the handshake rather than
-/// silently restarting with stale settings.
-///
-/// `protocol_version_is_pinned_at_30` (renamed at every bump since `_at_4`)
-/// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
-/// teardown test in the farhelm crate's e2e suite, pin both the number and
-/// the reasoning so the next milestone cannot re-assume tolerance that was
-/// never there.
-///
-/// The entry-by-entry history for versions 2 through 11 is preserved in
-/// `lore/2026-08-20-protocol-version-changelog.md`; that file is frozen at
-/// the moment it was written (`lore/AGENTS.md`) and is not extended for
-/// version 12 or later — see [`ControlMsg::ReportConversation`] for what
-/// version 12 added, [`ControlMsg::AgentRequest`] for version 13,
-/// [`ControlMsg::SessionList`] for version 14, and
-/// [`ControlMsg::ReportConversation`]'s required fields for version 28.
+/// Why each past version was bumped is history, kept in lore:
+/// `lore/2026-08-20-protocol-version-changelog.md` (versions 2 through 11)
+/// and `lore/2026-09-25-protocol-version-notes-to-v30.md` (through 30). A
+/// future bump records its reason in the commit that makes it, and in
+/// SPEC_impl.md when it establishes a wire contract later readers need; this
+/// comment states only the rules in force.
 pub const PROTOCOL_VERSION: u32 = 30;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
@@ -425,7 +295,7 @@ pub const MAX_FRAME_LEN: u32 = 8 * 1024 * 1024;
 
 /// The `reason` string a `ControlMsg::Detached` carries when a stalled
 /// viewer is given up on (PLAN_M2_5.md's stall-detach contract). Two
-/// emitters will send it: the supervisor, when a single pause lasts
+/// emitters send it: the supervisor, when a single pause lasts
 /// longer than the stall timeout (a hard maximum pause duration — there
 /// is deliberately no progress measurement while paused), and the helm,
 /// when a terminal's bounded event channel fills because its consumer
@@ -436,10 +306,6 @@ pub const MAX_FRAME_LEN: u32 = 8 * 1024 * 1024;
 /// Clients display `reason` inside their own detach banner (terminal.js
 /// prefixes "Detached: "), so this string must read as a bare cause with
 /// no leading "detached:" of its own, one line, user-legible.
-///
-/// This PR only reserves the string as wire vocabulary; nothing sends it
-/// yet. The supervisor stall timer and the helm channel bound land in
-/// later M2.5 PRs.
 pub const DETACH_REASON_STALLED: &str = "terminal stopped consuming output (stalled)";
 
 /// Why a non-displacing attach ([`ControlMsg::Attach::if_unowned`]) was
@@ -3923,107 +3789,6 @@ mod tests {
         }
     }
 
-    /// The reverse direction of the two tests above: JSON shaped exactly
-    /// as every pre-M4 (version 5) `Attach` request always was — no
-    /// `terminal`, no `lease` key at all — must still decode, defaulting
-    /// to `TerminalSelector::Agent` and an empty lease. This is what keeps
-    /// `Attach`'s pre-M4 meaning ("attach my one implicit terminal, own
-    /// everything") alive for any caller that predates the selector,
-    /// mirroring `restart_session_stop_if_running_defaults_false_when_absent`'s
-    /// treatment of an older field whose absence must resolve to a
-    /// specific, safe default rather than an arbitrary one.
-    #[farhelm_testtrace::test]
-    fn bare_legacy_attach_json_decodes_to_agent_terminal_and_empty_lease() {
-        let old_shape = serde_json::json!({
-            "type": "attach",
-            "req_id": 5,
-            "session_id": "s1",
-            "channel": 3,
-            "cols": 80,
-            "rows": 24,
-        });
-        let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
-        let ControlMsg::Attach {
-            terminal, lease, ..
-        } = decoded
-        else {
-            panic!("expected ControlMsg::Attach, got {decoded:?}");
-        };
-        assert_eq!(terminal, TerminalSelector::Agent);
-        assert_eq!(lease, "");
-    }
-
-    /// The REVERSE tolerance direction from the two tests above
-    /// (mirroring `new_session_list_json_decodes_under_a_legacy_pre_status_decoder`):
-    /// a hand-rolled decoder shaped like a genuine pre-M4 (version 5)
-    /// peer — no `terminal`, no `lease` field at all — must still decode
-    /// a CURRENT sender's `Attach` JSON, silently dropping the fields it
-    /// predates. `terminal` is deliberately set to the NON-default `Tab`
-    /// selector with a non-empty `lease` here, unlike
-    /// `control_json_shape_is_pinned`'s all-defaults case above, so this
-    /// pins that a legacy peer tolerates losing real information, not
-    /// just a default it would have reconstructed anyway.
-    ///
-    /// What this DOES NOT license, and what a reader coming to it for
-    /// reassurance most needs to hear: decoding tolerance is why the
-    /// version bumps are REQUIRED, not why they are unnecessary. Silently
-    /// dropping a field is exactly the failure mode that makes a mixed
-    /// fleet dangerous — most sharply for `if_unowned` (set here, and
-    /// dropped by the legacy shape below), whose whole meaning is "do
-    /// something DIFFERENT from what you would otherwise do". A peer that
-    /// drops it displaces a client it was asked to leave alone, and
-    /// nothing on either side notices. The hello refusal is what makes
-    /// that unreachable; this test documents the shape of the hazard it
-    /// closes, not a tolerance anyone may rely on.
-    #[derive(Debug, Deserialize)]
-    #[serde(tag = "type", rename_all = "snake_case")]
-    enum LegacyV5ControlMsg {
-        Attach {
-            req_id: u64,
-            session_id: String,
-            channel: u32,
-            cols: u16,
-            rows: u16,
-        },
-    }
-
-    #[farhelm_testtrace::test]
-    fn new_attach_json_decodes_under_a_legacy_pre_terminal_selector_decoder() {
-        let new_msg = ControlMsg::Attach {
-            req_id: 12,
-            session_id: "s1".to_string(),
-            channel: 4,
-            cols: 80,
-            rows: 24,
-            terminal: TerminalSelector::Tab {
-                id: "t1".to_string(),
-            },
-            lease: "client-xyz".to_string(),
-            if_unowned: true,
-        };
-        let json = serde_json::to_value(&new_msg).unwrap();
-
-        let LegacyV5ControlMsg::Attach {
-            req_id,
-            session_id,
-            channel,
-            cols,
-            rows,
-        } = serde_json::from_value(json.clone()).expect(
-            "a legacy (pre-M4, version 5) decoder without terminal/lease must still decode \
-             new-shape JSON",
-        );
-        assert_eq!(req_id, 12);
-        assert_eq!(session_id, "s1");
-        assert_eq!(channel, 4);
-        assert_eq!((cols, rows), (80, 24));
-
-        // The REAL type round-trips the same JSON too, same as every
-        // sibling test of this shape does.
-        let real_decoded: ControlMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(real_decoded, new_msg);
-    }
-
     /// `ControlMsg::Error`'s `kind` field is the thing `PROTOCOL_VERSION`
     /// was bumped for (see that const's docs), so its exact snake_case wire
     /// form deserves the same golden-JSON pinning as any other message: a
@@ -4228,19 +3993,17 @@ mod tests {
         assert_eq!(auth, None, "a v10 hello has no session attribution");
     }
 
-    /// The REVERSE direction from the two tests above, following the
-    /// shadow-decoder pattern near
-    /// `new_session_list_json_decodes_under_a_legacy_pre_status_decoder`: a
-    /// hand-rolled decoder shaped like the genuine v7 `Hello` — before
+    /// The REVERSE direction from the two tests above: a hand-rolled decoder
+    /// shaped like the genuine v7 `Hello` — before
     /// `host_identity` existed at all (see the version history linked from
     /// `PROTOCOL_VERSION`'s own docs for when it was added) — must still
     /// decode a NEW v8 sender's `Hello` JSON, silently ignoring the field it
     /// does not recognize.
-    /// As with the `SessionList` sibling, a real peer never exercises this
-    /// path (the handshake refuses a `protocol_version` mismatch before
-    /// any other field is inspected), but the decode tolerance is still
-    /// part of the additive contract this file pins independently of
-    /// whether production code currently walks it.
+    /// The greeting is the one message whose decode is pinned across
+    /// protocol versions (SPEC.md: no other message is expected to cross a
+    /// version boundary): it is what carries the version a peer is refused
+    /// by, so it must stay readable on both sides of a bump even though
+    /// today's handshake reads `protocol_version` before any other field.
     #[derive(Debug, Deserialize)]
     #[serde(tag = "type", rename_all = "snake_case")]
     enum LegacyHelloControlMsg {
@@ -4929,34 +4692,62 @@ mod tests {
         }
     }
 
-    /// The other tolerance direction within version 4: a decoder built
-    /// with a later optional field (modeled by a shadow struct with a
-    /// serde default, the same technique as M2's legacy-decoder test)
-    /// must accept today's pause/resume bytes and default the absent
-    /// field. Together with the future-extra-fields test above this pins
-    /// both halves of the additive discipline the `PROTOCOL_VERSION`
-    /// docs promise for 4.
+    /// Why this matters: builds that share a protocol version do connect (an
+    /// older supervisor build shows as `old version` but stays usable), so a
+    /// later build that adds an optional field within this version still
+    /// reads today's messages. The extra-field tests beside this one cover
+    /// the other direction.
+    ///
+    /// Specification: today's `PauseOutput` and `RenameSession` bytes, read
+    /// by a decoder shaped like a later same-version build that grew an
+    /// optional field, decode with that field defaulted rather than failing.
     #[farhelm_testtrace::test]
-    fn current_pause_output_decodes_under_a_future_v4_decoder_with_defaults() {
+    fn todays_messages_decode_under_a_later_same_version_decoder() {
+        /// Encode through the real framing and hand back the JSON a peer reads.
+        fn wire_json(msg: &ControlMsg) -> serde_json::Value {
+            let mut wire = Vec::new();
+            Frame::control(msg).encode(&mut wire).unwrap();
+            let (frame, _) = Frame::decode(&wire).unwrap().unwrap();
+            serde_json::from_slice(&frame.body).unwrap()
+        }
+
         #[derive(serde::Deserialize)]
-        struct FuturePauseOutput {
+        struct LaterPauseOutput {
             channel: u32,
             #[serde(default)]
             budget_bytes: Option<u64>,
         }
-        let mut wire = Vec::new();
-        Frame::control(&ControlMsg::PauseOutput { channel: 5 })
-            .encode(&mut wire)
-            .unwrap();
-        let (frame, _) = Frame::decode(&wire).unwrap().unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&frame.body).unwrap();
+        let value = wire_json(&ControlMsg::PauseOutput { channel: 5 });
         assert_eq!(value["type"], "pause_output");
-        let decoded: FuturePauseOutput = serde_json::from_value(value).unwrap();
-        assert_eq!(decoded.channel, 5);
+        let pause: LaterPauseOutput = serde_json::from_value(value).unwrap();
+        assert_eq!(pause.channel, 5);
+        assert_eq!(pause.budget_bytes, None);
+
+        #[derive(serde::Deserialize)]
+        struct LaterRenameSession {
+            req_id: u64,
+            session_id: String,
+            title: String,
+            #[serde(default)]
+            expected_generation: Option<u64>,
+        }
+        let value = wire_json(&ControlMsg::RenameSession {
+            req_id: 7,
+            session_id: "s1".to_string(),
+            title: "new title".to_string(),
+            expected_title: None,
+        });
+        assert_eq!(value["type"], "rename_session");
+        let rename: LaterRenameSession = serde_json::from_value(value).unwrap();
         assert_eq!(
-            decoded.budget_bytes, None,
-            "an absent future field must default, never fail the decode"
+            (
+                rename.req_id,
+                rename.session_id.as_str(),
+                rename.title.as_str()
+            ),
+            (7, "s1", "new title")
         );
+        assert_eq!(rename.expected_generation, None);
     }
 
     /// `SessionStatus`'s now SEVEN variants and EIGHT distinct JSON shapes
@@ -5099,169 +4890,6 @@ mod tests {
         }
     }
 
-    /// The live split's REMOVAL half (PLAN_M6_75.md item 3), which the
-    /// golden test above cannot state: `alive` is no longer decodable at
-    /// all. A v9 peer's `SessionInfo` is the only thing that would ever
-    /// carry it, and such a peer is refused at the handshake — so this
-    /// pins the failure the bump exists to cause, exactly as
-    /// `interrupted_and_error_status_fail_under_a_legacy_v4_decoder` pins
-    /// the mirror-image failure for version 5's additions.
-    ///
-    /// The direction matters: a decoder that silently DEFAULTED an
-    /// unrecognized `alive` to `Unknown` would turn a version skew into a
-    /// fleet of sessions with no status at all, which reads as a product
-    /// bug rather than as the version problem it is.
-    #[farhelm_testtrace::test]
-    fn the_removed_alive_status_no_longer_decodes() {
-        serde_json::from_value::<SessionStatus>(serde_json::json!({ "state": "alive" }))
-            .expect_err("`alive` was REPLACED at version 10, not kept as a tolerated alias");
-    }
-
-    /// The other side of the same skew: a decoder shaped like a genuine v9
-    /// peer — one that only ever knew `alive` — must FAIL on each of the
-    /// three live statuses version 10 introduced, rather than defaulting or
-    /// ignoring them. Without this, "the split forced a bump" would be an
-    /// assertion rather than a tested property.
-    #[derive(Debug, Deserialize)]
-    #[serde(tag = "state", rename_all = "snake_case")]
-    enum LegacyV9SessionStatus {
-        Unknown,
-        Alive,
-        #[allow(dead_code)]
-        Exited {
-            exit_code: Option<i32>,
-        },
-        Error {
-            #[allow(dead_code)]
-            detail: String,
-        },
-        Interrupted,
-    }
-
-    #[farhelm_testtrace::test]
-    fn the_split_live_statuses_fail_under_a_legacy_v9_decoder() {
-        for status in [
-            SessionStatus::Running,
-            SessionStatus::Waiting,
-            SessionStatus::Idle,
-        ] {
-            let json = serde_json::to_value(status).unwrap();
-            serde_json::from_value::<LegacyV9SessionStatus>(json).unwrap_err();
-        }
-        // The unchanged statuses still cross that boundary, which is what
-        // makes the failures above about the SPLIT rather than about the
-        // shadow decoder being broken.
-        for status in [SessionStatus::Unknown, SessionStatus::Interrupted] {
-            let json = serde_json::to_value(status).unwrap();
-            serde_json::from_value::<LegacyV9SessionStatus>(json)
-                .expect("statuses that version 10 did not touch must still decode");
-        }
-    }
-
-    /// PLAN_M3 review batch item 28: proves the FAILURE the whole
-    /// `PROTOCOL_VERSION` bump to 5 exists to cause. `Interrupted` and
-    /// `Error` are new tagged-enum variants (see `SessionStatus`'s own
-    /// docs on why they could not be additive), so a decoder shaped like a
-    /// genuine v4 peer — one that only ever knew `unknown`/`alive`/
-    /// `exited` — must FAIL to decode either of them, exactly as
-    /// `unknown_control_message_tag_fails_decode` pins the same failure
-    /// one level up for `ControlMsg` tags. Nothing before this test
-    /// actually checked that a v4 decoder rejects these; every other
-    /// `SessionStatus` test in this file decodes through the CURRENT (v6)
-    /// types, which trivially accept their own variants.
-    #[derive(Debug, Deserialize)]
-    #[serde(tag = "state", rename_all = "snake_case")]
-    enum LegacyV4SessionStatus {
-        Unknown,
-        Alive,
-        // Included for shape-completeness (a real v4 decoder has this
-        // variant too) even though this test only ever feeds it
-        // `interrupted`/`error` JSON, which is exactly the point: it
-        // exercises none of `Exited`'s own fields.
-        #[allow(dead_code)]
-        Exited {
-            exit_code: Option<i32>,
-        },
-    }
-
-    #[farhelm_testtrace::test]
-    fn interrupted_and_error_status_fail_under_a_legacy_v4_decoder() {
-        let interrupted = serde_json::to_value(SessionStatus::Interrupted).unwrap();
-        serde_json::from_value::<LegacyV4SessionStatus>(interrupted).expect_err(
-            "a v4 decoder must fail on `interrupted`, not silently ignore or default it",
-        );
-
-        let error = serde_json::to_value(SessionStatus::Error {
-            detail: "exec: no such file or directory".to_string(),
-        })
-        .unwrap();
-        serde_json::from_value::<LegacyV4SessionStatus>(error)
-            .expect_err("a v4 decoder must fail on `error`, not silently ignore or default it");
-    }
-
-    /// The `ErrorKind` sibling of the test above: a decoder shaped like a
-    /// genuine v4 peer — `not_found`/`invalid_request`/`internal` only —
-    /// must FAIL on `conflict`, the variant `PROTOCOL_VERSION` 5 added.
-    /// `ErrorKind` has no internal tag (every variant is a bare string;
-    /// see `AgentKind`'s doc comment for why), so the shadow enum below
-    /// needs no `#[serde(tag = ...)]` either.
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "snake_case")]
-    enum LegacyV4ErrorKind {
-        NotFound,
-        InvalidRequest,
-        Internal,
-    }
-
-    #[farhelm_testtrace::test]
-    fn conflict_error_kind_fails_under_a_legacy_v4_decoder() {
-        let conflict = serde_json::to_value(ErrorKind::Conflict).unwrap();
-        serde_json::from_value::<LegacyV4ErrorKind>(conflict)
-            .expect_err("a v4 decoder must fail on `conflict`, not silently ignore or default it");
-    }
-
-    /// The v10 error-kind vocabulary, before PLAN_M7.md item 2 added
-    /// `Unauthorized`.
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "snake_case")]
-    enum LegacyV10ErrorKind {
-        NotFound,
-        InvalidRequest,
-        Internal,
-        Conflict,
-    }
-
-    /// The v10 control slice needed to prove the bump-earning archive
-    /// request/reply tags and unauthorized error kind. Unknown enum tags
-    /// fail before any handler could accidentally assign them an older
-    /// meaning.
-    #[derive(Debug, Deserialize)]
-    #[serde(tag = "type", rename_all = "snake_case")]
-    enum LegacyV10ControlMsg {
-        #[allow(dead_code)]
-        DeleteSession { req_id: u64, session_id: String },
-        #[allow(dead_code)]
-        SessionDeleted { req_id: u64 },
-        #[allow(dead_code)]
-        Error {
-            req_id: u64,
-            message: String,
-            kind: LegacyV10ErrorKind,
-        },
-    }
-
-    /// A v10 decoder cannot mistake v11's authorization failure for an
-    /// older error kind; it must reject the tagged value.
-    #[farhelm_testtrace::test]
-    fn unauthorized_error_fails_under_a_legacy_v10_decoder() {
-        let error = ControlMsg::Error {
-            req_id: 1,
-            message: "credential rejected".to_string(),
-            kind: ErrorKind::Unauthorized,
-        };
-        serde_json::from_value::<LegacyV10ControlMsg>(serde_json::to_value(error).unwrap())
-            .expect_err("a v10 decoder must fail on the v11 unauthorized error kind");
-    }
     /// `SessionList`'s shape at `PROTOCOL_VERSION` 14: the whole list plus
     /// a required `truncated` flag, and nothing else — no `total`, no
     /// `next_cursor`. Golden-pinned in both the complete and the capped
@@ -5320,6 +4948,11 @@ mod tests {
     /// (`truncated` present), because the envelope is NOT tolerant — see
     /// `session_list_json_shape_is_pinned` — and this test is about the
     /// rows, not the envelope.
+    ///
+    /// Unlike wire messages, which never cross a protocol version (SPEC.md),
+    /// these rows also persist: the helm caches `SessionInfo` JSON in
+    /// helm.db, and after an upgrade it decodes rows an older build wrote.
+    /// That durable path is why this old-shape decode stays pinned.
     #[farhelm_testtrace::test]
     fn old_shape_session_info_rows_decode_with_defaulted_new_fields() {
         let old_shape = serde_json::json!({
@@ -5361,95 +4994,6 @@ mod tests {
             sessions[0].creation_seq, None,
             "an older sender has no supervisor creation sequence"
         );
-    }
-
-    /// The REVERSE direction from the test above: a hand-rolled decoder
-    /// shaped like a much OLDER peer than the one that test models — no
-    /// `status`, no `created_at`, no `truncated` — must still decode a
-    /// NEW sender's JSON successfully, silently dropping every field it
-    /// does not know about. This is deliberately older than "the peer
-    /// immediately before this PR": a genuine v7 sender already HAD
-    /// `status` (see the version history linked above for when each
-    /// arrived), so this shadow type instead stands in for a peer that
-    /// predates it — the pre-status shape its own test name says it
-    /// models. Serde's default of ignoring unrecognized object
-    /// keys is what makes this work. The shadow types below deliberately
-    /// carry no `#[serde(deny_unknown_fields)]` either, standing in for a real old
-    /// peer that never had a reason to add one — but this test's decode
-    /// path never touches the REAL `ControlMsg`/`SessionInfo` types at
-    /// all, so it says nothing about whether THOSE gaining
-    /// `deny_unknown_fields` would break anything (an earlier version of
-    /// this comment claimed otherwise; it does not, precisely because
-    /// decoding here goes through these shadow types, not the real ones).
-    /// The guarantee that DOES depend on the real types — an old-SHAPED
-    /// JSON still decoding under the CURRENT real decoder — is what the
-    /// sibling `old_shape_session_list_json_decodes_with_defaulted_new_fields`
-    /// test above pins instead. Together, the two tests cover both
-    /// directions of PLAN_M2.md's additivity claim.
-    #[derive(Debug, Deserialize)]
-    struct LegacySessionInfo {
-        id: String,
-        title: String,
-        cwd: String,
-        invocation: String,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(tag = "type", rename_all = "snake_case")]
-    enum LegacyControlMsg {
-        SessionList {
-            req_id: u64,
-            sessions: Vec<LegacySessionInfo>,
-        },
-    }
-
-    #[farhelm_testtrace::test]
-    fn new_session_list_json_decodes_under_a_legacy_pre_status_decoder() {
-        let new_msg = ControlMsg::SessionList {
-            req_id: 4,
-            sessions: vec![SessionInfo {
-                parent: None,
-                id: "s1".to_string(),
-                title: "demo".to_string(),
-                created_at: 1_700_000_000,
-                last_activity_at: 1_700_000_000,
-                last_work_started_at: 0,
-                creation_seq: None,
-                cwd: "/tmp".to_string(),
-                canonical_cwd: None,
-                invocation: "agent".to_string(),
-                resume_template: None,
-                launch: None,
-                status: SessionStatus::Exited { exit_code: Some(1) },
-                annotation: None,
-                restart_offer: RestartOffer::default(),
-                tabs: Vec::new(),
-                source_profile: None,
-                github_repo: None,
-                working_copy: None,
-            }],
-            truncated: true,
-        };
-        let json = serde_json::to_value(&new_msg).unwrap();
-
-        let LegacyControlMsg::SessionList { req_id, sessions } =
-            serde_json::from_value(json.clone()).expect(
-                "a legacy decoder without status/truncated/created_at must still decode \
-                 new-shape JSON",
-            );
-        assert_eq!(req_id, 4);
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].id, "s1");
-        assert_eq!(sessions[0].title, "demo");
-        assert_eq!(sessions[0].cwd, "/tmp");
-        assert_eq!(sessions[0].invocation, "agent");
-
-        // The REAL types round-trip the same JSON too — cheap to check
-        // here, and it makes explicit that this test's own `json` value
-        // is exactly what a real `ControlMsg::SessionList` produces, not
-        // some hand-crafted stand-in.
-        let real_decoded: ControlMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(real_decoded, new_msg);
     }
 
     /// `SessionInfo::annotation` and `restart_offer` are PLAN_M3.md's stop-
@@ -6321,10 +5865,7 @@ mod tests {
     /// (`intent_key` idempotency) and 7 (`agent_kind`/`resume_template`
     /// overrides) make: a caller that never learned these fields exist
     /// must get exactly the old behavior (no idempotency, no overrides),
-    /// never a decode failure. The REVERSE direction — today's `CreateSession`
-    /// bytes decoding under a decoder that predates these fields — is
-    /// `new_create_session_json_decodes_under_a_legacy_pre_snapshot_decoder`
-    /// below.
+    /// never a decode failure.
     #[farhelm_testtrace::test]
     fn old_shape_create_session_json_decodes_with_defaulted_new_fields() {
         let old_shape = serde_json::json!({
@@ -6362,174 +5903,6 @@ mod tests {
             Some("some-agent".to_string()),
             "a required-then-optional field must still carry the value it always did"
         );
-    }
-
-    /// The REVERSE tolerance direction (PLAN_M3 review batch item 7),
-    /// mirroring `new_session_list_json_decodes_under_a_legacy_pre_status_decoder`:
-    /// a decoder shaped like a peer built BEFORE `intent_key`/`agent_kind`/
-    /// `resume_template` existed must still decode a NEW sender's
-    /// `CreateSession` JSON, silently dropping the three fields it does
-    /// not know about. Without this test, the "CreateSession's tolerance
-    /// is covered both ways" claim made elsewhere in this file would be
-    /// true in only one direction.
-    #[derive(Debug, Deserialize)]
-    #[serde(tag = "type", rename_all = "snake_case")]
-    enum LegacyPreSnapshotControlMsg {
-        CreateSession {
-            req_id: u64,
-            cwd: String,
-            invocation: String,
-            title: Option<String>,
-            cols: u16,
-            rows: u16,
-        },
-    }
-
-    #[farhelm_testtrace::test]
-    fn new_create_session_json_decodes_under_a_legacy_pre_snapshot_decoder() {
-        let new_msg = ControlMsg::CreateSession {
-            req_id: 6,
-            parent: None,
-            profile_name: None,
-            profile_id: None,
-            inherit_agent: false,
-            cwd: "/some/dir".to_string(),
-            // RAW mode deliberately: a legacy decoder's `invocation` is a
-            // required `String`, so the PROFILE mode's `null` would fail
-            // this decode outright — which is a version-10 skew hazard the
-            // handshake closes, not a tolerance this test may claim.
-            invocation: Some("/opt/bin/claude".to_string()),
-            title: Some("demo".to_string()),
-            cols: 80,
-            rows: 24,
-            intent_key: Some("intent-xyz".to_string()),
-            agent_kind: Some(AgentKind::Claude),
-            resume_template: Some(vec![
-                "/opt/bin/claude".to_string(),
-                "--resume".to_string(),
-                "{conversation}".to_string(),
-            ]),
-            source_profile: None,
-            launch: None,
-            github_checkout: None,
-        };
-        let json = serde_json::to_value(&new_msg).unwrap();
-
-        let LegacyPreSnapshotControlMsg::CreateSession {
-            req_id,
-            cwd,
-            invocation,
-            title,
-            cols,
-            rows,
-        } = serde_json::from_value(json.clone()).expect(
-            "a legacy decoder without intent_key/agent_kind/resume_template must still decode \
-             new-shape JSON",
-        );
-        assert_eq!(req_id, 6);
-        assert_eq!(cwd, "/some/dir");
-        assert_eq!(invocation, "/opt/bin/claude");
-        assert_eq!(title, Some("demo".to_string()));
-        assert_eq!((cols, rows), (80, 24));
-
-        // The REAL type round-trips the same JSON too, same as the
-        // `SessionList` sibling test does.
-        let real_decoded: ControlMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(real_decoded, new_msg);
-    }
-
-    /// A decoder shaped like a genuine v9 peer: every field `CreateSession`
-    /// had at `PROTOCOL_VERSION` 9, with `invocation` still a REQUIRED
-    /// `String` — which is precisely the field version 10 loosened.
-    #[derive(Debug, Deserialize)]
-    #[serde(tag = "type", rename_all = "snake_case")]
-    enum LegacyV9ControlMsg {
-        // Every field is spelled out for SHAPE fidelity even though the
-        // test below reads only `invocation`: a decoder missing fields a
-        // real v9 peer had would be tolerant in ways that peer was not,
-        // and the whole point is to model what that peer would actually do
-        // with today's bytes.
-        #[allow(dead_code)]
-        CreateSession {
-            req_id: u64,
-            cwd: String,
-            invocation: String,
-            title: Option<String>,
-            cols: u16,
-            rows: u16,
-            intent_key: Option<String>,
-            agent_kind: Option<AgentKind>,
-            resume_template: Option<Vec<String>>,
-        },
-    }
-
-    /// The skew hazard version 10's `CreateSession` actually carries, in
-    /// both directions (PLAN_M6_75.md item 3).
-    ///
-    /// A RAW create still decodes under a v9 decoder — that is the control,
-    /// and it is what makes the second half meaningful rather than a test
-    /// of a broken fixture. A PROFILE-MODE create does NOT: `invocation` is
-    /// `null`, and a required `String` cannot take a null, so the decode
-    /// fails outright.
-    ///
-    /// Failing is the RIGHT outcome, and worth pinning precisely because
-    /// the alternative sounds harmless: a decoder that tolerated the null
-    /// (an `Option` with a default, say) would hand a v9 supervisor a
-    /// create with no invocation at all and no profile it knows how to
-    /// resolve — a request whose meaning it cannot see. The handshake is
-    /// what keeps this unreachable; this test states what would happen
-    /// without it, which is the argument for the bump.
-    #[farhelm_testtrace::test]
-    fn a_profile_mode_create_cannot_decode_under_a_legacy_v9_decoder() {
-        let raw = ControlMsg::CreateSession {
-            req_id: 1,
-            parent: None,
-            profile_name: None,
-            profile_id: None,
-            inherit_agent: false,
-            cwd: "/some/dir".to_string(),
-            invocation: Some("agent".to_string()),
-            title: None,
-            cols: 80,
-            rows: 24,
-            intent_key: None,
-            agent_kind: None,
-            resume_template: None,
-            source_profile: None,
-            launch: None,
-            github_checkout: None,
-        };
-        let LegacyV9ControlMsg::CreateSession { invocation, .. } =
-            serde_json::from_value(serde_json::to_value(&raw).unwrap())
-                .expect("a RAW create must still decode under a v9 decoder");
-        assert_eq!(
-            invocation, "agent",
-            "the control: version 10 did not change what a raw create looks like on the wire"
-        );
-
-        let profile_mode = ControlMsg::CreateSession {
-            req_id: 2,
-            parent: None,
-            profile_name: None,
-            profile_id: None,
-            inherit_agent: false,
-            cwd: "/some/dir".to_string(),
-            invocation: None,
-            title: None,
-            cols: 80,
-            rows: 24,
-            intent_key: None,
-            agent_kind: None,
-            resume_template: None,
-            source_profile: None,
-            launch: None,
-            github_checkout: None,
-        };
-        serde_json::from_value::<LegacyV9ControlMsg>(serde_json::to_value(&profile_mode).unwrap())
-            .expect_err(
-                "a v9 decoder must REFUSE a profile-mode create rather than read it as a create \
-             with no invocation",
-            );
     }
 
     /// `RestartSession`/`SessionRestarted` round-tripped through the real
@@ -6877,50 +6250,6 @@ mod tests {
         }
     }
 
-    /// A v11 decoder has neither the report nor the ack tag and must reject
-    /// both messages rather than ignore either as an additive field on an
-    /// older operation — the same reasoning
-    /// `archive_messages_fail_under_a_legacy_v10_decoder` pins for the v10
-    /// -> v11 boundary, one bump earlier.
-    #[farhelm_testtrace::test]
-    fn report_conversation_messages_fail_under_a_legacy_v11_decoder() {
-        /// The v11 control slice needed to prove the version-12-earning
-        /// report/ack tags are unrecognized by a decoder that predates
-        /// them. Unknown enum tags fail before any handler could
-        /// accidentally assign them an older meaning; the slice only needs
-        /// ONE known tag to exercise that failure, so it borrows the small
-        /// `StopSession` — mirroring `LegacyV10ControlMsg`'s own choice of
-        /// small variants — rather than something like `RestartSession`
-        /// whose embedded `SessionInfo` trips `clippy::large_enum_variant`
-        /// on a throwaway test-only type.
-        #[derive(Debug, Deserialize)]
-        #[serde(tag = "type", rename_all = "snake_case")]
-        enum LegacyV11ControlMsg {
-            #[allow(dead_code)]
-            StopSession { req_id: u64, session_id: String },
-        }
-
-        for msg in [
-            ControlMsg::ReportConversation {
-                vendor: ReportVendor::Pi,
-                transcript_path: None,
-                hook_event_name: None,
-                agent_id: None,
-                req_id: 2,
-                conversation: "abc123def456".to_string(),
-                source: "clear".to_string(),
-            },
-            ControlMsg::ConversationReported { req_id: 2 },
-        ] {
-            let decoded =
-                serde_json::from_value::<LegacyV11ControlMsg>(serde_json::to_value(&msg).unwrap());
-            assert!(
-                decoded.is_err(),
-                "a v11 decoder accepted a v12 report_conversation tag: {msg:?}"
-            );
-        }
-    }
-
     /// Version 5's additive rule for FIELDS (see `PROTOCOL_VERSION`'s
     /// docs): the future-extra-field tolerance direction, mirroring
     /// `pause_and_resume_with_future_extra_fields_decode_through_parse_control`.
@@ -7111,50 +6440,6 @@ mod tests {
                 title: "new title".to_string(),
                 expected_title: None,
             }
-        );
-    }
-
-    /// The OTHER half of version 7's additive rule: current-sender →
-    /// future-decoder, mirroring
-    /// `current_pause_output_decodes_under_a_future_v4_decoder_with_defaults`'s
-    /// shadow-struct technique. A hypothetical later-v7 build that grew
-    /// an optional field on `RenameSession` must accept today's rename
-    /// bytes and default the absent field — this is what makes "new
-    /// optional fields with decode defaults are fine" (the
-    /// `PROTOCOL_VERSION` docs' additive discipline) a tested promise
-    /// for the M5 vocabulary rather than an asserted one. Same
-    /// representative-variant argument as the future-extra-field test
-    /// above: the tolerance is the enum derive's property, pinned once
-    /// on the variant where a wrong answer costs most.
-    #[farhelm_testtrace::test]
-    fn current_rename_session_decodes_under_a_future_v7_decoder_with_defaults() {
-        #[derive(serde::Deserialize)]
-        struct FutureRenameSession {
-            req_id: u64,
-            session_id: String,
-            title: String,
-            #[serde(default)]
-            expected_generation: Option<u64>,
-        }
-        let mut wire = Vec::new();
-        Frame::control(&ControlMsg::RenameSession {
-            req_id: 7,
-            session_id: "s1".to_string(),
-            title: "new title".to_string(),
-            expected_title: None,
-        })
-        .encode(&mut wire)
-        .unwrap();
-        let (frame, _) = Frame::decode(&wire).unwrap().unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&frame.body).unwrap();
-        assert_eq!(value["type"], "rename_session");
-        let decoded: FutureRenameSession = serde_json::from_value(value).unwrap();
-        assert_eq!(decoded.req_id, 7);
-        assert_eq!(decoded.session_id, "s1");
-        assert_eq!(decoded.title, "new title");
-        assert_eq!(
-            decoded.expected_generation, None,
-            "an absent future field must default, never fail the decode"
         );
     }
 
