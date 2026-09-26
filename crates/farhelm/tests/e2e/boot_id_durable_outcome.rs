@@ -505,7 +505,10 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
         farhelm_bin().into(),
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            create_crash: Some(crash_at(CreateStage::AfterRecord)),
+            faults: FaultHooks {
+                create_crash: Some(crash_at(CreateStage::AfterRecord)),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )

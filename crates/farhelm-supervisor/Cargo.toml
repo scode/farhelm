@@ -13,6 +13,13 @@ description = "Per-host session management: tmux driver, agent integrations, sta
 [package.metadata.dist]
 dist = false
 
+[features]
+# Compiles the fault and gate hooks in `service::FaultHooks`, which tests use
+# to hold a boundary still or fail a step on purpose. Off in every product
+# build; the e2e tests turn it on through `farhelm`'s dev-dependency, and
+# this crate's own unit tests see the hooks through `cfg(test)`.
+test-seams = []
+
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true

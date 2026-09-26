@@ -108,9 +108,10 @@ mod uploads;
 pub use capture::{CaptureStoreFault, CaptureWrite};
 pub use connection::handle_connection;
 pub use core::{
-    BootIdSource, CreateCrashSeam, CreateIntentWaiting, CreateStage, ForwarderCleanupGate,
-    NaturalDetachGate, STALL_DETACH_TIMEOUT, SampleFault, SampleRead, SessionSnapshot,
-    StateDirOwnership, Supervisor, SupervisorSeams, SupervisorTimeouts, TabOpenFault, TabOpenStage,
-    TabSettleGate, UPLOAD_DISK_STAGE_TIMEOUT, UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT,
+    BootIdSource, CreateCrashSeam, CreateIntentWaiting, CreateStage, FaultHooks,
+    ForwarderCleanupGate, NaturalDetachGate, STALL_DETACH_TIMEOUT, SampleFault, SampleRead,
+    SessionSnapshot, StateDirOwnership, Supervisor, SupervisorSeams, SupervisorTimeouts,
+    TabOpenFault, TabOpenStage, TabSettleGate, UPLOAD_DISK_STAGE_TIMEOUT, UPLOAD_PROGRESS_TIMEOUT,
+    WRITER_STALL_TIMEOUT,
 };
 pub use core::{SupervisorStartup, connect, run};

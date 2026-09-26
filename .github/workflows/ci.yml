@@ -187,6 +187,11 @@ jobs:
           cache: false
           rustflags: ""
       - run: cargo clippy --all-targets -- -D warnings
+      # `--all-targets` builds the e2e tests, whose dev-dependency turns on the
+      # supervisor's `test-seams` feature for the whole build. The shipped
+      # binary builds without it, so lint that configuration separately:
+      # `-p farhelm --bins` builds no dev-dependency.
+      - run: cargo clippy -p farhelm --bins -- -D warnings
       # The JS unit harness (PLAN_M6_5.md item 1) is milliseconds of work, so
       # it shares the existing lint runner rather than paying for a separate
       # job. Node is already present on this runner image. Running from

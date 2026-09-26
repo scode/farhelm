@@ -586,7 +586,7 @@ impl Supervisor {
                         {
                             match self
                                 .store
-                                .reconcile_working_copy_archive(&row.id, self.seams.archive_parent_sync.clone())
+                                .reconcile_working_copy_archive(&row.id, self.seams.faults.archive_parent_sync().cloned())
                                 .await
                                 .map_err(|e| {
                                     format!("reconciling the pending archive: {e:#}")
@@ -620,7 +620,7 @@ impl Supervisor {
                                          deleting its ownership record without any move");
                                 }
                                 Ok(crate::working_copies::IdentityStatus::Matches) => {
-                                    match self.store.archive_move_working_copy(&row.id, self.seams.archive_parent_sync.clone()).await {
+                                    match self.store.archive_move_working_copy(&row.id, self.seams.faults.archive_parent_sync().cloned()).await {
                                         Ok(crate::working_copies::ArchiveOutcome::Archived {
                                             destination,
                                         }) => {
@@ -2106,7 +2106,10 @@ mod tests {
                 dummy_exe(),
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
-                    archive_parent_sync: Some(sync.clone()),
+                    faults: crate::service::FaultHooks {
+                        archive_parent_sync: Some(sync.clone()),
+                        ..crate::service::FaultHooks::default()
+                    },
                     ..SupervisorSeams::default()
                 },
             )
@@ -2222,7 +2225,10 @@ mod tests {
                         dummy_exe(),
                         SupervisorTimeouts::default(),
                         SupervisorSeams {
-                            archive_parent_sync: Some(sync.clone()),
+                            faults: crate::service::FaultHooks {
+                                archive_parent_sync: Some(sync.clone()),
+                                ..crate::service::FaultHooks::default()
+                            },
                             ..SupervisorSeams::default()
                         },
                     )
@@ -2492,7 +2498,10 @@ mod tests {
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
+                faults: crate::service::FaultHooks {
+                    create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
+                    ..crate::service::FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )

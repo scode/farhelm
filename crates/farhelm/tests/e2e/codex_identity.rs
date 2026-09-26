@@ -310,9 +310,12 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            create_crash: Some(crate::boot_id_durable_outcome::crash_at(
-                CreateStage::DuringLaunch,
-            )),
+            faults: FaultHooks {
+                create_crash: Some(crate::boot_id_durable_outcome::crash_at(
+                    CreateStage::DuringLaunch,
+                )),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )
@@ -422,24 +425,27 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         sup,
         client,
         SupervisorSeams {
-            codex_report_gate: Some(Arc::new({
-                let armed = Arc::clone(&report_armed);
-                let entered = Arc::clone(&report_entered);
-                let release = Arc::clone(&report_release);
-                move || {
-                    let entered = Arc::clone(&entered);
-                    let release = Arc::clone(&release);
-                    let pause = armed.swap(false, std::sync::atomic::Ordering::SeqCst);
-                    Box::pin(async move {
-                        if pause {
-                            entered.notify_one();
-                            tokio::time::timeout(Duration::from_secs(5), release.notified())
-                                .await
-                                .expect("the owned report interleaving must be released");
-                        }
-                    })
-                }
-            })),
+            faults: FaultHooks {
+                codex_report_gate: Some(Arc::new({
+                    let armed = Arc::clone(&report_armed);
+                    let entered = Arc::clone(&report_entered);
+                    let release = Arc::clone(&report_release);
+                    move || {
+                        let entered = Arc::clone(&entered);
+                        let release = Arc::clone(&release);
+                        let pause = armed.swap(false, std::sync::atomic::Ordering::SeqCst);
+                        Box::pin(async move {
+                            if pause {
+                                entered.notify_one();
+                                tokio::time::timeout(Duration::from_secs(5), release.notified())
+                                    .await
+                                    .expect("the owned report interleaving must be released");
+                            }
+                        })
+                    }
+                })),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )

@@ -3470,7 +3470,7 @@ pub(crate) async fn handle_restricted_control(
                 // can attempt the delete inside it — see `AgentAuthGate` for
                 // why nothing observable distinguishes the two orderings from
                 // outside. Production installs no gate.
-                if let Some(gate) = &sup.seams.agent_auth_gate {
+                if let Some(gate) = sup.seams.faults.agent_auth_gate() {
                     gate().await;
                 }
                 match sup
@@ -4384,7 +4384,12 @@ mod tests {
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                create_intent_waiting: Some(Arc::new(move |_| create_waiting_signal.notify_one())),
+                faults: crate::service::FaultHooks {
+                    create_intent_waiting: Some(Arc::new(move |_| {
+                        create_waiting_signal.notify_one()
+                    })),
+                    ..crate::service::FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -5191,14 +5196,17 @@ mod tests {
             dummy_exe(),
             super::super::core::SupervisorTimeouts::default(),
             SupervisorSeams {
-                agent_auth_gate: Some(Arc::new(move || {
-                    let entered = Arc::clone(&gate_entered);
-                    let release = Arc::clone(&gate_release);
-                    Box::pin(async move {
-                        entered.notify_one();
-                        release.notified().await;
-                    })
-                })),
+                faults: crate::service::FaultHooks {
+                    agent_auth_gate: Some(Arc::new(move || {
+                        let entered = Arc::clone(&gate_entered);
+                        let release = Arc::clone(&gate_release);
+                        Box::pin(async move {
+                            entered.notify_one();
+                            release.notified().await;
+                        })
+                    })),
+                    ..crate::service::FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -6476,7 +6484,10 @@ mod tests {
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                create_parent_waiting: Some(Arc::new(move |_| signal.notify_one())),
+                faults: crate::service::FaultHooks {
+                    create_parent_waiting: Some(Arc::new(move |_| signal.notify_one())),
+                    ..crate::service::FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -6593,7 +6604,10 @@ mod tests {
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
+                faults: crate::service::FaultHooks {
+                    create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
+                    ..crate::service::FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -7475,7 +7489,10 @@ mod tests {
             dummy_exe(),
             crate::service::core::SupervisorTimeouts::default(),
             crate::service::core::SupervisorSeams {
-                capture_store_fault: Some(fault),
+                faults: crate::service::FaultHooks {
+                    capture_store_fault: Some(fault),
+                    ..crate::service::FaultHooks::default()
+                },
                 ..crate::service::core::SupervisorSeams::default()
             },
         )

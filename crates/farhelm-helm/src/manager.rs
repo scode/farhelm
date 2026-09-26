@@ -975,6 +975,10 @@ pub struct ConnectionManager {
     store: HelmStore,
     transport: Arc<dyn HostTransport>,
     cadence: Cadence,
+    /// The test gate every actor of this manager checks before publishing
+    /// a duplicate result; see [`DuplicateGateSlot`].
+    #[cfg(test)]
+    duplicate_gate: DuplicateGateSlot,
     /// The fleet's "something changed" counter, shared with every actor
     /// this manager spawns and with the REST edge (see [`FleetEvents`]).
     ///
@@ -1225,18 +1229,32 @@ impl ConnectionManager {
         transport: Arc<dyn HostTransport>,
         cadence: Cadence,
     ) -> anyhow::Result<Arc<ConnectionManager>> {
-        let manager = Arc::new(ConnectionManager {
+        let manager = Self::unstarted(store, transport, cadence);
+        manager.sync_registry().await?;
+        Ok(manager)
+    }
+
+    /// The manager [`Self::start`] builds, before any actor is spawned.
+    ///
+    /// Separate so a test can install something every actor will see
+    /// before the first one runs.
+    fn unstarted(
+        store: HelmStore,
+        transport: Arc<dyn HostTransport>,
+        cadence: Cadence,
+    ) -> Arc<ConnectionManager> {
+        Arc::new(ConnectionManager {
             incarnations: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             store,
             transport,
             cadence,
+            #[cfg(test)]
+            duplicate_gate: DuplicateGateSlot::default(),
             events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
-        });
-        manager.sync_registry().await?;
-        Ok(manager)
+        })
     }
 
     /// Publish the handler that answers agent upcalls on every connection
@@ -1510,6 +1528,8 @@ impl ConnectionManager {
             transport: Arc::clone(&self.transport),
             cadence: self.cadence.clone(),
             status: Arc::clone(&status),
+            #[cfg(test)]
+            duplicate_gate: Arc::clone(&self.duplicate_gate),
             destination: Mutex::new(display_destination(&row)),
             cache_lock: Arc::clone(&cache_lock),
             seed_epoch: Arc::clone(&seed_epoch),
@@ -2586,6 +2606,9 @@ struct HostActor {
     transport: Arc<dyn HostTransport>,
     cadence: Cadence,
     status: Arc<watch::Sender<ActorStatus>>,
+    /// This actor's manager's test gate; see [`DuplicateGateSlot`].
+    #[cfg(test)]
+    duplicate_gate: DuplicateGateSlot,
     /// The destination this actor is currently working against, in display
     /// form, refreshed every time the row is reloaded.
     ///
@@ -2682,24 +2705,15 @@ struct DuplicatePublicationGate {
     release: tokio::sync::Notify,
 }
 
+/// Where a test installs its [`DuplicatePublicationGate`]: one slot per
+/// manager, shared with every actor that manager spawns.
+///
+/// Per manager rather than a process-wide static, so concurrently running
+/// fixtures cannot see each other's gate; the destination filter in
+/// [`HostActor::before_duplicate_publication`] then only has to tell one
+/// fixture's hosts apart.
 #[cfg(test)]
-static DUPLICATE_PUBLICATION_GATE: std::sync::OnceLock<
-    Mutex<Option<Arc<DuplicatePublicationGate>>>,
-> = std::sync::OnceLock::new();
-
-#[cfg(test)]
-async fn before_duplicate_publication(destination: &str) {
-    let gate = DUPLICATE_PUBLICATION_GATE
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .expect("duplicate publication gate mutex poisoned")
-        .clone();
-    let Some(gate) = gate.filter(|gate| gate.destination == destination) else {
-        return;
-    };
-    gate.reached.notify_one();
-    gate.release.notified().await;
-}
+type DuplicateGateSlot = Arc<Mutex<Option<Arc<DuplicatePublicationGate>>>>;
 
 /// How one connection attempt ended — the actor's whole decision surface,
 /// named so [`HostActor::run`]'s loop reads as the state machine it is
@@ -2762,6 +2776,24 @@ fn take_settled_outcome(
 }
 
 impl HostActor {
+    /// Hold here if this actor's manager has a test gate installed for this
+    /// actor's destination: the boundary just before a duplicate result is
+    /// published.
+    #[cfg(test)]
+    async fn before_duplicate_publication(&self) {
+        let destination = self.destination();
+        let gate = self
+            .duplicate_gate
+            .lock()
+            .expect("duplicate publication gate mutex poisoned")
+            .clone();
+        let Some(gate) = gate.filter(|gate| gate.destination == destination) else {
+            return;
+        };
+        gate.reached.notify_one();
+        gate.release.notified().await;
+    }
+
     /// Run this host's connection until the task is aborted, or until this
     /// entry's registry row disappears.
     ///
@@ -2850,7 +2882,7 @@ impl HostActor {
                 match self.twin_holding(&identity).await {
                     Ok(Some(twin)) => {
                         #[cfg(test)]
-                        before_duplicate_publication(&self.destination()).await;
+                        self.before_duplicate_publication().await;
                         // The manager may have published a retargeted
                         // Connecting state while the registry re-check was
                         // in flight. Consume that nudge before restoring the
@@ -2968,7 +3000,7 @@ impl HostActor {
                 }
                 AttemptOutcome::Duplicate { twin, identity } => {
                     #[cfg(test)]
-                    before_duplicate_publication(&self.destination()).await;
+                    self.before_duplicate_publication().await;
                     // A retarget can land after the duplicate answer settles
                     // but before this arm publishes it. Keep the manager's
                     // new Connecting state and retry from the reloaded row;
@@ -4094,17 +4126,19 @@ mod tests {
         (sender, receiver)
     }
 
-    /// Install a one-shot gate at the duplicate publication boundary. The
-    /// gate is scoped by destination so another concurrently running fixture
-    /// cannot pause its own duplicate actor.
-    fn install_duplicate_gate(destination: &str) -> Arc<DuplicatePublicationGate> {
+    /// Install a one-shot gate at `manager`'s duplicate publication
+    /// boundary, for its actor working against `destination`.
+    fn install_duplicate_gate(
+        manager: &ConnectionManager,
+        destination: &str,
+    ) -> Arc<DuplicatePublicationGate> {
         let gate = Arc::new(DuplicatePublicationGate {
             destination: destination.to_string(),
             reached: tokio::sync::Notify::new(),
             release: tokio::sync::Notify::new(),
         });
-        *DUPLICATE_PUBLICATION_GATE
-            .get_or_init(|| Mutex::new(None))
+        *manager
+            .duplicate_gate
             .lock()
             .expect("duplicate publication gate mutex poisoned") = Some(Arc::clone(&gate));
         gate
@@ -4112,9 +4146,9 @@ mod tests {
 
     /// Remove the test gate before releasing the actor so a second loop pass
     /// cannot consume the same one-shot synchronization point.
-    fn clear_duplicate_gate() {
-        *DUPLICATE_PUBLICATION_GATE
-            .get_or_init(|| Mutex::new(None))
+    fn clear_duplicate_gate(manager: &ConnectionManager) {
+        *manager
+            .duplicate_gate
             .lock()
             .expect("duplicate publication gate mutex poisoned") = None;
     }
@@ -4927,6 +4961,21 @@ mod tests {
         F: FnOnce(HelmStore, Arc<ScriptedTransport>) -> Fut,
         Fut: Future<Output = ()>,
     {
+        fixture_before_start(cadence, setup, |_| ()).await.0
+    }
+
+    /// [`fixture`], running `before_start` on the manager after it is built
+    /// and before any actor is spawned, for a test that must install
+    /// something every actor sees from its first step.
+    async fn fixture_before_start<F, Fut, T>(
+        cadence: Cadence,
+        setup: F,
+        before_start: impl FnOnce(&ConnectionManager) -> T,
+    ) -> (Fixture, T)
+    where
+        F: FnOnce(HelmStore, Arc<ScriptedTransport>) -> Fut,
+        Fut: Future<Output = ()>,
+    {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = HelmStore::open(&dir.path().join("helm.db"))
             .await
@@ -4940,19 +4989,22 @@ mod tests {
             },
         );
         setup(store.clone(), Arc::clone(&transport)).await;
-        let manager = ConnectionManager::start(
+        let manager = ConnectionManager::unstarted(
             store.clone(),
             Arc::clone(&transport) as Arc<dyn HostTransport>,
             cadence,
+        );
+        let installed = before_start(&manager);
+        manager.sync_registry().await.expect("start manager");
+        (
+            Fixture {
+                _dir: dir,
+                store,
+                transport,
+                manager,
+            },
+            installed,
         )
-        .await
-        .expect("start manager");
-        Fixture {
-            _dir: dir,
-            store,
-            transport,
-            manager,
-        }
     }
 
     /// The reserved local row's id, which `HelmStore::open` mints first
@@ -6919,32 +6971,35 @@ mod tests {
     async fn retargeting_during_duplicate_attempt_drops_the_stale_freeze() {
         let old_destination = "duplicate-old.example";
         let new_destination = "duplicate-new.example";
-        let gate = install_duplicate_gate(old_destination);
-        let fixture = fixture(Cadence::default(), |store, transport| async move {
-            let first = store
-                .add_ssh_host("duplicate-owner.example", None, None)
-                .await
-                .unwrap();
-            record_contact(&store, first, "shared").await;
-            let second = store
-                .add_ssh_host(old_destination, None, None)
-                .await
-                .unwrap();
-            transport.set_script(
-                first,
-                Script {
-                    reachable: false,
-                    ..Script::default()
-                },
-            );
-            transport.set_script(
-                second,
-                Script {
-                    identity: Some("shared".to_string()),
-                    ..Script::default()
-                },
-            );
-        })
+        let (fixture, gate) = fixture_before_start(
+            Cadence::default(),
+            |store, transport| async move {
+                let first = store
+                    .add_ssh_host("duplicate-owner.example", None, None)
+                    .await
+                    .unwrap();
+                record_contact(&store, first, "shared").await;
+                let second = store
+                    .add_ssh_host(old_destination, None, None)
+                    .await
+                    .unwrap();
+                transport.set_script(
+                    first,
+                    Script {
+                        reachable: false,
+                        ..Script::default()
+                    },
+                );
+                transport.set_script(
+                    second,
+                    Script {
+                        identity: Some("shared".to_string()),
+                        ..Script::default()
+                    },
+                );
+            },
+            |manager| install_duplicate_gate(manager, old_destination),
+        )
         .await;
         let rows = fixture.store.list_hosts().await.unwrap();
         let second = rows[2].id;
@@ -6965,7 +7020,7 @@ mod tests {
             .await
             .expect("retarget the duplicate entry");
         fixture.manager.sync_registry().await.unwrap();
-        clear_duplicate_gate();
+        clear_duplicate_gate(&fixture.manager);
         gate.release.notify_one();
 
         let mut saw_unreachable = false;
@@ -7040,7 +7095,7 @@ mod tests {
             .expect("the actor is frozen as a duplicate");
         let mut status = status_receiver(&fixture.manager, second);
         let _ = status.borrow_and_update();
-        let gate = install_duplicate_gate(old_destination);
+        let gate = install_duplicate_gate(&fixture.manager, old_destination);
 
         tokio::time::advance(REPROBE_INTERVAL).await;
         gate.reached.notified().await;
@@ -7054,7 +7109,7 @@ mod tests {
             .await
             .expect("retarget the frozen duplicate");
         fixture.manager.sync_registry().await.unwrap();
-        clear_duplicate_gate();
+        clear_duplicate_gate(&fixture.manager);
         gate.release.notify_one();
 
         let mut saw_unreachable = false;
@@ -8203,6 +8258,7 @@ mod tests {
             store,
             transport: ScriptedTransport::new(),
             cadence: Cadence::default(),
+            duplicate_gate: DuplicateGateSlot::default(),
             events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),

@@ -672,7 +672,8 @@ impl TickerHandle {
 /// next to a subprocess round trip.
 fn injected_sample_fault(sup: &Supervisor, read: SampleRead<'_>) -> Option<anyhow::Error> {
     sup.seams
-        .sample_fault
+        .faults
+        .sample_fault()
         .as_ref()
         .and_then(|fault| fault(read))
         .map(anyhow::Error::msg)
@@ -4197,12 +4198,15 @@ mod tests {
             supervisor_with(
                 &state,
                 SupervisorSeams {
-                    sample_fault: Some(Arc::new(move |asked| {
-                        let asked_about_b =
-                            matches!(asked, SampleRead::Tail { session } if session == "b");
-                        (asked_about_b && failing.load(Ordering::SeqCst))
-                            .then(|| "injected capture failure".to_string())
-                    })),
+                    faults: crate::service::FaultHooks {
+                        sample_fault: Some(Arc::new(move |asked| {
+                            let asked_about_b =
+                                matches!(asked, SampleRead::Tail { session } if session == "b");
+                            (asked_about_b && failing.load(Ordering::SeqCst))
+                                .then(|| "injected capture failure".to_string())
+                        })),
+                        ..crate::service::FaultHooks::default()
+                    },
                     ..SupervisorSeams::default()
                 },
             )
@@ -4344,15 +4348,18 @@ mod tests {
                 supervisor_with(
                     &state,
                     SupervisorSeams {
-                        sample_fault: Some(Arc::new(move |asked| {
-                            let asked_about = matches!(
-                                (read, asked),
-                                ("tail", SampleRead::Tail { .. })
-                                    | ("pane_states", SampleRead::PaneStates)
-                            );
-                            (asked_about && failing.load(Ordering::SeqCst))
-                                .then(|| "injected sampling failure".to_string())
-                        })),
+                        faults: crate::service::FaultHooks {
+                            sample_fault: Some(Arc::new(move |asked| {
+                                let asked_about = matches!(
+                                    (read, asked),
+                                    ("tail", SampleRead::Tail { .. })
+                                        | ("pane_states", SampleRead::PaneStates)
+                                );
+                                (asked_about && failing.load(Ordering::SeqCst))
+                                    .then(|| "injected sampling failure".to_string())
+                            })),
+                            ..crate::service::FaultHooks::default()
+                        },
                         ..SupervisorSeams::default()
                     },
                 )
@@ -4698,7 +4705,10 @@ mod tests {
             &state,
             SupervisorSeams {
                 agent_home: Some(home.path().to_path_buf()),
-                capture_gate: Some(barrier.gate()),
+                faults: crate::service::FaultHooks {
+                    capture_gate: Some(barrier.gate()),
+                    ..crate::service::FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -4846,7 +4856,10 @@ mod tests {
             &state,
             SupervisorSeams {
                 agent_home: Some(home.path().to_path_buf()),
-                capture_gate: Some(barrier.gate()),
+                faults: crate::service::FaultHooks {
+                    capture_gate: Some(barrier.gate()),
+                    ..crate::service::FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )

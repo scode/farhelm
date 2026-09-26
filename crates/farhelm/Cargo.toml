@@ -95,6 +95,10 @@ tracing-subscriber.workspace = true
 # AgentRequestHandler`, whose one method is `async fn` in a trait object —
 # so a test double needs the same attribute the trait is declared with.
 async-trait.workspace = true
+# The e2e tests install fault and gate hooks on the supervisors they build
+# (`SupervisorSeams::faults`). The feature compiles those hooks in for test
+# builds only; the shipped binary, which builds no dev-dependency, has none.
+farhelm-supervisor = { workspace = true, features = ["test-seams"] }
 # E2E tracing assertions must use a test-owned capture so supervisor tasks
 # stay attributable to their invoking test without a process-global layer.
 farhelm-testtrace.workspace = true

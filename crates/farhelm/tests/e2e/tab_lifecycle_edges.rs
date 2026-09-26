@@ -344,13 +344,16 @@ async fn a_tab_open_that_cannot_mark_its_window_leaves_nothing_behind() {
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            tab_open_fault: Some(Arc::new(|stage| {
-                assert_eq!(
-                    stage,
-                    farhelm_supervisor::service::TabOpenStage::BeforeMarking
-                );
-                Err(anyhow::anyhow!("injected marking failure"))
-            })),
+            faults: FaultHooks {
+                tab_open_fault: Some(Arc::new(|stage| {
+                    assert_eq!(
+                        stage,
+                        farhelm_supervisor::service::TabOpenStage::BeforeMarking
+                    );
+                    Err(anyhow::anyhow!("injected marking failure"))
+                })),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )
