@@ -2668,9 +2668,9 @@ fn with_hook_argv_using(
     // invocation already writing the `hooks.`/`features.hooks` tables owns
     // that configuration — appending ours after it is a merge nobody asked
     // for, over a table whose last-writer semantics we do not control.
-    // Like every other skip this falls back to the record scan, so the
-    // cost of being wrong here is an inferred identity, not a broken
-    // session.
+    // Codex has no record scan to fall back to, so the cost of being wrong
+    // here is a session with no exact conversation identity (and so no
+    // resume offer), not a broken session.
     if snapshot.kind == AgentKind::Codex && codex_invocation_configures_hooks(&argv) {
         skip("invocation already configures codex hooks");
         return (argv, false);
@@ -4314,7 +4314,7 @@ pub struct Supervisor {
     /// `None` is a real, if vanishing, state and not a should-never-happen:
     /// a farhelm installed under a non-UTF-8 path simply never has reporter
     /// controls injected — [`Supervisor::with_hook_argv`] logs the skip.
-    /// Claude and Codex retain their scan fallback; Goose, Pi, and OMP do not
+    /// Claude retains its scan fallback; Codex, Goose, Pi, and OMP do not
     /// gain a new exact target. Nothing else about the launch changes,
     /// because the shim itself is addressed by `PathBuf`
     /// (see [`crate::launch::window_command`]) and has never needed the
@@ -5160,8 +5160,8 @@ impl Supervisor {
             warn!(
                 exe = %farhelm_exe.display(),
                 "this farhelm executable's path is not valid UTF-8, so no launch can carry \
-                 conversation reporter controls; Claude and Codex retain record scanning, \
-                 while Goose, Pi, and OMP cannot report a new exact target"
+                 conversation reporter controls; Claude retains record scanning, while \
+                 Codex, Goose, Pi, and OMP cannot report a new exact target"
             );
         }
         // Store one absolute spelling after creation. Every injected
@@ -12867,8 +12867,8 @@ impl Supervisor {
     /// rather than inferred: the agent itself reports the id it is
     /// actually using, which is the only thing that survives a `/clear`.
     /// Everything this function can refuse leaves the launch runnable.
-    /// Claude and Codex then use their record scans; Goose, Pi, and OMP gain
-    /// no new exact target because their integrations are report-only.
+    /// Claude then uses its record scan; Codex, Goose, Pi, and OMP gain no
+    /// new exact target because their integrations are report-only.
     ///
     /// Returns the argv to spawn and whether it was hooked; see
     /// [`with_hook_argv_using`] for the refusal list, the order it applies
@@ -25399,9 +25399,9 @@ exit 0
     ///
     /// Both vendors accept a trailing positional prompt, and `--` ends
     /// option parsing: flags appended past one are not configuration at
-    /// all, they are prompt TEXT typed at the agent. Falling back to the
-    /// record scan is the only safe answer, and it is asserted for both
-    /// integrated kinds because the rule is about argv shape, not vendor.
+    /// all, they are prompt TEXT typed at the agent. Launching un-hooked is
+    /// the only safe answer, and it is asserted for both integrated kinds
+    /// because the rule is about argv shape, not vendor.
     #[farhelm_testtrace::test]
     fn with_hook_argv_refuses_an_invocation_containing_a_bare_double_dash() {
         for kind in [AgentKind::Claude, AgentKind::Codex] {
