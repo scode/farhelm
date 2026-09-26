@@ -336,36 +336,29 @@ pub(crate) fn LaunchControls(
                             "yolo"
                         }
                     }
-                    if harness == Some(LaunchHarness::Goose) {
-                        for (permission, label) in [
-                            (LaunchPermission::Approve, "approve"),
-                            (LaunchPermission::SmartApprove, "smart approve"),
-                            (LaunchPermission::Chat, "chat"),
-                        ] {
-                            button {
-                                key: "{label}",
-                                r#type: "button",
-                                class: if permissions == Some(permission) { "selected" } else { "" },
-                                aria_pressed: permissions == Some(permission),
-                                disabled: busy,
-                                onclick: move |_| on_permissions.call(Some(permission)),
-                                "{label}"
-                            }
-                        }
-                    }
-                    if harness == Some(LaunchHarness::Omp) {
-                        // OMP has an omitted default and only one offered
-                        // approval mode beside YOLO, unlike Pi or Goose.
-                        for (permission, label) in [(LaunchPermission::Approve, "approve")] {
-                            button {
-                                key: "{label}",
-                                r#type: "button",
-                                class: if permissions == Some(permission) { "selected" } else { "" },
-                                aria_pressed: permissions == Some(permission),
-                                disabled: busy,
-                                onclick: move |_| on_permissions.call(Some(permission)),
-                                "{label}"
-                            }
+                    // The approval modes after default and YOLO, in their
+                    // fixed order, shown for whichever harness offers them
+                    // (Goose all three, OMP Approve alone). Pi yields nothing
+                    // here; its sole YOLO button is above. Filtered in the
+                    // iterator so each keyed button stays the loop's root.
+                    for permission in [
+                        LaunchPermission::Approve,
+                        LaunchPermission::SmartApprove,
+                        LaunchPermission::Chat,
+                    ]
+                    .into_iter()
+                    .filter(|permission| {
+                        harness.is_some_and(|harness| harness.offers_permission(*permission))
+                    })
+                    {
+                        button {
+                            key: "{launch_composer::permission_value(permission)}",
+                            r#type: "button",
+                            class: if permissions == Some(permission) { "selected" } else { "" },
+                            aria_pressed: permissions == Some(permission),
+                            disabled: busy,
+                            onclick: move |_| on_permissions.call(Some(permission)),
+                            "{launch_composer::permission_value(permission)}"
                         }
                     }
                 }
