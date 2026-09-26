@@ -15,8 +15,7 @@ use crate::launch_controls::LaunchControls;
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{
-    AgentChoice, CatalogLookup, CatalogSurface, UNRESOLVED_VALUE, resolve_agent, seeded_choice,
-    submitted_field,
+    AgentChoice, CatalogLookup, CatalogSurface, UNRESOLVED_VALUE, resolve_agent, submitted_field,
 };
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{
@@ -1815,14 +1814,10 @@ pub(super) fn CreateSessionForm(
     // and coalesces with any read the page-owned surface already has in flight.
     use_effect(move || catalog.request(Trigger::Explicit));
 
-    // Host binding and profile seeding now have different lifecycles. A host
-    // installation change rotates the idempotency key and any host-specific
-    // refusal, but the explicit profile choice survives because every host
-    // consumes the same helm catalog. The remembered default is consumed once
-    // for the dialog, whatever its first answer was, so a later feed refresh
-    // cannot move the selection under someone filling in the form.
+    // A host installation change rotates the idempotency key and any
+    // host-specific refusal, but the explicit profile choice survives because
+    // every host consumes the same helm catalog.
     let mut bound_target = use_signal(|| None::<CreateTarget>);
-    let mut seeded_for = use_signal(|| false);
     // Which prefill GENERATION (`CreatePrefill`) this form has already
     // applied. Compared by generation rather than by mere presence in the
     // effect below, because `prefill` stays populated at its latest
@@ -2018,27 +2013,6 @@ pub(super) fn CreateSessionForm(
                 // host A's refusal could be shown for host B.
                 error.set(None);
             }
-            if *seeded_for.peek() {
-                return;
-            }
-            let CatalogLookup::Known { catalog: held, .. } = read.answer() else {
-                return;
-            };
-            seeded_for.set(true);
-            // The user (or a clone prefill, applied above) may have
-            // answered while the read was in flight; an answer outranks a
-            // default.
-            if chosen_profile.peek().is_some() {
-                return;
-            }
-            // Three outcomes, decided in one place (`profiles::seeded_choice`):
-            // the remembered profile, the command path where nothing was ever
-            // remembered, or NO choice where the remembered one is gone — which is
-            // what leaves the dialog blocked and asking, told apart from "not read
-            // yet" by the latch this effect just set.
-            if let Some(choice) = seeded_choice(held) {
-                chosen_profile.set(Some(choice));
-            }
         },
     ));
 
@@ -2049,8 +2023,7 @@ pub(super) fn CreateSessionForm(
         CatalogLookup::Known { catalog, .. } => Some(*catalog),
         _ => None,
     };
-    let seeded = *seeded_for.read();
-    let agent = resolve_agent(chosen_profile.read().as_ref(), offered, seeded);
+    let agent = resolve_agent(chosen_profile.read().as_ref(), offered);
     let by_profile = matches!(agent.choice, Some(AgentChoice::Profile(_)));
     // Only the active creation surface determines the notice; the other
     // surface retains a draft that may describe a different harness.
@@ -2099,8 +2072,7 @@ pub(super) fn CreateSessionForm(
             CatalogLookup::Known { catalog, .. } => Some(catalog),
             _ => None,
         };
-        let seeded = *seeded_for.peek();
-        resolve_agent(chosen_profile.peek().as_ref(), offered, seeded).choice
+        resolve_agent(chosen_profile.peek().as_ref(), offered).choice
     };
 
     // The render publishes the current authority before any old completion
@@ -2988,17 +2960,17 @@ pub(super) fn CreateSessionForm(
                 };
                 // No agent, no create. "Nothing is selected" is a real state
                 // rather than a gap to be filled — a profile that was chosen
-                // or remembered and has since been deleted leaves the dialog
-                // waiting for an answer, and the command field it would
-                // otherwise fall back to still holds whatever was typed into
-                // it earlier. Launching that would run something nobody
-                // picked while the note beside it said nothing was selected.
-                // Frozen HERE, from what was just resolved, and not touched
-                // again: the minting await below can span a deletion or
-                // another client's remembered-default write, and re-resolving
-                // across it would let the request's MODE differ from the one
-                // the button was pressed on. A profile that goes away in that
-                // window is refused by the supervisor, by name.
+                // and has since been deleted, or a clone whose own agent was
+                // never resolved, leaves the dialog waiting for an answer,
+                // and the command field it would otherwise fall back to still
+                // holds whatever was typed into it earlier. Launching that
+                // would run something nobody picked while the note beside it
+                // said nothing was selected. Frozen HERE, from what was just
+                // resolved, and not touched again: the minting await below
+                // can span a deletion, and re-resolving across it would let
+                // the request's MODE differ from the one the button was
+                // pressed on. A profile that goes away in that window is
+                // refused by the supervisor, by name.
                 let launch = if *creation_surface.peek() == CreationSurface::Structured {
                     let Some(harness) = *structured_harness.peek() else {
                         error.set(Some("choose a structured harness before launching".to_string()));
@@ -3440,9 +3412,10 @@ pub(super) fn CreateSessionForm(
                     match create_result {
                         Ok(session) => {
                             // A profile-backed create changes the helm's
-                            // remembered default. Drop the old paired answer
-                            // before this form closes so an immediate reopen
-                            // stays pending until an authoritative read lands;
+                            // remembered default, which the profiles popup
+                            // marks. Drop the old paired answer before this
+                            // form closes so the next reader stays pending
+                            // until an authoritative read lands;
                             // writing the submitted id locally would pretend
                             // the helm's best-effort preference write is known
                             // to have succeeded.
@@ -4581,11 +4554,12 @@ pub(super) fn CreateSessionForm(
                             p { "Cursor session tracking and Resume are not supported. Restart starts a new conversation." }
                         }
                         if *creation_surface.read() == CreationSurface::Legacy {
-            // The agent, offered from the helm catalog and defaulting
-            // to what a session was last created from on this helm (SPEC.md's
-            // creation rule; `profiles::resolve_agent`). The empty option is
-            // the raw command path below rather than "no agent" — a create
-            // always launches something, and this select is which of the two
+            // The agent, offered from the helm catalog. It never defaults to
+            // the profile last used on this helm (SPEC.md's creation rule;
+            // `profiles::resolve_agent`): New starts on the command path and a
+            // clone on its source's own agent. The empty option is the raw
+            // command path below rather than "no agent" — a create always
+            // launches something, and this select is which of the two
             // mutually exclusive modes it uses.
             label {
                 "agent"
@@ -4667,10 +4641,9 @@ pub(super) fn CreateSessionForm(
                 }
             }
             // SPEC.md's ask-don't-guess fallback, said out loud. It appears
-            // only when a profile that WAS available is not anymore — a first
-            // create in a helm has nothing to explain — and the thing it
-            // rules out is the silent substitution: another profile quietly
-            // preselected under the label of a remembered preference.
+            // only while nothing usable is selected, and the thing it rules
+            // out is the silent substitution: the command field, or some other
+            // profile, quietly standing in for an answer nobody gave.
             if let Some(note) = agent.note {
                 div { class: "create-session-profile-note", "{note.text()}" }
             }
