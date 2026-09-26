@@ -278,7 +278,12 @@ pub fn run_with(
         Err(_) => Outcome::word("panic"),
     };
     let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        append_log(hook_log.as_deref(), &outcome.render(unix_seconds()));
+        // The supervisor's clock reading: a pre-epoch clock reads as 0, and a
+        // nonsense timestamp is still better than losing the line.
+        append_log(
+            hook_log.as_deref(),
+            &outcome.render(farhelm_supervisor::store::now_unix().max(0) as u64),
+        );
     }));
 }
 
@@ -829,15 +834,6 @@ fn sanitize(value: &str, max_chars: usize, single_token: bool) -> String {
             }
         })
         .collect()
-}
-
-/// Wall-clock seconds for the log's timestamp, or 0 if the clock is before
-/// the epoch. A nonsense timestamp is still better than losing the line.
-fn unix_seconds() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// Append one line to the hook log, ignoring every failure.

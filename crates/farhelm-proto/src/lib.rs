@@ -74,6 +74,9 @@ pub mod launch;
 /// The one list of characters that must never be shown as themselves when
 /// peer-supplied text reaches a human (see the module's own docs).
 pub mod text;
+
+/// UTC calendar arithmetic shared by the crates that print dates.
+pub mod time;
 pub use launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
 /// Owned GitHub checkouts: validated repo identity, deterministic naming,
