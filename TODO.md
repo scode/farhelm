@@ -54,8 +54,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   tasteful in-progress animation. Something like `updating: 3/9 upload-farhelm <animation> 0:42`. Exact design TBD. This
   changes SPEC.md's rule that an updating host's row expands to follow progress; whether failure or an uncertain outcome
   should still expand is part of the design.
-- **Session overflow-menu overhaul.** Overhaul the pop-up menus opened by clicking `...` for sessions so they look
-  modern and are properly placed. The design is TBD and should be worked out when this TODO is planned.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).

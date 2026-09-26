@@ -77,6 +77,20 @@ function profileRow(page: Page, id: string) {
 }
 
 /**
+ * A pattern matching any text that contains `literal` verbatim.
+ *
+ * The menu header's summary tooltip is the whole summary line (for example
+ * `profile: <name> · running`), so a test about the profile snapshot can only
+ * require that the snapshotted name is IN it; the state word and the label
+ * prefix belong to other contracts. Playwright's `toHaveAttribute` takes a
+ * string or a RegExp but no asymmetric matcher, hence a regex. Escaped so a
+ * name carrying regex syntax is still matched literally.
+ */
+function containing(literal: string): RegExp {
+  return new RegExp(literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+}
+
+/**
  * Load the list with a stubbed, healthy feed, and hand the stub back.
  *
  * The handshake is played explicitly (`notify`) rather than armed, because
@@ -2108,19 +2122,19 @@ test.describe("agent profiles", () => {
     created.push(session.id);
 
     const feed = await listWithStubbedFeed(page);
-    // The profile chip moved into the row's actions panel with the rest
-    // of the per-session controls; it only exists in the DOM while the
-    // panel is open.
+    // The profile snapshot moved into the menu header; it only exists in the
+    // DOM while the panel is open, but keeps the old existence contract.
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
     await openRowMenu(row(page, session.id));
-    const label = row(page, session.id).locator(".session-profile");
+    const label = row(page, session.id).locator(".session-row-menu-summary");
     await expect(label).toBeVisible({ timeout: 20_000 });
     await expect(label).toContainText(before);
     await expect(label).toHaveAttribute("data-profile-existence", "present", { timeout: 20_000 });
+    await expect(label).toHaveAttribute("title", containing(before));
 
     // The row's own glyph track keeps the profile snapshot in its tooltip
-    // and accessible text. It is a second surface from the menu-panel chip,
-    // so this pins provenance without restoring obsolete visible badge text.
+    // and accessible text. It is a second surface from the menu-header
+    // summary, so this pins provenance without restoring obsolete footer text.
     const badge = row(page, session.id).locator(".session-agent");
     await expect(badge).toContainText(before);
     await expect(badge).toHaveAttribute("title", `profile: ${before} — command: farhelm — ${FAKE_AGENT}`);
@@ -2136,6 +2150,7 @@ test.describe("agent profiles", () => {
         "what the session was created from",
     ).toContainText(before);
     await expect(label).not.toContainText(after);
+    await expect(label).toHaveAttribute("title", containing(before));
 
     // The glyph track keeps the same accessible snapshot, with its `title`
     // qualified the same way `source_profile_label` qualifies the panel
@@ -2157,12 +2172,14 @@ test.describe("agent profiles", () => {
 
   /**
    * A near-limit unbroken profile name stays constrained inside the
-   * actions panel instead of widening it out of the sidebar.
+   * side-flyout header instead of widening it out of the viewport.
    *
-   * The chip moved from the row line into the 300px-max panel, whose
-   * column layout is a new overflow context for it; every other profile
-   * test uses short names, so this is the only place the ellipsis rule
-   * is actually exercised where the chip now lives.
+   * The snapshot moved from the row footer into the flyout header, whose
+   * bounded summary line is a new overflow context for it; every other
+   * profile test uses short names, so this is the only place the ellipsis
+   * rule is actually exercised where the snapshot now lives. The ellipsis
+   * must sit on the summary's text-holding block: on the outer summary it
+   * only clipped the name.
    */
   test("a long profile name ellipsizes inside the actions panel", async ({ page, request }) => {
     const local = await localHostId(request);
@@ -2178,17 +2195,41 @@ test.describe("agent profiles", () => {
     await expect(target).toBeVisible({ timeout: 20_000 });
     await openRowMenu(target);
 
-    const chip = target.locator(".session-profile");
-    await expect(chip).toBeVisible();
+    const label = target.locator(".session-row-menu-summary");
+    await expect(label).toBeVisible();
+    await expect(label).toHaveAttribute("title", containing(name));
     const sidebarBox = (await page.locator(".app-sidebar").boundingBox())!;
     const panelBox = (await target.locator(".session-row-menu-panel").boundingBox())!;
-    const chipBox = (await chip.boundingBox())!;
-    // The panel keeps to the sidebar, the chip keeps to the panel...
-    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(sidebarBox.x + sidebarBox.width + 1);
-    expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
-    // ...and the name really is being clipped, proving the ellipsis rule
-    // did the constraining rather than a conveniently short fixture.
-    expect(await chip.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    const labelBox = (await label.boundingBox())!;
+    const viewport = page.viewportSize()!;
+    // Design C places the flyout beyond the sidebar and keeps it inside the
+    // viewport even when the row is near an edge.
+    expect(panelBox.x).toBeGreaterThanOrEqual(sidebarBox.x + sidebarBox.width - 1);
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(panelBox.y).toBeGreaterThanOrEqual(0);
+    expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+    // ...and the name really is being clipped with an ellipsis, on the
+    // block whose own line holds the text. `text-overflow` does not reach
+    // into a child block, so the same rule on the outer summary clipped the
+    // line with no ellipsis; the check therefore reads the runs block's own
+    // style and overflow, not the summary's.
+    const runs = label.locator(".session-row-menu-summary-runs");
+    const truncation = await runs.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return {
+        textOverflow: style.textOverflow,
+        whiteSpace: style.whiteSpace,
+        overflowX: style.overflowX,
+        overflows: el.scrollWidth > el.clientWidth,
+      };
+    });
+    expect(truncation).toEqual({
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+      overflowX: "hidden",
+      overflows: true,
+    });
   });
 
   /**
@@ -2211,15 +2252,16 @@ test.describe("agent profiles", () => {
     created.push(session.id);
 
     const feed = await listWithStubbedFeed(page);
-    // As above: the chip lives in the actions panel now.
+    // As above: the snapshot lives in the menu header now.
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
     await openRowMenu(row(page, session.id));
-    const label = row(page, session.id).locator(".session-profile");
+    const label = row(page, session.id).locator(".session-row-menu-summary");
     await expect(label).toHaveAttribute("data-profile-existence", "present", { timeout: 20_000 });
+    await expect(label).toHaveAttribute("title", containing(name));
     const presentLabelColor = await label.evaluate((element) => getComputedStyle(element).color);
 
     // The row's own glyph track keeps the same present-state snapshot as
-    // the panel chip — see the rename test above for why this is a second
+    // the panel summary — see the rename test above for why this is a second
     // surface worth its own assertion.
     const badge = row(page, session.id).locator(".session-agent");
     await expect(badge).toContainText(name);
@@ -2232,6 +2274,7 @@ test.describe("agent profiles", () => {
 
     await expect(label).toHaveAttribute("data-profile-existence", "deleted", { timeout: 20_000 });
     await expect(label).toContainText(name);
+    await expect(label).toHaveAttribute("title", containing(name));
     await expect(
       row(page, session.id),
       "a session outlives the profile it was created from; removing the row would destroy the " +

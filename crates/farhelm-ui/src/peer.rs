@@ -178,15 +178,20 @@ pub(crate) fn detail_text(parts: &[DetailPart]) -> String {
         .collect()
 }
 
-/// Render a detail: our words as plain runs, every peer value isolated in
-/// its own fixed-direction element.
+/// Render a detail with isolated peer runs; value-only tooltips are opt-in for surfaces that need them.
 ///
 /// `dir="ltr"` AND the stylesheet's `unicode-bidi: isolate` together are
 /// what make the isolation real — the attribute sets the base direction, the
 /// property stops the run participating in the surrounding paragraph's
-/// bidirectional resolution at all.
+/// bidirectional resolution at all. Existing callers keep their prior markup
+/// unless `peer_tooltips` is enabled for a surface that needs per-value
+/// hover text.
 #[component]
-pub(crate) fn PeerLine(class: String, parts: Vec<DetailPart>) -> Element {
+pub(crate) fn PeerLine(
+    class: String,
+    parts: Vec<DetailPart>,
+    #[props(default = false)] peer_tooltips: bool,
+) -> Element {
     rsx! {
         div { class: "{class}",
             for (index , part) in parts.iter().enumerate() {
@@ -199,6 +204,7 @@ pub(crate) fn PeerLine(class: String, parts: Vec<DetailPart>) -> Element {
                             key: "{index}",
                             class: "peer-value",
                             dir: "ltr",
+                            title: if peer_tooltips { display_peer(value) },
                             "{display_peer(value)}"
                         }
                     },

@@ -13,6 +13,7 @@ use crate::icons::{
     EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, LocalHostIcon, PermissionGlyph,
     PermissionIcon, QualifierGlyph, QualifierIcon, RemoteHostIcon,
 };
+use crate::launch_composer::{selection_explicit_before_permissions, selection_permission_value};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{existence_word, source_profile_label};
 use crate::status::{StatusBadgeView, confirm_consequence, replace_consequence, status_badge};
@@ -22,7 +23,8 @@ use super::shared::{DeleteTarget, HostLocality, RowState};
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
     closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus, handle_menu_key,
-    measurement_outcome, menu_panel_placement_style, remember_menu_item, should_measure_on_mount,
+    measurement_outcome, remember_menu_item, session_menu_placement_style,
+    session_menu_pointer_style, should_measure_on_mount,
 };
 
 /// Which optional row controls exist for the current session state.
@@ -171,13 +173,9 @@ type MenuWiring = menu_panel::MenuWiring<MenuAction, String, { MENU_ACTIONS.len(
 /// lives on `.session-row-open`'s opacity while the selection highlight is
 /// the ROW's background, so a selected stale row shows both truthfully.
 ///
-/// `menu_open` is the third, and it is not decoration: the panel hangs
-/// below-left of its toggle and covers the rows under it (see
-/// `menu_panel::menu_panel_style`'s anchor doc), so "which of the several
-/// visible ⋯ is the open one" has to be answerable from the ROW, not just
-/// from the small toggle glyph — the toggles themselves stay uncovered
-/// and clickable, which is exactly why several of them are visible at
-/// once with one menu up. It composes with the other two the same
+/// `menu_open` is the third: the session panel sits beside the sidebar,
+/// so the row tint identifies which visible toggle owns it. It composes
+/// with the other two the same
 /// way — app.css keeps the selected row's own accent fill when both are
 /// on, rather than letting the neutral menu tint erase the selection
 /// SPEC.md requires to stay readable at a glance.
@@ -209,6 +207,99 @@ fn row_class(stale: bool, selected: bool, menu_open: bool) -> &'static str {
 /// split a codepoint.
 fn menu_label(title: &str) -> String {
     format!("session actions for {}", clamp_title(title))
+}
+
+/// Split the header's saved launch facts into peer and app-authored runs.
+///
+/// The row receives all dynamic values from the helm, so each one stays raw
+/// until `PeerLine` applies escaping and direction isolation at render time.
+/// Separators and the concise state word are this UI's own wording and remain
+/// ordinary text runs, which prevents a relayed value from reordering them.
+fn menu_header_summary_parts(session: &Session, state: Option<&str>) -> Vec<DetailPart> {
+    let values = if let Some(launch) = &session.launch {
+        let mut values = vec![format!("{:?}", launch.harness).to_lowercase()];
+        let permission = selection_permission_value(launch);
+        if permission != "default" {
+            values.push(permission.to_string());
+        }
+        values.extend(selection_explicit_before_permissions(launch));
+        if let Some(source) = &session.source_profile {
+            values.push(source_profile_label(source));
+        }
+        values
+    } else if let Some(source) = &session.source_profile {
+        vec![source_profile_label(source)]
+    } else {
+        vec![compact_invocation(&session.invocation).basename]
+    };
+
+    let mut parts = Vec::with_capacity(values.len() * 2 + usize::from(state.is_some()));
+    for (index, value) in values.into_iter().enumerate() {
+        if index != 0 {
+            parts.push(DetailPart::text(" · "));
+        }
+        parts.push(DetailPart::peer(value));
+    }
+    if let Some(state) = state {
+        parts.push(DetailPart::text(" · "));
+        parts.push(DetailPart::text(state));
+    }
+    parts
+}
+
+/// Build the header's native tooltip from already separated display runs.
+///
+/// The visible line uses one isolated element per peer value; the tooltip is
+/// necessarily one attribute string, so every peer run is escaped before the
+/// app-authored separators and state word are joined into its display form.
+fn menu_header_summary_tooltip(parts: &[DetailPart]) -> String {
+    parts
+        .iter()
+        .map(|part| match part {
+            DetailPart::Text(text) => text.clone(),
+            DetailPart::Peer(value) => display_peer(value),
+        })
+        .collect()
+}
+
+/// Decorative line art for commands; the button text supplies the name.
+///
+/// These paths come from design C's small action glyphs. Keeping them in
+/// one component makes every command use the same stroke and box size.
+#[component]
+fn MenuActionIcon(action: MenuAction) -> Element {
+    rsx! {
+        svg {
+            class: "session-row-menu-icon",
+            view_box: "0 0 14 14",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "1.2",
+            stroke_linejoin: "round",
+            "aria-hidden": "true",
+            match action {
+                MenuAction::Rename => rsx! { path { d: "M2.5 11.5 L2.5 9.5 L9 3 L11 5 L4.5 11.5 Z" } },
+                MenuAction::MarkSeen => rsx! {
+                    path { d: "M1.5 7 C3.5 3.5 10.5 3.5 12.5 7 C10.5 10.5 3.5 10.5 1.5 7 Z" }
+                    circle { cx: "7", cy: "7", r: "1.6", fill: "currentColor", stroke: "none" }
+                },
+                MenuAction::Clone => rsx! {
+                    rect { x: "2", y: "4.5", width: "7", height: "7", rx: "1" }
+                    path { d: "M5 4.5 V2.5 H11.5 V9 H9" }
+                },
+                MenuAction::ReplaceWith => rsx! {
+                    path { d: "M2 4 H12 M2 10 H12" }
+                    circle { cx: "5", cy: "4", r: "1.6", fill: "var(--bg-2)" }
+                    circle { cx: "9", cy: "10", r: "1.6", fill: "var(--bg-2)" }
+                },
+                MenuAction::Replace => rsx! {
+                    path { d: "M11.5 5.5 A4.6 4.6 0 0 0 3 4.5 M2.5 8.5 A4.6 4.6 0 0 0 11 9.5 M11.8 2.5 V5.8 H8.6 M2.2 11.5 V8.2 H5.4" }
+                },
+                MenuAction::Stop => rsx! { rect { x: "3.5", y: "3.5", width: "7", height: "7", rx: "1" } },
+                MenuAction::Delete => rsx! { path { d: "M2.5 4 H11.5 M5.5 4 V2.5 H8.5 V4 M3.8 4 L4.5 12 H9.5 L10.2 4" } },
+            }
+        }
+    }
 }
 
 // ===== The open menu's focus and keyboard behavior =====================
@@ -925,6 +1016,10 @@ pub(super) fn SessionRow(
     // convention two call sites have to maintain by hand.
     let unseen = session.has_unseen_output();
     let badge = status_badge(&session.status, session.annotation.as_deref(), unseen);
+    let menu_state = badge
+        .as_ref()
+        .map(|badge| badge.class.split_whitespace().next().unwrap_or(badge.class));
+    let menu_summary_parts = menu_header_summary_parts(&session, menu_state);
     // Live statuses occupy the fixed leading slot as dots. In compact mode an
     // ended status uses that same slot for an icon; noncompact rows put its
     // complete wording on the full-width detail line below the identity.
@@ -1755,29 +1850,45 @@ pub(super) fn SessionRow(
                 }
                 if menu_open {
                     div {
-                        // The panel is the POSITIONED box and nothing
-                        // more; what it currently IS lives one level in
-                        // (the item list's own `role="menu"`) or on the
-                        // panel only while it is a prompt. The class
-                        // carries the sub-state because the geometry
-                        // differs — a full-bleed list of rows versus a
-                        // padded prompt — and it is derived from the same
-                        // `showing_menu_items` value that picks the
-                        // markup, in the same expression, so the two
-                        // cannot drift. (This used to key off the panel's
-                        // own `role="menu"`; that attribute has moved
-                        // inward, and a selector on a role the element no
-                        // longer carries would have silently stopped
-                        // matching.)
-                        class: if showing_menu_items {
-                            "session-row-menu-panel"
-                        } else {
-                            "session-row-menu-panel menu-prompt"
-                        },
-                        // The confirm and rename sub-states ARE a small
-                        // named exchange: one consequence sentence and
-                        // the two answers to it, or a field and its two
-                        // answers, with focus deliberately placed on the
+                        class: "session-row-menu-flyout",
+                        style: session_menu_placement_style(placement()),
+                        if showing_menu_items {
+                            if let Some(pointer_style) = session_menu_pointer_style(placement()) {
+                                span { class: "session-row-menu-pointer", style: pointer_style, "aria-hidden": "true" }
+                            }
+                        }
+                        div {
+                            // The panel is the positioned box inside the
+                            // non-scrolling flyout wrapper. The wrapper owns
+                            // the pointer so its clamp follows the panel's
+                            // actual rendered height even when the panel
+                            // scrolls. That holds only while this panel is
+                            // the wrapper's ONLY in-flow child: anything else
+                            // rendered beside it (the refusal line once was)
+                            // adds to the height the pointer clamps against
+                            // and can leave the pointer beside that sibling,
+                            // off the panel. What the panel currently IS
+                            // lives one level in (the item list's own
+                            // `role="menu"`) or on the panel only while it is
+                            // a prompt.
+                            // The class carries the sub-state because the
+                            // geometry differs — a list of inset commands
+                            // versus a padded prompt — and it is derived from
+                            // the same `showing_menu_items` value that picks
+                            // the markup, in the same expression, so the two
+                            // cannot drift. (This used to key off the panel's
+                            // own `role="menu"`; that attribute has moved
+                            // inward, and a selector on a role the element no
+                            // longer carries would have silently stopped
+                            // matching.)
+                            class: if showing_menu_items {
+                                "session-row-menu-panel"
+                            } else {
+                                "session-row-menu-panel menu-prompt"
+                            },
+                        // The confirm sub-states ARE a small named exchange:
+                        // one consequence sentence and its two answers,
+                        // with focus deliberately placed on the
                         // safe one as it appears. `dialog` is the role
                         // that says so, and the toggle's own
                         // `aria-haspopup` above tracks it. Non-modal by
@@ -1796,7 +1907,6 @@ pub(super) fn SessionRow(
                         // variant means and why the panel needs three
                         // states rather than a plain measured/unmeasured
                         // flag.
-                        style: menu_panel_placement_style(placement()),
                         if confirming {
                             // Two elements, consequence first: an
                             // untruncatable consequence and a separately
@@ -1877,10 +1987,35 @@ pub(super) fn SessionRow(
                                 "cancel"
                             }
                         } else {
+                            // The header is outside the menu role: it names
+                            // the target and its saved launch state, but is
+                            // not another command in the roving tab order.
+                            div {
+                                class: "session-row-menu-header",
+                                div {
+                                    class: "session-row-menu-title",
+                                    title: "{display_peer(&session.title)}",
+                                    span {
+                                        class: "peer-value",
+                                        dir: "ltr",
+                                        title: "{display_peer(&session.title)}",
+                                        "{display_peer(&session.title)}"
+                                    }
+                                }
+                                div {
+                                    class: "session-row-menu-summary",
+                                    title: "{menu_header_summary_tooltip(&menu_summary_parts)}",
+                                    "data-profile-existence": session.source_profile.as_ref().map(|source| existence_word(source.existence)),
+                                    PeerLine {
+                                        class: "session-row-menu-summary-runs".to_string(),
+                                        parts: menu_summary_parts.clone(),
+                                        peer_tooltips: true,
+                                    }
+                                }
+                            }
                             // The menu proper: ONLY the actionable rows,
                             // in their own element. The panel around it
-                            // also holds the profile footer (a fact about
-                            // the session, not a command) and, as a
+                            // also holds the session header and, as a
                             // sibling below, any refusal line — neither
                             // belongs inside a `role="menu"`, where a
                             // screen reader would have to decide what a
@@ -1920,9 +2055,8 @@ pub(super) fn SessionRow(
                                 // item whose own action made the menu
                                 // busy would lose focus mid-press,
                                 // putting Escape out of reach.
-                                // `.session-row-menu-item` is the shared
-                                // LOOK — a full-width, left-aligned,
-                                // borderless row — while the per-action
+                                // `.session-row-menu-item` is the session
+                                // look, while the per-action
                                 // class beside it stays exactly what it
                                 // was, since the browser suite keys off
                                 // those.
@@ -1931,6 +2065,7 @@ pub(super) fn SessionRow(
                                         r#type: "button",
                                         class: "btn session-row-menu-item session-row-rename",
                                         role: "menuitem",
+                                        aria_label: "rename",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Rename) { "0" } else { "-1" },
                                         onmounted: move |element| {
@@ -1958,7 +2093,8 @@ pub(super) fn SessionRow(
                                             }
                                             on_rename_start.call(rename_start.clone());
                                         },
-                                        "rename"
+                                        MenuActionIcon { action: MenuAction::Rename }
+                                        span { class: "session-row-menu-label", "rename" }
                                     }
                                 }
                                 // Offered whenever `offers_mark_seen` says so
@@ -1975,6 +2111,7 @@ pub(super) fn SessionRow(
                                         r#type: "button",
                                         class: "btn session-row-menu-item session-row-mark-seen",
                                         role: "menuitem",
+                                        aria_label: "{mark_seen_label}",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::MarkSeen) { "0" } else { "-1" },
                                         onmounted: move |element| {
@@ -2002,8 +2139,12 @@ pub(super) fn SessionRow(
                                             }
                                             on_mark_seen.call(mark_seen_target.clone());
                                         },
-                                        "{mark_seen_label}"
+                                        MenuActionIcon { action: MenuAction::MarkSeen }
+                                        span { class: "session-row-menu-label", "{mark_seen_label}" }
                                     }
+                                }
+                                if controls.rename || controls.mark_seen {
+                                    div { class: "session-row-menu-separator", role: "separator" }
                                 }
                                 // Offered on every row, unconditionally —
                                 // see `RowControlVisibility`'s own doc for
@@ -2020,6 +2161,8 @@ pub(super) fn SessionRow(
                                     r#type: "button",
                                     class: "btn session-row-menu-item session-row-clone",
                                     role: "menuitem",
+                                    aria_label: "clone",
+                                    aria_describedby: "session-menu-clone-description",
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::Clone) { "0" } else { "-1" },
                                     onmounted: move |element| {
@@ -2043,7 +2186,11 @@ pub(super) fn SessionRow(
                                         }
                                         on_clone.call(clone_target.clone());
                                     },
-                                    "clone"
+                                    MenuActionIcon { action: MenuAction::Clone }
+                                    span { class: "session-row-menu-copy",
+                                        span { class: "session-row-menu-label", "clone" }
+                                        span { id: "session-menu-clone-description", class: "session-row-menu-description", "new session, keep this one" }
+                                    }
                                 }
                                 // Between clone and replace: clone's exact
                                 // editable form, pre-filled the same way,
@@ -2062,6 +2209,8 @@ pub(super) fn SessionRow(
                                     r#type: "button",
                                     class: "btn session-row-menu-item session-row-replace-with",
                                     role: "menuitem",
+                                    aria_label: "replace with",
+                                    aria_describedby: "session-menu-replace-with-description",
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::ReplaceWith) { "0" } else { "-1" },
                                     onmounted: move |element| {
@@ -2085,7 +2234,11 @@ pub(super) fn SessionRow(
                                         }
                                         on_replace_with.call(replace_with_target.clone());
                                     },
-                                    "replace with"
+                                    MenuActionIcon { action: MenuAction::ReplaceWith }
+                                    span { class: "session-row-menu-copy",
+                                        span { class: "session-row-menu-label", "replace with…" }
+                                        span { id: "session-menu-replace-with-description", class: "session-row-menu-description", "edit settings, then swap" }
+                                    }
                                 }
                                 // Also unconditional, directly beside the
                                 // two above — the row's LAST "make a new
@@ -2102,6 +2255,8 @@ pub(super) fn SessionRow(
                                     r#type: "button",
                                     class: "btn session-row-menu-item session-row-replace",
                                     role: "menuitem",
+                                    aria_label: "replace",
+                                    aria_describedby: "session-menu-replace-description",
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::Replace) { "0" } else { "-1" },
                                     onmounted: move |element| {
@@ -2125,13 +2280,20 @@ pub(super) fn SessionRow(
                                         }
                                         on_replace.call(replace_target.clone());
                                     },
-                                    "replace"
+                                    MenuActionIcon { action: MenuAction::Replace }
+                                    span { class: "session-row-menu-copy",
+                                        span { class: "session-row-menu-label", "replace" }
+                                        span { id: "session-menu-replace-description", class: "session-row-menu-description", "fresh conversation, same settings" }
+                                    }
                                 }
                                 if controls.stop {
+                                    div { class: "session-row-menu-separator", role: "separator" }
                                     button {
                                         r#type: "button",
                                         class: "btn session-row-menu-item session-row-stop",
                                         role: "menuitem",
+                                        aria_label: "stop",
+                                        aria_describedby: "session-menu-stop-description",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Stop) { "0" } else { "-1" },
                                         onmounted: move |element| {
@@ -2159,20 +2321,17 @@ pub(super) fn SessionRow(
                                             }
                                             on_stop.call(stop_id.clone());
                                         },
-                                        "stop"
+                                        MenuActionIcon { action: MenuAction::Stop }
+                                        span { class: "session-row-menu-copy",
+                                            span { class: "session-row-menu-label", "stop" }
+                                            span { id: "session-menu-stop-description", class: "session-row-menu-description", "ends the agent and its processes" }
+                                        }
                                     }
                                 }
-                                // The boundary before the destructive
-                                // item, as a real one: sighted users
-                                // already got a rule (drawn by this
-                                // element's own CSS), and without a
-                                // `role="separator"` the accessibility
-                                // tree showed four consecutive commands
-                                // with nothing to say the last is
-                                // different in kind. Not focusable and
-                                // not counted — `MenuOrder` holds only
-                                // actionable items, so arrow navigation
-                                // steps straight past it.
+                                // Delete has its own final group. The
+                                // separator describes that boundary to
+                                // assistive technology but remains outside
+                                // the action order and arrow navigation.
                                 if delete_follows_a_separator {
                                     div { class: "session-row-menu-separator", role: "separator" }
                                 }
@@ -2181,6 +2340,8 @@ pub(super) fn SessionRow(
                                         r#type: "button",
                                         class: "btn session-row-menu-item session-row-delete",
                                         role: "menuitem",
+                                        aria_label: "delete",
+                                        aria_describedby: "session-menu-delete-description",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Delete) { "0" } else { "-1" },
                                         onmounted: move |element| {
@@ -2208,41 +2369,34 @@ pub(super) fn SessionRow(
                                             }
                                             on_delete.call(delete_target.clone());
                                         },
-                                        "delete"
+                                        MenuActionIcon { action: MenuAction::Delete }
+                                        span { class: "session-row-menu-copy",
+                                            span { class: "session-row-menu-label", "delete" }
+                                            span { id: "session-menu-delete-description", class: "session-row-menu-description", "removes the session and its state" }
+                                        }
                                     }
                                 }
                             }
-                            // The profile this session was CREATED from, as
-                            // it snapshotted the name — moved here from the
-                            // row proper (the interviewed row contents drop
-                            // the chip) so SPEC.md's snapshot rule keeps a
-                            // visible surface: the name never moves under an
-                            // existing session. Renames stay qualified, while
-                            // a deleted row remains a plain historical label.
-                            // `data-profile-existence` remains the browser
-                            // suite's handle on the derived state. A SIBLING
-                            // of the menu above, never a child of it: it is a
-                            // fact about the session, not a fifth thing to do.
-                            if let Some(source) = &session.source_profile {
-                                span {
-                                    class: "session-profile peer-value",
-                                    dir: "ltr",
-                                    "data-profile-existence": "{existence_word(source.existence)}",
-                                    "{source_profile_label(source)}"
-                                }
+                        }
+                        // The refusal a panel action produced renders INSIDE
+                        // the open panel, under its controls, in every
+                        // sub-state: the panel floats over the row's own
+                        // error line, so an error rendered only down there
+                        // could sit hidden behind the very surface whose
+                        // click caused it. Inside the panel, not beside it
+                        // in the flyout: the pointer's clamp reads the
+                        // flyout's height as the panel's, and a long refusal
+                        // must scroll with the panel rather than hang past
+                        // the viewport below it.
+                        if let Some(err) = error.clone() {
+                            PeerLine {
+                                class: "action-error".to_string(),
+                                parts: vec![DetailPart::Peer(err)],
                             }
                         }
-                    }
-                    // The refusal a panel action produced renders INSIDE
-                    // the open panel, under its controls: the panel floats
-                    // over the row's own error line, so an error rendered
-                    // only down there could sit hidden behind the very
-                    // surface whose click caused it.
-                    if let Some(err) = error.clone() {
-                        PeerLine {
-                            class: "action-error".to_string(),
-                            parts: vec![DetailPart::Peer(err)],
+                        // End of `.session-row-menu-panel`.
                         }
+                    // End of `.session-row-menu-flyout`.
                     }
                 }
             }
@@ -2299,6 +2453,39 @@ pub(super) fn row_specimen(id: &str) -> Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::peer::detail_text;
+
+    /// The header must report stored structured choices, not infer them from
+    /// an invocation that can disagree with the saved launch selection.
+    /// A legacy row uses the existing bounded executable label and omits an
+    /// unknown state rather than inventing a classification.
+    #[farhelm_testtrace::test]
+    fn menu_header_uses_saved_launch_facts_and_existing_state_words() {
+        let structured = Session {
+            launch: Some(crate::LaunchSelection {
+                harness: LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: Some(crate::LaunchPermission::Yolo),
+                workspace_trust: None,
+            }),
+            invocation: "unrelated-command".to_string(),
+            ..row_specimen("structured")
+        };
+        assert_eq!(
+            detail_text(&menu_header_summary_parts(&structured, Some("running"))),
+            "claude · yolo · running"
+        );
+
+        let legacy = Session {
+            invocation: "codex --yolo".to_string(),
+            ..row_specimen("legacy")
+        };
+        assert_eq!(
+            detail_text(&menu_header_summary_parts(&legacy, None)),
+            "codex"
+        );
+    }
 
     /// MarkSeen sits right after Rename when offered and disappears entirely
     /// when the helm cannot answer the seen-state write.
@@ -2512,9 +2699,8 @@ mod tests {
     /// the SPEC.md-required stale marking and staleness must not hide
     /// which session the main pane is on.
     ///
-    /// `menu-open` joined them when the actions panel became a floating
-    /// surface hanging below-left of its toggle: the panel covers the
-    /// rows below it, so the row itself has to say which "⋯" owns the
+    /// `menu-open` identifies the row whose side flyout is visible, so
+    /// the row itself has to say which "⋯" owns the
     /// open menu (see `row_class`). It must not displace either of the
     /// other two — a stale, selected row with its menu up is still stale
     /// and still the selection.
