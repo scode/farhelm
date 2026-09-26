@@ -836,7 +836,7 @@ async fn close_notifies_and_removes_a_tab_while_output_cleanup_is_pending() {
     );
     let reason = expect_detached(&mut rx, 10).await;
     assert!(
-        reason.contains("terminal tab closed"),
+        reason.code == farhelm_proto::DetachCode::TabClosed,
         "the viewer must hear the final tab verdict despite cleanup delay: {reason}"
     );
     assert!(
@@ -1223,7 +1223,7 @@ async fn restarting_the_agent_leaves_a_tab_attached_running_and_unswept() {
     // The AGENT's attachment is gone, and told why.
     let reason = expect_detached(&mut agent_rx, 15).await;
     assert!(
-        reason.contains("restart"),
+        reason.reason.contains("restart"),
         "the agent's attachment must be detached for the restart, got: {reason:?}"
     );
     let _ = agent_chan;
@@ -2164,7 +2164,7 @@ async fn input_client_failure_safely_reaps_queued_output_before_reattach() {
         .await;
     let reason = expect_detached(&mut rx, 20).await;
     assert!(
-        reason.contains("input") && reason.contains("failed"),
+        reason.reason.contains("input") && reason.reason.contains("failed"),
         "the detach must describe the input-client failure: {reason}"
     );
     assert!(
@@ -2378,7 +2378,7 @@ async fn takeover_reason_wins_over_a_gated_natural_detach() {
         .expect("takeover attach");
     let reason = expect_detached(&mut owner_rx, 20).await;
     assert!(
-        reason.contains("another client"),
+        reason.code == farhelm_proto::DetachCode::TakenOver,
         "the explicit takeover reason must win, got: {reason}"
     );
 

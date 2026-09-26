@@ -473,7 +473,36 @@ pub enum TermEvent {
     ReplayComplete,
     /// The attachment ended: taken over by another client, or the
     /// session's terminal went away.
-    Detached(String),
+    Detached(Detach),
+}
+
+/// Why one attachment ended: the supervisor's user-legible `reason`, and the
+/// [`DetachCode`](farhelm_proto::DetachCode) a consumer may act on.
+///
+/// The helm decides nothing from `reason`'s text; it relays both to the
+/// browser, which acts on the code (latch a takeover, hold a stall, hide a
+/// closed tab) and shows the text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Detach {
+    pub reason: String,
+    pub code: farhelm_proto::DetachCode,
+}
+
+impl Detach {
+    /// A detach whose only meaning is its text: the connection dropped, the
+    /// client went away, or anything else no consumer decides behavior from.
+    pub fn other(reason: impl Into<String>) -> Detach {
+        Detach {
+            reason: reason.into(),
+            code: farhelm_proto::DetachCode::Other,
+        }
+    }
+}
+
+impl std::fmt::Display for Detach {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.reason)
+    }
 }
 
 /// One attached terminal, as the client holds it: the bounded event queue
@@ -490,7 +519,7 @@ pub enum TermEvent {
 /// capacity.
 struct TerminalHandle {
     events: mpsc::Sender<TermEvent>,
-    detach: watch::Sender<Option<String>>,
+    detach: watch::Sender<Option<Detach>>,
 }
 
 /// The receiving half of one attachment: bounded terminal events plus the
@@ -504,7 +533,7 @@ struct TerminalHandle {
 #[derive(Debug)]
 pub struct TermStream {
     events: mpsc::Receiver<TermEvent>,
-    detach: watch::Receiver<Option<String>>,
+    detach: watch::Receiver<Option<Detach>>,
     ended: bool,
 }
 
@@ -587,12 +616,12 @@ impl TermStream {
 /// Standalone view of one attachment's detach signal — see
 /// [`TermStream::detach_signal`].
 #[derive(Debug)]
-pub struct TermDetachSignal(watch::Receiver<Option<String>>);
+pub struct TermDetachSignal(watch::Receiver<Option<Detach>>);
 
 impl TermDetachSignal {
     /// Resolve with the detach reason once the attachment ends, or with
     /// `None` if the client itself disappeared first.
-    pub async fn detached(&mut self) -> Option<String> {
+    pub async fn detached(&mut self) -> Option<Detach> {
         loop {
             if let Some(reason) = self.0.borrow_and_update().clone() {
                 return Some(reason);
@@ -1139,7 +1168,7 @@ async fn send_agent_outcome(
 /// The first reason wins. A terminal is detached once, and a later cause
 /// (the connection dying after a takeover already landed) must not rewrite
 /// the specific reason the user is shown.
-fn signal_detached(handle: &TerminalHandle, reason: String) {
+fn signal_detached(handle: &TerminalHandle, reason: Detach) {
     handle.detach.send_if_modified(|current| {
         if current.is_some() {
             return false;
@@ -1485,7 +1514,7 @@ impl SupervisorClient {
     async fn fail_all(&self, reason: &str) {
         let mut terms = self.terminals.lock().await;
         for (_, handle) in terms.drain() {
-            signal_detached(&handle, reason.to_string());
+            signal_detached(&handle, Detach::other(reason));
         }
         drop(terms);
         let uploads = self.uploads.lock().await;
@@ -1706,9 +1735,19 @@ impl SupervisorClient {
                     return Ok(());
                 }
                 match &msg {
-                    ControlMsg::Detached { channel, reason } => {
+                    ControlMsg::Detached {
+                        channel,
+                        reason,
+                        code,
+                    } => {
                         if let Some(handle) = self.terminals.lock().await.remove(channel) {
-                            signal_detached(&handle, reason.clone());
+                            signal_detached(
+                                &handle,
+                                Detach {
+                                    reason: reason.clone(),
+                                    code: *code,
+                                },
+                            );
                             // Acknowledge upstream, so the SUPERVISOR can
                             // retire the connection-local routing this
                             // channel still has (its `input_routes` entry,
@@ -1876,7 +1915,13 @@ impl SupervisorClient {
                 Ok(()) => {}
                 Err(mpsc::error::TrySendError::Full(_)) => {
                     let handle = entry.remove();
-                    signal_detached(&handle, farhelm_proto::DETACH_REASON_STALLED.to_string());
+                    signal_detached(
+                        &handle,
+                        Detach {
+                            reason: farhelm_proto::DETACH_REASON_STALLED.to_string(),
+                            code: farhelm_proto::DetachCode::Stalled,
+                        },
+                    );
                     self.release_upstream(channel);
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
@@ -2996,9 +3041,10 @@ impl SupervisorClient {
     /// someone who is using it. A bare `false` at forty call sites says
     /// nothing at any of them; a name says which contract each one wants.
     ///
-    /// Refused with [`farhelm_proto::ATTACH_REFUSED_TAKEN_OVER`] and
-    /// `ErrorKind::Conflict`, and nothing is installed on a refusal — the
-    /// channel this named stays unattached.
+    /// Refused with `ErrorKind::TakenOver` (its message,
+    /// [`farhelm_proto::ATTACH_REFUSED_TAKEN_OVER`], is display text only),
+    /// and nothing is installed on a refusal — the channel this named stays
+    /// unattached.
     pub async fn attach_terminal_if_unowned(
         &self,
         session_id: &str,
@@ -4229,7 +4275,7 @@ mod tests {
             timeout(Duration::from_secs(2), term_rx.recv())
                 .await
                 .expect("terminal did not detach"),
-            Some(TermEvent::Detached(reason)) if reason.contains("connection lost")
+            Some(TermEvent::Detached(detach)) if detach.reason.contains("connection lost")
         ));
         assert!(
             timeout(Duration::from_secs(2), peer_reader.read_frame())
@@ -5032,8 +5078,9 @@ mod tests {
         .await
         .expect("the stalled terminal never received its detach notice");
         assert!(
-            matches!(final_event, Some(TermEvent::Detached(reason))
-                if reason == farhelm_proto::DETACH_REASON_STALLED),
+            matches!(final_event, Some(TermEvent::Detached(detach))
+                if detach.reason == farhelm_proto::DETACH_REASON_STALLED
+                    && detach.code == farhelm_proto::DetachCode::Stalled),
             "the stalled terminal must be told why it stopped, using the same reason string \
              the supervisor's own stall detach emits"
         );
@@ -5129,8 +5176,9 @@ mod tests {
         .await
         .expect("the stalled terminal never received its detach notice");
         assert!(
-            matches!(final_event, Some(TermEvent::Detached(reason))
-                if reason == farhelm_proto::DETACH_REASON_STALLED),
+            matches!(final_event, Some(TermEvent::Detached(detach))
+                if detach.reason == farhelm_proto::DETACH_REASON_STALLED
+                    && detach.code == farhelm_proto::DetachCode::Stalled),
             "a marker overflow must detach with the same shared reason a Data overflow uses, \
              not a different one that would let a client distinguish the two causes"
         );

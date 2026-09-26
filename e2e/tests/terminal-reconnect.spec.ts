@@ -1504,6 +1504,7 @@ try {
               data: JSON.stringify({
                 type: "detached",
                 reason: "terminal stopped consuming output (stalled)",
+                code: "stalled",
               }),
             });
           }, 20);

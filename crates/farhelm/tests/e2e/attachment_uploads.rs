@@ -1745,7 +1745,9 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
                 ControlMsg::Error { kind, message, .. } => {
                     panic!("measurement attach failed ({kind:?}): {message}")
                 }
-                ControlMsg::Detached { channel: 1, reason } => {
+                ControlMsg::Detached {
+                    channel: 1, reason, ..
+                } => {
                     panic!("measurement attachment ended before replay: {reason}")
                 }
                 _ => {}
@@ -1779,7 +1781,9 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
                 ControlMsg::Error { kind, message, .. } => {
                     panic!("opening the flood gate failed ({kind:?}): {message}")
                 }
-                ControlMsg::Detached { channel: 1, reason } => {
+                ControlMsg::Detached {
+                    channel: 1, reason, ..
+                } => {
                     panic!("measurement attachment ended before the flood began: {reason}")
                 }
                 _ => {}

@@ -718,6 +718,7 @@ impl Supervisor {
                         notify,
                         *channel,
                         format!("detached during a failed delete: {err_msg}"),
+                        farhelm_proto::DetachCode::Other,
                     );
                 }
                 drop(attachments);
@@ -762,7 +763,12 @@ impl Supervisor {
         }
 
         for (channel, notify) in &notify_detach {
-            notify_detached(notify, *channel, "session deleted".to_string());
+            notify_detached(
+                notify,
+                *channel,
+                "session deleted".to_string(),
+                farhelm_proto::DetachCode::Other,
+            );
         }
         drop(attachments);
         Ok(())

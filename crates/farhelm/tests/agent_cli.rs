@@ -954,6 +954,7 @@ fn an_untrustworthy_reply_fails_with_nothing_on_stdout() {
         Some(ControlMsg::Detached {
             channel: 1,
             reason: "not an answer".to_string(),
+            code: farhelm_proto::DetachCode::Other,
         })
     });
     // The uncorrelated refusal shape (`req_id` 0), which must still be
@@ -1155,6 +1156,7 @@ fn an_untrustworthy_answer_to_a_mutation_says_the_outcome_is_unknown() {
                     Some(ControlMsg::Detached {
                         channel: 1,
                         reason: "not an answer".to_string(),
+                        code: farhelm_proto::DetachCode::Other,
                     })
                 }),
             ),

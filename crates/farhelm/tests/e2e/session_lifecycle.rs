@@ -701,7 +701,11 @@ async fn second_attach_detaches_first() {
     })
     .await
     .expect("timed out waiting for Detached on first attachment");
-    assert!(detached.contains("another client"));
+    assert_eq!(
+        detached.code,
+        farhelm_proto::DetachCode::TakenOver,
+        "{detached}"
+    );
 
     // Second attachment is live.
     let mut seen2 = rx2_replay;
@@ -741,7 +745,7 @@ async fn an_attach_under_a_different_lease_takes_over_and_silences_the_loser() {
         .expect("attach2");
     let reason = expect_detached(&mut rx1, 10).await;
     assert!(
-        reason.contains("another client"),
+        reason.code == farhelm_proto::DetachCode::TakenOver,
         "the loser must be told it was taken over, got: {reason}"
     );
 
@@ -813,14 +817,14 @@ async fn an_unattended_attach_is_refused_while_another_lease_holds_the_session()
         .expect("the refusal is the supervisor's own error");
     assert_eq!(
         supervised.kind,
-        farhelm_proto::ErrorKind::Conflict,
-        "a session held by someone else is a conflict, not a bad request"
+        farhelm_proto::ErrorKind::TakenOver,
+        "a session held by someone else is refused as taken over: the helm relays that kind as the \
+         browser's taken_over code, which is what the browser decides from"
     );
     assert_eq!(
         supervised.message,
         farhelm_proto::ATTACH_REFUSED_TAKEN_OVER,
-        "the refusal must carry the takeover wording verbatim: a browser matches on it to decide \
-         it lost the session"
+        "the refusal still reads as the takeover wording a person sees"
     );
 
     // The owner never noticed: no detach notice, and input still lands.
@@ -844,7 +848,7 @@ async fn an_unattended_attach_is_refused_while_another_lease_holds_the_session()
         .expect("a displacing attach is unaffected");
     let reason = expect_detached(&mut owner_rx, 10).await;
     assert!(
-        reason.contains("another client"),
+        reason.code == farhelm_proto::DetachCode::TakenOver,
         "the deliberate takeover still displaces, got: {reason}"
     );
     let mut seen_taken = taken_rx_replay;
@@ -891,11 +895,11 @@ async fn a_same_lease_reattach_to_the_same_terminal_is_an_ordinary_cutover() {
         .expect("reattach");
     let reason = expect_detached(&mut rx1, 10).await;
     assert!(
-        reason.contains("replaced by a newer attachment"),
+        reason.code == farhelm_proto::DetachCode::Replaced,
         "a same-lease reattach must tell the incumbent it was replaced, got: {reason}"
     );
     assert!(
-        !reason.contains("another client"),
+        reason.code != farhelm_proto::DetachCode::TakenOver,
         "a client reconnecting under its own lease must never be told another client took \
          over, got: {reason}"
     );
@@ -940,7 +944,7 @@ async fn the_empty_lease_takes_over_everything_and_is_taken_over_by_anything() {
         .expect("legacy");
     let reason = expect_detached(&mut leased_rx, 10).await;
     assert!(
-        reason.contains("another client"),
+        reason.code == farhelm_proto::DetachCode::TakenOver,
         "an un-leased attach must take over a leased holder, got: {reason}"
     );
     let mut legacy_seen = legacy_rx_replay;
@@ -954,7 +958,7 @@ async fn the_empty_lease_takes_over_everything_and_is_taken_over_by_anything() {
         .expect("leased reattach");
     let reason = expect_detached(&mut legacy_rx, 10).await;
     assert!(
-        reason.contains("another client"),
+        reason.code == farhelm_proto::DetachCode::TakenOver,
         "a leased attach must take over an un-leased holder, got: {reason}"
     );
     let mut new_seen = new_rx_replay;
@@ -2617,7 +2621,7 @@ async fn connection_loss_detaches_terminals_and_fails_requests() {
     .await
     .expect("timed out waiting for Detached after connection loss");
     assert!(
-        detached.contains("connection lost"),
+        detached.reason.contains("connection lost"),
         "detach reason should say the connection is gone, got: {detached}"
     );
 
@@ -4833,7 +4837,7 @@ async fn delete_while_attached_detaches_the_client() {
     .await
     .expect("timed out waiting for Detached after delete");
     assert!(
-        detached.contains("deleted"),
+        detached.reason.contains("deleted"),
         "detach reason should say the session was deleted, got: {detached}"
     );
 }
@@ -4961,9 +4965,10 @@ async fn stop_does_not_disturb_the_existing_attachment() {
     })
     .await
     .expect("timed out waiting for the takeover Detached");
-    assert!(
-        detached.contains("another client"),
-        "takeover reason changed unexpectedly: {detached}"
+    assert_eq!(
+        detached.code,
+        farhelm_proto::DetachCode::TakenOver,
+        "a takeover must carry the taken-over code: {detached}"
     );
     // The second attachment is otherwise ordinary — same session, same
     // (now-dead) pane, still attachable.
@@ -6343,7 +6348,7 @@ async fn attach_during_delete_race_ends_in_a_consistent_state() {
                 .await
                 .expect("an attachment that raced a delete must resolve to Detached");
                 assert!(
-                    reason.contains("delete"),
+                    reason.reason.contains("delete"),
                     "Detached reason for a racer that saw a successful delete must name \
                      deletion, got: {reason:?}"
                 );

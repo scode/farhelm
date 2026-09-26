@@ -614,10 +614,9 @@ fn same_lease_client(incumbent: &str, requester: &str) -> bool {
 /// rather than repeating its text: a client told it lost the session and a
 /// client told it cannot have the session back are learning the same fact,
 /// and the only difference is whether it had a socket open at the time.
-/// Two literals would be two chances for that identity to lapse — and the
-/// browser matches ONE string to decide it lost the session, so a lapse
-/// would show up as a refused reconnect falling through to a generic
-/// banner and climbing the ladder against a session it can never have.
+/// Two literals would be two chances for the two banners to read
+/// differently. What the browser decides from is the accompanying
+/// `DetachCode::TakenOver`, never this text.
 pub(crate) const DETACH_REASON_TAKEOVER: &str = farhelm_proto::ATTACH_REFUSED_TAKEN_OVER;
 
 /// The reason the SAME client is told its previous attachment to a

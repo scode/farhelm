@@ -135,7 +135,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered profile defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_30` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_31` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -146,7 +146,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 30;
+pub const PROTOCOL_VERSION: u32 = 31;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -286,6 +286,13 @@ pub enum ErrorKind {
     /// retry is free, which is exactly the sort of thing a coarse
     /// classification exists to tell a caller without parsing prose.
     Timeout,
+    /// A non-displacing attach (`Attach::if_unowned`) was refused because
+    /// another client holds the terminal. Added with `PROTOCOL_VERSION` 31,
+    /// replacing a `Conflict` whose message text the helm had to compare
+    /// against [`ATTACH_REFUSED_TAKEN_OVER`]; the message still reads that
+    /// way for people. The helm relays it to the browser as
+    /// [`DetachCode::TakenOver`].
+    TakenOver,
 }
 
 /// Frames larger than this are rejected at decode time. Terminal output is
@@ -311,13 +318,10 @@ pub const DETACH_REASON_STALLED: &str = "terminal stopped consuming output (stal
 /// Why a non-displacing attach ([`ControlMsg::Attach::if_unowned`]) was
 /// refused: another client holds this session.
 ///
-/// Named in this crate for the same reason [`DETACH_REASON_STALLED`] is —
-/// three parties have to agree on it byte for byte and none of them can
-/// see the others' source: the supervisor emits it, the helm relays it
-/// into the browser's detach notice unchanged (the attach-failure arm of
-/// its terminal socket), and the browser matches it to decide that this
-/// view lost the session and must show its take-control surface rather
-/// than keep reconnecting.
+/// This is the text a person sees; nothing decides behavior from it. The
+/// refusal itself is [`ErrorKind::TakenOver`], which the helm relays to the
+/// browser as [`DetachCode::TakenOver`], and that code is what makes the
+/// view show its take-control surface rather than keep reconnecting.
 ///
 /// The wording is deliberately IDENTICAL to what a displaced client is
 /// told when it is taken over while attached, because the fact is
@@ -327,6 +331,40 @@ pub const DETACH_REASON_STALLED: &str = "terminal stopped consuming output (stal
 /// situation instead of inventing a second vocabulary for the half of it
 /// that happens to be observed late.
 pub const ATTACH_REFUSED_TAKEN_OVER: &str = "another client attached";
+
+/// Why an attachment ended, for code to act on; `reason` beside it is for
+/// people to read.
+///
+/// Clients decide real behavior from a detach: a view that was taken over
+/// latches and offers take-control instead of reconnecting, a stalled one
+/// waits for the user instead of reconnecting into the same wedge, and a
+/// closed tab disappears silently. Those decisions used to compare the
+/// English `reason` against copies of these sentences in the helm and the
+/// browser, so rewording a message silently broke them. The code is the
+/// contract now, and the text is free to change.
+///
+/// Closed on purpose: a new code is a new decision for clients, which is a
+/// protocol bump, not an optional field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DetachCode {
+    /// Another client attached to this terminal (a takeover), or a
+    /// non-displacing attach was refused because another client holds it.
+    /// Reason text: [`ATTACH_REFUSED_TAKEN_OVER`].
+    TakenOver,
+    /// This viewer stopped consuming output and was given up on, by the
+    /// supervisor's stall timer or the helm's full event channel. Reason
+    /// text: [`DETACH_REASON_STALLED`].
+    Stalled,
+    /// The terminal tab itself was closed or reaped.
+    TabClosed,
+    /// The same client's newer attachment (equal lease) replaced this one:
+    /// an ordinary reconnect, not a takeover.
+    Replaced,
+    /// Anything else (the session was stopped, restarted, or deleted, the
+    /// connection was lost): show the reason, decide nothing from it.
+    Other,
+}
 
 /// Errors surfaced by frame encoding/decoding.
 #[derive(Debug, thiserror::Error)]
@@ -2939,10 +2977,10 @@ pub enum ControlMsg {
         /// takeover latch exists to prevent — and worse than the latched
         /// case, because no one pressed anything.
         ///
-        /// Refused with [`ErrorKind::Conflict`] and
-        /// [`ATTACH_REFUSED_TAKEN_OVER`] as the message, which is what
-        /// lets a client render the refusal as the ordinary takeover it
-        /// is. A refusal installs nothing: the channel this attach named
+        /// Refused with [`ErrorKind::TakenOver`], which is what lets a
+        /// client treat the refusal as the ordinary takeover it is (the helm
+        /// relays it to the browser as [`DetachCode::TakenOver`]); the
+        /// message, [`ATTACH_REFUSED_TAKEN_OVER`], is display text only. A refusal installs nothing: the channel this attach named
         /// stays unattached and its caller must not send on it.
         ///
         /// "Owned" means the session-scoped rule already spelled out
@@ -2966,14 +3004,14 @@ pub enum ControlMsg {
     Detach { channel: u32 },
     /// Unsolicited: this channel's attachment was taken over or torn down.
     ///
-    /// `reason` is one of a small open-ended set of user-legible strings,
-    /// not a coded enum — clients render every reason generically inside
-    /// their detach banner without matching on its value.
-    /// [`DETACH_REASON_STALLED`] is the one reason this crate names,
-    /// because two independent emitters (supervisor and helm) and their
-    /// tests must produce the identical string; the "another client took
-    /// over" case has no constant because only one place emits it.
-    Detached { channel: u32, reason: String },
+    /// `reason` is a user-legible string clients render inside their detach
+    /// banner; `code` is what a client may decide behavior from (see
+    /// [`DetachCode`]). Nothing matches on `reason`'s text.
+    Detached {
+        channel: u32,
+        reason: String,
+        code: DetachCode,
+    },
     /// Unsolicited: this attach's initial catch-up is over — every byte
     /// the supervisor is going to replay from history FOR THE ATTACH has
     /// been written to `channel`, and the live stream follows
@@ -4366,24 +4404,24 @@ mod tests {
     /// The version-skew tests in the helm and the farhelm e2e suite are
     /// deliberately written against `PROTOCOL_VERSION ± 1` rather than
     /// against a literal, so they FOLLOW this constant instead of needing
-    /// an edit per bump; this test and the literal-29 skew check below are
+    /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_30() {
-        assert_eq!(PROTOCOL_VERSION, 30);
+    fn protocol_version_is_pinned_at_31() {
+        assert_eq!(PROTOCOL_VERSION, 31);
     }
 
-    /// Pins the skew direction the restart-with wire bump exists to create, in
+    /// Pins the skew direction the detach-code bump exists to create, in
     /// BOTH directions, against the LITERAL previous version rather than the
     /// constant-relative ± 1 the `io.rs` skew test uses:
     ///
-    /// - A peer still speaking v29 is refused by this build's handshake with
+    /// - A peer still speaking v30 is refused by this build's handshake with
     ///   the explicit skew error and the connection torn down — never
-    ///   tolerated into ignoring the structured restart override.
-    /// - A v30 hello is refused by a hand-rolled v29 receiver, which sees a
+    ///   tolerated into receiving a detach code or error kind it cannot decode.
+    /// - A v31 hello is refused by a hand-rolled v30 receiver, which sees a
     ///   version it does not know and hangs up. This test models the old
     ///   receiver with its refusal rule: accept
-    ///   exactly 29, refuse anything else. It is what keeps this test
+    ///   exactly 30, refuse anything else. It is what keeps this test
     ///   honest about the old side instead of asserting only the new side's
     ///   opinion.
     ///
@@ -4393,7 +4431,7 @@ mod tests {
     /// version history disagree. Each bump renames this test and moves both
     /// literals with it so both directions exercise the previous version.
     #[farhelm_testtrace::test]
-    async fn v29_and_v30_peers_refuse_each_other() {
+    async fn v30_and_v31_peers_refuse_each_other() {
         let stale_hello = |protocol_version: u32| ControlMsg::Hello {
             protocol_version,
             build_version: "9.9.9-test".to_string(),
@@ -4402,7 +4440,7 @@ mod tests {
             auth: None,
         };
 
-        // A literal-v29 peer against THIS build's handshake.
+        // A literal-v30 peer against THIS build's handshake.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
@@ -4413,7 +4451,7 @@ mod tests {
         });
         let mut r = crate::io::FrameReader::new(br);
         let mut w = crate::io::FrameWriter::new(bw);
-        w.write_control(&stale_hello(29)).await.unwrap();
+        w.write_control(&stale_hello(30)).await.unwrap();
         // Our hello crosses first (hellos cross on the wire), then the
         // refusal — the same shape `io.rs`'s own skew test pins.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
@@ -4429,22 +4467,22 @@ mod tests {
         let err = receiver.await.unwrap().unwrap_err();
         assert!(
             err.to_string().contains("protocol version mismatch"),
-            "a literal v29 peer must be refused: {err}"
+            "a literal v30 peer must be refused: {err}"
         );
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
-        assert_eq!(skew.peer_protocol, 29);
-        assert_eq!(skew.our_protocol, 30);
+        assert_eq!(skew.peer_protocol, 30);
+        assert_eq!(skew.our_protocol, 31);
 
-        // The reverse direction: a v29 receiver (the refusal rule itself,
-        // modeled by its exact-version check) meets a v30 hello and hangs up.
+        // The reverse direction: a v30 receiver (the refusal rule itself,
+        // modeled by its exact-version check) meets a v31 hello and hangs up.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
-        let v29_receiver = tokio::spawn(async move {
+        let v30_receiver = tokio::spawn(async move {
             let mut r = crate::io::FrameReader::new(br);
             let mut w = crate::io::FrameWriter::new(bw);
-            w.write_control(&stale_hello(29)).await.unwrap();
+            w.write_control(&stale_hello(30)).await.unwrap();
             let frame = r.read_frame().await.unwrap().unwrap();
             let their_hello = crate::io::parse_control(&frame).unwrap();
             let ControlMsg::Hello {
@@ -4453,7 +4491,7 @@ mod tests {
             else {
                 panic!("expected a hello, got {their_hello:?}");
             };
-            if protocol_version != 29 {
+            if protocol_version != 30 {
                 // The old peer's refusal: an error, then the connection
                 // closes (the writer is dropped at scope exit).
                 w.write_control(&ControlMsg::Error {
@@ -4463,7 +4501,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-                Err("refused a v30 peer".to_string())
+                Err("refused a v31 peer".to_string())
             } else {
                 Ok(())
             }
@@ -4473,11 +4511,11 @@ mod tests {
         w.write_control(&stale_hello(PROTOCOL_VERSION))
             .await
             .unwrap();
-        // Hellos cross first; the v29 peer's hello precedes its refusal.
+        // Hellos cross first; the v30 peer's hello precedes its refusal.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
         let refusal = crate::io::parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
         assert!(matches!(refusal, ControlMsg::Error { req_id: 0, .. }));
-        assert!(v29_receiver.await.unwrap().is_err());
+        assert!(v30_receiver.await.unwrap().is_err());
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -4518,6 +4556,7 @@ mod tests {
         let detached = ControlMsg::Detached {
             channel: 7,
             reason: DETACH_REASON_STALLED.to_string(),
+            code: DetachCode::Stalled,
         };
         assert_eq!(
             serde_json::to_value(&detached).unwrap(),
@@ -4525,7 +4564,31 @@ mod tests {
                 "type": "detached",
                 "channel": 7,
                 "reason": "terminal stopped consuming output (stalled)",
+                "code": "stalled",
             })
+        );
+    }
+
+    /// Why this matters: the browser's `terminal.js` matches these exact
+    /// spellings to latch a takeover, hold a stalled view, and hide a closed
+    /// tab, and nothing in Rust compiles against that file.
+    ///
+    /// Specification: every `DetachCode` serializes to the snake_case word
+    /// the browser matches, and `ErrorKind::TakenOver` to `taken_over`.
+    #[farhelm_testtrace::test]
+    fn detach_code_spellings_are_pinned() {
+        for (code, word) in [
+            (DetachCode::TakenOver, "taken_over"),
+            (DetachCode::Stalled, "stalled"),
+            (DetachCode::TabClosed, "tab_closed"),
+            (DetachCode::Replaced, "replaced"),
+            (DetachCode::Other, "other"),
+        ] {
+            assert_eq!(serde_json::to_value(code).unwrap(), serde_json::json!(word));
+        }
+        assert_eq!(
+            serde_json::to_value(ErrorKind::TakenOver).unwrap(),
+            serde_json::json!("taken_over")
         );
     }
 
@@ -5378,23 +5441,6 @@ mod tests {
              attach every caller has always sent — defaulting it the other way would turn every \
              legacy reattach into a refusal the moment anyone else held the session"
         );
-    }
-
-    /// The refusal string a non-displacing attach comes back with must be
-    /// the SAME string a client displaced while attached is told
-    /// (`DETACH_REASON_TAKEOVER`, private to the supervisor).
-    ///
-    /// Pinned as a literal here because the two constants live in
-    /// different crates with nothing but this equality holding them
-    /// together, and the browser matches on ONE string to decide it lost
-    /// the session (terminal.js's `TAKEOVER_DETACH_REASON`). If the
-    /// supervisor's copy ever drifts from this one, a client refused a
-    /// reconnect would fall through to its generic banner and keep
-    /// climbing the ladder against a session it can never have — the exact
-    /// eviction loop the refusal exists to end, minus the eviction.
-    #[farhelm_testtrace::test]
-    fn the_refused_attach_reason_is_the_takeover_wording() {
-        assert_eq!(ATTACH_REFUSED_TAKEN_OVER, "another client attached");
     }
 
     /// The `TabInfo` sibling of the two nesting-additivity tests above:

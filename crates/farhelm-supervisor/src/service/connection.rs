@@ -20,7 +20,7 @@ use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake_with_host_identity, parse_control,
     write_frame_before_stall,
 };
-use farhelm_proto::{ControlMsg, DETACH_REASON_STALLED, ErrorKind, Frame};
+use farhelm_proto::{ControlMsg, DETACH_REASON_STALLED, DetachCode, ErrorKind, Frame};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -527,6 +527,7 @@ where
                                         &notify,
                                         channel,
                                         format!("terminal input failed: {e:#}"),
+                                        DetachCode::Other,
                                     );
                                 }
                                 true
@@ -960,8 +961,17 @@ pub(crate) async fn send_reply(tx: &mpsc::Sender<Frame>, m: &ControlMsg) {
 /// a full-queue notice may land after frames enqueued behind it. That is
 /// harmless here: a `Detached` is the last thing that channel will ever
 /// carry, so nothing it could be reordered against still matters.
-pub(crate) fn notify_detached(tx: &mpsc::Sender<Frame>, channel: u32, reason: String) {
-    let frame = Frame::control(&ControlMsg::Detached { channel, reason });
+pub(crate) fn notify_detached(
+    tx: &mpsc::Sender<Frame>,
+    channel: u32,
+    reason: String,
+    code: DetachCode,
+) {
+    let frame = Frame::control(&ControlMsg::Detached {
+        channel,
+        reason,
+        code,
+    });
     // A `Closed` error needs no handling: the connection is gone, so there
     // is nobody left to tell.
     if let Err(mpsc::error::TrySendError::Full(frame)) = tx.try_send(frame) {
@@ -1556,6 +1566,7 @@ fn detach_stalled(
             .send(Frame::control(&ControlMsg::Detached {
                 channel,
                 reason: DETACH_REASON_STALLED.to_string(),
+                code: DetachCode::Stalled,
             }))
             .await;
     });
@@ -1604,7 +1615,7 @@ fn detach_naturally(
         }
         drop(sink);
         drop(attachments);
-        notify_detached(&tx, channel, reason);
+        notify_detached(&tx, channel, reason, DetachCode::Other);
     });
 }
 
@@ -1880,6 +1891,7 @@ mod tests {
         reply_frame(&ControlMsg::Detached {
             channel: 1,
             reason: "x".into(),
+            code: DetachCode::Other,
         });
     }
 
@@ -2722,7 +2734,7 @@ mod tests {
             .await
             .expect("channel is open");
 
-        let () = notify_detached(&tx, 7, "stalled".to_string());
+        let () = notify_detached(&tx, 7, "stalled".to_string(), DetachCode::Stalled);
 
         // The queue was full, so the notice had to be deferred — but it
         // must arrive once capacity appears.
@@ -2735,7 +2747,8 @@ mod tests {
         assert!(
             matches!(
                 parse_control(&notice).expect("valid control frame"),
-                ControlMsg::Detached { channel: 7, reason } if reason == "stalled"
+                ControlMsg::Detached { channel: 7, reason, code }
+                    if reason == "stalled" && code == DetachCode::Stalled
             ),
             "the deferred notice must be this channel's detach, unchanged"
         );
