@@ -2934,18 +2934,18 @@ fn codex_invocation_configures_hooks(argv: &[String]) -> bool {
 /// reason, which is to remove the file when the session is deleted, the
 /// same way a session's attachments and launch specs go.
 ///
-/// ## The two derivations must agree
+/// ## One derivation for the writer and the deleter
 ///
-/// The writer (`crates/farhelm/src/hook.rs`, a separate step of the same
-/// plan) is a short-lived process that knows nothing about the supervisor
-/// beyond the three environment variables the agent was launched with, so
-/// it derives the state directory as the PARENT of `FARHELM_SUPERVISOR_SOCK`
-/// — the socket is `<state_dir>/supervisor.sock` — and rebuilds this same
-/// path from it. Nothing checks that the two agree at runtime: a
-/// divergence is silent, and its symptom is per-session trace files that
-/// accumulate forever because delete no longer finds them. Change one side
-/// and you must change the other.
-pub(crate) fn hook_log_path(state_dir: &Path, session_id: &str) -> PathBuf {
+/// The writer (the `farhelm internal hook` process) is short-lived and
+/// knows nothing about the supervisor beyond the environment variables the
+/// agent was launched with, so its environment reader (`SessionEnv::hook_log`
+/// in `crates/farhelm/src/agent_client.rs`) takes the state directory to be
+/// the PARENT of `FARHELM_SUPERVISOR_SOCK` (the socket is
+/// [`Supervisor::socket_path`], `<state_dir>/supervisor.sock`) and calls
+/// this same function with it. Both sides share it because nothing would
+/// notice a disagreement at runtime: delete ignores a missing file, so the
+/// only symptom would be per-session trace files that accumulate forever.
+pub fn hook_log_path(state_dir: &Path, session_id: &str) -> PathBuf {
     state_dir.join("hook-log").join(format!("{session_id}.log"))
 }
 
@@ -6615,6 +6615,11 @@ impl Supervisor {
 
     /// The supervisor's unix socket path within a state dir. Shared with
     /// `farhelm internal stdio`, which is just a dumb pipe to this.
+    ///
+    /// The socket must stay a direct child of the state directory: an
+    /// agent's hook finds the state directory as this path's parent
+    /// (`SessionEnv::hook_log` in the `farhelm` crate, pinned by a test
+    /// there) to locate the log file delete later removes.
     pub fn socket_path(state_dir: &Path) -> PathBuf {
         state_dir.join("supervisor.sock")
     }
@@ -20315,15 +20320,12 @@ exit 0
     /// id of a session the user believes is gone.
     ///
     /// Scope, stated so nobody reads a guarantee that is not here: the
-    /// fixture plants its file through the DELETER's own helper, so this
-    /// says nothing whatever about the writer. That writer lives in
-    /// another crate and derives its path independently, from the socket's
-    /// parent directory; whether the two agree on a file is a cross-crate
-    /// contract this test cannot observe even in principle, and the e2e
-    /// suite is what holds it. Using the deleter's helper is deliberate
-    /// anyway — a hand-spelled path here would make this a test of the
-    /// layout rather than of the removal, and it would still not reach the
-    /// writer.
+    /// fixture plants its file through `hook_log_path`, which is also what
+    /// the writer's `SessionEnv::hook_log` in the `farhelm` crate calls
+    /// (with the socket's parent as the state directory), so this proves the
+    /// removal, not the writer's half of the arrangement. Using the helper is deliberate — a
+    /// hand-spelled path here would make this a test of the layout rather
+    /// than of the removal.
     ///
     /// A neighbouring file in the same directory is planted to pin the
     /// scope: delete removes ONE session's trace, not the directory, and

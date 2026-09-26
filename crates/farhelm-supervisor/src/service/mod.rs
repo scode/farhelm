@@ -112,6 +112,6 @@ pub use core::{
     ForwarderCleanupGate, NaturalDetachGate, STALL_DETACH_TIMEOUT, SampleFault, SampleRead,
     SessionSnapshot, StateDirOwnership, Supervisor, SupervisorSeams, SupervisorTimeouts,
     TabOpenFault, TabOpenStage, TabSettleGate, UPLOAD_DISK_STAGE_TIMEOUT, UPLOAD_PROGRESS_TIMEOUT,
-    WRITER_STALL_TIMEOUT,
+    WRITER_STALL_TIMEOUT, hook_log_path,
 };
 pub use core::{SupervisorStartup, connect, run};
