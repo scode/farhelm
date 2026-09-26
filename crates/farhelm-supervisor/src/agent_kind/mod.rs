@@ -168,6 +168,31 @@ pub const CWD_PLACEHOLDER: &str = "{cwd}";
 pub const CODEX_TRUSTED_CWD_PLACEHOLDER: &str = "{codex:trusted-cwd}";
 pub const CODEX_UNTRUSTED_CWD_PLACEHOLDER: &str = "{codex:untrusted-cwd}";
 
+/// Every whole-element marker a later launch pass substitutes, as the set a
+/// VALIDATOR refuses. (Substitution itself matches its own subsets:
+/// [`fill_cwd`] only the three directory markers.)
+///
+/// The helm's model-id check asks [`is_reserved_placeholder`] instead of
+/// keeping its own list: a model id that happens to equal a marker would be
+/// silently rewritten at spawn, and a hand-copied list is what let that check
+/// miss the two Codex markers when they were added. The conversation-id shape
+/// check (`is_plausible_conversation_id`) still carries its own two-entry
+/// list; converging it is tracked separately.
+pub const RESERVED_PLACEHOLDERS: &[&str] = &[
+    CWD_PLACEHOLDER,
+    CONVERSATION_PLACEHOLDER,
+    CODEX_TRUSTED_CWD_PLACEHOLDER,
+    CODEX_UNTRUSTED_CWD_PLACEHOLDER,
+];
+
+/// Whether `value` is exactly one of [`RESERVED_PLACEHOLDERS`].
+///
+/// Exact equality only, matching how substitution matches: a marker embedded
+/// in longer text (`--dir={cwd}`) is literal and is not reserved.
+pub fn is_reserved_placeholder(value: &str) -> bool {
+    RESERVED_PLACEHOLDERS.contains(&value)
+}
+
 /// The short model-visible pointer delivered through every supported vendor's
 /// additive instruction channel.
 pub const INSTRUCTIONS_POINTER: &str = "farhelm: when the user writes \"$farhelm ...\", run `farhelm agent instructions` and follow its output.";
