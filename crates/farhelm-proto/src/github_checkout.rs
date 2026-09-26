@@ -136,8 +136,8 @@ pub enum RepoError {
     TooLong,
 }
 
-/// Parse a whole `owner/repo` identifier — no `gh:` prefix; the UI strips
-/// the search label before calling this.
+/// Parse a whole `owner/repo` identifier — no `gh:` prefix; the UI's
+/// composer strips its search label before calling this.
 ///
 /// Accepts exactly `owner/repo`, one slash, both components matching the
 /// GitHub name rules (see [`RepoError`] for the class list and
@@ -379,76 +379,6 @@ fn slugify(value: &str) -> String {
         }
     }
     out
-}
-
-/// Which kind of composer search result a query is asking for, derived
-/// from its leading label.
-///
-/// The pure basis for composer search in a later unit, kept free of UI
-/// dependencies: the UI owns trimming the whole query and rendering, this
-/// decides only "which result kind does the query want, and what is the
-/// text after the label". Unlabeled queries keep the composer's existing
-/// behavior — harness, model, effort, folder, path, command, and recent
-/// matching all still apply — which is the "keep unlabeled folder matches"
-/// decision from the feature's planning.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchScope {
-    /// No recognized label: the composer's ordinary whole-result search.
-    Unlabeled,
-    /// `harness:` — launch-harness choices (`harness:other` selects the
-    /// existing Other/Command mode).
-    Harness,
-    /// `model:` — model choices across the catalog and recent custom ids.
-    Model,
-    /// `effort:` — reasoning-effort choices.
-    Effort,
-    /// `folder:` — folder/path results only.
-    Folder,
-    /// `recent:` — recent launch setups only.
-    Recent,
-    /// `gh:` — GitHub repository suggestions (and the fresh-clone entry).
-    Repo,
-}
-
-/// Split a composer search query into its scope and the value after the
-/// label.
-///
-/// Recognizes a leading `label:` ASCII case-insensitively for the known
-/// labels `harness:`, `model:`, `effort:`, `folder:`, `recent:`, and
-/// `gh:`. The second tuple element is everything after the label's colon
-/// with leading whitespace trimmed, and it may contain further colons —
-/// only the label's colon splits. An empty known label still selects that
-/// scope with an empty remainder (`gh:` means "list repository
-/// suggestions", not a plain search for the text "gh:").
-///
-/// Unknown labels are NOT scopes: `foo:bar` stays
-/// [`SearchScope::Unlabeled`] with the full string, so a custom model id
-/// typed into the box is not accidentally reinterpreted as a filter.
-///
-/// Contract edge: the label must be at the very start of the input. A
-/// caller that wants leading-whitespace tolerance trims the whole query
-/// first (the composer already does `query.trim()`); this function does
-/// not, so `" gh:x"` arrives as [`SearchScope::Unlabeled`] with its
-/// original spacing intact.
-pub fn parse_search_scope(query: &str) -> (SearchScope, &str) {
-    const LABELS: &[(&str, SearchScope)] = &[
-        ("harness:", SearchScope::Harness),
-        ("model:", SearchScope::Model),
-        ("effort:", SearchScope::Effort),
-        ("folder:", SearchScope::Folder),
-        ("recent:", SearchScope::Recent),
-        ("gh:", SearchScope::Repo),
-    ];
-    let lower = query.to_ascii_lowercase();
-    for (label, scope) in LABELS {
-        if lower.starts_with(label) {
-            // `to_ascii_lowercase` preserves byte length, so slicing the
-            // original at the label length is always a char boundary.
-            let remainder = query[label.len()..].trim_start();
-            return (*scope, remainder);
-        }
-    }
-    (SearchScope::Unlabeled, query)
 }
 
 // ---------------------------------------------------------------------------
@@ -888,69 +818,6 @@ mod tests {
         let err = checkout_basename(&repo, Some("existing"), &|n| n == "bar-existing")
             .expect_err("occupied");
         assert_eq!(err, NameError::Occupied);
-    }
-
-    // -- parse_search_scope ------------------------------------------------
-
-    /// Labeled queries select their scope and hand back the remainder with
-    /// leading whitespace trimmed; case is ignored on the label.
-    #[test]
-    fn known_labels_select_scopes() {
-        let cases: &[(&str, SearchScope, &str)] = &[
-            ("gh:acme/bar", SearchScope::Repo, "acme/bar"),
-            ("GH: acme/bar", SearchScope::Repo, "acme/bar"),
-            ("Gh:", SearchScope::Repo, ""),
-            ("harness:codex", SearchScope::Harness, "codex"),
-            ("Model: gpt-5", SearchScope::Model, "gpt-5"),
-            ("effort:  high", SearchScope::Effort, "high"),
-            ("folder:/a/b", SearchScope::Folder, "/a/b"),
-            ("recent:", SearchScope::Recent, ""),
-        ];
-        for (query, scope, remainder) in cases {
-            assert_eq!(
-                parse_search_scope(query),
-                (*scope, *remainder),
-                "query {query:?}"
-            );
-        }
-    }
-
-    /// Colons inside the value are value, not a second label split.
-    #[test]
-    fn colons_inside_value_are_not_reparsed() {
-        assert_eq!(
-            parse_search_scope("folder:/a/b:c"),
-            (SearchScope::Folder, "/a/b:c")
-        );
-        assert_eq!(
-            parse_search_scope("gh:owner/repo:x"),
-            (SearchScope::Repo, "owner/repo:x")
-        );
-    }
-
-    /// Unknown labels are not scopes, and the full string is preserved
-    /// byte for byte — a custom model id is not reinterpreted.
-    #[test]
-    fn unknown_label_stays_unlabeled() {
-        assert_eq!(
-            parse_search_scope("foo:bar"),
-            (SearchScope::Unlabeled, "foo:bar")
-        );
-        assert_eq!(parse_search_scope("a/b"), (SearchScope::Unlabeled, "a/b"));
-        assert_eq!(
-            parse_search_scope("ghh:x"),
-            (SearchScope::Unlabeled, "ghh:x")
-        );
-    }
-
-    /// The label must lead the string; the caller trims the whole query
-    /// first (the composer already does), so a padded query is unlabeled.
-    #[test]
-    fn label_must_lead() {
-        assert_eq!(
-            parse_search_scope(" gh:x"),
-            (SearchScope::Unlabeled, " gh:x")
-        );
     }
 
     // -- wire payload shapes -----------------------------------------------
