@@ -108,15 +108,40 @@ pub(crate) fn selection_permission_value(selection: &LaunchSelection) -> &'stati
         .unwrap_or("default")
 }
 
+/// The short name a user sees for a harness. Every spelling of a structured
+/// harness in the composer, a session's menu header, and the restart-with
+/// dialog derives from this, the lowercase words included (see
+/// [`harness_word`]).
+///
+/// One table rather than the Rust variant name, which only matches the
+/// product's spelling by accident: `Omp` is the project OMP, and the
+/// composer used to show "OMP" on its button and "Omp" everywhere it
+/// formatted the enum. The row badge's longer descriptions ("Claude Code")
+/// are a separate vocabulary and do not come from here.
+pub(crate) const fn harness_label(harness: LaunchHarness) -> &'static str {
+    match harness {
+        LaunchHarness::Codex => "Codex",
+        LaunchHarness::Claude => "Claude",
+        LaunchHarness::Muse => "Muse",
+        LaunchHarness::Cursor => "Cursor",
+        LaunchHarness::Grok => "Grok",
+        LaunchHarness::Goose => "Goose",
+        LaunchHarness::Pi => "Pi",
+        LaunchHarness::Omp => "OMP",
+        LaunchHarness::OpenCode => "OpenCode",
+    }
+}
+
 /// Return the lowercase word search matches a harness by.
 ///
 /// One spelling for the two places that compare a query against a harness —
 /// the substring match that offers the row and the exact-word match that
-/// preselects it — so they can never disagree about what "claude" names.
-/// Derived from the `Debug` name rather than a second literal table because
-/// that name is also what the row displays (`Harness: {harness:?}`).
+/// preselects it — so they can never disagree about what "claude" names. It
+/// also names the harness in the session view's "can't be resumed" reason.
+/// Derived from [`harness_label`] so that what a user can type is what the
+/// row shows them.
 pub(crate) fn harness_word(harness: LaunchHarness) -> String {
-    format!("{harness:?}").to_ascii_lowercase()
+    harness_label(harness).to_ascii_lowercase()
 }
 
 /// A partial structured choice used to narrow suggestions without inventing
@@ -437,8 +462,8 @@ pub(crate) fn grouped_search_results(
 /// its harness in a separately styled leading span.
 pub(crate) fn selection_summary(selection: &LaunchSelection) -> String {
     format!(
-        "{:?} · {}",
-        selection.harness,
+        "{} · {}",
+        harness_label(selection.harness),
         selection_summary_without_harness(selection)
     )
 }
@@ -776,9 +801,9 @@ pub(crate) fn search_results(
         // Search applies its text predicate after complete-selection ranking.
         for launch in ranked_recents(history, &ComposerFilter::default(), None) {
             let haystack = format!(
-                "{} {:?} {}",
+                "{} {} {}",
                 recent_destination_label(launch),
-                launch.selection.harness,
+                harness_label(launch.selection.harness),
                 launch.selection.model.as_deref().unwrap_or_default()
             )
             .to_ascii_lowercase();
@@ -1515,10 +1540,35 @@ mod tests {
         assert_eq!(recent_destination_label(&existing), "/work/bar-2");
     }
 
+    /// Spec: OMP's label is "OMP", its search word is "omp", and the full
+    /// saved-setup summary starts with the label.
+    ///
+    /// Why: the button and the rest of the composer used to disagree ("OMP"
+    /// against the enum's "Omp") because the other sites formatted the Rust
+    /// variant name. The browser spec for the OMP composer covers the
+    /// rendered search row; this pins the shared helpers underneath it.
+    #[test]
+    fn omp_is_labelled_omp_in_the_shared_harness_helpers() {
+        assert_eq!(harness_label(LaunchHarness::Omp), "OMP");
+        assert_eq!(harness_word(LaunchHarness::Omp), "omp");
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Omp,
+            model: None,
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        };
+        assert!(
+            selection_summary(&selection).starts_with("OMP · "),
+            "{}",
+            selection_summary(&selection)
+        );
+    }
+
     /// The compact row presents its harness separately and spells the
     /// permission itself, while the complete accessible summary must still
     /// describe the exact same saved defaults. Specifically: `selection_summary`
-    /// is exactly `"{harness:?} · "` followed by
+    /// is exactly `harness_label(..)` and `" · "` followed by
     /// `selection_summary_without_harness`, which is exactly
     /// `selection_summary_before_permissions` followed by the readable
     /// permission phrase, so no two renderings of one saved
