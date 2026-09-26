@@ -105,10 +105,12 @@ fn render(agent: &Command) -> String {
          title from discovery: --expected-title='old title'. An empty old title is written\n\
          --expected-title=. To act on yourself deliberately, discover your * session and pass\n\
          its id. Self-stop can kill this command; stop leaves the row.\n\
-         Restart requires --mode from the discovered restart_offer: resume, fallback-template,\n\
-         or fresh. Prefer resume; never downgrade after a refusal. Use --stop-if-running only\n\
-         with deliberate permission to stop the target. Restart uses its stored configuration;\n\
-         you cannot supply another command. Self-restart can lose its acknowledgement.\n\
+         Restart requires --mode matching the discovered offer. The restart_offer field of\n\
+         sessions --json spells it resume, fallback_template, or fresh_only; the table and\n\
+         --mode spell the same three resume, fallback-template, and fresh. Prefer resume;\n\
+         never downgrade after a refusal. Use --stop-if-running only with deliberate\n\
+         permission to stop the target. Restart uses its stored configuration; you cannot\n\
+         supply another command. Self-restart can lose its acknowledgement.\n\
          \n\
          Create requires a host, cwd, and exactly one profile name, profile id, or invocation.\n\
          Clone requires an exact source session id and destination host; cwd, title, and the\n\
@@ -258,6 +260,59 @@ mod tests {
             assert!(
                 text.contains(&format!("farhelm agent {verb}")),
                 "the instructions never mention `farhelm agent {verb}`:\n{text}"
+            );
+        }
+    }
+
+    /// Spec: the restart paragraph names every restart offer the way
+    /// `sessions --json` prints it and every mode the way `--mode` accepts it.
+    ///
+    /// Why: the two spellings differ (`fresh_only` against `fresh`), and an
+    /// agent that reads its offer from JSON and copies it into `--mode` gets a
+    /// usage error unless this text says how the two line up. A new offer or
+    /// mode added to either enum without updating the paragraph fails here;
+    /// the offer list goes through an exhaustive match so that a new variant
+    /// is a compile error in this test rather than a silent omission.
+    #[farhelm_testtrace::test]
+    fn the_restart_paragraph_names_every_offer_and_mode_spelling() {
+        use clap::ValueEnum;
+        use farhelm_proto::RestartOffer;
+        let text = text();
+        // Only the restart paragraph counts: `resume` and `fresh` are ordinary
+        // words, and a match anywhere else would keep this green after the
+        // paragraph itself lost a spelling.
+        let start = text
+            .find("Restart requires --mode")
+            .expect("the instructions have a restart paragraph");
+        let paragraph = &text[start..];
+        let paragraph = &paragraph[..paragraph.find("\n\n").unwrap_or(paragraph.len())];
+        let words: std::collections::HashSet<&str> = paragraph
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+            .collect();
+        let offers = [
+            RestartOffer::Resume,
+            RestartOffer::FallbackTemplate,
+            RestartOffer::FreshOnly,
+        ];
+        // Exhaustive on purpose: a new RestartOffer variant must fail to
+        // compile here until it is added to `offers` above.
+        match offers[0] {
+            RestartOffer::Resume | RestartOffer::FallbackTemplate | RestartOffer::FreshOnly => {}
+        }
+        for offer in offers {
+            let json = serde_json::to_value(offer).expect("offer serializes");
+            let spelling = json.as_str().expect("an offer is a bare string");
+            assert!(
+                words.contains(spelling),
+                "the restart paragraph never spells the JSON offer {spelling:?}:\n{paragraph}"
+            );
+        }
+        for mode in crate::AgentRestartMode::value_variants() {
+            let value = mode.to_possible_value().expect("every mode is selectable");
+            assert!(
+                words.contains(value.get_name()),
+                "the restart paragraph never spells the --mode value {:?}:\n{paragraph}",
+                value.get_name()
             );
         }
     }
