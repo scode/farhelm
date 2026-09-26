@@ -17,7 +17,7 @@
 
 use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::cleanup_launch_artifacts;
-use super::status::{entry_info, observe_entry};
+use super::status::{KnownTmuxNames, entry_info, observe_entry};
 use crate::store::{LastOutcome, Transition};
 use farhelm_proto::{LIST_SESSIONS_CAP, SessionInfo};
 use std::collections::HashMap;
@@ -102,6 +102,18 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
         let sessions = sup.sessions.lock().await;
         sessions.values().cloned().collect()
     };
+    // From the whole snapshot, not the cut: whether a renamed pane now
+    // belongs to another farhelm session depends on every session this
+    // supervisor holds, including the ones past the reply's cap.
+    let known = KnownTmuxNames::from_sessions(snapshot.iter().map(|entry| {
+        (
+            entry.info.id.as_str(),
+            entry
+                .terminal
+                .as_ref()
+                .map(|terminal| terminal.tmux_name.as_str()),
+        )
+    }));
     let (entries, truncated) = order_and_cut(snapshot, |entry| &entry.info);
     // Before the reply is computed, so an identity claimed on
     // this very pass is reflected in the `restart_offer` it
@@ -218,7 +230,7 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
         // contradict. Nothing gathered so far this pass is
         // committed: this `?` short-circuits before
         // `transition_many` is ever called.
-        let observed = observe_entry(sup, entry, &pane_states).await?;
+        let observed = observe_entry(sup, entry, &pane_states, &known).await?;
         if observed.settled_error {
             if sup.may_record() {
                 cleanup_launch_artifacts(
@@ -289,6 +301,7 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
             entry_info(
                 entry,
                 &pane_states,
+                &known,
                 sentinel_hits.get(&entry.info.id).map(String::as_str),
             )
         })

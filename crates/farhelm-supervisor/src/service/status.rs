@@ -51,7 +51,11 @@
 //! THIS pass, for the same reason, whether or not it could also be
 //! committed; then a live pane, which no non-error stored outcome may
 //! override; then, with no pane to ask, the stored outcome, which beats
-//! the blanket exited-unknown fallback. `session_status` and
+//! the blanket exited-unknown fallback. A pane tmux reports under a name no
+//! session here answers to ([`PaneEvidence::Unattributed`]) sits beside
+//! that ladder rather than on it: the sentinel still speaks (it is about
+//! this launch, not about any pane), but no pane-based inference is drawn
+//! and an unsettled outcome reads as unknown. `session_status` and
 //! `observe_entry` carry the two halves of that order and must agree.
 //! Keeping them in one module is what makes "a `SessionRenamed` reply
 //! describes a session exactly as `ListSessions` would" a property of the
@@ -68,7 +72,7 @@ use anyhow::Context;
 use farhelm_proto::{
     ProfileExistence, RestartOffer, SessionInfo, SessionStatus, SourceProfile, TabInfo,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use tracing::warn;
@@ -99,6 +103,95 @@ use tracing::warn;
 /// give.
 pub(crate) const QUIET_SAMPLES_BEFORE_IDLE: u64 = 3;
 
+/// The tmux session names this supervisor's sessions answer to: every
+/// session's minted `fh-{id}` name and every name a recorded terminal holds.
+///
+/// This is the evidence behind one decision that several paths have to make
+/// the same way: whether a recorded pane that tmux now reports under a
+/// DIFFERENT session name was recycled into another farhelm session (so ours
+/// is gone), or was renamed or moved out of band while still running our
+/// agent (so nothing about it can be attributed either way). See
+/// [`Supervisor::known_session_tmux_name`] for why an unknown owner is read as
+/// "possibly still ours" rather than "gone".
+///
+/// Built once per pass and handed to the synchronous classifiers, so a list
+/// reply does not take the session registry lock once per entry.
+#[derive(Debug, Default)]
+pub(crate) struct KnownTmuxNames(HashSet<String>);
+
+impl KnownTmuxNames {
+    /// From `(session id, recorded tmux session name)` pairs. The name is
+    /// optional because an entry caught between a relaunch's teardown and its
+    /// republication has no terminal, while its minted name is still farhelm's.
+    pub(crate) fn from_sessions<'a>(
+        sessions: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
+    ) -> Self {
+        let mut names = HashSet::new();
+        for (id, tmux_name) in sessions {
+            names.insert(format!("fh-{id}"));
+            if let Some(tmux_name) = tmux_name {
+                names.insert(tmux_name.to_string());
+            }
+        }
+        Self(names)
+    }
+
+    pub(crate) fn contains(&self, tmux_name: &str) -> bool {
+        self.0.contains(tmux_name)
+    }
+}
+
+/// What tmux says about one recorded pane, as far as it can be attributed to
+/// the session that recorded it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PaneEvidence<'a> {
+    /// Present under the tmux session name this session recorded: its dead
+    /// flag and exit status are this session's.
+    Owned(&'a PaneState),
+    /// Not present, or present under ANOTHER farhelm session's name. Pane ids
+    /// restart at `%0` on a fresh tmux server, so a known owner is read as the
+    /// id having been recycled after ours went away. (The ticker is stricter
+    /// and skips every foreign owner; the list and reload record the exit.)
+    Absent,
+    /// Present under a name no session here answers to — most cheaply
+    /// explained by an out-of-band `rename-session` or `move-pane` on the
+    /// private socket, in which case it is still our agent. Neither liveness
+    /// nor an exit can be concluded from it, so observers draw no pane-based
+    /// inference and report an unresolved outcome as `Unknown`, the same way
+    /// the stop, restart and delete verbs refuse to act on it and the ticker
+    /// skips it. A launch sentinel still counts: it is evidence about this
+    /// launch, not about the pane. The state is carried so a caller that keeps
+    /// the recorded terminal needs no second lookup.
+    Unattributed(&'a PaneState),
+}
+
+/// Classify `pane` for the session that recorded it under `tmux_name`.
+pub(crate) fn pane_evidence<'a>(
+    pane: &str,
+    tmux_name: &str,
+    pane_states: &'a HashMap<String, PaneState>,
+    known: &KnownTmuxNames,
+) -> PaneEvidence<'a> {
+    match pane_states.get(pane) {
+        None => PaneEvidence::Absent,
+        Some(state) if state.session_name == tmux_name => PaneEvidence::Owned(state),
+        Some(state) if known.contains(&state.session_name) => PaneEvidence::Absent,
+        Some(state) => PaneEvidence::Unattributed(state),
+    }
+}
+
+/// [`pane_evidence`] for an entry's recorded terminal; no terminal at all is
+/// [`PaneEvidence::Absent`].
+fn terminal_evidence<'a>(
+    terminal: Option<&Terminal>,
+    pane_states: &'a HashMap<String, PaneState>,
+    known: &KnownTmuxNames,
+) -> PaneEvidence<'a> {
+    terminal.map_or(PaneEvidence::Absent, |terminal| {
+        pane_evidence(&terminal.pane, &terminal.tmux_name, pane_states, known)
+    })
+}
+
 /// Compute one session's liveness for a `ListSessions` reply. tmux is the
 /// truth (module docs); this function only ever reports what it can
 /// actually observe, never a guess.
@@ -108,18 +201,18 @@ pub(crate) const QUIET_SAMPLES_BEFORE_IDLE: u64 = 3;
 /// - no terminal at all (the restart-gap entry);
 /// - this pane id is entirely absent from `pane_states` (removed mid-
 ///   query, or never existed on this server at all);
-/// - this pane id IS present, but for a DIFFERENT session name than the
-///   one this entry remembers creating it under. Pane ids reset to `%0`
-///   on a fresh tmux server (`PaneState::session_name`'s own docs), so a
-///   stale, never-reloaded entry's pane id can be silently recycled by an
-///   unrelated NEW session after a server restart; matching pane id alone
-///   would let that entry inherit the new session's liveness. Requiring
-///   BOTH identifiers to agree is also what a tmux-side rename of the
-///   session name (a rare, deliberately-provoked edge case, not a normal
-///   product flow) trips: this function has no positive way to confirm
-///   the renamed pane is still "the same session" rather than tmux having
-///   handed that pane to something else entirely, so it reports the same
-///   honest `Exited` rather than guessing either way.
+/// - this pane id IS present, but under ANOTHER farhelm session's name.
+///   Pane ids reset to `%0` on a fresh tmux server
+///   (`PaneState::session_name`'s own docs), so a stale, never-reloaded
+///   entry's pane id can be silently recycled by one of our NEW sessions
+///   after a server restart; matching pane id alone would let that entry
+///   inherit the new session's liveness.
+///
+/// A pane present under a name NO session here answers to is different
+/// ([`PaneEvidence::Unattributed`]): the likeliest explanation is an
+/// out-of-band rename or move of our own still-running agent, so a session
+/// whose outcome is not already settled reports `Unknown` rather than an
+/// exit that may never have happened.
 ///
 /// Only a pane found under BOTH its remembered pane id and its remembered
 /// tmux session name gets to decide live-versus-`Exited` from tmux's own
@@ -183,17 +276,23 @@ pub(crate) const QUIET_SAMPLES_BEFORE_IDLE: u64 = 3;
 pub(crate) fn session_status(
     entry: &SessionEntry,
     pane_states: &HashMap<String, PaneState>,
+    known: &KnownTmuxNames,
 ) -> (SessionStatus, Option<String>) {
     // The guard is held across the whole match rather than cloned out of:
     // this function is synchronous (no await can intervene) and every arm
     // only reads, so the clone would have bought nothing but an allocation
     // on the hottest path the list reply has.
     let recorded = entry.run.outcome.lock().expect("outcome mutex poisoned");
-    let live = entry.terminal.as_ref().and_then(|terminal| {
-        pane_states
-            .get(&terminal.pane)
-            .filter(|state| state.session_name == terminal.tmux_name)
-    });
+    let live = match terminal_evidence(entry.terminal.as_ref(), pane_states, known) {
+        PaneEvidence::Owned(state) => Some(state),
+        PaneEvidence::Absent => None,
+        // A settled outcome is retained knowledge and still speaks below; an
+        // unsettled one has nothing observable to decide it.
+        PaneEvidence::Unattributed(_) if !recorded.is_terminal() => {
+            return (SessionStatus::Unknown, None);
+        }
+        PaneEvidence::Unattributed(_) => None,
+    };
     match (&*recorded, live) {
         (LastOutcome::Error { detail }, _) => (
             SessionStatus::Error {
@@ -400,6 +499,7 @@ fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
 pub(crate) fn entry_info(
     entry: &SessionEntry,
     pane_states: &HashMap<String, PaneState>,
+    known: &KnownTmuxNames,
     sentinel: Option<&str>,
 ) -> SessionInfo {
     let mut info = entry.info.clone();
@@ -456,7 +556,7 @@ pub(crate) fn entry_info(
             info.annotation = None;
         }
         None => {
-            let (status, annotation) = session_status(entry, pane_states);
+            let (status, annotation) = session_status(entry, pane_states, known);
             info.status = status;
             info.annotation = annotation;
         }
@@ -611,6 +711,9 @@ pub(crate) async fn interrupted_preparation_detail(
 /// A stopped accepted fresh terminal also requires durable Ready setup;
 /// only then does the plain pane observation apply. Incomplete preparation
 /// never overrides a live pane or supplies launch evidence for a pending create.
+/// An unattributed pane ([`PaneEvidence::Unattributed`]) still has its
+/// sentinel read, and nothing else: the wrapper-failure, preparation and exit
+/// inferences all depend on a pane this session cannot claim.
 ///
 /// Deliberately does NOT commit: the list pass batches every entry's
 /// transition into ONE transaction, and taking that apart per entry
@@ -626,6 +729,7 @@ pub(crate) async fn observe_entry(
     sup: &Supervisor,
     entry: &Arc<SessionEntry>,
     pane_states: &HashMap<String, PaneState>,
+    known: &KnownTmuxNames,
 ) -> anyhow::Result<EntryObservation> {
     let recorded = entry
         .run
@@ -635,18 +739,7 @@ pub(crate) async fn observe_entry(
         .clone();
     // Borrowed out of the caller's map rather than cloned: this runs once
     // per entry on the polling path, and the pane state is only ever read.
-    let live: Option<&PaneState> = entry.terminal.as_ref().and_then(|terminal| {
-        pane_states
-            .get(&terminal.pane)
-            .filter(|state| state.session_name == terminal.tmux_name)
-    });
-    // Two different questions, deliberately not one: "no live
-    // process" (which a sentinel check needs) and "a pane that
-    // EXISTS and is dead" (which the wrapper-failure classifier
-    // needs — see its docs for why an absent pane must not qualify).
-    let dead_or_absent = live.is_none_or(|state| state.dead);
-    let pane_dead = live.is_some_and(|state| state.dead);
-
+    let evidence = terminal_evidence(entry.terminal.as_ref(), pane_states, known);
     if matches!(recorded, LastOutcome::Error { .. }) {
         return Ok(EntryObservation {
             sentinel: None,
@@ -654,6 +747,22 @@ pub(crate) async fn observe_entry(
             settled_error: true,
         });
     }
+    // Possibly our own agent under another name: only the sentinel, which
+    // is about this launch rather than any pane, may speak for it. The
+    // wrapper-failure, preparation and exit inferences all read the pane,
+    // which is how the ticker and the lifecycle verbs already treat it.
+    let unattributed = matches!(evidence, PaneEvidence::Unattributed(_));
+    let live = match evidence {
+        PaneEvidence::Owned(state) => Some(state),
+        PaneEvidence::Absent | PaneEvidence::Unattributed(_) => None,
+    };
+
+    // Two different questions, deliberately not one: "no live
+    // process" (which a sentinel check needs) and "a pane that
+    // EXISTS and is dead" (which the wrapper-failure classifier
+    // needs — see its docs for why an absent pane must not qualify).
+    let dead_or_absent = live.is_none_or(|state| state.dead);
+    let pane_dead = live.is_some_and(|state| state.dead);
 
     // A sentinel is READ regardless of whether this supervisor
     // `may_record()` (item 2 of the review-swarm fix batch): a
@@ -669,6 +778,7 @@ pub(crate) async fn observe_entry(
             })?;
         let mut detail = match found {
             Some(detail) => Some(detail),
+            None if unattributed => None,
             // The wrapper-failure shape: no sentinel, a pane that is
             // present and dead, and a launch spec nothing consumed.
             None => {
@@ -682,7 +792,7 @@ pub(crate) async fn observe_entry(
                 .await
             }
         };
-        if detail.is_none() {
+        if detail.is_none() && !unattributed {
             detail = interrupted_preparation_detail(
                 &sup.state_dir,
                 &sup.store,
@@ -711,7 +821,7 @@ pub(crate) async fn observe_entry(
         }
     }
 
-    let transition = if sup.may_record() {
+    let transition = if sup.may_record() && !unattributed {
         observation(&recorded, live)
     } else {
         None
@@ -806,16 +916,22 @@ mod tests {
             Some("still"),
         );
         entry.run.activity.lock().expect("activity mutex").working = true;
-        assert_eq!(session_status(&entry, &live).0, SessionStatus::Running);
+        assert_eq!(
+            session_status(&entry, &live, &KnownTmuxNames::default()).0,
+            SessionStatus::Running
+        );
 
         entry.run.activity.lock().expect("activity mutex").tail =
             Some("Do you want to run this command?\n❯ 1. Yes\n  2. No".to_string());
-        assert_eq!(session_status(&entry, &live).0, SessionStatus::Waiting);
+        assert_eq!(
+            session_status(&entry, &live, &KnownTmuxNames::default()).0,
+            SessionStatus::Waiting
+        );
 
         entry.run.activity.lock().expect("activity mutex").tail =
             Some("Working (4s • esc to interrupt)\n\n› draft\n\nfooter".to_string());
         assert_eq!(
-            session_status(&entry, &live).0,
+            session_status(&entry, &live, &KnownTmuxNames::default()).0,
             SessionStatus::Running,
             "once the pending question is gone, the retained work hint resumes winning over idle"
         );
@@ -841,7 +957,8 @@ mod tests {
         assert_eq!(
             session_status(
                 &entry_with(Some(a_terminal()), LastOutcome::Launching),
-                &live
+                &live,
+                &KnownTmuxNames::default()
             ),
             (SessionStatus::Running, None)
         );
@@ -857,7 +974,8 @@ mod tests {
                         annotation: Some("stopped by user".to_string()),
                     }
                 ),
-                &dead
+                &dead,
+                &KnownTmuxNames::default()
             ),
             (
                 SessionStatus::Exited { exit_code: Some(3) },
@@ -871,7 +989,8 @@ mod tests {
         assert_eq!(
             session_status(
                 &entry_with(Some(a_terminal()), LastOutcome::Launching),
-                &dead
+                &dead,
+                &KnownTmuxNames::default()
             ),
             (SessionStatus::Unknown, None)
         );
@@ -879,7 +998,11 @@ mod tests {
         // No pane to ask: the record answers, and interrupted is NOT
         // flattened into exited-unknown — the whole point of the state.
         assert_eq!(
-            session_status(&entry_with(None, LastOutcome::Interrupted), &empty),
+            session_status(
+                &entry_with(None, LastOutcome::Interrupted),
+                &empty,
+                &KnownTmuxNames::default()
+            ),
             (SessionStatus::Interrupted, None)
         );
         assert_eq!(
@@ -891,7 +1014,8 @@ mod tests {
                         annotation: Some("stopped by user".to_string()),
                     }
                 ),
-                &empty
+                &empty,
+                &KnownTmuxNames::default()
             ),
             (
                 SessionStatus::Exited { exit_code: Some(7) },
@@ -903,7 +1027,11 @@ mod tests {
 
         // Nothing observed and nothing recorded: M2's honest fallback.
         assert_eq!(
-            session_status(&entry_with(None, LastOutcome::Running), &empty),
+            session_status(
+                &entry_with(None, LastOutcome::Running),
+                &empty,
+                &KnownTmuxNames::default()
+            ),
             (SessionStatus::Exited { exit_code: None }, None)
         );
 
@@ -917,7 +1045,8 @@ mod tests {
                         detail: "Permission denied".to_string()
                     }
                 ),
-                &live
+                &live,
+                &KnownTmuxNames::default()
             ),
             (
                 SessionStatus::Error {
@@ -1018,7 +1147,7 @@ mod tests {
             Some("working"),
         );
         assert_eq!(
-            session_status(&one_short, &live).0,
+            session_status(&one_short, &live, &KnownTmuxNames::default()).0,
             SessionStatus::Running,
             "a screen can repeat for a sample or two while an agent works"
         );
@@ -1030,13 +1159,16 @@ mod tests {
             Some("working"),
         );
         assert_eq!(
-            session_status(&exactly_at, &live).0,
+            session_status(&exactly_at, &live, &KnownTmuxNames::default()).0,
             SessionStatus::Idle,
             "the threshold is inclusive: the Nth silent look is the one that decides"
         );
 
         let long_quiet = entry_sampled(AgentKind::Generic, 4_000, 3_999, Some("a shell prompt"));
-        assert_eq!(session_status(&long_quiet, &live).0, SessionStatus::Idle);
+        assert_eq!(
+            session_status(&long_quiet, &live, &KnownTmuxNames::default()).0,
+            SessionStatus::Idle
+        );
     }
 
     /// The bug this classifier's shape exists to prevent: a busy session on
@@ -1064,7 +1196,7 @@ mod tests {
         // whenever anybody looks at it, however rarely that is.
         let rarely_sampled = entry_sampled(AgentKind::Generic, 500, 0, Some("tick 500"));
         assert_eq!(
-            session_status(&rarely_sampled, &live).0,
+            session_status(&rarely_sampled, &live, &KnownTmuxNames::default()).0,
             SessionStatus::Running,
             "a pane that changed at every one of its own samples is working, whatever the \
              interval between them was"
@@ -1088,7 +1220,7 @@ mod tests {
         for samples in [0, 1] {
             let entry = entry_sampled(AgentKind::Generic, samples, 0, None);
             assert_eq!(
-                session_status(&entry, &live).0,
+                session_status(&entry, &live, &KnownTmuxNames::default()).0,
                 SessionStatus::Running,
                 "an unwatched live session is one that just launched, not one at rest \
                  ({samples} samples)"
@@ -1105,14 +1237,20 @@ mod tests {
         let live = pane_map(false, None);
         let mut entry = entry_with(Some(a_terminal()), LastOutcome::Running);
         entry.run.activity = ActivitySample::reloaded();
-        assert_eq!(session_status(&entry, &live).0, SessionStatus::Unknown);
+        assert_eq!(
+            session_status(&entry, &live, &KnownTmuxNames::default()).0,
+            SessionStatus::Unknown
+        );
 
         {
             let mut activity = entry.run.activity.lock().expect("activity mutex");
             activity.observe("unchanged".to_string());
             activity.observe("unchanged".to_string());
         }
-        assert_eq!(session_status(&entry, &live).0, SessionStatus::Unknown);
+        assert_eq!(
+            session_status(&entry, &live, &KnownTmuxNames::default()).0,
+            SessionStatus::Unknown
+        );
 
         entry
             .run
@@ -1120,7 +1258,10 @@ mod tests {
             .lock()
             .expect("activity mutex")
             .observe("changed".to_string());
-        assert_eq!(session_status(&entry, &live).0, SessionStatus::Running);
+        assert_eq!(
+            session_status(&entry, &live, &KnownTmuxNames::default()).0,
+            SessionStatus::Running
+        );
 
         let mut quiet = entry_with(Some(a_terminal()), LastOutcome::Running);
         quiet.run.activity = ActivitySample::reloaded();
@@ -1132,7 +1273,10 @@ mod tests {
                 .expect("activity mutex")
                 .observe("still".to_string());
         }
-        assert_eq!(session_status(&quiet, &live).0, SessionStatus::Idle);
+        assert_eq!(
+            session_status(&quiet, &live, &KnownTmuxNames::default()).0,
+            SessionStatus::Idle
+        );
 
         let waiting = entry_sampled(AgentKind::Claude, 1, 0, Some(CLAUDE_APPROVAL_TAIL));
         waiting
@@ -1141,11 +1285,14 @@ mod tests {
             .lock()
             .expect("activity mutex")
             .startup_provisional = true;
-        assert_eq!(session_status(&waiting, &live).0, SessionStatus::Waiting);
+        assert_eq!(
+            session_status(&waiting, &live, &KnownTmuxNames::default()).0,
+            SessionStatus::Waiting
+        );
 
         let dead = pane_map(true, Some(7));
         assert_eq!(
-            session_status(&entry, &dead).0,
+            session_status(&entry, &dead, &KnownTmuxNames::default()).0,
             SessionStatus::Exited { exit_code: Some(7) }
         );
     }
@@ -1165,11 +1312,14 @@ mod tests {
         // case where nothing is being printed — so the `Waiting` below can
         // only have come from the sharpener.
         let claude = entry_sampled(AgentKind::Claude, 9, 5, Some(CLAUDE_APPROVAL_TAIL));
-        assert_eq!(session_status(&claude, &live).0, SessionStatus::Waiting);
+        assert_eq!(
+            session_status(&claude, &live, &KnownTmuxNames::default()).0,
+            SessionStatus::Waiting
+        );
 
         let generic = entry_sampled(AgentKind::Generic, 9, 5, Some(CLAUDE_APPROVAL_TAIL));
         assert_eq!(
-            session_status(&generic, &live).0,
+            session_status(&generic, &live, &KnownTmuxNames::default()).0,
             SessionStatus::Idle,
             "a session with no integration keeps the generic baseline, whatever its screen says"
         );
@@ -1181,7 +1331,10 @@ mod tests {
             0,
             Some("⏺ Reading src/main.rs (120 lines)"),
         );
-        assert_eq!(session_status(&busy, &live).0, SessionStatus::Running);
+        assert_eq!(
+            session_status(&busy, &live, &KnownTmuxNames::default()).0,
+            SessionStatus::Running
+        );
     }
 
     /// The prompt-answered-then-captures-failed sequence, which is how a
@@ -1208,7 +1361,7 @@ mod tests {
         let live = pane_map(false, None);
         let entry = entry_sampled(AgentKind::Claude, 9, 5, Some(CLAUDE_APPROVAL_TAIL));
         assert_eq!(
-            session_status(&entry, &live).0,
+            session_status(&entry, &live, &KnownTmuxNames::default()).0,
             SessionStatus::Waiting,
             "premise: the prompt on screen is what makes this session waiting"
         );
@@ -1221,7 +1374,7 @@ mod tests {
             .forget_tail();
 
         assert_eq!(
-            session_status(&entry, &live).0,
+            session_status(&entry, &live, &KnownTmuxNames::default()).0,
             SessionStatus::Idle,
             "with no screen to read, the session falls back to its baseline rather than \
              reporting a question nobody can confirm is still on screen"
