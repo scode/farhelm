@@ -168,6 +168,46 @@ test("oversized title and copy fields overflow their boxes, with full tooltips",
 });
 
 /**
+ * The directory and command fields must use the room the header has before
+ * truncating. They used to be capped at a fixed 18 characters, so even an
+ * ordinary command ellipsized in a wide window while a large empty gap sat
+ * before the actions. In a wide viewport, a normal-length title, directory,
+ * and command must all render in full.
+ */
+test("copy fields use the header's free width before truncating", async ({ page, request }) => {
+  await page.setViewportSize({ width: 1920, height: 800 });
+  // A command of fixed, known length rather than the fake agent's absolute
+  // binary path, whose length depends on where the checkout lives: 60
+  // characters is far past the old 18-character cap yet leaves a 1920px
+  // window ample room for the title, directory, and every action. The
+  // header renders from the session record, so no agent output is needed.
+  const invocation = `sleep 300 #${"x".repeat(49)}`;
+  const session = await createSession(request, {
+    title: `header-width-${Date.now()}`,
+    cwd: "/tmp",
+    invocation,
+  });
+  try {
+    await page.goto("/");
+    const sessionRow = row(page, session.id);
+    await expect(sessionRow, "the created session must be listed before opening it").toBeVisible();
+    await sessionRow.locator(".session-row-open").click();
+    await waitForSessionRevealed(page, session.id);
+    await expect(page.locator(".titlebar .header-copy").nth(1)).toHaveAttribute(
+      "title",
+      `${invocation} — click to copy`,
+    );
+    const clipped = (selector: string, index = 0) =>
+      page.locator(selector).nth(index).evaluate((el) => el.scrollWidth > el.clientWidth);
+    expect(await clipped(".titlebar .title"), "a short title must not be clipped").toBe(false);
+    expect(await clipped(".titlebar .header-copy", 0), "the directory must not be clipped").toBe(false);
+    expect(await clipped(".titlebar .header-copy", 1), "the command must not be clipped").toBe(false);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
  * The session header is the only surface that exposes all four lifecycle
  * actions together. This test pins their shared keyboard order, proves that
  * both copy buttons hand their complete values to the native bridge, and

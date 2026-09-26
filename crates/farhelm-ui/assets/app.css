@@ -891,12 +891,18 @@ samp {
   white-space: nowrap;
 }
 
-/* Copy affordances stay compact and keyboard reachable; their values give up
-   width before the title while the full value remains available in `title`. */
+/* Copy affordances stay keyboard reachable, and their values give up width
+   before the title while the full value remains available in `title`.
+
+   Content-sized (`flex-basis: auto`) with no width cap: each field takes the
+   width its value needs, and only once the row runs out of room do they
+   shrink, three times as fast as the title. An earlier `max-width: 18ch`
+   ellipsized even a short command in a wide window and left a large empty
+   gap before the actions; the gap is now just whatever the row does not
+   need. `flex-grow` stays 0 so neither field stretches past its value. */
 .header-copy {
   min-width: 0;
-  max-width: 18ch;
-  flex: 1 3 10ch;
+  flex: 0 3 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
