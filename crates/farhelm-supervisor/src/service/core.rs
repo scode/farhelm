@@ -8216,19 +8216,19 @@ impl Supervisor {
     /// launch happened:
     ///
     /// - **The durable row.** A recorded pane means something once saw this
-    ///   session in tmux. An outcome past `Launching` means the same, with
-    ///   ONE exception that is exactly why the pane is checked separately:
-    ///   `Interrupted` is written by the reboot conversion, which blankets
-    ///   `Launching` rows too — so an interrupted row with no pane is a
-    ///   create that may never have launched at all, and treating the
-    ///   status alone as provenance would replay a session that never
-    ///   existed. A non-NULL `conversation_source` on the same row is a
-    ///   third, independent reading of it: only the launch hook writes that
-    ///   column, and the hook runs inside the agent process this
-    ///   reservation started, so a report is the agent testifying to its
-    ///   own existence. It can arrive before the pane is recorded, which is
-    ///   the whole reason it is checked rather than being assumed to imply
-    ///   one of the others.
+    ///   session in tmux. The outcome alone does not count (R1.2): a
+    ///   retained create-refusal is an `Error` row with an empty pane, and
+    ///   `Interrupted` is written by the reboot conversion over `Launching`
+    ///   rows too, so neither proves a launch happened and the physical
+    ///   probes below decide instead. (The store's takeover transaction,
+    ///   `SessionStore::restart_pending_launch`, rechecks the row more
+    ///   strictly than this.) A non-NULL `conversation_source` on the same
+    ///   row is a second, independent reading of it: only the launch hook
+    ///   writes that column, and the hook runs inside the agent process
+    ///   this reservation started, so a report is the agent testifying to
+    ///   its own existence. It can arrive before the pane is recorded,
+    ///   which is the whole reason it is checked rather than being assumed
+    ///   to imply the pane.
     /// - **The launch sentinel.** The shim wrote it, so the shim ran, so
     ///   tmux started something — even when no pane was ever recorded.
     /// - **The launch's cgroup scope**, where this host has a user manager.
