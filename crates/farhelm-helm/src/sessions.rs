@@ -1816,14 +1816,14 @@ async fn accept_created_session(
                 claim.host,
                 identity,
                 &session,
-                (
-                    session.canonical_cwd.as_deref().unwrap_or(&session.cwd),
-                    if github_repo.is_some() {
+                crate::store::HistoryPaths {
+                    canonical_cwd: session.canonical_cwd.as_deref().unwrap_or(&session.cwd),
+                    display_cwd: if github_repo.is_some() {
                         &session.cwd
                     } else {
                         &requested_cwd
                     },
-                ),
+                },
                 github_repo.as_ref(),
                 // Only a USER-initiated create may move the helm-wide
                 // remembered permissions default — the same authority
@@ -1832,7 +1832,11 @@ async fn accept_created_session(
                 // reason: an agent acting on its own (a relay clone, say)
                 // must not silently change what the next human "New" open
                 // preselects.
-                origin == CreateOrigin::User,
+                if origin == CreateOrigin::User {
+                    crate::store::LaunchChoiceMemory::Remember
+                } else {
+                    crate::store::LaunchChoiceMemory::Leave
+                },
             )
             .await
         {
