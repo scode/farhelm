@@ -265,14 +265,10 @@ are large mostly because of their tests.
   `create.rs`, `relaunch.rs`, `tabs.rs`, `reports.rs`, `startup.rs`, `github.rs`, each with its own `impl Supervisor`
   and the tests beside it, and split the long functions into phase functions along the phases their comments already
   name.
-- **Supervisor handler reply path.** Medium effort. Non-test `handlers.rs` has 64 hand-built `ControlMsg::Error`
-  literals and 52 bare `return;`, and the fallback error kind for the same failure class differs per handler
-  (`GithubCheckoutPreview` falls back to `InvalidRequest`, `ReconcileGithubCheckout` to `Internal`).
-  `handle_restricted_control` (`handlers.rs:3098`) is 685 lines, `handle_attach` 558, and `handle_create_session`
-  (`handlers.rs:542`) takes 21 positional arguments that both control handlers destructure field by field. The
-  session-credential check is copied three times (`:3154`, `:3367`, `:3666`). Fix: handlers return
-  `Result<ControlMsg, RequestError>` with one place that sends the reply, pass the request payload instead of 21
-  arguments, and factor out `require_session_auth`.
+- **Long supervisor handlers.** Medium effort. `handle_restricted_control` and `handle_attach` in
+  `farhelm-supervisor/src/service/handlers.rs` are each several hundred lines. Splitting them into phase functions goes
+  with the held-out `core.rs` carve-out; the reply boilerplate, the 21-argument create call, and the copied credential
+  check that shared this entry were cleaned up in the 2026-09 stack.
 - **Per-agent-kind behaviour smeared across the supervisor.** Medium-high effort. About 114 non-test `AgentKind::`
   sites, a third of them in `core.rs` and `handlers.rs`; kind-specific argv surgery lives in `core.rs`
   (`with_hook_argv_using`, `goose_launch_shape`, `pi_interactive_invocation`); `report_codex_conversation`,
