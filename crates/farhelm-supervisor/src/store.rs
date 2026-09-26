@@ -569,7 +569,7 @@ type OutcomeColumns = (String, Option<i32>, Option<String>, Option<String>);
 /// anywhere.
 ///
 /// `Permanent` rows are TOMBSTONES: they outlive the session they created (see
-/// [`SessionStore::delete_session_settling_reservations`]), because the
+/// [`SessionStore::delete_session_archiving_memberships`]), because the
 /// question a replay asks — "did this intent already happen?" — still has
 /// an answer after the session is gone, and the honest answer is "yes, and
 /// it was deleted", never a fresh duplicate.
@@ -3287,6 +3287,30 @@ impl SessionStore {
     /// Any row error rolls the WHOLE transaction back: the session row is
     /// retained (partial deletion is the accepted contract) and a retry
     /// re-decides everything.
+    ///
+    /// ## Reservation settlement
+    ///
+    /// Permanent interactive reservations are settled as `Created` in the
+    /// same transaction as row removal: their keys remain tombstones. A
+    /// session-lifetime spawn reservation is deleted instead, because its
+    /// key is promised only while this child exists and becomes reusable at
+    /// the same commit that removes the child.
+    ///
+    /// The settlement direction is `Created`, and it is a statement of
+    /// fact rather than a courtesy: a session cannot be deleted without
+    /// having existed, so a reservation still claiming to be in flight for
+    /// it was merely never told its launch had succeeded. Recording that
+    /// here is what keeps the tombstone honest — a later replay finds
+    /// `Created` with no session behind it and reports the gone-error,
+    /// where leaving the row `Pending` would instead tell the retry "the
+    /// crashed attempt never launched" and produce exactly the duplicate
+    /// this mechanism exists to exclude. The permanent reservation row is
+    /// deliberately kept; see [`Reservation`]'s docs on tombstones. Plain
+    /// [`SessionStore::delete_session`] settles in the OPPOSITE direction
+    /// (`Failed`) because it is ALSO the create path's rollback (`service`'s
+    /// `abandon_launching_record`), where the launch provably did not happen
+    /// and settling its reservation `Created` would be a lie.
+    ///
     /// Returns only checkout IDs whose last membership and ownership record
     /// were settled by this commit. After process teardown, the caller may
     /// remove their private preparation files; a failed transaction returns
@@ -3303,19 +3327,7 @@ impl SessionStore {
                     let tx = conn
                         .transaction()
                         .context("beginning the session delete transaction")?;
-                    tx.execute(
-                        "DELETE FROM create_reservations \
-                 WHERE session_id = ?1 AND dedup_scope = 'session_lifetime'",
-                        rusqlite::params![id],
-                    )
-                    .context("pruning the deleted spawn's bounded reservation")?;
-                    tx.execute(
-                        "UPDATE create_reservations SET state = 'created' \
-                 WHERE session_id = ?1 AND state = 'pending' \
-                 AND dedup_scope = 'permanent'",
-                        rusqlite::params![id],
-                    )
-                    .context("settling the deleted interactive session's reservations")?;
+                    settle_create_reservations_for_delete(&tx, &id)?;
                     let membership_ids: Vec<String> = {
                         let mut stmt = tx
                     .prepare(
@@ -4349,30 +4361,17 @@ impl SessionStore {
             .await
     }
 
-    /// [`SessionStore::delete_session`] for the user-visible DELETE path.
+    /// Test fixture: the reservation settlement of the real delete path,
+    /// [`SessionStore::delete_session_archiving_memberships`] (the same
+    /// [`settle_create_reservations_for_delete`]), without its working-copy
+    /// membership retirement.
     ///
-    /// Permanent interactive reservations are settled as `Created` in the
-    /// same transaction as row removal: their keys remain tombstones. A
-    /// session-lifetime spawn reservation is deleted instead, because its
-    /// key is promised only while this child exists and becomes reusable at
-    /// the same commit that removes the child.
-    ///
-    /// The settlement direction is `Created`, and it is a statement of
-    /// fact rather than a courtesy: a session cannot be deleted without
-    /// having existed, so a reservation still claiming to be in flight for
-    /// it was merely never told its launch had succeeded. Recording that
-    /// here is what keeps the tombstone honest — a later replay finds
-    /// `Created` with no session behind it and reports the gone-error,
-    /// where leaving the row `Pending` would instead tell the retry "the
-    /// crashed attempt never launched" and produce exactly the duplicate
-    /// this mechanism exists to exclude.
-    ///
-    /// The permanent reservation row is deliberately kept; see
-    /// [`Reservation`]'s docs on tombstones. This is a separate method from plain
-    /// [`SessionStore::delete_session`] because that one is ALSO the create
-    /// path's rollback (`service`'s `abandon_launching_record`), where the
-    /// launch provably did not happen and settling its reservation
-    /// `Created` would be a lie in the opposite direction.
+    /// Kept because a large body of existing tests model "the row is gone"
+    /// with it. Production never calls it: the user-visible DELETE goes
+    /// through `delete_session_archiving_memberships` in teardown. Compiled
+    /// only for tests and the `test-seams` feature so it cannot silently
+    /// become a second production path.
+    #[cfg(any(test, feature = "test-seams"))]
     pub async fn delete_session_settling_reservations(&self, id: &str) -> anyhow::Result<()> {
         let id = id.to_string();
         self.conn
@@ -4382,19 +4381,7 @@ impl SessionStore {
                     let tx = conn
                         .transaction()
                         .context("beginning the session delete transaction")?;
-                    tx.execute(
-                        "DELETE FROM create_reservations \
-                 WHERE session_id = ?1 AND dedup_scope = 'session_lifetime'",
-                        rusqlite::params![id],
-                    )
-                    .context("pruning the deleted spawn's bounded reservation")?;
-                    tx.execute(
-                        "UPDATE create_reservations SET state = 'created' \
-                 WHERE session_id = ?1 AND state = 'pending' \
-                 AND dedup_scope = 'permanent'",
-                        rusqlite::params![id],
-                    )
-                    .context("settling the deleted interactive session's reservations")?;
+                    settle_create_reservations_for_delete(&tx, &id)?;
                     tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
                         .context("deleting session row")?;
                     tx.commit().context("committing the session delete")?;
@@ -5480,6 +5467,35 @@ impl SessionStore {
             )
             .await
     }
+}
+
+/// The create-reservation half of deleting a session, shared by the real
+/// delete path ([`SessionStore::delete_session_archiving_memberships`], whose
+/// "Reservation settlement" docs carry the rationale) and its test fixture
+/// (`SessionStore::delete_session_settling_reservations`, test-only), so the
+/// fixture cannot drift from what production deletes do.
+///
+/// Prunes a session-lifetime (spawn) reservation, whose key becomes reusable
+/// with the child, and settles a still-pending permanent reservation as
+/// `created` so it stays a tombstone. Runs inside the caller's transaction.
+fn settle_create_reservations_for_delete(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+) -> anyhow::Result<()> {
+    tx.execute(
+        "DELETE FROM create_reservations \
+         WHERE session_id = ?1 AND dedup_scope = 'session_lifetime'",
+        rusqlite::params![id],
+    )
+    .context("pruning the deleted spawn's bounded reservation")?;
+    tx.execute(
+        "UPDATE create_reservations SET state = 'created' \
+         WHERE session_id = ?1 AND state = 'pending' \
+         AND dedup_scope = 'permanent'",
+        rusqlite::params![id],
+    )
+    .context("settling the deleted interactive session's reservations")?;
+    Ok(())
 }
 
 #[cfg(test)]
