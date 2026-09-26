@@ -599,9 +599,9 @@ fn agent_badge(session: &Session) -> AgentBadge {
 ///
 /// ## Fallback
 ///
-/// A string `shell_words` cannot parse at all (an unbalanced quote, a
-/// trailing unescaped backslash) — which the supervisor will not create,
-/// but a route stub or a future wire change could deliver — renders as the
+/// A string `shell_words` cannot parse at all (an unbalanced quote, the only
+/// thing it refuses) — which the supervisor will not create, but a route
+/// stub or a future wire change could deliver — renders as the
 /// trimmed input with no marker, exactly as an invocation with no
 /// non-whitespace characters at all does. Guessing further than the parser
 /// itself could resolve would be inventing structure for text that has
