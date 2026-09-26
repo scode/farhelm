@@ -1032,6 +1032,12 @@ async fn sample_pass(
     // tick retries the unread file.
     let mut observations = Vec::new();
     let mut sentinel_hits = HashSet::new();
+    // `observe_entry` classifies every pane it is handed, but the filter just
+    // below already skips every foreign owner (recognized or not), so for
+    // the entries that reach it this set cannot change the answer. It is
+    // passed rather than faked so that loosening the filter later cannot
+    // quietly turn every renamed pane into an inferred exit.
+    let known = sup.known_tmux_names().await;
     for entry in &entries {
         let terminal_is_dead_or_absent = entry.terminal.as_ref().is_none_or(|terminal| {
             let Some(state) = states.get(&terminal.pane) else {
@@ -1046,7 +1052,7 @@ async fn sample_pass(
         if !terminal_is_dead_or_absent {
             continue;
         }
-        match observe_entry(sup, entry, &states).await {
+        match observe_entry(sup, entry, &states, &known).await {
             Ok(observed) => {
                 if observed.settled_error {
                     // A prior writer may have crashed between recording
@@ -1766,7 +1772,7 @@ mod tests {
             .get(id)
             .cloned()
             .expect("the session is in the map");
-        session_status(&entry, &states).0
+        session_status(&entry, &states, &Default::default()).0
     }
 
     /// This session's sample cell, cloned out so an assertion never holds
@@ -2651,6 +2657,146 @@ mod tests {
             *entry.run.outcome.lock().expect("outcome mutex"),
             LastOutcome::Running,
             "an unmatched pane must not change the in-memory outcome either"
+        );
+    }
+
+    /// Spec: a list reply leaves a running session whose pane tmux now
+    /// reports under a session name no farhelm session answers to recorded
+    /// as running, and reports its status as unknown.
+    ///
+    /// Why: that shape is what an out-of-band `rename-session` or
+    /// `move-pane` on the private socket leaves, and the pane is then most
+    /// likely still this session's agent. Stop and restart refuse to record
+    /// an exit for it, and the ticker skips it (the test above); the list
+    /// path used to disagree and durably stamp an exit on the next helm
+    /// poll, for an agent that was still running.
+    #[farhelm_testtrace::test]
+    async fn a_list_never_records_an_exit_for_a_pane_renamed_out_of_band() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let pane = spawn_pane(&sup, "renamed-by-hand", "sleep 600").await;
+        install_durable_running_entry(
+            &sup,
+            "renamed",
+            Terminal {
+                tmux_name: "fh-renamed".to_string(),
+                pane,
+            },
+        )
+        .await;
+
+        let reply = super::super::listing::list_all(&sup).await.expect("list");
+        let info = reply
+            .sessions
+            .iter()
+            .find(|info| info.id == "renamed")
+            .expect("the session is listed");
+        assert_eq!(
+            info.status,
+            SessionStatus::Unknown,
+            "a pane farhelm cannot attribute decides neither liveness nor an exit"
+        );
+        assert_eq!(
+            stored_outcome(&sup, "renamed").await,
+            LastOutcome::Running,
+            "the list must not durably record an exit nobody observed"
+        );
+    }
+
+    /// Spec: a list reply still reports a launch sentinel for a session
+    /// whose pane is unattributed, and records the Error.
+    ///
+    /// Why: the sentinel is the shim's report that this launch never
+    /// exec'd, which is evidence about the launch rather than about any
+    /// pane. Declining to infer anything from a renamed pane must not also
+    /// bury a failed launch that was renamed before anyone looked.
+    #[farhelm_testtrace::test]
+    async fn a_list_still_reports_the_launch_sentinel_of_an_unattributed_pane() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let pane = spawn_pane(&sup, "renamed-by-hand", "sleep 600").await;
+        install_durable_running_entry(
+            &sup,
+            "failed",
+            Terminal {
+                tmux_name: "fh-failed".to_string(),
+                pane,
+            },
+        )
+        .await;
+        let spec = crate::launch::spec_path_for_launch(state.path(), "failed", 0);
+        std::fs::create_dir_all(spec.parent().expect("spec directory")).unwrap();
+        std::fs::write(
+            crate::launch::status_path_for_spec(&spec),
+            b"exec_failed argv0=agent errno=2",
+        )
+        .unwrap();
+
+        let reply = super::super::listing::list_all(&sup).await.expect("list");
+        let info = reply
+            .sessions
+            .iter()
+            .find(|info| info.id == "failed")
+            .expect("the session is listed");
+        assert!(
+            matches!(info.status, SessionStatus::Error { .. }),
+            "the sentinel outranks the unattributed pane, got {:?}",
+            info.status
+        );
+        assert!(matches!(
+            stored_outcome(&sup, "failed").await,
+            LastOutcome::Error { .. }
+        ));
+    }
+
+    /// Spec: a list reply still reads a recorded pane id that tmux now
+    /// reports under ANOTHER farhelm session's name as this session's pane
+    /// having gone, and records the exit.
+    ///
+    /// Why: pane ids restart at `%0` on a fresh tmux server, so after a
+    /// server death a stale row's id can be handed to one of our newer
+    /// sessions. Treating every foreign owner as unattributable (the fix the
+    /// test above pins) must not also freeze those rows as running forever.
+    #[farhelm_testtrace::test]
+    async fn a_list_reads_a_pane_recycled_into_another_farhelm_session_as_gone() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let pane = spawn_pane(&sup, "fh-newer", "sleep 600").await;
+        install_entry(
+            &sup,
+            "newer",
+            Terminal {
+                tmux_name: "fh-newer".to_string(),
+                pane: pane.clone(),
+            },
+        )
+        .await;
+        install_durable_running_entry(
+            &sup,
+            "stale",
+            Terminal {
+                tmux_name: "fh-stale".to_string(),
+                pane,
+            },
+        )
+        .await;
+
+        let reply = super::super::listing::list_all(&sup).await.expect("list");
+        let info = reply
+            .sessions
+            .iter()
+            .find(|info| info.id == "stale")
+            .expect("the session is listed");
+        assert_eq!(info.status, SessionStatus::Exited { exit_code: None });
+        assert!(
+            matches!(
+                stored_outcome(&sup, "stale").await,
+                LastOutcome::Exited {
+                    exit_code: None,
+                    ..
+                }
+            ),
+            "a recycled pane id is evidence the recorded pane is gone"
         );
     }
 
@@ -4399,7 +4545,7 @@ mod tests {
             }
             let states = sup.tmux.pane_states().await.expect("probe");
             assert_eq!(
-                session_status(&entry, &states).0,
+                session_status(&entry, &states, &Default::default()).0,
                 SessionStatus::Waiting,
                 "premise ({read}): the screen on file is an unanswered prompt"
             );
@@ -4410,7 +4556,7 @@ mod tests {
             sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
 
             assert_ne!(
-                session_status(&entry, &states).0,
+                session_status(&entry, &states, &Default::default()).0,
                 SessionStatus::Waiting,
                 "a {read} failure must invalidate the screen it can no longer confirm"
             );
@@ -4449,7 +4595,7 @@ mod tests {
             );
             drop(activity);
             assert_eq!(
-                session_status(&entry, &states).0,
+                session_status(&entry, &states, &Default::default()).0,
                 SessionStatus::Running,
                 "so the session classifies from what is on the pane NOW, not from the dialog it \
                  was showing before the failures ({read})"
