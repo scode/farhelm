@@ -2135,12 +2135,13 @@ beside its installation snapshot from AppBody, independently of the filtered sid
 - Host management commits durably first and converges the live actors after, so each verb states how it fails closed:
   add rolls its row back if no actor could be started (a registered host with no actor is invisible and un-dialed, while
   its destination is taken); retarget converges instead of rolling back, because the durable write is what the user
-  asked for and the actor can be told to reconnect through a path that cannot fail; remove tears the actor down by the
-  id it just committed, needing no registry read that could fail. Retry reports whether it found a host, and a RETIRED
-  host's retry respawns its actor from the current row — nothing else ever restarts one, so without that an actor that
-  panicked left its host permanently dark. Adopting names the identity the user was shown and is refused if the host has
-  since started reporting a different one, because a re-probe between the decision and the request would otherwise adopt
-  something nobody approved.
+  asked for and the actor can be told to reconnect (not guaranteed: with an unreadable registry, reviving a dead actor
+  fails and is reported, and a live actor keeps its old row); remove tears the actor down by the id it just committed,
+  needing no registry read that could fail. Retry reports whether it found a host, and a RETIRED host's retry respawns
+  its actor from the current row — nothing else ever restarts one, so without that an actor that panicked left its host
+  permanently dark. Adopting names the identity the user was shown and is refused if the host has since started
+  reporting a different one, because a re-probe between the decision and the request would otherwise adopt something
+  nobody approved.
 - `--ensure-hosts <file>` is a JSON5 floor under the registry, applied through the same registration path as a REST add
   before serving begins and never consulted again. It adds what is missing and touches nothing else: an already
   registered destination keeps its fields and its learned identity, because helm.db is the durable authority and a
