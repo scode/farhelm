@@ -20569,7 +20569,7 @@ exit 0
             .expect("insert");
         let checkout_id = uuid::Uuid::new_v4().to_string();
         let identity = {
-            let conn = store.conn.lock().unwrap();
+            let conn = store.conn.lock();
             crate::working_copies::record_planned(
                 &conn,
                 &crate::working_copies::PlannedWorkingCopy {
@@ -21364,7 +21364,7 @@ exit 0
         };
         let store = SessionStore::open(&db, true).await.unwrap();
         {
-            let conn = store.conn.lock().unwrap();
+            let conn = store.conn.lock();
             assert_eq!(historical_rows(&conn, &columns), before);
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
@@ -27895,12 +27895,11 @@ exit 0
                         sup.store
                             .conn
                             .lock()
-                            .unwrap()
                             .execute("DELETE FROM working_copies WHERE id = ?1", [&plan.id])
                             .unwrap();
                     }
                     "missing-provenance" => {
-                        let conn = sup.store.conn.lock().unwrap();
+                        let conn = sup.store.conn.lock();
                         conn.execute("DELETE FROM working_copies WHERE id = ?1", [&plan.id])
                             .unwrap();
                         conn.execute(
@@ -27999,7 +27998,6 @@ exit 0
                     sup.store
                         .conn
                         .lock()
-                        .unwrap()
                         .execute(
                             "DELETE FROM sessions WHERE id = ?1",
                             [&reservation.session_id],

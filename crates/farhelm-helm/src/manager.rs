@@ -5978,7 +5978,7 @@ mod tests {
         let mut forgetting =
             std::pin::pin!(fixture.manager.forget_session(&claim, "deleted-session"));
         {
-            let _commit_gate = connection.lock().expect("store mutex");
+            let _commit_gate = connection.lock();
             let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
             assert!(
                 forgetting.as_mut().poll(&mut cx).is_pending(),
@@ -6080,7 +6080,7 @@ mod tests {
         let connection = fixture.store.connection_for_test();
         let mut adoption = std::pin::pin!(fixture.manager.adopt(host, "identity-reinstalled"));
         {
-            let _commit_gate = connection.lock().expect("store mutex");
+            let _commit_gate = connection.lock();
             let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
             assert!(
                 adoption.as_mut().poll(&mut cx).is_pending(),
@@ -6135,7 +6135,6 @@ mod tests {
         assert!(cached_ids(&fixture.store, host).await.is_empty());
         connection
             .lock()
-            .expect("store mutex")
             .execute_batch("ALTER TABLE hosts RENAME COLUMN kind TO unavailable_kind")
             .unwrap();
         assert!(
@@ -6164,7 +6163,6 @@ mod tests {
         // retirement with a real connection using the adopted identity.
         connection
             .lock()
-            .expect("store mutex")
             .execute_batch("ALTER TABLE hosts RENAME COLUMN unavailable_kind TO kind")
             .unwrap();
         fixture

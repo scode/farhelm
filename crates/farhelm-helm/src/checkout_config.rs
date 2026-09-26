@@ -157,7 +157,7 @@ impl HelmStore {
     ) -> anyhow::Result<CheckoutConfigSnapshot> {
         let conn = self.conn();
         tokio::task::spawn_blocking(move || -> anyhow::Result<CheckoutConfigSnapshot> {
-            let conn = conn.lock().expect("helm db mutex poisoned");
+            let conn = conn.lock();
             read_snapshot(&conn, host)
         })
         .await
@@ -240,7 +240,7 @@ impl HelmStore {
         let conn = self.conn();
         let value = value.map(str::to_string);
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let mut conn = conn.lock();
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .context("beginning checkout config transaction")?;
@@ -709,7 +709,6 @@ mod tests {
         writer
             .conn()
             .lock()
-            .unwrap()
             .execute_batch("ALTER TABLE checkout_config RENAME TO checkout_config_unavailable")
             .unwrap();
         assert!(
@@ -721,7 +720,6 @@ mod tests {
         writer
             .conn()
             .lock()
-            .unwrap()
             .execute_batch("ALTER TABLE checkout_config_unavailable RENAME TO checkout_config")
             .unwrap();
         assert!(
@@ -1170,7 +1168,6 @@ mod tests {
         // the oracle below depends on the blocked COMMIT failing FAST.
         writer_conn
             .lock()
-            .unwrap()
             .busy_timeout(std::time::Duration::from_millis(200))
             .expect("set the racing writer's busy timeout");
         // The oracle depends on readers BLOCKING commits, which holds in
@@ -1178,7 +1175,6 @@ mod tests {
         // snapshots while the writer commits. Pin that premise.
         let journal_mode: String = writer_conn
             .lock()
-            .unwrap()
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("read journal mode");
         assert_eq!(
@@ -1199,7 +1195,7 @@ mod tests {
         let reader = HelmStore::open(&path).await.unwrap();
         {
             let conn = reader.conn();
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock();
             let interposed = interposed.clone();
             let commit_attempted = commit_attempted.clone();
             let commit_landed = commit_landed.clone();
@@ -1218,7 +1214,7 @@ mod tests {
                     // after both UPDATEs succeeded, so a later DatabaseBusy
                     // is attributable to the COMMIT itself.
                     (|| {
-                        let mut conn = writer_conn.lock().unwrap();
+                        let mut conn = writer_conn.lock();
                         let tx = match conn.transaction() {
                             Ok(tx) => tx,
                             Err(error) => {
@@ -1323,7 +1319,7 @@ mod tests {
         let store = HelmStore::open(path).await.expect("open to rewind");
         let conn = store.conn();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock();
             conn.execute_batch(
                 "DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
@@ -1503,7 +1499,7 @@ mod tests {
         let identity = "migration-identity";
         {
             let conn = store.conn();
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock();
             conn.execute(
                 "UPDATE hosts SET host_identity = ?2 WHERE id = ?1",
                 rusqlite::params![host, identity],
@@ -1552,7 +1548,7 @@ mod tests {
             // JSON at that historical shape while retaining every field v26
             // did persist, then prove the decoded content remains identical.
             let conn = store.conn();
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock();
             conn.execute(
                 "UPDATE session_cache
                  SET info_json = json_remove(info_json, '$.github_repo', '$.working_copy')

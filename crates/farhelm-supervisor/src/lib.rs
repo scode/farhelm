@@ -40,6 +40,8 @@
 
 pub mod agent_kind;
 pub mod attachments;
+/// The SQLite plumbing the supervisor's and the helm's stores share.
+pub mod db;
 pub mod files;
 pub mod launch;
 mod pi_extension;
