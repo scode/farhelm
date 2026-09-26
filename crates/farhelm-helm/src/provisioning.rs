@@ -3267,6 +3267,10 @@ mod tests {
     /// Discovery is still allowed to observe a local supervisor after setup.
     /// What it must not do is turn an adopt-or-fix conflict into an internal
     /// failure, because the panel then loses the state it needs to recover.
+    /// The refusal must name the stored identity as what the host *is* and
+    /// the reported one as what was *expected*, matching the variant's
+    /// contract and the ssh-discovery producer in `HelmStore`; this path used
+    /// to invert them.
     #[farhelm_testtrace::test]
     async fn local_probe_identity_conflict_is_reported_without_replacing_the_identity() {
         let mut harness = harness().await;
@@ -3313,6 +3317,16 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            body.contains("identity is Some(\"recorded-identity\")"),
+            "the recorded identity must be the one the host is on record as: {body}"
+        );
+        assert!(
+            body.contains("not the expected \"test-identity\""),
+            "the reported identity must be the expected one: {body}"
+        );
         let after = harness
             .store
             .list_hosts()
@@ -3322,6 +3336,64 @@ mod tests {
             .find(|row| row.id == local)
             .expect("the refused discovery must retain the local row");
         assert_eq!(after.host_identity.as_deref(), Some("recorded-identity"));
+    }
+
+    /// UPDATE planning refuses a host whose supervisor now reports a different
+    /// identity, naming the stored identity as what the host *is* and the
+    /// reported one as what was *expected*.
+    ///
+    /// Why: this refusal and the local-probe one above are the two places
+    /// provisioning builds the identity-mismatch error, and both used to put
+    /// the identities in each other's slots, telling an operator deciding
+    /// whether to adopt the new identity which one was on record backwards.
+    #[farhelm_testtrace::test]
+    async fn update_planning_names_the_recorded_identity_as_the_hosts() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let host = harness
+            .store
+            .add_ssh_host("renamed.example", None, None)
+            .await
+            .unwrap();
+        let row = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!(
+            harness
+                .store
+                .record_first_contact(host, &DialedAs::of(&row), "recorded-identity")
+                .await
+                .unwrap(),
+            crate::store::FirstContactOutcome::Recorded,
+            "the fixture must store its original identity before planning"
+        );
+        harness.manager.sync_registry().await.unwrap();
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::Supervisor {
+            build_version: "planned".to_string(),
+            host_identity: Some("reported-identity".to_string()),
+            dial_farhelm: root.path().join("lib/farhelm"),
+            dial_state_dir: Some(root.path().join("state")),
+        }));
+        let service = service(&harness, backend, root.path());
+        let error = service
+            .plan_update(host)
+            .await
+            .expect_err("a changed identity must refuse the plan");
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("identity is Some(\"recorded-identity\")"),
+            "the recorded identity must be the one the host is on record as: {text}"
+        );
+        assert!(
+            text.contains("not the expected \"reported-identity\""),
+            "the reported identity must be the expected one: {text}"
+        );
     }
 
     /// UPDATE on the local row is refused for EVERY local row, with no
