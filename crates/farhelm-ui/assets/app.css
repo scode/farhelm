@@ -1150,8 +1150,8 @@ samp {
      stared at all day: a fade long enough to notice becomes a tic, and
      a blanket `transition: all` would animate layout properties nobody
      asked to move. Hover tints on rows and buttons are the whole budget
-     — this sheet's ONLY `@keyframes` is the running dot's pulse (see
-     `.status-dot`), and controls gain none here. */
+     — this sheet's ONLY `@keyframes` is the running status dot's pulse (see
+     `.status-dot` and `.host-update-dot`), and controls gain none here. */
   transition: background-color 100ms;
 }
 
@@ -2968,6 +2968,66 @@ samp {
    without borrowing the red refusal styling used by `needs-attention`. */
 .host-status.old-version {
   color: var(--warn);
+}
+
+/* An update's inline status is far wider than any phase label (e.g.
+   `updating: 0/9 create-directories 0:00`, about 250px at this size), and
+   the 340px sidebar cannot fit it beside even `.host-name`'s 4em floor and
+   the "⋯" toggle. Unlike the phase labels, this status group may shrink;
+   `min-width: 0` is what lets a flex item go below its content width. The
+   row stays `nowrap` (see `.host-row-main` for why wrapping is ruled out),
+   so the width has to come from inside the status, and the step name below
+   is the one part allowed to give it up. */
+.host-status.updating {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Inline host updates reuse the running status pulse: the progress is active,
+   while the dot stays small enough to leave the step and elapsed text legible. */
+.host-update-dot {
+  animation: farhelm-status-pulse 2s ease-in-out infinite;
+  background: var(--warn);
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 6px;
+  height: 6px;
+  vertical-align: 1px;
+}
+
+/* Declared AFTER the animation above, and the order is load-bearing: both
+   selectors have the same specificity, so an override placed earlier in the
+   sheet (as the status badge's is) would lose to this dot's own animation
+   and keep it pulsing for someone who asked for less motion. The status is
+   still readable without the pulse, since the words say it is updating. */
+@media (prefers-reduced-motion: reduce) {
+  .host-update-dot {
+    animation: none;
+  }
+}
+
+.host-update-pending,
+.host-update-running {
+  align-items: center;
+  color: var(--warn);
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* The count and the clock are what the status is for, so they never shrink;
+   the step name ellipsizes instead, keeping its full text in `title`. */
+.host-update-count,
+.host-update-elapsed {
+  flex: none;
+}
+
+.host-update-step {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .host-status.connecting {

@@ -10,7 +10,7 @@
 // by every other spec.
 
 import { expect, test } from "./helpers/evidence";
-import { Page, APIRequestContext, TestInfo } from "@playwright/test";
+import { Page, APIRequestContext, Locator, TestInfo } from "@playwright/test";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -836,10 +836,10 @@ test("a failed local ADD keeps its rerun action in the local setup state", async
 // Remote updates submit automatically: the Update click is the authorization,
 // so these cases never wait for `.provisioning-confirm` — they count the
 // bodyless planning POST separately from the token-bearing submission POST
-// and prove no replay. Disclosure cases start with global details UNCHECKED
-// (never `openHostsPanel()`) and assert it stays unchecked: only the chosen
-// row expands, through automatic per-host disclosure, and only authoritative
-// success collapses it.
+// and prove no replay. These cases start with global details UNCHECKED (never
+// `openHostsPanel()`) and assert it stays unchecked: healthy updates show
+// inline progress, while failures and uncertain outcomes open their own row.
+// Authoritative success returns the status spot to its ordinary label.
 
 /**
  * Hold the page operation lock through an ADD confirm, without touching details.
@@ -883,6 +883,42 @@ async function holdLockWithAdd(
   return { release };
 }
 
+/** The inline status of a running update: `updating: N/M step m:ss`. */
+const RUNNING_PROGRESS = /updating: \d+\/\d+ \S+ \d+:\d{2}/;
+
+/**
+ * The row's pending `updating…` status at one exact lifecycle stage.
+ *
+ * Updates keep their row folded, so the planning, waiting-for-claim, and
+ * submitting indicators inside the details never render. Every stage shows
+ * the same `updating…` text; `data-update-phase` is the narrow handle that
+ * tells a held boundary apart, and a response arriving would not prove the
+ * UI had processed it.
+ */
+function pendingUpdate(
+  row: Locator,
+  phase: "planning" | "waiting" | "submitting" | "awaiting-progress",
+): Locator {
+  return row.locator(`.host-update-pending[data-update-phase="${phase}"]`);
+}
+
+/**
+ * Wait for a settled update to hand the status spot back to the ordinary label.
+ *
+ * A backend completion barrier proves only that the run ended, and a folded
+ * row looks the same while an update runs as after it ends, so settlement is
+ * observed here: both inline forms disappear and the plain phase label
+ * returns. The provisioning hosts dial `.invalid` destinations and never
+ * connect, so a plain label is always present at rest; its text is not
+ * compared because reprobing can move it between phases.
+ */
+async function expectOrdinaryStatus(row: Locator): Promise<void> {
+  await expect(row.locator(".host-update-pending")).toHaveCount(0);
+  await expect(row.locator(".host-update-running")).toHaveCount(0);
+  await expect(row.locator(".host-status")).not.toHaveClass(/\bupdating\b/);
+  await expect(row.locator(".host-status > .host-status-label")).toHaveClass("host-status-label");
+}
+
 /** Classify update-route POSTs into bodyless plans and token submissions. */
 function countUpdateRequests(page: Page, host: number): { plans: number; confirms: number } {
   const counts = { plans: 0, confirms: 0 };
@@ -899,7 +935,17 @@ function countUpdateRequests(page: Page, host: number): { plans: number; confirm
   return counts;
 }
 
-test("single Update plans and submits once with no confirmation, expanding only its row", async ({
+/**
+ * A healthy update is followed from the host row's status spot alone.
+ *
+ * Why this matters: the row used to open for every update, and the user asked
+ * for it to stay compact. This pins the whole folded path: one plan and one
+ * submission with no confirmation, `updating: N/M step m:ss` inline with a
+ * pulse that stands down under reduced motion, no trace line, the menu toggle
+ * still inside the sidebar with the longest real step name, and success
+ * returning the ordinary status without ever touching the details checkbox.
+ */
+test("single Update shows inline progress without opening its row", async ({
   page,
   request,
 }, testInfo) => {
@@ -931,19 +977,48 @@ test("single Update plans and submits once with no confirmation, expanding only 
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(toggle).toBeFocused();
   // The duplicate click coalesces into the accepted intent: one planning
-  // request, no confirmation rendered, and the row expands on its own.
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
+  // request, no confirmation, and live progress stays in the status spot.
+  await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+  // The inline status replaces the folded row's one-line run trace rather
+  // than sitting above a second line that repeats it.
+  await expect(row.locator(".provisioning-trace")).toHaveCount(0);
+
+  // The held step is `create-directories`, which ties for the longest real
+  // executor step name. It must not push the menu toggle past the sidebar's
+  // visible right edge (the sidebar clips horizontal overflow): the step
+  // name truncates, while the count and the clock stay whole, left of the
+  // toggle.
+  await expect(row.locator(".host-update-step")).toHaveAttribute("title", "create-directories");
+  const geometry = await row.evaluate((node) => {
+    const sidebar = node.closest(".app-sidebar")!;
+    const sidebarBox = sidebar.getBoundingClientRect();
+    const toggleBox = node.querySelector(".host-row-menu")!.getBoundingClientRect();
+    const clockBox = node.querySelector(".host-update-elapsed")!.getBoundingClientRect();
+    return {
+      visibleRight: sidebarBox.left + sidebar.clientLeft + sidebar.clientWidth,
+      toggleLeft: toggleBox.left,
+      toggleRight: toggleBox.right,
+      clockRight: clockBox.right,
+    };
+  });
+  expect(geometry.toggleRight).toBeLessThanOrEqual(geometry.visibleRight);
+  expect(geometry.clockRight).toBeLessThanOrEqual(geometry.toggleLeft);
+
+  const progressDot = row.locator(".host-update-dot");
+  expect(await progressDot.evaluate((dot) => getComputedStyle(dot).animationName)).toBe(
+    "farhelm-status-pulse",
   );
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await progressDot.evaluate((dot) => getComputedStyle(dot).animationName)).toBe("none");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await expect(row.locator(".provisioning-plan")).toHaveCount(0);
   await expect(row.locator(".provisioning-confirm")).toHaveCount(0);
-  await expect(row.locator(".host-detail")).toBeVisible();
+  await expect(row.locator(".host-detail")).toHaveCount(0);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(1);
 
-  // Only the chosen host expands; the bystander keeps no detail content.
+  // Only the chosen host shows inline progress; the bystander stays ordinary.
   await expect(idle.locator(".host-detail")).toHaveCount(0);
   await expect(idle.locator(".provisioning-run")).toHaveCount(0);
 
@@ -962,10 +1037,11 @@ test("single Update plans and submits once with no confirmation, expanding only 
   await expect(row.locator(".host-edit")).toBeDisabled();
   await page.keyboard.press("Escape");
 
-  // Authoritative success collapses the automatic disclosure; the checkbox
-  // the user never touched stays unchecked, and nothing replays.
+  // Authoritative success hands the status spot back to the ordinary label;
+  // the row stays folded, the checkbox stays untouched, and nothing replays.
   await configureBackend();
   await waitForProgress(request, accepted.host_id, "completed");
+  await expectOrdinaryStatus(row);
   await expect(row.locator(".host-detail")).toHaveCount(0);
   await expect(row.locator(".provisioning-trace")).toHaveCount(0);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -978,9 +1054,9 @@ test("single Update plans and submits once with no confirmation, expanding only 
  * shape. A fixed row menu must close at every boundary, including
  * running-to-failed where the traced host set itself is unchanged.
  *
- * The retained run is an ADD: observed UPDATE runs auto-expand their row
- * instead of tracing, so only a setup run keeps this geometry coverage
- * about the collapsed shape.
+ * The retained run is an ADD: a live UPDATE run shows its status inline in
+ * the host row and draws no trace while it runs, so a setup run is what
+ * exercises every trace transition here.
  */
 test("collapsed trace transitions invalidate fixed-surface geometry", async ({
   page,
@@ -1057,7 +1133,7 @@ test("a retarget and a foreign run each invalidate an unsubmitted update", async
   // row that no longer matches, so the intent dies and nothing submits.
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
-  await expect(row.locator(".provisioning-planning")).toBeVisible();
+  await expect(pendingUpdate(row, "planning")).toBeVisible();
   const changed = `${remote}-moved`;
   const response = await request.post(`/api/hosts/${accepted.host_id}/destination`, {
     data: { ssh: changed },
@@ -1065,9 +1141,9 @@ test("a retarget and a foreign run each invalidate an unsubmitted update", async
   expect(response.ok(), await responseBody(response)).toBe(true);
   await notifyFeed(feed, 2);
   // The refresh delivering the new binding invalidates the intent while
-  // planning is still held: the indicator going away proves the watcher
-  // ran, before the stale reply is even released.
-  await expect(row.locator(".provisioning-planning")).toHaveCount(0);
+  // planning is still held: the pending status going away proves the
+  // watcher ran, before the stale reply is even released.
+  await expect(row.locator(".host-update-pending")).toHaveCount(0);
   holdPlanning = false;
   releasePlanning();
   await expect(row.locator(".host-detail")).toHaveCount(0);
@@ -1094,7 +1170,7 @@ test("a retarget and a foreign run each invalidate an unsubmitted update", async
   });
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
-  await expect(row.locator(".provisioning-planning")).toBeVisible();
+  await expect(pendingUpdate(row, "planning")).toBeVisible();
   const competingPlan = await request.post(`/api/hosts/${accepted.host_id}/update`);
   expect(competingPlan.ok(), await responseBody(competingPlan)).toBe(true);
   const competing = (await competingPlan.json()) as { probe_id: string };
@@ -1191,7 +1267,10 @@ test("a Busy-refused UPDATE consumes its plan and leaves unrelated controls usab
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
-  await expect(row.locator(".provisioning-waiting")).toBeVisible();
+  // The plan is minted and stored, waiting behind the held lock: the
+  // submission below is this exact stale plan, not a fresh one.
+  await expect(pendingUpdate(row, "waiting")).toBeVisible();
+  await expect(row.locator(".host-detail")).toHaveCount(0);
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(0);
 
@@ -1552,13 +1631,11 @@ test("a progress read failure during an update recovers on retry demand alone", 
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
+  await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+  await expect(row.locator(".host-detail")).toHaveCount(0);
 
-  // The failure keeps the tracked run's expansion and adds its own
-  // diagnostic; the checkbox stays out of it.
+  // A failed read opens the row to expose its diagnostic; the checkbox stays
+  // out of that disclosure.
   fail = true;
   await notifyFeed(feed, 2);
   await expect(row.locator(".provisioning-read-error")).toContainText(
@@ -1571,11 +1648,8 @@ test("a progress read failure during an update recovers on retry demand alone", 
   // followed exactly where it was.
   fail = false;
   await expect(row.locator(".provisioning-read-error")).toHaveCount(0);
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
-  await expect(row.locator(".host-detail")).toBeVisible();
+  await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+  await expect(row.locator(".host-detail")).toHaveCount(0);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
 });
 
@@ -1721,10 +1795,8 @@ test("failed UPDATE rerun submits automatically through the host update route", 
   await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(toggle).toBeFocused();
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
+  await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+  await expect(row.locator(".host-detail")).toHaveCount(0);
   // Automatic, like a fresh update: no plan rendered, no confirmation.
   await expect(row.locator(".provisioning-plan")).toHaveCount(0);
   await expect(row.locator(".provisioning-confirm")).toHaveCount(0);
@@ -1787,14 +1859,10 @@ test("update all dispatches remote hosts and keeps their results independent", a
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
-  await expect(rowOne.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
-  await expect(rowTwo.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
+  await expect(rowOne.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+  await expect(rowTwo.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+  await expect(rowOne.locator(".host-detail")).toHaveCount(0);
+  await expect(rowTwo.locator(".host-detail")).toHaveCount(0);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
 
   // The inherited remote can finish while the held test rows remain busy;
@@ -1807,14 +1875,12 @@ test("update all dispatches remote hosts and keeps their results independent", a
 
   await configureBackend({ targets: { [target(second)]: { hold_actions: true } } });
   await waitForProgress(request, one.host_id, "completed");
-  // The finished row collapses on its own authoritative success while the
-  // still-running row stays expanded: per-host disclosure, not a page mode.
+  // Success returns the first row's ordinary status; the second keeps
+  // showing progress without opening its details.
+  await expectOrdinaryStatus(rowOne);
   await expect(rowOne.locator(".host-detail")).toHaveCount(0);
-  await expect(rowTwo.locator(".host-detail")).toBeVisible();
-  await expect(rowTwo.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
+  await expect(rowTwo.locator(".host-detail")).toHaveCount(0);
+  await expect(rowTwo.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   expect(updatesOne.plans).toBe(1);
   expect(updatesOne.confirms).toBe(1);
@@ -1894,8 +1960,10 @@ test("a plan held under a held OpLock submits exactly once on release", async ({
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
   // Planning ignores the held lock; the minted plan then waits for the
-  // claim visibly, sending nothing until the token frees.
-  await expect(row.locator(".provisioning-waiting")).toBeVisible();
+  // claim, sending nothing until the token frees. The folded row reports
+  // that stage through its pending status.
+  await expect(pendingUpdate(row, "waiting")).toBeVisible();
+  await expect(row.locator(".host-detail")).toHaveCount(0);
   await expect(row.locator(".provisioning-plan")).toHaveCount(0);
   await expect(row.locator(".provisioning-confirm")).toHaveCount(0);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -1908,11 +1976,9 @@ test("a plan held under a held OpLock submits exactly once on release", async ({
   await page.keyboard.press("Escape");
 
   lock.release();
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
-  await expect(row.locator(".provisioning-waiting")).toHaveCount(0);
+  await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+  await expect(row.locator(".host-detail")).toHaveCount(0);
+  await expect(row.locator(".host-update-pending")).toHaveCount(0);
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(1);
 });
@@ -1938,14 +2004,14 @@ test("a retarget and a removal before the claim each submit nothing", async ({
   // intent dies and the released lock submits nothing.
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
-  await expect(row.locator(".provisioning-waiting")).toBeVisible();
+  await expect(pendingUpdate(row, "waiting")).toBeVisible();
   const changed = `${remote}-moved`;
   const response = await request.post(`/api/hosts/${accepted.host_id}/destination`, {
     data: { ssh: changed },
   });
   expect(response.ok(), await responseBody(response)).toBe(true);
   await notifyFeed(feed, 2);
-  await expect(row.locator(".provisioning-waiting")).toHaveCount(0);
+  await expect(row.locator(".host-update-pending")).toHaveCount(0);
   // The intent is dead while the lock is still held, so the claim is
   // impossible on both sides of the release. Subscribe before resolving:
   // the released confirm's response plus the add-host button re-enabling
@@ -1967,7 +2033,7 @@ test("a retarget and a removal before the claim each submit nothing", async ({
   const holdAgain = await holdLockWithAdd(page, `${lockHost}-again`);
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
-  await expect(row.locator(".provisioning-waiting")).toBeVisible();
+  await expect(pendingUpdate(row, "waiting")).toBeVisible();
   const removed = await request.delete(`/api/hosts/${accepted.host_id}`);
   expect(removed.ok(), await responseBody(removed)).toBe(true);
   await notifyFeed(feed, 3);
@@ -2024,7 +2090,7 @@ test("removal before plan completion submits nothing", async ({
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
-  await expect(row.locator(".provisioning-planning")).toBeVisible();
+  await expect(pendingUpdate(row, "planning")).toBeVisible();
   // The held reply is an already-obtained successful plan before the row is
   // removed: the stale-plan premise, not a removal 404.
   await planningReady;
@@ -2118,12 +2184,11 @@ test("a stale Completed around submission settles nothing and replays nothing", 
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
   // A is admitted and held running on the backend while its 202 waits. The
-  // submitting indicator plus the disabled add-host button prove the
-  // submission is in flight and the page lock is held — the premise the
-  // acceptance release below needs. Request counts here prove dispatch,
-  // nothing more.
+  // submitting stage plus the disabled add-host button prove the submission
+  // is in flight and the page lock is held — the premise the acceptance
+  // release below needs. Request counts here prove dispatch, nothing more.
   await submissionAdmitted;
-  await expect(row.locator(".provisioning-submitting")).toBeVisible();
+  await expect(pendingUpdate(row, "submitting")).toBeVisible();
   await expect(page.getByRole("button", { name: "add host" })).toBeDisabled();
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(1);
@@ -2141,18 +2206,17 @@ test("a stale Completed around submission settles nothing and replays nothing", 
   const submitResponse = await submitted;
   expect(submitResponse.status(), await responseBody(submitResponse)).toBe(202);
   const submittedRun = ((await submitResponse.json()) as Accepted).run_id;
-  await expect(row.locator(".provisioning-submitting")).toHaveCount(0);
+  await expect(pendingUpdate(row, "submitting")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
   // The acceptance's own reread observes held running A, so the accepted
-  // run is reconciled before the stale detour begins.
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
+  // run is reconciled before the stale detour begins: only the tracked
+  // run's own running view produces full inline progress.
+  await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+  await expect(row.locator(".host-detail")).toHaveCount(0);
 
   // The stale older-run success lands on a read dispatched after that
-  // installation. It renders, yet settles nothing: the row stays expanded
-  // for the live submission.
+  // installation. It renders, yet settles nothing: the tracked run's unseen
+  // end becomes an uncertainty warning, which is what opens the row.
   serveStale = true;
   const provisioningPath = `/api/hosts/${accepted.host_id}/provisioning`;
   const staleRead = page.waitForResponse(
@@ -2200,6 +2264,7 @@ test("a stale Completed around submission settles nothing and replays nothing", 
   await configureBackend();
   await waitForProgress(request, accepted.host_id, "completed");
   await notifyFeed(feed, 4);
+  await expectOrdinaryStatus(row);
   await expect(row.locator(".host-detail")).toHaveCount(0);
   await expect(row.locator(".provisioning-warning")).toHaveCount(0);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -2207,7 +2272,18 @@ test("a stale Completed around submission settles nothing and replays nothing", 
   expect(updates.confirms).toBe(1);
 });
 
-test("an update expands at acceptance and collapses on immediate completion", async ({
+/**
+ * An update whose run completes before the UI ever reads it still settles.
+ *
+ * Why this matters: the accepted-but-unread gap is real (a fast update can
+ * finish between the 202 and the next progress read), and the row must not
+ * stay stuck on `updating…` or report the outcome as unknown just because
+ * Running was never observed. Specifies: `updating…` from the click, through
+ * planning and the unread gap, with the row folded; then the first read
+ * already reports the exact accepted run completed, and that alone returns
+ * the ordinary status, opens nothing, and offers Update again.
+ */
+test("an update shows pending status from acceptance and settles on immediate completion", async ({
   page,
   request,
 }, testInfo) => {
@@ -2246,15 +2322,11 @@ test("an update expands at acceptance and collapses on immediate completion", as
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
-  // Expansion happens at click acceptance, before planning returns: the
-  // planning indicator is showing, only the old completed setup run is
-  // visible (no new run exists yet), and the checkbox is still unchecked.
-  await expect(row.locator(".provisioning-planning")).toBeVisible();
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "completed",
-  );
-  await expect(row.locator(".host-detail")).toBeVisible();
+  // The status spot says `updating…` from click acceptance, before planning
+  // returns, while the row stays folded and the checkbox unchecked. The
+  // held planning request is what guarantees no new run exists yet.
+  await expect(pendingUpdate(row, "planning")).toBeVisible();
+  await expect(row.locator(".host-detail")).toHaveCount(0);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   // No new run can exist before the planning release below, so every read
   // that passed so far saw only the ADD run; every later read waits for
@@ -2275,15 +2347,26 @@ test("an update expands at acceptance and collapses on immediate completion", as
   await expect
     .poll(async () => await progress(request, accepted.host_id))
     .toMatchObject({ run_id: submittedRun, status: "completed" });
+  // Acceptance installed while every progress read is still held: the row
+  // follows the accepted run without any snapshot of it. This is the state
+  // the release below must visibly leave.
+  await expect(pendingUpdate(row, "awaiting-progress")).toBeVisible();
   releaseProgress();
-  // Matching completion without ever observing Running still settles.
+  // Matching completion without ever observing Running still settles: the
+  // ordinary status returns, no uncertainty warning opens the row, and the
+  // released ownership offers Update again.
+  await expectOrdinaryStatus(row);
   await expect(row.locator(".host-detail")).toHaveCount(0);
+  await expect(row.locator(".provisioning-warning")).toHaveCount(0);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+  await openHostMenu(row);
+  await expect(row.locator(".provisioning-update")).toBeVisible();
+  await page.keyboard.press("Escape");
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(1);
 });
 
-test("global detail toggles never move another row's automatic disclosure", async ({
+test("global details alone control disclosure while update progress stays inline", async ({
   page,
   request,
 }, testInfo) => {
@@ -2300,24 +2383,18 @@ test("global detail toggles never move another row's automatic disclosure", asyn
   const idle = page.locator(`[data-host-id="${other.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
+  await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+  await expect(row.locator(".host-detail")).toHaveCount(0);
 
-  // Toggling global details on details every row; toggling it back off
-  // collapses the bystander but leaves the running row's automatic
-  // disclosure exactly where it was.
+  // Global details opens every row while checked. Turning it back off folds
+  // both rows, while the running update keeps its inline status.
   await page.locator(".host-details-toggle").click();
   await expect(row.locator(".host-detail")).toBeVisible();
   await expect(idle.locator(".host-detail")).toBeVisible();
   await page.locator(".host-details-toggle").click();
   await expect(idle.locator(".host-detail")).toHaveCount(0);
-  await expect(row.locator(".host-detail")).toBeVisible();
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
+  await expect(row.locator(".host-detail")).toHaveCount(0);
+  await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
 
   // Success with global details on stays detailed; turning them off then
   // collapses the now-resting row.
@@ -2342,8 +2419,10 @@ test("incarnation churn keeps a followed run while a target change detaches it",
   feed.notifyOnConnect(1);
   // Rewrite only this row's registry entry, snapshotting the test's phase
   // at dispatch so an in-flight request keeps its own generation's facts.
-  // The alias marker is the render barrier: the destination-detail line
-  // appears only once the rewritten entry has rendered.
+  // The alias marker is the render barrier. The helm reports an alias as
+  // the host's `name`, so the rewrite sets both, and the marker then shows
+  // in the folded row's visible name only once the rewritten entry has
+  // rendered.
   let phase: "live" | "reconnected" | "moved" = "live";
   const moved = `${remote}-moved`;
   await page.route("**/api/hosts", async (route) => {
@@ -2355,6 +2434,7 @@ test("incarnation churn keeps a followed run while a target change detaches it",
     if (entry && seen !== "live") {
       entry.incarnation += 1;
       entry.alias = seen === "reconnected" ? "reconnected-marker" : "moved-marker";
+      entry.name = entry.alias;
       if (seen === "moved") entry.destination = moved;
     }
     await route.fulfill({ response, json: body });
@@ -2365,21 +2445,29 @@ test("incarnation churn keeps a followed run while a target change detaches it",
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
-  );
+  await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
 
   // A reconnect mid-run (fresh incarnation, same target) is normal: the
-  // run stays followed and the row stays expanded.
+  // run stays followed and the row stays folded.
+  const registryRefresh = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/hosts" &&
+      response.request().method() === "GET",
+  );
   phase = "reconnected";
   await notifyFeed(feed, 2);
-  await expect(row.locator(".host-destination-detail")).toBeVisible();
-  await expect(row.locator(".provisioning-run")).toHaveAttribute(
-    "data-provisioning-status",
-    "running",
+  const refreshed = await registryRefresh;
+  expect(refreshed.ok(), "the feed-triggered host refresh must succeed").toBe(true);
+  const refreshedHosts = (await refreshed.json()).hosts as Host[];
+  expect(JSON.stringify(refreshedHosts.find((host) => host.id === accepted.host_id))).toContain(
+    "reconnected-marker",
   );
-  await expect(row.locator(".host-detail")).toBeVisible();
+  // The response only proves the route served the new incarnation; the
+  // visible name proves the row rendered it, so the provisioning child has
+  // the new binding before continued progress is checked.
+  await expect(row.locator(".host-name")).toHaveText("reconnected-marker");
+  await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+  await expect(row.locator(".host-detail")).toHaveCount(0);
   await expect(row.locator(".provisioning-warning")).toHaveCount(0);
 
   // A real target change detaches the run evidence with an explicit
@@ -2497,15 +2585,22 @@ test("a progress read racing submission commits nothing; the delayed acceptance 
     (outgoing) =>
       new URL(outgoing.url()).pathname === provisioningPath && outgoing.method() === "GET",
   );
-  // Suppressed: the row still shows the old completed ADD view, with no
-  // adopted run and no warning, while the submission is outstanding.
+  // The folded row cannot show which view is committed, and the submitting
+  // stage would read the same either way. Global details are opened only for
+  // this observation: suppressed, the row still shows the old completed ADD
+  // view, with no adopted run and no warning, while the submission is
+  // outstanding. Closing them again restores the folded premise.
+  await expect(pendingUpdate(row, "submitting")).toBeVisible();
+  await expect(row.locator(".host-detail")).toHaveCount(0);
+  await page.locator(".host-details-toggle").click();
   await expect(row.locator(".provisioning-run")).toHaveAttribute(
     "data-provisioning-status",
     "completed",
   );
   await expect(row.locator(".provisioning-warning")).toHaveCount(0);
-  await expect(row.locator(".host-detail")).toBeVisible();
+  await page.locator(".host-details-toggle").click();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+  await expect(row.locator(".host-detail")).toHaveCount(0);
 
   // The delayed acceptance installs first; the fresh reread then observes
   // running B and follows it, keeping A's unseen end visible.
@@ -2630,14 +2725,16 @@ test("a held acceptance across a target change retires the old run instead of ad
   holdProgress = true;
   const runningA = await waitForProgress(request, accepted.host_id, "running");
   expect(runningA.run_id).not.toBeNull();
-  await expect(row.locator(".provisioning-submitting")).toBeVisible();
+  await expect(pendingUpdate(row, "submitting")).toBeVisible();
 
   // Retarget while the 202 is held: the submitting intent belongs to the old
   // row, so the watcher drops it with nothing tracked and no diagnostic —
-  // the row goes quiet, which is the premise this branch needs.
+  // the row goes quiet (no inline status, nothing opened), which is the
+  // premise this branch needs.
   moved = true;
   await notifyFeed(feed, 2);
-  await expect(row.locator(".provisioning-submitting")).toHaveCount(0);
+  await expect(row.locator(".host-update-pending")).toHaveCount(0);
+  await expect(row.locator(".host-update-running")).toHaveCount(0);
   await expect(row.locator(".host-detail")).toHaveCount(0);
 
   // The late acceptance lands on the mismatch branch: unknown outcome, this
@@ -2793,14 +2890,16 @@ test("a progress read across a held acceptance and target change cannot adopt th
   const runningA = await waitForProgress(request, accepted.host_id, "running");
   expect(runningA.run_id).not.toBeNull();
   const runA = runningA.run_id!;
-  await expect(row.locator(".provisioning-submitting")).toBeVisible();
+  await expect(pendingUpdate(row, "submitting")).toBeVisible();
 
   // Retarget while the 202 is held: the submitting intent belongs to the old
   // row, so the watcher drops it with nothing tracked and no diagnostic —
-  // the row goes quiet, which is the premise this ordering needs.
+  // the row goes quiet (no inline status, nothing opened), which is the
+  // premise this ordering needs.
   moved = true;
   await notifyFeed(feed, 2);
-  await expect(row.locator(".provisioning-submitting")).toHaveCount(0);
+  await expect(row.locator(".host-update-pending")).toHaveCount(0);
+  await expect(row.locator(".host-update-running")).toHaveCount(0);
   await expect(row.locator(".host-detail")).toHaveCount(0);
 
   // The held reads complete before the acceptance installs. The first
@@ -2823,7 +2922,12 @@ test("a progress read across a held acceptance and target change cannot adopt th
   // Suppressed: the old run acquires no new-target ownership — no adopted
   // run, no disclosure, no warning — while the submission is outstanding,
   // and the menu still offers Update. Without suppression this read adopts
-  // A with the new binding and owns the row.
+  // A with the new binding and owns the row, which would show as inline
+  // progress for A (an adopted running update opens nothing) and a busy
+  // menu; a committed but unadopted running view would draw the trace.
+  await expect(row.locator(".host-update-pending")).toHaveCount(0);
+  await expect(row.locator(".host-update-running")).toHaveCount(0);
+  await expect(row.locator(".provisioning-trace")).toHaveCount(0);
   await expect(row.locator(".provisioning-run")).toHaveCount(0);
   await expect(row.locator(".provisioning-warning")).toHaveCount(0);
   await expect(row.locator(".host-detail")).toHaveCount(0);
