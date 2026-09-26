@@ -8063,10 +8063,7 @@ impl Supervisor {
             ),
             _ => anyhow::bail!("checkout allocation is not recoverable"),
         }
-        let state_path = self
-            .state_dir
-            .join("checkout-preparation")
-            .join(format!("{}.json", plan.id));
+        let state_path = crate::launch::preparation_state_path(&self.state_dir, &plan.id);
         match (
             snapshot.publication_started,
             crate::launch::read_preparation_state(&state_path, &plan.id)?,
@@ -9281,10 +9278,7 @@ impl Supervisor {
                         unreachable!("allocated_checkout implies a Fresh destination")
                     }
                 };
-                let state_path = self
-                    .state_dir
-                    .join("checkout-preparation")
-                    .join(format!("{}.json", plan.id));
+                let state_path = crate::launch::preparation_state_path(&self.state_dir, &plan.id);
                 if let Err(publish_error) = self
                     .publish_preparation_not_started(&plan.id, &state_path)
                     .await
@@ -10150,10 +10144,7 @@ impl Supervisor {
                 .as_deref()
                 .context("fresh checkout has no accepted directory")?;
             self.recover_checkout_destination(&origin, cwd)?;
-            let state_path = self
-                .state_dir
-                .join("checkout-preparation")
-                .join(format!("{}.json", origin.id));
+            let state_path = crate::launch::preparation_state_path(&self.state_dir, &origin.id);
             let state = crate::launch::read_preparation_state(&state_path, &origin.id)?;
             anyhow::ensure!(
                 state.is_some_and(|record| record.state == crate::launch::PreparationState::Ready),
@@ -13562,7 +13553,8 @@ impl Supervisor {
         // directory itself: `write_durable_sync` fsyncs the state FILE's
         // parent, but the `checkout-preparation` directory's own entry
         // under the state dir rides on the state dir's directory entry, so
-        // THAT is the parent this fsync covers. An fsync failure here is
+        // THAT is the parent this fsync covers (the depth
+        // `launch::preparation_state_path` fixes). An fsync failure here is
         // propagated (R1.6): publishing NotStarted without a durable
         // directory entry would let clone/hook side effects survive a
         // crash without their state evidence.
