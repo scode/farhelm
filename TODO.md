@@ -243,12 +243,13 @@ test tooling, and cross-crate duplication. Six claims were re-checked by hand ag
 20" paragraph, and the product binary's `farhelm-teststate` dependency); the rest are the reviewers' reports, which were
 told to verify against the code. Line numbers are as of the anchor commit and will drift. Efforts are agent judgments.
 
-The dominant pattern is not sloppy code. It is the same small rule reimplemented in several places, where the copies
-have since diverged. Those come first because they are latent bugs and mostly cheap. Suggested order: the diverged
-copies as small independent PRs; then the handlers reply path and the `SessionEntry` split (contained, and they reduce
-ongoing cost); then the shared store helper for both stores at once; then the big mechanical carve-outs of `core.rs`
-(with `launch_reserved` and `reload_sessions`) and `CreateSessionForm`, at a time when no other stacks are touching
-those files.
+The dominant pattern was not sloppy code but the same small rule reimplemented in several places, with the copies since
+diverged. A 2026-09 stack of small PRs removed those copies (escaping, quoting, tmux refusal parsing, wire types, detach
+reasons, the handler reply path, the store plumbing, the session-cache rules, the subprocess runner, and the lock order)
+and is not listed here. What remains is of two kinds: the large mechanical moves that were held out to be timed when no
+other stack touches the same files (the `core.rs` carve-out with its handlers and per-kind behavior, the `HelmStore`
+split, `CreateSessionForm`, and the proto split), and the follow-ups that stack deliberately left, each entry saying
+where it stopped.
 
 Checked and found fine, so nobody re-raises them: state-dir resolution, the tmux version floor, and frame I/O are each
 in one place; supervisor state machines are proper enums and the helm actor loop is clean; every declared dependency is
@@ -325,7 +326,10 @@ are large mostly because of their tests.
 - **Test fixtures in the release binary.** Medium effort, lower payoff. `internal fake-agent` (~3.8k lines with
   `codex_conversation.rs`) and `internal sweep-test-state` ship in the product binary, and `crates/farhelm/Cargo.toml`
   depends on `farhelm-teststate` although that crate's docs say product code must never depend on it. Fix: a cargo
-  feature or a second `[[bin]]` for the e2e harness and `start-stack.sh`.
+  feature or a second `[[bin]]` for the e2e harness and `start-stack.sh`. Held out of the 2026-09 stack: an integration
+  test cannot name another package's binary, so a separate package first needs a way to build the fixtures before the
+  e2e tests run (a nextest setup script, say) that the recorder and the narrow-test recipes also accept, and every
+  script and spec that starts them changes with it.
 
 ### Stale in-code documentation
 
