@@ -28,6 +28,33 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 INSTALL_SH="$REPO_ROOT/scripts/install.sh"
 
+# The tmux floor the installer has to advise, read from the release pins rather
+# than spelled out in this file. install.sh cannot read the pins itself (it
+# runs from `curl | sh` with nothing beside it), so its floor is a literal, and
+# the supervisor's TMUX_FLOOR is tied to the same pin by a Rust test. Deriving
+# every floor-dependent case below from the pin is what makes a floor bump fail
+# here until install.sh's comparison and message follow it; with the floor
+# spelled out in this file too, the old installer and its old tests would keep
+# agreeing with each other.
+read_pinned_tmux_floor() {
+  local pins="$REPO_ROOT/.github/release/source-pins.env" lines
+  lines=$(grep -c '^TMUX_VERSION=' "$pins") || true
+  if [ "$lines" != 1 ]; then
+    echo "expected exactly one TMUX_VERSION in $pins, found $lines" >&2
+    exit 1
+  fi
+  sed -n 's/^TMUX_VERSION=//p' "$pins"
+}
+TMUX_FLOOR=$(read_pinned_tmux_floor)
+if ! [[ "$TMUX_FLOOR" =~ ^([0-9]+)\.([0-9]+)([a-z]?)$ ]]; then
+  echo "the pinned tmux version '$TMUX_FLOOR' is not MAJOR.MINOR[letter]" >&2
+  exit 1
+fi
+TMUX_FLOOR_MAJOR=${BASH_REMATCH[1]}
+TMUX_FLOOR_MINOR=${BASH_REMATCH[2]}
+TMUX_FLOOR_LETTER=${BASH_REMATCH[3]}
+TMUX_FLOOR_HINT="tmux $TMUX_FLOOR or newer is required"
+
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-install-test.XXXXXX")
 SERVER_PID=""
 
@@ -1355,7 +1382,7 @@ assert_closing_message_contract() {
   local tools="$WORKDIR/toolchain-f20-$label"
   mkdir -p "$tools"
   cp -a "$TOOLCHAIN_FULL"/. "$tools/"
-  write_fake_tmux "$tools" "tmux 3.7c"
+  write_fake_tmux "$tools" "tmux $TMUX_FLOOR"
   if [ "$has_desktop" = yes ]; then
     rm -f "$tools/uname"
     cat >"$tools/uname" <<'UNAMEEOF'
@@ -1456,14 +1483,15 @@ UNAMEEOF
   fi
 
   check "F20 ($label): no PATH warning (install dir is on PATH)" not_contains "$OUT" "is not on your PATH"
-  check "F20 ($label): no tmux hint (at-floor fixture)" not_contains "$OUT" "tmux 3.7c or newer is required"
+  check "F20 ($label): no tmux hint (at-floor fixture)" not_contains "$OUT" "or newer is required"
 }
 assert_closing_message_contract "fresh-linux" no no 1.2.3
 assert_closing_message_contract "fresh-macos" yes no 1.2.3
 assert_closing_message_contract "update-linux" no yes 1.2.3
 assert_closing_message_contract "update-macos" yes yes 1.2.3
 
-# tmux hint: absent, malformed, below-floor, exactly-at-floor, above-floor.
+# tmux hint: absent, malformed, the floor-derived boundary cases below, and
+# exactly-at and above the floor.
 run_tmux_case() {
   local label=$1 tmux_output=$2 expect_hint=$3 expect_have=$4
   local tools="$WORKDIR/toolchain-tmux-$label"
@@ -1476,17 +1504,40 @@ run_tmux_case() {
   mkdir -p "$home"
   run_install "$tools" "$home" "$home/.local/bin" "$BASE/good" 1.2.3
   if [ "$expect_hint" = yes ]; then
-    check "tmux hint ($label): present" contains "$OUT" "tmux 3.7c or newer is required"
+    check "tmux hint ($label): present" contains "$OUT" "$TMUX_FLOOR_HINT"
     check "tmux hint ($label): reports '$expect_have'" contains "$OUT" "this machine has $expect_have."
   else
-    check "tmux hint ($label): absent" not_contains "$OUT" "tmux 3.7c or newer is required"
+    check "tmux hint ($label): absent" not_contains "$OUT" "or newer is required"
   fi
 }
 run_tmux_case "absent" "" yes "none"
 run_tmux_case "malformed" "tmux next-3.8" yes "none"
-run_tmux_case "below-floor" "tmux 3.6" yes "tmux 3.6"
-run_tmux_case "at-floor" "tmux 3.7c" no ""
-run_tmux_case "above-floor" "tmux 3.8" no ""
+# The boundary cases come from the pinned floor (see read_pinned_tmux_floor):
+# the previous release both bare and with the last possible patch letter
+# (so a floor raised by a minor release cannot leave the old letter check
+# accepting e.g. 3.7z), the same minor without its patch letter and with the
+# letter before it, the floor itself, and one minor release above. A `.0`
+# floor has no minor to step down, so its previous release is taken from the
+# major below.
+if [ "$TMUX_FLOOR_MINOR" -gt 0 ]; then
+  previous_release="$TMUX_FLOOR_MAJOR.$((TMUX_FLOOR_MINOR - 1))"
+else
+  previous_release="$((TMUX_FLOOR_MAJOR - 1)).99"
+fi
+run_tmux_case "below-floor" "tmux $previous_release" yes "tmux $previous_release"
+run_tmux_case "below-floor-last-patch" "tmux ${previous_release}z" yes "tmux ${previous_release}z"
+if [ -n "$TMUX_FLOOR_LETTER" ]; then
+  no_letter="tmux $TMUX_FLOOR_MAJOR.$TMUX_FLOOR_MINOR"
+  run_tmux_case "below-floor-no-letter" "$no_letter" yes "$no_letter"
+  if [ "$TMUX_FLOOR_LETTER" != a ]; then
+    letters=abcdefghijklmnopqrstuvwxyz
+    prefix=${letters%%"$TMUX_FLOOR_LETTER"*}
+    previous_letter="tmux $TMUX_FLOOR_MAJOR.$TMUX_FLOOR_MINOR${prefix: -1}"
+    run_tmux_case "below-floor-letter" "$previous_letter" yes "$previous_letter"
+  fi
+fi
+run_tmux_case "at-floor" "tmux $TMUX_FLOOR" no ""
+run_tmux_case "above-floor" "tmux $TMUX_FLOOR_MAJOR.$((TMUX_FLOOR_MINOR + 1))" no ""
 
 # ===========================================================================
 # Scenario: no side effects outside FARHELM_INSTALL_DIR (F27) -- systemctl/
@@ -2077,8 +2128,8 @@ check "F9: macOS-shaped bundle Contents directory is not group/world-writable" \
 # ===========================================================================
 echo
 echo "== F12: multiline tmux -V output is rejected wholesale =="
-run_tmux_case "banner-then-valid" "$(printf 'some vendor banner\ntmux 3.7c')" yes "none"
-run_tmux_case "two-valid-lines" "$(printf 'tmux 3.7c\ntmux 3.8')" yes "none"
+run_tmux_case "banner-then-valid" "$(printf 'some vendor banner\ntmux %s' "$TMUX_FLOOR")" yes "none"
+run_tmux_case "two-valid-lines" "$(printf 'tmux %s\ntmux 3.8' "$TMUX_FLOOR")" yes "none"
 
 # ===========================================================================
 # Scenario: a colon-containing install directory is never treated as
