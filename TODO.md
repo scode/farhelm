@@ -307,13 +307,13 @@ are large mostly because of their tests.
   live in `farhelm-helm/src/session_cache.rs`. What remains is the plumbing: `remember_session`, `forget_session`, and
   `refresh_once` in `manager.rs` each branch on whether the host has an identity and carry a storage-specific body per
   branch. Fix: a cache type with the two backends behind it, so the manager calls one interface.
-- **Hand-rolled fake supervisors in tests.** Medium effort, test code only. About 180 inline duplex + handshake +
-  hand-matched reply setups in the helm (`sessions_tests.rs` ~65, `client.rs` 49, `agent_requests.rs` 23, `uploads.rs`
-  19, `terminal.rs` 13) while only `manager.rs` has a reusable scripted peer; about 16 more in the e2e tests (`RawPeer`,
-  `MarkerPeer`, `SessionPeer`, seven in `session_lifecycle.rs`); and the CLI mock supervisor with its four self-tests is
-  copied between `tests/agent_cli.rs` and `tests/spawn_cli.rs` despite `tests/cli_support/`. A wire or handshake change
-  fans out across hundreds of test bodies. Fix: a shared scripted fake in `rest_harness`, a `harness::raw_peer`, and the
-  CLI mock moved into `cli_support`.
+- **Hand-rolled fake supervisors in tests.** Medium effort, test code only. Shared peers now exist and each is proven on
+  one file: `rest_harness::FakeSupervisor` in the helm (`uploads.rs`), `harness::RawPeer` in the e2e tests
+  (`attachment_uploads.rs`), and one CLI mock supervisor in `tests/cli_support/mock_supervisor.rs`. What remains is the
+  migration: about 160 inline duplex + handshake + hand-matched reply setups in the helm (`sessions_tests.rs` ~65,
+  `client.rs` 49, `agent_requests.rs` 23, `terminal.rs` 13, and two `uploads.rs` window tests that also need a bounded
+  nothing-arrives read), and the other e2e peers (`MarkerPeer`, `SessionPeer`, seven in `session_lifecycle.rs`). A wire
+  or handshake change still fans out across all of those.
 
 ### Test hooks in production code
 
