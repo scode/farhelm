@@ -1432,12 +1432,12 @@ async fn forget_session(state: &AppState, claim: &manager::SessionClaim, session
 /// it asked for, and inventing a second place where a session's host is
 /// reported would be a second thing to keep true.
 ///
-/// The new session is seeded into its host's cache before this answers
-/// ([`seed_created_session`]), so it is routable — stop, rename, terminal —
-/// the moment the caller has its id, rather than after the owning host's
-/// next refresh. It joins the LIST on that next refresh like any other
-/// session; the two are separate promises and only the first one is
-/// something a client can be surprised by.
+/// The new session is recorded in its host's cache before this answers
+/// ([`record_session`]), so it is routable — stop, rename, terminal — and
+/// listed the moment the caller has its id, rather than after the owning
+/// host's next refresh. That recording is best effort (see its docs for
+/// what declines it and which of those cases heal on the host's next
+/// refresh); a declined recording still reports the create as a success.
 ///
 /// ## Profile mode, and the remembered default
 ///
