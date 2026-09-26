@@ -53,6 +53,25 @@ pub fn is_presentation_unsafe(ch: char) -> bool {
         )
 }
 
+/// Quote one word so a POSIX-family shell reads it back byte for byte, with
+/// no expansion of any kind.
+///
+/// Always single quotes, even for words that look plain. `shell_words::quote`
+/// leaves words it considers safe bare, and its safe set includes characters
+/// that are live syntax in the shells Farhelm actually hands command lines
+/// to: braces (bash and zsh brace expansion), `!` (history expansion in the
+/// interactive login shell an agent launches under), and `^`. Paths come from
+/// `$HOME`, state-directory flags, and remote install locations, so a
+/// directory named `a{1,2}` must not turn into two words. An embedded single
+/// quote is closed, escaped, and reopened (`'\''`), the one encoding every
+/// POSIX shell reads the same way.
+///
+/// Only for text that reaches a shell. Farhelm's own shell-word parsing
+/// (`shell_words::split` on an invocation) round-trips either encoding.
+pub fn shell_quote(word: &str) -> String {
+    format!("'{}'", word.replace('\'', "'\\''"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::is_presentation_unsafe;
@@ -91,6 +110,72 @@ mod tests {
                 "U+{:04X} is ordinary text and must be shown as itself",
                 ch as u32
             );
+        }
+    }
+
+    /// Why this matters: Farhelm hands command lines to the user's login
+    /// shell (agent launches run under `$SHELL -l -i -c`) and to remote
+    /// shells over ssh, with paths it did not choose inside them. A word the
+    /// shell expands (braces, history, variables, globs) launches the wrong
+    /// program or splits a path in two.
+    ///
+    /// Specification: each hostile word, quoted and handed to `sh -c` (and to
+    /// `bash -c` when bash is installed), prints back exactly as given, and
+    /// the quoted form still splits back to the word through the same
+    /// shell-word parser Farhelm uses for invocations.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn shell_quote_round_trips_hostile_words_through_real_shells() {
+        use super::shell_quote;
+        let words = [
+            "plain",
+            "",
+            "with space",
+            "brace{a,b}",
+            "bang!history",
+            "caret^x",
+            "dollar$HOME",
+            "back`tick`",
+            "glob*?[x]",
+            "single'quote",
+            "double\"quote",
+            "back\\slash",
+            "tilde~/x",
+            "semi;colon&and|pipe",
+            "new\nline",
+        ];
+        let shells: Vec<&str> = ["sh", "bash"]
+            .into_iter()
+            .filter(|shell| {
+                std::process::Command::new(shell)
+                    .args(["-c", "true"])
+                    .status()
+                    .is_ok_and(|status| status.success())
+            })
+            .collect();
+        assert!(
+            shells.contains(&"sh"),
+            "a POSIX sh is required for this test"
+        );
+        for word in words {
+            let quoted = shell_quote(word);
+            assert_eq!(
+                shell_words::split(&quoted).unwrap(),
+                vec![word.to_string()],
+                "{quoted}"
+            );
+            for shell in &shells {
+                let out = std::process::Command::new(shell)
+                    .args(["-c", &format!("printf %s {quoted}")])
+                    .output()
+                    .unwrap();
+                assert!(out.status.success(), "{shell} failed on {quoted}");
+                assert_eq!(
+                    String::from_utf8(out.stdout).unwrap(),
+                    word,
+                    "{shell} did not read {quoted} back verbatim"
+                );
+            }
         }
     }
 }

@@ -587,23 +587,25 @@ pub fn window_command(
     scope_prefix: Vec<String>,
 ) -> Vec<String> {
     // Quoting matters because both paths derive from $HOME or user flags
-    // and can contain spaces or quotes; shell_words::quote is the same
-    // POSIX single-quote encoding the invocation parser expects. The scope
-    // prefix goes through the same quoting even though its words are all
-    // literals this crate wrote: one encoder for the whole command line is
-    // one fewer place for a future flag with a shell metacharacter in it
-    // to break the launch.
-    let mut words: Vec<String> = vec!["exec".to_string()];
-    words.extend(scope_prefix);
+    // and can contain spaces, quotes, or characters the login shell would
+    // expand (braces; `!` under `-i`), so every word is single-quoted by
+    // `farhelm_proto::text::shell_quote`. The scope prefix goes through the
+    // same quoting even though its words are all literals this crate wrote:
+    // one encoder for the whole command line is one fewer place for a future
+    // flag with a shell metacharacter in it to break the launch. The leading
+    // `exec` is the one literal left bare: it is this crate's own keyword,
+    // and the no-preamble test pins the script as starting with it.
+    let mut words: Vec<String> = scope_prefix;
     words.push(farhelm_exe.to_string_lossy().into_owned());
     words.push("internal".to_string());
     words.push("launch".to_string());
     words.push(spec_path.to_string_lossy().into_owned());
-    let inner = words
+    let quoted = words
         .iter()
-        .map(|w| shell_words::quote(w).into_owned())
+        .map(|w| farhelm_proto::text::shell_quote(w))
         .collect::<Vec<_>>()
         .join(" ");
+    let inner = format!("exec {quoted}");
     vec![
         shell.to_string(),
         "-l".to_string(),
@@ -2044,8 +2046,44 @@ mod tests {
         assert_eq!(cmd[0..4], ["/bin/bash", "-l", "-i", "-c"]);
         assert_eq!(
             cmd[4],
-            "exec /opt/farhelm internal launch /state/launch/abc.json"
+            "exec '/opt/farhelm' 'internal' 'launch' '/state/launch/abc.json'"
         );
+    }
+
+    /// Why this matters: the launch script runs under the user's interactive
+    /// login shell (`-l -i -c`), which brace-expands and history-expands
+    /// unquoted words, and the executable and spec paths come from `$HOME`
+    /// and state-directory flags Farhelm does not choose.
+    ///
+    /// Specification: paths containing braces, `!`, `$`, spaces, and single
+    /// quotes reach the launch as exactly one word each when the script runs
+    /// through a real `sh -c` (and `bash -i -c` when bash is installed).
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn window_command_passes_hostile_paths_through_the_shell_verbatim() {
+        let exe = "/home/u/a{1,2} dir/it's!$HOME/farhelm";
+        let spec = "/state/{x,y}/launch!/abc.json";
+        let cmd = window_command("/bin/sh", Path::new(exe), Path::new(spec), Vec::new());
+        // Swap `exec` for printing the argv the shell would have exec'd.
+        let script = cmd[4].replacen("exec ", "printf '%s\\n' ", 1);
+        for (shell, flags) in [("sh", vec!["-c"]), ("bash", vec!["-i", "-c"])] {
+            let Ok(out) = std::process::Command::new(shell)
+                .args(&flags)
+                .arg(&script)
+                .env("HOME", "/nonexistent")
+                .output()
+            else {
+                assert_ne!(shell, "sh", "a POSIX sh is required for this test");
+                continue;
+            };
+            assert!(out.status.success(), "{shell} rejected {script:?}");
+            let words: Vec<&str> = std::str::from_utf8(&out.stdout).unwrap().lines().collect();
+            assert_eq!(
+                words,
+                [exe, "internal", "launch", spec],
+                "{shell} must see each path as one verbatim word"
+            );
+        }
     }
 
     /// The shim's window command writes NOTHING to the terminal before the
