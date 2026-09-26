@@ -4075,13 +4075,67 @@ pub(crate) struct SessionCells {
 /// that is disappearing out from under it — but deliberately NOT across
 /// its process-tree sweep, which can take seconds and would otherwise
 /// stall every other session's attach/input behind one slow delete (see
-/// that handler's own comment). `DeleteSession` is also the ONE path that
-/// ever holds both mutexes at once, briefly: it removes the in-memory map
-/// entry while `attachments` is still held for the notify decision. It
-/// establishes the only lock-ordering rule that needs to exist as long as
-/// nothing else ever needs both: `attachments` first, `sessions` second,
-/// never the reverse (anything acquiring both in the opposite order would
-/// be a deadlock waiting for a second caller to exist).
+/// that handler's own comment). Two paths hold both mutexes at once,
+/// briefly: `DeleteSession` removes the in-memory map entry while
+/// `attachments` is still held for the notify decision, and an attach
+/// revalidates the session's entry in `sessions` before installing itself.
+/// Both take `attachments` first, which is where the table's order comes
+/// from.
+///
+/// # Lock order
+///
+/// The known nesting edges between the locks, keyed locks, and semaphores
+/// this struct holds. A lock may be acquired while holding one ABOVE it in
+/// the same chain, never while holding one below it. The per-field notes
+/// say why each edge exists; this is the rule they add up to, and a new
+/// nested acquisition that fits none of it needs an entry here first.
+///
+/// The mutation chain (delete, stop, restart, rename, tab open/close):
+///
+/// | order | lock |
+/// |---|---|
+/// | 1 | `agent_request_locks` (asking session; delete claims it for its target) |
+/// | 2 | `admission` permit |
+/// | 3 | `working_copy_operations` (directory admission; delete and restart only) |
+/// | 4 | `lifecycle_locks` (target session) |
+/// | 5 | `attachments` |
+/// | 6 | `sessions` |
+///
+/// The create chain: `intent_locks` (intent key), then
+/// `working_copy_operations`, then, for a restricted create, the ASKING
+/// session's `lifecycle_locks` claim, held until the launch settles; then,
+/// when retrying an earlier attempt, the created session's own lifecycle
+/// claim (for a takeover, through the takeover transaction and its map
+/// removal; for a refusal the retry's validation retains, through that
+/// refusal's settlement and publication); then rows 5 and 6 above. Directory admission comes before any lifecycle
+/// claim in both chains, which is what lets a restricted create and a delete or restart
+/// of its parent wait on each other without a cycle. How long it is held
+/// differs by path: a create holds it until the launch settles, a delete
+/// for its whole teardown (sweep included, so the last-reference decision
+/// and the final membership removal see the same world), and a restart
+/// only through its admission checks, releasing it before any tmux work.
+///
+/// Branches off the chains, each ordered only against what it names:
+///
+/// - `attachments` before `sinks`: dropping a sink lease under
+///   `attachments` (detach, a failed input) locks the sink registry. No
+///   process operation runs under `sinks`.
+/// - `attachments` before `output_reaps`: an attach checks for an
+///   unfinished reap of the terminal it is about to open.
+/// - A lifecycle claim before `capture.lock`, the capture pass's own mutex
+///   (restart asks for an immediate capture). A pass then takes `sessions`
+///   and per-session `capture_locks`. Lifecycle work may also take a
+///   `capture_locks` claim directly, briefly; report and capture work never
+///   takes a lifecycle claim, so those edges only run one way.
+/// - `admission` before `directory_browse_workers`: a browse request's
+///   blocking filesystem worker.
+/// - `uploads`: may be taken under the whole mutation chain down to the
+///   lifecycle claim (delete's teardown aborts the session's uploads), and
+///   is never held alongside `attachments`, `sessions`, or `sinks`.
+/// - `helm_links`: taken only after releasing `attachments`.
+/// - `sampling_admission`: taken at the top of a ticker pass with nothing
+///   else held, and kept across the pass, which takes `sessions`, lifecycle
+///   claims (work-start persistence, tab reaping), and `capture.lock`.
 ///
 /// Known coarseness, acceptable in M1 and revisit at M2: the map-wide
 /// mutex serializes input for EVERY session behind any in-flight attach
@@ -4334,14 +4388,21 @@ pub struct Supervisor {
     /// that republishes or removes the same entry (see
     /// [`Supervisor::rename_session`]).
     ///
-    /// A CREATE takes one too, but only on its retry-takeover path and only
-    /// for the two steps that reclaim an existing session's identities: the
-    /// takeover transaction and the map removal that mirrors it. That span
-    /// is the one window in a create where a rename can interleave —
-    /// everywhere else the session is not on the map yet, or no longer is,
-    /// and rename answers `NotFound` like stop and delete do. The claim is
-    /// released well before the launch's tmux work, so a create never holds
-    /// one across a subprocess (see `Supervisor::launch_reserved`).
+    /// A CREATE takes one on the session it creates only when retrying an
+    /// earlier attempt, in two cases. On the takeover path it covers the two
+    /// steps that reclaim an existing session's identities: the takeover
+    /// transaction and the map removal that mirrors it, the one window in a
+    /// takeover where a rename can interleave (before it the session is not
+    /// on the map yet, after it no longer is, and rename answers `NotFound`
+    /// like stop and delete do); it is released well before the launch's
+    /// tmux work (see `Supervisor::launch_reserved`). When the retry's
+    /// validation instead retains a refusal, it covers that refusal's
+    /// durable settlement and publication, which a rename of the existing
+    /// entry could otherwise race. Separately, a
+    /// RESTRICTED create claims its asking session's key before checking
+    /// that session's credential, and holds it until the launch settles
+    /// (see `Supervisor::admit_create`, and the lock-order table in this
+    /// struct's docs).
     ///
     /// The map-wide `sessions` mutex cannot do this job — it is released
     /// the moment an entry is cloned out of it, and every one of these
@@ -4355,9 +4416,9 @@ pub struct Supervisor {
     /// sweep on the other side, and delete-vs-restart resolves to a
     /// half-torn-down session rather than one honest winner.
     ///
-    /// LOCK ORDER: lifecycle first, then `attachments`, then `sessions`
-    /// (see this struct's lock-discipline docs). Nothing acquires a
-    /// lifecycle claim while holding either of the other two.
+    /// LOCK ORDER: row 4 of the table in this struct's docs. Nothing
+    /// acquires a lifecycle claim while holding `attachments` or
+    /// `sessions`.
     pub(crate) lifecycle_locks: Arc<KeyedLocks>,
     /// One claim per ASKING session id, held for the whole of a MUTATING
     /// `AgentRequest` upcall — every verb
@@ -4442,13 +4503,9 @@ pub struct Supervisor {
     /// `mkdir(2)` arbitration.
     ///
     /// LOCK ORDER: taken AFTER a create's keyed intent guard and BEFORE
-    /// any lifecycle claim (R1.1); it is held only for supervisor
-    /// bookkeeping and the mkdir itself — never while the clone, the
-    /// post-clone hook, or the agent runs, and never across a tmux round
-    /// trip. Delete/restart admission (their own directory-mutex
-    /// acquisition points) arrives with the teardown slice; until then
-    /// nothing else acquires this mutex, so no cycle can form with the
-    /// lifecycle registry.
+    /// any lifecycle claim (R1.1), by create, delete, and restart alike.
+    /// How long each holds it differs; the lock-order table in this
+    /// struct's docs has both.
     pub(crate) working_copy_operations: Arc<tokio::sync::Mutex<()>>,
     /// All discovery requests share this scanner's two-child budget. It is
     /// independent of directory admission: slow Git inspection must not hold
@@ -9952,9 +10009,8 @@ impl Supervisor {
         // runs under it.
         let directory_admission = self.working_copy_operations.lock().await;
         // Taken SECOND, and released only when the whole restart is done —
-        // including the republication. Lock order is directory admission →
-        // lifecycle → attachments → sessions (see the `Supervisor` struct's
-        // docs).
+        // including the republication. See the lock-order table in the
+        // `Supervisor` struct's docs.
         let lifecycle = self.lifecycle_locks.claim(session_id).await;
         // No gap between the admission-time check and the claim it guards
         // (R1.1): a checkout whose registry row carries unresolved archive

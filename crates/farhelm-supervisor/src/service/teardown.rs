@@ -91,8 +91,9 @@ impl Supervisor {
     ///
     /// ALSO called under the supervisor's directory admission
     /// (`working_copy_operations`), passed in as `directory_admission`
-    /// rather than acquired here. The lock order is directory admission
-    /// BEFORE the lifecycle claim (R1.1), so this function must NEVER
+    /// rather than acquired here. The lock order (the table on
+    /// `Supervisor`) is directory admission BEFORE the lifecycle claim
+    /// (R1.1), so this function must NEVER
     /// acquire the mutex itself — it would order lifecycle → directory
     /// against every create's intent → directory → lifecycle sequence and
     /// form a cycle with a restricted create waiting on this very delete.

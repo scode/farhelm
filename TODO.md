@@ -315,14 +315,6 @@ are large mostly because of their tests.
   fans out across hundreds of test bodies. Fix: a shared scripted fake in `rest_harness`, a `harness::raw_peer`, and the
   CLI mock moved into `cli_support`.
 
-### Invariants held by convention
-
-- **Supervisor lock ordering.** Low-medium effort. With four mutexes, four keyed locks, working-copy operations, and
-  three semaphores, the order is written down piecemeal in about eight comments (`core.rs:4146`, `:4296`, `:4350`,
-  `:4382`, `:4426`, `:9850`, `handlers.rs:1422`, `teardown.rs:94`), and the struct doc at `core.rs:4019` still says
-  attachments-before-sessions is the only rule needed. Fix: one authoritative lock-order table, the stale paragraph
-  corrected.
-
 ### Test hooks in production code
 
 - **Fault hooks mixed into configuration.** Medium effort. `SupervisorSeams` (`core.rs:662-1004`) has about 36 public
