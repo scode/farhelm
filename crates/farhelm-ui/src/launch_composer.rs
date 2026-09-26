@@ -1,6 +1,7 @@
 //! Renderer-free rules for the structured launch composer.
 //!
-//! The component owns temporary input, focus, and request generations. This
+//! The create form owns temporary input, focus, and request generations; its
+//! shared choice controls receive their values and report changes. This
 //! module owns the choices that can be explained without a browser: whether a
 //! known model still fits a harness, which stored setups match deliberate
 //! fields, and what a click on one of those setups means. Keeping that split

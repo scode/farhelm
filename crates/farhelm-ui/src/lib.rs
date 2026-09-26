@@ -45,6 +45,9 @@
 //!   from the same subscription.
 //! - `list`: [`ListView`], `SessionRow`, and `CreateSessionForm` — the
 //!   session list and its lifecycle actions.
+//! - `launch_controls`: the values-in, changes-out structured choice controls
+//!   shared by the create form and the planned restart-with dialog. Their
+//!   caller owns harness choice, history, and create idempotency.
 //! - `hosts`: the hosts panel (PLAN_M6.md item 6) — the per-host state
 //!   chips SPEC.md requires to be always visible, the add/edit/remove/
 //!   adopt/retry management surface, and the renderer-free wording helpers
@@ -140,6 +143,7 @@ mod github_checkout;
 mod hosts;
 mod icons;
 mod launch_composer;
+mod launch_controls;
 mod list;
 mod menu_panel;
 mod ops;

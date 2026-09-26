@@ -11,6 +11,7 @@ use crate::github_checkout::{
     DestinationDraft, GithubAttempt, GithubCheckoutRequest, GithubRepo, PreviewAuthority,
     PreviewState, RepositoryAuthority, repository_choices,
 };
+use crate::launch_controls::LaunchControls;
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{
@@ -874,13 +875,6 @@ fn focus_composer_surface() {
 fn scroll_composer_search_result(index: usize) {
     document::eval(&format!(
         r#"document.getElementById('launch-composer-search-option-{index}')?.scrollIntoView({{ block: 'nearest' }});"#,
-    ));
-}
-
-/// Keep the active model row visible without moving focus out of its combobox.
-fn scroll_composer_model_result(index: usize) {
-    document::eval(&format!(
-        r#"document.getElementById('launch-composer-model-option-{index}')?.scrollIntoView({{ block: 'nearest' }});"#,
     ));
 }
 
@@ -2293,49 +2287,6 @@ pub(super) fn CreateSessionForm(
             .find(|host| host.id == id)
             .is_some_and(|host| host.phase.is_none())
     });
-    let structured_efforts = structured_harness()
-        .map(|harness| {
-            crate::launch_composer::compatible_efforts(
-                harness,
-                structured_model().as_deref(),
-                &catalog_models,
-            )
-        })
-        .unwrap_or_default();
-    let model_options = crate::launch_composer::model_options(
-        &catalog_models,
-        structured_harness(),
-        &model_draft(),
-        model_show_all(),
-    );
-    let model_option_count = model_options.len();
-    // The closed field shows the current SELECTION, whatever its history: a
-    // chosen model (escaped from its raw seed while untouched, raw once
-    // edited), otherwise "harness default". The edited flag only decides how
-    // a present model is spelled, never whether absence reads as default.
-    let model_display = if model_open() {
-        model_draft()
-    } else {
-        match structured_model() {
-            Some(model) if structured_model_edited() => model,
-            Some(model) => structured_model_raw_seed()
-                .as_deref()
-                .map(display_peer)
-                .unwrap_or(model),
-            None => "harness default".to_string(),
-        }
-    };
-    let model_hint = structured_harness()
-        .map(|harness| {
-            format!(
-                "{} for {harness:?}",
-                catalog_models
-                    .iter()
-                    .filter(|model| model.harness == harness)
-                    .count()
-            )
-        })
-        .unwrap_or_else(|| "choose a harness".to_string());
     // A stored structured snapshot is provenance, rather than a promise that
     // a later release still supports every combination it named. Keep its
     // model and effort visible for clone, but refuse to turn an incompatible
@@ -4481,401 +4432,149 @@ pub(super) fn CreateSessionForm(
                             }
                         }
                         if *creation_surface.read() == CreationSurface::Structured {
-                        if structured_harness() != Some(LaunchHarness::Grok) {
-                        div { class: "launch-composer-choice launch-composer-model-choice",
-                            span { class: "launch-composer-section-label", "model" }
-                            div { class: "launch-composer-model",
-                                input {
-                                    r#type: "text",
-                                    role: "combobox",
-                                    aria_label: "model",
-                                    aria_expanded: model_open(),
-                                    aria_controls: "launch-composer-model-results",
-                                    aria_activedescendant: model_open()
-                                        .then(|| model_active().map(|index| format!("launch-composer-model-option-{index}")))
-                                        .flatten(),
-                                    aria_invalid: model_draft_error().is_some(),
-                                    autocomplete: "off",
-                                    autocorrect: "off",
-                                    autocapitalize: "none",
-                                    spellcheck: false,
-                                    dir: "ltr",
-                                    disabled: busy,
-                                    value: "{model_display}",
-                                    onfocus: move |_| {
-                                        if !draft_transition_allowed(ops) {
-                                            return;
-                                        }
-                                        model_draft.set(String::new());
-                                        model_draft_error.set(None);
-                                        model_open.set(true);
-                                        model_active.set(None);
-                                    },
-                                    oninput: move |evt| {
-                                        if !draft_transition_allowed(ops) {
-                                            return;
-                                        }
-                                        model_draft.set(evt.value());
-                                        model_draft_error.set(None);
-                                        model_open.set(true);
-                                        model_active.set(None);
-                                    },
-                                    onblur: move |_| {
-                                        // A browser input can retain DOM text after a reactive render. Clearing the
-                                        // draft makes the selected value authoritative again when focus leaves. The
-                                        // "choose a harness" error deliberately survives the blur: the way to act
-                                        // on it is to click a harness chip, which is a blur, and the message must
-                                        // still be there to be followed. Focus or typing clears it.
-                                        model_draft.set(String::new());
-                                        model_open.set(false);
-                                        model_active.set(None);
-                                    },
-                                    onkeydown: {
-                                        let catalog = catalog_models.clone();
-                                        let options = model_options.clone();
-                                        move |evt| {
-                                            match evt.key() {
-                                                Key::Escape if model_open() => {
-                                                    // The dialog also cancels on Escape; this escape belongs to the
-                                                    // transient combobox and must not reach that outer handler.
-                                                    evt.prevent_default();
-                                                    evt.stop_propagation();
-                                                    model_draft.set(String::new());
-                                                    model_draft_error.set(None);
-                                                    model_open.set(false);
-                                                    model_active.set(None);
-                                                }
-                                                Key::ArrowDown if model_open() && model_option_count > 0 => {
-                                                    evt.prevent_default();
-                                                    let index = model_active()
-                                                        .map_or(0, |index| (index + 1) % model_option_count);
-                                                    model_active.set(Some(index));
-                                                    scroll_composer_model_result(index);
-                                                }
-                                                Key::ArrowUp if model_open() && model_option_count > 0 => {
-                                                    evt.prevent_default();
-                                                    let index = model_active().map_or(
-                                                        model_option_count - 1,
-                                                        |index| {
-                                                            (index + model_option_count - 1)
-                                                                % model_option_count
-                                                        },
-                                                    );
-                                                    model_active.set(Some(index));
-                                                    scroll_composer_model_result(index);
-                                                }
-                                                // Enter never reaches the form from this field, open or closed,
-                                                // for the same reason the search box swallows it: a text input's
-                                                // Enter is an implicit submit, and the keystroke a person uses to
-                                                // pick a model must not launch a session. With the list closed
-                                                // there is no draft to interpret, so it is a no-op.
-                                                Key::Enter if !evt.is_composing() => {
-                                                    evt.prevent_default();
-                                                    if !model_open() || !draft_transition_allowed(ops) {
-                                                        return;
-                                                    }
-                                                    let target = crate::launch_composer::model_enter_target(
-                                                        &options,
-                                                        model_active(),
-                                                        &model_draft(),
-                                                        &catalog,
-                                                        structured_harness(),
-                                                    );
-                                                    match target {
-                                                        crate::launch_composer::ModelEnterTarget::Nothing => {
-                                                            model_draft.set(String::new());
-                                                            model_open.set(false);
-                                                            model_active.set(None);
-                                                        }
-                                                        crate::launch_composer::ModelEnterTarget::Option(option) => {
-                                                            apply_model_option.call(option);
-                                                        }
-                                                        crate::launch_composer::ModelEnterTarget::Custom { id: model, harness } => {
-                                                            promote_fetched_history_snapshot(
-                                                                offered_history, create_target, fetched_history,
-                                                            );
-                                                            let before = LaunchSelection {
-                                                                harness,
-                                                                model: structured_model(),
-                                                                effort: structured_effort(),
-                                                                permissions: structured_permissions(),
-                                                                workspace_trust: structured_workspace_trust(),
-                                                            };
-                                                            let selection = LaunchSelection {
-                                                                harness,
-                                                                model: Some(model),
-                                                                effort: structured_effort(),
-                                                                permissions: structured_permissions(),
-                                                                workspace_trust: structured_workspace_trust(),
-                                                            };
-                                                            if !crate::launch_composer::selection_is_compatible(
-                                                                &selection,
-                                                                &catalog,
-                                                            ) {
-                                                                structured_effort.set(None);
-                                                                composer_reset_reason.set(
-                                                                    crate::launch_composer::reconciliation_reset_reason(
-                                                                        &before,
-                                                                        &LaunchSelection {
-                                                                            effort: None,
-                                                                            ..selection.clone()
-                                                                        },
-                                                                    ),
-                                                                );
-                                                            } else {
-                                                                composer_reset_reason.set(None);
-                                                            }
-                                                            structured_model_raw_seed.set(None);
-                                                            structured_model_edited.set(true);
-                                                            structured_model.set(selection.model);
-                                                            custom_model_harness.set(Some(harness));
-                                                            model_draft_error.set(None);
-                                                            model_draft.set(String::new());
-                                                            model_open.set(false);
-                                                            model_active.set(None);
-                                                            intent_key.set(None);
-                                                        }
-                                                        crate::launch_composer::ModelEnterTarget::NeedsHarness(_) => {
-                                                            model_draft_error.set(Some(
-                                                                "choose a harness before a custom model id"
-                                                                    .to_string(),
-                                                            ));
-                                                            intent_key.set(None);
-                                                        }
-                                                    }
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                    },
-                                }
-                                span { class: "launch-composer-model-hint", "{model_hint}" }
-                                if model_open() {
-                                    div { id: "launch-composer-model-results", role: "listbox", class: "launch-composer-listbox",
-                                        for (index, option) in model_options.iter().cloned().enumerate() {
-                                            button {
-                                                id: "launch-composer-model-option-{index}",
-                                                r#type: "button",
-                                                role: "option",
-                                                dir: "ltr",
-                                                aria_selected: model_active() == Some(index),
-                                                class: if model_active() == Some(index) { "selected" } else { "" },
-                                                disabled: busy,
-                                                // Keep the combobox focused through a pointer pick. Otherwise blur
-                                                // unmounts this transient row before its click can apply the choice.
-                                                onmousedown: move |evt| {
-                                                    evt.prevent_default();
-                                                },
-                                                onclick: {
-                                                    let option = option.clone();
-                                                    move |_| {
-                                                        apply_model_option.call(option.clone());
-                                                    }
-                                                },
-                                                match &option {
-                                                    crate::launch_composer::ModelOption::HarnessDefault => rsx! {
-                                                        "harness default"
-                                                    },
-                                                    crate::launch_composer::ModelOption::Model { id, harness } => rsx! {
-                                                        "{display_peer(id)}"
-                                                        if model_show_all() || structured_harness().is_none() {
-                                                            " ({harness:?})"
-                                                        }
-                                                    },
-                                                    crate::launch_composer::ModelOption::ShowAll => rsx! {
-                                                        if model_show_all() {
-                                                            "show chosen harness's models"
-                                                        } else {
-                                                            "show every harness's models"
-                                                        }
-                                                    },
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(reason) = model_draft_error() { div { class: "launch-composer-choice-error", "{reason}" } }
-                        }
-                        // OpenCode, Cursor, and Grok have no effort vocabulary, so permissions
-                        // stands alone in this pair rather than gaining a blank sibling that
-                        // suggests an unavailable setting exists.
-                        div { class: "launch-composer-choice-pair",
-                        if !matches!(structured_harness(), Some(LaunchHarness::OpenCode | LaunchHarness::Cursor | LaunchHarness::Grok)) {
-                        div { class: "launch-composer-choice launch-composer-effort-choice",
-                            span { class: "launch-composer-section-label", "effort" }
-                            div { class: "launch-composer-segmented",
-                                button {
-                                    r#type: "button", class: if structured_effort.read().is_none() { "selected" } else { "" },
-                                    aria_pressed: structured_effort.read().is_none(), disabled: busy,
-                                    onclick: move |_| {
+                            // These callbacks retain the create form's history and intent
+                            // boundaries. The shared controls only report the user's edits.
+                            LaunchControls {
+                                harness: structured_harness(),
+                                model: structured_model(),
+                                model_raw_seed: structured_model_raw_seed(),
+                                model_edited: structured_model_edited(),
+                                effort: structured_effort(),
+                                permissions: structured_permissions(),
+                                workspace_trust: structured_workspace_trust(),
+                                catalog: catalog_models.clone(),
+                                busy,
+                                model_draft: model_draft(),
+                                model_open: model_open(),
+                                model_active: model_active(),
+                                model_show_all: model_show_all(),
+                                model_draft_error: model_draft_error(),
+                                choice_error: structured_choice_error.map(str::to_string),
+                                reset_reason: composer_reset_reason(),
+                                model_id_prefix: "launch-composer-model".to_string(),
+                                on_model_focus: move |_| {
+                                    if !draft_transition_allowed(ops) { return; }
+                                    model_draft.set(String::new());
+                                    model_draft_error.set(None);
+                                    model_open.set(true);
+                                    model_active.set(None);
+                                },
+                                on_model_input: move |value| {
+                                    if !draft_transition_allowed(ops) { return; }
+                                    model_draft.set(value);
+                                    model_draft_error.set(None);
+                                    model_open.set(true);
+                                    model_active.set(None);
+                                },
+                                on_model_blur: move |_| {
+                                    // A browser input can retain DOM text after a reactive render.
+                                    // The selected value becomes authoritative again on blur, but
+                                    // the "choose a harness" error survives so the user can follow it.
+                                    model_draft.set(String::new());
+                                    model_open.set(false);
+                                    model_active.set(None);
+                                },
+                                on_model_escape: move |_| {
+                                    model_draft.set(String::new());
+                                    model_draft_error.set(None);
+                                    model_open.set(false);
+                                    model_active.set(None);
+                                },
+                                on_model_active: move |index| model_active.set(index),
+                                on_model_enter: {
+                                    let catalog = catalog_models.clone();
+                                    move |target| {
                                         if !draft_transition_allowed(ops) { return; }
-                                        promote_fetched_history_snapshot(
-                                            offered_history, create_target, fetched_history,
-                                        );
-                                        structured_effort.set(None); intent_key.set(None);
-                                    },
-                                    "default"
-                                }
-                                for effort in structured_efforts {
-                                    button {
-                                        key: "{crate::launch_composer::effort_value(effort)}", r#type: "button",
-                                        class: if *structured_effort.read() == Some(effort) { "selected" } else { "" },
-                                        aria_pressed: *structured_effort.read() == Some(effort), disabled: busy,
-                                        onclick: move |_| {
-                                            if !draft_transition_allowed(ops) { return; }
-                                            promote_fetched_history_snapshot(
-                                                offered_history, create_target, fetched_history,
-                                            );
-                                            structured_effort.set(Some(effort)); intent_key.set(None);
-                                        },
-                                        "{crate::launch_composer::effort_value(effort)}"
-                                    }
-                                }
-                            }
-                        }
-                        }
-                        div { class: "launch-composer-choice launch-composer-permissions-choice",
-                            span { class: "launch-composer-section-label", "permissions" }
-                            div { class: "launch-composer-segmented",
-                                if structured_harness() == Some(LaunchHarness::Pi) {
-                                    // Pi has no tool-approval gate. Its sole
-                                    // visible mode names that fact and cannot
-                                    // expose the unrelated `--approve` flag.
-                                    button {
-                                        r#type: "button",
-                                        class: "selected launch-composer-segment-danger",
-                                        aria_pressed: true,
-                                        disabled: busy,
-                                        onclick: move |_| {
-                                            if !draft_transition_allowed(ops) { return; }
-                                            promote_fetched_history_snapshot(
-                                                offered_history, create_target, fetched_history,
-                                            );
-                                            structured_permissions.set(Some(LaunchPermission::Yolo));
-                                            structured_permissions_is_explicit.set(true);
-                                            intent_key.set(None);
-                                        },
-                                        "yolo"
-                                    }
-                                } else {
-                                    button {
-                                        r#type: "button", class: if structured_permissions.read().is_none() { "selected" } else { "" },
-                                        aria_pressed: structured_permissions.read().is_none(), disabled: busy,
-                                        onclick: move |_| {
-                                            if !draft_transition_allowed(ops) { return; }
-                                            promote_fetched_history_snapshot(
-                                                offered_history, create_target, fetched_history,
-                                            );
-                                            structured_permissions.set(None);
-                                            structured_permissions_is_explicit.set(true);
-                                            intent_key.set(None);
-                                        },
-                                        "default"
-                                    }
-                                    button {
-                                        r#type: "button", class: if *structured_permissions.read() == Some(LaunchPermission::Yolo) { "selected launch-composer-segment-danger" } else { "launch-composer-segment-danger" },
-                                        aria_pressed: *structured_permissions.read() == Some(LaunchPermission::Yolo), disabled: busy,
-                                        onclick: move |_| {
-                                            if !draft_transition_allowed(ops) { return; }
-                                            promote_fetched_history_snapshot(
-                                                offered_history, create_target, fetched_history,
-                                            );
-                                            structured_permissions.set(Some(LaunchPermission::Yolo));
-                                            structured_permissions_is_explicit.set(true);
-                                            intent_key.set(None);
-                                        },
-                                        "yolo"
-                                    }
-                                }
-                                if structured_harness() == Some(LaunchHarness::Goose) {
-                                    for (permission, label) in [
-                                        (LaunchPermission::Approve, "approve"),
-                                        (LaunchPermission::SmartApprove, "smart approve"),
-                                        (LaunchPermission::Chat, "chat"),
-                                    ] {
-                                        button {
-                                            key: "{label}", r#type: "button",
-                                            class: if *structured_permissions.read() == Some(permission) { "selected" } else { "" },
-                                            aria_pressed: *structured_permissions.read() == Some(permission), disabled: busy,
-                                            onclick: move |_| {
-                                                if !draft_transition_allowed(ops) { return; }
+                                        match target {
+                                            crate::launch_composer::ModelEnterTarget::Nothing => {
+                                                model_draft.set(String::new());
+                                                model_open.set(false);
+                                                model_active.set(None);
+                                            }
+                                            crate::launch_composer::ModelEnterTarget::Option(option) => {
+                                                apply_model_option.call(option);
+                                            }
+                                            crate::launch_composer::ModelEnterTarget::Custom { id: model, harness } => {
                                                 promote_fetched_history_snapshot(
                                                     offered_history, create_target, fetched_history,
                                                 );
-                                                structured_permissions.set(Some(permission));
-                                                structured_permissions_is_explicit.set(true);
+                                                let before = LaunchSelection {
+                                                    harness,
+                                                    model: structured_model(),
+                                                    effort: structured_effort(),
+                                                    permissions: structured_permissions(),
+                                                    workspace_trust: structured_workspace_trust(),
+                                                };
+                                                let selection = LaunchSelection {
+                                                    harness,
+                                                    model: Some(model),
+                                                    effort: structured_effort(),
+                                                    permissions: structured_permissions(),
+                                                    workspace_trust: structured_workspace_trust(),
+                                                };
+                                                if !crate::launch_composer::selection_is_compatible(
+                                                    &selection, &catalog,
+                                                ) {
+                                                    structured_effort.set(None);
+                                                    composer_reset_reason.set(
+                                                        crate::launch_composer::reconciliation_reset_reason(
+                                                            &before,
+                                                            &LaunchSelection {
+                                                                effort: None,
+                                                                ..selection.clone()
+                                                            },
+                                                        ),
+                                                    );
+                                                } else {
+                                                    composer_reset_reason.set(None);
+                                                }
+                                                structured_model_raw_seed.set(None);
+                                                structured_model_edited.set(true);
+                                                structured_model.set(selection.model);
+                                                custom_model_harness.set(Some(harness));
+                                                model_draft_error.set(None);
+                                                model_draft.set(String::new());
+                                                model_open.set(false);
+                                                model_active.set(None);
                                                 intent_key.set(None);
-                                            },
-                                            "{label}"
+                                            }
+                                            crate::launch_composer::ModelEnterTarget::NeedsHarness(_) => {
+                                                model_draft_error.set(Some(
+                                                    "choose a harness before a custom model id".to_string(),
+                                                ));
+                                                intent_key.set(None);
+                                            }
                                         }
                                     }
-                                }
-                                if structured_harness() == Some(LaunchHarness::Omp) {
-                                    // OMP carries its permission as one
-                                    // explicit `--approval-mode` flag; unlike
-                                    // Pi, the harness default is a real
-                                    // choice and stays selectable, and
-                                    // unlike Goose only Approve is offered.
-                                    for (permission, label) in [(LaunchPermission::Approve, "approve")] {
-                                        button {
-                                            key: "{label}", r#type: "button",
-                                            class: if *structured_permissions.read() == Some(permission) { "selected" } else { "" },
-                                            aria_pressed: *structured_permissions.read() == Some(permission), disabled: busy,
-                                            onclick: move |_| {
-                                                if !draft_transition_allowed(ops) { return; }
-                                                promote_fetched_history_snapshot(
-                                                    offered_history, create_target, fetched_history,
-                                                );
-                                                structured_permissions.set(Some(permission));
-                                                structured_permissions_is_explicit.set(true);
-                                                intent_key.set(None);
-                                            },
-                                            "{label}"
-                                        }
-                                    }
-                                }
+                                },
+                                on_model_option: move |option| apply_model_option.call(option),
+                                on_effort: move |effort| {
+                                    if !draft_transition_allowed(ops) { return; }
+                                    promote_fetched_history_snapshot(
+                                        offered_history, create_target, fetched_history,
+                                    );
+                                    structured_effort.set(effort);
+                                    intent_key.set(None);
+                                },
+                                on_permissions: move |permission| {
+                                    if !draft_transition_allowed(ops) { return; }
+                                    promote_fetched_history_snapshot(
+                                        offered_history, create_target, fetched_history,
+                                    );
+                                    structured_permissions.set(permission);
+                                    structured_permissions_is_explicit.set(true);
+                                    intent_key.set(None);
+                                },
+                                on_workspace_trust: move |choice| {
+                                    if !draft_transition_allowed(ops) { return; }
+                                    promote_fetched_history_snapshot(
+                                        offered_history, create_target, fetched_history,
+                                    );
+                                    structured_workspace_trust.set(choice);
+                                    structured_workspace_trust_is_explicit.set(true);
+                                    intent_key.set(None);
+                                },
                             }
-                        }
-                        }
-                        if structured_harness().is_some_and(|harness| matches!(harness, LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi)) {
-                            div { class: "launch-composer-choice launch-composer-trust-choice",
-                                span { class: "launch-composer-section-label", "workspace trust" }
-                                if structured_harness() == Some(LaunchHarness::Muse) {
-                                    p { class: "launch-composer-choice-help", "Muse false adds no trust flag; YOLO or vendor settings may still trust this workspace." }
-                                }
-                                if structured_harness() == Some(LaunchHarness::Codex) {
-                                    p { class: "launch-composer-choice-help", "Codex true trusts this directory for this launch; false runs it as untrusted. Default uses Codex's own setting or prompt." }
-                                }
-                                div { class: "launch-composer-segmented",
-                                    for (choice, label) in [(None, "default"), (Some(true), "true"), (Some(false), "false")] {
-                                        button {
-                                            key: "{label}", r#type: "button",
-                                            class: if structured_workspace_trust() == choice { "selected" } else { "" },
-                                            aria_pressed: structured_workspace_trust() == choice,
-                                            disabled: busy,
-                                            onclick: move |_| {
-                                                if !draft_transition_allowed(ops) { return; }
-                                                promote_fetched_history_snapshot(
-                                                    offered_history, create_target, fetched_history,
-                                                );
-                                                structured_workspace_trust.set(choice);
-                                                structured_workspace_trust_is_explicit.set(true);
-                                                intent_key.set(None);
-                                            },
-                                            "{label}"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(reason) = structured_choice_error {
-                            div { class: "launch-composer-choice-error", "{reason}" }
-                        }
-                        if let Some(reason) = composer_reset_reason() {
-                            div { class: "launch-composer-choice-error", role: "status", "{reason}" }
-                        }
                         }
                         if cursor_launch {
                             p { "Cursor session tracking and Resume are not supported. Restart starts a new conversation." }
