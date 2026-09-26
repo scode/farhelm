@@ -29,7 +29,7 @@ use super::launch_artifacts::{
     wrapper_failure_detail,
 };
 use super::listing::list_all;
-use super::status::{dead_pane_exit_code, entry_info, observe_entry};
+use super::status::{KnownTmuxNames, dead_pane_exit_code, entry_info, observe_entry};
 use super::sweep::{
     ScopeKillFailure, ScopeUnits, SweepTarget, capture_process_identity, reap_process_tree,
     stop_live_agent,
@@ -895,11 +895,13 @@ async fn session_info_now(
     entry: &Arc<SessionEntry>,
 ) -> anyhow::Result<SessionInfo> {
     sup.capture_now().await;
-    let pane_states = match entry.terminal {
-        Some(_) => sup.tmux.pane_states().await?,
-        None => HashMap::new(),
+    // Without a terminal there is no pane to classify, so neither the tmux
+    // probe nor the registry snapshot is worth taking.
+    let (pane_states, known) = match entry.terminal {
+        Some(_) => (sup.tmux.pane_states().await?, sup.known_tmux_names().await),
+        None => (HashMap::new(), KnownTmuxNames::default()),
     };
-    let observed = observe_entry(sup, entry, &pane_states).await?;
+    let observed = observe_entry(sup, entry, &pane_states, &known).await?;
     if observed.settled_error && sup.may_record() {
         cleanup_launch_artifacts(&sup.state_dir, &sup.store, &entry.info.id, entry.generation)
             .await;
@@ -938,6 +940,7 @@ async fn session_info_now(
     sup.with_checkout_metadata(entry_info(
         entry,
         &pane_states,
+        &known,
         observed.sentinel.as_deref(),
     ))
     .await

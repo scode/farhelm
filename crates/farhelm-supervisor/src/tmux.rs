@@ -1509,12 +1509,12 @@ pub struct PaneState {
     /// only on pane id could have a stale, never-reloaded `SessionEntry`
     /// silently inherit an unrelated NEW session's liveness merely
     /// because both happen to share a recycled pane number. Requiring
-    /// this to also match the entry's own remembered `tmux_name` (see
-    /// `service.rs`'s `session_status`) is what closes that gap — a
-    /// mismatch on EITHER pane id or session name is treated as "this
-    /// pane is not the one we are asking about" and falls back to the
-    /// same honest `Exited { exit_code: None }` as an outright absent
-    /// pane.
+    /// this to also match the entry's own remembered `tmux_name` is what
+    /// closes that gap. A pane found under a different name is not this
+    /// entry's to judge by: under another farhelm session's name it is
+    /// read as recycled (ours is gone), and under a name no session
+    /// answers to it is left unattributed rather than read as an exit
+    /// (`service::status::PaneEvidence` has the rule).
     pub session_name: String,
     /// tmux's own `#{pane_dead}` flag, exactly as [`PaneProcess::dead`].
     pub dead: bool,
