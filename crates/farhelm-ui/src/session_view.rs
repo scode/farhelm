@@ -1225,7 +1225,7 @@ pub(crate) fn SessionView(
     let close_session_id = session.id.clone();
     let mut do_close_tab = move |tab_id: String| {
         // Re-entry guard on the per-tab in-flight set, mirroring
-        // `ListView`'s `pending`: `insert` returning `false` means a close
+        // `ListView`'s `RowPhase::Pending`: `insert` returning `false` means a close
         // for this tab is already running.
         if !closing_tabs.write().insert(tab_id.clone()) {
             return;
@@ -1237,7 +1237,8 @@ pub(crate) fn SessionView(
         let base = close_base.clone();
         let session_id = close_session_id.clone();
         spawn(async move {
-            match close_tab(&base, &session_id, &tab_id).await {
+            let tab = crate::Tab { id: tab_id.clone() };
+            match close_tab(&base, &session_id, &tab).await {
                 Ok(()) => {
                     // Acting on a response already in hand, not guessing:
                     // the same deliberate optimism `ListView` applies to a

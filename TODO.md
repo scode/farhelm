@@ -294,11 +294,6 @@ are large mostly because of their tests.
   one-render lag the form then patches over (`:1653-1661`). Fix: a shared `SeededField` type, one source of truth for
   the folder, a `use_memo` for the target in `ListView`, then split destination/browse, composer search, and submit out
   of the component.
-- **UI `ListView` per-row state.** Medium effort. Seven parallel `HashSet<String>`/`HashMap<String, _>`/`Option`
-  collections (`list/view.rs:583-694`) are recombined into each row's state, and the "is this row locked" triple is
-  passed to five call sites; exclusivity rules such as confirm-delete versus confirm-replace hold only by call-site
-  discipline. Session, tab, and profile ids are bare strings (`api::close_tab(base, session_id, tab_id)` can be called
-  with the two swapped). Fix: one `HashMap<SessionId, RowPhase>` and id newtypes like the existing `HostId`.
 - **CLI `main.rs`.** Medium effort. `main()` is ~540 lines (`farhelm/src/main.rs:688-1225`) mixing dispatch with env
   reads and the hook-log path derivation copied between `Hook` and `GooseHook`. `spawn_session` and `agent_request` each
   hand-roll connect, handshake, one request, one reply, but treat failures differently: `spawn` prints the supervisor's
