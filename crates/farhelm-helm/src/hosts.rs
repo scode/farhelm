@@ -534,12 +534,15 @@ pub(crate) async fn add_host(
 /// FAILS CLOSED, by CONVERGING rather than rolling back — the asymmetry with
 /// `add_host` is deliberate. The durable write here is what the user asked
 /// for and is already correct; the only thing at risk is an actor still
-/// dialing the old address. `retry_now` fixes exactly that and cannot fail
-/// (it reads no registry of its own — the ACTOR reloads its row at its own
-/// boundary), so the connection converges on the registry even when the
-/// reconcile did not. What is left over is cosmetic and self-correcting: the
-/// hosts list may show the old destination until the next successful
-/// reconcile, which the error says.
+/// dialing the old address. `retry_now` asks the actor to reload its row and
+/// redial, which is how the connection normally converges on the registry
+/// even when the reconcile did not. It is not guaranteed: with an unreadable
+/// registry `retry_now` fails outright when it must revive a dead or retired
+/// actor, and succeeds without effect when a live actor cannot re-read its
+/// row; either way the connection stays on the old address. That is why the
+/// handler reports `retry_now`'s outcome rather than assuming success. In the ordinary case what is left over is
+/// cosmetic: the hosts list may show the old destination until the next
+/// successful reconcile, which the error says.
 ///
 /// ## The retarget and this host's own writers are one queue
 ///
@@ -575,7 +578,7 @@ pub(crate) async fn set_destination(
         //
         // Its failures are reported rather than swallowed. `unwrap_or(false)`
         // read as "it either worked or it did not, never mind which", which
-        // is exactly the wrong posture on the path that exists to guarantee
+        // is exactly the wrong posture on the path whose whole job is
         // convergence: a revival that failed because the registry could not
         // be read leaves the actor pointed at the OLD address, and saying so
         // is the difference between a user who retries and a user who trusts
