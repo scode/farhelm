@@ -114,6 +114,12 @@ async function waitForFeedReaderBoundary(page: Page, withdrawn: boolean, staleSe
 }
 
 /**
+ * The `farhelm-fixtures` binary: the fake agent and state sweep, built by
+ * `cargo build` beside the product `farhelm` binary but never shipped with it.
+ */
+export const FIXTURES_BIN = path.resolve(__dirname, "../../../target/debug/farhelm-fixtures");
+
+/**
  * The fake agent's `basic` script, as the create form's `invocation` string
  * — an absolute path, quoted, exactly as the terminal spec family's shared
  * fixture and sidebar.spec.ts build theirs. The supervisor shell-splits it into argv
@@ -123,9 +129,7 @@ async function waitForFeedReaderBoundary(page: Page, withdrawn: boolean, staleSe
  * what makes it a usable fixture for a status transition (the supervisor's
  * sampler classifies a quiet pane as idle after a few looks).
  */
-export const FAKE_AGENT = `"${
-  path.resolve(__dirname, "../../../target/debug/farhelm")
-}" internal fake-agent --script basic`;
+export const FAKE_AGENT = `"${FIXTURES_BIN}" fake-agent --script basic`;
 
 /**
  * The session LISTING endpoint, as a route matcher.

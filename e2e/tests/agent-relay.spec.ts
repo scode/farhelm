@@ -69,7 +69,7 @@ import { submitPrompt, waitUntilAgentReady } from "./helpers/real-agent";
  * same file — nothing here kills or relaunches a supervisor, so nothing
  * here has any business knowing its pid or its state directory.
  */
-type StackInfo = { farhelm: string };
+type StackInfo = { farhelm: string; fixtures: string };
 
 /**
  * Read the published stack description, failing loudly if it is absent.
@@ -103,7 +103,7 @@ const LOCAL_HOST_NAME = "this machine";
 
 /** The fake-agent script that acts out the whole hook→pointer→verb chain. */
 function relayAgentInvocation(): string {
-  return `"${stackInfo().farhelm}" internal fake-agent --script agent-relay`;
+  return `"${stackInfo().fixtures}" fake-agent --script agent-relay`;
 }
 
 /** The fleet's ssh row — the harness's second, isolated supervisor. */

@@ -18,10 +18,10 @@ use crate::hook_identity::{ServeTask, wait_for_after_from};
 /// establish the premise the production ancestry guard validates.
 fn native_codex_image(dir: &std::path::Path) -> std::path::PathBuf {
     let image = dir.join("codex");
-    match std::fs::hard_link(farhelm_bin(), &image) {
+    match std::fs::hard_link(fixtures_bin(), &image) {
         Ok(()) => image,
         Err(link_error) => {
-            std::fs::copy(farhelm_bin(), &image).unwrap_or_else(|copy_error| {
+            std::fs::copy(fixtures_bin(), &image).unwrap_or_else(|copy_error| {
                 panic!(
                     "could not create the native Codex image: hard link failed: {link_error}; \
                      copy fallback failed: {copy_error}"
@@ -201,7 +201,7 @@ async fn a_shell_child_cannot_claim_a_pristine_codex_session() {
     let images = farhelm_teststate::tempdir().expect("native Codex image directory");
     let codex = native_codex_image(images.path());
     let invocation = format!(
-        "{} internal fake-agent --script codex-conversation --record-home {} --hook-binary {} --defer-startup",
+        "{} fake-agent --script codex-conversation --record-home {} --hook-binary {} --defer-startup",
         shell_words::quote(&codex.to_string_lossy()),
         shell_words::quote(&records.path().to_string_lossy()),
         shell_words::quote(farhelm_bin()),
@@ -328,14 +328,13 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     let original = std::path::Path::new(farhelm_bin());
 
     let invocation = format!(
-        "{} internal fake-agent --script codex-conversation --record-home {} --hook-binary {}",
+        "{} fake-agent --script codex-conversation --record-home {} --hook-binary {}",
         shell_words::quote(&codex.to_string_lossy()),
         shell_words::quote(&records.path().to_string_lossy()),
         shell_words::quote(&original.to_string_lossy()),
     );
     let resume_template = vec![
         codex.to_string_lossy().into_owned(),
-        "internal".to_string(),
         "fake-agent".to_string(),
         "--script".to_string(),
         "codex-conversation".to_string(),

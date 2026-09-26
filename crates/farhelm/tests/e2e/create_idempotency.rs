@@ -34,7 +34,7 @@ async fn create_keyed(
     client
         .create_session_with_key(
             &work.to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("keyed".to_string()),
             80,
             24,
@@ -238,7 +238,7 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
     let resized = client2
         .create_session_with_key(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("keyed".to_string()),
             132,
             50,
@@ -814,7 +814,7 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
     let first = client1
         .create_session_with_key(
             "~/ws",
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("tilde".to_string()),
             80,
             24,
@@ -843,7 +843,7 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
     client2
         .create_session_with_key(
             "~/ws",
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("tilde".to_string()),
             80,
             24,
@@ -854,7 +854,7 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
     let replay = client2
         .create_session_with_key(
             "~/ws",
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("tilde".to_string()),
             80,
             24,
@@ -905,7 +905,7 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
     let refused = client1
         .create_session_with_key(
             "~/ws",
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("tilde".to_string()),
             80,
             24,
@@ -938,7 +938,7 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
     let replayed = client2
         .create_session_with_key(
             "~/ws",
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("tilde".to_string()),
             80,
             24,
@@ -966,7 +966,7 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
     let conflict = client2
         .create_session_with_key(
             &home.path().join("ws").to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("tilde".to_string()),
             80,
             24,
@@ -1023,7 +1023,7 @@ async fn a_pending_tilde_create_retries_from_the_stored_expansion() {
     client1
         .create_session_with_key(
             "~/ws",
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("tilde".to_string()),
             80,
             24,
@@ -1056,7 +1056,7 @@ async fn a_pending_tilde_create_retries_from_the_stored_expansion() {
     let relaunched = client2
         .create_session_with_key(
             "~/ws",
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("tilde".to_string()),
             80,
             24,

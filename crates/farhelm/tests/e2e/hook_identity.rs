@@ -137,7 +137,7 @@ impl Drop for ServeTask {
 /// as it would for a real `claude` on the user's PATH.
 fn fixture_invocation(fixtures: &CaptureFixtures, kind: &str, script: &str) -> String {
     format!(
-        "{} internal fake-agent --script {script} --record-home {}",
+        "{} fake-agent --script {script} --record-home {}",
         shell_words::quote(&fixtures.bin().join(kind).to_string_lossy()),
         shell_words::quote(&fixtures.home().to_string_lossy())
     )
@@ -538,7 +538,6 @@ async fn a_second_report_replaces_the_first() {
     let claude = fixtures.bin().join("claude").to_string_lossy().into_owned();
     let template = vec![
         claude,
-        "internal".to_string(),
         "fake-agent".to_string(),
         "--script".to_string(),
         "hook-report".to_string(),
@@ -1266,8 +1265,7 @@ async fn generic_sessions_get_no_hook_flags() {
     // kind-named symlink, which is exactly what makes derivation call it
     // generic.
     let requested = [
-        farhelm_bin().to_string(),
-        "internal".to_string(),
+        fixtures_bin().to_string(),
         "fake-agent".to_string(),
         "--script".to_string(),
         "hook-report".to_string(),
@@ -2027,7 +2025,7 @@ fn run_hook(mut cmd: std::process::Command, payload: &[u8]) -> std::process::Out
 /// `Supervisor` this test built itself.
 async fn claude_hook_command_carries_announce(supervisor: &SupervisorProcess) -> bool {
     let bin = farhelm_teststate::tempdir().expect("bin dir");
-    std::os::unix::fs::symlink(farhelm_bin(), bin.path().join("claude"))
+    std::os::unix::fs::symlink(fixtures_bin(), bin.path().join("claude"))
         .expect("symlink claude onto the farhelm binary");
     let home = farhelm_teststate::tempdir().expect("record home");
     let work = farhelm_teststate::tempdir().expect("work dir");
@@ -2039,7 +2037,7 @@ async fn claude_hook_command_carries_announce(supervisor: &SupervisorProcess) ->
     let client = SupervisorClient::start(r, w).await.expect("handshake");
 
     let invocation = format!(
-        "{} internal fake-agent --script claude-record --record-home {}",
+        "{} fake-agent --script claude-record --record-home {}",
         shell_words::quote(&bin.path().join("claude").to_string_lossy()),
         shell_words::quote(&home.path().to_string_lossy())
     );

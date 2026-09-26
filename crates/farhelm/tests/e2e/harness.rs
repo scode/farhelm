@@ -259,10 +259,32 @@ pub(crate) fn argv_marker(transcript: &[u8]) -> String {
     line
 }
 
-/// The built farhelm binary: fake agent + launch shim in one artifact,
-/// exactly as production ships it.
+/// The built farhelm binary: the launch shim and hooks sessions run, exactly
+/// as production ships it.
 pub(crate) fn farhelm_bin() -> &'static str {
     env!("CARGO_BIN_EXE_farhelm")
+}
+
+/// The `farhelm-fixtures` binary: the fake agent and the state sweep, which
+/// are not part of the shipped product.
+///
+/// Another package's binary, so Cargo gives integration tests no path to
+/// it. It is found beside [`farhelm_bin`] instead, in the same target
+/// directory: `.config/nextest.toml` builds it before any e2e test runs, and
+/// a plain `cargo build` builds it as a default member. A missing binary
+/// panics with that remedy rather than failing some later spawn obscurely.
+pub(crate) fn fixtures_bin() -> &'static str {
+    static PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        let path = std::path::Path::new(farhelm_bin()).with_file_name("farhelm-fixtures");
+        assert!(
+            path.is_file(),
+            "{} is missing; build it with `cargo build -p farhelm-fixtures` (nextest does this \
+             before e2e tests through .config/nextest.toml)",
+            path.display()
+        );
+        path.to_str().expect("a UTF-8 target directory").to_string()
+    })
 }
 
 /// Run one tmux command against a private socket, asynchronously.
@@ -456,11 +478,15 @@ pub(crate) async fn wait_for_supervisor_ready(state_dir: &std::path::Path) {
     }
 }
 
-/// Quote a path for an agent invocation string, which the supervisor
-/// parses with shell-words. Without this a checkout under a path with
-/// spaces would fragment the argv and fail every test confusingly.
-pub(crate) fn agent_cmd(args: &str) -> String {
-    format!("{} {args}", shell_words::quote(farhelm_bin()))
+/// An agent invocation string running the fixtures binary with `args`:
+/// `fixture_cmd("fake-agent --script basic")` is the agent an e2e session
+/// usually runs.
+///
+/// The path is quoted because the supervisor parses invocations with
+/// shell-words; without it a checkout under a path with spaces would
+/// fragment the argv and fail every test confusingly.
+pub(crate) fn fixture_cmd(args: &str) -> String {
+    format!("{} {args}", shell_words::quote(fixtures_bin()))
 }
 
 /// Caps harnesses inside one process; nextest's shared budget lives in `.config/nextest.toml`.
@@ -854,7 +880,7 @@ pub(crate) async fn basic_session_mid_launch(
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,

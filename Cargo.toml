@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "crates/farhelm",
   "crates/farhelm-desktop",
+  "crates/farhelm-fixtures",
   "crates/farhelm-helm",
   "crates/farhelm-proto",
   "crates/farhelm-supervisor",
@@ -33,6 +34,7 @@ default-members = [
   "crates/farhelm-helm",
   "crates/farhelm-proto",
   "crates/farhelm-supervisor",
+  "crates/farhelm-fixtures",
   "crates/farhelm-teststate",
   "crates/farhelm-ui",
 ]

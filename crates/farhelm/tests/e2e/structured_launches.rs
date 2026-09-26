@@ -72,7 +72,7 @@ impl FakeHarness {
     /// Build a literal argv for one fake vendor entry point.
     ///
     /// The option tail follows the fake-agent script because the multi-call
-    /// fixture reserves its leading words for `internal fake-agent`; the
+    /// fixture reserves its leading word for `fake-agent`; the
     /// captured process still receives every option as a distinct argv value.
     pub(crate) fn invocation(&self, selection: &LaunchSelection) -> String {
         let mut argv = vec![
@@ -91,7 +91,6 @@ impl FakeHarness {
                 })
                 .to_string_lossy()
                 .into_owned(),
-            "internal".to_string(),
             "fake-agent".to_string(),
             "--script".to_string(),
             // Record fixtures are the existing fake-agent scripts that emit
@@ -197,10 +196,10 @@ pub(crate) fn fake_harness() -> FakeHarness {
         std::fs::write(
             &executable,
             format!(
-                "#!/bin/sh\ncounter={}\ngeneration=0\nif [ -f \"$counter\" ]; then\n  IFS= read -r generation < \"$counter\"\nfi\ngeneration=$((generation + 1))\nprintf '%s\\n' \"$generation\" > \"$counter\"\nprintf 'STRUCTURED-LAUNCH-GENERATION:%s\\n' \"$generation\"\nprintf 'STRUCTURED-LAUNCH-ARGV-HEX:'\nprintf '%s\\0' \"$@\" | od -An -tx1 | tr -d ' \\n'\nprintf '\\n'\nif [ \"$1\" = internal ]; then\n  exec {} \"$@\"\nfi\nexec {} internal fake-agent --script claude-record --record-home {} \"$@\"\n",
+                "#!/bin/sh\ncounter={}\ngeneration=0\nif [ -f \"$counter\" ]; then\n  IFS= read -r generation < \"$counter\"\nfi\ngeneration=$((generation + 1))\nprintf '%s\\n' \"$generation\" > \"$counter\"\nprintf 'STRUCTURED-LAUNCH-GENERATION:%s\\n' \"$generation\"\nprintf 'STRUCTURED-LAUNCH-ARGV-HEX:'\nprintf '%s\\0' \"$@\" | od -An -tx1 | tr -d ' \\n'\nprintf '\\n'\nif [ \"$1\" = fake-agent ]; then\n  exec {} \"$@\"\nfi\nexec {} fake-agent --script claude-record --record-home {} \"$@\"\n",
                 shell_words::quote(&counter.to_string_lossy()),
-                shell_words::quote(farhelm_bin()),
-                shell_words::quote(farhelm_bin()),
+                shell_words::quote(fixtures_bin()),
+                shell_words::quote(fixtures_bin()),
                 shell_words::quote(&home.path().to_string_lossy()),
             ),
         )
@@ -1085,7 +1084,7 @@ mod decoder_tests {
     /// last occurrence.
     #[test]
     fn a_stale_prefix_row_does_not_shadow_the_complete_witness() {
-        let words = ["codex", "internal", "fake-agent", "-m", "gpt-6-astra"];
+        let words = ["codex", "fake-agent", "-m", "gpt-6-astra"];
         let transcript = format!(
             "shell-prompt$ \nSTRUCTURED-LAUNCH-GENERATION:1\nSTRUCTURED-LAUNCH-ARGV-HEX:\nshell-prompt$ \nSTRUCTURED-LAUNCH-ARGV-HEX:{}\nfake-agent starting\nFAKE-AGENT ARGV:/bin/fake -m gpt-6-astra\nFAKE-AGENT READY\n",
             hex_of(&words)
@@ -1107,7 +1106,7 @@ mod decoder_tests {
     /// ago. The join must cross those blank rows to the payload.
     #[test]
     fn a_payload_across_blank_rows_still_joins_its_prefix() {
-        let words = ["codex", "internal", "fake-agent", "-m", "gpt-6-astra"];
+        let words = ["codex", "fake-agent", "-m", "gpt-6-astra"];
         let transcript = format!(
             "STRUCTURED-LAUNCH-GENERATION:2\nSTRUCTURED-LAUNCH-ARGV-HEX:  \n\n\n\n{}\nfake-agent starting\nFAKE-AGENT ARGV:/bin/fake -m gpt-6-astra\nFAKE-AGENT READY\n",
             hex_of(&words)
@@ -1130,7 +1129,7 @@ mod decoder_tests {
     /// failure transcript carries the full boundary, escapes included.
     #[test]
     fn a_witness_row_with_terminal_escapes_still_decodes() {
-        let words = ["codex", "internal", "fake-agent", "-m", "gpt-6-astra"];
+        let words = ["codex", "fake-agent", "-m", "gpt-6-astra"];
         let transcript = format!(
             "STRUCTURED-LAUNCH-GENERATION:2  \r\nSTRUCTURED-LAUNCH-ARGV-HEX:{pad}  \r\n\r\n\r\n\x1b[2;28H{hex}\r\n\x1b[?2004h\x1b[1;32mfake-agent\x1b[0m starting (script=record)\r\r\nFAKE-AGENT ARGV:/bin/fake -m gpt-6-astra\r\r\nFAKE-AGENT READY\r\r\n> ",
             pad = "                                                                                               ",
@@ -1153,7 +1152,7 @@ mod decoder_tests {
     /// included, is the only acceptable decode.
     #[test]
     fn a_snapshot_cut_mid_payload_joins_through_blank_rows() {
-        let words = ["codex", "internal", "fake-agent"];
+        let words = ["codex", "fake-agent"];
         let full = hex_of(&words);
         let (cut, rest) = full.split_at(6);
         let (first, second) = cut.split_at(4);
@@ -1204,7 +1203,7 @@ mod decoder_tests {
     /// of silently weakening the boundary.
     #[test]
     fn each_fake_marker_gate_is_necessary() {
-        let words = ["codex", "internal"];
+        let words = ["codex", "fake-agent"];
         let hex = hex_of(&words);
         let without_ready = format!(
             "STRUCTURED-LAUNCH-GENERATION:1\nSTRUCTURED-LAUNCH-ARGV-HEX:{hex}\nFAKE-AGENT ARGV:/bin/fake\n"
@@ -1231,7 +1230,7 @@ mod decoder_tests {
     /// same boundary, not a second candidate.
     #[test]
     fn a_wrapped_hex_witness_still_joins_across_rows() {
-        let words = ["codex", "internal", "fake-agent", "-m", "gpt-6-astra"];
+        let words = ["codex", "fake-agent", "-m", "gpt-6-astra"];
         let hex = hex_of(&words);
         let (first, second) = hex.split_at(hex.len() / 2);
         let transcript = format!(

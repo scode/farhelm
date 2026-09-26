@@ -214,7 +214,7 @@ export function installTerminalSuiteHooks(options: { tabSweep?: boolean } = {}) 
  * rather than a bare `sleep` — the multi-session flow types into one of
  * them, which `sleep` cannot answer.
  */
-export const FAKE_AGENT_INVOCATION = `"${path.resolve(__dirname, "../../../target/debug/farhelm")}" internal fake-agent --script basic`;
+export const FAKE_AGENT_INVOCATION = `"${path.resolve(__dirname, "../../../target/debug/farhelm-fixtures")}" fake-agent --script basic`;
 
 /**
  * The fake agent's flood producer as a COMMAND to type into a shell,
@@ -227,7 +227,7 @@ export const FAKE_AGENT_INVOCATION = `"${path.resolve(__dirname, "../../../targe
  * relative to an ATTACH, and here the attach is long since done: the
  * command starts the flood at the moment it is typed.
  */
-export const FLOOD_AGENT_COMMAND = `"${path.resolve(__dirname, "../../../target/debug/farhelm")}" internal fake-agent --script flood`;
+export const FLOOD_AGENT_COMMAND = `"${path.resolve(__dirname, "../../../target/debug/farhelm-fixtures")}" fake-agent --script flood`;
 
 /**
  * Locator for a session row by its exact title, matched against the

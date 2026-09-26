@@ -5,7 +5,7 @@
 //
 // Every test but the last is CI-runnable and needs no vendor credentials
 // — they drive `helpers/real-agent.ts` against
-// `farhelm internal fake-agent --script basic`, using its ECHO behavior
+// `farhelm-fixtures fake-agent --script basic`, using its ECHO behavior
 // as a synthetic-marker generator: typing arbitrary text and waiting for
 // `echo:<that text>` lets a test plant or release ANY marker it wants
 // with no fixture change, which is how the regression tests below pin
@@ -46,8 +46,8 @@ import { waitForSessionReady } from "./helpers/terminal-readiness";
  * mouse-modes.spec.ts's own constant.
  */
 const FAKE_AGENT_INVOCATION = `"${
-  path.resolve(__dirname, "../../target/debug/farhelm")
-}" internal fake-agent --script basic`;
+  path.resolve(__dirname, "../../target/debug/farhelm-fixtures")
+}" fake-agent --script basic`;
 
 /**
  * The word the real-agent leg asks Claude to reverse, and the reversal it

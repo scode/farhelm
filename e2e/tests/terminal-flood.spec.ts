@@ -41,12 +41,12 @@ installTerminalSuiteHooks();
  * controls precisely when the producer starts (`sendFloodGateByte`) rather
  * than racing it.
  */
-const FLOOD_GATED_AGENT_INVOCATION = `"${path.resolve(__dirname, "../../target/debug/farhelm")}" internal fake-agent --script flood-gated`;
+const FLOOD_GATED_AGENT_INVOCATION = `"${path.resolve(__dirname, "../../target/debug/farhelm-fixtures")}" fake-agent --script flood-gated`;
 
 
 /**
  * How many records the `flood`/`flood_gated` fake-agent scripts emit.
- * Duplicated from `fake_agent::FLOOD_RECORDS` (crates/farhelm/src/fake_agent.rs)
+ * Duplicated from `fake_agent::FLOOD_RECORDS` (crates/farhelm-fixtures/src/fake_agent.rs)
  * because that module is private to the bin crate and there is no shared
  * build step between it and this TypeScript suite — the same duplication
  * the Rust e2e suite accepts for the same reason (see its own

@@ -586,7 +586,7 @@ async fn reattach_cutover_has_no_missing_or_duplicated_output() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script counter"),
+            &fixture_cmd("fake-agent --script counter"),
             None,
             80,
             24,
@@ -631,7 +631,7 @@ async fn non_utf8_terminal_output_survives_live_stream() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script binary"),
+            &fixture_cmd("fake-agent --script binary"),
             None,
             80,
             24,
@@ -1810,7 +1810,7 @@ async fn reattach_to_alt_screen_app_preserves_content() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script altscreen"),
+            &fixture_cmd("fake-agent --script altscreen"),
             None,
             80,
             24,
@@ -2586,7 +2586,7 @@ async fn connection_loss_detaches_terminals_and_fails_requests() {
     let session = client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -2863,7 +2863,7 @@ async fn stdio_proxy_carries_a_real_session() {
     let session = client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -2908,7 +2908,7 @@ async fn large_input_survives_chunking() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             200,
             50,
@@ -3065,7 +3065,7 @@ async fn created_sessions_are_listed_with_a_derived_title() {
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    let invocation = agent_cmd("internal fake-agent --script basic");
+    let invocation = fixture_cmd("fake-agent --script basic");
 
     let session = h
         .client
@@ -3404,7 +3404,7 @@ async fn create_with_degenerate_size_clamps_to_1x1() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             0,
             0,
@@ -3481,7 +3481,7 @@ async fn input_bytes_survive_verbatim_through_hexecho() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script hexecho"),
+            &fixture_cmd("fake-agent --script hexecho"),
             None,
             80,
             24,
@@ -3551,7 +3551,7 @@ async fn printable_and_binary_input_preserve_bytes_across_commands() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script hexecho"),
+            &fixture_cmd("fake-agent --script hexecho"),
             None,
             200,
             50,
@@ -3828,7 +3828,7 @@ async fn list_sessions_survives_when_the_tmux_server_is_gone() {
     h.client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -4377,7 +4377,7 @@ async fn stop_kills_the_whole_process_tree() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner"),
+            &fixture_cmd("fake-agent --script spawner"),
             None,
             80,
             24,
@@ -4490,7 +4490,7 @@ async fn stop_kills_a_child_that_ignores_sigterm() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-stubborn"),
+            &fixture_cmd("fake-agent --script spawner-stubborn"),
             None,
             80,
             24,
@@ -4552,7 +4552,7 @@ async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-stubborn"),
+            &fixture_cmd("fake-agent --script spawner-stubborn"),
             None,
             80,
             24,
@@ -4882,7 +4882,7 @@ async fn delete_kills_the_whole_process_tree() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner"),
+            &fixture_cmd("fake-agent --script spawner"),
             None,
             80,
             24,
@@ -5019,7 +5019,7 @@ async fn stop_takes_no_screen_capture_and_replays_none() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script altscreen"),
+            &fixture_cmd("fake-agent --script altscreen"),
             None,
             80,
             24,
@@ -5198,7 +5198,7 @@ async fn delete_after_renamed_tmux_session_fails_closed() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -5294,7 +5294,7 @@ async fn stop_kills_a_reparented_marked_daemon() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            &fixture_cmd("fake-agent --script spawner-reparent"),
             None,
             80,
             24,
@@ -5343,7 +5343,7 @@ async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            &fixture_cmd("fake-agent --script spawner-reparent"),
             None,
             80,
             24,
@@ -5416,7 +5416,7 @@ async fn stop_kills_an_unmarked_child_of_a_reparented_daemon_via_closure_seeding
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            &fixture_cmd("fake-agent --script spawner-reparent"),
             None,
             80,
             24,
@@ -5511,7 +5511,7 @@ async fn a_scope_launched_stop_kills_through_the_cgroup_and_still_runs_the_sweep
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-cloaked"),
+            &fixture_cmd("fake-agent --script spawner-cloaked"),
             None,
             80,
             24,
@@ -5610,7 +5610,7 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-cloaked"),
+            &fixture_cmd("fake-agent --script spawner-cloaked"),
             None,
             80,
             24,
@@ -5731,7 +5731,7 @@ async fn a_multithreaded_sigterm_ignoring_agent_can_still_be_deleted_through_the
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script stubborn-threads"),
+            &fixture_cmd("fake-agent --script stubborn-threads"),
             None,
             80,
             24,
@@ -5819,8 +5819,7 @@ async fn a_systemd_255_sigkill_of_a_multithreaded_scope_member_still_tears_it_do
         .arg("--collect")
         .arg(format!("--unit={unit}"))
         .arg("--")
-        .arg(farhelm_bin())
-        .arg("internal")
+        .arg(fixtures_bin())
         .arg("fake-agent")
         .arg("--script")
         .arg("stubborn-threads")
@@ -6040,7 +6039,7 @@ async fn without_a_user_manager_a_launch_records_the_fallback_and_stops_like_m2(
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            &fixture_cmd("fake-agent --script spawner-reparent"),
             None,
             80,
             24,
@@ -6429,7 +6428,7 @@ async fn stop_quiesce_survives_no_marked_process() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-fork-storm"),
+            &fixture_cmd("fake-agent --script spawner-fork-storm"),
             None,
             80,
             24,

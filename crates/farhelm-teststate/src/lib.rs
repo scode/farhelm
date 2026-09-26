@@ -26,7 +26,7 @@
 //!   reboots) and where the old pure age gate had to wait an hour.
 //! - A **sweep** ([`sweep`]): reaps dead runs, kills their orphaned tmux
 //!   servers, and runs from every harness entry point — the stack script
-//!   invokes `farhelm internal sweep-test-state` at startup, and the Rust
+//!   invokes `farhelm-fixtures sweep-test-state` at startup, and the Rust
 //!   tests sweep once per process through [`tempdir`] — so a long-lived
 //!   session cleans up after its dead predecessors instead of
 //!   accumulating without bound.

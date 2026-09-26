@@ -169,7 +169,6 @@ fn wrapper_invocation(agent: &std::path::Path, agent_tail: &[&str]) -> String {
 /// watching, and the failure would look like capture being broken.
 fn record_tail(fixtures: &CaptureFixtures) -> Vec<String> {
     vec![
-        "internal".to_string(),
         "fake-agent".to_string(),
         "--script".to_string(),
         "claude-record".to_string(),
@@ -883,8 +882,8 @@ async fn stopping_a_wrapper_session_reaps_the_wrapper_and_the_agent() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let invocation = wrapper_invocation(
-        std::path::Path::new(farhelm_bin()),
-        &["internal", "fake-agent", "--script", "spawner"],
+        std::path::Path::new(fixtures_bin()),
+        &["fake-agent", "--script", "spawner"],
     );
     let session = h
         .client

@@ -53,10 +53,17 @@
 
 repo="$(cd "$(dirname "$0")/.." && pwd)" || exit 1
 bin="$repo/target/debug/farhelm"
+# The fake agent and the state sweep: test fixtures, built by `cargo build`
+# beside the product binary but never shipped with it.
+fixtures="$repo/target/debug/farhelm-fixtures"
 dist="$repo/target/dx/farhelm-ui/release/web/public"
 
 test -x "$bin" || {
   echo "missing $bin — run cargo build first" >&2
+  exit 1
+}
+test -x "$fixtures" || {
+  echo "missing $fixtures — run cargo build first" >&2
   exit 1
 }
 test -f "$dist/index.html" || {
@@ -89,7 +96,7 @@ fi
 # owned only, liveness-gated), and this invocation is one of its entry
 # points: every new stack cleans up after dead predecessors. Best-effort
 # by contract; a failing sweep must not stop the suite.
-"$bin" internal sweep-test-state || true
+"$fixtures" sweep-test-state || true
 
 state="$(mktemp -d /tmp/fh-e2e.XXXXXX)" || exit 1
 # The run's liveness lock (farhelm-teststate's protocol): an exclusive
@@ -194,7 +201,7 @@ printf 'STRUCTURED-LAUNCH-GENERATION:%s:%s\n' "\$session" "\$generation"
 printf 'STRUCTURED-LAUNCH-ARGV:'
 printf ' %s' "\$@"
 printf '\n'
-exec "$bin" internal fake-agent --script claude-record --record-home "$structured_home" "\$@"
+exec "$fixtures" fake-agent --script claude-record --record-home "$structured_home" "\$@"
 EOF
   chmod 700 "$structured_bin/$structured_name" || exit 1
 done
@@ -363,8 +370,9 @@ print(json.dumps({
     "remote_boot_id_file": sys.argv[6],
     "checkout_git_config": sys.argv[7],
     "structured_home": sys.argv[8],
+    "fixtures": sys.argv[9],
 }))
-' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" "$checkout_git_config" "$structured_home" >"$stack_info" || exit 1
+' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" "$checkout_git_config" "$structured_home" "$fixtures" >"$stack_info" || exit 1
 
 # Mint before the helm starts so its first protected request sees the same
 # durable token the harness CLI printed. It is captured only long enough to
@@ -459,9 +467,9 @@ for host in json.load(sys.stdin)["hosts"]:
 host="$(connected_local_host 9>&-)" || exit 1
 
 # The body is built by python rather than by string interpolation because
-# the invocation carries shell quoting of its own ('$bin' ...) that would
+# the invocation carries shell quoting of its own ('$fixtures' ...) that would
 # otherwise have to survive being pasted into JSON by hand.
-# The invocation is quoted with `shlex.join` rather than by wrapping $bin in
+# The invocation is quoted with `shlex.join` rather than by wrapping $fixtures in
 # literal single quotes: the supervisor parses it with shell-words, so a
 # checkout path containing an apostrophe (or a space, or a quote) would
 # otherwise produce an invocation that parses into the wrong argv — or fails
@@ -471,11 +479,11 @@ create_body="$(python3 -c '
 import json, shlex, sys
 print(json.dumps({
     "cwd": sys.argv[1],
-    "invocation": shlex.join([sys.argv[2], "internal", "fake-agent", "--script", "basic"]),
+    "invocation": shlex.join([sys.argv[2], "fake-agent", "--script", "basic"]),
     "title": "e2e-session",
     "host": int(sys.argv[3]),
 }))
-' "$work" "$bin" "$host")" || exit 1
+' "$work" "$fixtures" "$host")" || exit 1
 
 curl -sS -m 30 --fail-with-body \
   -X POST "$base/api/sessions" \

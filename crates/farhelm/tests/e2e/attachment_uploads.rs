@@ -1315,7 +1315,7 @@ async fn startup_reconciliation_sweeps_staging_and_keeps_published_attachments()
         let session = client
             .create_session(
                 &work.path().to_string_lossy(),
-                &agent_cmd("internal fake-agent --script basic"),
+                &fixture_cmd("fake-agent --script basic"),
                 None,
                 80,
                 24,
@@ -1450,7 +1450,7 @@ async fn a_relative_state_directory_still_reports_an_absolute_path() {
     let session = client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -1633,7 +1633,7 @@ async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script flood-gated"),
+            &fixture_cmd("fake-agent --script flood-gated"),
             None,
             80,
             24,
@@ -2712,7 +2712,7 @@ async fn a_non_utf8_state_directory_is_refused_before_any_session_can_exist() {
     let refused = client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,

@@ -43,7 +43,7 @@ async fn an_agent_wearing_an_ambient_tab_marker_is_still_reaped_while_a_real_tab
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            &fixture_cmd("fake-agent --script spawner-reparent"),
             None,
             80,
             24,

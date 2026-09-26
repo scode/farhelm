@@ -34,13 +34,13 @@ import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./hel
 import { waitForIslandMounted, waitForSessionMounted, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 /**
- * The mouse-mode fake-agent script (`crates/farhelm/src/fake_agent.rs`'s
+ * The mouse-mode fake-agent script (`crates/farhelm-fixtures/src/fake_agent.rs`'s
  * `mouse_modes`), built from an absolute path exactly like
  * terminal.spec.ts's own fake-agent invocations do.
  */
 const MOUSE_MODES_AGENT_INVOCATION = `"${
-  path.resolve(__dirname, "../../target/debug/farhelm")
-}" internal fake-agent --script mouse-modes`;
+  path.resolve(__dirname, "../../target/debug/farhelm-fixtures")
+}" fake-agent --script mouse-modes`;
 
 /**
  * The first three bytes of each mouse-report wire shape the fake agent's

@@ -439,7 +439,7 @@ async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
     let session = client1
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -519,7 +519,7 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
     client1
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,

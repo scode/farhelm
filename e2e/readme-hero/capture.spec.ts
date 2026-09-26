@@ -24,6 +24,8 @@ const OUTPUT_ENV = "FARHELM_HERO_OUTPUT";
 
 interface StackInfo {
   farhelm: string;
+  /** The `farhelm-fixtures` binary: the replay fixture runs from it. */
+  fixtures: string;
   state: string;
   wrappers: string;
   work: string;
@@ -75,7 +77,7 @@ function shellQuote(value: string): string {
  * land; the fixture tolerates them.
  */
 function writeAgentScript(info: StackInfo, cwd: string, session: ScenarioSession): void {
-  const argv = [info.farhelm, "internal", "fake-agent", "--script", "replay"];
+  const argv = [info.fixtures, "fake-agent", "--script", "replay"];
   if (session.transcript) argv.push("--transcript", path.join(SCENARIO_DIR, session.transcript));
   argv.push(...replayMode(session));
   const file = path.join(cwd, ".hero-agent");
@@ -162,7 +164,7 @@ async function measureTerminal(page: Page, request: APIRequestContext, info: Sta
   const cwd = path.join(info.work, "probe");
   mkdirSync(cwd, { recursive: true });
   const created = await request.post("/api/sessions", {
-    data: { cwd, invocation: `${shellQuote(info.farhelm)} internal fake-agent --script basic`, title: "size probe", host },
+    data: { cwd, invocation: `${shellQuote(info.fixtures)} fake-agent --script basic`, title: "size probe", host },
   });
   expect(created.ok(), `create the size probe: ${await created.text()}`).toBeTruthy();
   const id = ((await created.json()) as { id: string }).id;

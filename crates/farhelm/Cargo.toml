@@ -54,28 +54,12 @@ clap.workspace = true
 farhelm-helm.workspace = true
 farhelm-proto.workspace = true
 farhelm-supervisor.workspace = true
-# `internal sweep-test-state` (main.rs): the test harnesses' /tmp sweep
-# ships in the product binary because e2e/start-stack.sh already requires
-# the built binary and must not grow a second, diverging shell copy of the
-# sweep. A regular dependency rather than a dev-dependency on purpose —
-# dev targets see regular deps too, so this one entry also serves the
-# integration tests under tests/ that route their state dirs through it.
-farhelm-teststate.workspace = true
-# Only for the `hexecho` fake-agent script's raw-mode termios calls
-# (fake_agent.rs); everything else in this binary stays on tokio/std.
 libc.workspace = true
-# The record-writing fake-agent scripts build conversation records the
-# supervisor then parses; a hand-rolled escaper would make a fixture bug
-# look like a parser bug (fake_agent.rs).
 serde_json.workspace = true
 # Installer ownership receipts carry SHA-256 digests; the uninstall verifier
 # streams claimed artifacts through this shared implementation before it can
 # authorize a later remover to name them.
 sha2.workspace = true
-# The built-in fake agent emits a shell-word-safe argv witness for the e2e
-# harness. Keeping this regular dependency lets the shipped multi-call test
-# fixture and its integration-test binary use one serialization rule.
-shell-words.workspace = true
 # `farhelm helm setup` publishes each unit file through a uniquely named,
 # exclusively created staging file in the unit directory (setup.rs). A
 # predictable staging name is a symlink target and a race between two
@@ -99,6 +83,9 @@ async-trait.workspace = true
 # (`SupervisorSeams::faults`). The feature compiles those hooks in for test
 # builds only; the shipped binary, which builds no dev-dependency, has none.
 farhelm-supervisor = { workspace = true, features = ["test-seams"] }
+# The integration tests route their state directories through the shared
+# naming and flock protocol; the product binary no longer depends on it.
+farhelm-teststate.workspace = true
 # E2E tracing assertions must use a test-owned capture so supervisor tasks
 # stay attributable to their invoking test without a process-global layer.
 farhelm-testtrace.workspace = true
@@ -108,6 +95,9 @@ farhelm-testtrace.workspace = true
 # a second, worse thing to maintain. Loopback only, so no TLS backend is
 # needed and the workspace's default-feature-less reqwest is enough.
 reqwest.workspace = true
+# The e2e harness quotes fixture paths and parses the fake agent's
+# shell-word argv witness with the same rules the fixture writes it with.
+shell-words.workspace = true
 # The e2e listing-poll tests run on Tokio's virtual clock. Their timeout
 # assertions must not depend on a loaded machine scheduling real sleeps, and
 # `test-util` keeps that test-only support out of the shipped binary.

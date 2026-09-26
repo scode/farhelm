@@ -34,8 +34,8 @@ import { requireProductPageAuth } from "./helpers/device-auth";
 import { stackScratchDir } from "./helpers/scratch";
 import { attachSession } from "./helpers/term";
 
-const FARHELM = path.resolve(__dirname, "../../target/debug/farhelm");
-const SPAWN_AGENT = `"${FARHELM}" internal fake-agent --script spawn`;
+const FIXTURES = path.resolve(__dirname, "../../target/debug/farhelm-fixtures");
+const SPAWN_AGENT = `"${FIXTURES}" fake-agent --script spawn`;
 
 /** One list row by its supervisor-minted id. */
 function row(page: Page, id: string) {
