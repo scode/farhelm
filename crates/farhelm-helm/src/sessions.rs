@@ -2563,6 +2563,8 @@ pub(crate) struct RestartReq {
     mode: farhelm_proto::RestartMode,
     #[serde(default)]
     stop_if_running: bool,
+    #[serde(default)]
+    with: Option<farhelm_proto::LaunchSelection>,
 }
 
 /// `POST /api/sessions/{id}/restart` — relaunch the session's agent
@@ -2585,7 +2587,7 @@ pub(crate) async fn restart_session(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<RestartReq>,
 ) -> impl IntoResponse {
-    match do_restart_session(&state, &id, req.mode, req.stop_if_running).await {
+    match do_restart_session(&state, &id, req.mode, req.stop_if_running, req.with).await {
         Ok((_claim, session)) => match browser_session_ready(&session) {
             Ok(()) => axum::Json(session).into_response(),
             Err(error) => http_error(error),
@@ -2608,10 +2610,13 @@ pub(crate) async fn do_restart_session(
     id: &str,
     mode: farhelm_proto::RestartMode,
     stop_if_running: bool,
+    with: Option<farhelm_proto::LaunchSelection>,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
     let (claim, client) = route_session(state, id).await?;
     let profile_names = load_profile_name_index(&state.store).await?;
-    let mut session = client.restart_session(id, mode, stop_if_running).await?;
+    let mut session = client
+        .restart_session_with(id, mode, stop_if_running, with)
+        .await?;
     resolve_session_profiles(&profile_names, std::iter::once(&mut session));
     record_session(state, &claim, &session).await;
     Ok((claim, session))

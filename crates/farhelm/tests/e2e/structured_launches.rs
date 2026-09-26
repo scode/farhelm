@@ -31,6 +31,16 @@ pub(crate) struct FakeHarness {
 }
 
 impl FakeHarness {
+    /// Private record root used by both the fake process and capture scanner.
+    pub(crate) fn home(&self) -> &std::path::Path {
+        self.home.path()
+    }
+
+    /// Working directory retained for every process generation in this fixture.
+    pub(crate) fn work(&self) -> &std::path::Path {
+        self.work.path()
+    }
+
     /// Configure the fixture-owned login home to find these fake harnesses.
     ///
     /// The production launcher deliberately uses a login shell, which may
@@ -64,7 +74,7 @@ impl FakeHarness {
     /// The option tail follows the fake-agent script because the multi-call
     /// fixture reserves its leading words for `internal fake-agent`; the
     /// captured process still receives every option as a distinct argv value.
-    fn invocation(&self, selection: &LaunchSelection) -> String {
+    pub(crate) fn invocation(&self, selection: &LaunchSelection) -> String {
         let mut argv = vec![
             self.bin
                 .path()
@@ -332,7 +342,7 @@ async fn wait_for_generation_argv(
 }
 
 /// Read one specified generation's argv only after that generation is ready.
-async fn observed_argv(h: &Harness, session: &str, generation: u32) -> String {
+pub(crate) async fn observed_argv(h: &Harness, session: &str, generation: u32) -> String {
     let (channel, replay, mut stream) = h
         .client
         .attach_live(session, WIDE_COLS, ROWS)

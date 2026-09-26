@@ -2331,8 +2331,8 @@ enum RelaunchDisposition {
     /// `Launching` record stays and reload reconciles it.
     Ambiguous,
     /// The relaunch REACHED ITS PUBLICATION: the new terminal, generation,
-    /// and outcome are already installed on the map, and only the reply
-    /// that describes them could not be produced. Recovery must not run.
+    /// and outcome are already installed on the map, but a later durable
+    /// confirmation, cleanup, or reply step failed. Recovery must not run.
     ///
     /// This exists because classifying such a failure as merely `Ambiguous`
     /// was actively destructive rather than conservative. The recovery path
@@ -2346,9 +2346,9 @@ enum RelaunchDisposition {
     /// successful restart's live terminal is what the session has, and a
     /// failure to build a REPLY has no standing to revise that.
     ///
-    /// The error still surfaces — the caller is told what it must not
-    /// assume — but the published state stands, and the next list describes
-    /// the session correctly.
+    /// The independent error still surfaces, but the published state stands
+    /// and restart-with still attempts its post-spawn bundle write. The next
+    /// list describes the session's saved settings correctly.
     Published,
 }
 
@@ -2951,11 +2951,25 @@ pub(crate) fn hook_log_path(state_dir: &Path, session_id: &str) -> PathBuf {
 fn renamed_entry(entry: &SessionEntry, title: String) -> Arc<SessionEntry> {
     let mut info = entry.info.clone();
     info.title = title;
+    same_launch_entry(entry, info, entry.snapshot.clone())
+}
+
+/// Replace metadata for the published launch without splitting its mutable cells.
+///
+/// Rename and restart-with both change durable metadata after a launch is
+/// published. Readers with an older `Arc` may still update capture, outcome,
+/// or activity for that same generation, so the replacement shares those
+/// cells and keeps the terminal and generation from the current entry.
+fn same_launch_entry(
+    entry: &SessionEntry,
+    info: SessionInfo,
+    snapshot: IntegrationSnapshot,
+) -> Arc<SessionEntry> {
     Arc::new(SessionEntry {
         info,
         terminal: entry.terminal.clone(),
         outcome: Arc::clone(&entry.outcome),
-        snapshot: entry.snapshot.clone(),
+        snapshot,
         canonical_cwd: entry.canonical_cwd.clone(),
         first_input: Arc::clone(&entry.first_input),
         capture: Arc::clone(&entry.capture),
@@ -3600,6 +3614,32 @@ struct Relaunched {
     tabs: Vec<TabInfo>,
 }
 
+/// The validated metadata to adopt only if this relaunch's spawn succeeds.
+///
+/// The integration snapshot is resolved before destructive work. Carrying it
+/// here avoids another fallible resolution after the new process is running.
+struct RestartWithBundle {
+    invocation: String,
+    launch: farhelm_proto::LaunchSelection,
+    /// The validated, concrete template the store can reload for this kind.
+    /// Claude's compiled override is absent, but its resolved default is not.
+    resume_template: Option<Vec<String>>,
+    snapshot: IntegrationSnapshot,
+}
+
+/// Inputs that travel together across the supervisor-owned relaunch task.
+///
+/// The caller validates the override and directory while it still owns the
+/// lifecycle claim; the spawned task owns the rest of the restart even if its
+/// client disconnects.
+struct RelaunchPlan {
+    mode: RestartMode,
+    argv: Vec<String>,
+    launch_cwd: String,
+    terminal_survives: bool,
+    restart_with: Option<RestartWithBundle>,
+}
+
 /// Delete the `<state_dir>/snapshots/` directory an OLDER build left
 /// behind, whole, on startup.
 ///
@@ -3760,11 +3800,10 @@ pub(crate) struct SessionEntry {
     /// Shared with any title-only replacement of this entry; see the
     /// struct's own docs for why sharing and isolation are both needed.
     pub(crate) outcome: Arc<std::sync::Mutex<LastOutcome>>,
-    /// This session's integration snapshot (PLAN_M3.md item 7), resolved
-    /// at create and immutable for the session's life — hence a plain
-    /// field rather than another mutex. Read by the capture pass (to know
-    /// which agent's records to look for, if any) and by every reply that
-    /// computes a restart offer.
+    /// This session's integration snapshot (PLAN_M3.md item 7), resolved at
+    /// create and replaced only after restart-with successfully spawns. The
+    /// kind remains fixed; the snapshot follows the persisted launch bundle
+    /// so later capture and restart-offer work sees the new template.
     pub(crate) snapshot: IntegrationSnapshot,
     /// This session's working directory with symlinks, `.`/`..`, and a
     /// trailing slash resolved away, resolved at create and immutable
@@ -8623,7 +8662,7 @@ impl Supervisor {
             // The snapshot rides the RE-inserted row exactly as it does a
             // first insert: a relaunch under the same reservation is the
             // same create, so the session it finally produces must carry
-            // the same immutable kind and template it would have had if
+            // the same initial kind and template it would have had if
             // the first attempt had not crashed. The source-profile
             // snapshot rides along for the same reason — and it is the same
             // profile either way, since the fingerprint binds the profile
@@ -9831,12 +9870,43 @@ impl Supervisor {
     /// relaunch and cleared for the others, along with the rest of the
     /// per-launch capture state; [`SessionStore::begin_relaunch`] carries
     /// the argument for that split.
+    ///
+    /// An optional compiled invocation and selection change only a Resume
+    /// relaunch. Validation uses the current durable offer and builds the
+    /// replacement snapshot before this operation stops the old process.
     pub(crate) async fn restart_session(
         self: &Arc<Self>,
         session_id: &str,
         mode: RestartMode,
         stop_if_running: bool,
+        override_invocation: Option<String>,
+        override_launch: Option<farhelm_proto::LaunchSelection>,
+        override_resume_template: Option<Vec<String>>,
     ) -> anyhow::Result<SessionInfo> {
+        let restart_with = match (
+            override_invocation,
+            override_launch,
+            override_resume_template,
+        ) {
+            (Some(invocation), Some(launch), resume_template) => {
+                Some((invocation, launch, resume_template))
+            }
+            (None, None, None) => None,
+            _ => {
+                return Err(RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    "restart-with requires invocation and launch together",
+                )
+                .into());
+            }
+        };
+        if restart_with.is_some() && mode != RestartMode::Resume {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "restart-with only supports the Resume mode",
+            )
+            .into());
+        }
         // R1.1: directory admission is taken BEFORE the lifecycle claim —
         // every create takes intent → directory → lifecycle, so a restart
         // that claimed lifecycle first could cycle against a restricted
@@ -9959,7 +10029,62 @@ impl Supervisor {
                  or its exact record is unavailable; nothing was relaunched and no other transcript was selected",
             ).into());
         }
-        let argv = relaunch_argv(mode, &snapshot, &entry.info.invocation)?;
+        let (argv, restart_with) = if let Some((invocation, launch, resume_template)) = restart_with
+        {
+            if !entry
+                .info
+                .launch
+                .as_ref()
+                .is_some_and(|stored| stored.harness == launch.harness)
+            {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "restart-with requires a structured session with the stored harness",
+                )
+                .into());
+            }
+            if snapshot.restart_offer != RestartOffer::Resume {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "restart-with requires the session's current restart offer to be Resume",
+                )
+                .into());
+            }
+            let new_argv = shell_words::split(&invocation).map_err(|error| {
+                RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    format!("restart-with invocation does not parse: {error}"),
+                )
+            })?;
+            crate::agent_kind::ensure_executable_argv("restart-with invocation", &new_argv)
+                .map_err(|error| anyhow::anyhow!(error))?;
+            let integration = IntegrationSnapshot::resolve(
+                &new_argv,
+                Some(snapshot.kind),
+                resume_template.clone(),
+            )?;
+            let conversation = snapshot
+                .captured_conversation
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("restart-with requires a captured conversation"))?;
+            let argv = integration
+                .filled_resume_argv(conversation)
+                .ok_or_else(|| anyhow::anyhow!("restart-with resume template cannot be filled"))?;
+            (
+                argv,
+                Some(RestartWithBundle {
+                    invocation,
+                    launch,
+                    resume_template: integration.resume_template.clone(),
+                    snapshot: integration,
+                }),
+            )
+        } else {
+            (
+                relaunch_argv(mode, &snapshot, &entry.info.invocation)?,
+                None,
+            )
+        };
         if mode == RestartMode::Resume
             && matches!(
                 snapshot.kind,
@@ -10127,10 +10252,13 @@ impl Supervisor {
             sup.relaunch(
                 &entry_for_task,
                 &snapshot,
-                mode,
-                argv,
-                launch_cwd,
-                terminal_survives,
+                RelaunchPlan {
+                    mode,
+                    argv,
+                    launch_cwd,
+                    terminal_survives,
+                    restart_with,
+                },
             )
             .await
         });
@@ -10184,11 +10312,15 @@ impl Supervisor {
         self: &Arc<Self>,
         entry: &Arc<SessionEntry>,
         snapshot: &SessionSnapshot,
-        mode: RestartMode,
-        argv: Vec<String>,
-        launch_cwd: String,
-        terminal_survives: bool,
+        plan: RelaunchPlan,
     ) -> anyhow::Result<SessionInfo> {
+        let RelaunchPlan {
+            mode,
+            argv,
+            launch_cwd,
+            terminal_survives,
+            restart_with,
+        } = plan;
         let id = entry.info.id.clone();
         // A relaunch that is not resuming a captured identity opens a FRESH
         // capture window: `first_input_at` and the correlation verdict
@@ -10255,7 +10387,7 @@ impl Supervisor {
         // about to be respawned under it (or replaced outright), so the
         // client is told to reattach rather than left watching a stream
         // whose meaning changed underneath it.
-        let relaunched = match self.detach_for_restart(&id).await {
+        let mut relaunched = match self.detach_for_restart(&id).await {
             Ok(()) => {
                 self.relaunch_into_terminal(
                     entry,
@@ -10272,6 +10404,55 @@ impl Supervisor {
                 error.context("detaching the previous run's terminal output"),
             )),
         };
+        // Publication, rather than reply construction, is the boundary at
+        // which a spawned generation becomes this session's live run. Some
+        // post-spawn failures publish it and withhold only the reply; those
+        // runs need the new bundle just as much as an `Ok` reply does.
+        let published = match &relaunched {
+            Ok(_) => true,
+            Err(failure) => failure.disposition == RelaunchDisposition::Published,
+        };
+        if published && let Some(bundle) = restart_with {
+            if let Err(error) = self
+                .store
+                .update_restart_with_bundle(
+                    &id,
+                    claim.generation,
+                    &bundle.invocation,
+                    &bundle.launch,
+                    bundle.resume_template.as_deref(),
+                )
+                .await
+            {
+                // The new agent is already running. A bundle-write error
+                // must never turn an otherwise successful relaunch into an
+                // error reply that invites a second spawn.
+                warn!(
+                    session = %id,
+                    error = %format!("{error:#}"),
+                    "restart-with agent spawned but its launch settings were not saved"
+                );
+            } else {
+                let mut sessions = self.sessions.lock().await;
+                let current = sessions
+                    .get_mut(&id)
+                    .expect("a published relaunch has a session entry");
+                assert_eq!(
+                    current.generation, claim.generation,
+                    "restart-with must update the generation it spawned"
+                );
+                let mut live_info = current.info.clone();
+                live_info.invocation = bundle.invocation;
+                live_info.launch = Some(bundle.launch);
+                live_info.resume_template = bundle.resume_template;
+                *current = same_launch_entry(current, live_info.clone(), bundle.snapshot);
+                if let Ok(info) = &mut relaunched {
+                    info.invocation = live_info.invocation;
+                    info.launch = live_info.launch;
+                    info.resume_template = live_info.resume_template;
+                }
+            }
+        }
         match relaunched {
             Ok(info) => Ok(info),
             // The relaunch got as far as publishing its new generation and
@@ -15052,6 +15233,36 @@ pub(crate) mod tests {
         PathBuf::from("/nonexistent/farhelm")
     }
 
+    /// A template-only wire override must never fall through to plain restart.
+    ///
+    /// Refusing before session lookup distinguishes the partial-bundle rule
+    /// from a later missing-session error and prevents a valid target from
+    /// being stopped while its supplied template is silently ignored.
+    #[farhelm_testtrace::test]
+    async fn restart_refuses_a_template_without_invocation_and_selection() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor for early refusal");
+        let error = sup
+            .restart_session(
+                "missing",
+                RestartMode::Resume,
+                false,
+                None,
+                None,
+                Some(vec![
+                    "claude".into(),
+                    "--resume".into(),
+                    "{conversation}".into(),
+                ]),
+            )
+            .await
+            .expect_err("a lone template cannot be treated as plain restart");
+        assert_eq!(error_kind(&error), ErrorKind::InvalidRequest);
+        assert!(error.to_string().contains("invocation and launch together"));
+    }
+
     /// Browsing is a host-side discovery operation, so its canonical answer
     /// must be bounded and must expand `~` from the supervisor seam rather
     /// than from the test process or whichever helm later calls it.
@@ -16288,7 +16499,7 @@ pub(crate) mod tests {
         );
 
         let restarted = sup
-            .restart_session(&created.id, RestartMode::Fresh, true)
+            .restart_session(&created.id, RestartMode::Fresh, true, None, None, None)
             .await
             .expect("restart with a surviving tab");
         assert_eq!(
@@ -16428,7 +16639,7 @@ pub(crate) mod tests {
         };
 
         let restarted = sup
-            .restart_session(&created.id, RestartMode::Fresh, true)
+            .restart_session(&created.id, RestartMode::Fresh, true, None, None, None)
             .await
             .expect("restart with a live agent pane");
         assert_eq!(restarted.tabs, vec![TabInfo { id: tab.id.clone() }]);
@@ -16504,7 +16715,7 @@ pub(crate) mod tests {
             .await
             .expect("forge the agent marker on the tab");
 
-        sup.restart_session(&created.id, RestartMode::Fresh, true)
+        sup.restart_session(&created.id, RestartMode::Fresh, true, None, None, None)
             .await
             .expect_err("ambiguous old-window identity must be reported");
         let entry = sup
@@ -16617,7 +16828,7 @@ pub(crate) mod tests {
                 "fixture premise: the tab kept the session alive"
             );
 
-            sup.restart_session(&created.id, RestartMode::Fresh, true)
+            sup.restart_session(&created.id, RestartMode::Fresh, true, None, None, None)
                 .await
                 .expect_err("the injected replacement stage must fail");
             if stage == ReplacementStage::BeforeCreation {
@@ -23278,7 +23489,7 @@ exit 0
             })
         };
 
-        sup.restart_session(&created.id, RestartMode::Fresh, true)
+        sup.restart_session(&created.id, RestartMode::Fresh, true, None, None, None)
             .await
             .expect("restart");
         released.wait().await;
@@ -27899,7 +28110,7 @@ exit 0
                     .state,
                 incomplete
             );
-            sup.restart_session(&origin.id, RestartMode::Fresh, true)
+            sup.restart_session(&origin.id, RestartMode::Fresh, true, None, None, None)
                 .await
                 .expect_err("origin setup must finish first");
             assert_eq!(
@@ -27923,7 +28134,7 @@ exit 0
                 .unwrap()
                 .is_none()
         );
-        sup.restart_session(&borrower.id, RestartMode::Fresh, true)
+        sup.restart_session(&borrower.id, RestartMode::Fresh, true, None, None, None)
             .await
             .expect("borrower does not inherit incomplete setup");
         let borrower_row = sup.store.session(&borrower.id).await.unwrap().unwrap();
@@ -27946,7 +28157,7 @@ exit 0
         )
         .unwrap();
         let ready_bytes = std::fs::read(&path).unwrap();
-        sup.restart_session(&origin.id, RestartMode::Fresh, true)
+        sup.restart_session(&origin.id, RestartMode::Fresh, true, None, None, None)
             .await
             .expect("Ready permits ordinary restart");
         let restarted = sup.store.session(&origin.id).await.unwrap().unwrap();
@@ -27976,7 +28187,7 @@ exit 0
                 .state,
             PreparationState::Ready,
         );
-        sup.restart_session(&origin.id, RestartMode::Fresh, true)
+        sup.restart_session(&origin.id, RestartMode::Fresh, true, None, None, None)
             .await
             .expect("Ready permits restart after supervisor reopen");
         let restarted = sup.store.session(&origin.id).await.unwrap().unwrap();
@@ -28006,7 +28217,7 @@ exit 0
             crate::working_copies::IdentityStatus::DifferentObject
         );
         let refusal = sup
-            .restart_session(&origin.id, RestartMode::Fresh, true)
+            .restart_session(&origin.id, RestartMode::Fresh, true, None, None, None)
             .await
             .expect_err("Ready cannot authorize a foreign path");
         assert!(format!("{refusal:#}").contains("identity"));

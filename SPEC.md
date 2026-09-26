@@ -501,6 +501,11 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   it is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched terminal ahead of
   the new process — a frame with no process behind it looks live, accepts typing, and is overwritten when the real
   program draws, which is worse than blank. Restart touches the agent terminal only; terminal tabs are unaffected.
+  Restart may carry changed structured launch settings for a structured session with a resumable captured conversation;
+  the harness, host, and working directory remain fixed. Legacy profile and raw-command sessions do not support this
+  override because they have no stored structured selection. If a harness rejects a changed model or other setting while
+  resuming, that is an ordinary launch failure; restart again with settings the harness accepts. The general split
+  between launch-only and resume-safe arguments remains deferred.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, working directory,
   title, and agent — the fresh-conversation counterpart to restart's resumed one. The source session is untouched:
   cloning starts a brand-new, independent create through the same form and the same confirmation described under
