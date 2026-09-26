@@ -82,6 +82,16 @@ use std::time::Duration;
 /// would mean killing the agent.
 const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The most output, per stream, a user-manager query may write.
+///
+/// The queries read one property value, a short error line, or the list of
+/// one session's own scope units (one line each). A mebibyte is far above
+/// any of those, so a legitimate answer never meets it; it exists only so a
+/// misbehaving manager cannot make the supervisor buffer without limit. It
+/// is deliberately generous because a refused listing is not harmless: a
+/// teardown treats an unanswered list as "could not ask", not as "none".
+const SYSTEMCTL_OUTPUT_CAP: usize = 1024 * 1024;
+
 /// Total time the availability probe may spend before reporting failure.
 ///
 /// Covers the whole create → show → kill → gone sequence, so a manager that
@@ -1256,8 +1266,8 @@ async fn wait_for_unit(systemctl: &Path, unit: &str, want: bool) -> anyhow::Resu
     }
 }
 
-/// Run `cmd` to completion under [`SYSTEMCTL_TIMEOUT`], killing it and
-/// erroring out past the bound.
+/// Run `cmd` to completion under [`SYSTEMCTL_TIMEOUT`] and
+/// [`SYSTEMCTL_OUTPUT_CAP`], killing it and erroring out past either bound.
 ///
 /// Every QUERY into the user manager goes through here: a wedged manager must
 /// not be able to hang a stop, and `Command::output` on its own has no bound
@@ -1271,20 +1281,28 @@ async fn wait_for_unit(systemctl: &Path, unit: &str, want: bool) -> anyhow::Resu
 async fn run_with_timeout(
     cmd: &mut tokio::process::Command,
 ) -> anyhow::Result<std::process::Output> {
-    // `kill_on_drop` is what makes the timeout real: without it the child
-    // outlives the abandoned future and keeps holding its pipes open.
-    let child = cmd
-        .kill_on_drop(true)
-        .stdin(std::process::Stdio::null())
-        .output();
-    tokio::time::timeout(SYSTEMCTL_TIMEOUT, child)
+    use crate::bounded_command::{Ended, OutputCaps, run};
+    // A bounded capture as well as a bounded wait: the answers read here are
+    // a unit's properties and a short error line, and a manager that
+    // printed without end must cost an error, not the supervisor's memory.
+    const CAPS: OutputCaps = OutputCaps {
+        stdout: SYSTEMCTL_OUTPUT_CAP,
+        stderr: Some(SYSTEMCTL_OUTPUT_CAP),
+    };
+    match run(cmd, tokio::time::Instant::now() + SYSTEMCTL_TIMEOUT, CAPS)
         .await
+        .context("running a systemd user-manager command")?
+    {
+        Ended::Exited(output) => Ok(output),
         // `QueryTimedOut` rather than a bare `anyhow::anyhow!`: its identity
         // (not just its text) is what lets `classify_probe_failure` tell a
         // timeout apart from every other failure shape further up the call
         // chain.
-        .map_err(|_| anyhow::Error::new(QueryTimedOut))?
-        .context("running a systemd user-manager command")
+        Ended::TimedOut => Err(anyhow::Error::new(QueryTimedOut)),
+        Ended::OutputOverCap => anyhow::bail!(
+            "a systemd user-manager command wrote more than {SYSTEMCTL_OUTPUT_CAP} bytes of output"
+        ),
+    }
 }
 
 #[cfg(test)]
