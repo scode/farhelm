@@ -173,6 +173,10 @@ mod preferences;
 /// Helm-owned agent profile CRUD.
 mod profiles;
 
+/// The rules both session caches share: the reply merge, creation order,
+/// cap eviction, and the session id bound.
+pub mod session_cache;
+
 /// The session REST surface — the list, the owner-lookup routing behind
 /// every operation on one session, and the handlers themselves.
 mod sessions;

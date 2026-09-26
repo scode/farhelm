@@ -4462,7 +4462,7 @@ mod tests {
     /// an agent reads.
     #[farhelm_testtrace::test]
     async fn an_unusable_created_session_id_is_outcome_unknown_for_every_shape() {
-        let oversized = "x".repeat(crate::manager::MAX_SESSION_ID_BYTES + 1);
+        let oversized = "x".repeat(crate::session_cache::MAX_SESSION_ID_BYTES + 1);
         for (shape, id) in [
             ("an empty id", String::new()),
             ("an id past the ingress cap", oversized),
