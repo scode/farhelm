@@ -852,7 +852,7 @@ enum FocusAttempt {
 /// Page-lived coordination shared by the popup worker and its focus-out owner.
 ///
 /// The popup-local request contains the destination; this handle exposes only
-/// invalidation and pending state so the app bar can wait for a render handoff
+/// invalidation and pending state so the profile control can wait for a render handoff
 /// without inspecting popup DOM or starting another focus worker.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct FocusCoordinator {
@@ -903,7 +903,7 @@ impl FocusCoordinator {
         *self.unknown.peek()
     }
 
-    /// Publish the trusted outside sequence currently owned by the app bar.
+    /// Publish the trusted outside sequence currently owned by the profile control.
     pub(crate) fn set_outside_obligation(mut self, sequence: Option<u64>) {
         self.outside_obligation.set(sequence);
     }
@@ -929,7 +929,7 @@ impl FocusCoordinator {
 /// Create one generation-tagged request with matching Rust and browser clocks.
 ///
 /// `may_replace` separates opening, synchronous in-popup transitions, and
-/// asynchronous completion. Opening and completion yield when the app bar has
+/// asynchronous completion. Opening and completion yield when the profile control has
 /// published a sequence-tagged trusted outside obligation; ordinary focus-out alone is
 /// not evidence that the user chose that destination. A failed or timed-out
 /// browser-clock guard consumes the request as `Unknown` before observation.

@@ -611,8 +611,8 @@ samp {
 
 /* ===== Sidebar chrome ============================================= */
 
-/* The app-level identity readout and helm-wide profiles trigger stay in the
-   sidebar's existing chrome surface. Sticky, because `.app-sidebar` is the scroll
+/* The app-level identity readout stays in the sidebar's existing chrome
+   surface. Sticky, because `.app-sidebar` is the scroll
    container for the whole session list and an ordinary first child would
    scroll away with the rows — the point of the readout is that it is always
    there. Sticky content paints over what scrolls under it, so the bar carries
@@ -630,8 +630,8 @@ samp {
 }
 
 /* Only the native macOS shell extends beneath AppKit's titlebar. Reserve
-   the native traffic lights at (12, 16), keeping Profiles and the version
-   in their existing sticky row. Logical CSS pixels match Tao's logical
+   the native traffic lights at (12, 16), keeping the version in the
+   existing sticky row. Logical CSS pixels match Tao's logical
    coordinates across Retina scale factors. Browser and Linux shells never
    receive this class, even when an ordinary browser runs on macOS. */
 .macos-window .app-bar {
@@ -659,11 +659,10 @@ samp {
   cursor: default;
 }
 
-/* Native controls stay at viewport coordinates when the lower shell
-   scrolls horizontally. At narrow widths, give the app row its own fixed
-   top band and start BOTH scrolling panes below it. Keeping only static
-   left padding would let a scrolled Profiles button pass under Close.
-   The sidebar width and main-pane minimum remain unchanged. */
+/* The app row stays at viewport coordinates when the lower shell scrolls
+   horizontally. At narrow widths, give it its own fixed top band and start
+   BOTH scrolling panes below it. The sidebar width and main-pane minimum
+   remain unchanged. */
 @media (max-width: 661px) {
   .macos-window {
     box-sizing: border-box;
@@ -697,8 +696,8 @@ samp {
 }
 
 /* The count remains its own element for the committed-list contract. Count,
-   compact choice, and creation action describe the same list, so they share
-   one compact heading rather than spending a row each. */
+   compact choice, and the header actions describe the same list, so they
+   share one compact heading rather than spending a row each. */
 .session-heading,
 .hosts-heading {
   display: flex;
@@ -779,10 +778,14 @@ samp {
 }
 
 .session-heading .new-session-button,
+.session-heading .profiles-toggle,
 .hosts-heading .update-all-button {
-  margin-left: auto;
   padding: 2px 8px;
   font-size: 12px;
+}
+
+.session-heading .new-session-button {
+  margin-left: auto;
 }
 
 /* The two host actions share the header's trailing edge. Only the first
@@ -3207,7 +3210,7 @@ samp {
 /* ===== Profiles popup ============================================= */
 
 /* The catalog belongs to the helm rather than a host row, so its management
-   surface floats from the app bar. Viewport bounds mirror the filter popup:
+   surface floats from the session list header. Viewport bounds mirror the filter popup:
    the inline geometry variables clamp the anchor, and overflow keeps every
    profile reachable on a short window. */
 .profiles-popover {

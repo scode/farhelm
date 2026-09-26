@@ -279,7 +279,7 @@ test("the sidebar app bar stays pinned while the session list scrolls", async ({
 /**
  * Native window buttons occupy fixed viewport coordinates even when the
  * narrow shell scrolls horizontally. Opt the real application markup into
- * its macOS CSS to prove that Profiles, version, and session actions stay
+ * its macOS CSS to prove that the version and session actions stay
  * clear of that region. This is DOM geometry coverage, not AppKit testing:
  * the browser's drag spacer has no native action.
  */
@@ -288,11 +288,10 @@ test("macOS header controls stay clear of native buttons while the shell scrolls
   await page.goto("/");
   const shell = page.locator(".app-shell");
   const bar = page.locator(".app-bar");
-  const profiles = bar.locator(".profiles-toggle");
   const version = bar.locator(".app-version");
   const drag = bar.locator(".window-drag-region");
   const header = page.locator(".titlebar");
-  await expect(profiles).toBeVisible();
+  await expect(bar.locator(".profiles-toggle")).toHaveCount(0);
   await expect(version).not.toHaveText("");
   await expect(header).toBeVisible();
   await expect(drag).toBeHidden();
@@ -331,7 +330,7 @@ test("macOS header controls stay clear of native buttons while the shell scrolls
       // The native cluster begins at (12, 16), with roughly 60x14
       // logical pixels of buttons. A document-relative padding check
       // would pass the broken implementation; compare viewport boxes.
-      for (const control of [profiles, version]) {
+      for (const control of [version]) {
         const box = await control.boundingBox();
         expect(box).not.toBeNull();
         expect(box!.x).toBeGreaterThanOrEqual(0);
@@ -382,7 +381,7 @@ test("macOS header leaves the build mismatch notice readable", async ({ page }) 
   const notice = page.locator(".build-skew");
   const bar = page.locator(".app-bar");
   await expect(notice).toContainText("9.9.9-header-layout");
-  await expect(bar.locator(".profiles-toggle")).toBeVisible();
+  await expect(bar.locator(".profiles-toggle")).toHaveCount(0);
   await page.locator(".window-root").evaluate((element) => element.classList.add("macos-root"));
   await page.locator(".app-shell").evaluate((element) => element.classList.add("macos-window"));
   for (const width of [900, 400]) {
@@ -3440,7 +3439,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   }
 });
 
-/** Closing the app-bar popup discards its local editor draft, so reopening
+/** Closing the session list header popup discards its local editor draft, so reopening
  * starts at the shared catalog rather than resurrecting an abandoned form. */
 test("closing the profiles popup discards its open editor", async ({ page }) => {
   await page.goto("/");
@@ -4222,8 +4221,10 @@ test("opening the create-session form closes an open row menu", async ({ page, r
 
     // Moving the opener into the count heading must leave the draft after
     // it in keyboard order. Otherwise forward Tab skips the newly opened
-    // form entirely, even though pointer creation still works.
-    await page.locator(".new-session-button").focus();
+    // form entirely, even though pointer creation still works. The heading
+    // holds two actions, New then profiles, so the draft follows the LAST of
+    // them: forward Tab from profiles enters the form.
+    await page.locator(".profiles-toggle").focus();
     await page.keyboard.press("Tab");
     await expect(page.locator(".create-session-form :focus")).toHaveCount(1);
 

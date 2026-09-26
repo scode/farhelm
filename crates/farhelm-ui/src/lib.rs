@@ -52,7 +52,7 @@
 //!   with `session_view`, which puts the same wording behind a stale
 //!   session's notice).
 //! - `profiles`: agent profiles as this UI handles them (PLAN_M6_75.md item
-//!   8) — the one helm-wide catalog read shared by the app-bar popup and the
+//!   8) — the one helm-wide catalog read shared by the session-list profile control and the
 //!   create picker, the popup's create/edit/delete surface, and the
 //!   renderer-free rules the create dialog's picker needs: which profile a
 //!   fresh dialog preselects, when it must ask instead of guessing, and how
@@ -696,7 +696,7 @@ where
 /// Note what is deliberately NOT here: the profile's CURRENT name. A renamed
 /// profile's new name is knowable server-side and is withheld on purpose, so
 /// that there is exactly one copy of existence truth — a surface that needs
-/// today's name (the profiles popup) reads the catalog, where it is
+/// today's name (the profiles control) reads the catalog, where it is
 /// authoritative.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct SourceProfile {

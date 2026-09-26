@@ -674,7 +674,7 @@ test.describe("multi-host", () => {
     await expect(local.locator(".host-kind-icon + .visually-hidden")).toHaveText("local");
     await expect(local.locator(".host-status .status-dot")).toBeVisible();
     await expect(local.locator(".host-status-label")).toHaveCount(0);
-    // Profiles lives in the app bar. The local row menu contains Retry and
+    // Profiles lives beside New in the session list header. The local row menu contains Retry and
     // whichever provisioning command its current setup state permits, but
     // never destination management.
     await openHostMenu(local);

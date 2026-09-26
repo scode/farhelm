@@ -321,11 +321,11 @@ it has something to say costs the steady state nothing. A classified status rend
 normally, the stale notice's own metadata band for a stale session (where SPEC.md's title/directory/last-known-status
 triple is assembled), and nowhere at all for a session nothing has classified yet.
 
-The app-bar profiles popup has one explicit focus request at a time. Opening lands on `new profile`; opening an editor
-lands on its name field; closing a form returns to its row's edit control or to `new profile`; opening a delete prompt
-lands on cancel; and completing a save or delete chooses the surviving row control described by the catalog transition.
-Escape and layout invalidation close the popup and restore its toggle. Focus-out instead preserves the outside
-destination the user chose. Document/body focus after an internal control replacement is transit, not an outside
+The session-list profiles popup has one explicit focus request at a time. Opening lands on `new profile`; opening an
+editor lands on its name field; closing a form returns to its row's edit control or to `new profile`; opening a delete
+prompt lands on cancel; and completing a save or delete chooses the surviving row control described by the catalog
+transition. Escape and layout invalidation close the popup and restore its toggle. Focus-out instead preserves the
+outside destination the user chose. Document/body focus after an internal control replacement is transit, not an outside
 destination, even when the bounded replacement-focus request cannot place focus. The confirmation stays mounted and
 reachable; a recorded trusted outside pointer or Tab choice still dismisses it. A page operation may defer either
 dismissal while it keeps the popup mounted, but it never consumes the obligation: the popup closes once the operation is
