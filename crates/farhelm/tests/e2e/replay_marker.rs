@@ -658,7 +658,7 @@ async fn an_alternate_screen_attach_marks_after_its_visible_snapshot() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script altscreen"),
+            &fixture_cmd("fake-agent --script altscreen"),
             None,
             80,
             24,
@@ -792,7 +792,7 @@ async fn an_attach_is_marked_even_when_no_live_output_ever_follows() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script flood-gated"),
+            &fixture_cmd("fake-agent --script flood-gated"),
             None,
             80,
             24,
@@ -1010,7 +1010,7 @@ async fn a_tmux_pause_catch_up_replays_without_a_marker() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script counter"),
+            &fixture_cmd("fake-agent --script counter"),
             None,
             80,
             24,

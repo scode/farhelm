@@ -428,7 +428,7 @@ async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner"),
+            &fixture_cmd("fake-agent --script spawner"),
             None,
             80,
             24,
@@ -506,7 +506,7 @@ async fn restarting_a_live_session_without_consent_is_refused_and_kills_nothing(
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner"),
+            &fixture_cmd("fake-agent --script spawner"),
             None,
             80,
             24,
@@ -667,7 +667,7 @@ async fn a_restart_reaps_a_daemon_left_by_a_self_exited_agent() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            &fixture_cmd("fake-agent --script spawner-reparent"),
             None,
             80,
             24,
@@ -728,7 +728,7 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
         .client
         .create_session(
             &cwd,
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -861,7 +861,7 @@ fn fixture_resume_template(
         "sh".to_string(),
         "-c".to_string(),
         format!(
-            "{}=\"$2\" exec \"$0\" internal fake-agent --script {kind}-record --record-home \"$1\"",
+            "{}=\"$2\" exec \"$0\" fake-agent --script {kind}-record --record-home \"$1\"",
             FAKE_AGENT_RESUME_ENV
         ),
         argv0.to_string_lossy().into_owned(),
@@ -907,7 +907,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
     let kind = "claude";
     let home = farhelm_teststate::tempdir().expect("agent home");
     let bin = farhelm_teststate::tempdir().expect("agent bin");
-    std::os::unix::fs::symlink(farhelm_bin(), bin.path().join(kind))
+    std::os::unix::fs::symlink(fixtures_bin(), bin.path().join(kind))
         .expect("symlink the farhelm binary under the agent's own name");
     let state = farhelm_teststate::tempdir().expect("state dir");
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
@@ -952,7 +952,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
             .create_session_with_extras(
                 &work.path().to_string_lossy(),
                 &format!(
-                    "{} internal fake-agent --script {kind}-record --record-home {} {}",
+                    "{} fake-agent --script {kind}-record --record-home {} {}",
                     shell_words::quote(&bin.path().join(kind).to_string_lossy()),
                     shell_words::quote(&home.path().to_string_lossy()),
                     structured_options.as_deref().unwrap_or("")
@@ -1210,7 +1210,7 @@ async fn structured_claude_resume_survives_supervisor_reconstruction() {
 async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
     let home = farhelm_teststate::tempdir().expect("agent home");
     let bin = farhelm_teststate::tempdir().expect("agent bin");
-    std::os::unix::fs::symlink(farhelm_bin(), bin.path().join("claude"))
+    std::os::unix::fs::symlink(fixtures_bin(), bin.path().join("claude"))
         .expect("symlink the farhelm binary under the agent's own name");
     let state = farhelm_teststate::tempdir().expect("state dir");
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
@@ -1227,7 +1227,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
     };
     let claude = bin.path().join("claude");
     let invocation = format!(
-        "{} internal fake-agent --script hook-report --record-home {}",
+        "{} fake-agent --script hook-report --record-home {}",
         shell_words::quote(&claude.to_string_lossy()),
         shell_words::quote(&home.path().to_string_lossy())
     );
@@ -1245,7 +1245,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
         "sh".to_string(),
         "-c".to_string(),
         format!(
-            "{FAKE_AGENT_RESUME_ENV}=\"$3\" exec \"$0\" internal fake-agent --script hook-report \
+            "{FAKE_AGENT_RESUME_ENV}=\"$3\" exec \"$0\" fake-agent --script hook-report \
              --record-home \"$1\" \"$2\" \"$3\""
         ),
         claude.to_string_lossy().into_owned(),
@@ -1533,7 +1533,7 @@ async fn an_rc_file_change_between_launches_reaches_the_relaunched_agent() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script env-echo"),
+            &fixture_cmd("fake-agent --script env-echo"),
             None,
             80,
             24,

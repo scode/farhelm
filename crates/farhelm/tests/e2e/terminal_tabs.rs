@@ -409,7 +409,7 @@ async fn opening_a_tab_after_the_working_directory_vanished_names_it() {
         .client
         .create_session(
             &cwd,
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -548,7 +548,7 @@ async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words(
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -966,7 +966,7 @@ async fn tabs_are_rediscovered_across_a_supervisor_restart_and_unmarked_windows_
     let session = client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -1069,7 +1069,7 @@ async fn stopping_the_agent_leaves_a_tabs_shell_and_its_daemonized_child_running
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-reparent"),
+            &fixture_cmd("fake-agent --script spawner-reparent"),
             None,
             80,
             24,
@@ -1164,7 +1164,7 @@ async fn restarting_the_agent_leaves_a_tab_attached_running_and_unswept() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -2650,7 +2650,7 @@ async fn a_killed_supervisor_leaves_no_orphaned_sink_client() {
     let session = client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -3685,7 +3685,7 @@ async fn a_new_tab_window_is_presized_to_the_agent_windows_geometry() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,

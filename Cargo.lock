@@ -1781,6 +1781,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "farhelm-fixtures"
+version = "0.14.0-rc.2"
+dependencies = [
+ "anyhow",
+ "clap",
+ "farhelm-proto",
+ "farhelm-supervisor",
+ "farhelm-teststate",
+ "farhelm-testtrace",
+ "libc",
+ "serde_json",
+ "shell-words",
+ "tempfile",
+]
+
+[[package]]
 name = "farhelm-helm"
 version = "0.14.0-rc.2"
 dependencies = [

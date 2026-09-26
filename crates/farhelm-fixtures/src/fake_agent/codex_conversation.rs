@@ -21,7 +21,7 @@ const CHILD_FLAG: &str = "--codex-child";
 /// Run the root or one-shot nested native-Codex fixture.
 ///
 /// The hook binary is supplied as a trailing argument because the real
-/// `farhelm internal fake-agent` parser intentionally accepts vendor flags it
+/// `farhelm-fixtures fake-agent` parser intentionally accepts vendor flags it
 /// does not understand. The fixture must not default to its own executable:
 /// its executable is named `codex` for kernel-basename validation, while a
 /// hook launched through it would add a second native Codex ancestor.
@@ -132,7 +132,6 @@ fn nested_from_root(
         .context("the Codex fixture has argv[0]")?;
     let mut child = Command::new(&image)
         .args([
-            "internal",
             "fake-agent",
             "--script",
             "codex-conversation",
@@ -433,7 +432,6 @@ fn nested_shell_native(
              {}\n",
             shell_words::join([
                 &*image.to_string_lossy(),
-                "internal",
                 "fake-agent",
                 "--script",
                 "codex-conversation",

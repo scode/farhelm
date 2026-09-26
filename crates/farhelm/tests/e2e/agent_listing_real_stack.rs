@@ -358,7 +358,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
         &format!("{}/api/sessions", helm.base),
         serde_json::json!({
             "cwd": work.path().to_string_lossy(),
-            "invocation": agent_cmd("internal fake-agent --script basic"),
+            "invocation": fixture_cmd("fake-agent --script basic"),
             "title": "the-asking-session",
         }),
     )
@@ -487,7 +487,7 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
                 &format!("{base}/api/sessions"),
                 serde_json::json!({
                     "cwd": cwd,
-                    "invocation": agent_cmd("internal fake-agent --script basic"),
+                    "invocation": fixture_cmd("fake-agent --script basic"),
                     "title": title,
                 }),
             )
@@ -653,7 +653,7 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
         &format!("{}/api/profiles", helm.base),
         serde_json::json!({
             "name": "Relay Fixture",
-            "invocation": agent_cmd("internal fake-agent --script basic"),
+            "invocation": fixture_cmd("fake-agent --script basic"),
             "agent_kind": "generic",
         }),
     )

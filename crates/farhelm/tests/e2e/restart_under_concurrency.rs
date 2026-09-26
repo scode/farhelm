@@ -116,7 +116,7 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-stubborn"),
+            &fixture_cmd("fake-agent --script spawner-stubborn"),
             None,
             80,
             24,
@@ -186,7 +186,7 @@ async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner-stubborn"),
+            &fixture_cmd("fake-agent --script spawner-stubborn"),
             None,
             80,
             24,
@@ -317,7 +317,7 @@ async fn a_repointed_working_directory_refuses_the_restart() {
         .client
         .create_session(
             &link.to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,

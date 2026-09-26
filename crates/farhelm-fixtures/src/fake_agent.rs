@@ -1016,6 +1016,29 @@ fn wait_bounded(
     }
 }
 
+/// The product `farhelm` binary beside this one, whose `internal hook` the
+/// record scripts run.
+///
+/// The hook under test is the product's, not a copy, so the fixture has to
+/// find the real binary. Both are built into the same target directory
+/// (see this package's `main.rs`), and `current_exe` resolves the
+/// `claude`/`codex` symlinks some tests invoke this fixture through, so
+/// the sibling is the binary the test is exercising.
+fn product_farhelm() -> anyhow::Result<std::path::PathBuf> {
+    let fixture = std::env::current_exe().context("locating this fixture's own executable")?;
+    let farhelm = fixture
+        .parent()
+        .context("this fixture's executable has no directory")?
+        .join("farhelm");
+    anyhow::ensure!(
+        farhelm.is_file(),
+        "no farhelm binary beside {}; build the workspace (cargo build) so both are in one target \
+         directory",
+        fixture.display()
+    );
+    Ok(farhelm)
+}
+
 /// Fire the real `farhelm internal hook` for `conversation`, as the vendor
 /// would at `SessionStart`, and report what came back.
 ///
@@ -1044,7 +1067,7 @@ fn wait_bounded(
 ///   so a test waiting on the report fails on its own deadline with this
 ///   line in the transcript naming the reason.
 /// - `HOOK-STDOUT-EMPTY` — the child said nothing on EITHER descriptor and
-///   exited 0. This is the silence contract (see `crate::hook`): Claude
+///   exited 0. This is the silence contract (see `farhelm`'s `hook.rs`): Claude
 ///   feeds a `SessionStart` hook's stdout to the model as text and shows
 ///   stderr to the user on a non-zero exit, so a single stray byte here is
 ///   a user-visible defect. Asserted from inside a REAL supervised session,
@@ -1064,7 +1087,7 @@ fn wait_bounded(
 /// indistinguishable from the fixture's markers and would silently satisfy
 /// a naive transcript scan.
 fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
-    let exe = std::env::current_exe().context("locating this fixture's own executable")?;
+    let exe = product_farhelm()?;
     let payload = serde_json::json!({
         "session_id": conversation,
         "hook_event_name": "SessionStart",
@@ -1811,12 +1834,7 @@ fn flood_memory() -> anyhow::Result<()> {
 
     let exe = std::env::current_exe().context("locating the flood producer executable")?;
     let mut producer = std::process::Command::new(&exe)
-        .args([
-            "internal",
-            "fake-agent",
-            "--script",
-            "flood-memory-producer",
-        ])
+        .args(["fake-agent", "--script", "flood-memory-producer"])
         .stdin(std::process::Stdio::null())
         .spawn()
         .with_context(|| format!("spawning the flood producer {}", exe.display()))?;

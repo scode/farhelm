@@ -1,6 +1,10 @@
 # Process-per-test execution makes in-process slot semaphores local to one
 # test. Keep the shared resource budget here, where it covers every binary.
 nextest-version = { required = "0.9.143" }
+# Setup scripts are still experimental in nextest. The exact version pin above
+# is what makes relying on one safe: the feature cannot change under this
+# config without the pin changing too.
+experimental = ["setup-scripts"]
 
 [profile.default]
 test-threads = 4
@@ -52,3 +56,16 @@ threads-required = 2
 # Reserve the default global budget rather than measuring alongside other tests.
 filter = "test(terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled)"
 threads-required = 4
+
+# The e2e tests run `farhelm-fixtures` (the fake agent), a binary from another
+# package, which Cargo neither builds for them nor gives them a path to. Build
+# it before any e2e test runs, into the same target directory, where the
+# harness finds it beside the `farhelm` binary (`harness::fixtures_bin`).
+# `--locked` matches the recorder's own build. A run pointed at another target
+# directory or cargo profile must build the fixtures there itself.
+[scripts.setup.build-fixtures]
+command = ["cargo", "build", "--locked", "-p", "farhelm-fixtures"]
+
+[[profile.default.scripts]]
+filter = "package(farhelm) & binary(e2e)"
+setup = "build-fixtures"

@@ -323,13 +323,6 @@ are large mostly because of their tests.
   `fail_before_rename`, `*_for_test` store methods), each already `#[cfg(test)]` but with no shared mechanism, and the
   UI ships 32 `window.__farhelmTest*` hooks and test-observation signals in the product bundle. Fix: one failpoint
   mechanism in the helm, and a `test-hooks` feature for the Playwright build.
-- **Test fixtures in the release binary.** Medium effort, lower payoff. `internal fake-agent` (~3.8k lines with
-  `codex_conversation.rs`) and `internal sweep-test-state` ship in the product binary, and `crates/farhelm/Cargo.toml`
-  depends on `farhelm-teststate` although that crate's docs say product code must never depend on it. Fix: a cargo
-  feature or a second `[[bin]]` for the e2e harness and `start-stack.sh`. Held out of the 2026-09 stack: an integration
-  test cannot name another package's binary, so a separate package first needs a way to build the fixtures before the
-  e2e tests run (a nextest setup script, say) that the recorder and the narrow-test recipes also accept, and every
-  script and spec that starts them changes with it.
 
 ### Stale in-code documentation
 

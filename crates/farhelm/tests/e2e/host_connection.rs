@@ -214,7 +214,7 @@ async fn remote_supervisor() -> RemoteSupervisor {
     let session = control
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("connection-manager fixture".to_string()),
             80,
             24,

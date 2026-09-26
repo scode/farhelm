@@ -57,8 +57,8 @@ pub(crate) fn test_capture_bounds() -> CaptureWindowBounds {
 /// directory of kind-named symlinks to the farhelm binary.
 ///
 /// The symlinks are what let these tests exercise DERIVATION rather than
-/// routing around it. A session launched as `farhelm internal fake-agent
-/// ...` has basename `farhelm` and correctly classifies as generic, so
+/// routing around it. A session launched as `farhelm-fixtures fake-agent
+/// ...` has basename `farhelm-fixtures` and correctly classifies as generic, so
 /// running the fixture through `<bin>/claude` is the only way to reach the
 /// integrated path the way a real user does — and it simultaneously pins
 /// PLAN_M3.md item 7's other promise, that the default resume template is
@@ -119,7 +119,7 @@ pub(crate) async fn capture_harness_with_seams(
     let home = farhelm_teststate::tempdir().expect("agent home");
     let bin = farhelm_teststate::tempdir().expect("agent bin");
     for kind in ["claude", "codex"] {
-        std::os::unix::fs::symlink(farhelm_bin(), bin.path().join(kind))
+        std::os::unix::fs::symlink(fixtures_bin(), bin.path().join(kind))
             .expect("symlink the farhelm binary under an agent's own name");
     }
     let mut seams = SupervisorSeams {
@@ -143,7 +143,7 @@ pub(crate) async fn record_session(
     kind: &str,
 ) -> SessionInfo {
     let invocation = format!(
-        "{} internal fake-agent --script {kind}-record --record-home {}",
+        "{} fake-agent --script {kind}-record --record-home {}",
         shell_words::quote(&fixtures.bin.path().join(kind).to_string_lossy()),
         shell_words::quote(&fixtures.home.path().to_string_lossy())
     );
@@ -1208,10 +1208,10 @@ async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered(
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
 
-    // `farhelm internal fake-agent ...`: basename `farhelm`, so derivation
+    // `farhelm-fixtures fake-agent ...`: basename `farhelm-fixtures`, so derivation
     // says generic. The override is what makes it claude.
-    let invocation = agent_cmd(&format!(
-        "internal fake-agent --script claude-record --record-home {}",
+    let invocation = fixture_cmd(&format!(
+        "fake-agent --script claude-record --record-home {}",
         shell_words::quote(&fixtures.home.path().to_string_lossy())
     ));
     let overridden = h
@@ -1251,7 +1251,7 @@ async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered(
         .client
         .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -1279,7 +1279,7 @@ async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered(
         .client
         .create_session_with_extras(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -1308,7 +1308,7 @@ async fn a_keyed_replay_after_capture_reports_the_resume_offer() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let invocation = format!(
-        "{} internal fake-agent --script claude-record --record-home {}",
+        "{} fake-agent --script claude-record --record-home {}",
         shell_words::quote(&fixtures.bin.path().join("claude").to_string_lossy()),
         shell_words::quote(&fixtures.home.path().to_string_lossy())
     );
@@ -1386,7 +1386,7 @@ async fn a_session_resuming_an_old_conversation_is_not_captured() {
     // script under the `claude` name, which is what a resume looks like
     // from the supervisor's side.
     let invocation = format!(
-        "{} internal fake-agent --script basic",
+        "{} fake-agent --script basic",
         shell_words::quote(&fixtures.bin.path().join("claude").to_string_lossy())
     );
     let session = h

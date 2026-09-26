@@ -1,0 +1,31 @@
+[package]
+name = "farhelm-fixtures"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Stand-in agent and state sweep for Farhelm's test suites; never shipped"
+
+# Test-harness support, never shipped; see `farhelm-helm/Cargo.toml` for why
+# every non-shipping member says so explicitly.
+[package.metadata.dist]
+dist = false
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+# The record-writing scripts write conversation records exactly where the
+# supervisor's own locators look, so they share its path and time helpers.
+farhelm-supervisor.workspace = true
+farhelm-teststate.workspace = true
+libc.workspace = true
+# The record-writing scripts build conversation records the supervisor then
+# parses; a hand-rolled escaper would make a fixture bug look like a parser
+# bug.
+serde_json.workspace = true
+shell-words.workspace = true
+
+[dev-dependencies]
+farhelm-proto.workspace = true
+farhelm-testtrace.workspace = true
+tempfile.workspace = true

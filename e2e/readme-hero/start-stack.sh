@@ -29,9 +29,13 @@
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)" || exit 1
 bin="$repo/target/debug/farhelm"
+# The replay fixture and the state sweep: test fixtures, built by
+# `cargo build` beside the product binary but never shipped with it.
+fixtures="$repo/target/debug/farhelm-fixtures"
 dist="$repo/target/dx/farhelm-ui/release/web/public"
 
 test -x "$bin" || { echo "missing $bin — run cargo build first" >&2; exit 1; }
+test -x "$fixtures" || { echo "missing $fixtures — run cargo build first" >&2; exit 1; }
 test -f "$dist/index.html" || { echo "missing web dist — run dx build first" >&2; exit 1; }
 
 port="${FARHELM_E2E_PORT:-}"
@@ -69,7 +73,7 @@ while IFS= read -r destination; do
   }
 done <<<"$remotes"
 
-"$bin" internal sweep-test-state || true
+"$fixtures" sweep-test-state || true
 
 # Same prefix family as the ordinary suite so the teststate sweep reaps a
 # run that died without its trap.
@@ -166,7 +170,7 @@ done
 ensure="$state/ensure-hosts.json5"
 printf '%s\n' "$remotes" | python3 -c '
 import json, sys
-bin_path, ensure_path, info_path, state, wrappers, work, port = sys.argv[1:8]
+bin_path, ensure_path, info_path, state, wrappers, work, port, fixtures = sys.argv[1:9]
 destinations = [line for line in sys.stdin.read().split("\n") if line]
 hosts = [{
     "ssh": destination,
@@ -178,13 +182,14 @@ with open(ensure_path, "w") as ensure:
 with open(info_path, "w") as info:
     json.dump({
         "farhelm": bin_path,
+        "fixtures": fixtures,
         "state": state,
         "port": int(port),
         "wrappers": wrappers,
         "work": work,
         "remotes": [{"ssh": host["ssh"], "state": host["remote_state_dir"]} for host in hosts],
     }, info)
-' "$bin" "$ensure" "$stack_info" "$state" "$wrappers" "$work" "$port" || exit 1
+' "$bin" "$ensure" "$stack_info" "$state" "$wrappers" "$work" "$port" "$fixtures" || exit 1
 
 "$bin" helm run \
   --state-dir "$state" \

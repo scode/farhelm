@@ -159,7 +159,7 @@ async fn gated_flood_session(h: &Harness, cols: u16) -> (SessionInfo, farhelm_te
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script flood-gated"),
+            &fixture_cmd("fake-agent --script flood-gated"),
             None,
             cols,
             24,
@@ -589,7 +589,7 @@ async fn a_forced_tmux_pause_is_recovered_through_the_real_attachment() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script counter"),
+            &fixture_cmd("fake-agent --script counter"),
             None,
             80,
             24,
@@ -663,7 +663,7 @@ async fn a_forced_tmux_pause_recovers_an_alternate_screen_pane() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script altscreen"),
+            &fixture_cmd("fake-agent --script altscreen"),
             None,
             80,
             24,
@@ -816,7 +816,7 @@ async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script counter"),
+            &fixture_cmd("fake-agent --script counter"),
             None,
             80,
             24,
@@ -917,7 +917,7 @@ async fn memory_stays_flat_while_a_viewer_is_stalled() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script flood-memory"),
+            &fixture_cmd("fake-agent --script flood-memory"),
             None,
             80,
             24,
@@ -1089,7 +1089,7 @@ async fn a_paused_attachment_stops_receiving_until_it_resumes() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script counter"),
+            &fixture_cmd("fake-agent --script counter"),
             None,
             80,
             24,
@@ -1155,7 +1155,7 @@ async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script counter"),
+            &fixture_cmd("fake-agent --script counter"),
             None,
             80,
             24,
@@ -1792,7 +1792,7 @@ async fn a_pause_past_the_stall_timeout_detaches_and_leaves_the_session_healthy(
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script counter"),
+            &fixture_cmd("fake-agent --script counter"),
             None,
             80,
             24,

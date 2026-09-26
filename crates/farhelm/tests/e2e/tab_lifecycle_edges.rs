@@ -89,7 +89,7 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
     let session = client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -612,7 +612,7 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
     let session = client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,

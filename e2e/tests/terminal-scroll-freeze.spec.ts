@@ -57,7 +57,7 @@ import { waitForSessionSocketOpen } from "./helpers/terminal-readiness";
 
 installTerminalSuiteHooks();
 
-const FARHELM_BIN = path.resolve(__dirname, "../../target/debug/farhelm");
+const FIXTURES_BIN = path.resolve(__dirname, "../../target/debug/farhelm-fixtures");
 
 /**
  * `counter` (fake_agent.rs): a plain, UNGATED, paced (2ms/record) producer
@@ -72,7 +72,7 @@ const FARHELM_BIN = path.resolve(__dirname, "../../target/debug/farhelm");
  * test only needs the producer running before it acts, not synchronized
  * to a specific byte.
  */
-const COUNTER_INVOCATION = `"${FARHELM_BIN}" internal fake-agent --script counter`;
+const COUNTER_INVOCATION = `"${FIXTURES_BIN}" fake-agent --script counter`;
 
 /**
  * `flood-region` (fake_agent.rs): the gated, paced producer with TWO
@@ -87,7 +87,7 @@ const COUNTER_INVOCATION = `"${FARHELM_BIN}" internal fake-agent --script counte
  * adds shape 4's DEC 2026 synchronized-output brackets around each chunk
  * of the SECOND phase.
  */
-const REGION_INVOCATION = `"${FARHELM_BIN}" internal fake-agent --script flood-region`;
+const REGION_INVOCATION = `"${FIXTURES_BIN}" fake-agent --script flood-region`;
 const REGION_SYNC_INVOCATION = `${REGION_INVOCATION} --sync-output`;
 
 /** How many banner rows `flood_region` holds fixed above its scroll region. */

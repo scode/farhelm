@@ -418,7 +418,7 @@ async fn a_renamed_title_survives_a_supervisor_restart() {
     let session = client1
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             None,
             80,
             24,
@@ -696,7 +696,7 @@ async fn a_rename_does_not_disturb_the_create_intent_key() {
         .client
         .create_session_with_key(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("as-created".to_string()),
             80,
             24,
@@ -711,7 +711,7 @@ async fn a_rename_does_not_disturb_the_create_intent_key() {
         .client
         .create_session_with_key(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script basic"),
+            &fixture_cmd("fake-agent --script basic"),
             Some("as-created".to_string()),
             80,
             24,

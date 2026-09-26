@@ -25,7 +25,7 @@
 # NOTE: no reliance on `set -e` — every step carries its own guard.
 
 repo="$(cd "$(dirname "$0")/.." && pwd)" || exit 1
-bin="$repo/target/debug/farhelm"
+fixtures="$repo/target/debug/farhelm-fixtures"
 stack_script="$repo/e2e/start-stack.sh"
 stack_info="$repo/e2e/.stack-info.json"
 
@@ -56,7 +56,7 @@ pass() {
   echo "ok: $1"
 }
 
-test -x "$bin" || { echo "missing $bin — run cargo build first" >&2; exit 1; }
+test -x "$fixtures" || { echo "missing $fixtures — run cargo build first" >&2; exit 1; }
 test -f "$repo/target/dx/farhelm-ui/release/web/public/index.html" || {
   echo "missing web dist — run dx build first" >&2
   exit 1
@@ -90,7 +90,7 @@ cleanup_test() {
     kill -KILL "$script_pid" 2>/dev/null
   fi
   sleep 3
-  "$bin" internal sweep-test-state 2>/dev/null || true
+  "$fixtures" sweep-test-state 2>/dev/null || true
   kill "$decoy_pid" 2>/dev/null
   tmux -S "$decoy_sock" kill-server 2>/dev/null
   rm -rf "$decoy_dir"
