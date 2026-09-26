@@ -69,7 +69,7 @@ impl CreateAdmission {
 use anyhow::Context;
 use farhelm_proto::{
     AgentKind, AgentOutcome, AgentReply, AgentVerb, ControlMsg, DetachCode, ErrorKind, Frame,
-    LaunchHarness, LaunchSelection, MAX_SESSION_ID_BYTES, ProfileSnapshot as WireProfileSnapshot,
+    LaunchSelection, MAX_SESSION_ID_BYTES, ProfileSnapshot as WireProfileSnapshot,
     ResolvedGithubCheckout, RestartMode, SessionInfo, TerminalSelector,
     github_checkout::GithubPreviewRequest,
 };
@@ -328,17 +328,7 @@ fn create_mode(fields: CreateSelectorFields) -> Result<CreateSelector, String> {
         {
             return Err("a structured launch cannot also carry profile fields".to_string());
         }
-        let expected_kind = match selection.harness {
-            LaunchHarness::Codex => AgentKind::Codex,
-            LaunchHarness::Claude => AgentKind::Claude,
-            LaunchHarness::Muse => AgentKind::Generic,
-            LaunchHarness::Cursor => AgentKind::Generic,
-            LaunchHarness::OpenCode => AgentKind::Generic,
-            LaunchHarness::Goose => AgentKind::Goose,
-            LaunchHarness::Pi => AgentKind::Pi,
-            LaunchHarness::Omp => AgentKind::Omp,
-            LaunchHarness::Grok => AgentKind::Grok,
-        };
+        let expected_kind = selection.harness.agent_kind();
         if agent_kind != Some(expected_kind) {
             return Err("a structured launch's harness and agent_kind disagree".to_string());
         }
@@ -452,17 +442,7 @@ async fn resolve_create_selector(
                     )
                 })?;
             if let Some(selection) = parent.launch {
-                let agent_kind = match selection.harness {
-                    LaunchHarness::Codex => AgentKind::Codex,
-                    LaunchHarness::Claude => AgentKind::Claude,
-                    LaunchHarness::Muse => AgentKind::Generic,
-                    LaunchHarness::Cursor => AgentKind::Generic,
-                    LaunchHarness::OpenCode => AgentKind::Generic,
-                    LaunchHarness::Goose => AgentKind::Goose,
-                    LaunchHarness::Pi => AgentKind::Pi,
-                    LaunchHarness::Omp => AgentKind::Omp,
-                    LaunchHarness::Grok => AgentKind::Grok,
-                };
+                let agent_kind = selection.harness.agent_kind();
                 return Ok(CreateMode::Structured {
                     invocation: parent.invocation,
                     agent_kind,
@@ -4050,6 +4030,7 @@ mod tests {
     use super::super::terminals::Terminal;
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
+    use farhelm_proto::LaunchHarness;
     use farhelm_proto::{ReportVendor, RestartOffer, SessionStatus};
     use std::sync::atomic::AtomicBool;
 

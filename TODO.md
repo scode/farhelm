@@ -255,14 +255,6 @@ in one place; supervisor state machines are proper enums and the helm actor loop
 used, and the duplicate versions in `Cargo.lock` all come from dioxus, gtk, and ring; `setup.rs` and `provisioning.rs`
 are large mostly because of their tests.
 
-### Diverged copies of the same rule
-
-- **Harness-to-agent-kind tables.** Low effort. The `LaunchHarness` → `AgentKind` match is written out five times
-  (`farhelm-supervisor/src/service/handlers.rs:332` and `:456`, `farhelm-supervisor/src/store.rs:2627`,
-  `farhelm-helm/src/launches.rs:464`, `farhelm-helm/src/sessions.rs:2027`); the workspace-trust harness set is repeated
-  at `launches.rs:506` and helm `store.rs:5049`, and the permission words at helm `store.rs:795` and `:5045`. Fix:
-  `LaunchHarness::agent_kind()` in `farhelm-proto`, and expose the other two from `launches.rs`.
-
 ### Oversized modules and functions
 
 - **Supervisor `service/core.rs`.** Medium-high effort. 29k lines, 14.4k of them production; one `impl Supervisor` (from
@@ -286,9 +278,10 @@ are large mostly because of their tests.
   (`with_hook_argv_using`, `goose_launch_shape`, `pi_interactive_invocation`); `report_codex_conversation`,
   `report_grok_conversation`, and `report_omp_conversation` (`core.rs:13556`, `:13708`, `:13865`) are about 150 lines
   each with the same skeleton, alongside parallel `*_foreground` and `refresh_*_capture_claimed` helpers and a
-  coexisting legacy admission path. Adding or changing a kind is a shotgun edit. Fix: after the harness table above, a
-  per-kind trait or table in `agent_kind` for hook argv, locator verify, and foreground lookup, leaving one generic
-  report pipeline in core.
+  coexisting legacy admission path. Adding or changing a kind is a shotgun edit. Fix: a per-kind trait or table in
+  `agent_kind` for hook argv, locator verify, and foreground lookup, leaving one generic report pipeline in core. Held
+  out of the 2026-09 cleanup stack as a large move through `core.rs`; the harness-to-kind table
+  (`LaunchHarness::agent_kind`) that was its first step is done.
 - **Helm `HelmStore`.** Medium effort. About 6.2k production lines, one struct with about 65 methods over nine concerns
   (web tokens, device sessions, preferences, seen table, host registry, session cache, create and launch history,
   profiles, remembered default). `apply_schema` (`farhelm-helm/src/store.rs:1508`) is one ~1,100-line function whose

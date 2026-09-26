@@ -94,9 +94,10 @@ pub(crate) const fn normalized_workspace_trust(
     harness: LaunchHarness,
     trust: Option<bool>,
 ) -> Option<bool> {
-    match harness {
-        LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi => trust,
-        _ => None,
+    if harness.offers_workspace_trust() {
+        trust
+    } else {
+        None
     }
 }
 
@@ -746,14 +747,7 @@ pub(crate) fn search_results(
         }
     }
 
-    if scope == SearchScope::Trust
-        && harness.is_some_and(|harness| {
-            matches!(
-                harness,
-                LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi
-            )
-        })
-    {
+    if scope == SearchScope::Trust && harness.is_some_and(LaunchHarness::offers_workspace_trust) {
         for (word, value) in [("true", true), ("false", false)] {
             if query.is_empty() || word.starts_with(&folded_query) {
                 results.push(ComposerSearchResult::Trust(value));

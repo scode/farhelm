@@ -2628,17 +2628,7 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
             )
         })?;
     if let Some(selection) = &row.launch {
-        let expected_kind = match selection.harness {
-            farhelm_proto::LaunchHarness::Codex => farhelm_proto::AgentKind::Codex,
-            farhelm_proto::LaunchHarness::Claude => farhelm_proto::AgentKind::Claude,
-            farhelm_proto::LaunchHarness::Muse => farhelm_proto::AgentKind::Generic,
-            farhelm_proto::LaunchHarness::Cursor => farhelm_proto::AgentKind::Generic,
-            farhelm_proto::LaunchHarness::OpenCode => farhelm_proto::AgentKind::Generic,
-            farhelm_proto::LaunchHarness::Goose => farhelm_proto::AgentKind::Goose,
-            farhelm_proto::LaunchHarness::Pi => farhelm_proto::AgentKind::Pi,
-            farhelm_proto::LaunchHarness::Omp => farhelm_proto::AgentKind::Omp,
-            farhelm_proto::LaunchHarness::Grok => farhelm_proto::AgentKind::Grok,
-        };
+        let expected_kind = selection.harness.agent_kind();
         if row.agent_kind != expected_kind {
             anyhow::bail!(
                 "session {} records structured harness {:?} with incompatible agent kind {}",

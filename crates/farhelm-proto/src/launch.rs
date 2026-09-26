@@ -43,6 +43,42 @@ pub enum LaunchHarness {
     Grok,
 }
 
+impl LaunchHarness {
+    /// The supervisor integration a structured launch of this harness runs
+    /// under.
+    ///
+    /// The one place the pairing is stated: the helm compiles a launch with
+    /// it, the supervisor refuses a create whose harness and kind disagree,
+    /// and its store refuses a row that recorded a mismatched pair, so a copy
+    /// that drifted would make a valid create look invalid on one side only.
+    /// Exhaustive so a new harness has to choose its integration here.
+    pub fn agent_kind(self) -> crate::AgentKind {
+        use crate::AgentKind;
+        match self {
+            LaunchHarness::Codex => AgentKind::Codex,
+            LaunchHarness::Claude => AgentKind::Claude,
+            LaunchHarness::Muse | LaunchHarness::Cursor | LaunchHarness::OpenCode => {
+                AgentKind::Generic
+            }
+            LaunchHarness::Goose => AgentKind::Goose,
+            LaunchHarness::Pi => AgentKind::Pi,
+            LaunchHarness::Omp => AgentKind::Omp,
+            LaunchHarness::Grok => AgentKind::Grok,
+        }
+    }
+
+    /// Whether this harness accepts a per-run workspace-trust choice
+    /// ([`LaunchSelection::workspace_trust`]). The helm refuses the choice
+    /// for any other harness and remembers it only for these, and the browser
+    /// offers it only for these.
+    pub const fn offers_workspace_trust(self) -> bool {
+        matches!(
+            self,
+            LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi
+        )
+    }
+}
+
 /// An explicit reasoning-effort value requested from a structured harness.
 ///
 /// The release-owned catalog decides which values each harness and known model
@@ -93,6 +129,20 @@ pub enum LaunchPermission {
     Approve,
     SmartApprove,
     Chat,
+}
+
+impl LaunchPermission {
+    /// The wire spelling (the serde `snake_case` name), for places that store
+    /// or compare the choice as text, like the helm's remembered-permissions
+    /// preference.
+    pub fn wire_word(self) -> &'static str {
+        match self {
+            LaunchPermission::Yolo => "yolo",
+            LaunchPermission::Approve => "approve",
+            LaunchPermission::SmartApprove => "smart_approve",
+            LaunchPermission::Chat => "chat",
+        }
+    }
 }
 
 /// The full structured intent for one launch, before catalog compilation.
@@ -224,5 +274,26 @@ mod tests {
             serde_json::to_value(LaunchHarness::Grok).expect("serialize Grok harness"),
             serde_json::json!("grok")
         );
+    }
+
+    /// Why this matters: `wire_word` stands in for serde's spelling wherever
+    /// the choice is stored as text; if they differed, a remembered choice
+    /// would no longer match what a launch records.
+    ///
+    /// Specification: every permission's `wire_word` equals its serialized
+    /// JSON string.
+    #[farhelm_testtrace::test]
+    fn permission_wire_words_match_serde() {
+        for permission in [
+            LaunchPermission::Yolo,
+            LaunchPermission::Approve,
+            LaunchPermission::SmartApprove,
+            LaunchPermission::Chat,
+        ] {
+            assert_eq!(
+                serde_json::to_value(permission).unwrap(),
+                serde_json::json!(permission.wire_word())
+            );
+        }
     }
 }

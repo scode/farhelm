@@ -2502,14 +2502,11 @@ pub(crate) fn ListView(
                         // the helm never stored — the rarer, reversible
                         // direction, and accepted rather than plumbed back.
                         if let Some(launch) = &session.launch {
-                            let word = launch.permissions.map(|permission| match permission {
-                                crate::LaunchPermission::Yolo => "yolo".to_string(),
-                                crate::LaunchPermission::Approve => "approve".to_string(),
-                                crate::LaunchPermission::SmartApprove => "smart_approve".to_string(),
-                                crate::LaunchPermission::Chat => "chat".to_string(),
-                            });
+                            let word = launch
+                                .permissions
+                                .map(|permission| permission.wire_word().to_string());
                             preferences.0.write().remembered_permissions = word;
-                            if matches!(launch.harness, crate::LaunchHarness::Codex | crate::LaunchHarness::Muse | crate::LaunchHarness::Pi)
+                            if launch.harness.offers_workspace_trust()
                                 && let Some(trust) = launch.workspace_trust
                             {
                                 preferences.0.write().remembered_workspace_trust = Some(trust);
