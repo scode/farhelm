@@ -106,6 +106,75 @@ use tracing::{debug, warn};
 /// `create_session` has touched storage, tmux, or the filesystem.
 pub(crate) const CREATE_FIELD_CAP: usize = 64 * 1024;
 
+/// Revalidate a session-authenticated peer's credential against the store,
+/// or say how to refuse the request.
+///
+/// A credential is checked again at each protected step rather than trusted
+/// from the handshake, because the session behind it can be deleted while the
+/// connection stays open. `Unauthorized` means the credential no longer
+/// names a live session; `Internal` means the store could not answer, which
+/// is not evidence either way. The agent-request path makes the same check
+/// inline, interleaved with its own identity check and relay.
+async fn require_session_auth(
+    sup: &Supervisor,
+    auth: &farhelm_proto::SessionAuth,
+) -> Result<(), (ErrorKind, String)> {
+    match sup
+        .store
+        .authenticates_session(&auth.session_id, &auth.token)
+        .await
+    {
+        Ok(true) => Ok(()),
+        Ok(false) => Err((
+            ErrorKind::Unauthorized,
+            "the session credential is invalid or its session no longer exists".to_string(),
+        )),
+        Err(error) => Err((
+            ErrorKind::Internal,
+            format!("could not validate the session credential: {error:#}"),
+        )),
+    }
+}
+
+/// Reply to `req_id` with a refusal of `kind`.
+///
+/// Every handler refusal goes through here (or [`reply_failure`] /
+/// [`error_frame`]), so the error reply's shape is written once instead of as
+/// a struct literal at each early exit.
+async fn reply_error(
+    tx: &mpsc::Sender<Frame>,
+    req_id: u64,
+    kind: ErrorKind,
+    message: impl Into<String>,
+) {
+    send_reply(
+        tx,
+        &ControlMsg::Error {
+            req_id,
+            kind,
+            message: message.into(),
+        },
+    )
+    .await;
+}
+
+/// Reply to `req_id` with a failure, classified by [`error_kind`] and
+/// rendered with its whole context chain (`{:#}`), the one rendering every
+/// handler uses for an internal error.
+async fn reply_failure(tx: &mpsc::Sender<Frame>, req_id: u64, error: &anyhow::Error) {
+    reply_error(tx, req_id, error_kind(error), format!("{error:#}")).await;
+}
+
+/// The error reply frame, for the attach path, which sends through the
+/// admission permit it reserved rather than awaiting `tx`.
+fn error_frame(req_id: u64, kind: ErrorKind, message: impl Into<String>) -> Frame {
+    reply_frame(&ControlMsg::Error {
+        req_id,
+        kind,
+        message: message.into(),
+    })
+}
+
 /// Count the fields that share create's combined reply-size allowance.
 ///
 /// Restricted profile resolution uses this before sending a selector to the
@@ -518,11 +587,14 @@ async fn resolve_restricted_profile(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn handle_create_session(
-    sup: &Arc<Supervisor>,
-    tx: &mpsc::Sender<Frame>,
-    req_id: u64,
+/// One `CreateSession` request's fields as the wire carried them.
+///
+/// Both dispatchers (full-authority and session-authenticated) build one of
+/// these and hand it to [`handle_create_session`] beside the facts only the
+/// dispatcher knows (admission, the authenticating credential, a resolved
+/// mode), instead of passing twenty positional arguments that two call sites
+/// had to keep in the same order.
+struct CreateRequest {
     parent: Option<String>,
     cwd: String,
     invocation: Option<String>,
@@ -533,24 +605,48 @@ async fn handle_create_session(
     cols: u16,
     rows: u16,
     intent_key: Option<String>,
-    admission: CreateAdmission,
-    restricted_auth: Option<&farhelm_proto::SessionAuth>,
-    // Two consumers, and they must see the SAME values: item 6's
-    // fingerprint (a retry differing only in an override is a
-    // different request and is refused as a key reuse) and item
-    // 7's snapshot resolution, which is what makes the overrides
-    // shape the session itself.
+    /// Two consumers, and they must see the SAME values: item 6's
+    /// fingerprint (a retry differing only in an override is a different
+    /// request and is refused as a key reuse) and item 7's snapshot
+    /// resolution, which is what makes the overrides shape the session
+    /// itself. Likewise `resume_template`.
     agent_kind: Option<AgentKind>,
     resume_template: Option<Vec<String>>,
     source_profile: Option<WireProfileSnapshot>,
     launch: Option<LaunchSelection>,
-    resolved_mode: Option<CreateMode>,
-    // The helm-resolved fresh-checkout intent (protocol 24). Passed
-    // through to the create path untouched: validation, fingerprinting,
-    // and allocation all happen below this line (Design C), never in the
-    // dispatcher.
+    /// The helm-resolved fresh-checkout intent (protocol 24). Passed through
+    /// to the create path untouched: validation, fingerprinting, and
+    /// allocation all happen in the create path (Design C), never in the
+    /// dispatcher.
     github_checkout: Option<ResolvedGithubCheckout>,
+}
+
+async fn handle_create_session(
+    sup: &Arc<Supervisor>,
+    tx: &mpsc::Sender<Frame>,
+    req_id: u64,
+    request: CreateRequest,
+    admission: CreateAdmission,
+    restricted_auth: Option<&farhelm_proto::SessionAuth>,
+    resolved_mode: Option<CreateMode>,
 ) {
+    let CreateRequest {
+        parent,
+        cwd,
+        invocation,
+        profile_name,
+        profile_id,
+        inherit_agent,
+        title,
+        cols,
+        rows,
+        intent_key,
+        agent_kind,
+        resume_template,
+        source_profile,
+        launch,
+        github_checkout,
+    } = request;
     let checkout_bytes = match github_checkout
         .as_ref()
         .map(validate_checkout_fields)
@@ -558,15 +654,7 @@ async fn handle_create_session(
     {
         Ok(bytes) => bytes.unwrap_or(0),
         Err(message) => {
-            send_reply(
-                tx,
-                &ControlMsg::Error {
-                    req_id,
-                    kind: ErrorKind::InvalidRequest,
-                    message,
-                },
-            )
-            .await;
+            reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
             return;
         }
     };
@@ -582,15 +670,7 @@ async fn handle_create_session(
     }) {
         Ok(selector) => selector,
         Err(message) => {
-            send_reply(
-                tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message,
-                    kind: ErrorKind::InvalidRequest,
-                },
-            )
-            .await;
+            reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
             return;
         }
     };
@@ -604,16 +684,14 @@ async fn handle_create_session(
             title.as_deref(),
         );
         if field_len > CREATE_FIELD_CAP {
-            send_reply(
+            reply_error(
                 tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: format!(
-                        "parent, cwd, profile name, and title together are {field_len} bytes, \
+                req_id,
+                ErrorKind::InvalidRequest,
+                format!(
+                    "parent, cwd, profile name, and title together are {field_len} bytes, \
                          exceeding the {CREATE_FIELD_CAP}-byte limit"
-                    ),
-                    kind: ErrorKind::InvalidRequest,
-                },
+                ),
             )
             .await;
             return;
@@ -627,15 +705,7 @@ async fn handle_create_session(
         )),
         _ => None,
     } {
-        send_reply(
-            tx,
-            &ControlMsg::Error {
-                req_id,
-                message,
-                kind: ErrorKind::InvalidRequest,
-            },
-        )
-        .await;
+        reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
     // Profile resolution may contact the helm, so it precedes admission.
@@ -655,15 +725,7 @@ async fn handle_create_session(
     {
         Ok(guards) => guards,
         Err(error) => {
-            send_reply(
-                tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: format!("{error:#}"),
-                    kind: error_kind(&error),
-                },
-            )
-            .await;
+            reply_failure(tx, req_id, &error).await;
             return;
         }
     };
@@ -674,15 +736,7 @@ async fn handle_create_session(
     let mode = match mode {
         Ok(mode) => mode,
         Err((kind, message)) => {
-            send_reply(
-                tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message,
-                    kind,
-                },
-            )
-            .await;
+            reply_error(tx, req_id, kind, message).await;
             return;
         }
     };
@@ -761,15 +815,7 @@ async fn handle_create_session(
         None
     };
     if let Some(message) = refusal {
-        send_reply(
-            tx,
-            &ControlMsg::Error {
-                req_id,
-                message,
-                kind: ErrorKind::InvalidRequest,
-            },
-        )
-        .await;
+        reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
     // The fingerprint binds the resolved bundle. A profile edit between
@@ -808,15 +854,7 @@ async fn handle_create_session(
             send_reply(tx, &ControlMsg::SessionCreated { req_id, session }).await;
         }
         Err(e) => {
-            send_reply(
-                tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: format!("{e:#}"),
-                    kind: error_kind(&e),
-                },
-            )
-            .await;
+            reply_failure(tx, req_id, &e).await;
         }
     }
 }
@@ -1057,13 +1095,11 @@ async fn handle_stop_session(
         let _lifecycle = sup.lifecycle_locks.claim(&session_id).await;
         let entry = sup.sessions.lock().await.get(&session_id).cloned();
         let Some(entry) = entry else {
-            send_reply(
+            reply_error(
                 &tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: format!("no such session: {}", truncate_for_error(&session_id)),
-                    kind: ErrorKind::NotFound,
-                },
+                req_id,
+                ErrorKind::NotFound,
+                format!("no such session: {}", truncate_for_error(&session_id)),
             )
             .await;
             return;
@@ -1105,17 +1141,11 @@ async fn handle_stop_session(
                 // that never exited is a lie the user would act on.
                 Ok(PaneProbe::ForeignOwner { owner }) => {
                     if !sup.known_session_tmux_name(&owner).await {
-                        send_reply(
+                        reply_error(
                             &tx,
-                            &ControlMsg::Error {
-                                req_id,
-                                message: unknown_pane_owner_refusal(
-                                    &terminal.pane,
-                                    &owner,
-                                    &terminal.tmux_name,
-                                ),
-                                kind: ErrorKind::Internal,
-                            },
+                            req_id,
+                            ErrorKind::Internal,
+                            unknown_pane_owner_refusal(&terminal.pane, &owner, &terminal.tmux_name),
                         )
                         .await;
                         return;
@@ -1128,15 +1158,7 @@ async fn handle_stop_session(
                     None
                 }
                 Err(e) => {
-                    send_reply(
-                        &tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!("{e:#}"),
-                            kind: error_kind(&e),
-                        },
-                    )
-                    .await;
+                    reply_failure(&tx, req_id, &e).await;
                     return;
                 }
             },
@@ -1241,16 +1263,14 @@ async fn handle_stop_session(
                     // branch), so nothing beyond the classification
                     // write itself is lost — the caller can retry
                     // once the sentinel is readable again.
-                    send_reply(
+                    reply_error(
                         &tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!(
-                                "could not read this session's launch sentinel, so \
+                        req_id,
+                        ErrorKind::Internal,
+                        format!(
+                            "could not read this session's launch sentinel, so \
                                  nothing was recorded: {e:#}"
-                            ),
-                            kind: ErrorKind::Internal,
-                        },
+                        ),
                     )
                     .await;
                     return;
@@ -1262,13 +1282,11 @@ async fn handle_stop_session(
                 // requires the failure to surface rather than be
                 // logged past. Nothing has been killed at this
                 // point either way.
-                send_reply(
+                reply_error(
                     &tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: format!("recording the stop failed, so nothing was killed: {e:#}"),
-                        kind: ErrorKind::Internal,
-                    },
+                    req_id,
+                    ErrorKind::Internal,
+                    format!("recording the stop failed, so nothing was killed: {e:#}"),
                 )
                 .await;
                 return;
@@ -1313,15 +1331,7 @@ async fn handle_stop_session(
                 // See `ControlMsg::StopSession`'s docs: a caller
                 // must be able to tell "nothing was running" from
                 // "the sweep could not confirm nothing is running".
-                send_reply(
-                    &tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: format!("{e:#}"),
-                        kind: ErrorKind::Internal,
-                    },
-                )
-                .await;
+                reply_error(&tx, req_id, ErrorKind::Internal, format!("{e:#}")).await;
                 return;
             }
             None
@@ -1333,17 +1343,7 @@ async fn handle_stop_session(
         // agent's death output — there is nothing here for it to be
         // notified of, unlike delete below.
         match stop_error {
-            Some(message) => {
-                send_reply(
-                    &tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message,
-                        kind: ErrorKind::Internal,
-                    },
-                )
-                .await
-            }
+            Some(message) => reply_error(&tx, req_id, ErrorKind::Internal, message).await,
             None => send_reply(&tx, &ControlMsg::SessionStopped { req_id }).await,
         }
     });
@@ -1455,24 +1455,14 @@ async fn handle_delete_session(
         match mutation.await {
             Ok((Ok(()), _permit)) => send_reply(&tx, &ControlMsg::SessionDeleted { req_id }).await,
             Ok((Err(error), _permit)) => {
-                send_reply(
-                    &tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: error.message,
-                        kind: error.kind,
-                    },
-                )
-                .await;
+                reply_error(&tx, req_id, error.kind, error.message).await;
             }
             Err(join) => {
-                send_reply(
+                reply_error(
                     &tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: format!("the session delete task failed: {join}"),
-                        kind: ErrorKind::Internal,
-                    },
+                    req_id,
+                    ErrorKind::Internal,
+                    format!("the session delete task failed: {join}"),
                 )
                 .await;
             }
@@ -1527,15 +1517,7 @@ async fn handle_attach(
                 lease.len()
             )
         };
-        send_reply(
-            tx,
-            &ControlMsg::Error {
-                req_id,
-                message,
-                kind: ErrorKind::InvalidRequest,
-            },
-        )
-        .await;
+        reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
     let terminal_id = TerminalId::from(selector);
@@ -1562,16 +1544,14 @@ async fn handle_attach(
             {
                 Ok(claim) => Some(claim),
                 Err(_) => {
-                    send_reply(
+                    reply_error(
                         tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!(
-                                "session {} is being stopped or deleted; retry attaching",
-                                truncate_for_error(&session_id)
-                            ),
-                            kind: ErrorKind::Conflict,
-                        },
+                        req_id,
+                        ErrorKind::Conflict,
+                        format!(
+                            "session {} is being stopped or deleted; retry attaching",
+                            truncate_for_error(&session_id)
+                        ),
                     )
                     .await;
                     return;
@@ -1582,13 +1562,11 @@ async fn handle_attach(
     };
     let entry = sup.sessions.lock().await.get(&session_id).cloned();
     let Some(entry) = entry else {
-        send_reply(
+        reply_error(
             tx,
-            &ControlMsg::Error {
-                req_id,
-                message: format!("no such session: {}", truncate_for_error(&session_id)),
-                kind: ErrorKind::NotFound,
-            },
+            req_id,
+            ErrorKind::NotFound,
+            format!("no such session: {}", truncate_for_error(&session_id)),
         )
         .await;
         return;
@@ -1606,15 +1584,7 @@ async fn handle_attach(
     let terminal = match resolve_terminal(sup, &entry, &terminal_id).await {
         Ok(terminal) => terminal,
         Err(e) => {
-            send_reply(
-                tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: e.message,
-                    kind: e.kind,
-                },
-            )
-            .await;
+            reply_error(tx, req_id, e.kind, e.message).await;
             return;
         }
     };
@@ -1662,11 +1632,7 @@ async fn handle_attach(
     let sink = match sup.ensure_session_sink(&terminal.tmux_name).await {
         Ok(sink) => sink,
         Err(e) => {
-            permit.send(reply_frame(&ControlMsg::Error {
-                req_id,
-                message: format!("{e:#}"),
-                kind: error_kind(&e),
-            }));
+            permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
             return;
         }
     };
@@ -1686,11 +1652,11 @@ async fn handle_attach(
         }
         drop(attachments);
         if let Err(error) = sup.wait_for_output_reap(&key).await {
-            permit.send(reply_frame(&ControlMsg::Error {
+            permit.send(error_frame(
                 req_id,
-                message: format!("terminal output cleanup is unconfirmed: {error}"),
-                kind: ErrorKind::Internal,
-            }));
+                ErrorKind::Internal,
+                format!("terminal output cleanup is unconfirmed: {error}"),
+            ));
             return;
         }
     };
@@ -1733,15 +1699,15 @@ async fn handle_attach(
         }
         _ => {
             drop(attachments);
-            permit.send(reply_frame(&ControlMsg::Error {
+            permit.send(error_frame(
                 req_id,
-                message: format!(
+                ErrorKind::Conflict,
+                format!(
                     "session {} changed while this attach was being set up (it was \
                      restarted or deleted); attach again",
                     truncate_for_error(&session_id)
                 ),
-                kind: ErrorKind::Conflict,
-            }));
+            ));
             return;
         }
     };
@@ -1787,11 +1753,11 @@ async fn handle_attach(
             .any(|(k, a)| displaced_by_attach(k, &a.lease, &session_id, &lease))
     {
         drop(attachments);
-        permit.send(reply_frame(&ControlMsg::Error {
+        permit.send(error_frame(
             req_id,
-            message: farhelm_proto::ATTACH_REFUSED_TAKEN_OVER.to_string(),
-            kind: ErrorKind::TakenOver,
-        }));
+            ErrorKind::TakenOver,
+            farhelm_proto::ATTACH_REFUSED_TAKEN_OVER.to_string(),
+        ));
         return;
     }
     let displaced: Vec<(AttachmentKey, ActiveAttach)> = attachments
@@ -1867,11 +1833,11 @@ async fn handle_attach(
         for (channel, notify, reason) in notices {
             notify_detached(&notify, channel, reason.0.to_string(), reason.1);
         }
-        permit.send(reply_frame(&ControlMsg::Error {
+        permit.send(error_frame(
             req_id,
-            message: format!("the old terminal attachment could not be cleaned up: {error}"),
-            kind: ErrorKind::Internal,
-        }));
+            ErrorKind::Internal,
+            format!("the old terminal attachment could not be cleaned up: {error}"),
+        ));
         return;
     }
     if sup.has_output_reap_for_key(&key) {
@@ -1879,12 +1845,11 @@ async fn handle_attach(
         for (channel, notify, reason) in notices {
             notify_detached(&notify, channel, reason.0.to_string(), reason.1);
         }
-        permit.send(reply_frame(&ControlMsg::Error {
+        permit.send(error_frame(
             req_id,
-            message: "the old terminal attachment is still being cleaned up; attach again"
-                .to_string(),
-            kind: ErrorKind::Conflict,
-        }));
+            ErrorKind::Conflict,
+            "the old terminal attachment is still being cleaned up; attach again".to_string(),
+        ));
         return;
     }
     // Every notice is enqueued back to back, after the last
@@ -1950,11 +1915,7 @@ async fn handle_attach(
         Ok(candidate) => candidate,
         Err(e) => {
             drop(attachments);
-            permit.send(reply_frame(&ControlMsg::Error {
-                req_id,
-                message: format!("{e:#}"),
-                kind: error_kind(&e),
-            }));
+            permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
             return;
         }
     };
@@ -1974,11 +1935,7 @@ async fn handle_attach(
         Err(e) => {
             drop(stream_candidate);
             drop(attachments);
-            permit.send(reply_frame(&ControlMsg::Error {
-                req_id,
-                message: format!("{e:#}"),
-                kind: error_kind(&e),
-            }));
+            permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
             return;
         }
     };
@@ -2253,15 +2210,7 @@ async fn handle_restart_session(
                 send_reply(&tx, &ControlMsg::SessionRestarted { req_id, session }).await;
             }
             Err(e) => {
-                send_reply(
-                    &tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: format!("{e:#}"),
-                        kind: error_kind(&e),
-                    },
-                )
-                .await;
+                reply_failure(&tx, req_id, &e).await;
             }
         }
     })
@@ -2339,15 +2288,7 @@ async fn handle_rename_session(
         ensure_title_printable(&title).err().map(|e| e.message)
     };
     if let Some(message) = refusal {
-        send_reply(
-            tx,
-            &ControlMsg::Error {
-                req_id,
-                message,
-                kind: ErrorKind::InvalidRequest,
-            },
-        )
-        .await;
+        reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
     // THE request's admission slot — acquired here, in the read loop, so
@@ -2376,15 +2317,7 @@ async fn handle_rename_session(
         let renamed = match outcome {
             Ok(renamed) => renamed,
             Err(e) => {
-                send_reply(
-                    &tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: e.message,
-                        kind: e.kind,
-                    },
-                )
-                .await;
+                reply_error(&tx, req_id, e.kind, e.message).await;
                 return;
             }
         };
@@ -2397,17 +2330,15 @@ async fn handle_rename_session(
         match session_info_now(&sup, &renamed).await {
             Ok(session) => send_reply(&tx, &ControlMsg::SessionRenamed { req_id, session }).await,
             Err(e) => {
-                send_reply(
+                reply_error(
                     &tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: format!(
-                            "session {} was renamed, but reading back its current state \
+                    req_id,
+                    error_kind(&e),
+                    format!(
+                        "session {} was renamed, but reading back its current state \
                              failed: {e:#}",
-                            truncate_for_error(&session_id)
-                        ),
-                        kind: error_kind(&e),
-                    },
+                        truncate_for_error(&session_id)
+                    ),
                 )
                 .await;
             }
@@ -2434,15 +2365,7 @@ async fn handle_open_tab(
         match sup.open_tab(&session_id).await {
             Ok(tab) => send_reply(&tx, &ControlMsg::TabOpened { req_id, tab }).await,
             Err(e) => {
-                send_reply(
-                    &tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: e.message,
-                        kind: e.kind,
-                    },
-                )
-                .await;
+                reply_error(&tx, req_id, e.kind, e.message).await;
             }
         }
     })
@@ -2467,15 +2390,7 @@ async fn handle_close_tab(
         match sup.close_tab(&session_id, &tab_id).await {
             Ok(()) => send_reply(&tx, &ControlMsg::TabClosed { req_id }).await,
             Err(e) => {
-                send_reply(
-                    &tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: e.message,
-                        kind: e.kind,
-                    },
-                )
-                .await;
+                reply_error(&tx, req_id, e.kind, e.message).await;
             }
         }
     })
@@ -2530,15 +2445,7 @@ async fn handle_begin_upload(
         None
     };
     if let Some(message) = refusal {
-        send_reply(
-            tx,
-            &ControlMsg::Error {
-                req_id,
-                message,
-                kind: ErrorKind::InvalidRequest,
-            },
-        )
-        .await;
+        reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
     // The unknown-session refusal is made HERE rather than left to
@@ -2552,13 +2459,11 @@ async fn handle_begin_upload(
     // observed to finish (`prune_finished_uploads`), which is
     // eventual rather than immediate.
     if !sup.sessions.lock().await.contains_key(&session_id) {
-        send_reply(
+        reply_error(
             tx,
-            &ControlMsg::Error {
-                req_id,
-                message: format!("no such session: {}", truncate_for_error(&session_id)),
-                kind: ErrorKind::NotFound,
-            },
+            req_id,
+            ErrorKind::NotFound,
+            format!("no such session: {}", truncate_for_error(&session_id)),
         )
         .await;
         return;
@@ -2679,15 +2584,7 @@ async fn handle_commit_upload(
         other => Some(commit_without_upload(other.map(|route| &*route), channel)),
     };
     if let Some((message, kind)) = refusal {
-        send_reply(
-            tx,
-            &ControlMsg::Error {
-                req_id,
-                message,
-                kind,
-            },
-        )
-        .await;
+        reply_error(tx, req_id, kind, message).await;
     }
 }
 
@@ -2778,10 +2675,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             // (REST-level requests whose repo text does not parse are
             // refused by the HELM, which owns raw repo text; the
             // supervisor sees only resolved payloads.)
-            handle_create_session(
-                sup,
-                ctx.tx,
-                req_id,
+            let request = CreateRequest {
                 parent,
                 cwd,
                 invocation,
@@ -2792,14 +2686,20 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 cols,
                 rows,
                 intent_key,
-                CreateAdmission::Interactive,
-                None,
                 agent_kind,
                 resume_template,
                 source_profile,
                 launch,
-                None,
                 github_checkout,
+            };
+            handle_create_session(
+                sup,
+                ctx.tx,
+                req_id,
+                request,
+                CreateAdmission::Interactive,
+                None,
+                None,
             )
             .await
         }
@@ -2853,20 +2753,21 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                     .await
                 }
                 Err(error) => {
+                    // Unlike every other handler, an unclassified preview
+                    // failure falls back to `InvalidRequest` rather than
+                    // `Internal`. That preserves the preview's long-standing
+                    // behavior, which suits its most common unclassified
+                    // failures (a `~user` in the requested root that does not
+                    // resolve, a root that cannot be stat'ed). It is not a
+                    // guarantee that every such failure is the caller's: a
+                    // store read failing while checking existing working
+                    // copies also lands here.
                     let message = format!("{error:#}");
                     let kind = error
                         .downcast_ref::<RequestError>()
                         .map(|e| e.kind)
                         .unwrap_or(ErrorKind::InvalidRequest);
-                    send_reply(
-                        ctx.tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message,
-                            kind,
-                        },
-                    )
-                    .await;
+                    reply_error(ctx.tx, req_id, kind, message).await;
                 }
             }
         }
@@ -2878,21 +2779,19 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             rows,
             refuse_unknown,
         } => {
-            let reply = match sup
+            match sup
                 .reconcile_github_checkout(intent_key, &client_identity, cols, rows, refuse_unknown)
                 .await
             {
-                Ok(session) => ControlMsg::GithubCheckoutReconciled { req_id, session },
-                Err(error) => ControlMsg::Error {
-                    req_id,
-                    kind: error
-                        .downcast_ref::<RequestError>()
-                        .map(|e| e.kind)
-                        .unwrap_or(ErrorKind::Internal),
-                    message: format!("{error:#}"),
-                },
-            };
-            send_reply(ctx.tx, &reply).await;
+                Ok(session) => {
+                    send_reply(
+                        ctx.tx,
+                        &ControlMsg::GithubCheckoutReconciled { req_id, session },
+                    )
+                    .await
+                }
+                Err(error) => reply_failure(ctx.tx, req_id, &error).await,
+            }
         }
         ControlMsg::GithubRepoSearch {
             req_id,
@@ -3070,13 +2969,11 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         // leaving a helm that sent this waiting on a reply that never
         // comes, and leaving a test with nothing to assert on.
         ControlMsg::ReportConversation { req_id, .. } => {
-            send_reply(
+            reply_error(
                 ctx.tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: "only the session's own agent may report its conversation".to_string(),
-                    kind: ErrorKind::Unauthorized,
-                },
+                req_id,
+                ErrorKind::Unauthorized,
+                "only the session's own agent may report its conversation".to_string(),
             )
             .await;
         }
@@ -3146,15 +3043,13 @@ pub(crate) async fn handle_restricted_control(
             // catch-all below — but a create carrying the payload is ON
             // the allowlist's message shape and must be cut here.
             if github_checkout.is_some() {
-                send_reply(
+                reply_error(
                     tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: "fresh GitHub checkouts are not available to \
+                    req_id,
+                    ErrorKind::Unauthorized,
+                    "fresh GitHub checkouts are not available to \
                                   session-authenticated creates: the payload is helm-supplied"
-                            .to_string(),
-                        kind: ErrorKind::Unauthorized,
-                    },
+                        .to_string(),
                 )
                 .await;
                 return;
@@ -3164,55 +3059,22 @@ pub(crate) async fn handle_restricted_control(
             // an unauthenticated peer from causing an upcall, while the
             // second check below is still needed to serialize the accepted
             // create with deletion.
-            match sup
-                .store
-                .authenticates_session(&auth.session_id, &auth.token)
-                .await
-            {
-                Ok(true) => {}
-                Ok(false) => {
-                    send_reply(
-                        tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message:
-                                "the session credential is invalid or its session no longer exists"
-                                    .to_string(),
-                            kind: ErrorKind::Unauthorized,
-                        },
-                    )
-                    .await;
-                    return;
-                }
-                Err(error) => {
-                    send_reply(
-                        tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!(
-                                "could not validate the session credential: {error:#}"
-                            ),
-                            kind: ErrorKind::Internal,
-                        },
-                    )
-                    .await;
-                    return;
-                }
+            if let Err((kind, message)) = require_session_auth(sup, auth).await {
+                reply_error(tx, req_id, kind, message).await;
+                return;
             }
             if parent
                 .as_deref()
                 .is_some_and(|parent| parent != auth.session_id)
             {
-                send_reply(
+                reply_error(
                     tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: format!(
-                            "a session-authenticated peer may name only itself ({}) as parent",
-                            truncate_for_error(&auth.session_id)
-                        ),
-                        kind: ErrorKind::Unauthorized,
-                    },
+                    req_id,
+                    ErrorKind::Unauthorized,
+                    format!(
+                        "a session-authenticated peer may name only itself ({}) as parent",
+                        truncate_for_error(&auth.session_id)
+                    ),
                 )
                 .await;
                 return;
@@ -3225,16 +3087,8 @@ pub(crate) async fn handle_restricted_control(
                 + usize::from(profile_id.is_some())
                 + usize::from(inherit_agent);
             if invocation.is_some() || selector_count != 1 {
-                send_reply(
-                    tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: "a session-authenticated create requires exactly one profile name, profile id, or explicit inheritance selector"
-                            .to_string(),
-                        kind: ErrorKind::InvalidRequest,
-                    },
-                )
-                .await;
+                reply_error(tx, req_id, ErrorKind::InvalidRequest, "a session-authenticated create requires exactly one profile name, profile id, or explicit inheritance selector"
+                            .to_string()).await;
                 return;
             }
             let field_len = create_field_bytes(
@@ -3246,16 +3100,14 @@ pub(crate) async fn handle_restricted_control(
                 title.as_deref(),
             );
             if field_len > CREATE_FIELD_CAP {
-                send_reply(
+                reply_error(
                     tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: format!(
-                            "parent, cwd, profile name, and title together are {field_len} bytes, \
+                    req_id,
+                    ErrorKind::InvalidRequest,
+                    format!(
+                        "parent, cwd, profile name, and title together are {field_len} bytes, \
                              exceeding the {CREATE_FIELD_CAP}-byte limit"
-                        ),
-                        kind: ErrorKind::InvalidRequest,
-                    },
+                    ),
                 )
                 .await;
                 return;
@@ -3276,15 +3128,7 @@ pub(crate) async fn handle_restricted_control(
                 {
                     Ok(mode) => Some(mode),
                     Err((kind, message)) => {
-                        send_reply(
-                            tx,
-                            &ControlMsg::Error {
-                                req_id,
-                                message,
-                                kind,
-                            },
-                        )
-                        .await;
+                        reply_error(tx, req_id, kind, message).await;
                         return;
                     }
                 }
@@ -3299,14 +3143,11 @@ pub(crate) async fn handle_restricted_control(
             // profile. Only the full-authority helm and this supervisor's
             // own named-spawn resolution can attach that provenance.
             if source_profile.is_some() {
-                send_reply(
+                reply_error(
                     tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: "source_profile is not available to session-authenticated creates"
-                            .to_string(),
-                        kind: ErrorKind::InvalidRequest,
-                    },
+                    req_id,
+                    ErrorKind::InvalidRequest,
+                    "source_profile is not available to session-authenticated creates".to_string(),
                 )
                 .await;
                 return;
@@ -3316,22 +3157,16 @@ pub(crate) async fn handle_restricted_control(
             // Children may inherit their parent's established launch, but
             // cannot present a new structured bundle as trusted authority.
             if launch.is_some() {
-                send_reply(
+                reply_error(
                     tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: "launch is not available to session-authenticated creates"
-                            .to_string(),
-                        kind: ErrorKind::InvalidRequest,
-                    },
+                    req_id,
+                    ErrorKind::InvalidRequest,
+                    "launch is not available to session-authenticated creates".to_string(),
                 )
                 .await;
                 return;
             }
-            handle_create_session(
-                sup,
-                tx,
-                req_id,
+            let request = CreateRequest {
                 parent,
                 cwd,
                 invocation,
@@ -3342,19 +3177,25 @@ pub(crate) async fn handle_restricted_control(
                 cols,
                 rows,
                 intent_key,
-                CreateAdmission::Spawn {
-                    asking_session: auth.session_id.clone(),
-                },
-                Some(auth),
                 agent_kind,
                 resume_template,
                 source_profile,
                 launch,
-                resolved_mode,
                 // Unreachable as `Some` — the arm above refuses a
                 // restricted create that carries the payload before this
                 // call is reached.
-                None,
+                github_checkout: None,
+            };
+            handle_create_session(
+                sup,
+                tx,
+                req_id,
+                request,
+                CreateAdmission::Spawn {
+                    asking_session: auth.session_id.clone(),
+                },
+                Some(auth),
+                resolved_mode,
             )
             .await;
         }
@@ -3377,40 +3218,9 @@ pub(crate) async fn handle_restricted_control(
             // vendor shows a blown budget to the user as a hook error.
             // `Supervisor::report_conversation` carries the full argument,
             // including what the generation fence has to cover instead.
-            match sup
-                .store
-                .authenticates_session(&auth.session_id, &auth.token)
-                .await
-            {
-                Ok(true) => {}
-                Ok(false) => {
-                    send_reply(
-                        tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message:
-                                "the session credential is invalid or its session no longer exists"
-                                    .to_string(),
-                            kind: ErrorKind::Unauthorized,
-                        },
-                    )
-                    .await;
-                    return;
-                }
-                Err(error) => {
-                    send_reply(
-                        tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!(
-                                "could not validate the session credential: {error:#}"
-                            ),
-                            kind: ErrorKind::Internal,
-                        },
-                    )
-                    .await;
-                    return;
-                }
+            if let Err((kind, message)) = require_session_auth(sup, auth).await {
+                reply_error(tx, req_id, kind, message).await;
+                return;
             }
             // The length bound is this handler's own, not one inherited
             // from the scan's parser: a post-handshake frame is capped
@@ -3422,16 +3232,14 @@ pub(crate) async fn handle_restricted_control(
                     session = %auth.session_id, bytes = conversation.len(),
                     "refused a reported conversation identity this build will not store"
                 );
-                send_reply(
+                reply_error(
                     tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: format!(
-                            "not a conversation identity this build will store: {}",
-                            truncate_for_error(&conversation)
-                        ),
-                        kind: ErrorKind::InvalidRequest,
-                    },
+                    req_id,
+                    ErrorKind::InvalidRequest,
+                    format!(
+                        "not a conversation identity this build will store: {}",
+                        truncate_for_error(&conversation)
+                    ),
                 )
                 .await;
                 return;
@@ -3462,15 +3270,13 @@ pub(crate) async fn handle_restricted_control(
                     "refused a conversation report whose vendor does not match this \
                      session's durable agent kind"
                 );
-                send_reply(
+                reply_error(
                     tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: "the reported conversation identity does not match this \
+                    req_id,
+                    ErrorKind::InvalidRequest,
+                    "the reported conversation identity does not match this \
                                   session's agent kind"
-                            .to_string(),
-                        kind: ErrorKind::InvalidRequest,
-                    },
+                        .to_string(),
                 )
                 .await;
                 return;
@@ -3488,28 +3294,22 @@ pub(crate) async fn handle_restricted_control(
                 let subagent = match identity {
                     serde_json::Value::String(marker) => !marker.is_empty(),
                     _ => {
-                        send_reply(
+                        reply_error(
                             tx,
-                            &ControlMsg::Error {
-                                req_id,
-                                message: "the reported agent identity has an unexpected shape"
-                                    .to_string(),
-                                kind: ErrorKind::InvalidRequest,
-                            },
+                            req_id,
+                            ErrorKind::InvalidRequest,
+                            "the reported agent identity has an unexpected shape".to_string(),
                         )
                         .await;
                         return;
                     }
                 };
                 if subagent {
-                    send_reply(
+                    reply_error(
                         tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: "a delegated agent may not report its session's conversation"
-                                .to_string(),
-                            kind: ErrorKind::InvalidRequest,
-                        },
+                        req_id,
+                        ErrorKind::InvalidRequest,
+                        "a delegated agent may not report its session's conversation".to_string(),
                     )
                     .await;
                     return;
@@ -3522,13 +3322,11 @@ pub(crate) async fn handle_restricted_control(
             if vendor == farhelm_proto::ReportVendor::Codex
                 && !crate::agent_kind::codex::is_foreground_source(&source)
             {
-                send_reply(
+                reply_error(
                     tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: "Codex reported an unsupported foreground transition".to_string(),
-                        kind: ErrorKind::InvalidRequest,
-                    },
+                    req_id,
+                    ErrorKind::InvalidRequest,
+                    "Codex reported an unsupported foreground transition".to_string(),
                 )
                 .await;
                 return;
@@ -3542,13 +3340,11 @@ pub(crate) async fn handle_restricted_control(
             if vendor == farhelm_proto::ReportVendor::Omp
                 && !crate::agent_kind::omp::is_omp_foreground_source(&source)
             {
-                send_reply(
+                reply_error(
                     tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: "OMP reported an unsupported foreground transition".to_string(),
-                        kind: ErrorKind::InvalidRequest,
-                    },
+                    req_id,
+                    ErrorKind::InvalidRequest,
+                    "OMP reported an unsupported foreground transition".to_string(),
                 )
                 .await;
                 return;
@@ -3723,15 +3519,13 @@ pub(crate) async fn handle_restricted_control(
             send_reply(tx, &ControlMsg::AgentResponse { req_id, outcome }).await;
         }
         other => {
-            send_reply(
+            reply_error(
                 tx,
-                &ControlMsg::Error {
-                    req_id: other.request_req_id().unwrap_or(0),
-                    message: "a session-authenticated peer may only create sessions, report its \
+                other.request_req_id().unwrap_or(0),
+                ErrorKind::Unauthorized,
+                "a session-authenticated peer may only create sessions, report its \
                               conversation, and ask the helm about the fleet"
-                        .to_string(),
-                    kind: ErrorKind::Unauthorized,
-                },
+                    .to_string(),
             )
             .await;
         }
