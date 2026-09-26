@@ -45,15 +45,15 @@ use crate::peer::{DetailPart, PeerLine};
 /// distinction the check below is drawn on.
 pub(crate) const CLIENT_BUILD: &str = env!("CARGO_PKG_VERSION");
 
-/// The response header the helm stamps on every reply (its own
-/// `BUILD_STAMP_HEADER`).
+/// The response header the helm stamps on every reply
+/// ([`farhelm_proto::http::BUILD_STAMP_HEADER`]).
 ///
 /// A header rather than a body field, and that is what makes it cheap
 /// enough to be universal: every route already answers, none of them had to
 /// grow an envelope, and the routes that answer with a bare `{}` or a
 /// `text/plain` refusal carry it exactly like the ones that answer with
 /// JSON.
-pub(crate) const BUILD_HEADER: &str = "x-farhelm-build";
+pub(crate) const BUILD_HEADER: &str = farhelm_proto::http::BUILD_STAMP_HEADER;
 
 /// How much of a reported stamp is kept for display.
 ///

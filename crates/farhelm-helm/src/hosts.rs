@@ -245,7 +245,11 @@ impl From<&HostState> for HostStateView {
             },
             HostState::Unreachable { cause, last_error } => HostStateView::Unreachable {
                 cause: match cause {
-                    UnreachableCause::LocalSupervisorNotRunning => "local-supervisor-not-running",
+                    UnreachableCause::LocalSupervisorNotRunning => {
+                        farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING
+                    }
+                    // Not shared through proto: the UI never branches on this
+                    // label, only on the one above (see `farhelm_proto::http`).
                     UnreachableCause::TransportFailure => "transport-failure",
                 },
                 last_error: last_error.clone(),
@@ -850,6 +854,34 @@ mod tests {
                 state.phase(),
                 "the phase word and the wire tag disagree for {state:?}"
             );
+        }
+    }
+
+    /// Spec: an unreachable host's `cause` goes out on the host list as
+    /// exactly `"local-supervisor-not-running"` or `"transport-failure"`.
+    ///
+    /// The browser UI keys its diagnosis and its manual-start remedy for the
+    /// local row off the first of these, and nothing else on the Rust side
+    /// pins it: the browser specs that use it are not run in CI. The labels are
+    /// spelled out here rather than taken from `farhelm_proto::http` so that
+    /// editing the shared constant fails this test instead of silently changing
+    /// what the API sends.
+    #[farhelm_testtrace::test]
+    fn unreachable_causes_serialize_to_their_wire_labels() {
+        use crate::manager::{HostState, UnreachableCause};
+        for (cause, label) in [
+            (
+                UnreachableCause::LocalSupervisorNotRunning,
+                "local-supervisor-not-running",
+            ),
+            (UnreachableCause::TransportFailure, "transport-failure"),
+        ] {
+            let state = HostState::Unreachable {
+                cause,
+                last_error: "no route".to_string(),
+            };
+            let encoded = serde_json::to_value(HostStateView::from(&state)).unwrap();
+            assert_eq!(encoded["cause"], label);
         }
     }
 
