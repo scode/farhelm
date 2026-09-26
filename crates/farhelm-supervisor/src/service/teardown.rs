@@ -786,9 +786,7 @@ async fn cleanup_retired_preparation(state_dir: &std::path::Path, checkout_id: &
         warn!(working_copy = %checkout_id, "invalid retired checkout id; preparation files left untouched");
         return;
     }
-    let state_path = state_dir
-        .join("checkout-preparation")
-        .join(format!("{checkout_id}.json"));
+    let state_path = crate::launch::preparation_state_path(state_dir, checkout_id);
     // Keep the state evidence if removing its lock fails. No surviving member
     // can prepare this checkout, so successful unlink needs no replacement lock.
     for path in [
