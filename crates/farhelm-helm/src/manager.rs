@@ -1472,6 +1472,22 @@ impl ConnectionManager {
                         });
                         shape_changed = true;
                     } else {
+                        // An alias edit needs no reconnection, but every open
+                        // client displays the alias, so it is announced
+                        // HERE, by whichever reconcile first applies it.
+                        // Leaving that to the editing handler lost the
+                        // announcement whenever an unrelated reconcile
+                        // applied the edit first: the handler then saw
+                        // nothing change. Only the alias is compared: the
+                        // row's other non-dialing fields (the learned
+                        // identity, the cache's truncation flag) are written
+                        // by the actor and store themselves, which announce
+                        // them, so comparing them here would make the first
+                        // reconcile after a connection a spurious wakeup and
+                        // break the idempotent reconcile's silence.
+                        if handle.row.alias != row.alias {
+                            shape_changed = true;
+                        }
                         handle.row = row;
                     }
                 }
@@ -8351,6 +8367,71 @@ mod tests {
             .is_ok(),
             "a revival must retire the replaced actor's retained client; closures={:?}",
             fixture.transport.closures.borrow().clone()
+        );
+    }
+
+    /// A reconcile that applies an alias-only edit announces it, and a
+    /// reconcile with nothing new announces nothing.
+    ///
+    /// An alias edit needs no reconnection, so it used to be copied into the
+    /// actor's row without a fleet-revision bump, leaving the announcement to
+    /// the alias handler's before/after comparison. When some unrelated
+    /// reconcile (any other host edit) applied the new alias first, that
+    /// comparison saw nothing change and no open client ever learned the new
+    /// name. The `sync_registry` call here plays that unrelated reconcile.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_reconcile_applying_an_alias_edit_announces_it() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("aliased.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    identity: Some("aliased".to_string()),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.manager.wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Ok { .. },
+                        ..
+                    }
+                )
+            }),
+        )
+        .await
+        .expect("fixture premise: the host connected")
+        .expect("actor is running");
+        // Settle the initial reconcile's own bookkeeping, so the revision
+        // read below is not racing it.
+        fixture.manager.sync_registry().await.unwrap();
+
+        fixture
+            .store
+            .update_alias(host, Some("renamed"))
+            .await
+            .unwrap();
+        let before = fixture.manager.events().revision();
+        fixture.manager.sync_registry().await.unwrap();
+        assert!(
+            fixture.manager.events().revision() > before,
+            "the reconcile that applies an alias edit must announce it"
+        );
+        let settled = fixture.manager.events().revision();
+        fixture.manager.sync_registry().await.unwrap();
+        assert_eq!(
+            fixture.manager.events().revision(),
+            settled,
+            "a reconcile with nothing new must stay silent"
         );
     }
 
