@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `observers-leave-unread-launch-spec.md` — the ticker, listing and stop observers clean launch specs only after Error,
-  leaving credentials on disk.
 - `codex-hook-trust-bypass-runs-repo-hooks.md` — every Codex launch passes `--dangerously-bypass-hook-trust`, so a
   trusted repo's own hooks can run unreviewed.
 - `create-reply-foreign-id-misroutes.md` — a create reply naming an id another host caches routes the new session's
