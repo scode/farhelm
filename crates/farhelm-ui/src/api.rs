@@ -927,7 +927,7 @@ fn client() -> reqwest::Client {
 }
 
 /// How long a request that works on ANOTHER machine may take before it is
-/// abandoned: the host mutations, plus the two GETs that drain or browse a
+/// abandoned: the host mutations, plus the two requests that drain or browse a
 /// remote supervisor live (`fetch_session`, `browse_directory`). Helm-local
 /// idempotent reads have their own deadline — [`READ_TIMEOUT`], and the
 /// preference seed its shorter one — since the single-flight reader argument
@@ -955,7 +955,8 @@ fn client() -> reqwest::Client {
 /// request by construction — the same argument the funnel itself makes.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// How long a helm-local idempotent read (`send_read`'s callers) may take.
+/// How long an idempotent read (`send_read`'s callers) may take: helm-local
+/// reads, plus one bounded remote scan (see below).
 ///
 /// The 60s of [`REQUEST_TIMEOUT`] exists for the host mutations that do real
 /// work on another machine, and reads inherit it only because they shared
@@ -967,14 +968,24 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// maintainer's call (2026-09-17) was to split idempotent reads to a shorter
 /// timeout rather than keep instrumenting the stall.
 ///
-/// Ten seconds is still a hundred times what these reads take (every one is
-/// answered from the helm's own store or process memory in milliseconds),
-/// while a hung read now fails into the retry ladder with ~50s of a 60s
-/// test budget intact — enough for the whole 30s active ladder plus change.
-/// Two cross-machine requests deliberately stay on [`REQUEST_TIMEOUT`]:
-/// `browse_directory` (a POST, but the same reasoning) and `fetch_session`
-/// both work on ANOTHER machine, which is what the generous number was
-/// chosen for.
+/// Ten seconds is still a hundred times what most of these reads take (they
+/// are answered from the helm's own store or process memory in
+/// milliseconds), while a hung read now fails into the retry ladder with
+/// ~50s of a 60s test budget intact — enough for the whole 30s active ladder
+/// plus change. Two cross-machine requests deliberately stay on
+/// [`REQUEST_TIMEOUT`]: `browse_directory` (a POST, but the same reasoning)
+/// and `fetch_session` both work on ANOTHER machine, which is what the
+/// generous number was chosen for.
+///
+/// One cross-machine read does use this deadline: `fetch_github_repositories`
+/// (a POST) has the selected host's supervisor scan its checkout root. That
+/// scan is bounded on the supervisor at five seconds in total, with each git
+/// command it runs capped at one second inside that, so it fits inside ten
+/// seconds over an ordinary connection. The helm's request to the supervisor
+/// carries no deadline of its own, so this is the cap that frees the composer
+/// if that link stalls; a timeout costs the composer its repository
+/// suggestions, not an action. Raising the scan's budget, or lowering this
+/// one, eats into the margin that transport has left and can break that fit.
 ///
 /// On the desktop build, a 401 on one of these reads runs the native
 /// credential refresh and the retry inside this same absolute deadline;
@@ -1031,13 +1042,14 @@ async fn send_within(
     send_inner(request, timeout).await.map_err(send_error_text)
 }
 
-/// [`send`] at [`READ_TIMEOUT`] — the deadline every helm-local idempotent
-/// GET shares.
+/// [`send`] at [`READ_TIMEOUT`] — the deadline the idempotent reads share.
 ///
 /// A fixed constant here rather than a per-call-site argument for the same
 /// reason [`send`] fixes one: a deadline chosen per call site is a deadline
 /// someone eventually forgets. A read that legitimately needs longer is not
-/// a read — it is `browse_directory`, and it goes through [`send`].
+/// a read — it is `browse_directory`, and it goes through [`send`]. (The
+/// GitHub repository scan is the one bounded remote read that stays here;
+/// see [`READ_TIMEOUT`].)
 async fn send_read(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
     send_within(request, READ_TIMEOUT).await
 }
