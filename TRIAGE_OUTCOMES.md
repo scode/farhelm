@@ -1701,7 +1701,10 @@
 - Completion criteria: the same SPEC_impl.md sentence explicitly covers specs left by runtime observers and Stop (add
   wording in this item's change if needed). Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in
   the execution change.
-- Execution: `pending`.
+- Execution: `complete`; no wording was added: the same SPEC_impl.md sentence already names the runtime observers and
+  Stop among the paths after which an unread current-generation spec may stay until Delete. This change only records
+  that and removes the queue item. Draft PR [#1050](https://github.com/scode/farhelm/pull/1050/changes), jj change
+  `ysuyklky`, bookmark `pr/observer-unread-spec-accepted`.
 
 ## codex-hook-trust-bypass-runs-repo-hooks.md
 
