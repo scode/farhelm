@@ -278,8 +278,8 @@ One line per open item. This file must always match the feedback files in this d
   reports healthy.
 - `host-edits-not-cancellation-safe.md` — a client disconnect between a host edit's commit and its reconcile leaves the
   actor out of sync until restart.
-- `hostnotfound-refresh-keeps-serving.md` — a HostNotFound refresh does not end the connection, so an actor for a
-  deleted host keeps serving.
+- `hostnotfound-refresh-keeps-serving.md` — an identity-less actor for a deleted host keeps serving, because its
+  refreshes never write the store and so never see the row is gone.
 - `actor-respawn-skips-client-retire.md` — respawn/revive aborts the old supervisor task without retiring a
   still-published client.
 - `nudge-break-skips-cache-bump.md` — a cache change committed while a nudge is pending is never announced on the event
