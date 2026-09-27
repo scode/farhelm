@@ -557,6 +557,97 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
     peer.await.expect("join scripted supervisor");
 }
 
+/// Spec: remembered launch defaults come from what the user submitted, not
+/// from the supervisor's reply: a structured create that asked for the
+/// default permissions remembers no permission mode even when the reply
+/// claims `yolo` with workspace trust, and a raw create whose reply carries
+/// a launch moves nothing.
+///
+/// Why: the reply is written by the remote host. A compromised host
+/// answering creates with `yolo` plus trust used to make those the helm-wide
+/// defaults the next New dialog preselects on every host. SPEC.md's rule is
+/// that only explicit GUI selections shape GUI defaults.
+#[farhelm_testtrace::test]
+async fn remembered_defaults_follow_the_submitted_launch_not_the_reply() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, LaunchPermission, LaunchSelection};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .expect("complete supervisor handshake");
+        // Every reply claims yolo with workspace trust, whatever was asked.
+        for (index, id) in ["structured-asked-default", "raw-create"]
+            .into_iter()
+            .enumerate()
+        {
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CreateSession { req_id, .. } = request else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            let mut session = rest_harness::session(id, 1_700_000_000);
+            session.creation_seq = Some(index as u64 + 1);
+            session.launch = Some(LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: Some(LaunchPermission::Yolo),
+                workspace_trust: Some(true),
+            });
+            writer
+                .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                    req_id,
+                    session,
+                }))
+                .await
+                .unwrap();
+        }
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions",
+        serde_json::json!({
+            "cwd": "/work",
+            "launch": { "harness": "codex", "model": null, "effort": null, "permissions": null },
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let (_, preferences) = get_json(&harness, "/api/preferences").await;
+    assert_eq!(
+        preferences.get("remembered_permissions"),
+        None,
+        "the user asked for the default, so the reply's yolo must not be remembered: {preferences}"
+    );
+    assert_ne!(
+        preferences.get("remembered_workspace_trust"),
+        Some(&serde_json::json!(true)),
+        "the reply's workspace trust must not become the default: {preferences}"
+    );
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions",
+        serde_json::json!({ "cwd": "/work", "invocation": "codex" }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let (_, preferences) = get_json(&harness, "/api/preferences").await;
+    assert_eq!(
+        preferences.get("remembered_permissions"),
+        None,
+        "a raw create's reply must not move the defaults: {preferences}"
+    );
+
+    peer.await.expect("join scripted supervisor");
+}
+
 /// The create body's `intent_key`, `agent_kind`, and `resume_template`
 /// all reach the supervisor verbatim (PLAN_M3.md items 6 and 7).
 ///
@@ -8944,7 +9035,7 @@ async fn github_repository_rest_routes_config_and_preserves_incomplete_status() 
                     display_cwd: "/ephemeral",
                 },
                 Some(&repo),
-                crate::store::LaunchChoiceMemory::Leave,
+                None,
             )
             .await
             .unwrap();
@@ -9051,7 +9142,7 @@ async fn github_repository_rest_preserves_recents_offline() {
                 display_cwd: "/checkouts/bar-1",
             },
             Some(&repo),
-            crate::store::LaunchChoiceMemory::Leave,
+            None,
         )
         .await
         .unwrap();

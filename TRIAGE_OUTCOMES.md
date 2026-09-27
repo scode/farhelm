@@ -1793,7 +1793,21 @@
   time, canonical cwd) still come from the reply. Tests cover a reply whose `launch` differs from the submitted
   selection, and a raw/profile create whose reply carries a selection. Changelog fragment. Remove the feedback file and
   its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Decision note (from the goal-building session): the user applied the rule literally to agent creates too; sessions an
+  agent creates no longer add recent-setups rows. The New dialog's folder history is separate and unchanged.
+- Execution: `complete`; SPEC.md states the rule (only explicit GUI selections shape remembered permission/trust, the
+  remembered profile, and recent setups; recorded from the user's selection in the request that succeeded, never from a
+  reply or a listed row) and SPEC_impl.md's schema-30 note matches. `CreateAcceptance` carries `explicit_selection` (a
+  user-origin structured create's compiled selection, or the fresh-checkout request's own launch), and
+  `record_create_history_with_destination` takes it in place of `LaunchChoiceMemory`, which is gone: no selection writes
+  neither a history row nor a remembered default; a selection writes both from itself, whatever the reply says. Store
+  tests cover no selection, a selection, and a reply that disagrees with the submission; a REST test submits the default
+  permissions while the reply claims yolo with workspace trust, then a raw create with the same reply. The plain-Replace
+  path still passes its copied selection; `replace-records-peer-launch-defaults.md` changes that. The review caught that
+  the fresh-checkout path recorded the raw request selection while ordinary creates record the compiled one (they differ
+  for Pi with omitted permissions); both now use `launches::normalize_selection`, with a test that it equals what
+  `compile` records. Draft PR [#1053](https://github.com/scode/farhelm/pull/1053/changes), jj change `rstzutwr`,
+  bookmark `pr/explicit-selection-drives-defaults`.
 
 ## create-reply-launch-mirrored-into-client-defaults.md
 
