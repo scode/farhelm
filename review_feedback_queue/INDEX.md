@@ -102,8 +102,6 @@ One line per open item. This file must always match the feedback files in this d
   under a global mutex.
 - `spawn-reply-returns-raw-profile-invocation.md` — a spawn by profile name replies with the profile's raw command line
   and resume template.
-- `agent-fence-wait-unbounded.md` — a mutating agent request can wait up to ten minutes for the delete fence, then run
-  after its caller gave up.
 - `agent-create-replays-asker-as-child.md` — a keyed `agent create` can report the asking session itself as the newly
   created session.
 - `spawn-replays-asker-as-child.md` — a keyed `farhelm spawn` reusing another session's key can be handed that session's
