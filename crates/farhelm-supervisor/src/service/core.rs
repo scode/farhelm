@@ -1963,10 +1963,11 @@ struct LaunchRequest {
     /// same question as what it records.
     ///
     /// For a create the two are identical: there is no prior identity to
-    /// check the path against, and canonicalization is best-effort there
-    /// (a failure costs capture correlation, never the create), so
-    /// substituting a resolved path would only add a way for the launch to
-    /// disagree with the request.
+    /// check the path against, so substituting a resolved path would only
+    /// add a way for the launch to disagree with the request. (A create
+    /// into an existing directory still refuses when that directory cannot
+    /// be canonicalized, because the canonical spelling becomes the
+    /// identity later restarts check; a fresh checkout has none yet.)
     ///
     /// For a RETRY it is the canonical path [`ensure_cwd_identity`] just
     /// verified, and that is the whole point of the field. Checking that
@@ -7523,31 +7524,30 @@ impl Supervisor {
         // The agent will report its own `getcwd()`, which the kernel has
         // already resolved, so correlation has to compare against the
         // resolved spelling or a session created through a symlink could
-        // never match its own records. A failure here does NOT fail the
-        // create: the directory was just confirmed usable, so this is a
-        // race or an exotic filesystem, and the literal path is the honest
-        // fallback — it costs capture for that session, never correctness.
+        // never match its own records. The canonical spelling is also the
+        // directory's IDENTITY: every restart and keyed retry re-resolves
+        // `cwd` and refuses unless it equals the stored value exactly
+        // (`ensure_cwd_identity`). So a failure here FAILS the create, even
+        // though the directory was just confirmed usable: storing the
+        // literal spelling instead would record an unverified identity, and
+        // a literal that is not already canonical (a symlink component, a
+        // trailing slash, `..`) would make every later restart refuse.
         // Correlation needs the canonical spelling — but only for an
         // EXISTING directory, which is the only kind that exists yet. A
         // fresh checkout's canonical cwd is `None` until the exclusive
         // mkdir wins and `launch_reserved` records the accepted directory;
         // persisting a candidate here would claim an identity for a
-        // directory that does not exist. A failure on the existing arm
-        // still does NOT fail the create (see the comment below for why).
+        // directory that does not exist.
         let canonical_cwd = if destination.is_fresh() {
             None
         } else {
-            match tokio::fs::canonicalize(&cwd_path).await {
-                Ok(resolved) => Some(resolved.to_string_lossy().into_owned()),
-                Err(e) => {
-                    warn!(
-                        cwd = %cwd, error = %e,
-                        "could not resolve this working directory to a canonical path; \
-                         conversation capture may not correlate for this session"
-                    );
-                    Some(cwd.clone())
-                }
-            }
+            let resolved = tokio::fs::canonicalize(&cwd_path).await.with_context(|| {
+                format!(
+                    "could not resolve working directory {cwd} to its canonical path, so \
+                         the session was not created"
+                )
+            })?;
+            Some(resolved.to_string_lossy().into_owned())
         };
         if !destination.is_fresh() {
             self.refuse_pending_archive(&cwd, canonical_cwd.as_deref())
@@ -7557,10 +7557,9 @@ impl Supervisor {
             parent,
             destination,
             cwd: cwd.clone(),
-            // A create has no prior identity to have verified, and the
-            // canonicalization above is deliberately allowed to fail
-            // without failing the create — so the caller's own spelling is
-            // what tmux gets. See [`LaunchRequest::launch_cwd`].
+            // A create has no prior identity to have verified, so the
+            // caller's own spelling is what tmux gets. See
+            // [`LaunchRequest::launch_cwd`].
             launch_cwd: launch_cwd.clone(),
             invocation,
             argv,
