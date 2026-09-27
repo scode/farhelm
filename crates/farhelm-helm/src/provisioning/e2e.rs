@@ -97,8 +97,28 @@ struct E2eBackendConfig {
 }
 
 impl E2eProvisioningBackend {
+    /// Enable the simulated backend only for a directory that REALLY lies
+    /// inside the helm's private state directory and carries the marker.
+    ///
+    /// Both paths are canonicalized before the containment check.
+    /// `Path::starts_with` compares components without resolving them, so a
+    /// lexical check accepted `<state>/../../tmp/x` and a symlink inside the
+    /// state directory pointing anywhere, letting a directory outside the
+    /// private boundary choose which remote paths this user's ssh runs. The
+    /// resolved root is what the backend keeps using afterwards.
     pub(super) fn new(root: PathBuf, helm_state_dir: &Path) -> anyhow::Result<Self> {
-        if !root.is_absolute() || !root.starts_with(helm_state_dir) {
+        if !root.is_absolute() {
+            bail!("{E2E_BACKEND_ENV} must name a directory inside the helm state directory");
+        }
+        let root = std::fs::canonicalize(&root)
+            .with_context(|| format!("resolving {E2E_BACKEND_ENV} {}", root.display()))?;
+        let state = std::fs::canonicalize(helm_state_dir).with_context(|| {
+            format!(
+                "resolving the helm state directory {}",
+                helm_state_dir.display()
+            )
+        })?;
+        if !root.starts_with(&state) {
             bail!("{E2E_BACKEND_ENV} must name a directory inside the helm state directory");
         }
         let marker = std::fs::read_to_string(root.join("ENABLED"))
@@ -361,5 +381,48 @@ pub(super) struct E2ePayloads(pub(super) PathBuf);
 impl PayloadSource for E2ePayloads {
     async fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
         Ok(self.0.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Write the enabling marker into `dir`.
+    fn enable(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("ENABLED"), E2E_BACKEND_MARKER).unwrap();
+    }
+
+    /// The test-only backend gate accepts only a directory that really lies
+    /// inside the helm state directory.
+    ///
+    /// Why: the check used to be lexical, so a `..` path or a symlink inside
+    /// the state directory could point the simulated backend at a directory
+    /// outside the helm's private boundary, whose config then chose the
+    /// remote paths real ssh runs. Spec: a marked subdirectory is accepted;
+    /// the same marked outside directory is refused whether reached by `..`
+    /// or through a symlink.
+    #[farhelm_testtrace::test]
+    fn the_backend_gate_resolves_paths_before_the_containment_check() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join("state");
+        let inside = state.join("e2e");
+        let outside = root.path().join("outside");
+        enable(&inside);
+        enable(&outside);
+
+        assert!(E2eProvisioningBackend::new(inside.clone(), &state).is_ok());
+
+        let dotted = state.join("..").join("outside");
+        assert!(
+            dotted.starts_with(&state),
+            "fixture premise: the dotted path passes a lexical prefix check"
+        );
+        assert!(E2eProvisioningBackend::new(dotted, &state).is_err());
+
+        let link = state.join("link");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert!(E2eProvisioningBackend::new(link, &state).is_err());
     }
 }

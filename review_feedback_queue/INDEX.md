@@ -320,8 +320,8 @@ One line per open item. This file must always match the feedback files in this d
 - `redirect-limit-off-by-one.md` — the release download refuses the fifth redirect though five are documented.
 - `release-download-unbounded-under-host-lock.md` — release downloads have no overall deadline and run under the host
   lock, blocking removal while throttled.
-- `e2e-backend-gate-lexical-prefix.md` — the shipped E2E provisioning gate checks the state-dir prefix lexically, so ..
-  or a symlink escapes it.
+- `e2e-backend-gate-lexical-prefix.md` — the shipped E2E provisioning gate checks neither the directory's ownership nor
+  the build type.
 - `uninstall-creates-setup-lock-file.md` — uninstall and setup --uninstall create .farhelm-setup.lock (and possibly the
   unit dir) and never report it.
 - `installer-stale-lock-own-pid-live.md` — a stale lock carrying the current shell's pid is treated as live, so every
