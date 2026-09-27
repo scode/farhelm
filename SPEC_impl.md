@@ -1521,17 +1521,24 @@ failure can leave private evidence, but cannot authorize another directory move.
   they were passed to — which is what keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The
   costs are accepted deliberately, and both are scoped to the launches that actually carry the injected flags rather
   than to Codex launches in general: on those, Codex prints a hook-trust warning line above its composer, and with trust
-  bypassed any hook the user has in that same configuration home but has not trusted runs too. Codex fires
-  `SessionStart` at the first prompt rather than at process start, so a Codex session's identity arrives only once the
-  user has typed something, where Claude's arrives at startup. And three invocation shapes disqualify a launch, which is
-  skipped with a logged reason rather than made to work: an argv that already carries `--settings` (Claude honors only
-  the last one, so injecting ours would silently drop the user's), an argv already steering Codex's own hook
-  configuration (a second bypass flag risks a rejected command line, and the `hooks.`/`features.hooks` tables are the
-  user's once they touch them), and — for either vendor — an argv containing a bare `--` (our flags would become prompt
-  text). `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns
-  injection off wholesale or per kind, read once at supervisor start and carried as a seam value. Claude's scan remains
-  the fallback when no report has been accepted; Codex requires attributed reporting and does not infer ownership from
-  nearby rollout files. An accepted report dominates scan-derived state, including ambiguity.
+  bypassed any hook the user has in that same configuration home but has not trusted runs too. The same bypass covers a
+  trusted project's own `.codex/` hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's
+  workspace-trust option, including for fresh checkouts, or the user's own answer to Codex's trust prompt), and on an
+  injected launch they then run without Codex's per-hook review. That is accepted because trusting a workspace already
+  hands its Codex configuration, MCP servers included, the ability to run commands, and because skipping injection there
+  would drop conversation identity, and so resume, for trusted checkouts. It is accepted only until hook installation
+  becomes an explicit step surfaced to the user, where the user is told what is being installed and accepts specific
+  hooks; after that, launches no longer pass the per-launch bypass. Codex fires `SessionStart` at the first prompt
+  rather than at process start, so a Codex session's identity arrives only once the user has typed something, where
+  Claude's arrives at startup. And three invocation shapes disqualify a launch, which is skipped with a logged reason
+  rather than made to work: an argv that already carries `--settings` (Claude honors only the last one, so injecting
+  ours would silently drop the user's), an argv already steering Codex's own hook configuration (a second bypass flag
+  risks a rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and —
+  for either vendor — an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the
+  supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read
+  once at supervisor start and carried as a seam value. Claude's scan remains the fallback when no report has been
+  accepted; Codex requires attributed reporting and does not infer ownership from nearby rollout files. An accepted
+  report dominates scan-derived state, including ambiguity.
   `website/src/content/docs/docs/concepts/agent-hook-injection.md` is the user-facing account of the same mechanism.
 
   Grok uses the same hook executable and authenticated supervisor message but not this injection path. Its native TUI
