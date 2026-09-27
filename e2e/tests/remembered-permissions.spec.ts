@@ -11,7 +11,7 @@
 // across two real launches — reads clearest as its own linear story with
 // the shared stack's memory cleared at its own start.
 import { expect, test } from "./helpers/evidence";
-import { cleanupSession, patchPreferences, readPreferences } from "./helpers/fleet";
+import { FAKE_AGENT, cleanupSession, patchPreferences, readPreferences } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 
 test("the remembered structured-launch permissions mode survives an open, a reset, and a later default launch", async ({
@@ -119,6 +119,88 @@ test("the remembered structured-launch permissions mode survives an open, a rese
       "true",
     );
   } finally {
+    for (const id of created) await cleanupSession(request, id);
+  }
+});
+
+// A create REPLY is written by the host, not the user. This rewrites every
+// successful create reply the page receives so its `launch` claims yolo with
+// workspace trust, the way a misbehaving remote supervisor could, and checks
+// that the page's next New dialog still preselects what the user actually
+// submitted. The helm itself stores only the submitted choice; this pins the
+// page's own mirror of it, which used to copy the reply (SPEC.md: only
+// explicit GUI selections shape GUI defaults).
+test("a create reply claiming yolo does not change what the next New dialog preselects", async ({
+  page,
+  request,
+}) => {
+  const cwd = stackScratchDir("remembered-permissions-reply-");
+  const created: string[] = [];
+  try {
+    await patchPreferences(request, { remembered_permissions: null });
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      const response = await route.fetch();
+      if (!response.ok()) return route.fulfill({ response });
+      const json = await response.json();
+      json.launch = { harness: "codex", model: null, effort: null, permissions: "yolo", workspace_trust: true };
+      await route.fulfill({ response, json });
+    });
+    await page.goto("/");
+    const form = page.locator(".create-session-form");
+    const permissions = () => form.locator(".launch-composer-permissions-choice");
+    const submit = async () => {
+      const [response] = await Promise.all([
+        page.waitForResponse(
+          (candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions"),
+        ),
+        form.locator(".create-session-submit").click(),
+      ]);
+      expect(response.ok(), `the create must be admitted: ${await response.text()}`).toBe(true);
+      const session = await response.json();
+      created.push(session.id);
+      expect(session.launch, "the premise: the page received the rewritten reply").toMatchObject({
+        permissions: "yolo",
+        workspace_trust: true,
+      });
+      await expect(form, "a successful launch closes the composer").toHaveCount(0);
+      return response.request().postDataJSON();
+    };
+
+    // A structured create that asked for the default permissions.
+    await page.locator(".new-session-button").click();
+    await form.getByLabel("folder", { exact: true }).fill(cwd);
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    await permissions().getByRole("button", { name: "default", exact: true }).click();
+    expect((await submit()).launch).toMatchObject({ harness: "codex", permissions: null });
+
+    await page.locator(".new-session-button").click();
+    await expect(form).toBeVisible();
+    await expect(
+      permissions().getByRole("button", { name: "default", exact: true }),
+      "the reply's yolo must not become this page's preselection",
+    ).toHaveAttribute("aria-pressed", "true");
+
+    // A command create, which submits no launch at all.
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+    await form.locator(".create-session-profile").selectOption("");
+    await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await form.getByLabel("folder", { exact: true }).fill(cwd);
+    expect(await submit()).not.toHaveProperty("launch");
+
+    await page.locator(".new-session-button").click();
+    await expect(form).toBeVisible();
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    await expect(
+      permissions().getByRole("button", { name: "default", exact: true }),
+      "a command create's reply must not change the preselection either",
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      (await readPreferences(request)).remembered_permissions,
+      "the helm's stored default is untouched by the replies too",
+    ).toBeUndefined();
+  } finally {
+    await page.unroute("**/api/sessions");
     for (const id of created) await cleanupSession(request, id);
   }
 });

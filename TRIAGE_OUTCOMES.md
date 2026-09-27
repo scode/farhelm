@@ -1822,7 +1822,16 @@
   creates), never from the reply; the SPEC.md rule from the adjacent item covers it. A UI test shows a reply carrying a
   different launch leaves the next New dialog's preselection unchanged. Remove the feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the create form hands `on_created` a `CreatedSession` carrying the structured launch it
+  submitted (none for command and profile creates) beside the returned session, and `ListView` mirrors remembered
+  permissions and workspace trust through `mirror_submitted_launch`, which takes only that submitted selection and so
+  cannot see the reply's `launch`. A UI unit test pins the helper, and (the review asked for the wiring to be tested
+  through the page) a browser test in `e2e/tests/remembered-permissions.spec.ts` rewrites every create reply to claim
+  yolo with workspace trust and checks that a structured default-permissions create and a command create both leave the
+  next New dialog on "default"; it passed on Chromium and WebKit. The UI crate's tests pass and its desktop and wasm
+  `web` builds compile. The SPEC.md rule came with `create-reply-sets-remembered-yolo.md`. Draft PR
+  [#1055](https://github.com/scode/farhelm/pull/1055/changes), jj change `lqvkutlp`, bookmark
+  `pr/ui-mirrors-submitted-launch`.
 
 ## replace-records-peer-launch-defaults.md
 

@@ -60,6 +60,20 @@ impl CreateTarget {
     }
 }
 
+/// What a successful create hands to `on_created`: the session the helm
+/// returned, and the structured launch this form SUBMITTED, if any.
+///
+/// Kept apart because they come from different parties. `session.launch` is
+/// the supervisor's reply, which a remote host writes; the form's own
+/// submission is the user's choice. Anything that remembers "what the user
+/// picked" (the permission and workspace-trust mirror in `list::view`) must
+/// read `submitted_launch` (SPEC.md: only explicit GUI selections shape GUI
+/// defaults). `None` for command and profile creates.
+pub(crate) struct CreatedSession {
+    pub(crate) session: Session,
+    pub(crate) submitted_launch: Option<LaunchSelection>,
+}
+
 /// What one create would actually LAUNCH.
 ///
 /// The two creation modes are mutually exclusive on the wire (PLAN_M6_75.md
@@ -1277,7 +1291,8 @@ fn reseed_cloned_field(
 /// simpler than trying to keep a detached task meaningful after the fact.
 ///
 /// `on_created` fires only on a successful POST, with the newly created
-/// `Session` from the response body; `ListView` uses that to close the
+/// `Session` from the response body and the launch this form submitted
+/// ([`CreatedSession`]); `ListView` uses that to close the
 /// form and select the new session in the adjacent pane, whose terminal
 /// mounts immediately (SPEC.md: "creation launches the agent; you type
 /// your first prompt into its terminal") — the sidebar itself stays
@@ -1472,7 +1487,7 @@ pub(super) fn CreateSessionForm(
     prefill: Option<CreatePrefill>,
     /// Discard this draft without creating a session.
     on_cancel: EventHandler<()>,
-    on_created: EventHandler<Session>,
+    on_created: EventHandler<CreatedSession>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     // The helm-wide preference row (`PreferencesGate`'s seed): read here
@@ -3428,11 +3443,18 @@ pub(super) fn CreateSessionForm(
                             // afterwards would be released by a task nobody
                             // is left to run.
                             ops.release();
-                            on_created.call(enrich_created_session(
-                                session,
-                                bound.host,
-                                created_host_identity,
-                            ));
+                            let submitted_launch = match &bound.agent {
+                                LaunchIntent::Structured(selection) => Some(selection.clone()),
+                                LaunchIntent::Command(_) | LaunchIntent::Profile(_) => None,
+                            };
+                            on_created.call(CreatedSession {
+                                session: enrich_created_session(
+                                    session,
+                                    bound.host,
+                                    created_host_identity,
+                                ),
+                                submitted_launch,
+                            });
                         }
                         Err(e) => {
                             // Gated on the target this request was DISPATCHED
