@@ -6646,6 +6646,56 @@ async fn a_session_created_before_an_identity_less_hosts_first_refresh_is_routab
     peer.abort();
 }
 
+/// An identity-less host reporting an id another host already caches is
+/// listed once, under the cached (first) claimant, and counted once.
+///
+/// Within the cache the first claim already holds (SPEC_impl.md's duplicate
+/// id rule), but an identity-less host's rows come from memory and were
+/// appended to the merged list unchecked, so the session showed twice and
+/// `total` counted it twice, while routing refused both copies. The rule is
+/// about keeping the LIST coherent, so it has to hold on both storage paths.
+#[farhelm_testtrace::test]
+async fn an_identity_less_duplicate_of_a_cached_id_is_listed_once() {
+    let (builder, unbound) = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("local-identity".to_string()),
+            sessions: vec![rest_harness::session("shared-id", 100)],
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .ssh(
+            "user@no-identity-dup",
+            rest_harness::HostScript {
+                identity: None,
+                sessions: vec![
+                    rest_harness::session("shared-id", 200),
+                    rest_harness::session("only-unbound", 300),
+                ],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(local).await;
+    harness.await_refreshed(unbound).await;
+
+    let (status, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let mut ids = row_ids(&value);
+    ids.sort();
+    assert_eq!(ids, vec!["only-unbound", "shared-id"], "{value}");
+    assert_eq!(value["total"], 2, "the duplicate must not be counted twice");
+    let shared = value["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == "shared-id")
+        .expect("the shared id is listed");
+    assert_eq!(shared["host"], local, "the cached (first) claim holds");
+}
+
 /// Every session mutation reads the catalog before it asks the supervisor.
 ///
 /// A broken catalog must not turn a completed create, restart, or rename
