@@ -2,6 +2,40 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.17.0 - 2026-09-27
+
+### 💥 Breaking
+
+- This release *requires* you to update your remote hosts. (#970, #977)
+
+### 🚀 Added
+
+- `restart with` in a session's header restarts the session with a different model, effort, permissions, or workspace trust, and continues the same conversation. The session's harness, host, and folder cannot be changed this way. (#977, #978)
+- The session launcher's search now takes `yolo`, `perms:yolo`, and `perms:default` to set the launch permissions. (#964)
+- The Farhelm wordmark now appears at the top left of the window, above the session list. (#963)
+
+### 🔄 Changed
+
+- Host updates now show their current step and elapsed time in the host row, so you can follow an update without opening the row. A failed or uncertain update still opens the row with its details. (#975)
+- The session `⋯` menu now opens beside the session list, with the session's name and details at the top and a short explanation for each action that creates, replaces, stops, or deletes a session. (#974)
+- The profiles button now sits beside the new session button at the top of the session list, in the same compact shape. (#962)
+- "+ terminal" and the session launcher's "reset choices" now look like buttons, and the session's action buttons (restart, replace, clone, replace with) are lowercase like the rest of Farhelm's controls. (#957, #958, #959)
+
+### 🔧 Fixed
+
+- Cloning a session that was started from a profile could pick the profile you last launched with instead of the session's own, if you chose "other / command" before the launch dialog had finished loading your profiles. The dialog now picks nothing in that case and asks you to choose. (#1023)
+- While renaming a session or using the session launcher, a terminal tab closing in the background could move keyboard focus to the agent's terminal, so the rest of what you typed went to the agent. Focus now stays in the dialog. (#1014)
+- The folder and command shown at the top of an open session now use the available width before being cut off. Previously they were cut off after a handful of characters even in a wide window. (#961)
+- A profile's resume command is now split into arguments the same way as its invocation. Previously a backslash inside double quotes was dropped only in the resume command, so `--append-system-prompt "match \d+"` restarted the session with `match d+`. Saved profiles are unaffected until you edit their resume command. (#995)
+- Sessions now start when the path to Farhelm or its state folder contains characters such as `{}` or `!`. Previously the shell that starts the session could mangle the path. (#971)
+- A session whose tmux session you renamed, or whose pane you moved, by hand was recorded as exited even though its agent was still running. It now shows as unknown. A permission problem on the tmux socket could, in rare cases, also make a live session look like it had lost its terminal; that is fixed too. (#968, #996)
+- The session launcher now refuses `{codex:trusted-cwd}` and `{codex:untrusted-cwd}` as a custom model id, as it already did for `{cwd}` and `{conversation}`. Previously they were accepted, and the launch then failed. (#997)
+- The session launcher now spells OMP as "OMP" everywhere, instead of "Omp" in some places. (#1000)
+- If the host's supervisor went away while `farhelm spawn` was starting a session, spawn now says the outcome is unknown and to check before retrying, since the session may already be running. (#985)
+- The instructions Farhelm gives agents now explain how the restart options listed by `farhelm agent sessions --json` map to `farhelm agent restart --mode`. Agents following the old instructions got a usage error instead of a restart. (#998)
+- `farhelm agent` tables now show invisible characters in titles, paths, and errors as visible escapes such as `\u{200b}`, so two titles that look identical can be told apart. (#966)
+- Several error messages are clearer: an unexpected reply from a supervisor no longer dumps the whole reply into the error, a host identity mismatch no longer names the two identities the wrong way round, and refusing an unknown remembered permission lists all four accepted ones. (#972, #1005, #1011)
+
 ## v0.16.0 - 2026-09-25
 
 ### 🔧 Fixed

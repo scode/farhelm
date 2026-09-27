@@ -59,6 +59,21 @@ sections; the checker accepts the historical formats that are already present.
   procedure).
 - A Breaking entry says what the user must do about it (update both halves together, re-run provisioning, drop a flag),
   not only what changed.
+- A release that changes the helm–supervisor protocol version opens its Breaking category with exactly this entry, and a
+  release that does not change it never carries it:
+
+  ```
+  - This release *requires* you to update your remote hosts. (#N, #M)
+  ```
+
+  The references are the PRs that changed the protocol version, in merge order. Nothing else varies: no explanation of
+  the change, no reworded variant, and no second entry saying the same thing in other words. Builds on different
+  protocol versions refuse to connect to each other (SPEC.md's compatibility rules), so every such release strands the
+  hosts left on the old version at `needs update`. The fixed wording and the rule that it appears every time are the
+  point: a reader who does not find the line can rely on its absence to mean their hosts keep working unchanged, which
+  holds only while no release omits it. Sections up to and including `v0.16.0` predate the rule, and several of them
+  changed the protocol without saying so; their silence means nothing, and like every curated section they stay as they
+  are.
 - Entries are written for someone running Farhelm. Name the feature as the UI or CLI names it, say what changed for
   them, and leave out module names, internal mechanisms, and the reason a simpler fix was rejected. Caveats and
   limitations belong in the entry ("launch only; no conversation tracking"), since the alternative is the user finding
@@ -137,6 +152,20 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    an entry written now from the commit and PR, `kind: none` fragments are shown to the user as proposed exclusions (the
    fragment author's judgment is not the user's decision), and `STALE` ones are raised as described under the checker.
    This is the sweep the fragment rule exists to make cheap.
+
+   In the same step, ALWAYS check whether the helm–supervisor protocol version changed since the last stable release,
+   and tell the user the answer either way. Compare `PROTOCOL_VERSION` in `crates/farhelm-proto/src/lib.rs` at the merge
+   base the sweep uses and at the release base, and list the commits that changed it:
+
+   ```
+   base=$(git merge-base vPREV origin/main)
+   git log --oneline -G 'PROTOCOL_VERSION: u32 = [0-9]+' "$base"..origin/main -- crates/farhelm-proto/src/lib.rs
+   ```
+
+   (`vPREV` is the last stable tag.) Neither the sweep nor the fragments can be trusted to surface this: a bump often
+   rides in a `refactor`, which needs no fragment, or inside a feature whose fragment is about something else. When the
+   version changed, the section carries the fixed remote-hosts entry described under the format, citing those commits'
+   PRs; when it did not, it carries no such entry.
 2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments and from whatever the user and the
    agent agree on in conversation, following that guidance. Write the whole proposed `## vX.Y.Z - YYYY-MM-DD` section to
    `releasing/drafts/vX.Y.Z.md` and give the maintainer its absolute path. This ignored local Markdown file is the
