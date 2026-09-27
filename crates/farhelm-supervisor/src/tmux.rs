@@ -2705,7 +2705,10 @@ impl TmuxDriver {
     ) -> anyhow::Result<()> {
         let target = pane_in_session(session, pane);
         let env_args = env_assignments(env);
-        let mut args: Vec<&str> = vec!["respawn-pane", "-k", "-t", &target, "-c", cwd];
+        // `-c` is format-expanded here exactly as on `new-session`; see
+        // `tmux_start_directory` for what an unescaped `#` did.
+        let start_dir = tmux_start_directory(cwd);
+        let mut args: Vec<&str> = vec!["respawn-pane", "-k", "-t", &target, "-c", &start_dir];
         for assignment in &env_args {
             args.push("-e");
             args.push(assignment);
@@ -5346,6 +5349,73 @@ mod tests {
         // A `#()` job runs asynchronously inside the server, so its absence
         // right after create proves nothing on its own. The window is
         // generous against the observed sub-second job start.
+        // sleep-ok: observation window for an asynchronous tmux format job that must never run
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        assert!(
+            !marker.exists(),
+            "a #(...) job in the directory name must never run"
+        );
+    }
+
+    /// Spec: restarting in place (`respawn-pane`) into a directory whose
+    /// name contains tmux format syntax runs the new process in exactly
+    /// that directory, and nothing in the name is ever executed.
+    ///
+    /// `respawn-pane -c` is format-expanded like `new-session -c`, and it is
+    /// a separate call site, so fixing creation alone left every restart or
+    /// resume of such a session in the home directory, or re-running a
+    /// `#(...)` embedded in the name. It also defeated restart's own
+    /// directory identity check, which proves the directory it hands to
+    /// tmux and not the one tmux then expands it into.
+    #[farhelm_testtrace::test]
+    async fn relaunch_in_pane_starts_in_a_directory_named_with_tmux_format_syntax() {
+        let server = ScratchServer::start().await;
+        let marker = server.dir.path().join("format-job-ran");
+        // Octal escapes keep `/` out of the directory name; see the
+        // create-time twin of this test.
+        let octal_marker = marker
+            .to_str()
+            .expect("utf-8 scratch path")
+            .replace('/', "\\057");
+        let names = [
+            format!("job #(touch \"`printf '{octal_marker}'`\")"),
+            "alias #S here".to_string(),
+            "escape ## kept".to_string(),
+            "style #[x] kept".to_string(),
+            "doubled style ##[y] kept".to_string(),
+            "open brace #{z".to_string(),
+        ];
+        let sleep = ["sleep".to_string(), "60".to_string()];
+        let pane = server
+            .driver
+            .create_session("fmt", "/", 80, 24, &[], &sleep)
+            .await
+            .expect("create the session to relaunch");
+        for name in &names {
+            let directory = server.dir.path().join(name);
+            std::fs::create_dir(&directory).expect("create the oddly named directory");
+            server
+                .driver
+                .relaunch_in_pane(
+                    "fmt",
+                    &pane,
+                    directory.to_str().expect("utf-8 scratch path"),
+                    &[],
+                    &sleep,
+                )
+                .await
+                .expect("relaunch into the directory");
+            let actual = server
+                .driver
+                .run(&["display-message", "-p", "-t", &pane, "#{pane_current_path}"])
+                .await
+                .expect("query the pane's directory");
+            assert_eq!(
+                std::path::Path::new(actual.trim()),
+                directory.canonicalize().expect("canonical directory"),
+                "the relaunched pane must start in the literal directory {name:?}"
+            );
+        }
         // sleep-ok: observation window for an asynchronous tmux format job that must never run
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         assert!(

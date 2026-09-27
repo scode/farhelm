@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `tmux-cwd-format-expanded-on-relaunch.md` — restart in place passes the cwd to `respawn-pane -c` unescaped, bypassing
-  restart's directory identity check.
 - `tmux-cwd-format-expanded-on-tab-open.md` — opening a tab passes the session cwd to `new-window -c` unescaped: wrong
   directory or a hidden command runs.
 - `supervisor-stop-closes-clients-output-on.md` — the supervisor has no SIGTERM handler, so a normal stop closes every

@@ -1446,7 +1446,11 @@
 - Completion criteria: `relaunch_in_pane` uses the shared helper; a real-tmux regression test restarts a session in such
   directories with the same assertions. Stacked on the create item's PR. Changelog fragment. Remove the feedback file
   and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `relaunch_in_pane` passes its `respawn-pane -c` value through `tmux_start_directory`. A
+  real-tmux regression test relaunches one pane into directories named with a `#(...)` job, `#S`, and `##`, and asserts
+  the literal directory each time and that the job never ran. The create PR's changelog fragment now covers restart.
+  Draft PR [#1041](https://github.com/scode/farhelm/pull/1041/changes), jj change `rppmsvws`, bookmark
+  `pr/tmux-cwd-escape-relaunch`.
 
 ## tmux-cwd-format-expanded-on-tab-open.md
 
