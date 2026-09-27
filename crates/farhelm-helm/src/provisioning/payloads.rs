@@ -1020,12 +1020,18 @@ pub(super) enum RedirectDecision {
 /// it can be tested at all: `reqwest::redirect::Attempt` has no public
 /// constructor, so a test cannot drive `Policy::redirect` directly. The
 /// end-to-end loopback redirect test covers the wiring; this covers the rule.
+///
+/// `hops` is reqwest's `attempt.previous().len()`, which INCLUDES the URL
+/// farhelm originally asked for: it is 1 at the first redirect and `k` at the
+/// `k`th, so it counts the redirect being decided. The fifth is allowed and
+/// the sixth refused, matching the documented "at most five hops"; the
+/// earlier `>= 5` stopped at four.
 pub(super) fn release_redirect_decision(
     origin: Option<&url::Url>,
     next: &url::Url,
     hops: usize,
 ) -> RedirectDecision {
-    if hops >= 5 {
+    if hops > 5 {
         return RedirectDecision::TooManyHops;
     }
     let asked_for_https = origin.is_some_and(|url| url.scheme() == "https");

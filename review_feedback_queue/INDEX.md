@@ -196,7 +196,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- `redirect-hop-bound-off-by-one.md` — redirect hop bound enforces 4 hops while the policy documents 5.
 - `refresh-publish-races-retarget-in-check-then-act-gap.md` — retarget in the check-then-publish gap is briefly
   overwritten by the old connection.
 - `same-version-cache-generations-never-pruned.md` — same-version payload cache generations from other base URLs are
@@ -315,7 +314,6 @@ One line per open item. This file must always match the feedback files in this d
   the host never connects.
 - `reach-misreads-escaped-xdg-config-home.md` — an escaped XDG_CONFIG_HOME (path with a space) is misclassified as
   relative and refused.
-- `redirect-limit-off-by-one.md` — the release download refuses the fifth redirect though five are documented.
 - `release-download-unbounded-under-host-lock.md` — release downloads have no overall deadline and run under the host
   lock, blocking removal while throttled.
 - `e2e-backend-gate-lexical-prefix.md` — the shipped E2E provisioning gate checks neither the directory's ownership nor
