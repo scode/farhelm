@@ -501,11 +501,23 @@ pub(crate) async fn add_host(
     };
     if let Err(reconcile) = state.manager.sync_registry().await {
         return match state.store.remove_ssh_host(host).await {
-            Ok(()) => http_error(reconcile.context(
-                "the host was not registered: its actor could not be started, so the registry                  entry was rolled back",
-            )),
+            Ok(()) => {
+                // Another handler's reconcile may have run between the
+                // commit above and this failure and already started an
+                // actor for the row. Left alone it would keep serving (or
+                // sit retired in `/api/hosts`) for a host this reply says
+                // was never registered, and Remove could not reach it, since
+                // the row is gone. Provisioning's rollback stops its actor
+                // for the same reason.
+                state.manager.stop_actor(host).await;
+                http_error(reconcile.context(
+                    "the host was not registered: its actor could not be started, so the registry \
+                     entry was rolled back",
+                ))
+            }
             Err(rollback) => http_error(reconcile.context(format!(
-                "host {host} is registered but has no connection actor, and the entry could not                  be rolled back either ({rollback:#}); restart the helm to reconcile them"
+                "host {host} is registered but has no connection actor, and the entry could not \
+                 be rolled back either ({rollback:#}); restart the helm to reconcile them"
             ))),
         };
     }
