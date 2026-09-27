@@ -1776,7 +1776,14 @@ pub(crate) fn SessionView(
                         }
                         if confirming_header_replace() {
                             div { class: "header-confirm header-replace-confirm",
-                                span { class: "confirm-consequence", "replace this session with a fresh one?" }
+                                // The same status-derived consequence the row's
+                                // and the interrupted card's replace prompts
+                                // show: replacing deletes this session, so a
+                                // live agent is killed, and the prompt must say
+                                // so rather than a generic question.
+                                span { class: "confirm-consequence",
+                                    "{crate::status::replace_consequence(&shown.status)}"
+                                }
                                 button {
                                     r#type: "button",
                                     class: "btn btn-danger",
