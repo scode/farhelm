@@ -2989,14 +2989,14 @@ pub enum AgentHooks {
     /// written `fn default()` could.
     #[default]
     All,
-    /// No automatically installed reporter runs. Claude and Codex fall back
-    /// to their record scans; Goose, Pi, and OMP gain no new exact target.
+    /// No automatically installed reporter runs. Claude falls back to its
+    /// record scan; Codex, Goose, Pi, and OMP gain no new exact target.
     /// Manually configured Grok callbacks are unaffected.
     None,
     /// Exactly these automatically configured kinds get their reporter. A
-    /// disabled Claude or Codex
-    /// falls back to scanning; a disabled Goose, Pi, or OMP does not. An
-    /// [`AgentKind::Generic`] entry would be inert rather than rejected —
+    /// disabled Claude falls back to scanning; a disabled Codex, Goose, Pi,
+    /// or OMP does not. An [`AgentKind::Generic`] entry would be inert rather
+    /// than rejected —
     /// `allows` is never asked about it because the caller skips kinds with
     /// no integration before consulting this value.
     Only(Vec<AgentKind>),
@@ -3110,8 +3110,8 @@ pub fn parse_agent_hooks(value: &str) -> AgentHooks {
 ///
 /// It is deliberately NOT folded into `AgentHooks`. The two answer
 /// different questions and fail in different directions: turning hooks off
-/// costs identity capture (a scan fallback for Claude and Codex, no new
-/// target for Goose, Pi, or OMP, and no effect on manual Grok callbacks),
+/// costs identity capture (a scan fallback for Claude, no new target for
+/// Codex, Goose, Pi, or OMP, and no effect on manual Grok callbacks),
 /// while turning instructions off costs an
 /// agent knowing the CLI exists and nothing else. Someone who wants a silent
 /// launch but working resume must be able to say so.
