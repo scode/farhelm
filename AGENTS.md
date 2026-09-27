@@ -169,8 +169,7 @@ The CI workflow runs ONLY on demand: it has no push or pull-request trigger (rem
 ships; the local checks above are what validates a change before it lands. The focused headless macOS uninstall suite
 runs with `gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`. `gh workflow run ci.yml --ref <branch>` runs
 the whole baseline for any ref when a hosted verdict is wanted. PRs are still opened as drafts and marked ready when the
-user asks to publish them, or as part of landing them, never on the agent's own initiative; `pr-base.yml` (the only
-required check) still runs on every PR and only verifies that the base is main.
+user asks to publish them, or as part of landing them, never on the agent's own initiative.
 
 The RELEASE workflow is not on that list: it is generated, runs on tag pushes only, and carries its own gate, which is
 not something to run locally. `releasing/AGENTS.md` describes it, the parts of it that CAN be checked locally (the

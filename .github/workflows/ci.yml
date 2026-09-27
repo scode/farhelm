@@ -101,8 +101,8 @@ jobs:
   # - The allowlist is an ALLOWLIST. Anything it does not name — Cargo
   #   files, scripts/, e2e/, this workflow — counts as code, so a new file
   #   type defaults to running everything rather than silently skipping.
-  # - Branch protection requires only `require-main-base` (pr-base.yml),
-  #   never a CI job. A skipped job is neutral on the merge button. If a
+  # - Branch protection requires no status check, and in particular no CI
+  #   job. A skipped job is neutral on the merge button. If a
   #   CI job is ever made required, skipped runs will block merging and
   #   this gate needs an always-run aggregator job (one that succeeds on
   #   skipped upstreams) to sit behind the requirement instead.
