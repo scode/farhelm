@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `helm-answers-resolveprofile-to-any-supervisor.md` — the helm answers `ResolveProfile` with raw profile command lines
-  to any supervisor; only the asking supervisor refuses it.
 - `tmux-cwd-format-expanded-on-create.md` — session create passes the cwd to tmux `-c` unescaped: `#` paths start the
   agent in $HOME and `#(cmd)` names run commands.
 - `tmux-cwd-format-expanded-on-relaunch.md` — restart in place passes the cwd to `respawn-pane -c` unescaped, bypassing

@@ -962,6 +962,24 @@ holds a stall, and hides a closed tab) and show the reason as text, so reason wo
 helm and `terminal.js` compared English sentences they each kept a copy of, and only the disabled browser suite would
 have noticed a rewording.
 
+### What the helm believes from a supervisor
+
+The helm's trust in an attached supervisor is scoped by effect, not by connection. A supervisor is believed about things
+that affect only its own host: which of its sessions sent an upcall, that one of its sessions exited, what its panes
+show. A lie about those damages only that host, where the supervisor already has full authority. Anything whose effect
+reaches beyond its own host (another host's sessions, another supervisor, the helm's machine, or the helm's own state
+such as the profile catalog, settings, and credentials) is allowed only where the spec grants it, and a request's
+arrival on a supervisor connection adds nothing to that grant. The grants are the agent verbs any agent may use
+(cross-host stop, rename, and restart, plus the temporary create and clone exception in SPEC.md's "Local authority and
+trust between hosts"). A supervisor cannot, for example, ask the helm to delete a profile.
+
+`AgentVerb::ResolveProfile` is the verb this rule most needs spelled out for. It reads helm-owned data, the full
+resolved launch bundle of any profile, so answering it for any attached supervisor is not justified by the supervisor's
+identity. It is justified only by the temporary cross-host creation exception, which already lets any host have any
+profile launched on itself and so receive the same bundle; the helm logs every answer with the origin host, the
+supervisor-claimed asking session, and the profile id. When that exception is replaced by explicitly trusted
+environments, `ResolveProfile` from an untrusted host must end with it.
+
 ### Errors crossing levels of abstraction
 
 An error code or response at one level of abstraction is never, by default, equivalent to one at another level. The same

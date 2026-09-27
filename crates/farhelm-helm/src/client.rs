@@ -1892,17 +1892,19 @@ impl SupervisorClient {
                     // exactly the kind of work that must not sit on this
                     // path (see `dispatch`'s head-of-line note above).
                     //
-                    // THE TRUST BOUNDARY IS THIS CONNECTION, NOT THIS
-                    // MESSAGE. `session_id` and the claim that this
-                    // connection's host is that session's host are accepted
-                    // without re-verification: the helm never sees the
-                    // per-session credential (only the supervisor can check
-                    // it, and does, before forwarding), and the supervisor
-                    // on the far end of a full-authority connection is the
-                    // helm's own provisioned install with complete
-                    // authority over every session on its host. A helm that
-                    // could not trust it could not route an operation to it
-                    // either. See SPEC_impl.md's version-13 paragraph.
+                    // Trust here is scoped by EFFECT, not granted by the
+                    // connection (SPEC_impl.md, "What the helm believes from
+                    // a supervisor"). `session_id`, and the claim that this
+                    // connection's host is that session's host, are taken
+                    // without re-verification because they only say which
+                    // of this host's own sessions is asking: the helm never
+                    // sees the per-session credential, and a supervisor that
+                    // lies about its own sessions can only hurt its own
+                    // host. What the request may DO beyond that host is
+                    // decided per verb by the handler, which answers only
+                    // what the spec grants any agent; arriving on a
+                    // supervisor connection grants nothing more. See
+                    // SPEC_impl.md's version-13 paragraph.
                     ControlMsg::AgentRequest {
                         req_id,
                         session_id,
