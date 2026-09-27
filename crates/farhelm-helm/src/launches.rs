@@ -578,7 +578,7 @@ fn validate_model_id(model: &str) -> Result<(), String> {
     {
         return Err("model id must be one literal non-option argument without whitespace or control characters".to_string());
     }
-    if model == "{cwd}" || model == "{conversation}" {
+    if farhelm_supervisor::agent_kind::is_reserved_placeholder(model) {
         return Err("model id cannot be a reserved launch placeholder".to_string());
     }
     Ok(())
@@ -886,7 +886,14 @@ mod tests {
         wrong_harness.model = Some("gpt-5.6-terra".to_string());
         assert!(compile(wrong_harness).unwrap_err().contains("belongs"));
 
-        for model in ["", "--model", "two words", "{cwd}", "line\nbreak"] {
+        for model in ["", "--model", "two words", "line\nbreak"]
+            .into_iter()
+            .chain(
+                farhelm_supervisor::agent_kind::RESERVED_PLACEHOLDERS
+                    .iter()
+                    .copied(),
+            )
+        {
             let mut malformed = selection(LaunchHarness::Codex);
             malformed.model = Some(model.to_string());
             assert!(
@@ -894,6 +901,11 @@ mod tests {
                 "model {model:?} must be refused"
             );
         }
+        // Substitution only matches a whole element, so a marker inside a
+        // longer id is ordinary text and stays accepted.
+        let mut embedded = selection(LaunchHarness::Codex);
+        embedded.model = Some("x{codex:trusted-cwd}".to_string());
+        assert!(compile(embedded).is_ok());
     }
 
     /// Muse Contributor 1.3 deliberately stops at xhigh in Farhelm's
