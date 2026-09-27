@@ -2235,16 +2235,42 @@ impl TmuxDriver {
     /// (`%output`/`%extended-output`) is byte-clean and bypasses the grid
     /// (see `OutputStream::next_output`).
     async fn run_bytes(&self, args: &[&str]) -> anyhow::Result<Vec<u8>> {
+        self.run_bytes_within(args, None).await
+    }
+
+    /// [`Self::run_bytes`] with an optional deadline.
+    ///
+    /// Only callers that run while holding a supervisor-wide lock pass a
+    /// deadline (the resize under `Supervisor::attachments`), because an
+    /// unresponsive tmux server would otherwise hold that lock forever. The
+    /// bounded form also kills the tmux client when it expires, so no child
+    /// outlives the request. Unbounded callers keep their existing semantics:
+    /// a timeout on a mutating command such as `new-window` or `kill-session`
+    /// would leave its outcome unknown, which each such caller would have to
+    /// handle on its own terms.
+    async fn run_bytes_within(
+        &self,
+        args: &[&str],
+        deadline: Option<std::time::Duration>,
+    ) -> anyhow::Result<Vec<u8>> {
         // `stdin` is null so tmux can never inherit the supervisor's own
         // stdin — under `farhelm internal stdio` that stdin is the
         // protocol stream.
-        let out = self
-            .command()
-            .args(args)
-            .stdin(Stdio::null())
-            .output()
-            .await
-            .context("spawning tmux")?;
+        let mut command = self.command();
+        command.args(args).stdin(Stdio::null());
+        let out = match deadline {
+            None => command.output().await.context("spawning tmux")?,
+            Some(deadline) => {
+                command.kill_on_drop(true);
+                tokio::time::timeout(deadline, command.output())
+                    .await
+                    .with_context(|| {
+                        let (rendered_args, _) = redacted_tmux_args(args);
+                        format!("tmux {rendered_args} did not answer within {deadline:?}")
+                    })?
+                    .context("spawning tmux")?
+            }
+        };
         if !out.status.success() {
             // The human-readable message is layered on TOP of
             // `TmuxCommandFailure` via `.context(...)` rather than built by
@@ -2907,15 +2933,22 @@ impl TmuxDriver {
     ) -> anyhow::Result<()> {
         let cols = cols.clamp(1, 10_000);
         let rows = rows.clamp(1, 10_000);
-        self.run(&[
-            "resize-window",
-            "-t",
-            &pane_in_session(session, pane),
-            "-x",
-            &cols.to_string(),
-            "-y",
-            &rows.to_string(),
-        ])
+        // Bounded by the exchange budget: both callers (attach and resize)
+        // hold `Supervisor::attachments`, and an unresponsive tmux server must
+        // fail this one resize rather than freeze every terminal on the host.
+        // Both callers only log a resize failure.
+        self.run_bytes_within(
+            &[
+                "resize-window",
+                "-t",
+                &pane_in_session(session, pane),
+                "-x",
+                &cols.to_string(),
+                "-y",
+                &rows.to_string(),
+            ],
+            Some(self.exchange_timeout),
+        )
         .await?;
         Ok(())
     }
@@ -5667,6 +5700,76 @@ mod tests {
                 .await
                 .expect("liveness probe")
         );
+    }
+
+    /// A resize against a tmux that never answers fails within the exchange
+    /// budget, and the unanswered tmux client does not outlive it.
+    ///
+    /// Why it matters: attach and resize call `resize_window` while holding
+    /// the supervisor-wide attachments lock, so an unbounded wait on an
+    /// unresponsive tmux server froze typing, attaching and detaching for
+    /// every session on the host. The stand-in binary never exits, which is
+    /// what such a server looks like to the tmux client. Killing the client
+    /// on expiry matters too: against a wedged server, every abandoned
+    /// resize would otherwise leave one more stuck tmux client behind.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn resize_window_is_bounded_by_the_exchange_budget() {
+        let root = tempfile::tempdir().expect("fixture root");
+        let state = root.path().join("state");
+        std::fs::create_dir(&state).expect("state directory");
+        let fake = root.path().join("unanswering-tmux");
+        let pidfile = root.path().join("client.pid");
+        write_executable(
+            &fake,
+            &format!(
+                "#!/bin/sh\necho $$ > {}\nexec sleep 60\n",
+                shell_words::quote(&pidfile.to_string_lossy())
+            ),
+        );
+        // Long enough that the stand-in shell has started and recorded its
+        // pid before the budget kills it, even on a loaded machine: the kill
+        // assertion below needs that pid, and 200 ms proved too short under
+        // a parallel test run. The budget's own length is not under test.
+        let driver = TmuxDriver::new_with_program(
+            &state,
+            TmuxBudgets {
+                exchange: std::time::Duration::from_secs(2),
+                ..TmuxBudgets::default()
+            },
+            fake,
+        );
+
+        let error = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            driver.resize_window("fh-session", "%1", 80, 24),
+        )
+        .await
+        .expect("the resize must give up within its exchange budget")
+        .expect_err("an unanswered resize must fail");
+        assert!(
+            format!("{error:#}").contains("did not answer within"),
+            "the error must name the bounded tmux command: {error:#}"
+        );
+
+        let pid: libc::pid_t = std::fs::read_to_string(&pidfile)
+            .expect("fixture premise: the stand-in client started and recorded its pid")
+            .trim()
+            .parse()
+            .expect("a pid");
+        // A delivered SIGKILL does not imply the runtime has reaped the child
+        // yet, so allow a bounded moment for it to disappear.
+        let gone_by = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // SAFETY: signal 0 checks existence and permission without delivering anything.
+        while unsafe { libc::kill(pid, 0) } == 0 {
+            if std::time::Instant::now() >= gone_by {
+                // SAFETY: failure cleanup of the fixture's own recorded child.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+                panic!("the timed-out tmux client survived its abandoned resize");
+            }
+            // sleep-ok: a delivered kill does not imply completed reaping; poll the recorded child's existence.
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
     }
 
     /// Terminal-less delete must ask its own raw-stderr classifier, rather

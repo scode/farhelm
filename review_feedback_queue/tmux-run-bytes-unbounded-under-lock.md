@@ -1,39 +1,25 @@
-# One-shot tmux commands have no timeout and resize runs under the global lock
+# One-shot tmux commands other than resize have no timeout
 
-Reviewed commit: 2b597e90dcc715c5efa61e257d775725f80bd946
+Reviewed commit: 7cc06814956a1e9b6ec41f29e2e57ec57b5d2178
 
 ## TLDR
 
-Every terminal on the host stops accepting typing and new attaches until the supervisor restarts.
+If the private tmux server stops answering, supervisor startup and some per-connection requests can hang forever instead
+of failing with an error.
 
 ## Details
 
-Paths are relative to `crates/farhelm-supervisor/src/` unless they start with `crates/`.
+Narrowed from the original finding (pre-pr-review-swarm run `20260925-0414-2b597e9-0497`, `F4 / COR-RUNBYTES-TIMEOUT`).
+The part that froze every terminal on the host is fixed: `resize_window`, which attach and resize call while holding the
+supervisor-wide `attachments` mutex, now goes through `TmuxDriver::run_bytes_within` with the driver's
+`exchange_timeout` and `kill_on_drop`.
 
-Found by pre-pr-review-swarm run `20260925-0414-2b597e9-0497` (audit of Area 4, tmux seam) as
-`F4 / COR-RUNBYTES-TIMEOUT`, tagged **definite**. Anchors and title: `tmux.rs:2212-2222`,
-`service/handlers.rs:1926-1928`, `service/handlers.rs:2201-2203` — One-shot tmux commands have no timeout, and resize
-runs one while holding the supervisor-wide attachments lock
+What remains: every other `TmuxDriver::run` / `run_bytes` caller still awaits `Command::output()` with no deadline and
+without `kill_on_drop`, so a cancelled caller leaves the tmux child running and an unresponsive server blocks the caller
+forever. That covers supervisor startup (`start-server`, `display-message #{version}`), each connection's request loop
+through `resolve_terminal` → `pane_states` (`list-panes`), and mutating commands such as `new-window`, `kill-window`,
+`kill-session` and `set-option`. None of these holds the global attachments lock.
 
-Most short tmux commands the supervisor issues go through `TmuxDriver::run` and `run_bytes`: `resize-window`,
-`kill-window`, `new-window`, `set-option`, `display-message`, `list-panes`, `has-session`, `kill-session`, and
-`start-server`. `run_bytes` spawns `tmux <args>` and awaits `Command::output()` with no deadline. It also does not set
-`kill_on_drop`, so a cancelled caller leaves the tmux child running. The `tmux` client process blocks until the server
-answers. If the server is alive but not answering (stopped with SIGSTOP, deadlocked, or deep in swap), the call never
-returns.
-
-That matters most where the call runs under the `attachments` mutex. This is a single supervisor-wide lock that
-serializes attach, keyboard input, detach and teardown for every session on the host. The Attach handler
-(handlers.rs:~1928) and the Resize handler (handlers.rs:~2203) both call `resize_window` while holding it. The rest of
-the module is built to prevent exactly this. The docs on `CONTROL_EXCHANGE_TIMEOUT` say "a wedged tmux command must fail
-the attach request instead of leaving it holding the global attachment lock forever". The control-client exchange,
-`InputClient::send`, `list_client_pids_and_flags` and `run_bytes_tail` all have a deadline for that reason. `run_bytes`
-is the one path left unbounded. The same gap also hangs supervisor startup (`start-server`,
-`display-message #{version}`) and each connection's request loop through `resolve_terminal` → `pane_states`, though
-those do not hold the global lock.
-
-The result is that one unresponsive tmux server freezes the whole supervisor: every terminal stops accepting typing, and
-new attaches and detaches queue forever with no error, until the supervisor restarts. The suggested fix is to give
-`run_bytes` the same shape as `run_bytes_tail`: `kill_on_drop(true)` plus a `tokio::time::timeout` using the driver's
-`exchange_timeout`, with an error that names the command. At minimum, bound the `resize_window` calls made under the
-lock.
+A blanket timeout in `run_bytes` is the obvious next step, but it is not a mechanical change: a timeout on a mutating
+command leaves its outcome unknown (the window may or may not exist), so each mutating caller needs to decide how it
+treats that. Read-only callers (`list-panes`, `display-message`, `has-session`) can take the bounded form directly.
