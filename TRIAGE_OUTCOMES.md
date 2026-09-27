@@ -1219,7 +1219,13 @@
 - Completion criteria: SPEC_impl.md's process-tree section names non-dumpable and setuid-exec processes beside the
   existing residuals; SPEC.md's Stop/Delete reaping promises are qualified for hosts without a usable user manager;
   remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; SPEC.md's lifecycle cleanup paragraph and its security-section teardown sentence now narrow the
+  reaping guarantee on hosts without a usable systemd user manager to processes the sweep can identify, and SPEC_impl.md
+  names unreadable-environment processes (non-dumpable `ssh-agent`, setuid programs) beside the existing residuals, with
+  why only cgroup containment closes the gap. Fresh gpt-6-astra high review found the limit also had to apply to
+  terminal-tab cleanup, whose text promised the opposite; both specs' tab text now cross-references it. Draft PR
+  [#1033](https://github.com/scode/farhelm/pull/1033/changes) is on bookmark `pr/teardown-guarantee-without-manager`, jj
+  change `poqprvkp`.
 
 ## offline-rotate-creates-fresh-database.md
 
