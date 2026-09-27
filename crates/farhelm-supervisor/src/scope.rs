@@ -430,6 +430,26 @@ impl ScopeManager {
         )
     }
 
+    /// A re-probing fake that also lists `matching_units` for every glob and
+    /// confirms killed units gone: the stale-negative host whose manager, once
+    /// re-probed, can enumerate older generations and closed tabs.
+    #[cfg(test)]
+    pub(crate) fn fake_reprobing_with_matching_units_vanishing(
+        first: bool,
+        second: bool,
+        matching_units: Vec<String>,
+        vanishes_after: usize,
+        sink: ScopeOpSink,
+    ) -> ScopeManager {
+        ScopeManager::fake_with(
+            vec![first, second],
+            false,
+            Some(vanishes_after),
+            matching_units,
+            sink,
+        )
+    }
+
     /// A fake manager that lists `matching_units` for every requested glob.
     #[cfg(test)]
     pub(crate) fn fake_with_matching_units(
