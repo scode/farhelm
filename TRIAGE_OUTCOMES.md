@@ -1166,7 +1166,13 @@
 - Completion criteria: SPEC.md's tab lifecycle text and SPEC_impl.md's process-tree containment section state the
   principle and its contrast with the agent exemption; add a `Doc todo` entry in `TODO.md` for documenting the behavior
   in user-facing docs; remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; SPEC.md's session view section now says a tab's processes include what its shell's startup
+  files start, and contrasts that with the agent launch, whose startup services stay outside the cleanup guarantee
+  (without promising cleanup cannot reach them); SPEC_impl.md's process-tree section records why tab containment starts
+  before startup files. TODO.md's `Doc todo` has the requested user-documentation entry. Fresh gpt-6-astra high review
+  found the first SPEC.md wording overstated the agent exemption; corrected. Draft PR
+  [#1031](https://github.com/scode/farhelm/pull/1031/changes) is on bookmark `pr/tab-startup-services-spec`, jj change
+  `zsrwswsr`.
 
 ## sweep-can-claim-supervisor-or-tmux-server.md
 

@@ -62,6 +62,9 @@ The earlier cross-harness evidence is preserved in
 - Bring the README overview/splash content into the main documentation.
 - Document the harness support feature matrix so supported and unsupported features are clear.
 - Answer "Is it vibe coded?" with a clear explanation.
+- Tell users that closing, exiting, or deleting a terminal tab also stops services the tab shell's startup files started
+  there first (an `ssh-agent`, an editor daemon, a detached tmux server), and that services started for the agent launch
+  are not affected. SPEC.md's session view section states the rule.
 
 ## Tricky bugs
 
