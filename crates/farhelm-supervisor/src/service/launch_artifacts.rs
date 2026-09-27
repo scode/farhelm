@@ -339,12 +339,14 @@ pub(crate) async fn remove_fail_closed(path: &Path, what: &str) -> Result<(), St
 /// the store (this sweep needs it to answer "does anything still own
 /// this spec").
 ///
-/// Sentinels (`.status` files) are NEVER touched here, regardless of
-/// ownership — PLAN_M3.md item 5's durability promise for them would be
+/// Sentinels (`.status` files) of a session no longer on record are NEVER
+/// touched here — PLAN_M3.md item 5's durability promise for them would be
 /// worthless if a blanket startup sweep could erase the very evidence a
-/// later classifier needs to read; their lifecycle (supersede on
-/// relaunch, or explicit delete) belongs entirely to that future
-/// consumer, never to this best-effort hygiene pass.
+/// later classifier needs to read; that lifecycle belongs to the
+/// classifier or an explicit delete. The one exception is a live
+/// session's SUPERSEDED launch: sentinel reads address one exact
+/// generation, so an earlier generation's sentinel can never be read
+/// again and goes with its spec.
 ///
 /// A spec's session id (the first component of its `<id>.<generation>`
 /// stem — `launch::parse_launch_file_name`) is checked against `sessions` —
@@ -363,12 +365,17 @@ pub(crate) async fn remove_fail_closed(path: &Path, what: &str) -> Result<(), St
 /// removal of it already failed (logged there) — either way, nothing
 /// alive will ever come back for it.
 ///
-/// Best-effort and log-only: this sweep is credential hygiene (specs hold
-/// full agent command lines), so a failure that leaves debris behind must
-/// at least say so in the log, but never fails startup over it.
+/// `sessions` maps each session still on record to its current launch
+/// generation, so a live session's superseded specs are removed too.
+///
+/// Best-effort and log-only: this sweep is tidiness rather than a
+/// credential boundary (a spec holds nothing the session's own database row
+/// does not already hold for the session's lifetime; see SPEC_impl.md's
+/// runtime-state notes), so a failure that leaves debris behind is logged
+/// and never fails startup.
 pub(crate) async fn sweep_launch_dir(
     launch_dir: &Path,
-    sessions: &std::collections::HashSet<String>,
+    sessions: &std::collections::HashMap<String, i64>,
 ) {
     let mut entries = match tokio::fs::read_dir(launch_dir).await {
         Ok(entries) => entries,
@@ -394,22 +401,30 @@ pub(crate) async fn sweep_launch_dir(
             // sentinel is still launch-failure evidence, so only staging
             // whose parsed owner is absent is orphaned at startup.
             !sessions
-                .iter()
+                .keys()
                 .any(|session_id| staged_name_belongs_to(&name, session_id))
-        } else if let Some((id, _generation)) = crate::launch::parse_launch_file_name(&name) {
-            // Names are `<id>.<generation>.json|status` now that launch
-            // files are per-LAUNCH rather than per-session
-            // (`launch::spec_path_for_launch`), and the sweep's question is
-            // still the same one: does the SESSION still exist? A file
-            // belonging to a live session's older generation is not swept
-            // here — the restart that superseded it removes its own
-            // predecessor, and sweeping by generation would mean deciding,
-            // from a directory listing, which launch is current.
+        } else if let Some((id, generation)) = crate::launch::parse_launch_file_name(&name) {
+            // Names are `<id>.<generation>.json|status`: launch files are
+            // per-LAUNCH (`launch::spec_path_for_launch`). Two rules:
             //
-            // Only specs are ever removed; `.status` sentinels are never
-            // this sweep's to remove (see the function's own docs), which
-            // the extension check preserves.
-            !sessions.contains(id) && name.ends_with(".json")
+            // - A session no longer on record loses its SPECS only. Its
+            //   sentinels stay: the classifier's durability promise (this
+            //   function's docs) is about evidence whose owner is unknown.
+            // - A live session loses every file of a SUPERSEDED launch, spec
+            //   and sentinel alike. A restart writes the next generation and
+            //   nothing reads an older one again: sentinel reads address one
+            //   exact generation (`launch::read_launch_sentinel`), so an
+            //   earlier launch's sentinel is unreachable, and its spec is a
+            //   leftover no restart path removes (a login shell that died in
+            //   its rc files never reached the shim that would have). The
+            //   reloaded map says which generation is current, so this is a
+            //   registry question, not a guess from the directory listing.
+            //   The CURRENT launch's files are kept even unread: its shim may
+            //   still be mid-flight.
+            match sessions.get(id) {
+                None => name.ends_with(".json"),
+                Some(current) => generation < *current,
+            }
         } else {
             false
         };
@@ -462,7 +477,8 @@ mod tests {
         // Unrecognized names are never this sweep's to remove.
         std::fs::write(launch_dir.join("not-ours"), b"?").unwrap();
 
-        let live: std::collections::HashSet<String> = ["live".to_string()].into_iter().collect();
+        let live: std::collections::HashMap<String, i64> =
+            [("live".to_string(), 3)].into_iter().collect();
         sweep_launch_dir(&launch_dir, &live).await;
 
         assert!(
@@ -566,26 +582,49 @@ mod tests {
         assert!(unrelated.exists());
     }
 
-    /// Item 22's restart race: a spec whose session id IS still present
-    /// in `sessions` must survive the sweep untouched — a supervisor
-    /// restart does not kill tmux, so the login shell behind that session
-    /// can still be mid-flight toward reading this exact spec, arbitrarily
-    /// long after the window itself was created.
+    /// Spec: for a session still on record, the sweep keeps its CURRENT
+    /// generation's spec and sentinel and removes both for earlier
+    /// generations.
+    ///
+    /// Item 22's restart race is why the current spec must survive: a
+    /// supervisor restart does not kill tmux, so the login shell behind that
+    /// session can still be mid-flight toward reading it, arbitrarily long
+    /// after the window was created. An earlier generation's spec is
+    /// different: a restart already wrote its successor, nothing reads the
+    /// old one again, and before this sweep learned generations it stayed on
+    /// disk until Delete whenever its shell never reached the shim.
     #[farhelm_testtrace::test]
-    async fn sweep_launch_dir_preserves_a_spec_for_a_surviving_session() {
+    async fn sweep_launch_dir_keeps_the_current_launch_and_removes_superseded_ones() {
         let tmp = tempfile::tempdir().unwrap();
         let launch_dir = tmp.path().join("launch");
         std::fs::create_dir(&launch_dir).unwrap();
-        std::fs::write(launch_dir.join("live.json"), b"{}").unwrap();
+        for name in [
+            "live.1.json",
+            "live.1.status",
+            "live.2.json",
+            "live.2.status",
+        ] {
+            std::fs::write(launch_dir.join(name), b"{}").unwrap();
+        }
 
-        let mut sessions = std::collections::HashSet::new();
-        sessions.insert("live".to_string());
+        let sessions = std::collections::HashMap::from([("live".to_string(), 2)]);
         sweep_launch_dir(&launch_dir, &sessions).await;
 
         assert!(
-            launch_dir.join("live.json").exists(),
-            "a spec for a session still on record must survive — its shim may still be \
-             mid-flight toward reading it"
+            launch_dir.join("live.2.json").exists(),
+            "the current launch's spec must survive: its shim may still be mid-flight"
+        );
+        assert!(
+            !launch_dir.join("live.1.json").exists(),
+            "a superseded launch's spec is never read again and must go"
+        );
+        assert!(
+            !launch_dir.join("live.1.status").exists(),
+            "a superseded launch's sentinel can never be read again and must go"
+        );
+        assert!(
+            launch_dir.join("live.2.status").exists(),
+            "the current launch's sentinel is its classifier's evidence and must stay"
         );
     }
 

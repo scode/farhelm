@@ -1659,7 +1659,17 @@
   session" wording reflects per-generation naming. The startup sweep also removes specs (and their sentinels) whose
   generation is below the row's current generation, with its comment corrected; a test covers a superseded unread spec.
   Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; SPEC_impl.md's runtime-state text now says launch specs are per launch
+  (`<session>.<generation>.json`), hold nothing the session's database row does not already hold for its lifetime, so
+  removing them is tidiness rather than a credential boundary, and that a current-generation spec whose launch never
+  reached the shim may stay until Delete whichever path observed the outcome (startup reconciliation, the runtime
+  observers, or Stop), which is what items `reload-leaves-unread-launch-spec.md` and
+  `observers-leave-unread-launch-spec.md` rely on. The startup sweep takes each session's current generation and also
+  removes a superseded launch's spec and sentinel (sentinel reads address one exact generation, so an older one is
+  unreachable; sentinels of sessions no longer on record stay, as before), with its docs corrected; a test pins the
+  current launch's files kept and a superseded launch's removed. The first review caught that an earlier draft kept
+  superseded sentinels. Draft PR [#1048](https://github.com/scode/farhelm/pull/1048/changes), jj change `kzokpnwp`,
+  bookmark `pr/sweep-superseded-launch-specs`.
 
 ## reload-leaves-unread-launch-spec.md
 
