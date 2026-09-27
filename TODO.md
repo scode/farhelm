@@ -62,6 +62,9 @@ The earlier cross-harness evidence is preserved in
 - Bring the README overview/splash content into the main documentation.
 - Document the harness support feature matrix so supported and unsupported features are clear.
 - Answer "Is it vibe coded?" with a clear explanation.
+- Tell users that on Codex sessions Farhelm starts with hook injection, hooks Codex has not reviewed still run: those in
+  their Codex config home and, once a workspace is trusted, the workspace's own `.codex/` hooks. Trusting a workspace
+  means trusting its Codex configuration to run commands. SPEC_impl.md's hook-injection section states the rule.
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
   roots shared with or writable by other local accounts, and does not check. SPEC.md's fresh-checkout section states the
   rule.
@@ -420,6 +423,11 @@ are large mostly because of their tests.
   launch a session again. Permanent retention of these agent-originated retry records is not required; their replay
   exposure is accepted pending this work. Do not add further exceptions or infer a waiver of user-initiated GUI request
   correctness. Cross-host stop and rename remain intentionally allowed bounded operations.
+
+- Make agent hook installation an explicit step surfaced to the user: tell them which hooks Farhelm installs for which
+  agents, and have them accept specific hooks, so Codex launches no longer need `--dangerously-bypass-hook-trust` and
+  its `-c` overrides. Today that bypass lets unreviewed hooks in the user's Codex config home and in a trusted
+  workspace's `.codex/` run; SPEC_impl.md accepts it only until this step exists.
 
 - Let the user mark each host as "yolo is fine" or "yolo is not fine", controlling which hosts appear red in the session
   list. This could also support warnings when the user is about to run an unsandboxed agent on a host marked "yolo is

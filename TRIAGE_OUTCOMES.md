@@ -1733,7 +1733,15 @@
   launches, unapproved hooks in the user's config home and in a trusted workspace's `.codex/` run without Codex's
   per-hook review, and that trusting a workspace means trusting its Codex configuration to run commands. Remove the
   feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Decision note (from the goal-building session): no user-facing documentation is written now; the spec text and the two
+  TODO.md entries are the whole change.
+- Execution: `complete`; SPEC_impl.md's accepted cost for Codex hook injection now covers a trusted project's own
+  `.codex/` hooks running without Codex's per-hook review, gives the reasons (trusting a workspace already lets its
+  Codex configuration, MCP servers included, run commands; skipping injection would drop resume for trusted checkouts),
+  and says the acceptance lasts only until hook installation is an explicit, user-surfaced step with per-hook
+  acceptance. TODO.md gained that step in Maybe later and a Doc todo entry to tell users, both at the maintainer's
+  request. No code. Draft PR [#1051](https://github.com/scode/farhelm/pull/1051/changes), jj change `lrktwomx`, bookmark
+  `pr/codex-repo-hooks-accepted`.
 
 ## create-reply-foreign-id-misroutes.md
 
