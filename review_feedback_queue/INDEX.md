@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `restart-kills-terminal-less-agent-without-consent.md` — restart of a terminal-less session kills a possibly live
-  agent without stop consent.
 - `tab-close-kills-rc-started-services.md` — tab close, auto-reap and Delete kill services the tab shell's rc files
   started (ssh-agent, personal tmux).
 - `sweep-can-claim-supervisor-or-tmux-server.md` — nothing stops the kill sweep from claiming the supervisor itself or
