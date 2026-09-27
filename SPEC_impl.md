@@ -1646,6 +1646,13 @@ failure can leave private evidence, but cannot authorize another directory move.
   pane's process tree can still be found by the ordinary descendant walk; this is an exclusion from guaranteed cleanup,
   not a promise that every startup-file child survives.
 
+  Terminal tabs are the deliberate opposite. A tab's session and tab markers are set on the tmux window before its login
+  shell starts, and its scope wraps that shell, so everything the shell's startup files start is inside the tab's
+  containment and is reaped on close, auto-reap, and Delete. The tab shell is itself what closing the tab promises to
+  kill, and a tab has no shim that could run after initialization to apply containment later. The agent launch has
+  normally already run the same startup files outside containment, so guarded startup logic usually reuses that
+  instance; a shared service dies with a tab only when the tab's startup files are the first to start it.
+
   **What the cgroup does and does not promise.** It targets ACCIDENTAL daemonization — the dev server, MCP server, or
   build watcher that double-forks and execs away its environment marker, which is exactly the shape the sweep provably
   cannot find. It does NOT contain a deliberately adversarial descendant: one that runs `systemd-run --user --scope` on
