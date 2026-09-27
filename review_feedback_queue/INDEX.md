@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `archive-dir-owner-not-checked.md` — the archive directory's owner and mode aren't checked, so another account in a
-  shared root can capture archives.
 - `superseded-launch-specs-never-removed.md` — launch specs of superseded or unconsumed launches (argv + session token)
   stay on disk until Delete.
 - `reload-leaves-unread-launch-spec.md` — startup reconciliation cleans launch specs only after Error, so

@@ -1627,7 +1627,18 @@
   users that checkout roots must be private to their account and shared directories are unsupported. Tests cover a
   group-writable root, a foreign-owned archive directory, and the created directory's mode. Changelog fragment. Remove
   the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Decision note (supersedes the outcome above, from the goal-building session): the user changed this item to
+  `fix
+  spec` only: "lets' just not refuse at all, just have the spec update to clarify we aren't desining fro this.
+  the user is responsible for keeping their checkouts in self-writable locations." No refusal of roots or of the archive
+  directory, no owner or mode check, no change to how the archive directory is created. (The strict refusal would have
+  refused ordinary roots under a 0002 umask with user-private groups, and broken archiving for existing installs.)
+- Execution: `complete`; SPEC.md's fresh-checkout section states that Farhelm is not designed for working-copy roots
+  other local accounts can write to, that keeping the root in a location only the user can write is the user's
+  responsibility, that Farhelm does not check, and that the section's ownership and archive promises assume it.
+  TODO.md's Doc todo bucket gained the entry to tell users. No code. Draft PR
+  [#1047](https://github.com/scode/farhelm/pull/1047/changes), jj change `rtwnvrkk`, bookmark
+  `pr/shared-checkout-roots-unsupported`.
 
 ## superseded-launch-specs-never-removed.md
 
