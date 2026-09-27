@@ -8,8 +8,9 @@
 //! 0700 mode gives it the same trust boundary as direct access to helm.db. A
 //! lifetime flock serializes serving ownership with offline rotation, while
 //! the CLI verifies the peer's uid (SO_PEERCRED on Linux, getpeereid on
-//! macOS) and bounds connect, write, and read under one deadline before
-//! trusting the reply.
+//! macOS) before trusting the reply. Connect and send share one short
+//! deadline; the reply gets its own longer budget, because once `rotate` is
+//! sent the helm may commit whether or not the CLI is still waiting.
 
 use crate::{auth, auth::AuthState, store::HelmStore};
 use anyhow::Context;
@@ -23,6 +24,16 @@ const SOCKET_NAME: &str = "helm-token.sock";
 const LOCK_NAME: &str = "helm-token.lock";
 const MAX_REPLY_BYTES: u64 = 128;
 const CONTROL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long the CLI waits for the helm's answer once `rotate` was sent.
+///
+/// Separate from, and much longer than, [`CONTROL_DEADLINE`]: the helm runs
+/// the rotation to completion whether or not the CLI is still listening, and
+/// that can legitimately wait on the store's connection mutex and then on
+/// SQLite's [`farhelm_supervisor::db::BUSY_TIMEOUT`] (5 s) behind another
+/// writer. A reply budget shorter than that reported failure for rotations
+/// that committed, logging every browser out without showing the new token.
+/// If even this runs out, the outcome is unknown and the error says so.
+const ROTATE_REPLY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(15);
 /// How long a starting helm keeps retrying a held ownership lock.
 ///
 /// `token show` and an offline `token rotate` hold the lock only for one
@@ -225,6 +236,7 @@ pub async fn show(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
 /// with a fresh database would print a new token and exit successfully
 /// while the real helm kept the leaked one.
 pub async fn rotate(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
+    let show_command = recovery_show_command(state_dir.as_deref());
     let state_dir = state_dir_or_default(state_dir)?;
     let db_path = state_dir.join("helm.db");
     // Before `ensure_private_dir` and the ownership lock, both of which
@@ -244,7 +256,9 @@ pub async fn rotate(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
     let socket_path = state_dir.join(SOCKET_NAME);
     let deadline = tokio::time::Instant::now() + CONTROL_DEADLINE;
     match connect_before(&socket_path, deadline).await {
-        Ok(stream) => rotate_through_helm(stream, deadline).await,
+        Ok(stream) => {
+            rotate_through_helm(stream, deadline, ROTATE_REPLY_DEADLINE, &show_command).await
+        }
         Err(error)
             if error.downcast_ref::<std::io::Error>().is_some_and(|error| {
                 matches!(
@@ -258,7 +272,15 @@ pub async fn rotate(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
                     Ok(ownership) => break ownership,
                     Err(error) if error.downcast_ref::<OwnershipBusy>().is_some() => {
                         match connect_before(&socket_path, deadline).await {
-                            Ok(stream) => return rotate_through_helm(stream, deadline).await,
+                            Ok(stream) => {
+                                return rotate_through_helm(
+                                    stream,
+                                    deadline,
+                                    ROTATE_REPLY_DEADLINE,
+                                    &show_command,
+                                )
+                                .await;
+                            }
                             Err(connect_error)
                                 if connect_error.downcast_ref::<std::io::Error>().is_some_and(
                                     |error| {
@@ -287,7 +309,13 @@ pub async fn rotate(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
             match connect_before(&socket_path, deadline).await {
                 Ok(stream) => {
                     drop(ownership);
-                    return rotate_through_helm(stream, deadline).await;
+                    return rotate_through_helm(
+                        stream,
+                        deadline,
+                        ROTATE_REPLY_DEADLINE,
+                        &show_command,
+                    )
+                    .await;
                 }
                 Err(error)
                     if error.downcast_ref::<std::io::Error>().is_some_and(|error| {
@@ -307,7 +335,24 @@ pub async fn rotate(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
     }
 }
 
-/// Connect before the operation-wide deadline while preserving I/O kinds for
+/// The `token show` invocation an unknown-outcome rotation error tells the
+/// user to run, reading the SAME helm the rotation targeted.
+///
+/// Without the caller's `--state-dir`, `token show` would read (or even
+/// mint) the default helm's token instead. The `=` form keeps a directory
+/// that starts with `-` the option's value: shell quoting cannot, because
+/// the shell strips the quotes before the CLI parser sees the argument.
+fn recovery_show_command(state_dir: Option<&Path>) -> String {
+    match state_dir {
+        Some(dir) => format!(
+            "farhelm helm token show --state-dir={}",
+            shell_words::quote(&dir.to_string_lossy())
+        ),
+        None => "farhelm helm token show".to_string(),
+    }
+}
+
+/// Connect before the connect/send deadline while preserving I/O kinds for
 /// the absent/refused offline-fallback decision.
 async fn connect_before(
     path: &Path,
@@ -324,21 +369,56 @@ async fn connect_before(
         .with_context(|| format!("connecting to token-control socket {}", path.display()))
 }
 
+/// Ask a serving helm to rotate and return the token it committed.
+///
+/// `deadline` bounds only the send; the reply gets its own `reply_budget`
+/// starting once `rotate` is written, because from then on the helm may
+/// commit whether or not we are still waiting (see
+/// [`ROTATE_REPLY_DEADLINE`]). So every way of failing to get a usable
+/// answer after the send (timeout, read error, EOF, a malformed reply) is
+/// reported as an unknown outcome pointing at `token show`, never as a
+/// rotation that did not happen. Only an explicit `ERR` reply is a
+/// definite refusal. `show_command` is the exact `token show` invocation
+/// that reads this same helm, which that error tells the user to run.
 async fn rotate_through_helm(
     mut stream: tokio::net::UnixStream,
     deadline: tokio::time::Instant,
+    reply_budget: std::time::Duration,
+    show_command: &str,
 ) -> anyhow::Result<String> {
     verify_peer_uid(&stream)?;
     tokio::time::timeout_at(deadline, stream.write_all(b"rotate\n"))
         .await
         .context("timed out sending token rotation to the helm")?
         .context("sending token rotation to the helm")?;
+    match read_rotation_reply(stream, reply_budget).await {
+        Ok(Ok(token)) => Ok(token),
+        Ok(Err(detail)) => anyhow::bail!("the helm refused token rotation: {detail}"),
+        Err(error) => Err(error.context(format!(
+            "the helm may or may not have rotated the token. Run `{show_command}` to see the \
+             current token"
+        ))),
+    }
+}
+
+/// Read and parse the helm's answer to `rotate`: `Ok(Ok(token))` for a
+/// committed rotation, `Ok(Err(detail))` for an explicit `ERR` refusal, and
+/// `Err` for anything that leaves the outcome unknown.
+async fn read_rotation_reply(
+    stream: tokio::net::UnixStream,
+    reply_budget: std::time::Duration,
+) -> anyhow::Result<Result<String, String>> {
     let mut reply = Vec::new();
     let mut reader = tokio::io::BufReader::new(stream).take(MAX_REPLY_BYTES + 1);
     let read = reader.read_until(b'\n', &mut reply);
-    tokio::time::timeout_at(deadline, read)
+    tokio::time::timeout(reply_budget, read)
         .await
-        .context("timed out reading token rotation reply")?
+        .with_context(|| {
+            format!(
+                "timed out reading token rotation reply after {}s",
+                reply_budget.as_secs()
+            )
+        })?
         .context("reading token rotation reply")?;
     if reply.len() > usize::try_from(MAX_REPLY_BYTES).expect("reply limit fits usize") {
         anyhow::bail!("the helm returned an oversized token rotation reply");
@@ -352,10 +432,10 @@ async fn rotate_through_helm(
         if token.is_empty() {
             anyhow::bail!("the helm returned an empty rotated token");
         }
-        return Ok(token.to_string());
+        return Ok(Ok(token.to_string()));
     }
     if let Some(detail) = reply.strip_prefix("ERR ").map(str::trim) {
-        anyhow::bail!("the helm refused token rotation: {detail}");
+        return Ok(Err(detail.to_string()));
     }
     anyhow::bail!("the helm returned an unreadable token rotation reply")
 }
@@ -895,9 +975,14 @@ mod tests {
                 assert_eq!(&command, b"rotate\n");
                 server.write_all(&reply).await.unwrap();
             });
-            let error = rotate_through_helm(client, tokio::time::Instant::now() + CONTROL_DEADLINE)
-                .await
-                .unwrap_err();
+            let error = rotate_through_helm(
+                client,
+                tokio::time::Instant::now() + CONTROL_DEADLINE,
+                ROTATE_REPLY_DEADLINE,
+                "farhelm helm token show",
+            )
+            .await
+            .unwrap_err();
             let detail = format!("{error:#}");
             assert!(detail.contains("oversized") || detail.contains("unterminated"));
             writer.await.unwrap();
@@ -905,9 +990,12 @@ mod tests {
     }
 
     /// Once connected, a silent serving peer is a failed live rotation—not
-    /// evidence that the CLI may bypass it with an offline transaction.
+    /// evidence that the CLI may bypass it with an offline transaction. And
+    /// because the helm may have committed by then, the error must say the
+    /// outcome is unknown and point at `token show`, never read as "not
+    /// rotated".
     #[farhelm_testtrace::test]
-    async fn established_control_exchange_has_one_whole_operation_deadline() {
+    async fn silent_peer_after_send_is_an_unknown_outcome() {
         let (client, mut server) = tokio::net::UnixStream::pair().unwrap();
         let peer = tokio::spawn(async move {
             let mut command = [0; 7];
@@ -917,11 +1005,119 @@ mod tests {
         });
         let error = rotate_through_helm(
             client,
-            tokio::time::Instant::now() + std::time::Duration::from_millis(50),
+            tokio::time::Instant::now() + CONTROL_DEADLINE,
+            std::time::Duration::from_millis(50),
+            "farhelm helm token show --state-dir='/a helm'",
         )
         .await
         .unwrap_err();
-        assert!(format!("{error:#}").contains("timed out reading"));
+        let detail = format!("{error:#}");
+        assert!(detail.contains("timed out reading"), "{detail}");
+        assert!(detail.contains("may or may not"), "{detail}");
+        // The recovery command is the caller's, verbatim: one without the
+        // rotated helm's `--state-dir` would read a different helm's token.
+        assert!(
+            detail.contains("farhelm helm token show --state-dir='/a helm'"),
+            "{detail}"
+        );
         peer.abort();
+    }
+
+    /// The reply wait is its own budget, not the remainder of the short
+    /// connect/send deadline: the helm's rotation can legitimately outlast
+    /// that deadline (store mutex, SQLite busy wait) and still commit, so a
+    /// CLI that gave up on the shared deadline reported failure for a
+    /// rotation that happened. The peer answers only after the send deadline
+    /// has passed, and the answer must still be read. The send deadline is a
+    /// full second, so the send itself is never what races it.
+    #[farhelm_testtrace::test]
+    async fn reply_wait_outlives_the_send_deadline() {
+        let (client, mut server) = tokio::net::UnixStream::pair().unwrap();
+        let send_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+        let peer = tokio::spawn(async move {
+            let mut command = [0; 7];
+            server.read_exact(&mut command).await.unwrap();
+            assert_eq!(&command, b"rotate\n");
+            // sleep-ok: scheduling stimulus; the reply must arrive after the send deadline expired
+            tokio::time::sleep_until(send_deadline + std::time::Duration::from_millis(100)).await;
+            server.write_all(b"OK fresh-token\n").await.unwrap();
+        });
+        let token = rotate_through_helm(
+            client,
+            send_deadline,
+            ROTATE_REPLY_DEADLINE,
+            "farhelm helm token show",
+        )
+        .await
+        .unwrap();
+        assert_eq!(token, "fresh-token");
+        peer.await.unwrap();
+    }
+
+    /// A helm that commits and then dies before answering leaves the CLI
+    /// with EOF, not a timeout; the old credentials are already gone, so
+    /// that too must be reported as an unknown outcome that points at
+    /// `token show`. An explicit `ERR` reply, by contrast, is a definite
+    /// refusal and must not claim the rotation may have happened.
+    #[farhelm_testtrace::test]
+    async fn eof_after_send_is_an_unknown_outcome_but_err_is_a_refusal() {
+        let (client, mut server) = tokio::net::UnixStream::pair().unwrap();
+        let peer = tokio::spawn(async move {
+            let mut command = [0; 7];
+            server.read_exact(&mut command).await.unwrap();
+            drop(server);
+        });
+        let error = rotate_through_helm(
+            client,
+            tokio::time::Instant::now() + CONTROL_DEADLINE,
+            ROTATE_REPLY_DEADLINE,
+            "farhelm helm token show",
+        )
+        .await
+        .unwrap_err();
+        let detail = format!("{error:#}");
+        assert!(detail.contains("unterminated"), "{detail}");
+        assert!(detail.contains("may or may not"), "{detail}");
+        assert!(detail.contains("farhelm helm token show"), "{detail}");
+        peer.await.unwrap();
+
+        let (client, mut server) = tokio::net::UnixStream::pair().unwrap();
+        let peer = tokio::spawn(async move {
+            let mut command = [0; 7];
+            server.read_exact(&mut command).await.unwrap();
+            server.write_all(b"ERR store unavailable\n").await.unwrap();
+        });
+        let error = rotate_through_helm(
+            client,
+            tokio::time::Instant::now() + CONTROL_DEADLINE,
+            ROTATE_REPLY_DEADLINE,
+            "farhelm helm token show",
+        )
+        .await
+        .unwrap_err();
+        let detail = format!("{error:#}");
+        assert!(
+            detail.contains("refused token rotation: store unavailable"),
+            "{detail}"
+        );
+        assert!(!detail.contains("may or may not"), "{detail}");
+        peer.await.unwrap();
+    }
+
+    /// The recovery command names the rotated helm's state directory as
+    /// the option's value, even when that directory starts with `-`: the
+    /// CLI would otherwise reject `--state-dir -helm` as an unknown flag,
+    /// leaving the user no working way to read the token they now need.
+    #[farhelm_testtrace::test]
+    fn recovery_show_command_keeps_the_state_dir_as_the_options_value() {
+        assert_eq!(recovery_show_command(None), "farhelm helm token show");
+        assert_eq!(
+            recovery_show_command(Some(Path::new("-helm"))),
+            "farhelm helm token show --state-dir=-helm"
+        );
+        assert_eq!(
+            recovery_show_command(Some(Path::new("/a helm"))),
+            "farhelm helm token show --state-dir='/a helm'"
+        );
     }
 }

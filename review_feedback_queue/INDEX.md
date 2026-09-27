@@ -209,8 +209,6 @@ One line per open item. This file must always match the feedback files in this d
   killing a possibly live agent.
 - `sweep-drops-unreadable-root-silently.md` — the sweep silently drops a pane root whose identity read fails and can
   still report success.
-- `token-rotate-timeout-after-commit.md` — `token rotate` can report a timeout while the helm completes the rotation and
-  logs out every browser.
 - `token-show-busy-lock-misleading-failure.md` — `token show` assumes any lock holder is a serving helm with a token and
   fails with a misleading error.
 - `event-feed-cap-refusal-invisible.md` — the event feed's subscriber-cap refusal is a pre-upgrade 503 that browsers
