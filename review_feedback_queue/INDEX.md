@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `tmux-cwd-format-expanded-on-create.md` — session create passes the cwd to tmux `-c` unescaped: `#` paths start the
-  agent in $HOME and `#(cmd)` names run commands.
 - `tmux-cwd-format-expanded-on-relaunch.md` — restart in place passes the cwd to `respawn-pane -c` unescaped, bypassing
   restart's directory identity check.
 - `tmux-cwd-format-expanded-on-tab-open.md` — opening a tab passes the session cwd to `new-window -c` unescaped: wrong
