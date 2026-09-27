@@ -323,6 +323,7 @@ mod tests {
     /// wrong COUNT) would still be caught.
     fn fake_session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: id.to_string(),
             title: "x".to_string(),

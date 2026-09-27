@@ -2393,6 +2393,7 @@ mod tests {
     /// diagnostics useful to these tests.
     fn scripted_session(id: &str, title: &str) -> SessionInfo {
         SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: id.to_string(),
             title: title.to_string(),

@@ -209,6 +209,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
                     title: "some-agent".into(),
@@ -325,6 +326,7 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
+                        agent_kind: farhelm_proto::AgentKind::Generic,
                         parent: None,
                         id: "structured-tilde".into(),
                         title: "structured tilde".into(),
@@ -477,6 +479,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
+                        agent_kind: farhelm_proto::AgentKind::Generic,
                         parent: None,
                         id: id.into(),
                         title: id.into(),
@@ -605,6 +608,7 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
                     title: "t".into(),
@@ -1384,6 +1388,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         assert_eq!(agent_kind, None);
         assert_eq!(resume_template, None);
         let created = SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
             title: "sess-1".into(),
@@ -1505,6 +1510,7 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
                     title: "sess-1".into(),
@@ -1610,6 +1616,7 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
         assert_eq!(agent_kind, Some(farhelm_proto::AgentKind::Claude));
         assert_eq!(resume_template, None);
         let created = SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
             title: "sess-1".into(),
@@ -1833,6 +1840,7 @@ async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invoca
             "a raw fallback carries no profile provenance"
         );
         let created = SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
             title: "sess-1".into(),
@@ -1967,6 +1975,7 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
             panic!("expected CreateSession, got {request:?}");
         };
         let created = SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
             title: "sess-1".into(),
@@ -2099,6 +2108,7 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
             panic!("expected CreateSession, got {request:?}");
         };
         let created = SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
             title: "sess-1".into(),
@@ -2250,6 +2260,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
             .unwrap();
 
         let created = SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
             title: "sess-1".into(),
@@ -2438,6 +2449,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         assert_eq!(title, Some("replaced-with-title".to_string()));
         assert_eq!(intent_key, None);
         let created = SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
             title: "replaced-with-title".into(),
@@ -2645,6 +2657,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
         assert_eq!(cwd, "/override-delete-fails");
         assert_eq!(invocation, Some("override-agent".to_string()));
         let created = SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
             title: "sess-1".into(),
@@ -2868,6 +2881,7 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
                     title: "sess-1".into(),
@@ -3385,6 +3399,7 @@ async fn restart_session_passes_mode_and_consent_through_and_returns_the_session
             .write_control(&ControlMsg::SessionRestarted {
                 req_id,
                 session: farhelm_proto::SessionInfo {
+                    agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
                     title: "t".into(),
@@ -3640,6 +3655,7 @@ async fn rename_session_forwards_the_title_verbatim() {
         // must fail the full-struct comparison below even if the
         // title alone looked right.
         let expected_session = SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-1".into(),
             title: expected_title.clone(),
@@ -3817,6 +3833,7 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
                 .write_control(&ControlMsg::SessionRenamed {
                     req_id,
                     session: farhelm_proto::SessionInfo {
+                        agent_kind: farhelm_proto::AgentKind::Generic,
                         parent: None,
                         id: "sess-1".into(),
                         title: String::new(),
@@ -4251,6 +4268,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-new".into(),
                     title: "sess-new".into(),
@@ -4420,6 +4438,7 @@ async fn a_stale_claim_blocks_the_cache_seed_but_not_the_remembered_default() {
         identity: None,
     };
     let session = SessionInfo {
+        agent_kind: farhelm_proto::AgentKind::Generic,
         parent: None,
         id: "sess-stale".into(),
         title: "sess-stale".into(),

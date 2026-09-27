@@ -1141,13 +1141,14 @@ async fn create_for_agent(
 /// clones into a session whose conversation capture, status classification
 /// and restart behavior may differ from the original's.
 ///
-/// It is stated rather than fixed because the fix is not local: nothing
-/// this function can read carries those values. `SessionInfo` — the shape
-/// `drain_sessions` returns and the only view the helm has of another
-/// host's session — exposes `invocation` and `source_profile` and no
-/// integration fields at all, so copying them means adding them to the
-/// wire, populating them at every point a supervisor builds a session row
-/// (create, reload, restart), and persisting them for a reload to find.
+/// It is stated rather than fixed because the fix is not local.
+/// `SessionInfo` — the shape `drain_sessions` returns and the only view the
+/// helm has of another host's session — carries the recorded `agent_kind`
+/// (added for the fleet `agent` label) but not a custom resume template,
+/// and an older supervisor's rows decode as `Generic` whether or not that
+/// was the session's real kind. Copying the integration faithfully would
+/// still mean putting the template on the wire and telling an explicit
+/// `Generic` apart from an absent field.
 /// Refusing the raw clone instead is not available either: SPEC.md's agent
 /// section promises that a session created from a raw invocation "clones as
 /// that invocation".
@@ -1540,48 +1541,35 @@ fn agent_session(
 
 /// The non-secret name for what is running in a session.
 ///
-/// The profile's snapshotted name when the session came from one — that is
-/// a label a user chose and the same one the UI's profile chip shows. For a
-/// raw-invocation session there is no such label, and the answer is the
-/// PROGRAM's basename and nothing else: `claude`, not
-/// `claude --api-key sk-…`.
+/// The profile's snapshotted name when the session came from one — a label
+/// the user chose, and the same one the UI's profile chip shows. Otherwise
+/// the word for the integrated agent kind the supervisor recorded (`claude`,
+/// `codex`, `goose`, `pi`, `omp`, `grok`), or [`CUSTOM_AGENT_LABEL`] when
+/// there is no supported agent.
 ///
-/// Dropping the arguments is the point, not a cosmetic trim. See
-/// [`AgentSession::agent`] for the whole reasoning; the short version is
-/// that this listing is fleet-wide and reachable with any one session's
-/// credential, so a secret typed into one command line must not travel to
-/// an unrelated session on another host.
-///
-/// An invocation that does not shell-split (an unbalanced quote in a
-/// hand-edited row) falls back to its first whitespace-delimited token,
-/// which is still the program spelling and still never an argument — a
-/// slightly uglier label beats either an empty cell or a parse failure that
-/// fails the whole listing.
+/// The invocation is never consulted, and that is the whole design. See
+/// [`AgentSession::agent`] for why this label must not carry a credential:
+/// the listing is fleet-wide and reachable with any one session's
+/// credential. An earlier version took the invocation's first word and
+/// stripped it to a basename, which leaked a leading `KEY=secret` whole
+/// (`ANTHROPIC_API_KEY=sk-… claude` became the label) and read every `env …`
+/// launch as `env`. Parsing the command line more cleverly would only move
+/// the next such shape somewhere else; a label drawn from a closed vocabulary
+/// cannot leak anything, whatever the user typed.
 fn agent_label(info: &farhelm_proto::SessionInfo) -> String {
     if let Some(profile) = &info.source_profile {
         return profile.name.clone();
     }
-    let program = shell_words::split(&info.invocation)
-        .ok()
-        .and_then(|argv| argv.into_iter().next())
-        .unwrap_or_else(|| {
-            info.invocation
-                .split_whitespace()
-                .next()
-                .unwrap_or_default()
-                .to_string()
-        });
-    basename(&program).to_string()
+    match info.agent_kind {
+        farhelm_proto::AgentKind::Generic => CUSTOM_AGENT_LABEL.to_string(),
+        kind => kind.word().to_string(),
+    }
 }
 
-/// The last path component of `program`, or the whole string when it has
-/// no separator.
-///
-/// Split on `/` alone: these are POSIX hosts, and a Windows-style path
-/// would be a literal filename here rather than a path to shorten.
-fn basename(program: &str) -> &str {
-    program.rsplit('/').next().unwrap_or(program)
-}
+/// The `agent` label for a session with no profile and no supported agent
+/// kind: a generic program, or a row from a supervisor too old to report a
+/// kind at all.
+const CUSTOM_AGENT_LABEL: &str = "custom";
 
 /// The status word a user sees for one session, or `""` for a session
 /// nothing has classified.
@@ -1633,6 +1621,9 @@ mod tests {
 
     fn session_info(id: &str, status: SessionStatus) -> SessionInfo {
         SessionInfo {
+            // Matches the `claude` invocation below, as a supervisor's
+            // basename recognition would have recorded it.
+            agent_kind: farhelm_proto::AgentKind::Claude,
             id: id.to_string(),
             parent: None,
             title: "a title".to_string(),
@@ -1992,50 +1983,54 @@ mod tests {
         assert!(!theirs.current);
     }
 
-    /// Spec: `agent` carries the source profile's snapshotted name when a
-    /// session came from one — whether or not that profile still exists —
-    /// and otherwise the invocation's PROGRAM BASENAME with every argument
-    /// dropped.
+    /// Spec: a session's `agent` label is its profile's snapshotted name, or
+    /// the supervisor-recorded agent kind's word, or `custom`; the
+    /// invocation never contributes a single character.
     ///
-    /// The argument-dropping is the clause that matters, and it is a
-    /// security property rather than a formatting choice. Users put
-    /// credentials in command lines; this listing is fleet-wide and any
-    /// attached session's credential reads all of it; the reader is a model
-    /// that will quote what it read. A projection that let `--api-key sk-…`
-    /// through would leak one session's secret into an unrelated session's
-    /// transcript, and no other test in the stack would notice.
-    ///
-    /// The deleted-profile row is here because the snapshot is the only
-    /// handle left once a profile is gone: a later "does this profile still
-    /// exist?" check that fell back to the invocation would be both
-    /// misleading and, for a raw command line, potentially secret-bearing.
+    /// This is the fleet-wide label any attached session's credential can
+    /// read, so it is a redaction boundary. The two command-line shapes
+    /// pinned here are the ones that broke the old "first word's basename"
+    /// rule: a leading `NAME=secret` assignment surfaced the secret whole,
+    /// and every `env …` launch (including the helm's own composed Goose
+    /// launches) read as `env`. The deleted-profile row is here because the
+    /// snapshot is the only handle left once a profile is gone: falling back
+    /// to anything derived from the invocation would be both misleading and
+    /// potentially secret-bearing.
     #[farhelm_testtrace::test]
-    fn a_sessions_agent_is_its_profile_name_or_its_program_basename() {
-        // `session_info`'s invocation is `claude --dangerously`; only the
-        // program survives.
+    fn a_sessions_agent_is_its_profile_name_its_agent_kind_or_custom() {
         let raw = session_row(session_info("s1", SessionStatus::Running), "this machine");
         assert_eq!(projected(&raw, 1, "s1").agent, "claude");
 
-        let mut with_secret = session_info("s2", SessionStatus::Running);
-        with_secret.invocation = "/opt/bin/codex --api-key sk-secret-value".to_string();
-        let row = session_row(with_secret, "this machine");
+        let mut leading_secret = session_info(
+            "s2",
+            SessionStatus::Error {
+                detail: "exec failed".to_string(),
+            },
+        );
+        leading_secret.invocation = "ANTHROPIC_API_KEY=sk-secret-value claude".to_string();
+        leading_secret.agent_kind = farhelm_proto::AgentKind::Generic;
+        let row = session_row(leading_secret, "this machine");
         assert_eq!(
             projected(&row, 1, "s1").agent,
-            "codex",
-            "arguments must never reach this wire"
+            "custom",
+            "a leading assignment must never reach this wire"
         );
 
-        let mut unparsable = session_info("s3", SessionStatus::Running);
-        unparsable.invocation = "claude --title 'unbalanced".to_string();
-        let row = session_row(unparsable, "this machine");
-        assert_eq!(
-            projected(&row, 1, "s1").agent,
-            "claude",
-            "an invocation that does not shell-split still yields only its program"
-        );
+        let mut composed_goose = session_info("s3", SessionStatus::Running);
+        composed_goose.invocation =
+            "env GOOSE_THINKING_EFFORT=high GOOSE_MODE=auto goose session".to_string();
+        composed_goose.agent_kind = farhelm_proto::AgentKind::Goose;
+        let row = session_row(composed_goose, "this machine");
+        assert_eq!(projected(&row, 1, "s1").agent, "goose");
+
+        let mut unrecognized = session_info("s4", SessionStatus::Running);
+        unrecognized.invocation = "/opt/bin/my-tool --token abc123".to_string();
+        unrecognized.agent_kind = farhelm_proto::AgentKind::Generic;
+        let row = session_row(unrecognized, "this machine");
+        assert_eq!(projected(&row, 1, "s1").agent, "custom");
 
         for existence in [ProfileExistence::Present, ProfileExistence::Deleted] {
-            let mut from_profile = session_info("s4", SessionStatus::Running);
+            let mut from_profile = session_info("s5", SessionStatus::Running);
             from_profile.source_profile = Some(snapshot("Claude", existence));
             let row = session_row(from_profile, "this machine");
             assert_eq!(
@@ -2159,6 +2154,9 @@ mod tests {
     fn scripted(id: &str, created_at: i64, profile: Option<&str>) -> SessionInfo {
         SessionInfo {
             invocation: "/usr/local/bin/claude --api-key sk-not-for-agents".to_string(),
+            // What the supervisor's basename recognition records for that
+            // invocation; the label comes from this, never the command line.
+            agent_kind: farhelm_proto::AgentKind::Claude,
             source_profile: profile.map(|name| snapshot(name, ProfileExistence::Present)),
             ..session(id, created_at)
         }

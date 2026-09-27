@@ -594,6 +594,7 @@ mod tests {
     fn row(id: &str, created_at: i64, host: HostId) -> SessionRow {
         SessionRow {
             info: SessionInfo {
+                agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: id.to_string(),
                 title: id.to_string(),

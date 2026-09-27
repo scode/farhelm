@@ -868,6 +868,23 @@ pub struct SessionInfo {
     /// plausible-looking guess from a mutable command line.
     #[serde(default)]
     pub launch: Option<LaunchSelection>,
+    /// The integrated agent kind the supervisor recorded for this session,
+    /// or [`AgentKind::Generic`] when it has none.
+    ///
+    /// This is the supervisor's own classification, fixed at creation (the
+    /// helm-resolved kind, an explicit override, or basename recognition of
+    /// the program) and the same value that drives hook injection and
+    /// resume. It exists on the wire so a reader that must NOT look at
+    /// `invocation` still has a closed-vocabulary answer to "what is
+    /// running": `farhelm agent sessions`' fleet-wide `agent` label is built
+    /// from it (see [`AgentSession::agent`]) precisely because anything
+    /// derived from the command line can carry a credential.
+    ///
+    /// A sender that predates the field leaves it absent, which reads as
+    /// `Generic`; a reader cannot tell that apart from a genuinely generic
+    /// session, and no current reader needs to.
+    #[serde(default = "AgentKind::generic")]
+    pub agent_kind: AgentKind,
     /// `Unknown`, the live statuses (`Running`/`Waiting`/`Idle`), and
     /// `Exited` are computed fresh by the supervisor on
     /// every `ListSessions` reply through LIVE tmux probing — that half of
@@ -1519,6 +1536,32 @@ pub enum AgentKind {
     Generic,
 }
 
+impl AgentKind {
+    /// [`AgentKind::Generic`], as a function so it can name the serde
+    /// default for a field that older senders omit.
+    ///
+    /// Deliberately not a `Default` impl: "generic" is the right reading of
+    /// an ABSENT kind on the wire, not a value any code should reach for
+    /// when it has not decided what a session is.
+    pub fn generic() -> Self {
+        AgentKind::Generic
+    }
+
+    /// The kind's wire word (`claude`, `codex`, …, `generic`), matching its
+    /// serde spelling.
+    pub fn word(self) -> &'static str {
+        match self {
+            AgentKind::Claude => "claude",
+            AgentKind::Codex => "codex",
+            AgentKind::Goose => "goose",
+            AgentKind::Pi => "pi",
+            AgentKind::Omp => "omp",
+            AgentKind::Grok => "grok",
+            AgentKind::Generic => "generic",
+        }
+    }
+}
+
 /// The one stop annotation this PR reserves. SPEC.md itself only promises
 /// THAT a user-initiated stop gets an annotation on an `Exited` session
 /// ("'stopped' is not a distinct status"), without pinning its exact
@@ -2115,19 +2158,21 @@ pub struct AgentSession {
     pub title: String,
     pub cwd: String,
     /// What is running, as a DELIBERATELY NON-SECRET label: the profile's
-    /// snapshotted name when the session came from one, and otherwise the
-    /// basename of the invocation's program — `claude`, `codex`, `sh` —
-    /// and nothing else.
+    /// snapshotted name when the session came from one; otherwise the word
+    /// for the integrated agent kind the supervisor recorded (`claude`,
+    /// `codex`, `goose`, `pi`, `omp`, `grok`); otherwise `custom`.
     ///
-    /// Arguments are excluded, and that exclusion is the field's whole
-    /// contract rather than an economy of space. Users put credentials in
-    /// command lines (the repo warns against it and it happens anyway), and
-    /// this listing is fleet-wide: any process holding ANY attached
-    /// session's credential can read every row, and an agent will quote
-    /// what it read into a model's context. One session's `--token abc123`
-    /// must not become another session's transcript. A caller that needs
-    /// the real command line has the helm's own APIs, which are not reached
-    /// by a session credential.
+    /// Nothing derived from the invocation ever appears here, and that is
+    /// the field's whole contract rather than an economy of space. Users put
+    /// credentials in command lines (the repo warns against it and it
+    /// happens anyway), and this listing is fleet-wide: any process holding
+    /// ANY attached session's credential can read every row, and an agent
+    /// will quote what it read into a model's context. One session's
+    /// `--token abc123`, or a leading `API_KEY=… claude`, must not become
+    /// another session's transcript. Taking even the program's basename was
+    /// not safe: a leading environment assignment IS the first word. A
+    /// caller that needs the real command line has the helm's own APIs,
+    /// which are not reached by a session credential.
     pub agent: String,
     /// The status word the UI shows (`running`, `waiting`, `idle`,
     /// `exited`, `interrupted`, `error`), or empty for a session nothing
@@ -4116,6 +4161,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_created_at_json_shape_is_pinned() {
         let info = SessionInfo {
+            agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
             title: "demo".to_string(),
@@ -4254,6 +4300,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_github_fields_decode_absent_and_roundtrip() {
         let mut info = SessionInfo {
+            agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
             title: "demo".to_string(),
@@ -5066,6 +5113,51 @@ mod tests {
         );
     }
 
+    /// Spec: `SessionInfo::agent_kind` serializes as the kind's snake_case
+    /// word, and a sender that predates the field (an older supervisor, or a
+    /// row the helm cached before it existed) decodes as `generic`.
+    ///
+    /// The fleet `agent` label falls back to `custom` for exactly that
+    /// reading, so the default is load-bearing: a missing field must neither
+    /// fail the decode (dropping the row) nor invent an integrated kind.
+    #[farhelm_testtrace::test]
+    fn session_info_agent_kind_decodes_absent_as_generic_and_roundtrips() {
+        let info = SessionInfo {
+            parent: None,
+            id: "s1".to_string(),
+            title: "demo".to_string(),
+            created_at: 1_700_000_000,
+            last_activity_at: 0,
+            last_work_started_at: 0,
+            creation_seq: None,
+            cwd: "/tmp".to_string(),
+            canonical_cwd: None,
+            invocation: "goose session".to_string(),
+            resume_template: None,
+            launch: None,
+            agent_kind: AgentKind::Goose,
+            status: SessionStatus::default(),
+            annotation: None,
+            restart_offer: RestartOffer::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+            github_repo: None,
+            working_copy: None,
+        };
+        let mut json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["agent_kind"], "goose");
+        assert_eq!(
+            serde_json::from_value::<SessionInfo>(json.clone()).unwrap(),
+            info
+        );
+
+        json.as_object_mut()
+            .expect("a SessionInfo serializes as an object")
+            .remove("agent_kind");
+        let decoded: SessionInfo = serde_json::from_value(json).expect("decodes without it");
+        assert_eq!(decoded.agent_kind, AgentKind::Generic);
+    }
+
     /// `SessionInfo::annotation` and `restart_offer` are PLAN_M3.md's stop-
     /// annotation (item 4) and restart-offer (item 9) additions, both
     /// defaulting on absence for the same additive-within-5 reason
@@ -5089,6 +5181,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
         let bare = SessionInfo {
+            agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
             title: "demo".to_string(),
@@ -5130,6 +5223,7 @@ mod tests {
                 "working_copy": null,
                 "resume_template": null,
                 "launch": null,
+                "agent_kind": "generic",
             })
         );
 
@@ -5231,6 +5325,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_effective_activity_falls_back_to_creation_time_only_when_unknown() {
         let at = |created_at: i64, last_activity_at: i64| SessionInfo {
+            agent_kind: crate::AgentKind::Generic,
             id: "s1".to_string(),
             parent: None,
             title: "demo".to_string(),
@@ -5273,6 +5368,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn effective_work_start_falls_back_stably_and_saturates() {
         let mut info = SessionInfo {
+            agent_kind: crate::AgentKind::Generic,
             id: "s1".to_string(),
             parent: None,
             title: "demo".to_string(),
@@ -5318,6 +5414,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_tabs_json_shape_is_pinned() {
         let info = SessionInfo {
+            agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
             title: "demo".to_string(),
@@ -5994,6 +6091,7 @@ mod tests {
         let reply = ControlMsg::SessionRestarted {
             req_id: 42,
             session: SessionInfo {
+                agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
@@ -6138,6 +6236,7 @@ mod tests {
         let msg = ControlMsg::SessionRestarted {
             req_id: 8,
             session: SessionInfo {
+                agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
@@ -6183,6 +6282,7 @@ mod tests {
                     "working_copy": null,
                     "resume_template": null,
                     "launch": null,
+                    "agent_kind": "generic",
                 },
             })
         );
@@ -6390,6 +6490,7 @@ mod tests {
                 ControlMsg::SessionRenamed {
                     req_id: 50,
                     session: SessionInfo {
+                        agent_kind: crate::AgentKind::Generic,
                         parent: None,
                         id: "s1".to_string(),
                         title: "renamed title".to_string(),
@@ -6433,6 +6534,7 @@ mod tests {
                         "working_copy": null,
                         "resume_template": null,
                         "launch": null,
+                        "agent_kind": "generic",
                     },
                 }),
             ),
@@ -6611,6 +6713,7 @@ mod tests {
                 ProfileExistence::Deleted => "deleted",
             };
             let info = SessionInfo {
+                agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
@@ -7346,6 +7449,7 @@ mod tests {
         let fat = ControlMsg::SessionList {
             req_id: 1,
             sessions: vec![SessionInfo {
+                agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
                 title: "t".repeat(4096),

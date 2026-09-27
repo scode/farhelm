@@ -8567,6 +8567,7 @@ mod tests {
             "s1".to_string(),
             Arc::new(SessionEntry {
                 info: SessionInfo {
+                    agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "s1".to_string(),
                     title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
@@ -8754,6 +8755,7 @@ mod tests {
     fn fake_entry(id: &str, created_at: i64) -> Arc<SessionEntry> {
         Arc::new(SessionEntry {
             info: SessionInfo {
+                agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: id.to_string(),
                 title: "t".to_string(),
@@ -8950,6 +8952,7 @@ mod tests {
             "s1".to_string(),
             Arc::new(SessionEntry {
                 info: SessionInfo {
+                    agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "s1".to_string(),
                     title: "t".to_string(),
