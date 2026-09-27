@@ -147,8 +147,8 @@ One line per open item. This file must always match the feedback files in this d
   always 409s and never shows as duplicate.
 - `ssh-controlpath-too-long.md` — the ssh ControlPath under the state dir overflows sun_path for common long usernames,
   so every ssh host fails.
-- `update-installs-tmux-into-shared-bin.md` — UPDATE installs Farhelm's private tmux next to the registered binary (e.g.
-  ~/.local/bin), overwriting or shadowing the user's tmux.
+- `update-installs-tmux-into-shared-bin.md` — provisioning replaces an existing file at the private tmux destination
+  without checking whether Farhelm installed it.
 - `sftp-upload-unbounded-before-temp-appears.md` — the sftp upload has no deadline until the remote temporary appears,
   holding the host lock so even Remove hangs.
 - `update-reports-success-on-hand-started-supervisor.md` — UPDATE of a hand-started supervisor crash-loops the new unit

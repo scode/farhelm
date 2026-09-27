@@ -604,6 +604,77 @@ mod tests {
         }
     }
 
+    /// An update keeps the private tmux in Farhelm's own directory even when
+    /// the registered binary lives in a shared bin directory.
+    ///
+    /// Why it matters: the registered binary is often `~/.local/bin/farhelm`
+    /// (where the install script puts it). Deriving the tmux destination from
+    /// the binary's directory installed Farhelm's tmux as `~/.local/bin/tmux`,
+    /// overwriting the user's own tmux or shadowing the distribution's on
+    /// their shell PATH. Spec: tmux goes to `~/.local/lib/farhelm/tmux`, which
+    /// the plan ensures exists; the binary still goes to its registered path.
+    #[farhelm_testtrace::test]
+    fn update_plan_keeps_the_private_tmux_out_of_the_binary_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let binary = home.join(".local/bin/farhelm");
+        let reach = Reach {
+            home: home.clone(),
+            user_unit_dir: root.path().join("units"),
+            arch: PayloadArch::X86_64,
+            distro_id: "ubuntu".to_string(),
+            needs_tmux: true,
+            host_tmux: None,
+        };
+        let row = HostRow {
+            id: 1,
+            kind: HostKind::Ssh,
+            destination: Some("user@host".to_string()),
+            alias: None,
+            remote_farhelm: Some(binary.to_string_lossy().into_owned()),
+            remote_state_dir: None,
+            host_identity: None,
+            cache_truncated: false,
+        };
+        let plan = PlanLayout::production(root.path().join("state"))
+            .plan_for_row(
+                &row,
+                ProvisioningTarget::Ssh {
+                    destination: "user@host".to_string(),
+                },
+                &reach,
+                "nonce",
+            )
+            .expect("an absolute registered binary plans an update");
+
+        let private = home.join(".local/lib/farhelm");
+        let installed = |kind: PayloadKind| {
+            plan.actions
+                .iter()
+                .find_map(|action| match action {
+                    ProvisioningAction::InstallPayload {
+                        payload,
+                        destination,
+                        ..
+                    } if *payload == kind => Some(destination.clone()),
+                    _ => None,
+                })
+                .expect("the plan installs the payload")
+        };
+        assert_eq!(installed(PayloadKind::Farhelm), binary);
+        assert_eq!(installed(PayloadKind::Tmux), private.join("tmux"));
+        assert!(
+            plan.actions.iter().any(|action| matches!(
+                action,
+                ProvisioningAction::EnsureDirectories { directories }
+                    if directories.iter().any(|dir| dir.path == private)
+                        && directories.iter().any(|dir| Some(dir.path.as_path()) == binary.parent())
+            )),
+            "both the private directory and the binary's directory are ensured: {:?}",
+            plan.actions
+        );
+    }
+
     /// A bare executable name is valid for SSH steady state, but an update
     /// must not install a guessed absolute copy that the remote PATH ignores.
     #[farhelm_testtrace::test]

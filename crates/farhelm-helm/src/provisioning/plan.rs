@@ -334,21 +334,37 @@ impl PlanLayout {
                 name.to_string_lossy()
             ))
         };
+        // `lib_dir` is Farhelm's private directory, which is also where the
+        // private tmux goes. An UPDATE may install the farhelm binary
+        // elsewhere (the registered path, often a shared bin directory on the
+        // user's PATH); that directory is ensured too, but nothing else of
+        // Farhelm's is placed in it.
+        let mut directories = vec![DirectorySpec {
+            path: lib_dir.clone(),
+            mode: 0o755,
+        }];
+        if let Some(binary_dir) = farhelm_path.parent()
+            && binary_dir != lib_dir
+        {
+            directories.push(DirectorySpec {
+                path: binary_dir.to_path_buf(),
+                mode: 0o755,
+            });
+        }
         let mut actions = vec![ProvisioningAction::EnsureDirectories {
-            directories: vec![
-                DirectorySpec {
-                    path: lib_dir.clone(),
-                    mode: 0o755,
-                },
-                DirectorySpec {
-                    path: state_dir.clone(),
-                    mode: 0o700,
-                },
-                DirectorySpec {
-                    path: unit_dir,
-                    mode: 0o755,
-                },
-            ],
+            directories: directories
+                .into_iter()
+                .chain([
+                    DirectorySpec {
+                        path: state_dir.clone(),
+                        mode: 0o700,
+                    },
+                    DirectorySpec {
+                        path: unit_dir,
+                        mode: 0o755,
+                    },
+                ])
+                .collect(),
         }];
         let remote = matches!(&target, ProvisioningTarget::Ssh { .. });
         let farhelm_temporary = temporary(&farhelm_path, farhelm_name);
@@ -464,9 +480,13 @@ impl PlanLayout {
                         "",
                     ));
                 }
-                let farhelm = PathBuf::from(farhelm);
-                layout.override_lib_dir = farhelm.parent().map(Path::to_path_buf);
-                layout.override_farhelm_path = Some(farhelm);
+                // Only the binary's own path follows the registration. The
+                // private tmux stays in Farhelm's private directory: the
+                // registered binary often lives in a shared bin directory on
+                // the user's PATH, where a `tmux` would overwrite or shadow
+                // the user's own. The unit pins tmux by absolute path, so
+                // nothing needs it next to the binary.
+                layout.override_farhelm_path = Some(PathBuf::from(farhelm));
             }
             if let Some(state_dir) = &row.remote_state_dir {
                 layout.override_state_dir = Some(PathBuf::from(state_dir));
