@@ -1324,3 +1324,394 @@
   `web` builds compile. Fresh gpt-6-astra high review reported no findings. Draft PR
   [#1036](https://github.com/scode/farhelm/pull/1036/changes) is on bookmark `pr/remote-errors-cannot-sign-out`, jj
   change `lpyuqsyw`.
+
+## agent-label-leaks-env-prefix.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `5cf4b12`, not live reproduction. `agent_label`
+  (`farhelm-helm/src/agent_requests.rs`) takes the first shell word of a raw invocation and strips it to its basename,
+  so `ANTHROPIC_API_KEY=sk-… claude` yields the label `ANTHROPIC_API_KEY=sk-…`. Create accepts that invocation
+  (`ensure_executable_argv` refuses only empty argv, an empty program, or NUL), launch then fails because the argv is
+  exec'd without a shell, and the error row keeps showing the key to every process holding any attached session's
+  credential until the row is deleted. This contradicts the `AgentSession::agent` doc and SPEC_impl.md's non-secret
+  label rule. Composer-built Goose sessions (`env GOOSE_…=… goose …`, `farhelm-helm/src/launches.rs`) and raw
+  `env NAME=value prog` sessions all read as `env`; `SessionInfo::launch` is never consulted. Not covered by SPEC or a
+  Planned TODO item.
+- Decision: the user chose a closed vocabulary over smarter parsing, to prevent this class of leak without complexity:
+  the label is the source profile's snapshotted name for a profile session (a deliberate user label, kept), and
+  otherwise the supervisor's recorded integrated agent kind (`claude`, `codex`, `goose`, `pi`, `omp`, `grok`), or
+  `custom` when there is no supported agent. The invocation is never parsed for the label. No create-time refusal of a
+  leading `NAME=value` word.
+- Completion criteria: SPEC_impl.md states the rule — the `agent` label is a profile's snapshotted name or a value from
+  the closed agent-kind vocabulary plus `custom`, and never text derived from the invocation. The supervisor reports
+  each session's recorded agent kind to the helm (an additive `SessionInfo` field whose absence, from an older
+  supervisor, yields `custom`); `agent_label` uses it; the `AgentSession::agent` doc matches. Tests cover a raw
+  `KEY=secret claude` session, a composer-built Goose session, a recognized raw agent, and an unrecognized program.
+  Changelog fragment. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## helm-answers-resolveprofile-to-any-supervisor.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `5cf4b12`, not live reproduction; practical impact narrower than
+  the TLDR. The helm answers `ResolveProfile` from any supervisor connection with the profile's full invocation, agent
+  kind, resume template, and snapshot (`farhelm-helm/src/agent_requests.rs`), validates only the selector shape, and
+  logs nothing; only the asking supervisor refuses the verb from sessions
+  (`farhelm-supervisor/src/service/
+  handlers.rs`). This contradicts SPEC.md's "Remote input" statement that profile
+  discovery does not extend to raw command lines, and its rule that a remote host must not gain access to secrets.
+  However, the same compromised host can already obtain the same bundle through SPEC.md's accepted temporary exception
+  for agent-requested cross-host creation: `farhelm agent create --profile X` aimed at its own host makes the helm send
+  the resolved invocation and resume template to that host's supervisor. The finding's unique delta is the absence of a
+  visible session and an audit line. Closing only this verb (helm-side create instead of returning the bundle) would not
+  keep profile contents from that host. The module docs' "the trust boundary is the connection" rationale is broader
+  than the intended trust model.
+- Decision: accept the exposure, but only as part of the existing temporary cross-host creation exception, not as a
+  standing grant. The user stated the intended trust model: the helm trusts a supervisor about things that affect only
+  that supervisor's own host, and never about things that affect other sessions on other hosts, other supervisors, the
+  helm's machine, or the helm's own state beyond functionality inherent to the helm (a supervisor cannot delete a
+  profile, for example). Reaching beyond its own host is allowed only where the spec grants it. Arbitrary hosts may
+  currently create sessions on other hosts because that functionality is needed now; the user intends to restrict
+  cross-host spawning and interrogation to explicitly trusted environments. Answering `ResolveProfile` to any attached
+  host continues that same temporary exception forward and must end with it. Represent this so future agents do not
+  mistake it for a permanent grant or treat profiles as secret from attached hosts today.
+- Completion criteria: SPEC_impl.md states the effect-scoped trust rule next to the directional-trust text. SPEC.md's
+  temporary cross-host creation exception explicitly covers attached hosts obtaining resolved profile bundles, with the
+  reason (the exception already lets any host launch any profile on itself) and that it is revoked with that exception;
+  the "Remote input" profile-discovery paragraph points at this exception instead of implying profile command lines are
+  never exposed; until then profiles are not a place for secrets that must be hidden from attached hosts. TODO.md's
+  Maybe later entry "Close the cross-host execution hole…" is widened, at the maintainer's request, to the intended end
+  state: only explicitly trusted environments may spawn sessions on, or interrogate session and profile data of, other
+  hosts; arbitrary attached supervisors lose both. It names `ResolveProfile` and the fleet-wide session and host
+  listings as in scope next to create, clone, and their retry paths; cross-host stop and rename stay allowed bounded
+  operations. The helm logs every `ResolveProfile` with origin host, supervisor-claimed asking session, and profile id.
+  The `ResolveProfile` arm carries a comment naming the temporary exception it depends on. The `agent_requests.rs` and
+  `client.rs` trust docs are restated as effect-scoped trust rather than connection trust. Remove the feedback file and
+  its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## tmux-cwd-format-expanded-on-create.md
+
+- Outcome: `fix code`.
+- Assessment: Session create passes the raw cwd to `new-session -c` (`farhelm-supervisor/src/tmux.rs`,
+  `create_session`). confirmed at `5cf4b12` by inspection and by a reproduction on a private server with the pinned tmux
+  3.7c: a pane started with `-c …/C#Samples` landed in `$HOME`; a `-c` path containing `#(touch …/MARK)` ran the `touch`
+  (even though the directory did not exist); escaping `#` as `##` made the `C#Samples` pane land in the literal
+  directory and kept an escaped `#(touch …/MARK2)` path from running. `ensure_cwd_usable`
+  (`farhelm-supervisor/src/service/core.rs`) checks only the literal path, so it passes. No spec acceptance or Planned
+  TODO item covers this.
+- Decision: the user chose `fix code` for this and its two sibling call sites (create, relaunch, tab open), executed as
+  three stacked PRs per the one-PR-per-item rule rather than merged into one.
+- Completion criteria: Add one shared helper that escapes every `#` as `##` for a tmux `-c` value, documented with why
+  (tmux format-expands `-c`; `-e` values and the command after `--` are not expanded), and use it in `create_session`.
+  Real-tmux regression tests create sessions in directories named with `#(touch marker)`, `#S`, and `##`, asserting the
+  pane's directory is the literal path and the marker never appears. First of the three stacked PRs; the helper lands
+  here. Changelog fragment. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution
+  change.
+- Execution: `pending`.
+
+## tmux-cwd-format-expanded-on-relaunch.md
+
+- Outcome: `fix code`.
+- Assessment: Restart in place passes the resolved cwd raw to `respawn-pane -c` (`relaunch_in_pane`), defeating the
+  `ensure_cwd_identity` check made just before. confirmed at `5cf4b12` by inspection and by a reproduction on a private
+  server with the pinned tmux 3.7c: a pane started with `-c …/C#Samples` landed in `$HOME`; a `-c` path containing
+  `#(touch …/MARK)` ran the `touch` (even though the directory did not exist); escaping `#` as `##` made the `C#Samples`
+  pane land in the literal directory and kept an escaped `#(touch …/MARK2)` path from running. `ensure_cwd_usable`
+  (`farhelm-supervisor/src/service/core.rs`) checks only the literal path, so it passes. No spec acceptance or Planned
+  TODO item covers this.
+- Decision: the user chose `fix code` for this and its two sibling call sites (create, relaunch, tab open), executed as
+  three stacked PRs per the one-PR-per-item rule rather than merged into one.
+- Completion criteria: `relaunch_in_pane` uses the shared helper; a real-tmux regression test restarts a session in such
+  directories with the same assertions. Stacked on the create item's PR. Changelog fragment. Remove the feedback file
+  and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## tmux-cwd-format-expanded-on-tab-open.md
+
+- Outcome: `fix code`.
+- Assessment: Opening a tab passes the session cwd raw to `new-window -c` (`new_window`), contradicting SPEC.md's rule
+  that unusable tab paths fail clearly. confirmed at `5cf4b12` by inspection and by a reproduction on a private server
+  with the pinned tmux 3.7c: a pane started with `-c …/C#Samples` landed in `$HOME`; a `-c` path containing
+  `#(touch …/MARK)` ran the `touch` (even though the directory did not exist); escaping `#` as `##` made the `C#Samples`
+  pane land in the literal directory and kept an escaped `#(touch …/MARK2)` path from running. `ensure_cwd_usable`
+  (`farhelm-supervisor/src/service/core.rs`) checks only the literal path, so it passes. No spec acceptance or Planned
+  TODO item covers this.
+- Decision: the user chose `fix code` for this and its two sibling call sites (create, relaunch, tab open), executed as
+  three stacked PRs per the one-PR-per-item rule rather than merged into one.
+- Completion criteria: `new_window` uses the shared helper; a real-tmux regression test opens a tab in such directories
+  with the same assertions. Stacked on the relaunch item's PR. Changelog fragment. Remove the feedback file and its
+  `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## supervisor-stop-closes-clients-output-on.md
+
+- Outcome: `fix code`.
+- Assessment: code shape confirmed at `5cf4b12` by inspection; the crash consequence on the pinned tmux is unverified.
+  No crate installs a signal handler (no `tokio::signal`, `signal_hook`, or `sigaction`), the generated units use
+  `KillMode=process` (`farhelm-helm/src/units.rs`), and `farhelm helm setup` restarts the units
+  (`farhelm/src/setup.rs`), so a planned stop or upgrade SIGTERMs the supervisor into the same abrupt death as SIGKILL,
+  closing every output-bearing control client without the acknowledged no-output step that `OutputStream::shutdown` and
+  `shutdown_output_control_client` exist to perform. BUGS.md's evidence for the resulting server abort is 5 in roughly
+  5,000 SIGKILLs under saturation on distro tmux 3.6, with the `not enough data` identification inferred; whether pinned
+  tmux 3.7c aborts on this path is not established. BUGS.md's "a SIGKILLed supervisor runs nothing" rationale does not
+  apply to catchable SIGTERM. No spec acceptance or Planned TODO item covers this.
+- Decision: the user chose `fix code`, and required that the reason for the handler be clearly documented where it
+  lives, so a future reader does not remove it as unnecessary shutdown ceremony.
+- Completion criteria: `farhelm supervisor run` handles SIGTERM and SIGINT by running the existing orderly teardown
+  (output disabled and acknowledged on every output client and sink before any is closed) within a bounded budget well
+  under systemd's stop timeout, then exits. The handler's docs state why it exists: the tmux abort that takes down every
+  session on the host, that `KillMode=process` makes every planned stop and upgrade a SIGTERM to the supervisor alone,
+  that SIGKILL remains the accepted BUGS.md residual, and what the budget bounds. A test SIGTERMs a supervisor with
+  output-bearing clients and shows output was disabled before their close. BUGS.md's entry is narrowed to abrupt deaths
+  and points at the handler. Changelog fragment. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry
+  in the execution change.
+- Execution: `pending`.
+
+## checkout-can-take-archive-dir-name.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `5cf4b12`. The fresh-checkout occupancy scan deliberately skips
+  `ARCHIVE_DIR_NAME` (`farhelm-supervisor/src/working_copies.rs`), and `fresh_root_constraint_error`
+  (`farhelm-supervisor/src/service/core.rs`) derives the reserved archive path only from non-retired registry rows that
+  have a recorded path, so the first checkout in a root, or one whose checkouts are all retired, can be named
+  `farhelm-archived-working-copies` by an ordinary title (repo `farhelm`, title "archived working copies"). Later
+  archive moves then land inside that clone, and its own delete fails with `EINVAL` and stays `archive_pending`. The
+  restater's correction holds: `git clean`/`git add -A` do not destroy or commit nested repositories; the realistic loss
+  is the user removing the colliding clone by hand. Low likelihood, innocent trigger. No spec acceptance or Planned TODO
+  item covers this.
+- Decision: the user chose `fix code`; executed as its own PR, below the archive-side companion.
+- Completion criteria: the preview and the create-time destination recheck refuse a planned basename equal to
+  `ARCHIVE_DIR_NAME` regardless of what the registry holds (the occupancy scan reports the name as taken when it is the
+  candidate, or the basename rule skips it). A test uses a root with no registry rows. Changelog fragment. Remove the
+  feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## archive-root-accepts-active-checkout.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `5cf4b12`. `ensure_archive_root`
+  (`farhelm-supervisor/src/working_copies.rs`) accepts any real, non-symlink, same-filesystem directory at the archive
+  path; `refuse_overlapping_archive` compares only the source with other active rows and never the destination; the row
+  is journalled `archive_pending` before the rename, and `rename_noreplace` maps only `EEXIST`/`ENOTEMPTY` to a
+  collision, so a source that is the archive directory fails with a generic `EINVAL` on every retry and startup
+  reconciliation. This is the protection for databases that already hold a colliding checkout, and defense in depth for
+  any other path by which an active checkout lands there.
+- Decision: the user chose `fix code`; executed as its own PR, stacked on the creation-side item.
+- Completion criteria: before the journal is written in `archive_move_with_effects`, and in
+  `reconcile_archive_with_effects`, refuse the move when the archive directory equals, contains, or lies inside the path
+  of any non-retired row, including the row being moved, so the row stays `allocated` rather than turning pending; the
+  source-is-the-archive-directory case gets its own clear error instead of a raw `EINVAL`. Tests cover an active
+  checkout at the archive path, both as another row and as the row being moved. Changelog fragment. Remove the feedback
+  file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## inode-reuse-defeats-ownership-check.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at `5cf4b12` by inspection and reproduction. `verify_identity`
+  (`farhelm-supervisor/src/working_copies.rs`) and the other pre-destructive checks compare only `(st_dev, st_ino)`; on
+  this host's ext4 a directory removed and recreated at the same path got the same inode every time, including when
+  recreated by `git clone`. Deleting the old session then archives the new, foreign directory, contrary to SPEC.md's "A
+  foreign object replacing the recorded path must remain untouched." The folder is moved within the same root, not
+  destroyed. Trigger: the user removes a managed checkout by hand and re-clones or creates something at the same path.
+  Bucket: the user agreed this is `high` (a surprising move of user work, recoverable) rather than `highest`; the index
+  is left unchanged until execution removes the item.
+- Decision: the user agreed with `fix code` using birth time as the reuse-proof discriminator, with the lenient rule for
+  rows recorded before the change.
+- Completion criteria: record the directory's birth time (Linux `statx` `STATX_BTIME`, macOS `st_birthtime`) alongside
+  device and inode for new checkouts and roots; a mismatch, or an unreadable value where one was recorded, is
+  `DifferentObject` in `verify_identity`, `archive_move_with_effects`, `reconcile_archive_with_effects`, and
+  `verified_root`. Rows recorded before the change keep today's `(dev, ino)` comparison, documented as the accepted
+  residual. Tests cover a recreated directory with a reused inode (a controlled birth-time mismatch where the filesystem
+  cannot be made to reuse an inode) and a legacy row. Changelog fragment. Remove the feedback file and its
+  `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## archive-dir-owner-not-checked.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `5cf4b12`, conditional on a checkout root another local account
+  can write. `ensure_archive_root` (`farhelm-supervisor/src/working_copies.rs`) checks neither owner nor mode of an
+  existing archive directory and creates a missing one with plain `create_dir` (0777 minus umask). Nothing checks the
+  checkout root's owner or mode either (`verified_root` has no uid or mode check), and no spec rule addresses shared
+  roots. A co-user who can write the root can pre-create the archive directory, receive the victim's archived checkouts,
+  and lock the victim out; the same co-user has other openings in such a root, so an archive-only check is incomplete.
+- Decision: the user agreed to address the class one level up, and required the spec to state that Farhelm is NOT
+  designed for checkout roots shared with, or writable by, other Unix accounts. The user also asked for a Doc todo entry
+  to tell users this.
+- Completion criteria: SPEC.md states that checkout roots shared with or writable by other local accounts are
+  unsupported and outside the design. The supervisor refuses, at preview and at create, a checkout root not owned by its
+  effective uid or that is group- or world-writable, with a message naming the reason. `ensure_archive_root` applies the
+  same owner and mode check to an existing archive directory and creates a missing one 0700 (reusing
+  `ensure_private_dir`'s approach). TODO.md's Doc todo bucket gains an entry (added at the maintainer's request) to tell
+  users that checkout roots must be private to their account and shared directories are unsupported. Tests cover a
+  group-writable root, a foreign-owned archive directory, and the created directory's mode. Changelog fragment. Remove
+  the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## superseded-launch-specs-never-removed.md
+
+- Outcome: `fix spec+code`.
+- Assessment: mechanics confirmed by current-code inspection at `5cf4b12`; security impact essentially nil. The startup
+  sweep keeps every generation's spec for a session that still exists, and its comment ("the restart that superseded it
+  removes its own predecessor") describes code that does not exist, so an earlier generation's unread spec survives
+  until Delete. But everything a spec holds (argv, session id, session token, paths; `farhelm-supervisor/src/launch.rs`)
+  is already on disk in the same private state directory for the same lifetime: the supervisor database stores the full
+  invocation and the plaintext session credential, deliberately recoverable for restart
+  (`farhelm-supervisor/src/store.rs`). A leftover spec therefore exposes nothing new, and only to the trusted same
+  account. By the bucket rules this is `other` (cleanup and an unkept spec promise), not `highest`.
+- Decision: the user agreed with the recommendation and declined to discard: correct the spec's framing of launch-spec
+  cleanup once, and make the small sweep fix.
+- Completion criteria: SPEC_impl.md's runtime-state text says launch specs duplicate what the session's database row
+  holds for the session's lifetime, so removing them is tidiness rather than a credential boundary; a current-generation
+  spec left by a launch that never ran may remain until Delete, which removes it; the stale "one 0600 JSON spec per
+  session" wording reflects per-generation naming. The startup sweep also removes specs (and their sentinels) whose
+  generation is below the row's current generation, with its comment corrected; a test covers a superseded unread spec.
+  Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## reload-leaves-unread-launch-spec.md
+
+- Outcome: `fix spec`.
+- Assessment: mechanics confirmed by current-code inspection at `5cf4b12`: startup reconciliation calls
+  `cleanup_launch_artifacts` only for Error outcomes, so the reboot conversion to Interrupted and unscoped early-exit
+  shapes leave the current generation's unread spec until Delete. Same nil marginal exposure as
+  `superseded-launch-specs-never-removed.md`: the database row holds the same data for the same lifetime.
+- Decision: the user agreed: no reload cleanup; the spec principle recorded for
+  `superseded-launch-specs-never-removed.md` covers this case explicitly.
+- Completion criteria: the SPEC_impl.md sentence from `superseded-launch-specs-never-removed.md` explicitly covers a
+  current-generation spec left after reload's Interrupted or exited outcomes (add wording in this item's change if that
+  PR's text does not already). Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution
+  change.
+- Execution: `pending`.
+
+## observers-leave-unread-launch-spec.md
+
+- Outcome: `fix spec`.
+- Assessment: mechanics confirmed by current-code inspection at `5cf4b12`: the ticker, listing, single-session reply
+  observers, and Stop (`StopCompleted`) clean launch artifacts only on Error, so a pane that died before the shim ran
+  leaves the current generation's spec until Delete; the restater's anchor correction for Stop holds. Same nil marginal
+  exposure as `superseded-launch-specs-never-removed.md`.
+- Decision: the user agreed: no observer or Stop cleanup; the same spec principle covers this case explicitly.
+- Completion criteria: the same SPEC_impl.md sentence explicitly covers specs left by runtime observers and Stop (add
+  wording in this item's change if needed). Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in
+  the execution change.
+- Execution: `pending`.
+
+## codex-hook-trust-bypass-runs-repo-hooks.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed from code at `5cf4b12` plus Codex's published docs; not reproduced against a live Codex (0.156.1
+  installed locally). Farhelm side: `--dangerously-bypass-hook-trust` is added to every injected Codex launch
+  (`farhelm-supervisor/src/agent_kind/mod.rs`), the `{codex:trusted-cwd}` override trusts the folder (including fresh
+  checkouts, per SPEC.md), and `with_hook_argv_using` never skips injection for trusted or hook-bearing folders. Codex
+  side (docs at learn.chatgpt.com/docs/hooks): project `.codex/` hooks load only in a trusted project, then each hook
+  needs hash-based review; the flag runs enabled hooks without persisted hook trust for that invocation. So in a trusted
+  folder a repository's own hooks run unreviewed, outside Codex's sandbox, at the first prompt. SPEC_impl.md's accepted
+  cost names only hooks in the user's own configuration home. Marginal exposure is smaller than the finding implies: per
+  Codex's docs, trusting a project already loads its whole `.codex/` layer, including project `mcp_servers` commands;
+  whether those start without a prompt on this Codex version was not verified. Skipping injection would lose
+  conversation identity, and so resume, for trusted checkouts.
+- Decision: the user accepts the exposure for now, explicitly as temporary: it holds until hook installation becomes an
+  explicit step surfaced to the user, in which the user is told what is being installed and accepts specific hooks, so
+  Farhelm no longer needs to pass the bypass arguments per launch.
+- Completion criteria: SPEC_impl.md's accepted-cost text for Codex hook injection is widened to cover hooks from a
+  trusted project's `.codex/` layer running without per-hook review, with the reason, and states that the acceptance
+  lasts only until hook installation is an explicit, user-surfaced step with per-hook acceptance, after which the
+  per-launch bypass is not passed. TODO.md's Maybe later bucket gains an entry (added at the maintainer's request) for
+  that move: a separate "install hooks" process that tells the user what is being installed and lets them accept
+  specific hooks, so launches need not pass `--dangerously-bypass-hook-trust` and its overrides. TODO.md's Doc todo
+  bucket gains an entry (added at the maintainer's request) to document for users that on Farhelm-injected Codex
+  launches, unapproved hooks in the user's config home and in a trusted workspace's `.codex/` run without Codex's
+  per-hook review, and that trusting a workspace means trusting its Codex configuration to run commands. Remove the
+  feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## create-reply-foreign-id-misroutes.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `5cf4b12`. When a create on host B returns an id host A already
+  caches, the write-back refusal (`SessionOwnerAmbiguous`) is only logged in `record_session`
+  (`farhelm-helm/src/sessions.rs`), with a log line claiming the id "will not be routed while both keep claiming it";
+  `resolve_owner` sees A as cached owner and no contest until B's next refresh, so operations on the "new" session route
+  to A's session for that window. `resolve_owner`'s docstring cites a nonexistent `AppState::contested_sessions`.
+  Requires a buggy or hostile B (honest supervisors mint UUIDs). Marginal harm is small: SPEC.md already lets any agent
+  stop sessions on other hosts, and misrouted input goes to the user's own session on A, not to B. By the bucket rules
+  this is `other` (correctness with a hostile-only trigger), not `highest`.
+- Decision: the user chose `fix code`.
+- Completion criteria: when the post-create write-back fails with `SessionOwnerAmbiguous`, the create fails with a
+  conflict naming both hosts rather than reporting success, and an immediate refresh of the creating host is requested;
+  the misleading log line and the `resolve_owner` docstring are corrected. A test covers a create reply naming an id
+  another host caches. Changelog fragment. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in
+  the execution change.
+- Execution: `pending`.
+
+## create-reply-sets-remembered-yolo.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `5cf4b12`. `accept_created_session`
+  (`farhelm-helm/src/sessions.rs`) records create history with `LaunchChoiceMemory::Remember` for every user-origin
+  create, and `record_launch_history` (`farhelm-helm/src/store.rs`) derives both the `launch_history` row's selection
+  and the helm-wide `remembered_permissions`/`remembered_workspace_trust` from `entry.launch`, the supervisor's reply.
+  Nothing compares it with what the helm sent; a raw or profile create sends no selection yet a reply carrying one is
+  recorded. A hostile host can therefore set the remembered defaults to yolo with workspace trust for every host.
+  Contradicts SPEC.md "Remote input, session defaults, and availability".
+- Decision: the user stated the governing rule: only things the user explicitly selects in the GUI may affect future GUI
+  defaults and suggestions. This covers the remembered permission and workspace-trust defaults, the remembered profile,
+  and the recent-setups history the New dialog ranks its one-click recents from (per host, per folder). A choice is
+  still recorded only after its create succeeds: the user's selection decides the value, the host's success only whether
+  it is recorded. The rule goes into SPEC.md explicitly.
+- Completion criteria: SPEC.md states the rule as the principle for remembered launch defaults and composer history,
+  replacing or grounding the narrower "remote metadata must not override…" framing. The helm carries its own submitted
+  selection (the compiled structured selection, or none) through create acceptance, and both the remembered defaults and
+  the `launch_history` row's selection come from it, never from `entry.launch`; reply-only facts (session id, creation
+  time, canonical cwd) still come from the reply. Tests cover a reply whose `launch` differs from the submitted
+  selection, and a raw/profile create whose reply carries a selection. Changelog fragment. Remove the feedback file and
+  its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## create-reply-launch-mirrored-into-client-defaults.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `5cf4b12`. `ListView`'s `on_created` handler
+  (`farhelm-ui/src/list/view.rs`) writes the create reply's `session.launch` permissions and workspace trust into the
+  page's `remembered_permissions`/`remembered_workspace_trust` mirror, which seeds every later New dialog and "reset
+  choices" until reload, independent of the helm's stored value.
+- Decision: the same rule as `create-reply-sets-remembered-yolo.md`: only explicit GUI selections affect future GUI
+  defaults. Executed as the PR adjacent to that item.
+- Completion criteria: the client mirror derives from the selection the form submitted (none for command/profile
+  creates), never from the reply; the SPEC.md rule from the adjacent item covers it. A UI test shows a reply carrying a
+  different launch leaves the next New dialog's preselection unchanged. Remove the feedback file and its
+  `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## replace-records-peer-launch-defaults.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `5cf4b12`. A plain Replace (no `with` body) builds its create from
+  the source row the owning host lists (`mode_from_source`, `farhelm-helm/src/sessions.rs`) and runs it as
+  `CreateOrigin::User`, so the peer's launch selection is recorded as the user's remembered permission and trust choice.
+  The fix for `create-reply-sets-remembered-yolo.md` alone does not close this, because the submitted selection itself
+  was copied from the peer.
+- Decision: the same rule: a plain Replace involves no GUI selection, so it moves no remembered defaults or history
+  suggestions; a "replace with" the user filled in does count.
+- Completion criteria: a create whose mode is derived from a source row records no remembered launch choices (and no
+  history suggestion derived from the peer row); composer creates and explicit "replace with" bodies still do. A test
+  covers a plain Replace of a yolo row leaving the remembered defaults unchanged. Remove the feedback file and its
+  `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## replace-sets-peer-default-profile.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `5cf4b12`. For a plain Replace whose source row names a
+  `source_profile`, `mode_from_source` resolves that catalog id, and `accept_created_session` calls
+  `remember_default_profile` for the user-origin create, so a host listing a session under any catalog profile id sets
+  the helm-wide default profile.
+- Decision: the same rule: a plain Replace is not an explicit GUI profile choice and must not move the default profile.
+- Completion criteria: `remember_default_profile` is skipped when the create mode was derived from a source row; it
+  still runs for the composer and for a "replace with" body naming a profile the user chose. A test covers a plain
+  Replace of a row claiming a different profile. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry
+  in the execution change.
+- Execution: `pending`.
