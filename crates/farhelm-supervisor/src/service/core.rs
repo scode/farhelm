@@ -13919,8 +13919,13 @@ impl Supervisor {
                     ));
                 }
                 Err(e) => {
+                    // Only the id's length is logged: at this point it has
+                    // been bounded but not content-checked (that happens in
+                    // `accepts_reported_conversation`, below), and a raw
+                    // newline in it would split this line into forged ones.
                     warn!(
-                        session = %id, conversation = %report.conversation, source = %report.source,
+                        session = %id, conversation_bytes = report.conversation.len(),
+                        source = %report.source,
                         error = %format!("{e:#}"),
                         "could not read the session row a report arrived for before its \
                          entry was published; the report is discarded"
