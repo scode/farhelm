@@ -61,26 +61,20 @@ pub(crate) const fn permission_value(permission: LaunchPermission) -> &'static s
 /// Normalize a permission to the modes the selected harness can represent.
 ///
 /// Pi's missing tool gate is deliberately represented as YOLO even when an
-/// older stored selection omitted the optional field. Goose owns the three
-/// approval modes; OMP owns the harness default plus YOLO and Approve, so
-/// only the Goose-only labels clear on it; moving any unsupported mode
-/// elsewhere clears it rather than letting an unsupported hidden choice
-/// reach launch.
+/// older stored selection omitted the optional field. Every other harness
+/// keeps the modes `LaunchHarness::offers_permission` gives it (Goose all
+/// three approval modes, OMP Approve, everyone YOLO), and moving to a harness
+/// that does not offer the current mode clears it rather than letting an
+/// unsupported hidden choice reach launch.
 pub(crate) const fn normalized_permissions(
     harness: LaunchHarness,
     permissions: Option<LaunchPermission>,
 ) -> Option<LaunchPermission> {
     match harness {
         LaunchHarness::Pi => Some(LaunchPermission::Yolo),
-        LaunchHarness::Goose => permissions,
-        LaunchHarness::Omp => match permissions {
-            Some(LaunchPermission::SmartApprove | LaunchPermission::Chat) => None,
-            permissions => permissions,
-        },
+        // `Option::filter` is not const, hence the spelled-out match.
         _ => match permissions {
-            Some(
-                LaunchPermission::Approve | LaunchPermission::SmartApprove | LaunchPermission::Chat,
-            ) => None,
+            Some(permission) if !harness.offers_permission(permission) => None,
             permissions => permissions,
         },
     }
@@ -1149,21 +1143,11 @@ pub(crate) fn selection_is_compatible(
                 |model| model.efforts.contains(&effort),
             )
     });
-    let permissions_are_compatible = match (selection.harness, selection.permissions) {
-        (LaunchHarness::Goose, _)
-        | (LaunchHarness::Pi, None | Some(LaunchPermission::Yolo))
-        // OMP offers the harness default, YOLO, and Approve; the Goose-only
-        // labels clear on it rather than silently launching.
-        | (LaunchHarness::Omp, None | Some(LaunchPermission::Yolo | LaunchPermission::Approve))
-        | (LaunchHarness::Grok, None | Some(LaunchPermission::Yolo))
-        | (_, None | Some(LaunchPermission::Yolo)) => true,
-        (
-            _,
-            Some(
-                LaunchPermission::Approve | LaunchPermission::SmartApprove | LaunchPermission::Chat,
-            ),
-        ) => false,
-    };
+    // The harness default is always compatible; an explicit mode must be one
+    // the helm will accept (`LaunchHarness::offers_permission`).
+    let permissions_are_compatible = selection
+        .permissions
+        .is_none_or(|permission| selection.harness.offers_permission(permission));
     effort_is_compatible
         && permissions_are_compatible
         && normalized_workspace_trust(selection.harness, selection.workspace_trust)
@@ -2143,8 +2127,9 @@ mod tests {
     }
 
     /// Compatibility mirrors the helm boundary for all permission variants.
-    /// An old Pi snapshot may omit its mode, but Goose approval modes cannot
-    /// cross into any other harness.
+    /// An old Pi snapshot may omit its mode, but Goose's approval modes do
+    /// not cross into the harnesses below (OMP's own Approve is covered by
+    /// the proto table's test).
     #[test]
     fn compatibility_rejects_goose_permissions_outside_goose() {
         for permission in [
