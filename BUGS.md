@@ -33,10 +33,13 @@ understood.
 
 Why we are not fixing it: there is nothing to fix on our side of the line. Farhelm's own teardown paths already disable
 output through an acknowledged boundary before closing any control client, precisely to avoid this abort — but that
-discipline is code the supervisor runs, and a SIGKILLed supervisor runs nothing. No handler survives SIGKILL. The only
-code that could make post-mortem teardown safe is tmux's. What farhelm does do is clean up the non-crash aftermath: when
-the server survives an abrupt supervisor death, the next supervisor start reaps any control clients the dead one left
-wedged (see `reap_stale_control_clients` in the supervisor's tmux driver for why they can wedge forever).
+discipline is code the supervisor runs, and a SIGKILLed supervisor runs nothing. No handler survives SIGKILL. A planned
+stop is not in this entry: SIGTERM and SIGINT (what `systemctl stop`/`restart`, an upgrade, or Ctrl-C send, and with the
+units' `KillMode=process` they reach only the supervisor) and the desktop app's closing tether all run the same orderly
+output shutdown before the process exits (`farhelm_supervisor::service::run`), so only a death that runs no code is left
+here. The only code that could make post-mortem teardown safe is tmux's. What farhelm does do is clean up the non-crash
+aftermath: when the server survives an abrupt supervisor death, the next supervisor start reaps any control clients the
+dead one left wedged (see `reap_stale_control_clients` in the supervisor's tmux driver for why they can wedge forever).
 
 If you hit this, the signature is: all sessions gone at once, `no server running on <state-dir>/tmux.sock`, and a
 supervisor that restarts cleanly into an empty server with your sessions listed as exited. Reporting it upstream to tmux

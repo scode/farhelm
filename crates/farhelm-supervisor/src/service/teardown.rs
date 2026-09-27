@@ -774,6 +774,74 @@ impl Supervisor {
         drop(attachments);
         Ok(())
     }
+
+    /// Close every terminal-output client this supervisor holds, each
+    /// through its orderly no-output boundary, because the process is about
+    /// to exit; give up after `budget`.
+    ///
+    /// This exists because a supervisor that simply exits closes all its
+    /// tmux control clients at once, and tmux can abort its whole private
+    /// server when a client that still has queued pane output sees EOF,
+    /// ending every session on the host (BUGS.md: "Abrupt supervisor death
+    /// can crash the private tmux server"). SIGKILL cannot be helped; a
+    /// planned stop can, and the generated units' `KillMode=process` makes
+    /// every planned stop and upgrade exactly that: a SIGTERM to the
+    /// supervisor alone, while tmux and every session keep running.
+    ///
+    /// First a stop boundary is established while holding `attachments`:
+    /// from then on no new session sink is handed out and no attachment
+    /// installs (see [`super::terminals::SinkRegistryState::stopping`]), so an attach racing
+    /// the stop is refused rather than left streaming. Connection tasks keep
+    /// running; they simply cannot create output clients any more. Then
+    /// comes whole-session delete's orderly sequence with the session filter
+    /// removed: every attachment is drained and its cleanup barrier
+    /// published under that same lock hold, every forwarder is signalled
+    /// before any is joined (so none can race the others), each forwarder
+    /// crosses its own acknowledged no-output boundary, and each sink lease
+    /// is dropped only after its forwarder finished, which hands the sink to
+    /// its own orderly shutdown. Finally it waits until no sink is still
+    /// owned and every runtime-owned reaper has settled. No detach notices
+    /// are sent: the peers are about to lose the connection anyway.
+    ///
+    /// ONE budget covers all of it, including waiting for `attachments`
+    /// itself, which an in-flight attach holds across tmux commands.
+    /// Returns whether everything settled inside it; errors from individual
+    /// clients are recorded in the registries as usual, and at exit there
+    /// is nothing further to do about them.
+    pub(crate) async fn shutdown_output_clients(&self, budget: std::time::Duration) -> bool {
+        tokio::time::timeout(budget, async {
+            let mut forwarders = tokio::task::JoinSet::new();
+            {
+                let mut attachments = self.attachments.lock().await;
+                self.sinks.lock().expect("sink registry poisoned").stopping = true;
+                let doomed: Vec<(AttachmentKey, ActiveAttach)> = attachments.drain().collect();
+                for (key, old) in &doomed {
+                    self.begin_forwarder_shutdown(key.clone(), old);
+                }
+                for (key, old) in doomed {
+                    // `..` drops the input client (its control process goes
+                    // with `kill_on_drop`; it carries no output) and the
+                    // pause sender, exactly as whole-session delete does.
+                    let ActiveAttach {
+                        forwarder, sink, ..
+                    } = old;
+                    forwarders.spawn(async move {
+                        let joined = forwarder.await;
+                        drop(sink);
+                        (key, joined)
+                    });
+                }
+            }
+            while let Some(joined) = forwarders.join_next().await {
+                if let Ok((key, joined)) = joined {
+                    let _ = self.record_forwarder_join(key, joined);
+                }
+            }
+            self.wait_for_all_output_cleanup().await;
+        })
+        .await
+        .is_ok()
+    }
 }
 
 /// Remove private preparation evidence only after final retirement and process
@@ -2634,5 +2702,150 @@ mod tests {
             );
         }
         assert!(sup.store.session("s-race").await.unwrap().is_none());
+    }
+
+    // -----------------------------------------------------------------
+    // Orderly stop: `shutdown_output_clients`
+    // -----------------------------------------------------------------
+
+    /// A registered, live session-sink lease backed by a fake task that ends
+    /// as soon as it is asked to, standing in for a real sink client so the
+    /// stop boundary can be exercised without tmux.
+    fn fake_live_sink(sup: &Supervisor, tmux_name: &str) -> SessionSinkLease {
+        let (shutdown, shutdown_rx) = oneshot::channel::<()>();
+        let (state, _state_rx) = watch::channel(None);
+        let task = tokio::spawn(async move {
+            let _ = shutdown_rx.await;
+            Ok::<_, anyhow::Error>(())
+        });
+        let handle = Arc::new(SessionSinkHandle {
+            tmux_name: tmux_name.to_string(),
+            task: Some(task),
+            shutdown: Some(shutdown),
+            state,
+        });
+        sup.sinks.lock().expect("sink registry").insert(
+            tmux_name.to_string(),
+            super::super::terminals::SinkRegistryEntry::Live(Arc::downgrade(&handle)),
+        );
+        SessionSinkLease::new(handle, Arc::clone(&sup.sinks))
+    }
+
+    /// Spec: a stop does not report completion while any session sink is
+    /// still owned, refuses new sinks from the moment it starts, and
+    /// completes once the last owner lets go.
+    ///
+    /// Why: the stop exists so that no output-bearing client is closed
+    /// abruptly at exit. An attach that got its sink just before the stop
+    /// holds a live lease outside the attachment map; reporting completion
+    /// then would let the process exit with that sink still streaming. And
+    /// a sink handed out after the stop began would be a new client nothing
+    /// is going to close in order.
+    #[farhelm_testtrace::test]
+    async fn a_stop_waits_for_live_sinks_and_refuses_new_ones() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let lease = fake_live_sink(&sup, "fh-held");
+
+        assert!(
+            !sup.shutdown_output_clients(std::time::Duration::from_millis(200))
+                .await,
+            "a stop must not complete while a sink lease is still held"
+        );
+        assert!(sup.is_stopping());
+        let refused = sup
+            .ensure_session_sink("fh-new")
+            .await
+            .err()
+            .expect("no new sink may be handed out once stopping");
+        assert!(
+            format!("{refused:#}").contains(super::super::terminals::SUPERVISOR_STOPPING),
+            "unexpected refusal: {refused:#}"
+        );
+
+        drop(lease);
+        assert!(
+            sup.shutdown_output_clients(std::time::Duration::from_secs(5))
+                .await,
+            "the stop must complete once the last lease is released"
+        );
+    }
+
+    /// Spec: when the last owner of a live sink lets go while a stop is
+    /// waiting, the stop keeps waiting until that sink's reaper finishes;
+    /// it does not return in the gap between "no live sink" and "reaper
+    /// done".
+    ///
+    /// Why: the lease destructor turns `Live` into `Reaping` and only then
+    /// schedules the orderly shutdown. A stop that saw the sink as neither
+    /// would exit before that shutdown disabled the client's output. The
+    /// reaper here is held until the test releases it, so a premature
+    /// return is visible deterministically.
+    #[farhelm_testtrace::test]
+    async fn a_stop_waits_for_the_reaper_a_released_sink_leaves_behind() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (release, released) = oneshot::channel::<()>();
+        let (shutdown, _shutdown_rx) = oneshot::channel::<()>();
+        let (sink_state, _sink_state_rx) = watch::channel(None);
+        let handle = Arc::new(SessionSinkHandle {
+            tmux_name: "fh-held-reaper".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = released.await;
+                Ok::<_, anyhow::Error>(())
+            })),
+            shutdown: Some(shutdown),
+            state: sink_state,
+        });
+        sup.sinks.lock().expect("sink registry").insert(
+            "fh-held-reaper".to_string(),
+            super::super::terminals::SinkRegistryEntry::Live(Arc::downgrade(&handle)),
+        );
+        let lease = SessionSinkLease::new(handle, Arc::clone(&sup.sinks));
+
+        let stop = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            async move {
+                sup.shutdown_output_clients(std::time::Duration::from_secs(10))
+                    .await
+            }
+        });
+        drop(lease);
+        // sleep-ok: observation window in which a stop that lost track of the reaper would already have returned
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(
+            !stop.is_finished(),
+            "the stop must still be waiting for the released sink's reaper"
+        );
+        release.send(()).expect("release the reaper");
+        assert!(
+            stop.await.expect("stop task"),
+            "the stop must complete once the reaper finishes"
+        );
+    }
+
+    /// Spec: the stop budget includes waiting for the `attachments` lock.
+    ///
+    /// Why: an in-flight attach holds that lock across tmux commands that
+    /// have no timeout of their own, so a budget that started only after
+    /// acquiring it would not bound the stop at all; a wedged tmux would
+    /// hang a desktop quit or outlast systemd's stop timeout.
+    #[farhelm_testtrace::test]
+    async fn the_stop_budget_covers_the_attachments_lock() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let held = sup.attachments.lock().await;
+        assert!(
+            !sup.shutdown_output_clients(std::time::Duration::from_millis(100))
+                .await,
+            "a stop must give up while the attachments lock is held past its budget"
+        );
+        drop(held);
     }
 }

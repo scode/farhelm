@@ -902,7 +902,9 @@ fn main() -> anyhow::Result<()> {
 /// Child destructors are not reliable when a GUI framework terminates its
 /// process directly. A pipe is an operating-system lifetime primitive: every
 /// exit path closes the desktop parent's write end, so EOF releases the child
-/// even when Rust cleanup never runs. The blocking read lives on a detached OS
+/// even when Rust cleanup never runs. EOF is handed to `service::run` as its
+/// stop signal, so the child still closes its terminal-output clients in
+/// order on the way out, exactly as it does for SIGTERM. The blocking read lives on a detached OS
 /// thread, not Tokio's blocking pool: if the supervisor itself fails first,
 /// runtime shutdown cannot wait forever for an uncancellable stdin read.
 ///
@@ -920,7 +922,7 @@ async fn run_supervisor(
     use anyhow::Context as _;
 
     if !exit_on_stdin_close {
-        return farhelm_supervisor::service::run(state_dir, startup).await;
+        return farhelm_supervisor::service::run(state_dir, startup, std::future::pending()).await;
     }
     let (stdin_closed_tx, stdin_closed) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
@@ -930,13 +932,16 @@ async fn run_supervisor(
             let _ = stdin_closed_tx.send(result);
         })
         .context("starting desktop supervisor stdin watcher")?;
-    tokio::select! {
-        result = farhelm_supervisor::service::run(state_dir, startup) => result,
-        result = stdin_closed => {
-            result.context("desktop supervisor stdin watcher stopped without reporting EOF")??;
-            Ok(())
-        }
-    }
+    // The tether is handed to `run` as its stop signal rather than raced
+    // against it here: racing would drop the supervisor mid-stream on EOF,
+    // skipping the orderly output shutdown `run` performs on every stop.
+    let tether = async move {
+        stdin_closed
+            .await
+            .context("desktop supervisor stdin watcher stopped without reporting EOF")?
+            .context("reading the desktop supervisor stdin tether")
+    };
+    farhelm_supervisor::service::run(state_dir, startup, tether).await
 }
 
 /// Run one `farhelm agent` subcommand and print its answer.

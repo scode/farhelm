@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `supervisor-stop-closes-clients-output-on.md` — the supervisor has no SIGTERM handler, so a normal stop closes every
-  output client with output on (tmux-abort risk).
 - `checkout-can-take-archive-dir-name.md` — a fresh checkout can be named `farhelm-archived-working-copies`; later
   deletes move checkouts into it and its session is undeletable.
 - `archive-root-accepts-active-checkout.md` — the archive move accepts an active managed checkout (or the source itself)
