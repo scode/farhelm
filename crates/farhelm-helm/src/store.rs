@@ -3084,15 +3084,11 @@ impl HelmStore {
         })
     }
 
-    /// Return the recoverable web token, inserting `candidate` if this helm
-    /// has never minted one before.
-    ///
-    /// The insert and read share one immediate transaction so concurrent
-    /// `token show` callers converge on the token that actually committed.
-    /// A caller must never assume its candidate won merely because the row
     /// Read the recoverable web token without creating one.
     ///
-    /// Keeping this read separate lets callers avoid consuming randomness or
+    /// `token show`'s read-only path depends on this never inserting: it
+    /// must report a missing token rather than mint one. Keeping this read
+    /// separate lets callers avoid consuming randomness or
     /// consulting the clock on the overwhelmingly common existing-token path.
     pub async fn web_token(&self) -> anyhow::Result<Option<String>> {
         const WEB_TOKEN_SCHEMA: i64 = 7;

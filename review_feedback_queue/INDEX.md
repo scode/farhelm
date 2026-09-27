@@ -225,8 +225,6 @@ One line per open item. This file must always match the feedback files in this d
   contrary to the on-socket refusal promise.
 - `client-log-drops-claimed-counted.md` — the client-log drop warning says later drops are counted, but nothing counts
   them.
-- `web-token-docstring-spliced.md` — `HelmStore::web_token`'s docstring opens with a spliced fragment claiming it
-  inserts a token.
 - `unauthenticated-bearer-contends-sqlite.md` — any unauthenticated Bearer value is hashed and looked up in SQLite,
   letting a local flood contend the DB lock.
 - `clone-source-missing-from-truncated-list.md` — `agent clone` reports the source gone when the source host's list was
