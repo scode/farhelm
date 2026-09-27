@@ -1847,7 +1847,13 @@
   history suggestion derived from the peer row); composer creates and explicit "replace with" bodies still do. A test
   covers a plain Replace of a yolo row leaving the remembered defaults unchanged. Remove the feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `CreateSpec` gained `settings_from_source`, set by a plain Replace (no `with` body) and false
+  everywhere else, and a create with it set records no explicit selection, so no remembered permission or trust default
+  and no recent setup. A "replace with" body the user filled in still records its selection. A REST test replaces a
+  listed yolo-with-trust row and checks the preferences and recent setups are untouched; it fails with the flag
+  disabled. The SPEC.md rule came with `create-reply-sets-remembered-yolo.md`. Draft PR
+  [#1060](https://github.com/scode/farhelm/pull/1060/changes), jj change `uuzskvwk`, bookmark
+  `pr/plain-replace-records-no-launch-choices`.
 
 ## replace-sets-peer-default-profile.md
 

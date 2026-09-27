@@ -1105,6 +1105,7 @@ async fn create_for_agent(
                 // back, which is what the key is for. Contrast
                 // `clone_for_agent`, whose replay can be the ASKING session.
                 accept_result: None,
+                settings_from_source: false,
             },
         )
         .await,
@@ -1276,6 +1277,7 @@ async fn clone_for_agent(
                         reject_clone_replay(&asking, &source, created)
                     }
                 })),
+                settings_from_source: false,
             },
         )
         .await,
