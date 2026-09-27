@@ -6,6 +6,7 @@ Type=simple
 ExecStart=@FARHELM@ supervisor run --state-dir @STATE_DIR@
 Environment="PATH=@PATH@"
 Environment="FARHELM_TMUX=@TMUX@"
+UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID
 KillMode=process
 Restart=on-failure
 
