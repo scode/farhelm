@@ -3485,6 +3485,15 @@ impl HostActor {
             // this connection's health now would overwrite the state the
             // manager just published for the edited row.
             if taken_nudge(nudge).is_some() {
+                // The health is not published, but a cache change this
+                // refresh already COMMITTED still has to be announced: the
+                // bump below is never reached on this path, and the exit
+                // publish usually compares equal (a retarget has already set
+                // `Connecting`), so without this other clients kept showing
+                // the pre-refresh list until some later, unrelated bump.
+                if step.cache_changed {
+                    self.events.bump();
+                }
                 ended = "the host was reconfigured or an immediate retry was requested";
                 break;
             }
