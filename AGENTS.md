@@ -150,7 +150,10 @@ that its required systemd or SSH substrate ran.
 - `dprint check`
 - `cd website && bun install --frozen-lockfile && bun run build` — the docs website (Astro + Starlight) must build; this
   is what catches a page with missing frontmatter or a sidebar slug that names no page. Bun is the package manager the
-  Vercel project is configured with, so the lockfile is `bun.lock`; commit it with any dependency change.
+  Vercel project is configured with, so the lockfile is `bun.lock`; commit it with any dependency change. Vercel skips a
+  push, on main or any PR branch, unless it changes something under `website/` (the `ignoreCommand` in
+  `website/vercel.json`, which compares against the branch's last successful deployment, or the parent commit when it
+  has none), so the site must never read files outside `website/`: a change to such a file would not redeploy it.
 - `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
   and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
   cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
