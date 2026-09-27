@@ -1867,4 +1867,9 @@
   still runs for the composer and for a "replace with" body naming a profile the user chose. A test covers a plain
   Replace of a row claiming a different profile. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry
   in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the same `settings_from_source` flag now also clears the remembered profile for a create whose
+  mode was derived from a listed row, so `remember_default_profile` never runs for a plain Replace; the composer and a
+  "replace with" body naming a profile still set it. A REST test replaces a row that claims a catalog profile and checks
+  the remembered profile stays unset; it fails with the new arm disabled. Draft PR
+  [#1063](https://github.com/scode/farhelm/pull/1063/changes), jj change `oqwpvkuw`, bookmark
+  `pr/plain-replace-keeps-default-profile`.

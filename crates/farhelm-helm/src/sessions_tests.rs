@@ -1521,6 +1521,96 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
     );
 }
 
+/// Spec: a plain Replace of a session the host lists as created from a
+/// catalog profile does not make that profile the helm-wide remembered
+/// default.
+///
+/// Why: the profile id comes from the owning host's listing, and profile ids
+/// are discoverable to agents, so a compromised host could list a session
+/// under any catalog profile (a "yolo" one, say) and have the next New
+/// dialog suggest it on every host once the user pressed Replace. Only a
+/// profile the user picked in the GUI may become the default.
+#[farhelm_testtrace::test]
+async fn a_plain_replace_does_not_remember_the_listed_rows_profile() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let mut source = rest_harness::session("profiled-src", 1_700_000_000);
+    // Filled in once the catalog row exists below; the scripted list is read
+    // only after the harness starts.
+    source.invocation = "claude".to_string();
+    let (harness, local) = spliced_replace_harness(client_side, Vec::new()).await;
+    let crate::store::ProfileCreation::Created(profile) = harness
+        .store
+        .create_profile(
+            "yolo-profile".into(),
+            "claude --dangerously-skip-permissions".into(),
+            farhelm_proto::AgentKind::Claude,
+            None,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("fixture catalog must have capacity");
+    };
+    source.source_profile = Some(farhelm_proto::SourceProfile {
+        id: profile.id.clone(),
+        name: profile.name.clone(),
+        existence: farhelm_proto::ProfileExistence::Unresolved,
+    });
+    let fleet = harness.fleet.clone();
+    fleet.edit(local, |script| script.sessions.push(source.clone()));
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        let mut created = rest_harness::session("profiled-new", 1_700_000_500);
+        created.source_profile = source.source_profile.clone();
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, .. } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        fleet.edit(local, |script| {
+            script.sessions.retain(|s| s.id != "profiled-src")
+        });
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    harness.refresh_to_completion(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/profiled-src/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    peer.await.unwrap();
+    assert_eq!(
+        harness.store.remembered_profile().await.unwrap(),
+        None,
+        "a plain Replace must not make the listed row's profile the default"
+    );
+}
+
 /// The simplest replace: a live, raw-invocation source. SPEC.md's contract
 /// is a NEW id carrying the source's cwd, title, and invocation, with the
 /// old id gone from the list at once — this pins that promise against the
