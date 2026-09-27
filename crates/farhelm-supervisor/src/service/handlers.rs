@@ -580,8 +580,8 @@ async fn resolve_restricted_profile(
             message,
         } if message.starts_with(NO_HELM_ATTACHED) => Err((
             ErrorKind::Unavailable,
-            "an attached helm is needed to resolve a profile name; omit --agent to \
-             reuse the asking session's agent"
+            "an attached helm is needed to resolve --agent or --profile-id; pass \
+             --inherit-agent instead to reuse the asking session's own agent"
                 .to_string(),
         )),
         AgentOutcome::Err { kind, message } => Err((kind, message)),
@@ -4441,8 +4441,12 @@ mod tests {
         };
         assert_eq!(kind, ErrorKind::Unavailable);
         assert!(message.contains("attached helm"));
-        assert!(message.contains("omit --agent"));
-        assert!(message.contains("asking session's agent"));
+        // The remedy must be one the CLI accepts: it requires exactly one of
+        // --agent, --profile-id, or --inherit-agent, so "omit --agent" (the
+        // old advice) was itself a usage error.
+        assert!(message.contains("--inherit-agent"));
+        assert!(!message.contains("omit --agent"));
+        assert!(message.contains("asking session's own agent"));
     }
 
     /// A named restricted create must leave the parent lifecycle lock free
