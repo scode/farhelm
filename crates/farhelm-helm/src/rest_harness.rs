@@ -1070,6 +1070,17 @@ impl FleetBuilder {
         self
     }
 
+    /// Hold `host`'s FIRST list reply until the returned sender is used or
+    /// dropped.
+    ///
+    /// [`ScriptedFleet::hold_next_list`] can only be armed once the harness
+    /// is running, by which time the connection's first refresh has usually
+    /// completed. A test about the window BEFORE any refresh has succeeded
+    /// needs the barrier in place before the actor ever dials.
+    pub(crate) fn hold_first_list(&self, host: HostId) -> tokio::sync::oneshot::Sender<()> {
+        self.fleet.hold_next_list(host)
+    }
+
     /// Refresh this fleet on `interval` instead of once an hour.
     ///
     /// Only for tests whose subject IS the refresh loop's interleaving with

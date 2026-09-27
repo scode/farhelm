@@ -3425,13 +3425,29 @@ impl HostActor {
         // Anything sent before this connection existed is not about it.
         refresh.mark_unchanged();
         let connected_at = tokio::time::Instant::now();
-        self.publish(
+        // An identity-less host serves from memory from the moment it is
+        // connected, starting with an empty list, not from its first
+        // successful refresh. Creates are accepted as soon as the host is
+        // `Connected`, and `remember_session` refuses to record into a list
+        // that does not exist; publishing `Clear` here left a session created
+        // before the first drain finished (or while drains kept failing,
+        // each `Retain`ing the absent list) unrecorded, so it answered 404
+        // until a refresh succeeded. Empty is also the honest starting
+        // answer: nothing is known about this host yet, which is exactly
+        // what the persisted scope showed for it before.
+        let live = if identity.is_none() {
+            LiveSessions::Set(Arc::new(Vec::new()))
+        } else {
+            LiveSessions::Clear
+        };
+        self.publish_with_live(
             HostState::Connected {
                 identity: identity.clone(),
                 build_version: build_version.clone(),
                 last_refresh: RefreshHealth::Pending,
             },
             Some(Arc::clone(&client)),
+            live,
         );
         let mut ended = "the peer closed the connection";
         loop {
