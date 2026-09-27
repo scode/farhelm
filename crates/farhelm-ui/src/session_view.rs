@@ -1704,7 +1704,7 @@ pub(crate) fn SessionView(
                             // panel represented by `aria-expanded`.
                             div { id: "restart-confirm-panel", class: "header-confirm",
                                 span { class: "confirm-consequence",
-                                    "still running — restarting stops the agent and its whole process tree first:"
+                                    "{crate::status::restart_consequence(&shown.status)}"
                                 }
                                 button {
                                     r#type: "button",

@@ -403,8 +403,6 @@ One line per open item. This file must always match the feedback files in this d
   "Starting Farhelm…".
 - `row-ops-counter-leaks-on-unmount.md` — row_ops leaks when the browser token prompt unmounts the list mid-operation,
   disabling header actions.
-- `restart-prompt-claims-running-when-unknown.md` — the header restart prompt says "still running" for an Unknown
-  status.
 - `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
   sidebar keeps deleted/stale rows.
 - `sidebar-rename-not-reflected-in-header.md` — renaming the open session never updates its header, which reads a
