@@ -268,8 +268,6 @@ One line per open item. This file must always match the feedback files in this d
   misclassified as interrupted.
 - `create-replay-codex-offer-conflict.md` — a create replay can fail with an unrelated "Codex restart offer changed"
   Conflict.
-- `create-mark-window-failure-drops-pane.md` — when marking the agent window fails at create, the pane is dropped and a
-  running agent has no terminal.
 - `canonicalize-failure-stores-literal-cwd.md` — a failed canonicalization at create stores the literal path as
   verified, blocking later restarts.
 - `reused-pane-dead-treated-definitive.md` — a failed relaunch into a reused pane treats a dead pane as "respawn never
