@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `reload-leaves-unread-launch-spec.md` — startup reconciliation cleans launch specs only after Error, so
-  Interrupted/Exited launches keep credentials on disk.
 - `observers-leave-unread-launch-spec.md` — the ticker, listing and stop observers clean launch specs only after Error,
   leaving credentials on disk.
 - `codex-hook-trust-bypass-runs-repo-hooks.md` — every Codex launch passes `--dangerously-bypass-hook-trust`, so a

@@ -1684,7 +1684,11 @@
   current-generation spec left after reload's Interrupted or exited outcomes (add wording in this item's change if that
   PR's text does not already). Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution
   change.
-- Execution: `pending`.
+- Execution: `complete`; no wording was added: the SPEC_impl.md runtime-state sentence landed with
+  `superseded-launch-specs-never-removed.md` already names startup reconciliation among the paths after which a
+  current-generation spec whose launch never reached the shim may stay until Delete. This change only records that and
+  removes the queue item. Draft PR [#1049](https://github.com/scode/farhelm/pull/1049/changes), jj change `rvlwskzq`,
+  bookmark `pr/reload-unread-spec-accepted`.
 
 ## observers-leave-unread-launch-spec.md
 
