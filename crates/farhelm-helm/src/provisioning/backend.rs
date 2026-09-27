@@ -1007,6 +1007,35 @@ impl SystemBackend {
             .and_then(|bytes| std::str::from_utf8(&bytes).ok()?.trim().parse().ok())
     }
 
+    /// The remote shell script an ssh probe runs: find the farhelm binary and
+    /// exec its stdio proxy, or exit with the positive-absence status.
+    ///
+    /// `farhelm` and `state` are already shell-quoted. A bare `farhelm` is
+    /// looked up on the remote PATH and then in Farhelm's two standard install
+    /// locations, because a non-interactive ssh command does not read the
+    /// login profile that usually puts `~/.local/bin` on PATH: the private
+    /// ADD layout (`~/.local/lib/farhelm`) and the install script's
+    /// `~/.local/bin`. Missing the latter reported a host that runs Farhelm
+    /// from the standard installer as empty, and offered to install a second
+    /// copy over it.
+    pub(super) fn probe_script(farhelm: &str, state: Option<&str>) -> String {
+        let state_arg = state
+            .map(|path| format!(" --state-dir {path}"))
+            .unwrap_or_default();
+        format!(
+            "printf '%s\\n' {marker} >&2; resolved=''; \
+             if command -v {farhelm} >/dev/null 2>&1; then resolved=$(command -v {farhelm}); \
+             elif [ {farhelm} = farhelm ] && [ -x \"$HOME/.local/lib/farhelm/farhelm\" ]; \
+             then resolved=\"$HOME/.local/lib/farhelm/farhelm\"; \
+             elif [ {farhelm} = farhelm ] && [ -x \"$HOME/.local/bin/farhelm\" ]; \
+             then resolved=\"$HOME/.local/bin/farhelm\"; fi; \
+             if [ -n \"$resolved\" ]; then printf '%s%s\\n' {resolved_prefix} \"$resolved\" >&2; \
+             exec \"$resolved\" internal stdio{state_arg}; fi; exit {POSITIVE_ABSENCE_EXIT}",
+            marker = crate::ssh::shell_quote(REMOTE_PROBE_MARKER),
+            resolved_prefix = crate::ssh::shell_quote(REMOTE_RESOLVED_PREFIX),
+        )
+    }
+
     /// Start the stdio proxy without interpreting its bytes. The caller owns
     /// hello completion and the positive-absence exit taxonomy.
     async fn spawn_probe(
@@ -1029,19 +1058,7 @@ impl SystemBackend {
                     .as_ref()
                     .map(|path| shell_path(path))
                     .transpose()?;
-                let state_arg = state
-                    .map(|path| format!(" --state-dir {path}"))
-                    .unwrap_or_default();
-                let script = format!(
-                    "printf '%s\\n' {marker} >&2; resolved=''; \
-                     if command -v {farhelm} >/dev/null 2>&1; then resolved=$(command -v {farhelm}); \
-                     elif [ {farhelm} = farhelm ] && [ -x \"$HOME/.local/lib/farhelm/farhelm\" ]; \
-                     then resolved=\"$HOME/.local/lib/farhelm/farhelm\"; fi; \
-                     if [ -n \"$resolved\" ]; then printf '%s%s\\n' {resolved_prefix} \"$resolved\" >&2; \
-                     exec \"$resolved\" internal stdio{state_arg}; fi; exit {POSITIVE_ABSENCE_EXIT}",
-                    marker = crate::ssh::shell_quote(REMOTE_PROBE_MARKER),
-                    resolved_prefix = crate::ssh::shell_quote(REMOTE_RESOLVED_PREFIX),
-                );
+                let script = Self::probe_script(&farhelm, state.as_deref());
                 self.ssh_command(destination, script).map_err(|error| {
                     BackendFailure::new("building the ssh probe", error.to_string())
                 })?

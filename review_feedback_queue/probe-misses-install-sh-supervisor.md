@@ -1,43 +1,28 @@
-# Discovery misses an install.sh supervisor in ~/.local/bin
+# The probe misses a supervisor whose farhelm is in a custom install directory
 
-Reviewed commit: 2b597e90dcc715c5efa61e257d775725f80bd946
+Reviewed commit: 7cc06814956a1e9b6ec41f29e2e57ec57b5d2178
 
 ## TLDR
 
-Adding a host where the user already runs Farhelm from the standard installer offers to install a second copy, and
-confirming it leaves a crash-looping service and may quietly attach to the old build.
+Adding a host whose running supervisor comes from a farhelm installed in a non-standard directory (not on the
+non-interactive ssh PATH) probes as "no supervisor", and the helm offers to install a second copy over it.
 
 ## Details
 
 Paths are relative to `crates/farhelm-helm/src/` unless they start with `crates/`.
 
-Found by pre-pr-review-swarm run `20260925-0602-2b597e9-f96c` (audit of Area 8, provisioning) as
-`F10 / COR-PROBE-MISSES-LOCAL-BIN`, tagged **definite**. Anchors and title: `provisioning/backend.rs:936-942` —
-Discovery reports "absent" when farhelm is not on the non-interactive ssh PATH, missing an install.sh supervisor and
-offering to install over it
+Narrowed from the original finding (pre-pr-review-swarm run `20260925-0602-2b597e9-f96c`,
+`F10 /
+COR-PROBE-MISSES-LOCAL-BIN`). The ssh probe script (`provisioning/backend.rs`, `SystemBackend::probe_script`) now
+also tries `$HOME/.local/bin/farhelm`, the install script's default, after `command -v farhelm` and the ADD layout
+`$HOME/.local/lib/farhelm/farhelm`. That covers the documented install.
 
-The probe's remote script (backend.rs:936-942) looks for the binary with `command -v farhelm` and, failing that, only
-tries `$HOME/.local/lib/farhelm/farhelm` (the ADD layout). If neither exists it exits 75, which the helm reads as a
-positive "no supervisor here". But `install.sh` installs to `~/.local/bin/farhelm`, and on stock Ubuntu `~/.local/bin`
-is added to PATH only by the login profile, which a non-interactive `ssh host command` does not read. So a host where
-the user installed Farhelm the documented way and runs a supervisor from it probes as absent.
+What remains is an install elsewhere, for example `FARHELM_INSTALL_DIR` set to a custom directory, with a supervisor
+running from it. The probe still exits with positive absence (75), and the helm offers ADD, which installs a second
+binary and a unit on the same default state directory. For a hand-started supervisor the new unit then crash-loops on
+the state-directory lock; for setup's unit the unit file is overwritten. SPEC.md Topology says a running supervisor is
+used as-is.
 
-The helm then offers ADD, which installs a second binary at `~/.local/lib/farhelm/farhelm`, writes a unit pointing it at
-the same default state directory, and runs `enable --now`. If the running supervisor was started by hand, the new unit's
-supervisor cannot take the state-directory lock and crash-loops (the same mechanism as F3), and the attach step either
-reconnects to the old supervisor and reports success or times out. SPEC.md Topology says a running supervisor —
-explicitly including a hand-started one — is used as-is and never replaced; here the probe misses Farhelm's own install
-layout.
-
-Suggested change: also try `$HOME/.local/bin/farhelm`; and before declaring a host empty, look for a live socket in the
-default state directory or an existing unit, and ask for the binary path instead of offering an install.
-
-Restater note: the claim covers "by hand or via `farhelm helm setup`", but the two cases end differently. If the running
-supervisor is setup's `farhelm-supervisor.service`, ADD's `enable --now` finds that unit already active and does not
-start a second copy, so there is no crash loop. Instead the unit file is silently overwritten (F4), losing setup's
-marker, the row is repointed at the new binary, attach succeeds through the old running process, and the new binary only
-takes over at the next restart or boot. The crash loop applies to hand-started supervisors.
-
-User-visible consequence: adding a host where the user already runs Farhelm from the standard installer offers to
-install a second copy, and confirming it leaves a crash-looping service (hand-started case) and may quietly attach to
-the old build.
+The original suggestion for this part: before declaring a host empty, look for a live supervisor socket in the default
+state directory or an existing `farhelm-supervisor.service` unit, and ask for the binary path instead of offering an
+install. That is a new detection step in the probe, not a narrow path addition.
