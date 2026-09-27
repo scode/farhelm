@@ -1481,8 +1481,12 @@ mod embedded_ui_tests {
     async fn successful_embedded_response_carries_build_stamp_header() {
         let response = embedded_router().await.oneshot(get("/")).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        // Spelled out rather than taken from the constant: this pins the
+        // header's wire name, so an edit to the shared constant fails here
+        // instead of silently renaming what the UI and the browser suite
+        // look for.
         assert_eq!(
-            response.headers().get(BUILD_STAMP_HEADER).unwrap(),
+            response.headers().get("x-farhelm-build").unwrap(),
             env!("CARGO_PKG_VERSION")
         );
     }
@@ -1688,12 +1692,10 @@ async fn run_with_ready(
 /// The response header carrying this helm's build version to the browser
 /// (PLAN_M6.md item 6).
 ///
-/// Lowercase because `HeaderName::from_static` accepts nothing else, and
-/// spelled out in one place because the UI matches on the same literal
-/// (farhelm-ui's `skew::BUILD_HEADER`) — a cross-language coupling with
-/// nothing but this pairing to hold it together, which is why the browser
-/// suite asserts the header by name.
-const BUILD_STAMP_HEADER: &str = "x-farhelm-build";
+/// The name comes from [`farhelm_proto::http::BUILD_STAMP_HEADER`], which the
+/// UI reads as well; the browser suite also asserts the header by its
+/// literal name.
+const BUILD_STAMP_HEADER: &str = farhelm_proto::http::BUILD_STAMP_HEADER;
 
 /// Classify an error chain into the coarse [`ErrorKind`] vocabulary this
 /// crate's two error-facing callers both need: [`http_error`] turns it into
@@ -1845,8 +1847,10 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
     let mut response = (status, format!("{e:#}")).into_response();
     if unaccepted {
         response.headers_mut().insert(
-            "x-farhelm-create-outcome",
-            axum::http::HeaderValue::from_static("definitely-unaccepted"),
+            farhelm_proto::http::CREATE_OUTCOME_HEADER,
+            axum::http::HeaderValue::from_static(
+                farhelm_proto::http::CREATE_OUTCOME_DEFINITELY_UNACCEPTED,
+            ),
         );
     }
     response

@@ -1305,13 +1305,15 @@ fn remaining(deadline: tokio::time::Instant) -> Result<std::time::Duration, Send
         .ok_or_else(|| SendError::Request("request deadline elapsed".to_string()))
 }
 
-/// Only the authentication middleware emits this structured error code;
-/// supervisor authorization refusals may share status 401 but not meaning.
+/// Only the authentication middleware emits this structured error code
+/// ([`farhelm_proto::http::AUTH_REQUIRED_CODE`]); supervisor authorization
+/// refusals may share status 401 but not meaning.
 pub(crate) fn device_auth_required(body: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .is_some_and(|value| {
-            value.get("code").and_then(|code| code.as_str()) == Some("device_auth_required")
+            value.get("code").and_then(|code| code.as_str())
+                == Some(farhelm_proto::http::AUTH_REQUIRED_CODE)
         })
 }
 
@@ -1759,8 +1761,10 @@ pub(crate) async fn submit_fresh_create(
     if !resp.status().is_success() {
         let unaccepted = resp
             .headers()
-            .get("x-farhelm-create-outcome")
-            .is_some_and(|value| value == "definitely-unaccepted");
+            .get(farhelm_proto::http::CREATE_OUTCOME_HEADER)
+            .is_some_and(|value| {
+                value == farhelm_proto::http::CREATE_OUTCOME_DEFINITELY_UNACCEPTED
+            });
         let text = refusal_text("POST", &url, resp).await;
         return Err(if unaccepted {
             FreshCreateError::Unaccepted(text)
@@ -1773,21 +1777,18 @@ pub(crate) async fn submit_fresh_create(
         .map_err(|error| FreshCreateError::Unresolved(error.to_string()))
 }
 
-/// The marker the helm appends to a create refused because the host is no
-/// longer on the connection the create named (`precondition.rs` in the helm).
-const INCARNATION_MARKER: &str = "[farhelm:precondition/incarnation]";
-
 /// Classify a create refusal: `(stale, prose)`, where `stale` says the helm
 /// refused because the world moved under the request — re-read and re-seed,
 /// rather than show a permanent error — and `prose` is the sentence with the
-/// machine marker stripped for display.
+/// machine marker ([`farhelm_proto::http::INCARNATION_MARKER`], which the helm
+/// appends) stripped for display.
 ///
 /// Every OTHER 409 (a host that is not connected, a supervisor's own refusal)
 /// carries no marker and must not be answered by re-reading, which is why
 /// this is a marker check and not a status check.
 pub(crate) fn precondition_of(refusal: &str) -> (bool, String) {
     let trimmed = refusal.trim_end();
-    match trimmed.strip_suffix(INCARNATION_MARKER) {
+    match trimmed.strip_suffix(farhelm_proto::http::INCARNATION_MARKER) {
         Some(prose) => (true, prose.trim_end().to_string()),
         None => (false, refusal.to_string()),
     }

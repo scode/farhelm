@@ -37,7 +37,8 @@ const WS_DEVICE_PREFIX: &str = "farhelm-device-";
 const SECRET_LENGTH: usize = 22;
 
 /// Structured marker emitted only by the device-authentication boundary.
-pub(crate) const AUTH_REQUIRED_CODE: &str = "device_auth_required";
+/// Shared with the UI, which branches on it, through `farhelm-proto`.
+pub(crate) const AUTH_REQUIRED_CODE: &str = farhelm_proto::http::AUTH_REQUIRED_CODE;
 
 #[derive(Debug, thiserror::Error)]
 enum ExchangeError {

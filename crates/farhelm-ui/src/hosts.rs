@@ -269,11 +269,11 @@ pub(crate) fn adoptable(state: &HostPhase) -> Option<&str> {
 /// with a command on the machine they are already sitting at
 /// (farhelm-helm's `HostStateView::Unreachable::cause`).
 ///
-/// Named rather than spelled out at each of its two match arms: the string
-/// is a cross-crate coupling, and the diagnosis and the remedy have to key
-/// off exactly the same one or the row would explain one state while
-/// prescribing for another.
-const LOCAL_SUPERVISOR_NOT_RUNNING: &str = "local-supervisor-not-running";
+/// Named rather than spelled out at each of its match arms: the diagnosis and
+/// the remedy have to key off exactly the same string or the row would explain
+/// one state while prescribing for another. It comes from `farhelm-proto`
+/// because the helm writes the same constant, so the two crates cannot drift.
+const LOCAL_SUPERVISOR_NOT_RUNNING: &str = farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 
 /// The evidence behind a phase — the diagnosis, never the remedy (that is
 /// [`state_remedy`]'s job).

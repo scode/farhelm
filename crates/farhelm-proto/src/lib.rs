@@ -8,6 +8,10 @@
 //! tests pin the wire format without async machinery. Transport-agnostic
 //! async read/write helpers live in `io`.
 //!
+//! It also holds the few tokens the helm's HTTP API hands the browser UI for
+//! the UI to branch on (`http`): the UI already depends on this crate, and
+//! these need one definition both sides read, just like the frame types do.
+//!
 //! Wire format, deliberately minimal (all integers big-endian):
 //!
 //! ```text
@@ -67,6 +71,9 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Tokens the UI branches on in the helm's HTTP replies (see the module's own
+/// docs).
+pub mod http;
 #[cfg(feature = "io")]
 pub mod io;
 pub mod launch;
