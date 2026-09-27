@@ -176,8 +176,7 @@ pub const CODEX_UNTRUSTED_CWD_PLACEHOLDER: &str = "{codex:untrusted-cwd}";
 /// keeping its own list: a model id that happens to equal a marker would be
 /// silently rewritten at spawn, and a hand-copied list is what let that check
 /// miss the two Codex markers when they were added. The conversation-id shape
-/// check (`is_plausible_conversation_id`) still carries its own two-entry
-/// list; converging it is tracked separately.
+/// check (`is_plausible_conversation_id`) asks it too, for the same reason.
 pub const RESERVED_PLACEHOLDERS: &[&str] = &[
     CWD_PLACEHOLDER,
     CONVERSATION_PLACEHOLDER,
@@ -2328,20 +2327,20 @@ fn correlators_from(
 ///
 /// ## The placeholders themselves
 ///
-/// An id equal to [`CWD_PLACEHOLDER`] (or, for symmetry,
-/// [`CONVERSATION_PLACEHOLDER`]) is refused even though it is graphic
-/// ASCII. Substitution runs in two passes — identity first, the working
-/// directory later in `spawn_agent` — and an id spelled `{cwd}` would be
-/// written into the template by the first pass and then rewritten into a
-/// directory by the second, so a record file (which any local process can
-/// write) could steer what the resume argv carries. Refusing the literal
-/// keeps the passes from reinterpreting each other's output.
+/// An id equal to any of [`RESERVED_PLACEHOLDERS`] is refused even though
+/// it is graphic ASCII. Substitution runs in two passes — identity first,
+/// the working directory later in `spawn_agent` — and an id spelled `{cwd}`
+/// (or one of the Codex trust markers, which that later pass turns into a
+/// Codex project-trust setting) would be written into the template by the
+/// first pass and then rewritten by the second, so a record file (which any
+/// local process can write) could steer what the resume argv carries.
+/// Refusing the literals keeps the passes from reinterpreting each other's
+/// output; asking the shared set means a marker added later is covered too.
 pub(crate) fn is_plausible_conversation_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= MAX_CONVERSATION_ID_LEN
         && !id.starts_with('-')
-        && id != CWD_PLACEHOLDER
-        && id != CONVERSATION_PLACEHOLDER
+        && !is_reserved_placeholder(id)
         && id
             .chars()
             .all(|c| c.is_ascii_graphic() && c != '"' && c != '\'' && c != '\\')
@@ -4946,6 +4945,11 @@ mod tests {
         assert!(!is_plausible_conversation_id("has space"));
         assert!(!is_plausible_conversation_id("has\nnewline"));
         assert!(!is_plausible_conversation_id("has\"quote"));
+        // Every marker a later substitution pass rewrites, including the two
+        // Codex trust markers the check once missed.
+        for placeholder in RESERVED_PLACEHOLDERS {
+            assert!(!is_plausible_conversation_id(placeholder), "{placeholder}");
+        }
         assert!(!is_plausible_conversation_id(
             &"x".repeat(MAX_CONVERSATION_ID_LEN + 1)
         ));

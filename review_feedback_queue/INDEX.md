@@ -288,8 +288,6 @@ One line per open item. This file must always match the feedback files in this d
   "can't capture" warnings.
 - `env-wrapper-hides-command-not-found.md` — Farhelm's own `env` wrapper turns "command not found" for Goose, Pi and OMP
   into exited (127) instead of error.
-- `conversation-id-misses-codex-placeholders.md` — the conversation-id plausibility check misses
-  `{codex:trusted-cwd}`/`{codex:untrusted-cwd}` placeholders.
 - `host-write-lock-split-on-actor-respawn.md` — the per-host write lock lives on the actor handle, so a respawn lets
   edits run during provisioning.
 - `alias-edit-waits-on-provisioning.md` — renaming a host alias blocks behind a provisioning run although the alias
