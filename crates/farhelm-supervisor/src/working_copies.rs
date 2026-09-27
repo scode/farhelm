@@ -195,6 +195,17 @@ pub struct WorkingCopyRow {
     /// Identity of the allocated directory itself. The fingerprint every
     /// destructive act verifies against.
     pub path_identity: Option<DirectoryIdentity>,
+    /// Birth time (nanoseconds since the epoch) of `canonical_root` when the
+    /// directory was allocated, or `None`: a row recorded before birth times
+    /// were kept, or a filesystem that reports none.
+    ///
+    /// `(dev, ino)` alone cannot tell a directory from one recreated at the
+    /// same path, because filesystems reuse inode numbers routinely (on
+    /// ext4 a removed-and-recreated directory commonly gets the same one).
+    /// The birth time is what changes. See [`same_directory`] for the rule.
+    pub root_birth_ns: Option<i64>,
+    /// Birth time of the allocated directory itself; see `root_birth_ns`.
+    pub path_birth_ns: Option<i64>,
     pub allocation_state: AllocationState,
     /// The journaled rename destination while `archive_pending` (kept for
     /// diagnostics afterwards).
@@ -330,6 +341,159 @@ fn identity_of(path: &Path) -> Result<DirectoryIdentity> {
     Ok((meta.dev(), meta.ino()))
 }
 
+/// What one no-follow stat of a path observed: its identity, whether it
+/// is a directory, and its birth time when the filesystem reports one.
+///
+/// All three come from the SAME system call, so they describe one object
+/// even if the path is being replaced concurrently.
+#[derive(Clone, Copy, Debug)]
+struct Observed {
+    dev: u64,
+    ino: u64,
+    is_dir: bool,
+    /// Nanoseconds since the epoch; `None` when the filesystem (or, on
+    /// Linux, a kernel older than `statx`) does not report a birth time.
+    birth_ns: Option<i64>,
+}
+
+impl Observed {
+    fn identity(&self) -> DirectoryIdentity {
+        (self.dev, self.ino)
+    }
+}
+
+/// Stat `path` without following symlinks, including its birth time.
+///
+/// Linux asks `statx` for `STATX_BTIME` directly rather than going through
+/// `Metadata::created`: the standard library only uses `statx` on glibc,
+/// and on musl, which is what the released Linux binaries are built
+/// against, `created` always reports "unsupported". The `libc` crate gates
+/// its own `statx` binding on musl behind a cfg this build does not set, so
+/// the syscall is made directly with the kernel's fixed, versioned struct
+/// layout. A kernel without `statx` falls back to plain `lstat` with no
+/// birth time.
+#[cfg(target_os = "linux")]
+fn observe(path: &Path) -> std::io::Result<Observed> {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    /// `struct statx_timestamp` from `<linux/stat.h>`.
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct StatxTimestamp {
+        tv_sec: i64,
+        tv_nsec: u32,
+        reserved: i32,
+    }
+    /// `struct statx` from `<linux/stat.h>`: 256 bytes, fields fixed by the
+    /// kernel ABI and extended only into the trailing spare space.
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct Statx {
+        mask: u32,
+        blksize: u32,
+        attributes: u64,
+        nlink: u32,
+        uid: u32,
+        gid: u32,
+        mode: u16,
+        spare0: u16,
+        ino: u64,
+        size: u64,
+        blocks: u64,
+        attributes_mask: u64,
+        atime: StatxTimestamp,
+        btime: StatxTimestamp,
+        ctime: StatxTimestamp,
+        mtime: StatxTimestamp,
+        rdev_major: u32,
+        rdev_minor: u32,
+        dev_major: u32,
+        dev_minor: u32,
+        spare2: [u64; 14],
+    }
+    const _: () = assert!(std::mem::size_of::<Statx>() == 256);
+    const STATX_TYPE: u32 = 0x0001;
+    const STATX_INO: u32 = 0x0100;
+    const STATX_BTIME: u32 = 0x0800;
+
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let mut buf = Statx::default();
+    // SAFETY: `c_path` is a valid NUL-terminated string and `buf` is a
+    // writable, correctly sized `struct statx` for the duration of the call.
+    let rc = unsafe {
+        libc::syscall(
+            libc::SYS_statx,
+            libc::AT_FDCWD,
+            c_path.as_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+            STATX_TYPE | STATX_INO | STATX_BTIME,
+            &mut buf as *mut Statx,
+        )
+    };
+    if rc != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ENOSYS) {
+            let meta = fs::symlink_metadata(path)?;
+            return Ok(Observed {
+                dev: meta.dev(),
+                ino: meta.ino(),
+                is_dir: meta.is_dir(),
+                birth_ns: None,
+            });
+        }
+        return Err(error);
+    }
+    let birth_ns = (buf.mask & STATX_BTIME != 0)
+        .then(|| {
+            buf.btime
+                .tv_sec
+                .checked_mul(1_000_000_000)?
+                .checked_add(i64::from(buf.btime.tv_nsec))
+        })
+        .flatten();
+    Ok(Observed {
+        dev: libc::makedev(buf.dev_major, buf.dev_minor),
+        ino: buf.ino,
+        is_dir: u32::from(buf.mode) & libc::S_IFMT == libc::S_IFDIR,
+        birth_ns,
+    })
+}
+
+/// Stat `path` without following symlinks, including its birth time
+/// (`st_birthtime`, which `Metadata::created` reads on macOS).
+#[cfg(not(target_os = "linux"))]
+fn observe(path: &Path) -> std::io::Result<Observed> {
+    let meta = fs::symlink_metadata(path)?;
+    let birth_ns = meta
+        .created()
+        .ok()
+        .and_then(|created| created.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|since| i64::try_from(since.as_nanos()).ok());
+    Ok(Observed {
+        dev: meta.dev(),
+        ino: meta.ino(),
+        is_dir: meta.is_dir(),
+        birth_ns,
+    })
+}
+
+/// Whether `observed` is the directory a row recorded: the same `(dev, ino)`
+/// and, when a birth time was recorded, the same birth time.
+///
+/// The one rule every ownership check in this module applies, because
+/// inode numbers are reused: a directory removed and recreated at the same
+/// path (a user re-cloning over a checkout Farhelm made, say) can carry the
+/// old `(dev, ino)`, and a match on those alone would let Delete archive the
+/// user's new folder. A recorded birth time that differs, or cannot be read
+/// now, means a different object. A row without one (recorded before birth
+/// times were kept, or on a filesystem without them) falls back to
+/// `(dev, ino)` alone: the accepted residual for those rows.
+fn same_directory(observed: &Observed, identity: DirectoryIdentity, birth: Option<i64>) -> bool {
+    observed.identity() == identity
+        && birth.is_none_or(|recorded| observed.birth_ns == Some(recorded))
+}
+
 /// fsync an openable directory. The durability primitive
 /// `files.rs::write_durable_sync` lacks for NEW child entries: it fsyncs a
 /// file's parent after renaming the file over a destination, but a freshly
@@ -350,7 +514,7 @@ pub fn get_working_copy(conn: &Connection, id: &str) -> Result<Option<WorkingCop
     let mut stmt = conn.prepare(
         "SELECT id, canonical_root, canonical_path, repo_owner, repo_name, \
          original_basename, origin_session_id, root_device, root_inode, \
-         path_device, path_inode, allocation_state, archive_destination, \
+         path_device, path_inode, root_birth_ns, path_birth_ns, allocation_state, archive_destination, \
          preparation_snapshot, created_at \
          FROM working_copies WHERE id = ?1",
     )?;
@@ -373,6 +537,8 @@ fn decode_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkingCopyRow> {
         origin_session_id: row.get("origin_session_id")?,
         root_identity: decode_identity(row, "root_device", "root_inode"),
         path_identity: decode_identity(row, "path_device", "path_inode"),
+        root_birth_ns: row.get("root_birth_ns")?,
+        path_birth_ns: row.get("path_birth_ns")?,
         allocation_state: AllocationState::from_str(&state).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
         })?,
@@ -436,14 +602,26 @@ pub struct PreparationSnapshot {
 /// over [`occupied_related_names`]); allocation does not rename, it creates
 /// exactly this name.
 pub fn record_planned(conn: &Connection, spec: &PlannedWorkingCopy) -> Result<WorkingCopyRow> {
+    // The root's birth time is recorded with the plan, so a create that is
+    // interrupted before mkdir can still tell its root from one recreated
+    // at the same path (with a reused inode) before it retries. It is taken
+    // only when the root still has the identity admission saw moments
+    // earlier; otherwise the stored identity already disagrees with the
+    // disk, and the pre-mkdir check refuses the retry on `(dev, ino)` alone.
+    let root_birth = spec.root_identity.and_then(|identity| {
+        observe(Path::new(&spec.canonical_root))
+            .ok()
+            .filter(|observed| observed.identity() == identity)
+            .and_then(|observed| observed.birth_ns)
+    });
     conn.execute(
         "INSERT INTO working_copies \
          (id, canonical_root, canonical_path, repo_owner, repo_name, \
           original_basename, origin_session_id, root_device, root_inode, \
           path_device, path_inode, allocation_state, archive_destination, \
-          preparation_snapshot, created_at) \
+          preparation_snapshot, created_at, root_birth_ns) \
          VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?9, ?10, NULL, NULL, ?7, \
-                 NULL, ?11, ?8)",
+                 NULL, ?11, ?8, ?12)",
         rusqlite::params![
             spec.id,
             spec.canonical_root,
@@ -456,6 +634,7 @@ pub fn record_planned(conn: &Connection, spec: &PlannedWorkingCopy) -> Result<Wo
             spec.root_identity.map(|identity| identity.0 as i64),
             spec.root_identity.map(|identity| identity.1 as i64),
             spec.preparation_snapshot,
+            root_birth,
         ],
     )?;
     get_working_copy(conn, &spec.id)?.ok_or_else(|| WorkingCopyError::RowMissing(spec.id.clone()))
@@ -512,7 +691,7 @@ pub fn origin_working_copy(conn: &Connection, session_id: &str) -> Result<Option
     let mut stmt = conn.prepare(
         "SELECT id, canonical_root, canonical_path, repo_owner, repo_name, \
          original_basename, origin_session_id, root_device, root_inode, \
-         path_device, path_inode, allocation_state, archive_destination, \
+         path_device, path_inode, root_birth_ns, path_birth_ns, allocation_state, archive_destination, \
          preparation_snapshot, created_at \
          FROM working_copies WHERE origin_session_id = ?1 LIMIT 2",
     )?;
@@ -531,7 +710,7 @@ pub fn member_working_copies(conn: &Connection, session_id: &str) -> Result<Vec<
     let mut stmt = conn.prepare(
         "SELECT w.id, w.canonical_root, w.canonical_path, w.repo_owner, w.repo_name, \
          w.original_basename, w.origin_session_id, w.root_device, w.root_inode, \
-         w.path_device, w.path_inode, w.allocation_state, w.archive_destination, \
+         w.path_device, w.path_inode, w.root_birth_ns, w.path_birth_ns, w.allocation_state, w.archive_destination, \
          w.preparation_snapshot, w.created_at \
          FROM working_copies w \
          JOIN working_copy_members m ON m.working_copy_id = w.id \
@@ -563,7 +742,7 @@ pub fn all_working_copies(conn: &Connection) -> Result<Vec<WorkingCopyRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, canonical_root, canonical_path, repo_owner, repo_name, \
          original_basename, origin_session_id, root_device, root_inode, \
-         path_device, path_inode, allocation_state, archive_destination, \
+         path_device, path_inode, root_birth_ns, path_birth_ns, allocation_state, archive_destination, \
          preparation_snapshot, created_at \
          FROM working_copies ORDER BY created_at, id",
     )?;
@@ -876,8 +1055,10 @@ pub fn allocate_with_fault(
         // A missing root is ALSO an identity failure (it cannot match an
         // expected identity), and so is any other stat failure — fail
         // closed rather than allocate inside a tree we cannot vouch for.
-        let actual = identity_of(&root).map_err(AllocationFailure::PreMkdir)?;
-        if actual != expected {
+        let actual = observe(&root)
+            .map_err(WorkingCopyError::Io)
+            .map_err(AllocationFailure::PreMkdir)?;
+        if !same_directory(&actual, expected, row.root_birth_ns) {
             return Err(AllocationFailure::PreMkdir(
                 WorkingCopyError::IdentityMismatch { path: root },
             ));
@@ -905,7 +1086,11 @@ pub fn allocate_with_fault(
     // it accurately says Farhelm has no captured identity while the Error
     // session makes the possible directory visible. A later read failure
     // after the allocation transaction may instead retain Allocated.
-    let identity = identity_of(&target).map_err(AllocationFailure::PostMkdir)?;
+    let target_observed = observe(&target)
+        .map_err(WorkingCopyError::Io)
+        .map_err(AllocationFailure::PostMkdir)?;
+    let identity = target_observed.identity();
+    let path_birth = target_observed.birth_ns;
     // Canonicalize AFTER exclusive creation: the only path canonicalized
     // is a directory this call just created, so no concurrent rename of
     // parents can smuggle in a different object without the identity
@@ -914,7 +1099,11 @@ pub fn allocate_with_fault(
         .canonicalize()
         .map_err(WorkingCopyError::Io)
         .map_err(AllocationFailure::PostMkdir)?;
-    let root_identity = identity_of(&root).map_err(AllocationFailure::PostMkdir)?;
+    let root_observed = observe(&root)
+        .map_err(WorkingCopyError::Io)
+        .map_err(AllocationFailure::PostMkdir)?;
+    let root_identity = root_observed.identity();
+    let root_birth = root_observed.birth_ns;
 
     // Make the new directory's entry durable before the database claims
     // it: without this parent fsync a crash could leave the row
@@ -937,7 +1126,8 @@ pub fn allocate_with_fault(
         .execute(
             "UPDATE working_copies \
          SET allocation_state = ?2, root_device = ?3, root_inode = ?4, \
-             path_device = ?5, path_inode = ?6, canonical_path = ?7 \
+             path_device = ?5, path_inode = ?6, canonical_path = ?7, \
+             root_birth_ns = ?9, path_birth_ns = ?10 \
          WHERE id = ?1 AND allocation_state = ?8",
             rusqlite::params![
                 row.id,
@@ -948,6 +1138,8 @@ pub fn allocate_with_fault(
                 identity.1 as i64,
                 canonical_path.to_string_lossy(),
                 AllocationState::Planned.as_str(),
+                root_birth,
+                path_birth,
             ],
         )
         .map_err(|error| AllocationFailure::PostMkdir(WorkingCopyError::Db(error)))?;
@@ -1036,8 +1228,10 @@ pub fn verify_identity(row: &WorkingCopyRow) -> Result<IdentityStatus> {
     let Some(path) = &row.canonical_path else {
         return Ok(IdentityStatus::NoCapturedIdentity);
     };
-    match fs::symlink_metadata(path) {
-        Ok(meta) if (meta.dev(), meta.ino()) == identity => Ok(IdentityStatus::Matches),
+    match observe(Path::new(path)) {
+        Ok(observed) if same_directory(&observed, identity, row.path_birth_ns) => {
+            Ok(IdentityStatus::Matches)
+        }
         Ok(_) => Ok(IdentityStatus::DifferentObject),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(IdentityStatus::Missing),
         Err(e) => Err(e.into()),
@@ -1140,16 +1334,17 @@ fn archive_move_with_effects(
     refuse_overlapping_archive(conn, &row)?;
     refuse_archive_destination_checkout(conn, &row)?;
     let root = verified_root(&row)?;
-    let source_identity = match fs::symlink_metadata(&source) {
-        Ok(meta) => (meta.dev(), meta.ino()),
+    let source_observed = match observe(&source) {
+        Ok(observed) => observed,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ArchiveOutcome::SourceMissing);
         }
         Err(e) => return Err(e.into()),
     };
-    if source_identity != expected {
+    if !same_directory(&source_observed, expected, row.path_birth_ns) {
         return Err(WorkingCopyError::IdentityMismatch { path: source });
     }
+    let source_identity = source_observed.identity();
     let archive_root = ensure_archive_root(&root)?;
     if identity_of(&archive_root)?.0 != source_identity.0 {
         return Err(WorkingCopyError::ArchiveRootForeignDevice { path: archive_root });
@@ -1177,8 +1372,8 @@ pub(crate) fn verified_root(row: &WorkingCopyRow) -> Result<PathBuf> {
         .root_identity
         .ok_or_else(|| WorkingCopyError::WrongState(row.id.clone()))?;
     let root = PathBuf::from(&row.canonical_root);
-    let metadata = fs::symlink_metadata(&root)?;
-    if !metadata.is_dir() || (metadata.dev(), metadata.ino()) != expected {
+    let observed = observe(&root)?;
+    if !observed.is_dir || !same_directory(&observed, expected, row.root_birth_ns) {
         return Err(WorkingCopyError::IdentityMismatch { path: root });
     }
     Ok(root)
@@ -1406,8 +1601,8 @@ fn reconcile_archive_with_effects(
     // its matching identity proves the rename completed, even when a
     // foreign object has since appeared at the old source name.
     let mut overlong_destination = false;
-    let destination_identity = match fs::symlink_metadata(&destination_path) {
-        Ok(meta) => Some((meta.dev(), meta.ino())),
+    let destination_meta = match observe(&destination_path) {
+        Ok(observed) => Some(observed),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) if e.raw_os_error() == Some(libc::ENAMETOOLONG) => {
             // Older collision retries could journal a growing UUID chain.
@@ -1424,11 +1619,11 @@ fn reconcile_archive_with_effects(
     // metadata (re-fsync both parents for durability) and leave whatever
     // occupies the old source path untouched. This is R1.6's "matching
     // destination wins" rule.
-    if let Some(actual) = destination_identity {
+    if let Some(actual) = &destination_meta {
         let Some(expected) = row.path_identity else {
             return Err(WorkingCopyError::WrongState(row.id.clone()));
         };
-        if actual == expected {
+        if same_directory(actual, expected, row.path_birth_ns) {
             sync_archive_parent(&archive_root, parent_sync)?;
             sync_archive_parent(&root, parent_sync)?;
             return Ok(ReconcileOutcome::MetadataComplete);
@@ -1452,7 +1647,7 @@ fn reconcile_archive_with_effects(
         let Some(expected) = expected_identity else {
             return Err(WorkingCopyError::WrongState(row.id.clone()));
         };
-        if identity_of(&source)? != expected {
+        if !same_directory(&observe(&source)?, expected, row.path_birth_ns) {
             return Err(WorkingCopyError::IdentityMismatch {
                 path: source.clone(),
             });
@@ -1471,7 +1666,7 @@ fn reconcile_archive_with_effects(
     // Keep its journaled candidate first, but base any replacement on the
     // recorded basename and this recovery's timestamp, never on old suffixes.
     let collision_stem = format!("{}-{}", row.original_basename, utc_compact(now_unix()));
-    match (source_present, destination_identity) {
+    match (source_present, &destination_meta) {
         (true, None) if !overlong_destination => {
             // Crash between journal and rename: the commit may be retried.
             let destination = rename_exclusive_into(
@@ -1491,7 +1686,7 @@ fn reconcile_archive_with_effects(
             let Some(expected) = row.path_identity else {
                 return Err(WorkingCopyError::WrongState(row.id.clone()));
             };
-            if actual != expected {
+            if !same_directory(actual, expected, row.path_birth_ns) {
                 // An unrelated object holds the journaled name while the
                 // source is gone. There is nothing left to move and
                 // nothing here is ours: fail closed rather than adopt the
@@ -1619,7 +1814,9 @@ mod tests {
                  allocation_state     TEXT NOT NULL,
                  archive_destination  TEXT,
                  preparation_snapshot TEXT,
-                 created_at           INTEGER NOT NULL
+                 created_at           INTEGER NOT NULL,
+                 root_birth_ns        INTEGER,
+                 path_birth_ns        INTEGER
              ) STRICT;
              CREATE TABLE sessions (
                  id TEXT PRIMARY KEY,
@@ -1650,6 +1847,22 @@ mod tests {
 
     fn planned_row(conn: &Connection, root: &Path, basename: &str) -> WorkingCopyRow {
         record_planned(conn, &planned_spec(root, basename)).expect("planned row")
+    }
+
+    /// Whether the filesystem under `path` reports birth times, asked of
+    /// coreutils' `stat` (`%W`, 0 or `-` when unknown) rather than of the
+    /// code under test, so a broken `observe` fails the birth-time tests
+    /// instead of making them skip.
+    fn filesystem_reports_birth_time(path: &Path) -> bool {
+        std::process::Command::new("stat")
+            .args(["-c", "%W"])
+            .arg(path)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .and_then(|text| text.trim().parse::<i64>().ok())
+            .is_some_and(|seconds| seconds > 0)
     }
 
     fn identity_of_path(path: &Path) -> DirectoryIdentity {
@@ -2716,6 +2929,160 @@ mod tests {
         );
     }
 
+    /// Spec: a directory with the recorded `(dev, ino)` but a different
+    /// birth time is a different object: `verify_identity` reports
+    /// `DifferentObject`, archiving refuses and moves nothing, and a root
+    /// with a different birth time fails `verified_root`. A row with no
+    /// recorded birth time keeps the `(dev, ino)` comparison.
+    ///
+    /// Why: filesystems reuse inode numbers (on ext4 a removed and recreated
+    /// directory commonly gets the same one), so a user who removed a
+    /// Farhelm checkout and re-cloned at the same path could have that new
+    /// folder archived by the old session's Delete. The mismatch is planted
+    /// in the recorded value because a test cannot make the filesystem
+    /// reuse an inode on demand; the real reuse is exercised separately
+    /// where the filesystem cooperates.
+    #[test]
+    fn a_different_birth_time_is_a_different_object() {
+        let conn = registry_conn();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let row = planned_row(&conn, dir.path(), "bar");
+        allocate(&conn, &row.id, None).expect("allocate");
+        let fresh = get_working_copy(&conn, &row.id)
+            .expect("row")
+            .expect("present");
+        let Some(recorded) = fresh.path_birth_ns else {
+            assert!(
+                !filesystem_reports_birth_time(dir.path()),
+                "the filesystem reports birth times, but none was recorded"
+            );
+            println!("SKIPPED: this filesystem reports no birth time; the legacy rule applies");
+            return;
+        };
+        assert_eq!(
+            verify_identity(&fresh).expect("verify"),
+            IdentityStatus::Matches
+        );
+
+        conn.execute(
+            "UPDATE working_copies SET path_birth_ns = ?2 WHERE id = ?1",
+            rusqlite::params![row.id, recorded - 1],
+        )
+        .expect("plant a different birth time");
+        let planted = get_working_copy(&conn, &row.id)
+            .expect("row")
+            .expect("present");
+        assert_eq!(
+            verify_identity(&planted).expect("verify"),
+            IdentityStatus::DifferentObject
+        );
+        assert!(matches!(
+            archive_move(&conn, &row.id),
+            Err(WorkingCopyError::IdentityMismatch { .. })
+        ));
+        assert_eq!(
+            entries(dir.path()),
+            vec!["bar".to_string()],
+            "nothing may move"
+        );
+
+        conn.execute(
+            "UPDATE working_copies SET path_birth_ns = NULL, root_birth_ns = root_birth_ns - 1 \
+             WHERE id = ?1",
+            rusqlite::params![row.id],
+        )
+        .expect("a legacy path identity and a planted root birth time");
+        let legacy = get_working_copy(&conn, &row.id)
+            .expect("row")
+            .expect("present");
+        assert_eq!(
+            verify_identity(&legacy).expect("verify"),
+            IdentityStatus::Matches,
+            "a row without a recorded birth time keeps the (dev, ino) rule"
+        );
+        assert!(matches!(
+            verified_root(&legacy),
+            Err(WorkingCopyError::IdentityMismatch { .. })
+        ));
+    }
+
+    /// Spec: removing an allocated checkout and recreating a directory at the
+    /// same path yields `DifferentObject`, even when the filesystem hands the
+    /// new directory the old inode number.
+    ///
+    /// Why: this is the user-visible shape of the bug (re-cloning over a
+    /// checkout Farhelm made). It runs on the real filesystem, so it only
+    /// proves something where birth times exist; it says which premise held.
+    #[test]
+    fn a_recreated_checkout_directory_is_a_different_object() {
+        let conn = registry_conn();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let row = planned_row(&conn, dir.path(), "bar");
+        allocate(&conn, &row.id, None).expect("allocate");
+        let fresh = get_working_copy(&conn, &row.id)
+            .expect("row")
+            .expect("present");
+        if fresh.path_birth_ns.is_none() {
+            assert!(
+                !filesystem_reports_birth_time(dir.path()),
+                "the filesystem reports birth times, but none was recorded"
+            );
+            println!("SKIPPED: this filesystem reports no birth time; the legacy rule applies");
+            return;
+        }
+        let path = fresh.canonical_path.clone().expect("path");
+        let before = identity_of_path(Path::new(&path));
+        fs::remove_dir(&path).expect("remove the checkout");
+        fs::create_dir(&path).expect("recreate a directory at the same path");
+        let reused = identity_of_path(Path::new(&path)) == before;
+        println!("inode reused by the filesystem: {reused}");
+        assert_eq!(
+            verify_identity(&fresh).expect("verify"),
+            IdentityStatus::DifferentObject
+        );
+    }
+
+    /// Spec: a planned row records its root's birth time with the plan, and
+    /// allocation refuses, creating nothing, when the root at that path has
+    /// the recorded `(dev, ino)` but a different birth time.
+    ///
+    /// Why: a create interrupted after its plan committed but before mkdir
+    /// is retried later; if the root was removed and recreated meanwhile
+    /// with a reused inode, a `(dev, ino)` check alone would let the retry
+    /// allocate and prepare a checkout inside the replacement root. The
+    /// mismatch is planted in the recorded value because a test cannot make
+    /// the filesystem reuse an inode on demand.
+    #[test]
+    fn allocation_refuses_a_root_with_a_different_birth_time() {
+        let conn = registry_conn();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root_identity = identity_of_path(dir.path());
+        let mut spec = planned_spec(dir.path(), "bar");
+        spec.root_identity = Some(root_identity);
+        let planned = record_planned(&conn, &spec).expect("planned row");
+        let Some(recorded) = planned.root_birth_ns else {
+            assert!(
+                !filesystem_reports_birth_time(dir.path()),
+                "the filesystem reports birth times, but planning recorded none"
+            );
+            println!("SKIPPED: this filesystem reports no birth time; the legacy rule applies");
+            return;
+        };
+        conn.execute(
+            "UPDATE working_copies SET root_birth_ns = ?2 WHERE id = ?1",
+            rusqlite::params![planned.id, recorded - 1],
+        )
+        .expect("plant a different root birth time");
+
+        assert!(matches!(
+            allocate(&conn, &planned.id, Some(root_identity)),
+            Err(AllocationFailure::PreMkdir(
+                WorkingCopyError::IdentityMismatch { .. }
+            ))
+        ));
+        assert!(entries(dir.path()).is_empty(), "nothing may be created");
+    }
+
     /// A symlinked archive root is refused before any mutation.
     #[test]
     fn archive_move_rejects_a_symlinked_archive_root() {
@@ -2770,9 +3137,10 @@ mod tests {
         // leaving the source here. This deliberately inconsistent record
         // reaches the device guard rather than failing the root guard first.
         let root_identity = identity_of_path(host.path());
+        let root_birth = observe(host.path()).expect("stat host root").birth_ns;
         conn.execute(
-            "UPDATE working_copies SET canonical_root = ?2, root_device = ?3, root_inode = ?4 WHERE id = ?1",
-            rusqlite::params![row.id, host.path().to_str().expect("utf8"), root_identity.0 as i64, root_identity.1 as i64],
+            "UPDATE working_copies SET canonical_root = ?2, root_device = ?3, root_inode = ?4, root_birth_ns = ?5 WHERE id = ?1",
+            rusqlite::params![row.id, host.path().to_str().expect("utf8"), root_identity.0 as i64, root_identity.1 as i64, root_birth],
         )
         .expect("repoint root");
         assert!(matches!(

@@ -104,7 +104,7 @@ use subtle::ConstantTimeEq;
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 22;
+const SCHEMA_VERSION: i64 = 23;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1713,14 +1713,16 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  allocation_state     TEXT NOT NULL,
                  archive_destination  TEXT,
                  preparation_snapshot TEXT,
-                 created_at           INTEGER NOT NULL
+                 created_at           INTEGER NOT NULL,
+                 root_birth_ns        INTEGER,
+                 path_birth_ns        INTEGER
              ) STRICT;
              CREATE TABLE working_copy_members (
                  session_id      TEXT NOT NULL,
                  working_copy_id TEXT NOT NULL,
                  PRIMARY KEY (session_id, working_copy_id)
              ) STRICT;
-             PRAGMA user_version = 22;
+             PRAGMA user_version = 23;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2264,6 +2266,25 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         )
         .context("migrating schema from version 21 to 22")?;
         version = 22;
+    }
+    if version == 22 {
+        // Birth times beside each working copy's `(device, inode)`, because
+        // inode numbers are reused: a checkout removed and recreated at the
+        // same path can carry the old pair, and matching on it alone let
+        // Delete archive a folder Farhelm did not create. Every pre-23 row
+        // adopts NULL, which keeps the old `(device, inode)` comparison for
+        // that row (see `working_copies::same_directory`). Nullable
+        // INTEGER nanoseconds, repeated in the fresh-database DDL above so a
+        // migrated and a freshly created database have identical schemas.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE working_copies ADD COLUMN root_birth_ns INTEGER;
+             ALTER TABLE working_copies ADD COLUMN path_birth_ns INTEGER;
+             PRAGMA user_version = 23;
+             COMMIT;",
+        )
+        .context("migrating schema from version 22 to 23")?;
+        version = 23;
     }
     if version == SCHEMA_VERSION {
         return Ok(());
@@ -6634,6 +6655,8 @@ mod tests {
                 "ALTER TABLE sessions DROP COLUMN capture_ownership_version;
                  ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
                  ALTER TABLE sessions DROP COLUMN omp_launch_program;
+                 ALTER TABLE working_copies DROP COLUMN root_birth_ns;
+                 ALTER TABLE working_copies DROP COLUMN path_birth_ns;
                  PRAGMA user_version = 19;",
             )
             .expect("downgrade the fixture to the pre-provenance schema");
@@ -8022,6 +8045,8 @@ mod tests {
                  ALTER TABLE sessions DROP COLUMN capture_ownership_version;
                  ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
                  ALTER TABLE sessions DROP COLUMN omp_launch_program;
+                 ALTER TABLE working_copies DROP COLUMN root_birth_ns;
+                 ALTER TABLE working_copies DROP COLUMN path_birth_ns;
                  UPDATE sessions SET archived = 1,
                      title = 'retained title', pane = '', outcome_state = 'exited',
                      exit_code = 0, annotation = 'archived by user', parent = 'parent-session',
@@ -10502,6 +10527,8 @@ mod tests {
                  ALTER TABLE sessions DROP COLUMN capture_ownership_version;
                  ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
                  ALTER TABLE sessions DROP COLUMN omp_launch_program;
+                 ALTER TABLE working_copies DROP COLUMN root_birth_ns;
+                 ALTER TABLE working_copies DROP COLUMN path_birth_ns;
                  DROP TABLE working_copies;
                  DROP TABLE working_copy_members;
                  ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
@@ -10611,6 +10638,8 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN capture_ownership_version;
              ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
              ALTER TABLE sessions DROP COLUMN omp_launch_program;
+             ALTER TABLE working_copies DROP COLUMN root_birth_ns;
+             ALTER TABLE working_copies DROP COLUMN path_birth_ns;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
@@ -10699,6 +10728,8 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN capture_ownership_version;
              ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
              ALTER TABLE sessions DROP COLUMN omp_launch_program;
+             ALTER TABLE working_copies DROP COLUMN root_birth_ns;
+             ALTER TABLE working_copies DROP COLUMN path_birth_ns;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;

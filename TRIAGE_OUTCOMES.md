@@ -1591,7 +1591,21 @@
   residual. Tests cover a recreated directory with a reused inode (a controlled birth-time mismatch where the filesystem
   cannot be made to reuse an inode) and a legacy row. Changelog fragment. Remove the feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Decision note (from the goal-building session): the user accepted the schema migration for birth-time columns.
+- Execution: `complete`; each checkout's and its root's birth time is recorded in two nullable columns added by the
+  supervisor's 22→23 migration: the root's when the plan is recorded (if the root still has the identity admission saw),
+  the checkout's at allocation. On Linux the birth time comes from a direct `statx` call asking for `STATX_BTIME`,
+  because the standard library's `Metadata::created` never reports it on musl, which the released Linux binaries use
+  (the first review caught this); macOS uses `st_birthtime`. Device, inode, and birth time come from one observation.
+  One helper, `same_directory`, holds the rule every ownership check uses (`verify_identity`, `verified_root`, the
+  pre-mkdir root check, the archive move, and recovery): same `(dev, ino)` and, when a birth time was recorded, the same
+  birth time, with an unreadable one counting as different; rows without one keep the `(dev, ino)` comparison,
+  documented as the residual. Tests plant a different birth time (identity reports a different object, archive refuses
+  and moves nothing, root check fails, a planned row's retry refuses to allocate, a legacy row still matches) and
+  recreate a checkout directory on the real filesystem, which on this host reused the inode. They fail rather than skip
+  when coreutils `stat` shows the filesystem reports birth times; they pass built for both glibc and musl. Draft PR
+  [#1046](https://github.com/scode/farhelm/pull/1046/changes), jj change `kxvrxyks`, bookmark
+  `pr/directory-identity-birth-time`.
 
 ## archive-dir-owner-not-checked.md
 

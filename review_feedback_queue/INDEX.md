@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `inode-reuse-defeats-ownership-check.md` — the `(dev, ino)` ownership check can't tell a recreated directory from the
-  original, so Delete can archive a user's folder.
 - `archive-dir-owner-not-checked.md` — the archive directory's owner and mode aren't checked, so another account in a
   shared root can capture archives.
 - `superseded-launch-specs-never-removed.md` — launch specs of superseded or unconsumed launches (argv + session token)
