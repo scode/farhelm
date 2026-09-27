@@ -109,18 +109,13 @@ pub(crate) async fn require_loopback_origin(
 /// rule and the residual it leaves (a squatter can still show a fake token
 /// prompt at `localhost`).
 fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
-    let is_loopback_authority = |value: &str| -> bool {
-        // Host carries no scheme; Origin does. Strip a known scheme and
-        // refuse anything still containing '/': deriving the authority
-        // by splitting on '/' would accept any value that merely ENDS
-        // in a loopback authority ("evil.example/127.0.0.1:7433"). No
-        // browser emits such a Host/Origin, but this check is the sole
-        // gate in front of command execution, so it must not lean on
-        // the client's URL parser for its own correctness.
-        let authority = value
-            .strip_prefix("http://")
-            .or_else(|| value.strip_prefix("https://"))
-            .unwrap_or(value);
+    let is_loopback_authority = |authority: &str| -> bool {
+        // Refuse anything containing '/': deriving the authority by
+        // splitting on '/' would accept any value that merely ENDS in a
+        // loopback authority ("evil.example/127.0.0.1:7433"). No browser
+        // emits such a Host/Origin, but this check is the sole gate in
+        // front of command execution, so it must not lean on the client's
+        // URL parser for its own correctness.
         if authority.contains('/') {
             return false;
         }
@@ -138,7 +133,7 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
     let host_ok = headers
         .get(axum::http::header::HOST)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(&is_loopback_authority);
+        .is_some_and(is_loopback_authority);
 
     // A missing Origin is fine — curl and other non-browser clients omit
     // it — but a present one must match. The desktop target is the
@@ -146,9 +141,17 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
     // so its WebSocket carries that origin. A web page cannot forge a
     // custom-scheme Origin, which is why this is safe to allow; `null`
     // (sandboxed iframes, data: documents) deliberately is not.
+    //
+    // Host carries no scheme; Origin does, and only `http://` can be this
+    // helm's own page: it never serves TLS. The scheme also decides what a
+    // portless authority means, so accepting `https://` would let
+    // `https://127.0.0.1` (port 443, some other server) pass as the helm's
+    // own origin on `--port 80`.
     let origin_ok = headers.get(axum::http::header::ORIGIN).is_none_or(|v| {
-        v.to_str()
-            .is_ok_and(|o| is_loopback_authority(o) || is_desktop_webview_origin(o))
+        v.to_str().is_ok_and(|o| {
+            o.strip_prefix("http://").is_some_and(is_loopback_authority)
+                || is_desktop_webview_origin(o)
+        })
     });
 
     // The Origin check has one browser-shaped hole: a TOP-LEVEL cross-site
@@ -536,6 +539,27 @@ mod tests {
         assert!(!origin_is_allowed(&headers(Some("evil.example"), None), 80));
         // ...and portless loopback stays refused on non-default ports.
         assert!(!origin_is_allowed(&headers(Some("127.0.0.1"), None), PORT));
+    }
+
+    /// The helm never serves TLS, so an `https://` Origin is never its own
+    /// page. On `--port 80` this matters: the bare `https://127.0.0.1`
+    /// means port 443, a different server, yet with the scheme discarded
+    /// it matched the portless port-80 exception. Refused on every port,
+    /// with and without an explicit port.
+    #[farhelm_testtrace::test]
+    fn https_origins_are_refused() {
+        assert!(!origin_is_allowed(
+            &headers(Some("127.0.0.1"), Some("https://127.0.0.1")),
+            80
+        ));
+        assert!(!origin_is_allowed(
+            &headers(Some("127.0.0.1:80"), Some("https://127.0.0.1:80")),
+            80
+        ));
+        assert!(!origin_is_allowed(
+            &headers(Some("127.0.0.1:7433"), Some("https://127.0.0.1:7433")),
+            PORT
+        ));
     }
 
     /// Authority derivation must not be a suffix match: a value that

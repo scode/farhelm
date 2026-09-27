@@ -215,8 +215,6 @@ One line per open item. This file must always match the feedback files in this d
   cannot observe.
 - `revoked-attach-timeout-leaves-attachment.md` — cancelling a revoked terminal attach can leave the supervisor-side
   attachment with no owner.
-- `origin-check-ignores-scheme-on-port-80.md` — the origin check ignores the scheme, so a port-80 helm accepts
-  `https://127.0.0.1` as its own origin.
 - `any-dioxus-webview-passes-origin-guard.md` — any Dioxus or wry app's webview origin passes the helm's origin guard
   and CORS, not just Farhelm's.
 - `terminal-query-refused-before-upgrade.md` — a bad `?cols=`/`?rows=` is refused with HTTP 400 before the upgrade,
