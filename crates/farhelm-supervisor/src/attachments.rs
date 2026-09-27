@@ -495,8 +495,19 @@ async fn discard_quarantine_root(quarantine: &Path) {
             return;
         }
     };
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        discard_quarantined(&entry.path()).await;
+    // Matched explicitly, like the sibling sweeps: a read error part-way
+    // through must say the pass stopped early rather than end it silently,
+    // since this startup pass is the backstop every delete path relies on.
+    loop {
+        match entries.next_entry().await {
+            Ok(None) => break,
+            Ok(Some(entry)) => discard_quarantined(&entry.path()).await,
+            Err(e) => {
+                warn!(path = %quarantine.display(), error = %e,
+                    "attachment quarantine sweep aborted early; debris may remain");
+                break;
+            }
+        }
     }
 }
 
