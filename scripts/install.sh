@@ -1158,6 +1158,13 @@ EOF
       printf 'could not publish installer ownership metadata. The binaries in %s are installed and usable; re-run the installer to repair uninstall metadata.\n' "$INSTALL_DIR" >&2
       exit 1
     fi
+    # Stop claiming the lock BEFORE releasing it. Once the slot is free,
+    # another installer can take it and write its own journal there; if this
+    # process still believed it held the lock, its exit handler would roll
+    # back or unlock that installer's live transaction. Clearing the flag
+    # first means a signal arriving in between leaves a stale lock (which the
+    # next run recovers) rather than acting on someone else's.
+    LOCK_ACQUIRED=0
     remove_owned_lock
 
     # 7. macOS launcher identity: assemble ~/Applications/Farhelm.app around
