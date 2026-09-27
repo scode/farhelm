@@ -282,6 +282,22 @@ pub enum WorkingCopyError {
         "working-copy path {path} overlaps active record {other_id}; refusing automated archival"
     )]
     OverlappingRecord { path: PathBuf, other_id: String },
+    /// The checkout being archived IS (or contains, or sits inside) its
+    /// root's archive directory. Moving a directory into its own
+    /// subdirectory is impossible (the kernel answers `EINVAL`), so this is
+    /// named up front instead of surfacing as a raw rename error forever.
+    #[error(
+        "the checkout {path} occupies its root's reserved archive directory, so it cannot be \
+         archived into it; move or rename it by hand"
+    )]
+    SourceIsArchiveRoot { path: PathBuf },
+    /// Another active managed checkout is, contains, or sits inside the
+    /// archive directory. Archiving would move this checkout into that one.
+    #[error(
+        "the archive directory {path} overlaps active managed checkout {other_id}; refusing to \
+         archive into another checkout"
+    )]
+    ArchiveRootIsCheckout { path: PathBuf, other_id: String },
     #[error("the archive directory {path} is a symlink; refusing to archive through it")]
     ArchiveRootSymlink { path: PathBuf },
     #[error("the archive directory {path} is not a directory")]
@@ -568,7 +584,21 @@ pub(crate) fn path_overlaps(a: &Option<String>, b: &str) -> bool {
 /// Admission normally excludes overlapping checkouts. Recovery cannot assume
 /// that invariant survived damaged registry evidence: inspect all active rows
 /// before creating archive directories, journaling or moving any content.
+///
+/// Also refuses a row that is, contains, or sits inside its own root's
+/// archive directory. Admission reserves that name, but a registry recorded
+/// before the reservation can hold such a checkout, and moving a directory
+/// into its own subdirectory can never succeed (the kernel answers
+/// `EINVAL`), so it is named up front rather than retried forever. No
+/// earlier attempt can have completed for such a row, which is why this
+/// half of the check is safe to apply before recovery looks at anything.
 fn refuse_overlapping_archive(conn: &Connection, row: &WorkingCopyRow) -> Result<()> {
+    let archive_dir = Path::new(&row.canonical_root).join(ARCHIVE_DIR_NAME);
+    if path_overlaps(&row.canonical_path, &archive_dir.to_string_lossy()) {
+        return Err(WorkingCopyError::SourceIsArchiveRoot {
+            path: PathBuf::from(row.canonical_path.as_deref().unwrap_or(&row.canonical_root)),
+        });
+    }
     for other in all_working_copies(conn)? {
         if other.id != row.id
             && other.allocation_state != AllocationState::Retired
@@ -579,6 +609,33 @@ fn refuse_overlapping_archive(conn: &Connection, row: &WorkingCopyRow) -> Result
         {
             return Err(WorkingCopyError::OverlappingRecord {
                 path: PathBuf::from(row.canonical_path.as_deref().unwrap_or(&row.canonical_root)),
+                other_id: other.id,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Refuse to MOVE a checkout into its root's archive directory while another
+/// active managed checkout is, contains, or sits inside that directory:
+/// the move would land this checkout inside an unrelated repository.
+///
+/// A registry recorded before the archive name was reserved can hold such a
+/// checkout. Kept separate from [`refuse_overlapping_archive`] because it
+/// guards the rename, not the row: a fresh archive checks it before writing
+/// its journal, while recovery checks it only on paths that would still
+/// rename. A pending archive whose rename already completed (its journaled
+/// destination matches) must still finish, since nothing moves any more.
+fn refuse_archive_destination_checkout(conn: &Connection, row: &WorkingCopyRow) -> Result<()> {
+    let archive_dir = Path::new(&row.canonical_root).join(ARCHIVE_DIR_NAME);
+    let archive_dir_str = archive_dir.to_string_lossy();
+    for other in all_working_copies(conn)? {
+        if other.id != row.id
+            && other.allocation_state != AllocationState::Retired
+            && path_overlaps(&other.canonical_path, &archive_dir_str)
+        {
+            return Err(WorkingCopyError::ArchiveRootIsCheckout {
+                path: archive_dir,
                 other_id: other.id,
             });
         }
@@ -1081,6 +1138,7 @@ fn archive_move_with_effects(
     };
     let source = PathBuf::from(path);
     refuse_overlapping_archive(conn, &row)?;
+    refuse_archive_destination_checkout(conn, &row)?;
     let root = verified_root(&row)?;
     let source_identity = match fs::symlink_metadata(&source) {
         Ok(meta) => (meta.dev(), meta.ino()),
@@ -1403,6 +1461,11 @@ fn reconcile_archive_with_effects(
 
     if overlong_destination && !source_present {
         return Err(std::io::Error::from_raw_os_error(libc::ENAMETOOLONG).into());
+    }
+    // Every branch below that still renames needs the source present; a
+    // completed move already returned above and is not refused here.
+    if source_present {
+        refuse_archive_destination_checkout(conn, &row)?;
     }
     // A recovery may happen much later than the original archive attempt.
     // Keep its journaled candidate first, but base any replacement on the
@@ -2555,6 +2618,101 @@ mod tests {
             entries(dir.path()),
             vec!["bar"],
             "the foreign object must be untouched and nothing archived"
+        );
+    }
+
+    /// Spec: archiving refuses, before writing its journal, when an active
+    /// checkout occupies the root's archive directory, both when archiving
+    /// another checkout (which would move it inside that one) and when
+    /// archiving the occupying checkout itself (which can never succeed).
+    /// Startup reconciliation refuses the same way for a row that a registry
+    /// written before this guard already left `archive_pending`.
+    ///
+    /// Admission now reserves the archive name, but a database from before
+    /// that reservation can hold such a checkout. Without this guard the
+    /// other checkout silently landed inside an unrelated repository, and
+    /// the occupying one stayed `archive_pending` failing `EINVAL` on every
+    /// delete retry and startup.
+    #[test]
+    fn archive_refuses_an_active_checkout_at_the_archive_directory() {
+        let conn = registry_conn();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let squatter = planned_row(&conn, dir.path(), ARCHIVE_DIR_NAME);
+        allocate(&conn, &squatter.id, None).expect("allocate the squatting checkout");
+        let other = planned_row(&conn, dir.path(), "bar");
+        allocate(&conn, &other.id, None).expect("allocate another checkout");
+
+        assert!(matches!(
+            archive_move(&conn, &other.id),
+            Err(WorkingCopyError::ArchiveRootIsCheckout { ref other_id, .. }) if *other_id == squatter.id
+        ));
+        assert!(matches!(
+            archive_move(&conn, &squatter.id),
+            Err(WorkingCopyError::SourceIsArchiveRoot { .. })
+        ));
+        for id in [&other.id, &squatter.id] {
+            assert_eq!(
+                get_working_copy(&conn, id)
+                    .expect("row")
+                    .expect("present")
+                    .allocation_state,
+                AllocationState::Allocated,
+                "a refused archive must not leave the row archive_pending"
+            );
+        }
+        let mut names = entries(dir.path());
+        names.sort();
+        assert_eq!(names, vec!["bar".to_string(), ARCHIVE_DIR_NAME.to_string()]);
+        assert!(
+            entries(&dir.path().join(ARCHIVE_DIR_NAME)).is_empty(),
+            "nothing may be moved into the squatting checkout"
+        );
+
+        persist_journal(&conn, &squatter.id, "stem", AllocationState::Allocated)
+            .expect("journal as an older database would have");
+        assert!(matches!(
+            reconcile_archive(&conn, &squatter.id),
+            Err(WorkingCopyError::SourceIsArchiveRoot { .. })
+        ));
+    }
+
+    /// Spec: recovery still completes an archive whose rename into a
+    /// squatting checkout already happened, and leaves the squatter alone.
+    ///
+    /// The destination refusal exists to stop a MOVE into another
+    /// checkout. When an older version already made that move and crashed
+    /// before retiring the journal, nothing is left to move; refusing would
+    /// leave a finished archive `archive_pending` on every delete retry and
+    /// startup until someone dealt with an unrelated checkout by hand.
+    #[test]
+    fn recovery_completes_a_finished_move_into_a_squatting_checkout() {
+        let conn = registry_conn();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let squatter = planned_row(&conn, dir.path(), ARCHIVE_DIR_NAME);
+        allocate(&conn, &squatter.id, None).expect("allocate the squatting checkout");
+        let other = planned_row(&conn, dir.path(), "bar");
+        allocate(&conn, &other.id, None).expect("allocate another checkout");
+        let other = get_working_copy(&conn, &other.id)
+            .expect("row")
+            .expect("present");
+        // What an older version left behind: the journal written and the
+        // rename done, the row not yet retired.
+        persist_journal(&conn, &other.id, "bar-archived", AllocationState::Allocated)
+            .expect("journal");
+        fs::rename(
+            other.canonical_path.as_deref().expect("path"),
+            dir.path().join(ARCHIVE_DIR_NAME).join("bar-archived"),
+        )
+        .expect("the older version's completed move");
+
+        assert!(matches!(
+            reconcile_archive(&conn, &other.id),
+            Ok(ReconcileOutcome::MetadataComplete)
+        ));
+        assert_eq!(
+            entries(&dir.path().join(ARCHIVE_DIR_NAME)),
+            vec!["bar-archived".to_string()],
+            "the squatting checkout keeps its content and nothing else moves"
         );
     }
 
