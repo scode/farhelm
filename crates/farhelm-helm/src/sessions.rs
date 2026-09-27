@@ -1590,6 +1590,7 @@ pub(crate) async fn create_session(
             // it must refuse.
             accept_result: None,
             github_checkout: None,
+            settings_from_source: false,
         },
     )
     .await
@@ -1667,6 +1668,7 @@ pub(crate) async fn do_create_session(
         origin,
         accept_result,
         github_checkout,
+        settings_from_source,
     } = spec;
     // REST carries the displayed preview cwd as part of the retained client
     // request identity. The supervisor's fresh-create destination instead
@@ -1789,7 +1791,9 @@ pub(crate) async fn do_create_session(
     // user-initiated structured create has one; an agent's create does not
     // speak for the user.
     let explicit_selection = match (&mode, origin) {
-        (CreateMode::Structured(compiled), CreateOrigin::User) => Some(compiled.selection.clone()),
+        (CreateMode::Structured(compiled), CreateOrigin::User) if !settings_from_source => {
+            Some(compiled.selection.clone())
+        }
         _ => None,
     };
     accept_created_session(
@@ -1956,6 +1960,15 @@ pub(crate) struct CreateSpec {
     /// be the ASKING session; see [`do_create_session`]'s "Two phases" note
     /// for why the check cannot simply run at the call site afterwards.
     pub(crate) accept_result: Option<CreatedSessionCheck>,
+    /// The mode and settings were copied from a listed session row (a plain
+    /// Replace) rather than chosen in the GUI for this create.
+    ///
+    /// Such a create is user-initiated but expresses no choice of launch
+    /// settings: they came from what the owning host listed, which a remote
+    /// host controls. It therefore records no explicit selection, and so no
+    /// remembered defaults or recent setup (SPEC.md: only explicit GUI
+    /// selections shape GUI defaults and suggestions).
+    pub(crate) settings_from_source: bool,
 }
 
 /// Whose successful create may affect the helm-wide profile suggestion.
@@ -2238,6 +2251,7 @@ async fn create_fresh_session(
             github_checkout,
             origin: CreateOrigin::User,
             accept_result: acceptance.accept_result,
+            settings_from_source: false,
         },
     )
     .await
@@ -3149,6 +3163,9 @@ pub(crate) async fn do_replace_session(
     // neither of invocation/profile/launch, a profile body also naming
     // agent_kind/resume_template) for free, rather than a second copy of
     // them to keep in sync.
+    // A plain Replace copies the source's listed settings; only a "replace
+    // with" body is the user's own choice of them.
+    let settings_from_source = with.is_none();
     let (mode, cwd, title, cols, rows, agent_kind, resume_template) = match (with, with_mode) {
         (Some(with), Some(mode)) => (
             mode,
@@ -3216,6 +3233,7 @@ pub(crate) async fn do_replace_session(
             // `clone_for_agent`'s identical veto, which this mirrors for the
             // identical reason.
             accept_result: Some(replacement_result_check(id)),
+            settings_from_source,
         },
     )
     .await?;

@@ -1427,6 +1427,100 @@ async fn spliced_replace_harness(
     (harness, local)
 }
 
+/// Spec: a plain Replace (no `with` body) of a session the host lists as a
+/// structured yolo launch with workspace trust records no remembered
+/// defaults and no recent setup.
+///
+/// Why: a plain Replace copies the source row's settings, and that row is
+/// what the owning host listed, which a remote host controls. Recording
+/// them as the user's choice let a compromised host set the helm-wide
+/// defaults to yolo with trust just by listing such a row and waiting for
+/// the user to press Replace. Only settings the user chose in the GUI (a
+/// "replace with" body, the composer) may do that.
+#[farhelm_testtrace::test]
+async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, LaunchPermission, LaunchSelection};
+
+    let yolo = LaunchSelection {
+        harness: farhelm_proto::LaunchHarness::Codex,
+        model: None,
+        effort: None,
+        permissions: Some(LaunchPermission::Yolo),
+        workspace_trust: Some(true),
+    };
+    let mut source = rest_harness::session("yolo-src", 1_700_000_000);
+    source.launch = Some(yolo.clone());
+    source.invocation = "codex --dangerously-bypass-approvals-and-sandbox".to_string();
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        let mut created = rest_harness::session("yolo-new", 1_700_000_500);
+        created.launch = Some(yolo);
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, .. } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        fleet.edit(local, |script| {
+            script.sessions.retain(|s| s.id != "yolo-src")
+        });
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/yolo-src/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    peer.await.unwrap();
+
+    let (_, preferences) = get_json(&harness, "/api/preferences").await;
+    assert_eq!(
+        preferences.get("remembered_permissions"),
+        None,
+        "a plain Replace must not remember the listed row's permissions: {preferences}"
+    );
+    assert_ne!(
+        preferences.get("remembered_workspace_trust"),
+        Some(&serde_json::json!(true)),
+        "a plain Replace must not remember the listed row's workspace trust: {preferences}"
+    );
+    assert!(
+        harness
+            .store
+            .launch_history(local, "local-identity")
+            .await
+            .unwrap()
+            .is_empty(),
+        "a plain Replace must not add the listed row's launch to recent setups"
+    );
+}
+
 /// The simplest replace: a live, raw-invocation source. SPEC.md's contract
 /// is a NEW id carrying the source's cwd, title, and invocation, with the
 /// old id gone from the list at once — this pins that promise against the
