@@ -4,9 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `stale-dial-outcome-publishes-over-retarget-nudge.md` — editing a host mid-dial briefly routes operations to the old
-  machine.
-- `stripped-agent-marker-forges-killable-tab.md` — stripped agent marker lets a forged tab kill the live agent.
 - `restart-kills-terminal-less-agent-without-consent.md` — restart of a terminal-less session kills a possibly live
   agent without stop consent.
 - `tab-close-kills-rc-started-services.md` — tab close, auto-reap and Delete kill services the tab shell's rc files
@@ -53,6 +50,8 @@ One line per open item. This file must always match the feedback files in this d
   operations to that other host.
 - `create-reply-sets-remembered-yolo.md` — a remote supervisor's create reply sets the helm-wide remembered
   permissions/workspace-trust defaults.
+- `create-reply-launch-mirrored-into-client-defaults.md` — the client also mirrors the reply's launch choices into its
+  in-memory remembered defaults, so the helm-side fix alone leaves this page preselecting yolo until reload.
 - `replace-records-peer-launch-defaults.md` — a plain Replace copies the remote row's launch selection into the
   helm-wide remembered permission/trust defaults.
 - `replace-sets-peer-default-profile.md` — a plain Replace makes the remote host's claimed profile the helm-wide
@@ -71,6 +70,9 @@ One line per open item. This file must always match the feedback files in this d
   mentions farhelm, ignoring its own receipt.
 - `installer-mirror-var-drops-https-no-signature.md` — install.sh honours the helm's FARHELM_RELEASE_BASE_URL, dropping
   HTTPS pinning with no minisign check.
+- `release-gate-runs-unpinned-privileged-container-before-signed-build.md` — the release build job runs an unpinned
+  `centos:stream9` image `--privileged` on the runner before `dist build`, so a poisoned image yields a validly signed
+  release.
 - `app-info-plist-uses-caller-umask.md` — install.sh writes Farhelm.app's Info.plist with the caller's umask, so another
   local account may inject LSEnvironment.
 - `setup-pins-relative-path-tmux.md` — helm setup can pin a tmux found via a relative PATH entry like "." into the
