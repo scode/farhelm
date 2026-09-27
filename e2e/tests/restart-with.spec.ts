@@ -11,13 +11,16 @@ import { type Page } from "@playwright/test";
 import { SESSION_LISTING } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { attachSession, cleanupSession } from "./helpers/term";
-import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   addTab,
+  armTerminalFocusSpy,
+  closeTabAndAwaitAgentFallback,
   createTabSession,
   fulfillAsHelm,
+  installTerminalFocusSpy,
   installTerminalSuiteHooks,
-  selectTerminal,
+  selectTabOverRevealedAgent,
+  terminalFocusCount,
 } from "./helpers/terminal-suite";
 
 // The tab sweep removes the scratch working directory `createTabSession` makes
@@ -240,30 +243,6 @@ async function presentAsResumable(page: Page, id: string) {
   });
 }
 
-/**
- * Count every focus that enters the primary terminal once the test arms it.
- *
- * This is the mechanism the focus tests are about, recorded by the page at the
- * moment it happens: a reveal or a selection change that focuses the agent
- * behind the modal fires `focusin` on xterm's helper textarea whether or not a
- * later observation happens to catch it there.
- */
-async function installTerminalFocusSpy(page: Page) {
-  await page.addInitScript(() => {
-    const spy = { armed: false, count: 0 };
-    (window as any).__restartWithTerminalFocus = spy;
-    document.addEventListener(
-      "focusin",
-      (event) => {
-        if (spy.armed && event.target instanceof Element && event.target.closest("#terminal")) {
-          spy.count += 1;
-        }
-      },
-      true,
-    );
-  });
-}
-
 /** Whether the document's focused element is inside the restart-with dialog. */
 async function focusInsideDialog(page: Page): Promise<boolean> {
   return page.evaluate(() => {
@@ -332,9 +311,7 @@ test("restart with keeps focus inside the dialog over a live terminal while pend
     const dialog = page.locator(".restart-with-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.locator(".restart-with-cancel")).toBeFocused();
-    await page.evaluate(() => {
-      (window as any).__restartWithTerminalFocus.armed = true;
-    });
+    await armTerminalFocusSpy(page);
 
     await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })
       .click();
@@ -390,7 +367,7 @@ test("restart with keeps focus inside the dialog over a live terminal while pend
       expect(await focusInsideDialog(page), `focus after ${key} following the refusal`).toBe(true);
     }
     expect(
-      await page.evaluate(() => (window as any).__restartWithTerminalFocus.count),
+      await terminalFocusCount(page),
       "the terminal beneath the modal must never take focus",
     ).toBe(0);
     expect(bodies, "keys pressed inside the dialog must not resend the restart").toHaveLength(1);
@@ -428,24 +405,7 @@ test("restart with keeps focus inside the dialog when the selected tab goes away
     await page.goto("/");
     await attachSession(page, id);
     const tabId = await addTab(page, 0);
-    await waitForSessionRevealed(page, id, { tabId });
-    // Premise: the tab is the selected terminal and holds focus, so the view
-    // has a focus target to fall back from, and the agent is attached and
-    // revealed, so the fallback lands on an existing island. Selecting the
-    // agent first makes the tab's selection a real change: the view moves
-    // focus only when its focus target changes, and a click on an
-    // already-selected tab would leave focus on the strip button.
-    await selectTerminal(page, "agent");
-    await selectTerminal(page, tabId);
-    await expect
-      .poll(() =>
-        page.evaluate(
-          (el) => !!document.getElementById(el)?.contains(document.activeElement),
-          `terminal-${tabId}`,
-        )
-      )
-      .toBe(true);
-    await waitForSessionRevealed(page, id);
+    await selectTabOverRevealedAgent(page, id, tabId);
 
     const trigger = page.locator(".restart-with-trigger");
     await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
@@ -454,22 +414,9 @@ test("restart with keeps focus inside the dialog when the selected tab goes away
     const cancel = dialog.locator(".restart-with-cancel");
     await expect(dialog).toBeVisible();
     await expect(cancel).toBeFocused();
-    await page.evaluate(() => {
-      (window as any).__restartWithTerminalFocus.armed = true;
-    });
+    await armTerminalFocusSpy(page);
 
-    const closed = await request.delete(`/api/sessions/${id}/tabs/${tabId}`);
-    expect(closed.ok(), await closed.text()).toBe(true);
-    await expect(page.locator(`.tab-slot[data-tab-id="${tabId}"]`)).toHaveCount(0, {
-      timeout: 20_000,
-    });
-    await expect(page.locator(".tab-agent")).toHaveClass(/selected/);
-    // The view unmounts the departed tab's island in the same synchronous
-    // call that decides the new focus target, so once it is gone that
-    // decision has been made.
-    await expect
-      .poll(() => page.evaluate(() => Object.keys((window as any).__farhelmIslands ?? {}).sort()))
-      .toEqual(["terminal"]);
+    await closeTabAndAwaitAgentFallback(page, request, id, tabId);
 
     await expect(dialog).toBeVisible();
     await expect(cancel).toBeFocused();
@@ -478,7 +425,7 @@ test("restart with keeps focus inside the dialog when the selected tab goes away
       expect(await focusInsideDialog(page), `focus after ${key} following the tab's removal`).toBe(true);
     }
     expect(
-      await page.evaluate(() => (window as any).__restartWithTerminalFocus.count),
+      await terminalFocusCount(page),
       "the agent terminal beneath the modal must never take focus",
     ).toBe(0);
   } finally {
@@ -659,9 +606,7 @@ test("restart with pulls stray focus back and still cancels on Escape", async ({
   const dialog = page.locator(".restart-with-dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".restart-with-cancel")).toBeFocused();
-  await page.evaluate(() => {
-    (window as any).__restartWithTerminalFocus.armed = true;
-  });
+  await armTerminalFocusSpy(page);
 
   for (const key of ["q", "Tab"]) {
     await blurToBody(page);
@@ -676,7 +621,7 @@ test("restart with pulls stray focus back and still cancels on Escape", async ({
   await expect(dialog).toHaveCount(0);
   await expect(trigger).toBeFocused();
   expect(
-    await page.evaluate(() => (window as any).__restartWithTerminalFocus.count),
+    await terminalFocusCount(page),
     "the terminal beneath the modal must never take focus",
   ).toBe(0);
   expect(bodies, "stray keys and Escape must not send a restart").toEqual([]);

@@ -947,6 +947,17 @@
   // this mount's own test hook — plus the `path`/`gen` pair `sync()`
   // compares against to decide whether a still-wanted island is the SAME
   // attachment or a different one that has to be torn down and rebuilt.
+  /**
+   * Any open modal dialog: the restart-with dialog, the rename dialog, and
+   * the session launcher all render `role="dialog"` with `aria-modal="true"`.
+   * While one is open a terminal must not take focus, or the next keystroke
+   * aimed at the dialog lands in the agent beneath its scrim. Only the
+   * restart-with dialog also marks the page `inert`, so for the other two
+   * this check is the only guard. Matching the ARIA contract rather than
+   * each dialog's class is what keeps a new modal covered by default.
+   */
+  const OPEN_MODAL_SELECTOR = '[role="dialog"][aria-modal="true"]';
+
   const islands = new Map();
 
   // `mountWhenReady()` calls still waiting for xterm's globals and their
@@ -2448,8 +2459,9 @@
       // arbitrarily later, so the intent has to be recorded first for that
       // deferred mount to see it.
       //
-      // The intent is recorded even when the focus itself is withheld. A
-      // mounted restart-with dialog is modal, and the target can change
+      // The intent is recorded even when the focus itself is withheld. An
+      // open modal dialog (OPEN_MODAL_SELECTOR: restart-with, rename, the
+      // session launcher) sits over this view, and the target can change
       // under it without the user doing anything: a selected tab whose
       // shell exits (or that another client closes) drops out of the
       // listing, the view falls back to the agent tab, and the agent island
@@ -2461,15 +2473,16 @@
       // `takesFocus()`'s rules would break select-then-type, because
       // selecting a tab leaves focus on its strip button.
       //
-      // This veto is the second layer. The dialog marks the rest of the
-      // page `inert` while mounted (restart_with.rs, modal_isolation.rs),
-      // which already turns this `focus()` into a no-op; the veto keeps the
-      // guarantee in an engine that does not implement `inert`.
+      // For the restart-with dialog this veto is the second layer: it marks
+      // the rest of the page `inert` while mounted (restart_with.rs,
+      // modal_isolation.rs), which already turns this `focus()` into a no-op.
+      // The rename dialog and the launcher do not, so for them this is the
+      // only thing keeping focus in the dialog.
       const focusEl = specs.find((spec) => spec.focus)?.el ?? null;
       if (focusEl !== focusedEl) {
         focusedEl = focusEl;
         const island = focusEl === null ? null : islands.get(focusEl);
-        if (island && !document.querySelector(".restart-with-dialog")) island.term.focus();
+        if (island && !document.querySelector(OPEN_MODAL_SELECTOR)) island.term.focus();
       }
 
       for (const spec of specs) {
@@ -3696,11 +3709,14 @@
          * cancel hands focus back to the header action that opened it.
          * `sync()` focuses an already-revealed island when the selection
          * changes, which is the other way a terminal can take focus, and
-         * it carries the same dialog veto. Both vetoes are the dialog's
-         * second layer: while mounted it marks everything outside itself
-         * `inert` (restart_with.rs, modal_isolation.rs), so this `focus()`
-         * would be a no-op anyway, and the vetoes cover engines without
-         * `inert`.
+         * it carries the same dialog veto. Both vetoes cover every open modal
+         * dialog (OPEN_MODAL_SELECTOR), not only restart-with (the profiles
+         * popover, which is not a modal dialog, is vetoed here at reveal
+         * only): the rename
+         * dialog and the session launcher have no `inert` isolation, so for
+         * them the vetoes are the only guard; for restart-with they are the
+         * second layer behind its `inert` marking (restart_with.rs,
+         * modal_isolation.rs).
          *
          * Other focused buttons do not hold the reveal back. The tab-strip
          * selector is the concrete case: selecting a tab leaves focus on its
@@ -3711,7 +3727,7 @@
         function takesFocus() {
           if (!focusOnReveal || focusedEl !== spec.el) return false;
           if (document.querySelector(".profiles-popover")) return false;
-          if (document.querySelector(".restart-with-dialog")) return false;
+          if (document.querySelector(OPEN_MODAL_SELECTOR)) return false;
           const active = document.activeElement;
           if (!active || active === document.body) return true;
           if (el && el.contains(active)) return true;
