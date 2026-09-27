@@ -37,7 +37,7 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   await harnesses.getByRole("button", { name: "Codex", exact: true }).click();
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await search.fill("omp");
-  await form.getByRole("option", { name: "Harness: Omp", exact: true }).click();
+  await form.getByRole("option", { name: "Harness: OMP", exact: true }).click();
   await expect(harnesses.getByRole("button", { name: "OMP", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
