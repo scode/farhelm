@@ -590,14 +590,15 @@ impl Supervisor {
     /// selects the helm the user is actually looking at, which is the whole
     /// mental model this feature is built on.
     ///
-    /// Several terminals may be attached for one session. A stale attachment
-    /// can remain briefly while its helm link is being reconnected, so it
-    /// must not shadow another matching attachment whose link is still
-    /// registered.
-    /// Lease takeover guarantees that all attachments matching a session id
-    /// belong to one helm, so the first registered match is that helm; if
-    /// takeover weakened to per-terminal uniqueness, this choice could become
-    /// arbitrary.
+    /// Several terminals may be attached for one session, and they need not
+    /// share one connection. Lease takeover evicts a DIFFERENT lease's
+    /// attachments, but a helm that reconnects under the SAME lease replaces
+    /// only the terminals it re-attaches; its other terminals stay bound to
+    /// the old connection, which can still be registered if that transport
+    /// is half-open. So among the links that own any of the session's
+    /// attachments, the most recently registered one wins: it is the helm's
+    /// current connection, and a stale one must not shadow it. Unregistered
+    /// owners are skipped entirely.
     ///
     /// Two lock hops rather than one: the attachment identifies its owning
     /// connection only by that connection's writer queue (see
@@ -677,19 +678,26 @@ impl Supervisor {
     }
 }
 
-/// Select the first registered link identified by any matching attachment.
-/// Keeping this selection separate makes the stale-first case directly
-/// testable without manufacturing a live terminal forwarder.
+/// Select the most recently registered link that owns any of the given
+/// attachments.
+///
+/// `links` is in registration order (links are appended as they register),
+/// so scanning it from the end prefers a reconnected helm's current link
+/// over an older one still owning some of the session's terminals; see
+/// `helm_link_for_session`. The attachment order, which comes from a
+/// `HashMap`, therefore never decides the route. Keeping this selection
+/// separate makes it directly testable without manufacturing a live
+/// terminal forwarder.
 fn registered_link_for_attachments<'a>(
-    mut attachments: impl Iterator<Item = &'a mpsc::Sender<Frame>>,
+    attachments: impl Iterator<Item = &'a mpsc::Sender<Frame>>,
     links: &[Arc<HelmLink>],
 ) -> Option<Arc<HelmLink>> {
-    attachments.find_map(|owner| {
-        links
-            .iter()
-            .find(|link| link.notify.same_channel(owner))
-            .map(Arc::clone)
-    })
+    let owners = attachments.collect::<Vec<_>>();
+    links
+        .iter()
+        .rev()
+        .find(|link| owners.iter().any(|owner| link.notify.same_channel(owner)))
+        .map(Arc::clone)
 }
 
 #[cfg(test)]
@@ -727,6 +735,33 @@ mod tests {
         let selected =
             registered_link_for_attachments(owners.iter(), std::slice::from_ref(&live_link));
         assert!(selected.is_some_and(|link| Arc::ptr_eq(&link, &live_link)));
+    }
+
+    /// When a session's terminals are owned by two registered links, the
+    /// newer registration wins regardless of attachment order.
+    ///
+    /// Why it matters: a helm that reconnects under the same lease leaves the
+    /// terminals it has not re-attached on its old connection, which can
+    /// stay registered while half-open. Routing an agent request there waits
+    /// out the whole answer budget (and, for a mutation, retains the delete
+    /// fence) although a healthy link exists. Attachment order comes from a
+    /// `HashMap`, so both orders are checked.
+    #[test]
+    fn registered_link_prefers_the_newest_owning_registration() {
+        let (old, _old_rx) = link();
+        let (new, _new_rx) = link();
+        let (unrelated, _unrelated_rx) = link();
+        let links = [Arc::clone(&old), Arc::clone(&new), Arc::clone(&unrelated)];
+        for owners in [
+            [old.notify.clone(), new.notify.clone()],
+            [new.notify.clone(), old.notify.clone()],
+        ] {
+            let selected = registered_link_for_attachments(owners.iter(), &links);
+            assert!(
+                selected.is_some_and(|link| Arc::ptr_eq(&link, &new)),
+                "the newest owning registration must win in either attachment order"
+            );
+        }
     }
 
     /// A bare link with nothing behind it but a channel, so the endings can
