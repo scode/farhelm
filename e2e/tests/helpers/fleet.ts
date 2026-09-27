@@ -228,10 +228,10 @@ export interface ProfileRow {
  * The profiles reply: the helm-wide catalog plus this helm's remembered
  * default.
  *
- * The pair travels together on the wire deliberately (the helm serves the
- * remembered id RAW, even when it names a deleted profile), and it is what
- * SPEC.md's ask-don't-guess fallback is keyed off — so a spec that wants to
- * know which state the create dialog should be in reads both from here.
+ * The helm serves the remembered id RAW, even when it names a deleted
+ * profile. The create dialog never selects from it (SPEC.md: New does not
+ * silently choose a remembered profile), so specs read it here to set up a
+ * remembered profile the dialog must NOT pick.
  */
 export interface ProfilesView {
   profiles: ProfileRow[];

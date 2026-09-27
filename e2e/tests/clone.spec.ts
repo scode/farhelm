@@ -16,6 +16,7 @@ import {
   createSession,
   FAKE_AGENT,
   hideSeenState,
+  listProfiles,
   localHostId,
   openRowMenu,
   type SessionRow,
@@ -837,6 +838,88 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     await cleanupSession(request, original.id);
     await cleanupProfile(request, profileA.id);
     await cleanupProfile(request, profileB.id);
+  }
+});
+
+/**
+ * A clone whose own profile never got applied asks for an agent; it does not
+ * take the helm's remembered last-used profile instead.
+ *
+ * SPEC.md: New does not silently choose a remembered profile. The dialog
+ * used to consume the first catalog's remembered id once, which was
+ * invisible for an ordinary New (it starts on the command path) but not for
+ * a profile clone opened before the catalog read landed: switching launch
+ * mode in that window hands the agent choice to the user, so the clone's
+ * own profile is never applied, and the late catalog then selected the
+ * remembered profile — a launch nobody chose, under a picker that looked
+ * like a deliberate selection.
+ */
+test("a clone whose profile was never applied does not take the remembered profile", async ({ page, request }) => {
+  const stamp = Date.now();
+  const cloned = await createProfile(request, { name: `clone-unapplied-a-${stamp}` });
+  const remembered = await createProfile(request, { name: `clone-unapplied-b-${stamp}` });
+  const source = await createSession(request, {
+    title: `clone-unapplied-source-${stamp}`,
+    cwd: "/tmp",
+    profile_id: cloned.id,
+  });
+  // Created second so the helm remembers B, a profile that still exists: a
+  // form still consuming the remembered default would select it.
+  const rememberedShift = await createSession(request, {
+    title: `clone-unapplied-remembered-${stamp}`,
+    cwd: "/tmp",
+    profile_id: remembered.id,
+  });
+  const catalogGate = routeGate();
+  let catalogGets = 0;
+  const catalogMatcher = (url: URL) => url.pathname === "/api/profiles";
+  const catalogHandler = async (route: import("@playwright/test").Route) => {
+    if (route.request().method() === "GET") {
+      catalogGets += 1;
+      await catalogGate.wait();
+    }
+    // Swallowed deliberately: a handler still held at teardown resumes after
+    // the page closes, and its target-closed rejection is not this test's
+    // failure. Nothing else runs here, so there is nothing to drain.
+    await route.continue().catch(() => {});
+  };
+  try {
+    await expect
+      .poll(async () => (await listProfiles(request)).default_profile, { timeout: 20_000 })
+      .toBe(remembered.id);
+    await page.route(catalogMatcher, catalogHandler);
+    await page.goto("/");
+    const sourceRow = row(page, source.id);
+    await expect(sourceRow).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(sourceRow);
+    await sourceRow.locator(".session-row-clone").click();
+
+    const form = page.locator(".create-session-form");
+    const picker = form.locator(".create-session-profile");
+    await expect(form).toBeVisible();
+    // Fixture premise: the catalog read is still held, so the clone's own
+    // profile cannot have been applied yet.
+    await expect.poll(() => catalogGets).toBeGreaterThan(0);
+    await expect(form.locator(".create-session-profile-note")).toContainText("have not been read yet");
+
+    // Choosing the launch mode is the user taking over the agent decision.
+    await chooseCommandMode(form);
+    catalogGate.release();
+
+    // Consumption receipt: the late catalog's options rendered.
+    await expect(picker.locator(`option[value="${remembered.id}"]`)).toHaveCount(1, { timeout: 20_000 });
+    await expect(picker, "the remembered profile must not be chosen for the user").toHaveValue(
+      "__unresolved__",
+    );
+    await expect(form.locator(".create-session-profile-note")).toContainText("no agent is selected");
+    await expect(form.locator(".create-session-submit")).toBeDisabled();
+  } finally {
+    catalogGate.release();
+    await page.unroute(catalogMatcher, catalogHandler);
+    await cleanupSession(request, rememberedShift.id);
+    await cleanupSession(request, source.id);
+    await cleanupProfile(request, cloned.id);
+    await cleanupProfile(request, remembered.id);
   }
 });
 

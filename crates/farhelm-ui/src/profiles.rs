@@ -12,14 +12,13 @@
 //!
 //! ## Ask, do not guess
 //!
-//! SPEC.md's creation rule has two halves and the second is the one that is
-//! easy to lose: the dialog defaults to the last-used profile, and when that
-//! profile no longer exists it ASKS rather than substituting another. The
-//! helm serves the remembered id raw — never filtered against the catalog
-//! beside it — precisely so a client can tell "nothing was ever used here"
-//! apart from "what you used is gone". [`resolve_agent`] is where those two
-//! become different screens: the first preselects nothing quietly, the second
-//! preselects nothing and says why.
+//! SPEC.md's creation rule: New does not silently choose a remembered
+//! profile, and a profile the dialog was relying on that no longer exists is
+//! ASKED about rather than replaced by another. The helm still serves its
+//! remembered last-used id for compatibility callers, and the profiles popup
+//! marks it, but the create dialog never selects from it. [`resolve_agent`]
+//! is where "nothing is selected" becomes a blocked dialog that says why,
+//! rather than a fallback to the command field or to some other profile.
 //!
 //! ## The snapshot rule, made visible
 //!
@@ -419,16 +418,16 @@ impl AgentChoice {
 
 /// Why a dialog is preselecting nothing, when there is a reason worth saying.
 ///
-/// Only ever produced for a profile that WAS available and is not anymore.
-/// The ordinary "nothing has ever been created from a profile on this helm"
-/// case yields no note at all, and that asymmetry is the point: a first-time
-/// dialog has nothing to explain, while a dialog that silently dropped a
-/// remembered choice would look like it had forgotten it.
+/// Produced only while the dialog holds no usable choice, so each note is
+/// paired with a blocked create; a dialog with a choice has nothing to
+/// explain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AgentNote {
-    /// The helm's remembered last-used profile is gone from its catalog —
-    /// SPEC.md's ask-don't-guess case, exactly.
-    RememberedGone,
+    /// The catalog is known but nothing is chosen. Reached when a clone's
+    /// own agent was never applied, because the user switched launch mode
+    /// before the catalog could resolve it; the dialog asks rather than
+    /// picking for them.
+    NothingChosen,
     /// A profile the user had explicitly picked left the catalog while the
     /// dialog was open (deleted from another client, or from the popup).
     ChoiceGone,
@@ -448,9 +447,9 @@ impl AgentNote {
     /// is BLOCKED until one of the offered answers is chosen.
     pub(crate) fn text(self) -> &'static str {
         match self {
-            AgentNote::RememberedGone => {
-                "the profile you last used in this helm no longer exists, so nothing is selected \
-                 — choose a profile, or choose \"custom command\" to run the command below"
+            AgentNote::NothingChosen => {
+                "no agent is selected — choose a profile, or choose \"custom command\" to run the \
+                 command below"
             }
             AgentNote::ChoiceGone => {
                 "the profile you picked is no longer in this helm, so nothing is selected — \
@@ -477,43 +476,16 @@ pub(crate) struct AgentSelection {
     pub(crate) note: Option<AgentNote>,
 }
 
-/// What the first catalog to answer a dialog's own question decides, once.
-///
-/// The consumption half of SPEC.md's creation rule, split out from the
-/// component so the decision can be stated and tested without a runtime. Three
-/// outcomes, and the middle one is why this returns an `Option` rather than a
-/// choice:
-///
-/// - the remembered default still exists → that is the choice;
-/// - a default is remembered but is GONE → no choice, which leaves the dialog
-///   blocked and asking (SPEC.md's ask-don't-guess);
-/// - nothing was ever remembered here → the command path, so the helm is
-///   usable immediately and has nothing to explain.
-///
-/// Consulted once per dialog, whatever it answers — see
-/// `list::CreateSessionForm` for why "a choice exists" is not a usable record
-/// of that having happened.
-pub(crate) fn seeded_choice(catalog: &ProfileCatalog) -> Option<AgentChoice> {
-    match catalog.default_profile.as_deref() {
-        Some(remembered) if catalog.profiles.iter().any(|p| p.id == remembered) => {
-            Some(AgentChoice::Profile(remembered.to_string()))
-        }
-        Some(_) => None,
-        None => Some(AgentChoice::Command),
-    }
-}
-
 /// Resolve the create dialog's current agent choice without guessing.
 ///
-/// An explicit choice wins. A chosen or remembered profile that is absent or
-/// unconfirmed blocks rather than falling back to the command field, whose
-/// retained text may describe a different intention. `seeded` makes the
-/// remembered default a one-time dialog decision instead of a value that an
-/// open form follows when another client changes it.
+/// An explicit choice wins. A chosen profile that is absent or unconfirmed
+/// blocks rather than falling back to the command field, whose retained text
+/// may describe a different intention. No choice at all also blocks: the
+/// catalog's remembered last-used profile is deliberately not consulted,
+/// because SPEC.md's creation rule says New does not silently choose one.
 pub(crate) fn resolve_agent(
     chosen: Option<&AgentChoice>,
     catalog: Option<&ProfileCatalog>,
-    seeded: bool,
 ) -> AgentSelection {
     let held = |id: &str| {
         catalog.is_some_and(|catalog| catalog.profiles.iter().any(|profile| profile.id == id))
@@ -538,20 +510,15 @@ pub(crate) fn resolve_agent(
         // a decision the user has to make and the other resolves itself.
         (Some(AgentChoice::Profile(_)), Some(_)) => blocked(AgentNote::ChoiceGone),
         (Some(AgentChoice::Profile(_)), None) => blocked(AgentNote::ChoiceUnconfirmed),
-        // Nothing chosen, and this dialog has ALREADY been seeded from a
-        // catalog: the only way to reach here is a remembered default that did
-        // not resolve, because every other outcome writes a choice at seeding
-        // time (see `list::CreateSessionForm`). It is SPEC.md's ask case and
-        // it blocks.
-        (None, _) if seeded => blocked(AgentNote::RememberedGone),
-        // Nothing chosen and nothing seeded yet: the catalog is still being
-        // read, or could not be. Blocking here is the conservative reading of
-        // SPEC.md's ask-don't-guess rule — this dialog does not yet know
-        // whether the helm remembers a profile, so defaulting to the command
-        // field would be answering a question nobody has asked yet, and the
-        // field is not necessarily empty. It clears itself the moment the read
-        // lands, and the user can always answer it directly.
-        (None, _) => blocked(AgentNote::ChoiceUnconfirmed),
+        // Nothing chosen against a known catalog. The command field is not a
+        // safe answer (it is not necessarily empty), and neither is the
+        // catalog's remembered profile, so the dialog asks.
+        (None, Some(_)) => blocked(AgentNote::NothingChosen),
+        // Nothing chosen and no catalog yet: a clone waiting for the read to
+        // resolve its own agent. It clears itself when a read succeeds (a
+        // failed read leaves it here, beside the printed failure), and
+        // the user can always answer it directly.
+        (None, None) => blocked(AgentNote::ChoiceUnconfirmed),
     }
 }
 
@@ -2394,66 +2361,48 @@ mod tests {
         assert_eq!(read.answer(), CatalogLookup::Pending);
     }
 
-    /// The first catalog to answer decides, once — and a remembered default
-    /// that is GONE decides nothing, which is what leaves the dialog asking.
+    /// With nothing chosen, a known catalog's remembered profile is NOT
+    /// selected, whether it still exists or not: the dialog blocks and asks.
     ///
-    /// The three outcomes are SPEC.md's creation rule in one table, and the
-    /// middle one is the whole point: substituting another profile there would
-    /// launch an agent nobody chose from a dialog that looks like it
-    /// remembered a preference, and substituting the command field would run
-    /// whatever was typed into it earlier.
+    /// SPEC.md's creation rule says New does not silently choose a remembered
+    /// profile. The dialog used to take the first catalog's remembered id
+    /// once, and a clone whose own agent was still unresolved (the user had
+    /// switched launch mode before the catalog arrived) could have that
+    /// profile selected for it. The remembered id is still served and still
+    /// marked in the profiles popup, which is why the resolver has to ignore
+    /// it rather than never see it.
     #[farhelm_testtrace::test]
-    fn the_first_catalog_decides_once_and_a_deleted_default_decides_nothing() {
-        let held = catalog(
+    fn nothing_chosen_asks_even_when_the_remembered_profile_exists() {
+        let remembered = catalog(
             vec![profile("p-1", "Claude Code"), profile("p-2", "Codex")],
             Some("p-2"),
         );
+        let asking = AgentSelection {
+            choice: None,
+            note: Some(AgentNote::NothingChosen),
+        };
         assert_eq!(
-            seeded_choice(&held),
-            Some(AgentChoice::Profile("p-2".to_string()))
+            resolve_agent(None, Some(&remembered)),
+            asking,
+            "a live remembered profile must not be chosen for the user"
         );
-
         let gone = catalog(vec![profile("p-1", "Claude Code")], Some("p-deleted"));
         assert_eq!(
-            seeded_choice(&gone),
-            None,
-            "a deleted default must be asked about — never replaced by another profile, and never \
-             by the command field, which is not empty"
+            resolve_agent(None, Some(&gone)),
+            asking,
+            "a gone remembered profile gets the same neutral ask, not a note about that profile: \
+             the dialog never relied on it"
         );
-
-        // Nothing has ever been created from a profile here: there is no
-        // forgotten choice, so there is nothing to explain and the dialog
-        // stays immediately usable.
         let fresh = catalog(vec![profile("p-1", "Claude Code")], None);
-        assert_eq!(seeded_choice(&fresh), Some(AgentChoice::Command));
-    }
-
-    /// Once a dialog has been seeded, "nothing chosen" means the ask —
-    /// permanently, until the user answers or closes the dialog.
-    ///
-    /// Another client creating a session moves the helm's remembered id. A
-    /// dialog that still consulted the default after the notification would
-    /// change its selection under whoever was filling it in; the latch makes
-    /// the default a decision this dialog made rather than a value it follows.
-    #[farhelm_testtrace::test]
-    fn a_seeded_dialog_never_follows_a_later_remembered_default() {
-        let moved = catalog(
-            vec![profile("p-1", "Claude Code"), profile("p-2", "Codex")],
-            Some("p-2"),
-        );
         assert_eq!(
-            resolve_agent(None, Some(&moved), true),
-            AgentSelection {
-                choice: None,
-                note: Some(AgentNote::RememberedGone),
-            },
-            "a seeded dialog holding no choice is the ask case, whatever the catalog now \
-             remembers"
+            resolve_agent(None, Some(&fresh)),
+            asking,
+            "nor is the command field a default, since it may hold text typed for something else"
         );
     }
 
-    /// An explicit choice outranks the remembered default, and survives every
-    /// re-read that still holds it.
+    /// An explicit choice survives every re-read that still holds it,
+    /// whatever the catalog remembers.
     #[farhelm_testtrace::test]
     fn an_explicit_choice_outranks_the_remembered_default() {
         let held = catalog(
@@ -2461,11 +2410,7 @@ mod tests {
             Some("p-2"),
         );
         assert_eq!(
-            resolve_agent(
-                Some(&AgentChoice::Profile("p-1".to_string())),
-                Some(&held),
-                true
-            ),
+            resolve_agent(Some(&AgentChoice::Profile("p-1".to_string())), Some(&held)),
             AgentSelection {
                 choice: Some(AgentChoice::Profile("p-1".to_string())),
                 note: None,
@@ -2475,7 +2420,7 @@ mod tests {
         // overridden by a remembered profile — a user who selected the
         // command path has said what they want.
         assert_eq!(
-            resolve_agent(Some(&AgentChoice::Command), Some(&held), true),
+            resolve_agent(Some(&AgentChoice::Command), Some(&held)),
             AgentSelection {
                 choice: Some(AgentChoice::Command),
                 note: None,
@@ -2498,8 +2443,7 @@ mod tests {
         assert_eq!(
             resolve_agent(
                 Some(&AgentChoice::Profile("p-gone".to_string())),
-                Some(&without),
-                true
+                Some(&without)
             ),
             AgentSelection {
                 choice: None,
@@ -2511,26 +2455,26 @@ mod tests {
     /// Before any catalog has been read, NOTHING is selected — whether or not
     /// a profile has been picked.
     ///
-    /// SPEC.md's ask-don't-guess rule read conservatively: a dialog that has
-    /// not yet learned whether its helm remembers a profile cannot honestly
-    /// default to the command field, which may already hold text typed for a
-    /// different intention. The state is transient by construction (it clears
-    /// when the read lands) and always escapable — choosing "custom command"
-    /// is an answer, and so is typing into the command field, which records
-    /// the same choice.
+    /// SPEC.md's ask-don't-guess rule read conservatively: a clone waiting
+    /// for the catalog to resolve its own agent cannot honestly default to
+    /// the command field, which may already hold text typed for a different
+    /// intention. The state is transient by construction (it clears when the
+    /// read lands) and always escapable — choosing "custom command" is an
+    /// answer, and so is typing into the command field, which records the
+    /// same choice.
     #[farhelm_testtrace::test]
     fn an_unread_catalog_confirms_nothing_at_all() {
         assert_eq!(
-            resolve_agent(None, None, false),
+            resolve_agent(None, None),
             AgentSelection {
                 choice: None,
                 note: Some(AgentNote::ChoiceUnconfirmed),
             },
-            "before the catalog answers, this dialog does not know whether the helm remembers a \
-             profile — so it asks rather than defaulting to a command field that may not be empty"
+            "before the catalog answers, nothing chosen stays nothing chosen — the dialog asks \
+             rather than defaulting to a command field that may not be empty"
         );
         assert_eq!(
-            resolve_agent(Some(&AgentChoice::Profile("p-1".to_string())), None, false),
+            resolve_agent(Some(&AgentChoice::Profile("p-1".to_string())), None),
             AgentSelection {
                 choice: None,
                 note: Some(AgentNote::ChoiceUnconfirmed),
@@ -2540,7 +2484,7 @@ mod tests {
         // An explicit command choice needs no catalog at all: it names the
         // field below, which is always there.
         assert_eq!(
-            resolve_agent(Some(&AgentChoice::Command), None, false),
+            resolve_agent(Some(&AgentChoice::Command), None),
             AgentSelection {
                 choice: Some(AgentChoice::Command),
                 note: None,
