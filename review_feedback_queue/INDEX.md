@@ -233,8 +233,6 @@ One line per open item. This file must always match the feedback files in this d
   truncated at 500.
 - `credential-refusal-surfaces-as-broken-pipe.md` — a session-credential refusal can reach the CLI as "Broken pipe"
   instead of the real error.
-- `uncredentialed-agent-request-never-answered.md` — an `AgentRequest` sent without a session credential gets no reply
-  and hangs its sender.
 - `spawn-lookup-timeout-message-misleads.md` — a timed-out spawn profile lookup says a retry may repeat the request,
   though nothing was created.
 - `conversation-id-logged-raw-on-store-error.md` — an unchecked reported conversation id is written raw into a log line

@@ -3026,6 +3026,25 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             )
             .await;
         }
+        // The same reasoning as `ReportConversation`: an agent request is
+        // made AS a particular session, which only that session's credential
+        // can establish, so a full-authority connection cannot make one. The
+        // refusal rides in `AgentResponse`, the one reply shape an agent
+        // request's sender decodes; the catch-all below would leave it waiting.
+        ControlMsg::AgentRequest { req_id, .. } => {
+            send_reply(
+                ctx.tx,
+                &ControlMsg::AgentResponse {
+                    req_id,
+                    outcome: farhelm_proto::AgentOutcome::Err {
+                        kind: ErrorKind::Unauthorized,
+                        message: "agent requests must be made with a session credential"
+                            .to_string(),
+                    },
+                },
+            )
+            .await;
+        }
         // Response/event messages arriving at the supervisor are peer
         // bugs; log and continue. `AgentResponse` is one of them here by
         // construction: the connection loop completes it against that
@@ -7331,6 +7350,51 @@ mod tests {
         assert_eq!(
             message,
             "only the session's own agent may report its conversation"
+        );
+    }
+
+    /// An agent request on a full-authority connection gets a refusal
+    /// instead of silence.
+    ///
+    /// Why it matters: an agent request is made as a particular session,
+    /// which a connection without a session credential cannot be, and the
+    /// catch-all for unexpected messages only logged, leaving the sender
+    /// waiting forever. Spec: the refusal is an `AgentResponse` carrying
+    /// `Unauthorized`, the reply shape an agent request's sender decodes.
+    #[farhelm_testtrace::test]
+    async fn a_full_authority_agent_request_is_answered_with_a_refusal() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (_tasks, mut rx) = dispatch_for_test(
+            &sup,
+            ControlMsg::AgentRequest {
+                req_id: 62,
+                session_id: "some-session".to_string(),
+                request: AgentVerb::Sessions {},
+            },
+        )
+        .await;
+        let reply: ControlMsg = serde_json::from_slice(
+            &rx.recv()
+                .await
+                .expect("the refusal must be SENT, not merely logged")
+                .body,
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                reply,
+                ControlMsg::AgentResponse {
+                    req_id: 62,
+                    outcome: farhelm_proto::AgentOutcome::Err {
+                        kind: ErrorKind::Unauthorized,
+                        ..
+                    },
+                }
+            ),
+            "{reply:?}"
         );
     }
 
