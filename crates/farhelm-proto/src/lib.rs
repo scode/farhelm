@@ -91,7 +91,7 @@ pub use launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection}
 pub mod github_checkout;
 pub use github_checkout::{
     AcceptedGithubPreview, CheckoutPreviewBinding, ClaimContext, GithubCheckoutIntent,
-    GithubCheckoutRequest, GithubPreviewRequest, GithubPreviewResponse, GithubRepo,
+    GithubCheckoutRequest, GithubPreviewRequest, GithubPreviewResponse, GithubRepo, RepoError,
     ResolvedGithubCheckout, WorkingCopyInfo, parse_github_repo,
 };
 

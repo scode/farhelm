@@ -4,6 +4,7 @@
 //! the browser's displayed preview, installation claim and submitted request
 //! together; a late response is not permission to change the user's destination.
 
+use farhelm_proto::RepoError;
 use serde::{Deserialize, Serialize};
 
 /// The launch destination is independent of the agent controls and search
@@ -79,35 +80,34 @@ pub(crate) struct WorkingCopyInfo {
 
 impl GithubRepo {
     /// Validate the composer's complete owner/repo pair without repairing URLs
-    /// or stripping transport suffixes. Server validation remains authoritative.
+    /// or stripping transport suffixes.
+    ///
+    /// The rules are `farhelm_proto::parse_github_repo`'s, the same function
+    /// the helm and the supervisor run, rather than a copy kept here: a copy
+    /// that fell behind would offer repositories the server then refuses, or
+    /// hide ones it would accept. Server validation remains authoritative;
+    /// this only decides what the composer offers.
+    ///
+    /// The struct itself is still this crate's own rather than proto's
+    /// `GithubRepo`, which has the same two fields: it is threaded through the
+    /// UI's API and form code with its own `identifier()`, and unifying the
+    /// types is a separate change from sharing the rules.
     pub(crate) fn parse(value: &str) -> Result<Self, String> {
-        let Some((owner, name)) = value.split_once('/') else {
-            return Err("enter a GitHub repository as owner/repo".into());
-        };
-        let owner_valid = !owner.is_empty()
-            && owner.len() <= 39
-            && owner
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            && owner.as_bytes()[0].is_ascii_alphanumeric()
-            && owner.as_bytes()[owner.len() - 1].is_ascii_alphanumeric()
-            && !owner.contains("--");
-        let name_valid = !name.is_empty()
-            && name.len() <= 100
-            && name != "."
-            && name != ".."
-            && name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte));
-        if !owner_valid || !name_valid {
-            return Err(
-                "enter a valid GitHub owner/repo pair without a URL or branch suffix".into(),
-            );
+        match farhelm_proto::parse_github_repo(value) {
+            Ok(repo) => Ok(Self {
+                owner: repo.owner,
+                name: repo.name,
+            }),
+            Err(RepoError::Empty | RepoError::MissingSeparator) => {
+                Err("enter a GitHub repository as owner/repo".into())
+            }
+            Err(
+                RepoError::ExtraSeparator
+                | RepoError::InvalidOwner
+                | RepoError::InvalidRepo
+                | RepoError::TooLong,
+            ) => Err("enter a valid GitHub owner/repo pair without a URL or branch suffix".into()),
         }
-        Ok(Self {
-            owner: owner.to_ascii_lowercase(),
-            name: name.to_ascii_lowercase(),
-        })
     }
 
     /// Canonical identifier used for search, grouping and the create body.
@@ -327,6 +327,8 @@ mod tests {
 
     /// Inputs accepted locally must remain plain repository identities. URL
     /// repair and suffix stripping would silently select a different repository.
+    /// The composer's two refusal sentences also map onto proto's failure
+    /// classes: a missing pair asks for one, anything else says why not.
     #[test]
     fn repo_input_preserves_identity_and_refuses_transport_syntax() {
         assert_eq!(
@@ -351,6 +353,16 @@ mod tests {
         assert!(GithubRepo::parse(&format!("{}/{}", "a".repeat(39), "b".repeat(100))).is_ok());
         assert!(GithubRepo::parse(&format!("{}/bar", "a".repeat(40))).is_err());
         assert!(GithubRepo::parse(&format!("acme/{}", "b".repeat(101))).is_err());
+        // The composer's two sentences survive delegating to proto's parser:
+        // a missing pair asks for one, anything else malformed says why not.
+        assert_eq!(
+            GithubRepo::parse("bar").unwrap_err(),
+            "enter a GitHub repository as owner/repo"
+        );
+        assert_eq!(
+            GithubRepo::parse("acme/bar/extra").unwrap_err(),
+            "enter a valid GitHub owner/repo pair without a URL or branch suffix"
+        );
     }
 
     /// Generation, installation and draft identity are separate boundaries.
