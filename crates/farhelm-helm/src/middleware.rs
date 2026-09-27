@@ -60,6 +60,13 @@ pub(crate) async fn require_loopback_origin(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     if !origin_is_allowed(req.headers(), port) {
+        if let Some(location) = legacy_loopback_redirect(req.method(), req.headers(), port) {
+            return (
+                axum::http::StatusCode::TEMPORARY_REDIRECT,
+                [(axum::http::header::LOCATION, location)],
+            )
+                .into_response();
+        }
         return (
             axum::http::StatusCode::FORBIDDEN,
             "request must originate from this helm's loopback address\n",
@@ -88,6 +95,19 @@ pub(crate) async fn require_loopback_origin(
 /// The header decision behind [`require_loopback_origin`], as a pure
 /// function so its matrix is unit-testable (a browser cannot set `Host`,
 /// so the integration test can only reach the Origin half).
+///
+/// The only loopback authority accepted is the IPv4 literal `127.0.0.1`,
+/// never the name `localhost` or `[::1]`. The helm binds only
+/// `127.0.0.1`, so another local account can bind `[::1]` on the same port
+/// at any time, and a browser resolving `localhost` to `::1` first would
+/// load that account's page at `http://localhost:<port>`. That page's
+/// origin is the one the UI's stored device secret lives under, so serving
+/// the UI there would hand the secret to whoever holds `[::1]`. Binding
+/// `[::1]` as well does not close it: IPv6 loopback can appear after the
+/// helm starts. Refusing the names means no credential is ever stored
+/// under an origin another account can serve. SPEC_impl.md records the
+/// rule and the residual it leaves (a squatter can still show a fake token
+/// prompt at `localhost`).
 fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
     let is_loopback_authority = |value: &str| -> bool {
         // Host carries no scheme; Origin does. Strip a known scheme and
@@ -109,12 +129,10 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
         // below never match and every request would 403 — a functional
         // lockout of a legal flag value. Accept the bare authorities for
         // exactly that port; everything else stays exact-match.
-        if port == 80 && matches!(authority, "127.0.0.1" | "localhost" | "[::1]") {
+        if port == 80 && authority == "127.0.0.1" {
             return true;
         }
         authority == format!("127.0.0.1:{port}")
-            || authority == format!("localhost:{port}")
-            || authority == format!("[::1]:{port}")
     };
 
     let host_ok = headers
@@ -151,6 +169,42 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
         || headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) != Some("cross-site");
 
     host_ok && origin_ok && fetch_site_ok
+}
+
+/// Where to send a plain page load that named this helm by a loopback name
+/// it no longer answers to, or `None` when the request must simply be
+/// refused.
+///
+/// Old bookmarks and habits say `http://localhost:<port>/`. When such a
+/// request reaches the real helm (the browser fell back to IPv4 because
+/// nothing listens on `[::1]`), a redirect to the IPv4 literal is friendlier
+/// than a bare 403 and gives nothing away: it only ever comes from the
+/// genuine helm, and its target is this fixed literal, never anything taken
+/// from the request. The target is always `/` because the UI has no path
+/// routing. Only `GET` and `HEAD` without an `Upgrade` header qualify; API
+/// calls and WebSocket upgrades under those names stay refused, since no
+/// page this helm serves can make them.
+fn legacy_loopback_redirect(
+    method: &axum::http::Method,
+    headers: &axum::http::HeaderMap,
+    port: u16,
+) -> Option<axum::http::HeaderValue> {
+    if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
+        return None;
+    }
+    if headers.contains_key(axum::http::header::UPGRADE) {
+        return None;
+    }
+    let host = headers
+        .get(axum::http::header::HOST)
+        .and_then(|value| value.to_str().ok())?;
+    let named = host == format!("localhost:{port}")
+        || host == format!("[::1]:{port}")
+        || (port == 80 && matches!(host, "localhost" | "[::1]"));
+    if !named {
+        return None;
+    }
+    axum::http::HeaderValue::from_str(&format!("http://127.0.0.1:{port}/")).ok()
 }
 
 /// Whether an `Origin` is one of the desktop build's own webview schemes.
@@ -300,7 +354,7 @@ pub(crate) async fn stamp_build(
 
 #[cfg(test)]
 mod tests {
-    use super::origin_is_allowed;
+    use super::{legacy_loopback_redirect, origin_is_allowed};
     use axum::http::HeaderMap;
     const PORT: u16 = 7433;
 
@@ -328,16 +382,96 @@ mod tests {
             &headers(Some("127.0.0.1:7433"), None),
             PORT
         ));
-        assert!(origin_is_allowed(
-            &headers(Some("localhost:7433"), None),
-            PORT
-        ));
-        assert!(origin_is_allowed(&headers(Some("[::1]:7433"), None), PORT));
         // The browser's own same-origin requests carry both.
         assert!(origin_is_allowed(
             &headers(Some("127.0.0.1:7433"), Some("http://127.0.0.1:7433")),
             PORT
         ));
+    }
+
+    /// `localhost` and `[::1]` name loopback too, but another local account
+    /// can serve them: the helm binds only `127.0.0.1`, so `[::1]` on the
+    /// same port is free for anyone, and a browser that resolves
+    /// `localhost` to `::1` would load that account's page under the origin
+    /// the UI keeps its device secret in. Neither name may be accepted as
+    /// Host or Origin, or the UI could again be served (and its secret
+    /// stored) under an origin the helm does not own.
+    #[farhelm_testtrace::test]
+    fn loopback_names_other_than_the_ipv4_literal_are_refused() {
+        for host in ["localhost:7433", "[::1]:7433"] {
+            assert!(!origin_is_allowed(&headers(Some(host), None), PORT));
+        }
+        for origin in ["http://localhost:7433", "http://[::1]:7433"] {
+            assert!(!origin_is_allowed(
+                &headers(Some("127.0.0.1:7433"), Some(origin)),
+                PORT
+            ));
+        }
+    }
+
+    fn with_method_and_upgrade(upgrade: bool, host: &str) -> (axum::http::Method, HeaderMap) {
+        let mut h = headers(Some(host), None);
+        if upgrade {
+            h.insert(axum::http::header::UPGRADE, "websocket".parse().unwrap());
+        }
+        (axum::http::Method::GET, h)
+    }
+
+    /// A plain page load that still says `localhost` or `[::1]` is sent to
+    /// the IPv4 literal instead of dead-ending in a 403.
+    ///
+    /// Old bookmarks say `http://localhost:<port>/`, and when the browser
+    /// falls back to IPv4 the request reaches this helm. The target is the
+    /// fixed literal and root path whatever the request carried, so the
+    /// redirect cannot be steered anywhere.
+    #[farhelm_testtrace::test]
+    fn legacy_loopback_page_loads_redirect_to_the_ipv4_literal() {
+        for host in ["localhost:7433", "[::1]:7433"] {
+            let (method, h) = with_method_and_upgrade(false, host);
+            assert_eq!(
+                legacy_loopback_redirect(&method, &h, PORT).unwrap(),
+                "http://127.0.0.1:7433/"
+            );
+            assert!(
+                legacy_loopback_redirect(&axum::http::Method::HEAD, &h, PORT).is_some(),
+                "HEAD is a page probe like GET"
+            );
+        }
+        for host in ["localhost", "[::1]"] {
+            let (method, h) = with_method_and_upgrade(false, host);
+            assert_eq!(
+                legacy_loopback_redirect(&method, &h, 80).unwrap(),
+                "http://127.0.0.1:80/"
+            );
+        }
+    }
+
+    /// Only plain page loads under the legacy names are redirected.
+    ///
+    /// A WebSocket upgrade or an API call under `localhost` could only come
+    /// from a page served at that origin, which the helm no longer serves,
+    /// so those are refused outright. Foreign hosts, the wrong port, and a
+    /// portless name on a non-default port get no redirect either: the
+    /// redirect is a convenience for the one legacy spelling, not a second
+    /// way past the guard.
+    #[farhelm_testtrace::test]
+    fn only_plain_legacy_page_loads_are_redirected() {
+        let (method, h) = with_method_and_upgrade(true, "localhost:7433");
+        assert!(legacy_loopback_redirect(&method, &h, PORT).is_none());
+        let (_, h) = with_method_and_upgrade(false, "localhost:7433");
+        assert!(legacy_loopback_redirect(&axum::http::Method::POST, &h, PORT).is_none());
+        for host in [
+            "attacker.example:7433",
+            "localhost:9999",
+            "localhost",
+            "127.0.0.1:9999",
+        ] {
+            let (method, h) = with_method_and_upgrade(false, host);
+            assert!(
+                legacy_loopback_redirect(&method, &h, PORT).is_none(),
+                "{host} must not redirect"
+            );
+        }
     }
 
     /// The desktop webview serves the app from a custom scheme a web page
@@ -390,7 +524,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn default_port_80_accepts_portless_loopback_authorities() {
         assert!(origin_is_allowed(&headers(Some("127.0.0.1"), None), 80));
-        assert!(origin_is_allowed(&headers(Some("localhost"), None), 80));
+        // The portless names are refused on port 80 like everywhere else.
+        assert!(!origin_is_allowed(&headers(Some("localhost"), None), 80));
         assert!(origin_is_allowed(
             &headers(Some("127.0.0.1"), Some("http://127.0.0.1")),
             80

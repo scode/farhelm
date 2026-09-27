@@ -67,8 +67,13 @@ only those custom-scheme origins.
 Two things sit beside the credential and are worth knowing about because the tradeoff below leans on them. The loopback
 origin guard (`require_loopback_origin`) refuses any request whose `Host` is not this helm's own loopback authority, any
 browser `Origin` that is not that authority or a desktop custom scheme, and any top-level cross-site navigation
-(`Sec-Fetch-Site: cross-site` with no vouching Origin). Every response carries `X-Frame-Options: DENY` and
-`frame-ancestors 'none'`.
+(`Sec-Fetch-Site: cross-site` with no vouching Origin). That authority is the IPv4 literal `127.0.0.1:<port>` only. The
+helm binds only IPv4 loopback, so another local account can bind `[::1]` on the same port even while the helm runs, and
+a browser that resolves `localhost` to `::1` would load that account's page under the origin where the UI keeps its
+device secret. The names `localhost` and `[::1]` are therefore refused (a plain page load under them is redirected to
+`127.0.0.1`), which keeps the secret out of any origin another account can serve. A secret a browser stored under
+`localhost` before that rule stays exposed to such a squatter until the token is rotated. Every response carries
+`X-Frame-Options: DENY` and `frame-ancestors 'none'`.
 
 ### The tradeoff that was taken
 
@@ -106,14 +111,17 @@ the helm's port IS the helm. Port-scoped storage stops a credential from reachin
 about a different process on the same port. Concretely: the helm is down (stopped, restarting, crashed), another user on
 the same machine binds its port, and either a tab left open sends its stored device secret to them on the next
 reconnect, or the user opens the bookmarked URL, sees a page that looks like Farhelm's token prompt, and pastes the web
-token into it. The URL bar shows the same `http://localhost:<port>` either way, so there is nothing for the user to
+token into it. The URL bar shows the same `http://127.0.0.1:<port>` either way, so there is nothing for the user to
 notice. The preconditions are all required: another local user, the helm not running at that moment, and (for the paste
-case) a convincing lookalike. On a machine with no other local users, none of this is reachable.
+case) a convincing lookalike. On a machine with no other local users, none of this is reachable. One variant does not
+need the helm to be down: a user who types `localhost` rather than `127.0.0.1` can reach another user's server on
+`[::1]`, which can show the same lookalike prompt. No stored secret is exposed that way, because the helm never serves
+the UI under that name.
 
 No client-side mechanism closes it. A key the page holds, a challenge the page answers, a token that carries the helm's
 identity for the page to check — all of them are checked by code that, in this scenario, the attacker served. The
 browser has exactly one way to verify a server before running its page, and that is a TLS certificate chained to a trust
-anchor the browser already holds. For `localhost` no public CA will issue one, so it means the user installing a
+anchor the browser already holds. For a loopback address no public CA will issue one, so it means the user installing a
 Farhelm-minted CA into each browser's trust store on each client machine: a one-time, out-of-band configuration step per
 machine, not something a link click can do. The other complete answer is to not use a browser at all.
 

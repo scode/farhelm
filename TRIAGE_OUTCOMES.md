@@ -1275,7 +1275,14 @@
   and the fake-prompt residual; update `docs/browser-limitations.md`, `docs/security.md`, and any other user docs that
   present `localhost` or `[::1]`; add a changelog fragment; remove the feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the loopback guard (`origin_is_allowed`) accepts only `127.0.0.1:<port>` (bare on port 80), and
+  a new `legacy_loopback_redirect` sends a plain `GET`/`HEAD` whose Host is exactly `localhost` or `[::1]` (with this
+  port) to the fixed `http://127.0.0.1:<port>/`; upgrades and other methods get the 403. SPEC.md, SPEC_impl.md,
+  `docs/security.md`, and `docs/browser-limitations.md` state the rule, why dual-binding was rejected, the stale-secret
+  residual with `token rotate` as the remedy, and the lookalike-prompt residual. The focused recorded run passed the
+  nine middleware tests. Fresh gpt-6-astra high review reported no findings. Draft PR
+  [#1035](https://github.com/scode/farhelm/pull/1035/changes) is on bookmark `pr/ui-only-at-ipv4-loopback`, jj change
+  `nyvmnvmu`.
 
 ## supervisor-error-forges-reauth-401.md
 

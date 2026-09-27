@@ -1,10 +1,12 @@
-# Browser limitations: why the UI wants a localhost tunnel
+# Browser limitations: why the UI wants a loopback tunnel
 
-What you lose when the web UI is reached at anything other than `http://localhost:<port>` (or `127.0.0.1` / `[::1]`),
-and why. Reaching a remote helm means an SSH port forward you set up yourself (`ssh -N -L 7433:127.0.0.1:7433 box`), and
-the helm refuses non-loopback binds anyway, so in v1 the non-tunnel case is mostly something you get into by accident: a
-reverse proxy, a tailnet hostname, a forward on a different local port. This page says what breaks so the report is
-"origin problem", not "clipboard is broken".
+What you lose when the web UI is reached at anything other than `http://127.0.0.1:<port>`, and why. The helm answers
+only to that address: `http://localhost:<port>` and `http://[::1]:<port>` redirect a page load to it and refuse
+everything else, because another local account could serve those names (see `docs/security.md`). Reaching a remote helm
+means an SSH port forward you set up yourself (`ssh -N -L 7433:127.0.0.1:7433 box`), and the helm refuses non-loopback
+binds anyway, so in v1 the non-tunnel case is mostly something you get into by accident: a reverse proxy, a tailnet
+hostname, a forward on a different local port. This page says what breaks so the report is "origin problem", not
+"clipboard is broken".
 
 NOTE: this is not a description of the security model. For that, read SPEC.md's Security section.
 
@@ -44,5 +46,6 @@ reads further), so a loopback origin is necessary for copy-on-select, not suffic
 means by "eligibility is not the same as success".
 
 Installed web apps (Chrome's "Install app", Safari's "Add to Dock") sit behind the same gate, and the installed app is
-bound to the exact origin, scheme, host and port included. A same-port forward to `localhost` satisfies both, which is
-why the standalone-window experience costs nothing beyond a manifest; a non-loopback `http://` link satisfies neither.
+bound to the exact origin, scheme, host and port included. A same-port forward opened at `127.0.0.1` satisfies both,
+which is why the standalone-window experience costs nothing beyond a manifest; a non-loopback `http://` link satisfies
+neither.
