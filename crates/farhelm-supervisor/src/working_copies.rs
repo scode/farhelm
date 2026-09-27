@@ -691,10 +691,18 @@ pub struct OccupiedScan {
 
 /// Scan `root` once and collect every entry related to `basename` — the
 /// plain name and every name beginning with `basename-`, including titled
-/// names with arbitrary suffixes. The reserved archive directory is skipped
-/// exactly like the allocator skips it. Every other entry occupies its exact
-/// name — files, directories, and symlinks alike, including DANGLING ones (a
-/// name claimed on disk is claimed as far as mkdir is concerned). It returns
+/// names with arbitrary suffixes. Every entry occupies its exact name —
+/// files, directories, and symlinks alike, including DANGLING ones (a name
+/// claimed on disk is claimed as far as mkdir is concerned).
+///
+/// [`ARCHIVE_DIR_NAME`] is reported as occupied whenever it is related to
+/// `basename`, whether or not it exists yet: it is reserved for archived
+/// checkouts, and ordinary titles produce it exactly (repo `farhelm`,
+/// title "archived working copies"). A checkout that took the name became
+/// the archive directory for every later delete in that root, and its own
+/// delete tried to move it into itself. Reserving it here, rather than
+/// relying on the nesting guard, holds even in a root whose registry has
+/// no active rows to derive the archive path from. It returns
 /// a SET because the naming helper's `occupied_names` callback checks
 /// arbitrary candidates for titled names. The preview uses it to propose a
 /// name and the create path re-runs it to confirm the proposal still holds;
@@ -727,6 +735,9 @@ where
 {
     let mut names = std::collections::HashSet::new();
     let basename_prefix = format!("{basename}-");
+    if ARCHIVE_DIR_NAME == basename || ARCHIVE_DIR_NAME.starts_with(&basename_prefix) {
+        names.insert(ARCHIVE_DIR_NAME.to_owned());
+    }
     for _ in 0..cap {
         let entry = match entries.next() {
             Some(Ok(entry)) => entry,
@@ -740,7 +751,6 @@ where
         };
         let name = entry.file_name();
         if let Some(name) = name.to_str()
-            && name != ARCHIVE_DIR_NAME
             && (name == basename || name.starts_with(&basename_prefix))
         {
             names.insert(name.to_owned());
@@ -1674,6 +1684,52 @@ mod tests {
         let numbered = farhelm_proto::github_checkout::checkout_basename(&repo, None, &occupied)
             .expect("bar-01 does not occupy bar-1");
         assert_eq!(numbered.basename, "bar-1");
+    }
+
+    /// Spec: a fresh checkout can never be named `ARCHIVE_DIR_NAME`, even in
+    /// an empty root where no registry row exists to derive the archive path
+    /// from, and in a root where the archive directory already exists.
+    ///
+    /// Ordinary titles produce the reserved name exactly. A checkout that took
+    /// it became the destination for every later archive in that root, and
+    /// its own delete failed forever trying to move it into itself. The
+    /// earlier nesting guard only knew the archive path from active registry
+    /// rows, so the first checkout in a root was unprotected; this pins the
+    /// name reservation that does not depend on the registry.
+    #[test]
+    fn the_archive_directory_name_is_never_a_free_checkout_name() {
+        for repo in [
+            "acme/farhelm",
+            "acme/farhelm-archived",
+            "acme/farhelm-archived-working",
+        ] {
+            let repo =
+                farhelm_proto::github_checkout::parse_github_repo(repo).expect("valid repository");
+            let title = &ARCHIVE_DIR_NAME[repo.name.len() + 1..].replace('-', " ");
+            for existing_archive in [false, true] {
+                let root = tempfile::tempdir().expect("empty root");
+                if existing_archive {
+                    fs::create_dir(root.path().join(ARCHIVE_DIR_NAME)).expect("archive directory");
+                }
+                let scan =
+                    occupied_related_names(root.path(), &repo.name, 8).expect("complete scan");
+                assert!(scan.names.contains(ARCHIVE_DIR_NAME));
+                let occupied = |name: &str| scan.names.contains(name);
+                for title in [title.as_str(), ARCHIVE_DIR_NAME] {
+                    assert_eq!(
+                        farhelm_proto::github_checkout::checkout_basename(
+                            &repo,
+                            Some(title),
+                            &occupied
+                        )
+                        .expect_err("the reserved name must not be proposed"),
+                        farhelm_proto::github_checkout::NameError::Occupied,
+                        "repo {} title {title:?}",
+                        repo.name
+                    );
+                }
+            }
+        }
     }
 
     /// A missing root is an unknown scan, and injected iterator failures are
