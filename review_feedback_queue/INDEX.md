@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `superseded-launch-specs-never-removed.md` — launch specs of superseded or unconsumed launches (argv + session token)
-  stay on disk until Delete.
 - `reload-leaves-unread-launch-spec.md` — startup reconciliation cleans launch specs only after Error, so
   Interrupted/Exited launches keep credentials on disk.
 - `observers-leave-unread-launch-spec.md` — the ticker, listing and stop observers clean launch specs only after Error,

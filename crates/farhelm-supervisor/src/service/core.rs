@@ -6736,8 +6736,13 @@ impl Supervisor {
         // sweep needs to know which sessions still exist to avoid
         // unlinking a spec a surviving shim might still read (see
         // `sweep_launch_dir`'s own docs).
-        let known_sessions: std::collections::HashSet<String> =
-            self.sessions.lock().await.keys().cloned().collect();
+        let known_sessions: std::collections::HashMap<String, i64> = self
+            .sessions
+            .lock()
+            .await
+            .iter()
+            .map(|(id, entry)| (id.clone(), entry.generation))
+            .collect();
         sweep_launch_dir(&self.state_dir.join("launch"), &known_sessions).await;
         sweep_tmux_config_temp_files(&self.state_dir).await;
         sweep_legacy_snapshots_dir(&self.state_dir).await;
@@ -6746,7 +6751,8 @@ impl Supervisor {
         // files a hard crash stranded, directories a delete parked but
         // never discarded, and whole session directories whose session no
         // longer exists (see `attachments::reconcile_at_startup`).
-        crate::attachments::reconcile_at_startup(&self.state_dir, &known_sessions).await;
+        let known_ids: std::collections::HashSet<String> = known_sessions.keys().cloned().collect();
+        crate::attachments::reconcile_at_startup(&self.state_dir, &known_ids).await;
         // This supervisor's own cadence (PLAN_M6_75.md item 1), started
         // last because this is where initialization ENDS: the session map
         // is the one this process will serve, the socket is bound, and the
