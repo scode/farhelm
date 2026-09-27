@@ -1781,7 +1781,12 @@ pub(crate) async fn do_create_session(
     if let Some(profile_names) = &profile_names {
         resolve_session_profiles(profile_names, std::iter::once(&mut session));
     }
+    // A plain Replace resolved its profile from the id the host LISTED for
+    // the source row, which is not the user's choice of profile, so it must
+    // not become the helm-wide default (SPEC.md: only explicit GUI
+    // selections shape GUI defaults).
     let remembered_profile = match &mode {
+        _ if settings_from_source => None,
         CreateMode::Profile(profile_id) => Some(profile_id.clone()),
         CreateMode::ResolvedProfile { profile, .. } => Some(profile.id.clone()),
         CreateMode::Raw(_) | CreateMode::Structured(_) => None,
