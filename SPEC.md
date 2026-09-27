@@ -1209,19 +1209,26 @@ each supervisor (SSH) — plus one deliberately local one.
 - **Client to helm**: the helm serves its web UI over plain HTTP bound to loopback only, with a required token. The helm
   refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine means an
   SSH port forward the user sets up themselves — there is no built-in tunneling or Tailscale integration in v1. The
-  browser therefore always talks to localhost, which is conveniently a secure context — the precondition the browser
-  clipboard APIs require to be reachable at all. Eligibility is not the same as success: engine policy and per-request
-  permission still apply on top of it, and a clipboard operation that the engine refuses fails silently by the Terminal
-  experience section's own clipboard contract above, not with an error. The token still matters on loopback: it keeps
-  other local processes and users out. The helm generates it on first run; the user views or rotates it on the helm's
-  machine (`farhelm helm token show|rotate`), and the browser asks for it once per device and keeps a session
-  thereafter. Rotating the token invalidates every device credential for new requests; already-admitted requests may
-  finish. Existing terminal and event-feed connections may remain usable or close on rotation, whichever keeps the
-  implementation simpler; reconnecting requires a current credential. Rotation does not stop running agent sessions. The
-  native app embeds its helm; that edge is local. The token keeps other users OUT of the helm; it does not let the
-  browser tell the helm apart from another local user's process that binds the same port while the helm is down. That
-  gap is accepted in v1: the browser UI is recommended only on a machine with no other, untrusted local users, and the
-  native app is the preferred client wherever it is available. `docs/security.md` records the reasoning.
+  browser therefore always talks to the loopback literal `http://127.0.0.1:<port>`, which is conveniently a secure
+  context — the precondition the browser clipboard APIs require to be reachable at all. Eligibility is not the same as
+  success: engine policy and per-request permission still apply on top of it, and a clipboard operation that the engine
+  refuses fails silently by the Terminal experience section's own clipboard contract above, not with an error. The token
+  still matters on loopback: it keeps other local processes and users out. The helm generates it on first run; the user
+  views or rotates it on the helm's machine (`farhelm helm token show|rotate`), and the browser asks for it once per
+  device and keeps a session thereafter. Rotating the token invalidates every device credential for new requests;
+  already-admitted requests may finish. Existing terminal and event-feed connections may remain usable or close on
+  rotation, whichever keeps the implementation simpler; reconnecting requires a current credential. Rotation does not
+  stop running agent sessions. The native app embeds its helm; that edge is local. The token keeps other users OUT of
+  the helm; it does not let the browser tell the helm apart from another local user's process that binds the same port
+  while the helm is down. That gap is accepted in v1: the browser UI is recommended only on a machine with no other,
+  untrusted local users, and the native app is the preferred client wherever it is available. `docs/security.md` records
+  the reasoning. The UI is served only under the IPv4 literal, never under the names `localhost` or `[::1]`: the helm
+  binds only `127.0.0.1`, so another local account can bind `[::1]` on the same port at any time, even while the helm
+  runs, and a browser that resolves `localhost` to `::1` would load that account's page under the origin holding the
+  device secret. Refusing the names keeps any device secret from being stored under an origin another account can serve;
+  a plain page load that names them and still reaches the helm is redirected to `127.0.0.1`. A device secret a browser
+  stored under `localhost` before this rule remains exposed to such a squatter until the token is rotated, and a
+  squatter on `localhost` can still show a lookalike token prompt, which falls under the gap accepted above.
 - **Helm to supervisor**: SSH, and only SSH, for every remote supervisor. Passwordless access from the helm's machine,
   as the user, is the requirement; authentication is the user's SSH keys, and supervisors listen on no network port of
   their own. Registering a host means giving the helm its SSH destination — there is no supervisor token to manage. The
