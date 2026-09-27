@@ -1743,6 +1743,32 @@ fn pane_in_session(session: &str, pane: &str) -> String {
     format!("={session}:.{pane}")
 }
 
+/// A working directory spelled for a tmux `-c` flag, which tmux does NOT
+/// take literally: it runs the value through its format language first.
+///
+/// In that language `#{...}` is a variable, `#S`, `#W`, `#H` and friends
+/// are short aliases, `#(cmd)` runs `cmd` through `/bin/sh`, and a run of
+/// `#` followed by `[` is kept verbatim for later style processing. A
+/// directory named `C#Samples` therefore expanded to a path that does not
+/// exist, and tmux answers a start directory that does not exist by
+/// silently starting the pane in `$HOME` and reporting success; a
+/// directory whose name contains `#(...)` ran that command as the user.
+///
+/// Every `#` becomes `#{a:35}`, the ASCII modifier for character 35, which
+/// expands to a literal `#` without being rescanned. The obvious `##`
+/// escape is NOT enough: tmux copies a `##[` run unchanged (the style
+/// branch), so `project#[x]` would reach `chdir` as `project##[x]` and land
+/// in `$HOME` all the same. Both behaviors were verified against the pinned
+/// tmux, which is also the supported floor, so the modifier is always
+/// available.
+///
+/// Only `-c` needs this. `-e` values and the command after `--` reach tmux
+/// as literal argv and are not format-expanded, so escaping them would
+/// corrupt them instead.
+fn tmux_start_directory(cwd: &str) -> String {
+    cwd.replace('#', "#{a:35}")
+}
+
 fn env_assignments(env: &[(String, String)]) -> Vec<String> {
     env.iter()
         .map(|(name, value)| format!("{name}={value}"))
@@ -2594,7 +2620,9 @@ impl TmuxDriver {
     /// `service::SupervisorSeams::launch_env` for the one caller that does
     /// not, and why the launch environment needs an injection point at
     /// all). Values are passed as literal argv elements to tmux, never
-    /// through a shell, so no quoting applies.
+    /// through a shell, so no quoting applies. `cwd` is the exception on the
+    /// tmux side: `-c` is format-expanded, so it goes through
+    /// [`tmux_start_directory`].
     pub async fn create_session(
         &self,
         name: &str,
@@ -2607,6 +2635,7 @@ impl TmuxDriver {
         let cols_s = cols.clamp(1, 10_000).to_string();
         let rows_s = rows.clamp(1, 10_000).to_string();
         let env_args = env_assignments(env);
+        let start_dir = tmux_start_directory(cwd);
         // `-P -F` prints the pane id from the same invocation that
         // creates the session. One call, not new-session followed by a
         // display-message query: if the follow-up query failed, the
@@ -2626,7 +2655,7 @@ impl TmuxDriver {
             "-y",
             &rows_s,
             "-c",
-            cwd,
+            &start_dir,
         ];
         for assignment in &env_args {
             args.push("-e");
@@ -5252,6 +5281,77 @@ mod tests {
             .await
             .expect("querying the other session's geometry");
         assert_eq!(geometry.trim(), "80x24");
+    }
+
+    /// Spec: a session created in a directory whose name contains tmux
+    /// format syntax starts its pane in exactly that directory, and nothing
+    /// in the name is ever executed.
+    ///
+    /// tmux format-expands the `-c` start directory, and a start directory
+    /// that does not exist after expansion silently becomes `$HOME` with a
+    /// success exit. Before `tmux_start_directory`, `C#Samples`-style names
+    /// ran the agent in the home directory while the UI showed the chosen
+    /// folder, and a name containing `#(cmd)` ran `cmd` as the user at
+    /// create time, before any agent or trust prompt. The names cover each
+    /// shape of the language: a `#(...)` job, a short alias (`#S`), the `##`
+    /// escape itself, the `#[`/`##[` style runs that defeat a plain `##`
+    /// escape, and an unterminated `#{`.
+    #[farhelm_testtrace::test]
+    async fn create_session_starts_in_a_directory_named_with_tmux_format_syntax() {
+        let server = ScratchServer::start().await;
+        let marker = server.dir.path().join("format-job-ran");
+        // A directory name cannot contain `/`, so the job spells the
+        // marker's absolute path in octal escapes that the job's own shell
+        // turns back into slashes. Checked by hand against the pinned tmux:
+        // this name runs the `touch` when `-c` is passed unescaped.
+        let octal_marker = marker
+            .to_str()
+            .expect("utf-8 scratch path")
+            .replace('/', "\\057");
+        let names = [
+            format!("job #(touch \"`printf '{octal_marker}'`\")"),
+            "alias #S here".to_string(),
+            "escape ## kept".to_string(),
+            "style #[x] kept".to_string(),
+            "doubled style ##[y] kept".to_string(),
+            "open brace #{z".to_string(),
+        ];
+        for (index, name) in names.iter().enumerate() {
+            let directory = server.dir.path().join(name);
+            std::fs::create_dir(&directory).expect("create the oddly named directory");
+            let session = format!("fmt{index}");
+            let pane = server
+                .driver
+                .create_session(
+                    &session,
+                    directory.to_str().expect("utf-8 scratch path"),
+                    80,
+                    24,
+                    &[],
+                    &["sleep".into(), "60".into()],
+                )
+                .await
+                .expect("create a session in the directory");
+            let actual = server
+                .driver
+                .run(&["display-message", "-p", "-t", &pane, "#{pane_current_path}"])
+                .await
+                .expect("query the pane's directory");
+            assert_eq!(
+                std::path::Path::new(actual.trim()),
+                directory.canonicalize().expect("canonical directory"),
+                "the pane must start in the literal directory {name:?}"
+            );
+        }
+        // A `#()` job runs asynchronously inside the server, so its absence
+        // right after create proves nothing on its own. The window is
+        // generous against the observed sub-second job start.
+        // sleep-ok: observation window for an asynchronous tmux format job that must never run
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        assert!(
+            !marker.exists(),
+            "a #(...) job in the directory name must never run"
+        );
     }
 
     /// `capture_pane_tail` reads the VISIBLE grid and stops there, while

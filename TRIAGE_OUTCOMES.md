@@ -1422,7 +1422,14 @@
   pane's directory is the literal path and the marker never appears. First of the three stacked PRs; the helper lands
   here. Changelog fragment. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution
   change.
-- Execution: `pending`.
+- Execution: `complete`; `tmux_start_directory` in `farhelm-supervisor/src/tmux.rs` spells every `#` as `#{a:35}` for a
+  tmux `-c` value, documented with why only `-c` needs it, and `create_session` uses it. The review found that the
+  suggested `##` escape leaves `#[` style runs verbatim (verified: `p#[x]` landed in `$HOME`), which is why the modifier
+  replaced it; tmux 3.7c is both the pin and the floor, so the modifier is always available. A real-tmux regression test
+  creates sessions in directories named with a `#(...)` job, `#S`, `##`, `#[`, `##[`, and an unterminated `#{`, and
+  asserts the pane's literal directory and that the job never ran; it was confirmed to fail with the escape disabled.
+  Draft PR [#1040](https://github.com/scode/farhelm/pull/1040/changes), jj change `mvkzrulp`, bookmark
+  `pr/tmux-cwd-escape-create`.
 
 ## tmux-cwd-format-expanded-on-relaunch.md
 
