@@ -1774,6 +1774,10 @@ impl ProvisioningBackend for SystemBackend {
         // the login shell's. Those environments can disagree about
         // XDG_CONFIG_HOME, and writing to the shell's directory would leave
         // a valid-looking unit that this manager never searches.
+        //
+        // The unit_dir lines below are the shell twin of
+        // `crate::units::user_unit_dir_for`, which the local side uses;
+        // nothing ties the two, so keep them in step by hand.
         let script = "if [ -r /etc/os-release ]; then . /etc/os-release; fi; \
                       printf '%s\\0%s\\0%s\\0' 'farhelm-reach-v1' \"${ID-}\" \"${HOME-}\"; \
                       uname -m | tr -d '\\n'; printf '\\0'; \
@@ -2003,9 +2007,12 @@ impl ProvisioningBackend for SystemBackend {
     /// the one place in this file where that is true rather than a
     /// shortcut: this method asks about the machine the helm itself runs
     /// on, so the manager that would load the unit is the helm's own user
-    /// manager. Remote hosts are asked over SSH by `inspect` instead, and
-    /// the derivation is shared with it through
-    /// [`crate::units::user_unit_dir`].
+    /// manager. Remote hosts are asked over SSH by `inspect` instead, whose
+    /// shell fragment is a separate copy of
+    /// [`crate::units::user_unit_dir_for`]'s rule rather than a call into it
+    /// (see the note there). The two differ for a relative
+    /// `XDG_CONFIG_HOME`: this side falls back to `HOME`, the shell reports
+    /// `unsupported-xdg`.
     ///
     /// Everything short of a confirmed absence is an error. A missing
     /// `HOME` with no absolute `XDG_CONFIG_HOME`, a file this process may
