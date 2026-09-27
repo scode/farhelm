@@ -106,8 +106,8 @@ One line per open item. This file must always match the feedback files in this d
   after its caller gave up.
 - `agent-create-replays-asker-as-child.md` — a keyed `agent create` can report the asking session itself as the newly
   created session.
-- `spawn-replays-asker-as-child.md` — a keyed `farhelm spawn` without `--parent` can return the asking session as its
-  own new child.
+- `spawn-replays-asker-as-child.md` — a keyed `farhelm spawn` reusing another session's key can be handed that session's
+  child as its own new child.
 - `helm-link-chosen-by-hashmap-order.md` — agent requests can be routed to a stale half-open helm connection chosen by
   HashMap order.
 - `spawn-holds-global-mutex-waiting-parent.md` — a spawn waiting on its busy parent's lifecycle claim holds the
