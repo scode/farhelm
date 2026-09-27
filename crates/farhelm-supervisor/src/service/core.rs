@@ -21956,8 +21956,9 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                22,
-                "the v17 fixture now migrates through the provenance, OMP asset, and OMP program migrations too"
+                23,
+                "the v17 fixture now migrates through the provenance, OMP asset, OMP program, and \
+                 working-copy birth-time migrations too"
             );
             assert_eq!(
                 conn.query_row(
