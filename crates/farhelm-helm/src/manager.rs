@@ -1395,6 +1395,19 @@ impl ConnectionManager {
                             started.push(start);
                         }
                         let previous = existing.insert(replacement);
+                        // "Dead" includes an actor that already dropped its
+                        // nudge receiver while its supervisor task has not
+                        // yet run the retirement that would withdraw and
+                        // retire the published client. Aborting that task
+                        // skips it, and a client clone a caller still holds
+                        // would keep the old transport answering. So the
+                        // client is withdrawn here and retired with the
+                        // others once the map lock is released.
+                        previous.status.send_modify(|status| {
+                            if let Some(client) = status.client.take() {
+                                withdrawn.push(client);
+                            }
+                        });
                         previous.task.abort();
                         shape_changed = true;
                         continue;
@@ -2480,10 +2493,19 @@ impl ConnectionManager {
         // gate opens, so the map is the single arbiter of which actor owns
         // this host.
         let start = replacement.start.take();
+        let mut withdrawn = None;
         if let Some(previous) = map.actors.insert(host, replacement) {
+            // The previous actor may have died without its supervisor task
+            // having retired the published client yet, and aborting that
+            // task skips the retirement: withdraw it here, as `stop_actor`
+            // does, and retire it once the map lock is released.
+            previous.status.send_modify(|status| {
+                withdrawn = status.client.take();
+            });
             previous.task.abort();
         }
         drop(map);
+        retire_withdrawn(withdrawn);
         if let Some(start) = start {
             let _ = start.send(());
         }
@@ -8230,6 +8252,96 @@ mod tests {
             fixture.manager.state(direct),
             fixture.transport.closures.borrow().clone(),
             Arc::strong_count(&retained_direct)
+        );
+    }
+
+    /// Replacing an actor that looks dead but has not yet retired its
+    /// client must retire that client itself.
+    ///
+    /// A respawn (`sync_registry`) or revival treats an actor as dead once
+    /// its nudge channel is closed, which happens as soon as a panicking
+    /// actor drops its receiver, before its supervisor task has run the
+    /// retirement that withdraws and retires the published client. Aborting
+    /// that supervisor task skipped the retirement, so a client clone a
+    /// caller still held kept the old transport open and answering. The
+    /// fixture stages exactly that gap: the published client is still in the
+    /// status and the task still runs, but the nudge channel is closed.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn replacing_a_dead_actor_retires_its_unretired_client() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            for destination in ["respawned.example", "revived.example"] {
+                let host = store.add_ssh_host(destination, None, None).await.unwrap();
+                transport.set_script(
+                    host,
+                    Script {
+                        identity: Some(destination.to_string()),
+                        ..Script::default()
+                    },
+                );
+            }
+        })
+        .await;
+        let rows = fixture.store.list_hosts().await.unwrap();
+        let (respawned, revived) = (rows[1].id, rows[2].id);
+        for host in [respawned, revived] {
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                fixture.manager.wait_for_state(host, |state| {
+                    matches!(
+                        state,
+                        HostState::Connected {
+                            last_refresh: RefreshHealth::Ok { .. },
+                            ..
+                        }
+                    )
+                }),
+            )
+            .await
+            .expect("fixture premise: the host connected")
+            .expect("actor is running");
+        }
+        let retained_respawned =
+            status_client(&fixture.manager, respawned).expect("a published client");
+        let retained_revived =
+            status_client(&fixture.manager, revived).expect("a published client");
+        // Close a handle's nudge channel by swapping in a sender whose only
+        // receiver is already dropped: the "receiver gone, retirement not
+        // yet run" gap, held open for as long as the test needs it. Each
+        // host is staged only right before the path it exercises.
+        let stage_dead = |host: HostId| {
+            let mut map = fixture.manager.actors.lock().expect("actor map");
+            let handle = map.actors.get_mut(&host).expect("an actor");
+            handle.nudge = watch::channel(Nudge::default()).0;
+            assert!(handle.nudge.is_closed(), "fixture premise: looks dead");
+            assert!(!handle.task.is_finished(), "fixture premise: not retired");
+        };
+
+        stage_dead(respawned);
+        fixture.manager.sync_registry().await.unwrap();
+        let _ = &retained_respawned;
+        assert!(
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                fixture.transport.wait_for_closures(respawned, 1),
+            )
+            .await
+            .is_ok(),
+            "a respawn must retire the replaced actor's retained client; closures={:?}",
+            fixture.transport.closures.borrow().clone()
+        );
+
+        stage_dead(revived);
+        assert!(fixture.manager.revive(revived).await.unwrap());
+        let _ = &retained_revived;
+        assert!(
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                fixture.transport.wait_for_closures(revived, 1),
+            )
+            .await
+            .is_ok(),
+            "a revival must retire the replaced actor's retained client; closures={:?}",
+            fixture.transport.closures.borrow().clone()
         );
     }
 
