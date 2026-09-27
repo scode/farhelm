@@ -314,6 +314,22 @@ pub(crate) struct CompiledLaunch {
     pub(crate) selection: LaunchSelection,
 }
 
+/// The durable form of a submitted structured selection: what history,
+/// remembered defaults, and retries record for it.
+///
+/// Pi has no vendor approval mode. Its only offered safety label records
+/// that absence, so an omitted Pi choice becomes `yolo` here. Shared by
+/// [`compile`] and by acceptance paths that never compile (a fresh-checkout
+/// create reconciled after a lost reply), so the same request records the
+/// same selection whichever path accepts it. Pure: no catalog lookup, so a
+/// previously accepted request stays recoverable after catalog changes.
+pub(crate) fn normalize_selection(mut selection: LaunchSelection) -> LaunchSelection {
+    if selection.harness == LaunchHarness::Pi && selection.permissions.is_none() {
+        selection.permissions = Some(LaunchPermission::Yolo);
+    }
+    selection
+}
+
 /// Compile an explicit structured choice into one shell-word-safe invocation.
 ///
 /// The result contains no user-provided shell syntax. A custom model is one
@@ -321,13 +337,8 @@ pub(crate) struct CompiledLaunch {
 /// quoting at the boundary where the supervisor later splits the invocation.
 /// An absent model adds no provider or model flags, leaving the installed
 /// harness's configured default in charge.
-pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, String> {
-    // Pi has no vendor approval mode. Its only offered safety label records
-    // that absence, so make an omitted Pi choice durable before history and
-    // retry paths receive the compiled selection.
-    if selection.harness == LaunchHarness::Pi && selection.permissions.is_none() {
-        selection.permissions = Some(LaunchPermission::Yolo);
-    }
+pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, String> {
+    let selection = normalize_selection(selection);
     validate_selection(&selection)?;
 
     let mut argv = Vec::new();
@@ -595,7 +606,7 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
 
 #[cfg(test)]
 mod tests {
-    use super::compile;
+    use super::{compile, normalize_selection};
     use farhelm_proto::{
         AgentKind,
         launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection},
@@ -613,6 +624,27 @@ mod tests {
 
     /// Cursor remains a Generic launch even when model and permission choices
     /// are explicit; a saved ID must not synthesize Resume.
+    /// Spec: `normalize_selection` is exactly the selection `compile`
+    /// records, including Pi's omitted permissions becoming `yolo`.
+    ///
+    /// Why: a fresh-checkout create reconciled after a lost reply records
+    /// its selection without compiling. If the two disagreed, the same Pi
+    /// request would leave a different remembered permission default
+    /// depending on whether its first reply arrived.
+    #[farhelm_testtrace::test]
+    fn normalized_and_compiled_selections_agree() {
+        let pi = LaunchSelection {
+            harness: LaunchHarness::Pi,
+            model: None,
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        };
+        let normalized = normalize_selection(pi.clone());
+        assert_eq!(normalized.permissions, Some(LaunchPermission::Yolo));
+        assert_eq!(compile(pi).expect("compile pi").selection, normalized);
+    }
+
     #[test]
     fn cursor_launches_preserve_intent_without_conversation_integration() {
         for model in [None, Some("composer-2.5"), Some("custom[effort=high]")] {

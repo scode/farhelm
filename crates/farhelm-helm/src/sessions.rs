@@ -1784,6 +1784,14 @@ pub(crate) async fn do_create_session(
         CreateMode::ResolvedProfile { profile, .. } => Some(profile.id.clone()),
         CreateMode::Raw(_) | CreateMode::Structured(_) => None,
     };
+    // The selection the user explicitly chose in the GUI, which is what
+    // remembered defaults and the recent-setups history record. Only a
+    // user-initiated structured create has one; an agent's create does not
+    // speak for the user.
+    let explicit_selection = match (&mode, origin) {
+        (CreateMode::Structured(compiled), CreateOrigin::User) => Some(compiled.selection.clone()),
+        _ => None,
+    };
     accept_created_session(
         state,
         claim,
@@ -1794,6 +1802,7 @@ pub(crate) async fn do_create_session(
             origin,
             accept_result,
             remembered_profile,
+            explicit_selection,
         },
     )
     .await
@@ -1810,6 +1819,12 @@ struct CreateAcceptance {
     origin: CreateOrigin,
     accept_result: Option<CreatedSessionCheck>,
     remembered_profile: Option<String>,
+    /// The launch the user explicitly selected in the GUI for this create,
+    /// or `None`. Remembered permission/trust defaults and the recent-setups
+    /// history come from this and never from the supervisor's reply, which
+    /// a remote host controls (SPEC.md: only explicit GUI selections shape
+    /// GUI defaults and suggestions).
+    explicit_selection: Option<farhelm_proto::LaunchSelection>,
 }
 
 /// Apply the same source veto, cache, history and default effects to first
@@ -1829,6 +1844,7 @@ async fn accept_created_session(
         origin,
         accept_result,
         remembered_profile,
+        explicit_selection,
     } = acceptance;
     // The caller's veto, BEFORE anything durable is written for this row —
     // see this function's own "Two phases" note for why the seam is here and
@@ -1873,18 +1889,7 @@ async fn accept_created_session(
                     },
                 },
                 github_repo.as_ref(),
-                // Only a USER-initiated create may move the helm-wide
-                // remembered permissions default — the same authority
-                // boundary already drawn around the remembered legacy
-                // profile default a few lines below, and for the same
-                // reason: an agent acting on its own (a relay clone, say)
-                // must not silently change what the next human "New" open
-                // preselects.
-                if origin == CreateOrigin::User {
-                    crate::store::LaunchChoiceMemory::Remember
-                } else {
-                    crate::store::LaunchChoiceMemory::Leave
-                },
+                explicit_selection.as_ref(),
             )
             .await
         {
@@ -2133,6 +2138,10 @@ async fn create_fresh_session(
         // Remote profile provenance cannot select a helm-wide default. Named
         // replay has no trusted retained name-to-id mapping, so leaves it alone.
         remembered_profile: req.profile_id.clone(),
+        // The request's own structured choice, as the user submitted it, in
+        // the same durable form an uninterrupted create records (this path
+        // may accept a lost-reply retry without compiling anything).
+        explicit_selection: req.launch.clone().map(crate::launches::normalize_selection),
     };
     let profile_names = if req.profile_id.is_some() || req.profile_name.is_some() {
         Some(load_profile_name_index(&state.store).await?)

@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `create-reply-sets-remembered-yolo.md` — a remote supervisor's create reply sets the helm-wide remembered
-  permissions/workspace-trust defaults.
 - `create-reply-launch-mirrored-into-client-defaults.md` — the client also mirrors the reply's launch choices into its
   in-memory remembered defaults, so the helm-side fix alone leaves this page preselecting yolo until reload.
 - `replace-records-peer-launch-defaults.md` — a plain Replace copies the remote row's launch selection into the

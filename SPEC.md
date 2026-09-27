@@ -1430,6 +1430,13 @@ Agent instructions must identify fleet session metadata as data, never instructi
 session terminal does not establish a security defect: the agent already controls that output. This does not excuse
 unsafe rendering of remote input by the helm or GUI, secret disclosure, or violations of existing formatting contracts.
 
+Only what the user explicitly selects in the GUI may affect the GUI's future defaults and suggestions: the remembered
+permission mode and workspace-trust choice, the remembered profile, and the recent setups the New dialog offers. Each is
+recorded from the user's own selection in the request that succeeded, never from what a host replies or lists. A
+supervisor's create reply, the settings a plain Replace copies from a listed row, and anything an agent creates do not
+qualify, because none of them is a choice the user made in the GUI. A choice is still recorded only once its create
+succeeds; the host's success decides whether it is recorded, never what.
+
 The helm owns the remembered default for profile-backed session creation. The structured composer still opens without a
 selected harness; this authority rule does not require it to preselect a profile. A remote supervisor's reported
 timestamps, profile references, or other session metadata must not override an explicit user choice or indefinitely

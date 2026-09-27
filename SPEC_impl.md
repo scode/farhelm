@@ -1834,13 +1834,16 @@ suggestions with its other history; ordinary history rows retain their existing 
 
 Schema 30 adds nullable `remembered_workspace_trust` to the preference row. The helm updates it in the same admitted
 create transaction as structured launch history, only for an explicit Codex, Muse, or Pi choice from a user-originated
-create. Codex true and false compile to a whole-argv config marker. The supervisor fills it at the shared spawn seam,
-after any GitHub checkout has fixed the final cwd, with one `projects.<cwd>.trust_level` override set to `trusted` or
-`untrusted`. The cwd is quoted as a TOML key and resolved on the target host; omitted trust adds no Codex override. Muse
-true adds `--trust-workspace`; Muse false adds no trust flag and cannot undo trust from `--yolo` or vendor settings. Pi
-true adds `--approve` and Pi false adds `--no-approve`, independent of Pi's YOLO tool mode. Unsupported harnesses reject
-an explicit trust value. The composer clears that value on a switch to an unsupported harness and restores it from the
-preference row on a fresh open or reset. Older selection JSON decodes without a trust choice.
+create. Both are written from the selection the user submitted (`CreateAcceptance::explicit_selection`), never from the
+supervisor's reply, per SPEC.md's rule that only explicit GUI selections shape GUI defaults and suggestions; a create
+without one (an agent's, a plain Replace, a raw or profile create) writes neither. Codex true and false compile to a
+whole-argv config marker. The supervisor fills it at the shared spawn seam, after any GitHub checkout has fixed the
+final cwd, with one `projects.<cwd>.trust_level` override set to `trusted` or `untrusted`. The cwd is quoted as a TOML
+key and resolved on the target host; omitted trust adds no Codex override. Muse true adds `--trust-workspace`; Muse
+false adds no trust flag and cannot undo trust from `--yolo` or vendor settings. Pi true adds `--approve` and Pi false
+adds `--no-approve`, independent of Pi's YOLO tool mode. Unsupported harnesses reject an explicit trust value. The
+composer clears that value on a switch to an unsupported harness and restores it from the preference row on a fresh open
+or reset. Older selection JSON decodes without a trust choice.
 
 Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
 sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order

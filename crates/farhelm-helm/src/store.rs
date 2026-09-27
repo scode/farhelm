@@ -131,18 +131,6 @@ pub struct HistoryPaths<'a> {
     pub display_cwd: &'a str,
 }
 
-/// Whether an admitted create may update the helm-wide remembered launch
-/// choices (see [`HelmStore::record_create_history_with_destination`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LaunchChoiceMemory {
-    /// A user-initiated create: its structured choices become the defaults
-    /// the next "New" dialog preselects.
-    Remember,
-    /// An agent-originated create: recorded in history, but it must not move
-    /// the interactive user's defaults.
-    Leave,
-}
-
 /// The facts one admitted create writes into each history table.
 struct AdmittedCreate<'a> {
     host: HostId,
@@ -204,16 +192,22 @@ fn upsert_folder_history(
     Ok(changed != 0)
 }
 
-/// Record `create`'s structured launch in `launch_history` and, when
-/// `memory` allows it, remember its permission and workspace-trust choices.
-/// Returns whether the history row was new. A create without a structured
-/// launch records nothing and returns `false`.
+/// Record the launch the user explicitly selected for `create` in
+/// `launch_history`, and remember its permission and workspace-trust
+/// choices. Returns whether the history row was new. A create with no
+/// explicit selection records nothing here and returns `false`.
+///
+/// The selection comes from the caller, never from `create.entry.launch`:
+/// that field is the supervisor's reply, which a remote host controls, and
+/// SPEC.md's rule is that only what the user explicitly selects in the GUI
+/// may shape GUI defaults and suggestions. Agent-originated creates and a
+/// plain Replace (whose settings come from the source row) pass none.
 fn record_launch_history(
     tx: &rusqlite::Transaction<'_>,
     create: &AdmittedCreate<'_>,
-    memory: LaunchChoiceMemory,
+    explicit_selection: Option<&LaunchSelection>,
 ) -> anyhow::Result<bool> {
-    let Some(selection) = &create.entry.launch else {
+    let Some(selection) = explicit_selection else {
         return Ok(false);
     };
     // Captured from the same admitted selection `launch_history` is about to
@@ -253,7 +247,7 @@ fn record_launch_history(
     // `record_create_history_with_destination`'s own doc for why this is
     // gated on `memory` and placed here rather than written unconditionally
     // from `entry.launch`.
-    if memory == LaunchChoiceMemory::Remember {
+    {
         tx.execute(
             "INSERT INTO preferences (singleton, remembered_permissions) \
              VALUES (1, ?1) \
@@ -4964,8 +4958,9 @@ impl HelmStore {
         // it on the helm's filesystem, which may name another machine.
         let folder_identity = entry.canonical_cwd.as_deref().unwrap_or(&entry.cwd);
         // Test/fixture callers of this convenience wrapper are simulating an
-        // ordinary successful create, so they get the same remembering
-        // behavior a real user-initiated one would.
+        // ordinary successful user create whose explicit selection is the
+        // one the reply echoes, so they get the same remembering behavior a
+        // real user-initiated one would.
         self.record_create_history_with_destination(
             host,
             identity,
@@ -4975,7 +4970,7 @@ impl HelmStore {
                 display_cwd: &entry.cwd,
             },
             None,
-            LaunchChoiceMemory::Remember,
+            entry.launch.as_ref(),
         )
         .await
     }
@@ -4993,19 +4988,15 @@ impl HelmStore {
     /// fact is absent, callers pass the display spelling as a distinct key;
     /// the helm must never resolve it itself.
     ///
-    /// `memory` gates TWO independent side effects that
-    /// piggyback on this same admitted-create transaction: when `entry` is
-    /// a structured launch, its permissions choice (one of the released
-    /// permission words, or absent) becomes the helm-wide
-    /// `preferences.remembered_permissions` memory. An explicit Codex, Muse, or Pi
-    /// trust choice updates `remembered_workspace_trust` as well
-    /// (SPEC.md's launch-composer carve-out). The caller passes [`LaunchChoiceMemory::Leave`] for
-    /// an agent-relay-originated create (`sessions::CreateOrigin::Agent`):
-    /// that memory is the interactive user's own dialog default, and an
-    /// agent replaying or cloning a structured session on its own initiative
-    /// must not silently move what the next human "New" open preselects —
-    /// the same authority boundary SPEC.md already draws around the
-    /// remembered legacy-profile default. Piggybacked on the launch-history
+    /// `explicit_selection` is the launch the user explicitly selected in
+    /// the GUI for this create, or `None` (an agent-originated create, a
+    /// plain Replace, a raw or profile create). It alone decides the
+    /// `launch_history` row and, from the same selection, the helm-wide
+    /// `preferences.remembered_permissions` memory and, for an explicit
+    /// Codex, Muse, or Pi trust choice, `remembered_workspace_trust`.
+    /// Never `entry.launch`: that is the supervisor's reply, which a remote
+    /// host controls, and SPEC.md allows only explicit GUI selections to
+    /// shape GUI defaults and suggestions. Piggybacked on the launch-history
     /// admission (rather than written unconditionally from `entry.launch`)
     /// so a stale, out-of-order replayed create — one old enough that its
     /// own history entry is rejected below — cannot overwrite a newer
@@ -5031,7 +5022,7 @@ impl HelmStore {
         entry: &SessionInfo,
         paths: HistoryPaths<'_>,
         github_repo: Option<&farhelm_proto::GithubRepo>,
-        memory: LaunchChoiceMemory,
+        explicit_selection: Option<&LaunchSelection>,
     ) -> anyhow::Result<bool> {
         let github_repo = github_repo
             .map(|repo| {
@@ -5046,6 +5037,7 @@ impl HelmStore {
         } = paths;
         let identity = identity.to_string();
         let entry = entry.clone();
+        let explicit_selection = explicit_selection.cloned();
         let canonical_cwd = canonical_cwd.to_string();
         let display_cwd = display_cwd.to_string();
         self.conn.call("record create history task panicked", move |conn: &mut Connection| -> anyhow::Result<bool> {
@@ -5199,7 +5191,8 @@ impl HelmStore {
             };
             let folder_changed = github_repo.is_none()
                 && upsert_folder_history(&tx, &create, &canonical_cwd)?;
-            let launch_changed = record_launch_history(&tx, &create, memory)?;
+            let launch_changed =
+                record_launch_history(&tx, &create, explicit_selection.as_ref())?;
 
             // Find the newest row that will be evicted before deleting it.
             // Persisting this lower watermark is what keeps a delayed replay
@@ -6531,7 +6524,7 @@ mod tests {
                         display_cwd: "/work/bar-1"
                     },
                     Some(&repo),
-                    LaunchChoiceMemory::Remember
+                    entry.launch.as_ref()
                 )
                 .await
                 .unwrap()
@@ -6547,7 +6540,7 @@ mod tests {
                         display_cwd: "/changed"
                     },
                     Some(&other),
-                    LaunchChoiceMemory::Remember
+                    entry.launch.as_ref()
                 )
                 .await
                 .unwrap(),
@@ -6566,7 +6559,7 @@ mod tests {
                         display_cwd: "/work/bar-2"
                     },
                     Some(&repo),
-                    LaunchChoiceMemory::Remember
+                    entry.launch.as_ref()
                 )
                 .await
                 .unwrap()
@@ -6607,7 +6600,7 @@ mod tests {
                     display_cwd: "/work/bar-1",
                 },
                 None,
-                LaunchChoiceMemory::Remember,
+                entry.launch.as_ref(),
             )
             .await
             .unwrap();
@@ -6641,7 +6634,7 @@ mod tests {
                         display_cwd: "/work/bar-1"
                     },
                     Some(&repo),
-                    LaunchChoiceMemory::Leave
+                    None
                 )
                 .await
                 .unwrap()
@@ -6689,7 +6682,7 @@ mod tests {
                         display_cwd: "/work/bar-1"
                     },
                     Some(&repo),
-                    LaunchChoiceMemory::Leave
+                    None
                 )
                 .await
                 .unwrap()
@@ -6705,7 +6698,7 @@ mod tests {
                     display_cwd: "/work/bar-2",
                 },
                 Some(&repo),
-                LaunchChoiceMemory::Leave,
+                None,
             )
             .await
             .unwrap();
@@ -6850,18 +6843,19 @@ mod tests {
         );
     }
 
-    /// `LaunchChoiceMemory` is the one thing distinguishing a user-
-    /// initiated structured create from an agent-relay-originated one at
-    /// this function's call site (`sessions::do_create_session` passes
-    /// `origin == CreateOrigin::User`): a user create updates the helm-wide
-    /// "last permissions used" memory and an agent create must not, since
-    /// that memory is the interactive user's own dialog default (SPEC.md's
-    /// launch-composer carve-out). Pinned directly at this gate rather than
-    /// through a full agent-relay fixture, because the gate itself — not
-    /// which real caller passes which origin — is the risk this test
-    /// exists to catch.
+    /// Spec: only an explicit selection is recorded. A create recorded
+    /// without one (an agent's create, a plain Replace, a raw or profile
+    /// create) adds no recent-setups row and moves no remembered default,
+    /// even when the supervisor's reply carries a launch; a create with one
+    /// records exactly that selection, whatever the reply says.
+    ///
+    /// Why: the reply is written by the remote host. A compromised host
+    /// answering every create with `permissions: yolo` and workspace trust
+    /// used to set those as the helm-wide defaults the next New dialog
+    /// preselects, for every host. SPEC.md's rule is that only what the user
+    /// explicitly selects in the GUI shapes GUI defaults and suggestions.
     #[farhelm_testtrace::test]
-    async fn launch_choice_memory_gates_whether_a_structured_create_updates_the_memory() {
+    async fn only_an_explicit_selection_shapes_history_and_remembered_defaults() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "permissions.example", "identity-a").await;
         let yolo = |id: &str, seq: u64| SessionInfo {
@@ -6887,14 +6881,22 @@ mod tests {
                     display_cwd: &agent_origin.cwd,
                 },
                 None,
-                LaunchChoiceMemory::Leave,
+                None,
             )
             .await
-            .expect("record an agent-originated structured create");
+            .expect("record a create with no explicit selection");
         assert_eq!(
             store.preferences().await.unwrap().remembered_permissions,
             None,
-            "LaunchChoiceMemory::Leave must leave the memory untouched"
+            "a reply's launch must not move the remembered defaults"
+        );
+        assert!(
+            store
+                .launch_history(host, "identity-a")
+                .await
+                .unwrap()
+                .is_empty(),
+            "a reply's launch must not become a recent setup"
         );
 
         let user_origin = yolo("user-origin", 2);
@@ -6908,7 +6910,7 @@ mod tests {
                     display_cwd: &user_origin.cwd,
                 },
                 None,
-                LaunchChoiceMemory::Remember,
+                user_origin.launch.as_ref(),
             )
             .await
             .expect("record a user-originated structured create");
@@ -6920,7 +6922,54 @@ mod tests {
                 .remembered_permissions
                 .as_deref(),
             Some("yolo"),
-            "LaunchChoiceMemory::Remember sets the memory"
+            "an explicit selection sets the memory"
+        );
+
+        // The reply claims yolo; the user submitted approve. The submitted
+        // selection is what history and the memory record.
+        let divergent = SessionInfo {
+            cwd: "/divergent".to_string(),
+            ..yolo("divergent-reply", 100)
+        };
+        let submitted = LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: Some(farhelm_proto::LaunchPermission::Approve),
+            workspace_trust: None,
+        };
+        store
+            .record_create_history_with_destination(
+                host,
+                "identity-a",
+                &divergent,
+                HistoryPaths {
+                    canonical_cwd: &divergent.cwd,
+                    display_cwd: &divergent.cwd,
+                },
+                None,
+                Some(&submitted),
+            )
+            .await
+            .expect("record a create whose reply disagrees with the submission");
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .remembered_permissions
+                .as_deref(),
+            Some("approve"),
+            "the submitted selection wins over the reply"
+        );
+        let recorded = store.launch_history(host, "identity-a").await.unwrap();
+        assert_eq!(
+            recorded
+                .iter()
+                .find(|entry| entry.cwd == "/divergent")
+                .map(|entry| &entry.selection),
+            Some(&submitted),
+            "the recent setup is the submitted selection, not the reply's"
         );
 
         for (index, (permission, word)) in [
@@ -6955,7 +7004,7 @@ mod tests {
                         display_cwd: &entry.cwd,
                     },
                     None,
-                    LaunchChoiceMemory::Remember,
+                    entry.launch.as_ref(),
                 )
                 .await
                 .expect("record a Goose permission mode");
@@ -7049,11 +7098,7 @@ mod tests {
                         display_cwd: &entry.cwd,
                     },
                     None,
-                    if user {
-                        LaunchChoiceMemory::Remember
-                    } else {
-                        LaunchChoiceMemory::Leave
-                    },
+                    if user { entry.launch.as_ref() } else { None },
                 )
                 .await
                 .expect("record admitted structured launch");
