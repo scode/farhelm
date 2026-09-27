@@ -1114,3 +1114,163 @@
   cited `5f4bdac86887` is a ledger commit, not the implementation, which was `f4e9f8202ac3`. That fix is restored on
   bookmark `pr/restore-duplicate-freeze-retarget`, changed only by two test lint fixes the current toolchain requires;
   draft PR [#954](https://github.com/scode/farhelm/pull/954/changes).
+
+## restart-kills-terminal-less-agent-without-consent.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `29ced1a`, not runtime reproduction. A session left without a
+  recorded pane (chiefly an ambiguous create where tmux errored but the session may exist) takes `None => None` in
+  `restart_session`'s liveness recheck, so `stop_if_running` is never demanded and the else-branch reaps every process
+  carrying the session's agent marker. A live agent is killed without consent through the agent CLI or any client that
+  does not confirm on Unknown; the web and desktop UI already confirm for Unknown rows. This contradicts SPEC.md's
+  restart and Unknown-status rules and `restart_session`'s own docs, which promise terminal-less entries are treated as
+  possibly alive. The finding's `tmux kill-session` half is stale: #919 replaced that path after the reviewed commit.
+  How often tmux reports failure after creating the session is unverified.
+- Decision: the user chose the minimal fix (option 1). A terminal-less entry is treated as possibly alive: restart
+  refuses without `stop_if_running`, and with consent the existing marker-keyed reap performs the stop. No tmux probing
+  or marker-based pane discovery inside restart; that more precise variant was rejected as added mechanism and scope.
+  Accepted cost: a CLI restart of a genuinely dead terminal-less session needs `--stop-if-running`.
+- Completion criteria: restart of a terminal-less entry without consent is refused with the existing consent error;
+  with consent it proceeds as today; confirm the web/desktop Unknown-row confirmation sends consent so the UI path does
+  not regress; add a focused regression test; update `restart_session` docs if needed; remove the feedback file and its
+  `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## tab-close-kills-rc-started-services.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by current-code inspection at `29ced1a`, not runtime reproduction. Tab markers are set through
+  `new-window -e` and the tab's cgroup scope wraps the login shell itself, both before rc files run (`core.rs`
+  `tab_environment`, `launch.rs` `tab_window_command`, pinned by `a_tab_scope_prefix_wraps_the_shell_itself`). A shared
+  service an rc file starts from a tab therefore belongs to that tab and dies on close, exit-then-reap, and Delete. On
+  systemd hosts the scope catches it even after daemonizing; elsewhere the marker sweep does, except for non-dumpable
+  daemons such as `ssh-agent` (see `nondumpable-daemons-escape-sweep.md`). The realistic trigger is narrower than the
+  finding implies: a tab can only open on a live agent, whose launch already ran the same rc files outside containment,
+  so guarded rc logic normally reuses that instance and the tab never owns it.
+- Decision: the user chose to specify the current behavior rather than change it. Principle: tab containment
+  deliberately starts before the shell's startup files, because the tab shell is itself what close promises to kill;
+  anything those files start from a tab is part of that tab. This contrasts with the agent launch, whose markers and
+  scope apply only after startup files, which is why shared services normally already run outside any tab. The user
+  also asked for a `TODO.md` entry under `Doc todo` to document this for users in user-facing documentation.
+- Completion criteria: SPEC.md's tab lifecycle text and SPEC_impl.md's process-tree containment section state the
+  principle and its contrast with the agent exemption; add a `Doc todo` entry in `TODO.md` for documenting the
+  behavior in user-facing docs; remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution
+  change.
+- Execution: `pending`.
+
+## sweep-can-claim-supervisor-or-tmux-server.md
+
+- Outcome: `fix spec+code`.
+- Assessment: partly correct, by current-code inspection at `29ced1a` plus a `/tmp` experiment showing a tmux server
+  keeps the marker environment it was started with. The sweep has no exclusion for the supervisor, its ancestors, or
+  its private tmux server (`sweep.rs` `claims`, `snapshot_proc`, `enumerate_tree`), so a supervisor carrying one of its
+  sessions' markers signals itself on Delete, tab close, or Stop; a tmux server started by such a supervisor would be
+  claimed too, killing every pane on the host. A plausible contamination route is a tab rc file running bare
+  `systemctl --user import-environment` or `dbus-update-activation-environment --systemd --all`, which the next
+  supervisor restart inherits because the generated unit sets no `UnsetEnvironment=`. The reported permanent freeze is
+  wrong: no SIGTERM handler exists, so the supervisor dies in the SIGTERM round (and, dying cleanly, is not restarted by
+  `Restart=on-failure`). The hand-started and desktop variant is a supervisor inside its own session, not a
+  missing-exclusion bug. How common the triggering rc lines are is unverified.
+- Decision: the user chose the narrow hardening (option A): the generated supervisor unit sets
+  `UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID`, since a systemd-managed supervisor never
+  legitimately belongs to a session. The user asked that SPEC_impl.md record this behavior. The sweep-side protected set
+  (option B) was not chosen, so supervisors started outside systemd and other polluted user services stay uncovered.
+- Completion criteria: the generated supervisor unit strips the three session markers, with a unit-generation test
+  covering it; SPEC_impl.md states that the systemd supervisor unit strips session markers and why; remove the feedback
+  file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## nondumpable-daemons-escape-sweep.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by current-code inspection at `29ced1a` and a `/tmp` reproduction: a detached `ssh-agent`
+  calls `setsid` and marks itself non-dumpable, so `/proc/<pid>/environ` is unreadable to its own user. The portable
+  sweep treats an unreadable environment as unmarked (`procs.rs` `read_environ`, `sweep.rs` `environ_markers_of` and
+  `snapshot_proc`), and the process is no longer a pane descendant, so on hosts without a usable systemd user manager
+  Stop and Delete leave it running. Hosts with a user manager catch it through the cgroup scope. A comment in
+  `sweep.rs` already calls the non-dumpable case an accepted residual, and SPEC_impl.md accepts the general class
+  (marker-dropping daemons, the macOS platform-binary residual), but SPEC.md's "reap everything the agent started"
+  promises carry no no-manager caveat. Homebrew `ssh-agent` readability on macOS is unverified. No trust boundary is
+  crossed (0600 socket, same-user access only).
+- Decision: the user chose a spec clarification rather than a code change. Principle: where no usable user manager
+  exists, the reaping guarantee covers only processes the portable sweep can identify; processes whose environment is
+  unreadable (non-dumpable, setuid exec) are a named residual that only cgroup containment closes.
+- Completion criteria: SPEC_impl.md's process-tree section names non-dumpable and setuid-exec processes beside the
+  existing residuals; SPEC.md's Stop/Delete reaping promises are qualified for hosts without a usable user manager;
+  remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## offline-rotate-creates-fresh-database.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `29ced1a`, not runtime reproduction. `token rotate` against a
+  state directory where no helm ever ran creates the directory (`ensure_private_dir`), takes the offline branch because
+  no socket answers, opens `helm.db` through the creating, migrating open (`HelmStore::open` → `db::open_private` with
+  `SQLITE_OPEN_CREATE`), writes a fresh token, prints it, and exits 0 without naming the directory. The real helm keeps
+  the leaked token and every enrolled browser. Triggers are a mistyped `--state-dir` or a shell `XDG_STATE_HOME` that
+  differs from the one `helm setup` pinned into the units. The store already documents this hazard on
+  `open_existing_current_schema`. `token show` minting into a fresh directory is deliberate first-run bootstrap and out
+  of scope.
+- Decision: the user chose the code fix as recommended: offline rotation never creates a helm state directory, lock,
+  or database.
+- Completion criteria: offline `token rotate` refuses when the state directory or `helm.db` is absent, with an error
+  naming the resolved path and pointing at `--state-dir` / `XDG_STATE_HOME`; the database is opened without the create
+  flag; a regression test shows rotate against an empty temporary directory fails and leaves no directory, lock, or
+  database behind; add a `fix` changelog fragment; remove the feedback file and its `review_feedback_queue/INDEX.md`
+  entry in the execution change.
+- Execution: `pending`.
+
+## ipv4-only-bind-allows-localhost-squat.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `29ced1a` and `/tmp` experiments that never touched a helm. The
+  helm binds only `127.0.0.1` (`farhelm-helm/src/lib.rs` listener setup) while the origin guard accepts `localhost` and
+  `[::1]` (`middleware.rs` `origin_is_allowed`). Another local account can bind `[::1]:<port>` even while the helm runs;
+  `localhost` resolved to `::1` first on the test host, and Playwright Chromium and WebKit both loaded a `[::1]` server
+  at `http://localhost:<port>`. That same-origin page can read the stored device secret or show a fake token prompt.
+  This removes the "helm not running" precondition SPEC.md and `docs/security.md` rely on. Firefox, macOS browsers, and
+  a genuinely separate account were not tested. The desktop app uses `127.0.0.1` and is unaffected.
+- Decision: the user rejected dual-binding `[::1]` because IPv6 can be enabled while the helm runs, reopening the
+  squat. Instead the browser UI is served only under the literal IPv4 origin `127.0.0.1:<port>`: requests naming
+  `localhost`, `[::1]`, or any other host are refused, so no device secret is ever stored under an origin another
+  account could serve. A `localhost`/`[::1]` request that reaches the real helm may redirect to `127.0.0.1`. Accepted
+  residual: a squatter answering `localhost` can still show a fake token prompt; that stays under the existing guidance
+  against untrusted local users.
+- Completion criteria: the Host/origin guard accepts only `127.0.0.1:<port>`; a request reaching the helm under
+  `localhost` or `[::1]` redirects to `http://127.0.0.1:<port>/` or is refused clearly; tests cover acceptance of the
+  IPv4 literal and refusal/redirect of the others; SPEC.md/SPEC_impl.md state the IPv4-literal-origin rule, its reason,
+  and the fake-prompt residual; update `docs/browser-limitations.md`, `docs/security.md`, and any other user docs that
+  present `localhost` or `[::1]`; add a changelog fragment; remove the feedback file and its
+  `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## supervisor-error-forges-reauth-401.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `29ced1a`, not live reproduction. The helm's REST error path
+  (`farhelm-helm/src/lib.rs` `error_kind` → `http_error`) takes a supervisor reply's `ErrorKind` wholesale when no
+  helm-side error type matches and maps it one-to-one to an HTTP status, with the supervisor's text as the body. A
+  supervisor `Unauthorized` whose message is the `device_auth_required` JSON therefore yields a 401 byte-identical to
+  the auth middleware's, and the browser UI replaces the whole app with the token prompt (desktop re-checks its native
+  credential). No credential leaks; reload recovers; repeated re-pastes can evict other browsers' enrollments past the
+  64-enrollment cap. The helm itself never raises `Unauthorized`, so no legitimate 401 depends on this path.
+  Orchestrator follow-up found the same trust-by-name pattern in other client-control signals: `CheckoutConflict` sets
+  the "definitely unaccepted" create-outcome header, `NotFound` on `fetch_session` makes the UI treat the session as
+  gone, and the stale-create `INCARNATION_MARKER` is a text match on a body the supervisor partly writes. Only the 401
+  reaches beyond the lying host's own objects. The agent relay and terminal WebSocket paths were not audited.
+- Decision: the user widened the fix from the narrow 401 remap to the general principle, and required a SPEC_impl.md
+  rule: an error code or response at one level of abstraction is NEVER by default equivalent to one at another level,
+  even under the same name or number. Translating across levels is valid only through explicit, case-by-case reasoning
+  recorded where the translation happens; the current blanket supervisor-kind → HTTP-status mapping (including
+  `Unauthorized` → 401) is exactly the default equivalence the rule forbids. Client-control signals (re-authenticate,
+  create-outcome certainty, stale-create re-seed) are produced only by the helm's own reasoning.
+- Completion criteria: SPEC_impl.md states the cross-level non-equivalence rule and that helm client-control signals
+  are helm-originated only; `error_kind`/`http_error` map supervisor-originated kinds through an explicit, per-kind
+  reasoned translation that can never produce the device-auth 401 (supervisor `Unauthorized` becomes a non-401
+  status); each retained translation (`NotFound`, `CheckoutConflict` and its create-outcome header, the others) carries
+  its case-specific justification; the incarnation marker no longer depends on body text a supervisor can write; fix
+  the doc comments claiming only the middleware emits `device_auth_required`; tests show a supervisor error cannot
+  produce the 401 or the stale-create signal; add a changelog fragment; remove the feedback file and its
+  `review_feedback_queue/INDEX.md` entry in the execution change. Auditing the agent relay and terminal WebSocket for
+  the same pattern is out of this item's scope unless the user adds it.
+- Execution: `pending`.
