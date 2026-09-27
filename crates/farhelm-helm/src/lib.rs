@@ -1758,6 +1758,7 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
             store::HostStoreError::HostNotFound(_) => ErrorKind::NotFound,
             store::HostStoreError::InvalidDestination(_)
             | store::HostStoreError::InvalidRemoteFarhelm(_)
+            | store::HostStoreError::InvalidRemoteStateDir(_)
             | store::HostStoreError::InvalidAlias(_) => {
                 ErrorKind::InvalidRequest
             }

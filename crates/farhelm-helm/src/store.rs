@@ -1220,6 +1220,13 @@ pub enum HostStoreError {
     /// destination.
     #[error("{0:?} is not a usable remote farhelm path")]
     InvalidRemoteFarhelm(String),
+    /// A registered remote state directory is empty or contains a NUL byte.
+    /// It becomes the remote `--state-dir` argument on every dial, so an
+    /// empty value points the far side at its login directory and a NUL
+    /// fails the local ssh spawn; either way the host would register and
+    /// then never connect, with an error about something else.
+    #[error("{0:?} is not a usable remote state directory")]
+    InvalidRemoteStateDir(String),
     /// An alias failed a LOCAL, syntax-only rule — a control character, or
     /// the 64-character cap — checked before any comparison against other
     /// hosts runs. A collision with another host's current display name is
@@ -1484,6 +1491,12 @@ fn remote_farhelm_is_usable(remote_farhelm: &str) -> bool {
     !remote_farhelm.is_empty()
         && !remote_farhelm.contains('\0')
         && Path::new(remote_farhelm).file_name().is_some()
+}
+
+/// Whether a remote state directory can be stored and later passed as the
+/// remote `--state-dir` argument. See [`HostStoreError::InvalidRemoteStateDir`].
+fn remote_state_dir_is_usable(remote_state_dir: &str) -> bool {
+    !remote_state_dir.is_empty() && !remote_state_dir.contains('\0')
 }
 
 /// The non-error result of [`HelmStore::record_first_contact`] — a
@@ -3751,6 +3764,13 @@ impl HelmStore {
                 remote_farhelm.to_string(),
             )));
         }
+        if let Some(remote_state_dir) = remote_state_dir
+            && !remote_state_dir_is_usable(remote_state_dir)
+        {
+            return Err(anyhow::Error::new(HostStoreError::InvalidRemoteStateDir(
+                remote_state_dir.to_string(),
+            )));
+        }
         let remote_farhelm = remote_farhelm.map(str::to_string);
         let remote_state_dir = remote_state_dir.map(str::to_string);
         tokio::task::spawn_blocking(move || -> anyhow::Result<HostId> {
@@ -3821,6 +3841,13 @@ impl HelmStore {
         {
             return Err(anyhow::Error::new(HostStoreError::InvalidRemoteFarhelm(
                 remote_farhelm.to_string(),
+            )));
+        }
+        if let Some(remote_state_dir) = remote_state_dir
+            && !remote_state_dir_is_usable(remote_state_dir)
+        {
+            return Err(anyhow::Error::new(HostStoreError::InvalidRemoteStateDir(
+                remote_state_dir.to_string(),
             )));
         }
         let destination = destination.to_string();
@@ -3972,6 +3999,13 @@ impl HelmStore {
             {
                 return Err(anyhow::Error::new(HostStoreError::InvalidRemoteFarhelm(
                     remote_farhelm.to_string(),
+                )));
+            }
+            if let Some(remote_state_dir) = entry.remote_state_dir.as_deref()
+                && !remote_state_dir_is_usable(remote_state_dir)
+            {
+                return Err(anyhow::Error::new(HostStoreError::InvalidRemoteStateDir(
+                    remote_state_dir.to_string(),
                 )));
             }
         }
@@ -10567,6 +10601,72 @@ mod tests {
                 .await
                 .expect("absolute and PATH-resolved executables are valid registrations");
         }
+    }
+
+    /// Every registration path refuses a remote state directory that could
+    /// never be dialed, and writes nothing.
+    ///
+    /// Why it matters: the stored value becomes the remote `--state-dir` on
+    /// every dial. An empty one points the far side at its login directory
+    /// and a NUL fails the ssh spawn, so the host registered and then never
+    /// connected, and the only recovery was remove plus re-add (a new host
+    /// id, losing its cached sessions). Spec: add, probed registration, and
+    /// the ensure batch refuse with `InvalidRemoteStateDir`; the ensure batch
+    /// stays all-or-nothing.
+    #[farhelm_testtrace::test]
+    async fn remote_state_dir_values_are_validated_at_registration() {
+        let (_dir, store) = fresh_store().await;
+        let before = store.list_hosts().await.unwrap().len();
+        for (index, rejected) in ["", "bad\0dir"].into_iter().enumerate() {
+            let refused = |error: anyhow::Error| {
+                assert!(
+                    matches!(
+                        error.downcast_ref::<HostStoreError>(),
+                        Some(HostStoreError::InvalidRemoteStateDir(value)) if value == rejected
+                    ),
+                    "must name the rejected state directory: {error:#}"
+                );
+            };
+            refused(
+                store
+                    .add_ssh_host(&format!("add-{index}@host"), None, Some(rejected))
+                    .await
+                    .expect_err("add must refuse an unusable state directory"),
+            );
+            refused(
+                store
+                    .register_probed_ssh_host(
+                        &format!("probe-{index}@host"),
+                        None,
+                        Some(rejected),
+                        None,
+                    )
+                    .await
+                    .expect_err("probed registration must refuse an unusable state directory"),
+            );
+            refused(
+                store
+                    .ensure_ssh_hosts(vec![
+                        EnsureHost {
+                            destination: format!("ensure-good-{index}@host"),
+                            remote_farhelm: None,
+                            remote_state_dir: None,
+                        },
+                        EnsureHost {
+                            destination: format!("ensure-bad-{index}@host"),
+                            remote_farhelm: None,
+                            remote_state_dir: Some(rejected.to_string()),
+                        },
+                    ])
+                    .await
+                    .expect_err("the ensure batch must refuse an unusable state directory"),
+            );
+        }
+        assert_eq!(
+            store.list_hosts().await.unwrap().len(),
+            before,
+            "no refused registration, including the ensure batch's good entry, may add a row"
+        );
     }
 
     /// The same duplicate check on the update path — `UPDATE OR IGNORE`
