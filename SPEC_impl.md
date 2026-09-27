@@ -1648,10 +1648,12 @@ failure can leave private evidence, but cannot authorize another directory move.
 
   Terminal tabs are the deliberate opposite. A tab's session and tab markers are set on the tmux window before its login
   shell starts, and its scope wraps that shell, so everything the shell's startup files start is inside the tab's
-  containment and is reaped on close, auto-reap, and Delete. The tab shell is itself what closing the tab promises to
-  kill, and a tab has no shim that could run after initialization to apply containment later. The agent launch has
-  normally already run the same startup files outside containment, so guarded startup logic usually reuses that
-  instance; a shared service dies with a tab only when the tab's startup files are the first to start it.
+  containment and is reaped on close, auto-reap, and Delete, subject to the same residuals as the agent's processes (see
+  below; on a host without a usable user manager, a detached tab-started process whose environment is unreadable escapes
+  the sweep). The tab shell is itself what closing the tab promises to kill, and a tab has no shim that could run after
+  initialization to apply containment later. The agent launch has normally already run the same startup files outside
+  containment, so guarded startup logic usually reuses that instance; a shared service dies with a tab only when the
+  tab's startup files are the first to start it.
 
   **What the cgroup does and does not promise.** It targets ACCIDENTAL daemonization — the dev server, MCP server, or
   build watcher that double-forks and execs away its environment marker, which is exactly the shape the sweep provably
@@ -1672,6 +1674,12 @@ failure can leave private evidence, but cannot authorize another directory move.
   still reaps it while it remains in the pane's tree. The planned close is a session-id membership channel — tmux panes
   are session leaders and a SID survives fork, exec, and reparenting — deferred until the gap proves to matter in
   practice. See lore/2026-07-27-m2-process-tree-stop.md for the alternatives as they looked when this was decided.
+  Another residual applies to every host without a usable user manager, for agent and tab cleanup alike: a detached
+  descendant whose environment its own user cannot read. `ssh-agent` marks itself non-dumpable, which makes
+  `/proc/<pid>/environ` unreadable even to its owner (observed, not theorized), and it calls `setsid`; a setuid
+  program's environment is unreadable the same way. The sweep treats an unreadable environment as unmarked, so once such
+  a process has left the pane's tree nothing claims it. Only cgroup containment closes this; the session-id channel
+  would not, because `setsid` gives the process a new session id.
 - Attachments land in `~/.local/state/farhelm/attachments/<session-id>/`, deleted with the session. There is no size cap
   in v1: the bytes are the user's, on the user's own machine, and every hop streams them under a credit window, so a
   large file costs time rather than memory. A reported write or fsync failure before publication leaves nothing

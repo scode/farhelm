@@ -552,8 +552,14 @@ directory — restart, opening a terminal tab — fail with a clear error naming
 creation; the session itself remains, and delete still works.
 
 This cleanup covers ordinary agent descendants, including accidentally daemonized processes, rather than hostile
-same-account processes deliberately escaping cleanup. Detached services started by shell initialization before the agent
-launches are outside the cleanup guarantee: they may serve the user's login environment beyond this session.
+same-account processes deliberately escaping cleanup. On a host without a usable systemd user manager (macOS, or a Linux
+host running the supervisor by hand where that manager is missing or broken), there is no cgroup to contain a detached
+descendant, and the guarantee narrows to the processes Farhelm can still identify: those still descended from the
+session's terminal, and those whose environment it can read. A detached process whose environment is unreadable to its
+own user, such as a non-dumpable `ssh-agent` or a setuid program, survives stop and delete there. The same limit applies
+to a terminal tab's processes when the tab is closed, reaped, or deleted. Detached services started by shell
+initialization before the agent launches are outside the cleanup guarantee: they may serve the user's login environment
+beyond this session.
 
 ### Session view
 
@@ -570,16 +576,17 @@ reboot, tabs are gone and the user re-adds them; nothing recreates them automati
 which kills that shell and its processes — that is the whole per-tab operation set in v1. A tab's processes include
 whatever its shell's startup files start: containment begins before those files run, so a shared service (an
 `ssh-agent`, an editor daemon, a detached personal tmux server) that a tab's startup files are the first to start
-belongs to that tab and dies when the tab is closed, reaped, or deleted with its session. This is deliberately unlike
-the agent launch, which leaves detached services started by shell initialization before the agent outside its cleanup
-guarantee (see above), though cleanup may still reach one that stays in the agent's process tree; since the agent's
-launch has normally already run the same startup files, a tab usually finds such a service running and only reuses it. A
-tab whose process exits on its own is reaped automatically and silently: the tab disappears as if closed, its dead
-pane's scrollback is discarded, and no notice or exit code is shown. This is deliberately NOT the agent terminal's
-contract — an exited agent stays viewable with its scrollback — because a tab's shell exiting is the user being done
-with the tab. A shell that dies before the tab's open completes still refuses the open loudly, with the shell's last
-words as the error. A tab someone has hand-split into several panes (through the session's own tmux access) counts as
-exited only when EVERY pane in it has — one exited half must not condemn a shell still running beside it.
+belongs to that tab and dies when the tab is closed, reaped, or deleted with its session (within the cleanup guarantee's
+limits on hosts without a usable systemd user manager; see above). This is deliberately unlike the agent launch, which
+leaves detached services started by shell initialization before the agent outside its cleanup guarantee (see above),
+though cleanup may still reach one that stays in the agent's process tree; since the agent's launch has normally already
+run the same startup files, a tab usually finds such a service running and only reuses it. A tab whose process exits on
+its own is reaped automatically and silently: the tab disappears as if closed, its dead pane's scrollback is discarded,
+and no notice or exit code is shown. This is deliberately NOT the agent terminal's contract — an exited agent stays
+viewable with its scrollback — because a tab's shell exiting is the user being done with the tab. A shell that dies
+before the tab's open completes still refuses the open loudly, with the shell's last words as the error. A tab someone
+has hand-split into several panes (through the session's own tmux access) counts as exited only when EVERY pane in it
+has — one exited half must not condemn a shell still running beside it.
 
 When a session's terminal contents no longer exist on a reachable host after a reboot, opening it shows the session's
 metadata and says why there is no terminal, rather than an empty pane.
@@ -1421,7 +1428,8 @@ configuration afterward. Missing objects must be handled sensibly, and an operat
 wrong object. The helm and GUI must still handle the resulting remote failures safely.
 
 Session teardown covers ordinary agent descendants, including background servers. Detached services started by shell
-initialization before the agent launches are outside that guarantee; see [Lifecycle operations](#lifecycle-operations).
+initialization before the agent launches are outside that guarantee, and so, on hosts without a usable systemd user
+manager, are detached descendants whose environment cannot be read; see [Lifecycle operations](#lifecycle-operations).
 
 After a failed Delete disconnects a viewer, either automatically reconnecting to a surviving terminal or remaining
 detached until the user reconnects is explicitly acceptable. Choose the simpler implementation. Reviewers must not treat
