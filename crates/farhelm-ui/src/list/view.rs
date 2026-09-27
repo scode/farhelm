@@ -25,7 +25,9 @@ use crate::rows::{
 };
 use crate::{ApiBase, HostId, Session};
 
-use super::create_form::{CreatePrefill, CreateSessionForm, CreateTarget, prefill_from};
+use super::create_form::{
+    CreatePrefill, CreateSessionForm, CreateTarget, CreatedSession, prefill_from,
+};
 use super::row::SessionRow;
 use super::shared::{
     DeleteTarget, HostOption, OpenDestination, RowState, effective_create_host, host_options,
@@ -2492,7 +2494,11 @@ pub(crate) fn ListView(
                         show_create.set(false);
                         focus_new_session_button();
                     },
-                    on_created: move |session: Session| {
+                    on_created: move |created: CreatedSession| {
+                        let CreatedSession {
+                            session,
+                            submitted_launch,
+                        } = created;
                         // Read BEFORE any of the clearing below: a
                         // successful replace-with's closing prefill is the
                         // only place this handler can still tell the
@@ -2512,9 +2518,11 @@ pub(crate) fn ListView(
                             .is_some_and(|prefill| prefill.replace_source.is_some());
                         // Creation is a user-initiated selection too.
                         remember_selection(&created_base, preferences, &session.id);
-                        // Mirror THIS client's own successful structured
-                        // launch into its held copy of the preferences
-                        // (SPEC.md's launch-composer carve-out), so the next
+                        // Mirror the structured launch THIS client submitted
+                        // (never the reply's `session.launch`, which the
+                        // remote host writes: SPEC.md allows only explicit
+                        // GUI selections to shape GUI defaults) into its
+                        // held copy of the preferences, so the next
                         // "New" open in this client is right without
                         // waiting on a refetch — the durable copy is
                         // already written by the helm itself as part of
@@ -2531,17 +2539,10 @@ pub(crate) fn ListView(
                         // next reload this client may then preselect a value
                         // the helm never stored — the rarer, reversible
                         // direction, and accepted rather than plumbed back.
-                        if let Some(launch) = &session.launch {
-                            let word = launch
-                                .permissions
-                                .map(|permission| permission.wire_word().to_string());
-                            preferences.0.write().remembered_permissions = word;
-                            if launch.harness.offers_workspace_trust()
-                                && let Some(trust) = launch.workspace_trust
-                            {
-                                preferences.0.write().remembered_workspace_trust = Some(trust);
-                            }
-                        }
+                        mirror_submitted_launch(
+                            &mut preferences.0.write(),
+                            submitted_launch.as_ref(),
+                        );
                         show_create.set(false);
                         // This component stays mounted after creation, so
                         // clear the draft's host and clone seed just as the
@@ -2756,6 +2757,32 @@ pub(crate) fn ListView(
     }
 }
 
+/// Mirror a successful create's SUBMITTED structured launch into this
+/// client's held preferences, the way the helm records it durably.
+///
+/// Takes only the submitted selection, never the created `Session`: the
+/// session's `launch` is the supervisor's reply, which a remote host writes,
+/// and SPEC.md allows only explicit GUI selections to shape GUI defaults.
+/// `None` (a command or profile create) leaves the preferences alone, as the
+/// helm does. A harness that does not offer workspace trust, or a selection
+/// that leaves it unset, keeps the remembered trust choice.
+fn mirror_submitted_launch(
+    preferences: &mut crate::api::Preferences,
+    submitted: Option<&farhelm_proto::LaunchSelection>,
+) {
+    let Some(launch) = submitted else {
+        return;
+    };
+    preferences.remembered_permissions = launch
+        .permissions
+        .map(|permission| permission.wire_word().to_string());
+    if launch.harness.offers_workspace_trust()
+        && let Some(trust) = launch.workspace_trust
+    {
+        preferences.remembered_workspace_trust = Some(trust);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2764,6 +2791,49 @@ mod tests {
     ///
     /// A partial or mutation-local listing cannot prove that an editor's
     /// source left the fleet.
+    /// Spec: the local preference mirror after a create follows only the
+    /// launch the form submitted: a command or profile create (no
+    /// submission) leaves the remembered choices alone, and a structured
+    /// submission sets them from itself.
+    ///
+    /// Why: the mirror used to copy the created session's `launch`, which is
+    /// the supervisor's reply. A misbehaving remote host could make this
+    /// page's next New dialog preselect "yolo" with workspace trust for every
+    /// host until reload, even with the helm's own stored defaults untouched.
+    /// The helper takes no `Session` at all, so the reply cannot reach it.
+    #[farhelm_testtrace::test]
+    fn the_preference_mirror_follows_only_the_submitted_launch() {
+        let mut preferences = crate::api::Preferences {
+            remembered_permissions: Some("smart_approve".to_string()),
+            remembered_workspace_trust: Some(false),
+            ..crate::api::Preferences::default()
+        };
+        mirror_submitted_launch(&mut preferences, None);
+        assert_eq!(
+            preferences.remembered_permissions.as_deref(),
+            Some("smart_approve")
+        );
+        assert_eq!(preferences.remembered_workspace_trust, Some(false));
+
+        let submitted = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        };
+        mirror_submitted_launch(&mut preferences, Some(&submitted));
+        assert_eq!(
+            preferences.remembered_permissions, None,
+            "a default-permissions submission clears the remembered mode"
+        );
+        assert_eq!(
+            preferences.remembered_workspace_trust,
+            Some(false),
+            "a submission that leaves trust unset keeps the remembered trust"
+        );
+    }
+
     #[farhelm_testtrace::test]
     fn rename_availability_changes_only_on_authoritative_absence() {
         let editor = RenameEditor {

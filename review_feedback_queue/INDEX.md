@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `create-reply-launch-mirrored-into-client-defaults.md` — the client also mirrors the reply's launch choices into its
-  in-memory remembered defaults, so the helm-side fix alone leaves this page preselecting yolo until reload.
 - `replace-records-peer-launch-defaults.md` — a plain Replace copies the remote row's launch selection into the
   helm-wide remembered permission/trust defaults.
 - `replace-sets-peer-default-profile.md` — a plain Replace makes the remote host's claimed profile the helm-wide
