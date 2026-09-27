@@ -720,13 +720,16 @@ pub(crate) async fn route_session(
 /// the cap outside what this product is built for, and the listing's
 /// "could not read to the end" notice is the whole of the answer to one.
 ///
-/// FAILS CLOSED where two hosts claim one id, with the ambiguity named —
-/// including a collision a create discovered and recorded
-/// ([`AppState::contested_sessions`]). helm.db makes that unconstructible
-/// within itself, but a create can still mint an id another host already
-/// holds, and picking one would mean a stop aimed at one machine landing on
-/// another. A contested entry clears itself as soon as the fleet agrees
-/// again, so a collision that resolved needs no intervention.
+/// FAILS CLOSED where two hosts claim one id, with the ambiguity named.
+/// helm.db makes that unconstructible within itself, but a host can report
+/// an id another host already caches, and picking one would mean a stop
+/// aimed at one machine landing on another. The evidence is refresh state
+/// (`contested_claimants`), so it appears only once the reporting host has
+/// refreshed: a create that hits the collision therefore fails itself and
+/// requests that refresh (`record_session`) rather than hand out an id this
+/// function would still route to the cached owner. A contested entry clears
+/// itself as soon as the fleet agrees again, so a collision that resolved
+/// needs no intervention.
 async fn resolve_owner(
     state: &AppState,
     session_id: &str,
@@ -1263,17 +1266,22 @@ fn create_target(
 /// creation contract rules out. Every such failure is self-healing within
 /// one refresh — the host has the session and will report it.
 ///
-/// AMBIGUITY IS THE EXCEPTION, and it is reported rather than swallowed:
+/// AMBIGUITY IS THE EXCEPTION, and it is returned rather than swallowed:
 /// if the session id is already cached under a DIFFERENT host there is no
-/// honest owner, and routing would silently pick the other one. The
-/// standing collision itself is not remembered HERE — it is refresh state
-/// on the hosts that report it (`manager::ActorStatus::contested`), so it
-/// clears itself when they stop.
+/// honest owner. The collision is not remembered HERE — a contest is
+/// refresh state on the hosts that report it (`manager::ActorStatus::
+/// contested`), so it clears itself when they stop — and until the
+/// reporting host's next refresh marks the id contested, `resolve_owner`
+/// still sees only the cached owner and would route operations on this id
+/// to THAT host's session. So this asks for that refresh at once, and a
+/// create fails with the returned error rather than hand the caller an id
+/// whose operations would land on another machine. Replies to operations
+/// on an existing session ignore it: their id was already routed.
 async fn record_session(
     state: &AppState,
     claim: &manager::SessionClaim,
     session: &farhelm_proto::SessionInfo,
-) {
+) -> Result<(), anyhow::Error> {
     // Every caller resolves the reply once and passes that same row both to
     // the cache and to its consumer. Refuse to persist a supervisor marker
     // if a future caller bypasses that boundary.
@@ -1283,10 +1291,10 @@ async fn record_session(
         .is_some_and(|source| source.existence == farhelm_proto::ProfileExistence::Unresolved)
     {
         warn!(session = %manager::peer_text(&session.id), "refusing to cache a session whose profile existence is unresolved");
-        return;
+        return Ok(());
     }
     let Err(error) = state.manager.remember_session(claim, session).await else {
-        return;
+        return Ok(());
     };
     // The id is the PEER's text — escaped and bounded before it reaches a
     // log line, like every other peer-supplied value this process writes.
@@ -1300,10 +1308,11 @@ async fn record_session(
             session_id = session_id.as_str(),
             first,
             second,
-            "the host reported a session id another host already claims; it will not be routed \
-             while both keep claiming it"
+            "the host reported a session id another host already caches; refreshing it so the \
+             id is marked contested and routing refuses it"
         );
-        return;
+        state.manager.refresh_now(claim.host);
+        return Err(error);
     }
     warn!(
         host = claim.host,
@@ -1311,6 +1320,7 @@ async fn record_session(
         error = %error,
         "could not record the session for routing; it will be picked up at the next refresh"
     );
+    Ok(())
 }
 
 /// The catalog fields needed to classify a session's immutable profile
@@ -1804,7 +1814,9 @@ struct CreateAcceptance {
 
 /// Apply the same source veto, cache, history and default effects to first
 /// replies and reconciled replies. The veto precedes every durable side effect;
-/// best-effort suggestion writes never turn an accepted create into a failure.
+/// best-effort suggestion writes (history, remembered defaults) never turn an
+/// accepted create into a failure. The one caching outcome that does is an id
+/// another host already caches: see `record_session`.
 async fn accept_created_session(
     state: &AppState,
     claim: &manager::SessionClaim,
@@ -1824,7 +1836,21 @@ async fn accept_created_session(
     if let Some(accept_result) = &accept_result {
         accept_result(&session)?;
     }
-    record_session(state, claim, &session).await;
+    // A create whose id another host already caches fails here: the
+    // session exists on this host, but operations on its id could reach
+    // the other machine's session until the contest is visible (see
+    // `record_session`). The error names both hosts.
+    record_session(state, claim, &session)
+        .await
+        .map_err(|error| {
+            error.context(format!(
+                "the session was created on host {}, but its id {} is already cached for another \
+             host, so it cannot be addressed safely; it will show as contested until one of \
+             them stops reporting it",
+                claim.host,
+                manager::peer_text(&session.id)
+            ))
+        })?;
     // A fresh request's cwd is not its accepted destination: the target
     // allocated that path. Keep the actual path for diagnostics while repo
     // intent, independently captured from the request, controls reuse.
@@ -2647,7 +2673,9 @@ pub(crate) async fn do_restart_session(
         .restart_session_with(id, mode, stop_if_running, with)
         .await?;
     resolve_session_profiles(&profile_names, std::iter::once(&mut session));
-    record_session(state, &claim, &session).await;
+    // An ambiguity is logged and refreshed inside; this id was already
+    // routed, so the reply stands.
+    let _ = record_session(state, &claim, &session).await;
     Ok((claim, session))
 }
 
@@ -2695,7 +2723,9 @@ pub(crate) async fn do_rename_session(
     let profile_names = load_profile_name_index(&state.store).await?;
     let mut session = client.rename_session(id, title, expected_title).await?;
     resolve_session_profiles(&profile_names, std::iter::once(&mut session));
-    record_session(state, &claim, &session).await;
+    // An ambiguity is logged and refreshed inside; this id was already
+    // routed, so the reply stands.
+    let _ = record_session(state, &claim, &session).await;
     Ok((claim, session))
 }
 

@@ -5502,6 +5502,88 @@ async fn an_identity_less_hosts_sessions_serve_while_connected_and_vanish_after(
     );
 }
 
+/// Spec: a create whose reply names a session id another host already
+/// caches fails with a conflict naming the creating host, and the existing
+/// session stays listed, and routed, under its original host.
+///
+/// Why: before this, the create reported success while the write-back was
+/// refused, and until the creating host's next refresh marked the id
+/// contested, opening, typing into, or stopping the "new" session reached
+/// the other machine's session. Only a buggy or hostile supervisor can
+/// reply this way, since honest ones mint random ids, so the test plays
+/// one.
+#[farhelm_testtrace::test]
+async fn a_create_reply_naming_another_hosts_session_id_is_refused() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame};
+
+    let (creator_client, creator_peer) = tokio::io::duplex(64 * 1024);
+    let creator_task = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(creator_peer);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        // The id the OWNER host already holds.
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: rest_harness::session("shared", 200),
+            }))
+            .await
+            .unwrap();
+    });
+
+    let (builder, owner) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "user@owner",
+            rest_harness::HostScript {
+                identity: Some("identity-owner".to_string()),
+                sessions: vec![rest_harness::session("shared", 100)],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let (builder, creator) = builder
+        .ssh(
+            "user@creator",
+            rest_harness::HostScript {
+                identity: Some("identity-creator".to_string()),
+                peer: Some(creator_client),
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    harness.await_refreshed(owner).await;
+    harness.await_refreshed(creator).await;
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions",
+        serde_json::json!({"host": creator, "cwd": "/work", "invocation": "agent"}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+    assert!(
+        body.contains(&format!("created on host {creator}")) && body.contains("shared"),
+        "the refusal must name the creating host and the colliding id: {body}"
+    );
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(row_ids(&value), vec!["shared"]);
+    assert_eq!(
+        value["sessions"][0]["host"], owner,
+        "the owner's session keeps its host"
+    );
+    creator_task.await.unwrap();
+}
+
 /// A hostile or buggy supervisor claiming another host's session id must
 /// not be able to steer an operation to the wrong machine — and while
 /// the claim STANDS, no operation goes anywhere at all.

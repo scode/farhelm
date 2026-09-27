@@ -2127,10 +2127,14 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   contradicting the answer the caller just got — a session that cannot be operated on, a restart that still reads
   `exited`, a deleted row sitting beside its replacement. All of it is best effort and none of it can fail the mutation:
   the operation succeeded, and reporting a success as a failure is the one outcome SPEC.md's creation contract rules
-  out. Each write carries the CLAIM its operation was routed under — a manager-wide connection token that is never
-  reused, plus the identity — and is dropped if the connection has changed since, so a delayed reply cannot file one
-  install's session under another's name. Writes are serialized against the host's own refresh, and a refresh whose
-  drain predates one of them declines to commit rather than erasing it.
+  out. The one exception is a create whose reply names a session id another host already caches: there is then no honest
+  owner, and until the creating host's next refresh marks the id contested, routing would send operations on it to the
+  other host's session. That create fails with a conflict naming the creating host and the id, the creating host is
+  refreshed at once, and nothing is rolled back on it; only a buggy or compromised supervisor replies this way. Each
+  write carries the CLAIM its operation was routed under — a manager-wide connection token that is never reused, plus
+  the identity — and is dropped if the connection has changed since, so a delayed reply cannot file one install's
+  session under another's name. Writes are serialized against the host's own refresh, and a refresh whose drain predates
+  one of them declines to commit rather than erasing it.
 - One field of such a reply is NOT taken as given: a status of `unknown` never overwrites a definite one. The protocol
   is explicit that `ListSessions` is the only reply computing a real liveness answer and that everywhere else `unknown`
   means "not yet known" rather than "not running" — a create's and a restart's replies carry it deliberately, because at
