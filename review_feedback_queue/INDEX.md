@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `tmux-cwd-format-expanded-on-tab-open.md` — opening a tab passes the session cwd to `new-window -c` unescaped: wrong
-  directory or a hidden command runs.
 - `supervisor-stop-closes-clients-output-on.md` — the supervisor has no SIGTERM handler, so a normal stop closes every
   output client with output on (tmux-abort risk).
 - `checkout-can-take-archive-dir-name.md` — a fresh checkout can be named `farhelm-archived-working-copies`; later

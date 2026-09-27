@@ -2741,7 +2741,8 @@ impl TmuxDriver {
     /// `create_session`'s contract — values are literal argv elements, so
     /// no quoting applies, and a new window inherits the session's
     /// geometry, which the attach that follows resizes to the client's own
-    /// anyway.
+    /// anyway. As there, `cwd` is the tmux-side exception: `-c` is
+    /// format-expanded, so it goes through [`tmux_start_directory`].
     pub async fn new_window(
         &self,
         session: &str,
@@ -2751,6 +2752,7 @@ impl TmuxDriver {
     ) -> anyhow::Result<(String, String)> {
         let target = format!("={session}:");
         let env_args = env_assignments(env);
+        let start_dir = tmux_start_directory(cwd);
         let mut args: Vec<&str> = vec![
             "new-window",
             "-d",
@@ -2760,7 +2762,7 @@ impl TmuxDriver {
             "-t",
             &target,
             "-c",
-            cwd,
+            &start_dir,
         ];
         for assignment in &env_args {
             args.push("-e");
@@ -5414,6 +5416,73 @@ mod tests {
                 std::path::Path::new(actual.trim()),
                 directory.canonicalize().expect("canonical directory"),
                 "the relaunched pane must start in the literal directory {name:?}"
+            );
+        }
+        // sleep-ok: observation window for an asynchronous tmux format job that must never run
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        assert!(
+            !marker.exists(),
+            "a #(...) job in the directory name must never run"
+        );
+    }
+
+    /// Spec: opening a tab (`new-window`) in a directory whose name contains
+    /// tmux format syntax starts the tab's shell in exactly that directory,
+    /// and nothing in the name is ever executed.
+    ///
+    /// SPEC.md's tab working-directory rule allows normal filesystem
+    /// resolution but requires unusable paths to fail clearly; tmux
+    /// rewriting the path text and silently opening the tab in `$HOME` is
+    /// neither. Every tab open re-reads the stored path, so before the fix a
+    /// `#(...)` directory name ran its command on every open, and a user
+    /// running `git reset` or `rm` in what looked like the project tab did it
+    /// in the wrong directory.
+    #[farhelm_testtrace::test]
+    async fn new_window_starts_in_a_directory_named_with_tmux_format_syntax() {
+        let server = ScratchServer::start().await;
+        let marker = server.dir.path().join("format-job-ran");
+        // Octal escapes keep `/` out of the directory name; see the
+        // create-time twin of this test.
+        let octal_marker = marker
+            .to_str()
+            .expect("utf-8 scratch path")
+            .replace('/', "\\057");
+        let names = [
+            format!("job #(touch \"`printf '{octal_marker}'`\")"),
+            "alias #S here".to_string(),
+            "escape ## kept".to_string(),
+            "style #[x] kept".to_string(),
+            "doubled style ##[y] kept".to_string(),
+            "open brace #{z".to_string(),
+        ];
+        let sleep = ["sleep".to_string(), "60".to_string()];
+        server
+            .driver
+            .create_session("fmt", "/", 80, 24, &[], &sleep)
+            .await
+            .expect("create the session to open tabs in");
+        for name in &names {
+            let directory = server.dir.path().join(name);
+            std::fs::create_dir(&directory).expect("create the oddly named directory");
+            let (_window, pane) = server
+                .driver
+                .new_window(
+                    "fmt",
+                    directory.to_str().expect("utf-8 scratch path"),
+                    &[],
+                    &sleep,
+                )
+                .await
+                .expect("open a tab in the directory");
+            let actual = server
+                .driver
+                .run(&["display-message", "-p", "-t", &pane, "#{pane_current_path}"])
+                .await
+                .expect("query the tab's directory");
+            assert_eq!(
+                std::path::Path::new(actual.trim()),
+                directory.canonicalize().expect("canonical directory"),
+                "the tab must start in the literal directory {name:?}"
             );
         }
         // sleep-ok: observation window for an asynchronous tmux format job that must never run

@@ -1467,7 +1467,11 @@
 - Completion criteria: `new_window` uses the shared helper; a real-tmux regression test opens a tab in such directories
   with the same assertions. Stacked on the relaunch item's PR. Changelog fragment. Remove the feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `new_window` passes its `new-window -c` value through `tmux_start_directory`. A real-tmux
+  regression test opens tabs in directories named with a `#(...)` job, `#S`, `##`, `#[`, `##[`, and an unterminated
+  `#{`, and asserts each tab's literal directory and that the job never ran. The create PR's changelog fragment now
+  covers tabs. Draft PR [#1042](https://github.com/scode/farhelm/pull/1042/changes), jj change `mpkrowty`, bookmark
+  `pr/tmux-cwd-escape-tab`.
 
 ## supervisor-stop-closes-clients-output-on.md
 
