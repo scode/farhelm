@@ -203,8 +203,10 @@ static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 /// without parsing `message`. `request()` builds it from the `kind` a
 /// `ControlMsg::Error` reply already carries, and helm code that refuses a
 /// request itself (a validation failure in `sessions`, say) builds one
-/// directly so the HTTP layer classifies both the same way; nothing
-/// downstream distinguishes the two origins. From there it rides the ordinary `anyhow::Error` chain, so a
+/// directly. `origin` records which of the two it was: most consumers treat
+/// them alike, but the HTTP layer must not, because a remote supervisor is
+/// untrusted and a kind it chose means something at the supervisor's level
+/// of abstraction, not at the helm's (see [`ErrorOrigin`]). From there it rides the ordinary `anyhow::Error` chain, so a
 /// caller downcasts with `error.downcast_ref::<SupervisorError>()` —
 /// `anyhow`'s own `downcast_ref` searches the root cause and every
 /// `.context(...)` layer above it, so this finds a `SupervisorError`
@@ -215,8 +217,29 @@ static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct SupervisorError {
+    pub origin: ErrorOrigin,
     pub kind: ErrorKind,
     pub message: String,
+}
+
+/// Who decided a [`SupervisorError`]'s `kind`.
+///
+/// The same `ErrorKind` name does not mean the same thing at both levels.
+/// A supervisor's `Unauthorized` says a session-scoped peer asked for
+/// something outside its slice; the helm's HTTP 401 tells a browser that it
+/// is signed out. Passing the first through as the second let any remote
+/// supervisor, which the helm treats as untrusted, force every browser tab
+/// back to the token prompt. So the HTTP layer translates a
+/// [`ErrorOrigin::SupervisorReply`] kind case by case (`http_error` in
+/// `lib.rs` carries the reasoning for each), while a helm-decided kind maps
+/// directly. SPEC_impl.md states the general rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorOrigin {
+    /// The helm refused the request itself and chose the kind.
+    Helm,
+    /// Built from a `ControlMsg::Error` a supervisor sent: both the kind and
+    /// the message are the supervisor's, and neither is trusted.
+    SupervisorReply,
 }
 
 /// A request that produced no USABLE reply, split by the one fact that
@@ -2403,9 +2426,11 @@ impl SupervisorClient {
         // a clone here for no reason (the reply is not used afterwards
         // either way).
         match reply {
-            ControlMsg::Error { message, kind, .. } => {
-                Err(anyhow::Error::new(SupervisorError { kind, message }))
-            }
+            ControlMsg::Error { message, kind, .. } => Err(anyhow::Error::new(SupervisorError {
+                origin: ErrorOrigin::SupervisorReply,
+                kind,
+                message,
+            })),
             reply => Ok(reply),
         }
     }
@@ -2820,6 +2845,7 @@ impl SupervisorClient {
             // reach the route as a 500.
             .map_err(|message| {
                 anyhow::Error::new(SupervisorError {
+                    origin: crate::client::ErrorOrigin::Helm,
                     kind: ErrorKind::InvalidRequest,
                     message,
                 })
@@ -3502,6 +3528,7 @@ impl UploadGuard {
         if let Some(reason) = self.terminal_reason() {
             self.retire().await;
             return Err(anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::Internal,
                 message: reason,
             }));
@@ -3522,16 +3549,17 @@ impl UploadGuard {
         // answer, which is the case this arm exists for — it reached the
         // demultiplexer before any reply could.
         let reply = tokio::select! {
-            biased;
-            reply = client.request(req_id, ControlMsg::CommitUpload { req_id, channel }) => reply,
-            reason = wait_ended(&mut progress) => {
-                self.retire().await;
-                return Err(anyhow::Error::new(SupervisorError {
-                    kind: ErrorKind::Internal,
-                    message: reason,
-                }));
-            }
-        };
+                   biased;
+                   reply = client.request(req_id, ControlMsg::CommitUpload { req_id, channel }) => reply,
+                   reason = wait_ended(&mut progress) => {
+                       self.retire().await;
+                       return Err(anyhow::Error::new(SupervisorError {
+        origin: crate::client::ErrorOrigin::Helm,
+                           kind: ErrorKind::Internal,
+                           message: reason,
+                       }));
+                   }
+               };
         self.retire().await;
         match reply? {
             ControlMsg::UploadCommitted { path, .. } => Ok(path),

@@ -21,15 +21,23 @@
 //! bytes keep spelling them out rather than importing these constants, so an
 //! accidental edit here fails a test instead of silently moving both sides.
 
-/// The marker an incarnation-precondition refusal ends with.
+/// Response header marking a refused request as a failed precondition the
+/// client should answer by re-reading, not by showing a permanent error.
 ///
-/// The helm appends it to a 409 whose request named a connection the host is
-/// no longer on (farhelm-helm's `precondition` module has the full contract).
-/// Bracketed and trailing so the prose in front of it stays the sentence a
-/// user is shown; a client branches on its presence and may strip a trailing
-/// one before display. A 409 WITHOUT it is some other conflict and must not be
-/// answered by re-reading.
-pub const INCARNATION_MARKER: &str = "[farhelm:precondition/incarnation]";
+/// The helm sets it on a 409 whose request named a connection the host is no
+/// longer on (farhelm-helm's `precondition` module has the full contract), with
+/// the value [`PRECONDITION_INCARNATION`]. A 409 WITHOUT it is some other
+/// conflict and must not be answered by re-reading.
+///
+/// A header rather than a marker in the body because the body can carry a
+/// remote supervisor's text verbatim, and a supervisor must not be able to
+/// make the client act. Only the helm's own response code sets headers, so
+/// this signal is the helm's alone.
+pub const PRECONDITION_HEADER: &str = "x-farhelm-precondition";
+
+/// The one value of [`PRECONDITION_HEADER`]: the request was prepared against
+/// a connection that has since been replaced.
+pub const PRECONDITION_INCARNATION: &str = "incarnation";
 
 /// Response header that marks a failed create as provably never accepted.
 ///
@@ -56,9 +64,10 @@ pub const LOCAL_SUPERVISOR_NOT_RUNNING: &str = "local-supervisor-not-running";
 /// The `code` of the JSON body the helm's device-authentication boundary
 /// answers an unauthenticated request with.
 ///
-/// Only that middleware emits it, so the UI keys its sign-in flow off this
-/// field rather than off status 401, which a supervisor's own authorization
-/// refusal can share without meaning "sign in".
+/// Only that middleware emits it. A remote supervisor's error text reaches the
+/// client verbatim and could spell this JSON, but the helm never answers a
+/// supervisor's refusal with 401 (farhelm-helm's `http_error` translates its
+/// `Unauthorized` to 502), and the UI only reads this code off a 401.
 pub const AUTH_REQUIRED_CODE: &str = "device_auth_required";
 
 /// Response header carrying the helm's build version on every reply.

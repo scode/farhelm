@@ -201,6 +201,7 @@ pub(crate) async fn github_repositories(
     if req.query.len() > 4096 {
         return http_error(
             SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::InvalidRequest,
                 message: "repository query exceeds the 4096-byte limit".into(),
             }
@@ -210,6 +211,7 @@ pub(crate) async fn github_repositories(
     let Some(status) = state.manager.status(req.host) else {
         return http_error(
             SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::NotFound,
                 message: format!("no such host: {}", req.host),
             }
@@ -244,6 +246,7 @@ pub(crate) async fn github_repositories(
     else {
         return http_error(
             SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::Conflict,
                 message: "repository discovery requires a stable host installation identity".into(),
             }
@@ -351,6 +354,7 @@ pub(crate) async fn github_checkout_preview(
     }
     let Some(installation_identity) = claim.identity.clone().filter(|id| !id.is_empty()) else {
         return http_error(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Conflict,
             message: "fresh checkout preview requires a host with a stable installation identity"
                 .into(),
@@ -364,6 +368,7 @@ pub(crate) async fn github_checkout_preview(
     };
     let Some(root) = config.root.clone() else {
         return http_error(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: "no checkout root is configured; set one with \
                       `farhelm helm checkout-config set-root`"
@@ -531,6 +536,7 @@ fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
     if let Some(status) = present(&q.status) {
         let known = store::parse_status_key(&status).ok_or_else(|| {
             anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::InvalidRequest,
                 message: format!(
                     "{status:?} is not a session status; this helm knows running, waiting, idle, \
@@ -563,6 +569,7 @@ fn list_sort(q: &ListQuery) -> anyhow::Result<store::ListSort> {
     };
     store::parse_sort_key(sort).ok_or_else(|| {
         anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: format!(
                 "{sort:?} is not a session list order; this helm serves created, activity, and \
@@ -673,6 +680,7 @@ pub(crate) async fn route_session(
     };
     let client = status.client.ok_or_else(|| {
         anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Conflict,
             message: refusal_text(host, &status.state),
         })
@@ -750,6 +758,7 @@ async fn resolve_owner(
     let live = state.manager.live_owner(session_id)?;
     match (cached, live) {
         (None, None) => Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::NotFound,
             message: format!("no such session: {session_id}"),
         })),
@@ -766,6 +775,7 @@ async fn resolve_owner(
         (Some(host), _) => {
             let status = state.manager.status(host).ok_or_else(|| {
                 anyhow::Error::new(SupervisorError {
+                    origin: crate::client::ErrorOrigin::Helm,
                     kind: ErrorKind::Conflict,
                     message: format!(
                         "session {session_id} lives on host {host}, which is no longer registered"
@@ -783,6 +793,7 @@ async fn resolve_owner(
             let still = state.store.host_of_session(session_id).await?;
             if still != Some(host) {
                 return Err(anyhow::Error::new(SupervisorError {
+                    origin: crate::client::ErrorOrigin::Helm,
                     kind: ErrorKind::Conflict,
                     message: format!(
                         "session {session_id} changed hosts while this request was being routed; \
@@ -985,6 +996,7 @@ fn accepted_checkout_preview<'a>(
     claim: &manager::SessionClaim,
 ) -> anyhow::Result<&'a farhelm_proto::AcceptedGithubPreview> {
     let preview = checkout.preview.as_ref().ok_or_else(|| SupervisorError {
+        origin: crate::client::ErrorOrigin::Helm,
         kind: ErrorKind::InvalidRequest,
         message: "fresh checkout requires an accepted preview; request a preview before launching"
             .into(),
@@ -994,6 +1006,7 @@ fn accepted_checkout_preview<'a>(
         || claim.identity.as_deref() != Some(preview.installation_identity.as_str())
     {
         return Err(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Conflict,
             message: "the accepted checkout preview belongs to a different host installation"
                 .into(),
@@ -1035,6 +1048,7 @@ async fn github_checkout_resolution(
     let checkout = req.github_checkout.as_ref()?;
     if let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo) {
         return Some(Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: format!(
                 "invalid GitHub repository {:?}: {error}",
@@ -1050,6 +1064,7 @@ async fn github_checkout_resolution(
     };
     let Some(root) = config.root else {
         return Some(Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: "no checkout root is configured; set one with \
                       `farhelm helm checkout-config set-root`"
@@ -1060,6 +1075,7 @@ async fn github_checkout_resolution(
         .expect("the parse above already accepted this identifier");
     let Some(preview) = &checkout.preview else {
         return Some(Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message:
                 "fresh checkout requires an accepted preview; request a preview before launching"
@@ -1068,6 +1084,7 @@ async fn github_checkout_resolution(
     };
     if preview.binding.config_revision != config.config_revision {
         return Some(Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Conflict,
             message: "checkout settings changed since the accepted preview; request a new preview"
                 .into(),
@@ -1078,6 +1095,7 @@ async fn github_checkout_resolution(
     // before converting this request to the supervisor's fresh-only shape.
     if !req.cwd.is_empty() && req.cwd != preview.binding.cwd {
         return Some(Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: "fresh checkout cwd must be empty or match the accepted preview".into(),
         })));
@@ -1143,6 +1161,7 @@ pub(crate) fn host_client(
 ) -> anyhow::Result<(manager::SessionClaim, Arc<SupervisorClient>)> {
     let status = state.manager.status(host).ok_or_else(|| {
         anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::NotFound,
             message: format!("no such host: {host}"),
         })
@@ -1166,6 +1185,7 @@ pub(crate) fn host_client(
     };
     let client = status.client.ok_or_else(|| {
         anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Conflict,
             message: refusal_text(host, &status.state),
         })
@@ -1485,6 +1505,7 @@ pub(crate) async fn create_session(
         && let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo)
     {
         return http_error(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: format!(
                 "invalid GitHub repository {:?}: {error}",
@@ -1691,6 +1712,7 @@ pub(crate) async fn do_create_session(
                 .find(|profile| profile.id == *profile_id)
                 .ok_or_else(|| {
                     anyhow::Error::new(SupervisorError {
+                        origin: crate::client::ErrorOrigin::Helm,
                         kind: ErrorKind::NotFound,
                         message: format!("profile not found: {profile_id}"),
                     })
@@ -2041,6 +2063,7 @@ pub(crate) async fn mode_from_source(
         Some(profile) => Ok(CreateMode::resolved_profile(profile, &profiles)),
         None => match policy {
             DanglingProfilePolicy::Refuse => Err(anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::InvalidRequest,
                 message: format!(
                     "cannot clone profile {:?}: its snapshotted id {} is no longer in the helm \
@@ -2109,6 +2132,7 @@ async fn create_fresh_session(
             && outer != inner
         {
             return Err(anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::InvalidRequest,
                 message: "fresh checkout and session titles must agree".into(),
             }));
@@ -2129,6 +2153,7 @@ async fn create_fresh_session(
                 .cloned()
                 .ok_or_else(|| {
                     anyhow::Error::new(SupervisorError {
+                        origin: crate::client::ErrorOrigin::Helm,
                         kind: ErrorKind::NotFound,
                         message: format!("profile not found: {id}"),
                     })
@@ -2158,7 +2183,7 @@ async fn create_fresh_session(
                 // Preserve the recorded supervisor outcome, including its
                 // kind, rather than replacing it with today's local failure.
                 // Only CheckoutConflict carries durable non-acceptance proof.
-                Err(error) => Err(error.context(format!("current request validation also failed: {local_error:#}"))),
+                Err(error) => Err(error.context(crate::precondition::AlsoFailedValidation::of(&local_error))),
             };
         }
     };
@@ -2208,6 +2233,7 @@ async fn resolve_create_mode(state: &AppState, req: &mut CreateReq) -> anyhow::R
     };
     if req.invocation.is_some() || req.profile_id.is_some() || req.launch.is_some() {
         return Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message:
                 "a create names exactly one of invocation, profile_id, profile_name, or launch"
@@ -2216,6 +2242,7 @@ async fn resolve_create_mode(state: &AppState, req: &mut CreateReq) -> anyhow::R
     }
     if req.agent_kind.is_some() || req.resume_template.is_some() {
         return Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: "a profile-backed create cannot also send agent_kind or resume_template"
                 .into(),
@@ -2251,6 +2278,7 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
     ) {
         (Some(_), Some(_), _) | (Some(_), _, Some(_)) | (_, Some(_), Some(_)) => {
             Err(anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::InvalidRequest,
                 message: "a create names exactly one of invocation, profile, or launch: each is a \
                       complete selector and there is no honest way to merge two of them"
@@ -2258,6 +2286,7 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
             }))
         }
         (None, None, None) => Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: "a create must name an invocation, profile, or launch; this body names \
                       neither, so there is nothing to launch"
@@ -2266,6 +2295,7 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
         (Some(invocation), None, None) => Ok(CreateMode::Raw(invocation)),
         (None, Some(_), None) if req.agent_kind.is_some() || req.resume_template.is_some() => {
             Err(anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::InvalidRequest,
                 message: "a profile-backed create cannot also send agent_kind or \
                           resume_template: the profile states both, and the wire refuses a \
@@ -2278,6 +2308,7 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
         (None, None, Some(selection)) => {
             if req.agent_kind.is_some() || req.resume_template.is_some() {
                 return Err(anyhow::Error::new(SupervisorError {
+                    origin: crate::client::ErrorOrigin::Helm,
                     kind: ErrorKind::InvalidRequest,
                     message: "a structured launch cannot also send agent_kind or resume_template: \
                               the composer owns its resolved bundle"
@@ -2288,6 +2319,7 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
                 .map(CreateMode::Structured)
                 .map_err(|message| {
                     anyhow::Error::new(SupervisorError {
+                        origin: crate::client::ErrorOrigin::Helm,
                         kind: ErrorKind::InvalidRequest,
                         message,
                     })
@@ -2448,6 +2480,7 @@ pub(crate) async fn get_session(
         .find(|snapshot| snapshot.id == host)
     else {
         return http_error(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::NotFound,
             message: format!("no such session: {id}"),
         }));
@@ -2503,6 +2536,7 @@ pub(crate) async fn get_session(
             // There is nothing to put behind the notice, and inventing a
             // placeholder would be worse than saying so.
             None => http_error(anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::NotFound,
                 message: format!("no such session: {id}"),
             })),
@@ -2532,6 +2566,7 @@ pub(crate) async fn get_session(
                 // between the last cache refresh and now, so 404 is the truth
                 // rather than the stale row.
                 None => http_error(anyhow::Error::new(SupervisorError {
+                    origin: crate::client::ErrorOrigin::Helm,
                     kind: ErrorKind::NotFound,
                     message: format!("no such session: {id}"),
                 })),
@@ -2973,6 +3008,7 @@ pub(crate) async fn do_replace_session(
                 && let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo)
             {
                 return Err(anyhow::Error::new(SupervisorError {
+                    origin: crate::client::ErrorOrigin::Helm,
                     kind: ErrorKind::InvalidRequest,
                     message: format!(
                         "invalid GitHub repository {:?}: {error}",
@@ -2995,6 +3031,7 @@ pub(crate) async fn do_replace_session(
         && Some(with_key) != intent_key.as_ref()
     {
         return Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: "the replace's own idempotency key and its \"with\" body's key disagree; \
                       send the same key in both places, or omit it from \"with\" entirely"
@@ -3014,6 +3051,7 @@ pub(crate) async fn do_replace_session(
         && wanted_host != claim.host
     {
         return Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Conflict,
             message: format!(
                 "replace with keeps the source session's own host ({}); it cannot move a \
@@ -3056,6 +3094,7 @@ pub(crate) async fn do_replace_session(
         .find(|session| session.id == id)
         .ok_or_else(|| {
             anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::NotFound,
                 message: "this session's own host no longer lists it, so there is nothing to \
                           replace"
@@ -3154,6 +3193,7 @@ fn replacement_result_check(id: &str) -> CreatedSessionCheck {
             return Ok(());
         }
         Err(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Conflict,
             message: "the idempotency key replayed the create that made the source \
                       session, so no replacement was made; retry the replace with a \
@@ -3199,6 +3239,7 @@ async fn replace_with_fresh_checkout(
         .any(|session| session.id == id)
     {
         return Err(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::NotFound,
             message: "this session's own host no longer lists it, so there is nothing to replace"
                 .into(),
@@ -3268,6 +3309,7 @@ async fn finish_replacement(
             )
         };
         return Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Internal,
             message,
         }));

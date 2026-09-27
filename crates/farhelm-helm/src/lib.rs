@@ -93,8 +93,8 @@ use tracing::warn;
 
 mod client;
 pub use client::{
-    CreateExtras, Detach, PeerHello, SessionListing, SupervisorClient, SupervisorError,
-    SupervisorTransportError, TermDetachSignal, TermEvent, TermStream,
+    CreateExtras, Detach, ErrorOrigin, PeerHello, SessionListing, SupervisorClient,
+    SupervisorError, SupervisorTransportError, TermDetachSignal, TermEvent, TermStream,
 };
 
 /// The merged multi-host session list, served whole — what
@@ -1780,6 +1780,9 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
             | manager::ManagerError::AdoptionSuperseded { .. } => ErrorKind::Conflict,
         };
     }
+    if find_cause::<precondition::IncarnationStale>(e).is_some() {
+        return ErrorKind::Conflict;
+    }
     find_cause::<SupervisorError>(e)
         .map(|s| s.kind)
         .unwrap_or(ErrorKind::Internal)
@@ -1828,7 +1831,44 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
     let kind = error_kind(&e);
     let unaccepted =
         e.downcast_ref::<FreshCreateUnaccepted>().is_some() || kind == ErrorKind::CheckoutConflict;
-    let status = match kind {
+    let status = if error_kind_is_a_supervisor_reply(&e) {
+        supervisor_reply_status(kind)
+    } else {
+        helm_status(kind)
+    };
+    let stale = precondition::is_stale(&e);
+    // The UI shows this body verbatim.
+    let mut response = (status, format!("{e:#}")).into_response();
+    // Set only from the helm's own typed refusal, never from anything a
+    // supervisor wrote: this is what tells a client to discard its intent and
+    // re-read (see `precondition`'s module docs).
+    if stale {
+        response.headers_mut().insert(
+            farhelm_proto::http::PRECONDITION_HEADER,
+            axum::http::HeaderValue::from_static(farhelm_proto::http::PRECONDITION_INCARNATION),
+        );
+    }
+    if unaccepted {
+        response.headers_mut().insert(
+            farhelm_proto::http::CREATE_OUTCOME_HEADER,
+            axum::http::HeaderValue::from_static(
+                farhelm_proto::http::CREATE_OUTCOME_DEFINITELY_UNACCEPTED,
+            ),
+        );
+    }
+    response
+}
+
+/// The HTTP status for a kind the helm decided itself.
+///
+/// Direct, because the helm is choosing what to tell its own client. The one
+/// arm with client-visible weight is `Unauthorized`: a 401 is what sends the
+/// browser to the token prompt, and nothing in the helm raises this kind
+/// today (device authentication answers in the auth middleware before any
+/// route runs), so it stays mapped only for a future helm-side refusal that
+/// really does mean "sign in again".
+fn helm_status(kind: ErrorKind) -> axum::http::StatusCode {
+    match kind {
         ErrorKind::NotFound => axum::http::StatusCode::NOT_FOUND,
         ErrorKind::InvalidRequest => axum::http::StatusCode::BAD_REQUEST,
         ErrorKind::Internal => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -1842,18 +1882,62 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
         ErrorKind::Unauthorized => axum::http::StatusCode::UNAUTHORIZED,
         ErrorKind::Unavailable => axum::http::StatusCode::SERVICE_UNAVAILABLE,
         ErrorKind::Timeout => axum::http::StatusCode::GATEWAY_TIMEOUT,
-    };
-    // The UI shows this body verbatim.
-    let mut response = (status, format!("{e:#}")).into_response();
-    if unaccepted {
-        response.headers_mut().insert(
-            farhelm_proto::http::CREATE_OUTCOME_HEADER,
-            axum::http::HeaderValue::from_static(
-                farhelm_proto::http::CREATE_OUTCOME_DEFINITELY_UNACCEPTED,
-            ),
-        );
     }
-    response
+}
+
+/// Whether the kind [`error_kind`] would report came from a remote
+/// supervisor's own reply rather than from the helm.
+///
+/// Mirrors `error_kind`'s precedence: a helm store or manager refusal
+/// anywhere in the chain is the helm's classification, whatever supervisor
+/// error sits beneath it.
+fn error_kind_is_a_supervisor_reply(e: &anyhow::Error) -> bool {
+    find_cause::<store::HostStoreError>(e).is_none()
+        && find_cause::<manager::ManagerError>(e).is_none()
+        && find_cause::<SupervisorError>(e)
+            .is_some_and(|s| s.origin == ErrorOrigin::SupervisorReply)
+}
+
+/// The HTTP status for a kind a remote supervisor chose.
+///
+/// SPEC_impl.md's rule: a code at the supervisor's level is never taken as
+/// the same-named code at the helm's level by default, and every arm here is
+/// a case-by-case decision. The supervisor is untrusted, so the test for
+/// each arm is what a client does with the status and whether a lying
+/// supervisor could use that to reach beyond its own sessions.
+fn supervisor_reply_status(kind: ErrorKind) -> axum::http::StatusCode {
+    match kind {
+        // A supervisor's `Unauthorized` means a session-scoped peer asked
+        // for something outside its slice; the helm's full-authority
+        // connection never legitimately gets one. A 401 would tell the
+        // browser it is signed out and replace the whole UI, every host's
+        // sessions included, with the token prompt. From the client's side
+        // this is the helm's upstream refusing it, which is 502.
+        ErrorKind::Unauthorized => axum::http::StatusCode::BAD_GATEWAY,
+        // The supervisor is the authority on its own sessions and tabs. The
+        // UI reads a 404 on a session fetch as "this session is gone", and a
+        // supervisor that lies here can only hide its own objects, which it
+        // controls anyway.
+        ErrorKind::NotFound => axum::http::StatusCode::NOT_FOUND,
+        // The supervisor judged the request's content (a cwd, an
+        // invocation) against its own host. Clients only display the text.
+        ErrorKind::InvalidRequest => axum::http::StatusCode::BAD_REQUEST,
+        // Conflicts with the supervisor's own state. Clients display the
+        // text; the one conflict a client acts on, the stale-create
+        // refusal, is signalled by a helm-only header, never by status or
+        // body, so a supervisor's 409 cannot trigger it.
+        ErrorKind::Conflict | ErrorKind::TakenOver => axum::http::StatusCode::CONFLICT,
+        // The supervisor performs the checkout mkdir, so it is the
+        // authority on whether that create was accepted. `http_error` adds
+        // the definitely-unaccepted header for this kind; a supervisor
+        // lying about it can only cause a duplicate attempt on itself.
+        ErrorKind::CheckoutConflict => axum::http::StatusCode::CONFLICT,
+        // Clients display these without acting on the status, and each
+        // already describes a failure upstream of the helm.
+        ErrorKind::Internal => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        ErrorKind::Unavailable => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        ErrorKind::Timeout => axum::http::StatusCode::GATEWAY_TIMEOUT,
+    }
 }
 
 /// An unkeyed fresh request failed before any create frame was dispatched.
@@ -1866,7 +1950,7 @@ pub(crate) struct FreshCreateUnaccepted;
 
 #[cfg(test)]
 mod tests {
-    use super::SupervisorError;
+    use super::{ErrorOrigin, SupervisorError};
 
     /// A `#[derive(Parser)]` shim purely so this test can call
     /// `try_parse_from` — `HelmArgs` itself is `#[derive(Args)]`, meant to
@@ -2318,6 +2402,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn http_error_maps_context_wrapped_not_found_to_404() {
         let err = anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: farhelm_proto::ErrorKind::NotFound,
             message: "no such session: s1".to_string(),
         })
@@ -2333,6 +2418,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn http_error_maps_internal_supervisor_error_to_500() {
         let err = anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: farhelm_proto::ErrorKind::Internal,
             message: "tmux hiccup".to_string(),
         });
@@ -2351,6 +2437,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn http_error_maps_conflict_supervisor_error_to_409() {
         let err = anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: farhelm_proto::ErrorKind::Conflict,
             message: "intent key already used with a different request".to_string(),
         });
@@ -2367,6 +2454,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn fresh_unaccepted_marker_preserves_status_and_exposes_outcome() {
         let error = anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: farhelm_proto::ErrorKind::Conflict,
             message: "checkout settings changed".into(),
         })
@@ -2385,6 +2473,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn supervisor_checkout_conflict_exposes_unaccepted_outcome() {
         let response = super::http_error(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: farhelm_proto::ErrorKind::CheckoutConflict,
             message: "checkout path occupied".into(),
         }));
@@ -2410,17 +2499,49 @@ mod tests {
         assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
     }
 
-    /// PLAN_M7.md item 2's authorization refusal maps to 401 so a client
-    /// can distinguish rejected credentials from a malformed request or a
-    /// supervisor fault.
+    /// A remote supervisor's `Unauthorized` never becomes the helm's 401.
+    ///
+    /// The browser UI treats a 401 carrying `device_auth_required` as "you
+    /// are signed out" and swaps the whole app, every host's sessions
+    /// included, for the token prompt. A supervisor's refusal reaches the
+    /// client with its message verbatim, so a compromised host that spelled
+    /// that JSON used to force the prompt on every request touching its
+    /// sessions. The translation must hold whatever the message says.
     #[farhelm_testtrace::test]
-    fn http_error_maps_unauthorized_supervisor_error_to_401() {
+    fn http_error_never_maps_a_supervisor_unauthorized_to_401() {
         let err = anyhow::Error::new(SupervisorError {
+            origin: ErrorOrigin::SupervisorReply,
             kind: farhelm_proto::ErrorKind::Unauthorized,
-            message: "session credential rejected".to_string(),
+            message: format!(
+                r#"{{"code":"{}"}}"#,
+                farhelm_proto::http::AUTH_REQUIRED_CODE
+            ),
         });
         let response = super::http_error(err);
-        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_GATEWAY);
+    }
+
+    /// A supervisor's text can never produce the stale-create signal.
+    ///
+    /// The one conflict a client answers by discarding its intent and
+    /// re-reading is marked by a helm-only header. It used to be a marker at
+    /// the end of the body, which a supervisor's own refusal could end with
+    /// too; a conflict from a supervisor must come back as a plain 409.
+    #[farhelm_testtrace::test]
+    fn a_supervisor_conflict_never_carries_the_stale_create_header() {
+        let err = anyhow::Error::new(SupervisorError {
+            origin: ErrorOrigin::SupervisorReply,
+            kind: farhelm_proto::ErrorKind::Conflict,
+            message: "refused [farhelm:precondition/incarnation]".to_string(),
+        });
+        let response = super::http_error(err);
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+        assert!(
+            response
+                .headers()
+                .get(farhelm_proto::http::PRECONDITION_HEADER)
+                .is_none()
+        );
     }
 
     /// Spec: an error chain with no `SupervisorError` anywhere in it — a
@@ -2467,6 +2588,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn error_kind_prefers_the_host_store_family_over_a_supervisor_error_in_the_same_chain() {
         let inner = anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: farhelm_proto::ErrorKind::Internal,
             message: "an inner, less specific classification".to_string(),
         });

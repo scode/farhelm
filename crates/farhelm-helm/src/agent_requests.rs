@@ -768,11 +768,13 @@ fn resolve_profile_selector(
             .cloned()
             .ok_or_else(|| {
                 anyhow::Error::new(crate::SupervisorError {
+ origin: crate::client::ErrorOrigin::Helm,
                     kind: ErrorKind::NotFound,
                     message: format!("no profile with id {id:?} exists; run `farhelm agent profiles` and select an exact id"),
                 })
             }),
         _ => Err(anyhow::Error::new(crate::SupervisorError {
+ origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: "a profile lookup requires exactly one non-empty name or id".to_string(),
         })),
@@ -816,6 +818,7 @@ async fn resolve_host(
         let Some(view) = matches.next() else {
             let names: Vec<&str> = views.iter().map(|view| view.name.as_str()).collect();
             return Err(anyhow::Error::new(crate::SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::NotFound,
                 // The name is quoted back so a typo is visible as a
                 // typo, and the alternatives are listed because the
@@ -831,6 +834,7 @@ async fn resolve_host(
         if matches.next().is_some() {
             let duplicates = views.iter().filter(|view| view.name == name).count();
             return Err(anyhow::Error::new(crate::SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::Conflict,
                 // `Conflict`, not `NotFound` or `InvalidRequest`: the
                 // request is well formed and the fleet is the thing
@@ -1005,6 +1009,7 @@ async fn create_for_agent(
     let mode = match (request.profile_name, request.profile_id, request.invocation) {
         (Some(_), Some(_), _) | (Some(_), _, Some(_)) | (_, Some(_), Some(_)) => {
             return Err(anyhow::Error::new(crate::SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::InvalidRequest,
                 message: "a create requires exactly one profile name, profile id, or invocation"
                     .to_string(),
@@ -1023,6 +1028,7 @@ async fn create_for_agent(
         (None, None, Some(invocation)) => crate::sessions::CreateMode::Raw(invocation),
         (None, None, None) => {
             return Err(anyhow::Error::new(crate::SupervisorError {
+ origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::InvalidRequest,
                 message: "a create requires exactly one profile name, profile id, or invocation; no default is selected".to_string(),
             }));
@@ -1165,6 +1171,7 @@ async fn clone_for_agent(
         .find(|session| session.id == request.source_session_id)
         .ok_or_else(|| {
             anyhow::Error::new(crate::SupervisorError {
+ origin: crate::client::ErrorOrigin::Helm,
                 kind: ErrorKind::NotFound,
                 message: format!(
                     "the selected source host no longer lists session {:?}, so there is nothing to clone",
@@ -1186,6 +1193,7 @@ async fn clone_for_agent(
         crate::sessions::route_session(state, &request.source_session_id).await?;
     if confirmed_claim != source_claim || !Arc::ptr_eq(&confirmed_client, &source_client) {
         return Err(anyhow::Error::new(crate::SupervisorError {
+ origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Conflict,
             message: "the source session's owner changed while it was being read; run discovery again before retrying the clone".to_string(),
         }));
@@ -1275,6 +1283,7 @@ fn reject_clone_replay(
     // refusal with the host it is about, exactly as it wraps the target's
     // own refusals.
     Err(anyhow::Error::new(crate::SupervisorError {
+ origin: crate::client::ErrorOrigin::Helm,
         kind: ErrorKind::Conflict,
         message: "the idempotency key replayed the create that made the source or caller session, so no copy was made; retry the clone with a key that has not been used on this host, or with none at all".to_string(),
     }))

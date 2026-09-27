@@ -1317,9 +1317,14 @@ fn remaining(deadline: tokio::time::Instant) -> Result<std::time::Duration, Send
         .ok_or_else(|| SendError::Request("request deadline elapsed".to_string()))
 }
 
-/// Only the authentication middleware emits this structured error code
-/// ([`farhelm_proto::http::AUTH_REQUIRED_CODE`]); supervisor authorization
-/// refusals may share status 401 but not meaning.
+/// Whether a 401 body is the helm's "sign in again" answer
+/// ([`farhelm_proto::http::AUTH_REQUIRED_CODE`]).
+///
+/// Only the helm's authentication middleware emits that code on a 401. A
+/// remote supervisor's refusal text reaches clients verbatim and could spell
+/// the same JSON, but the helm never answers a supervisor's refusal with 401
+/// (it translates a supervisor's `Unauthorized` to 502), so a body read off a
+/// 401 is the middleware's own.
 pub(crate) fn device_auth_required(body: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()
@@ -1605,7 +1610,7 @@ pub(crate) async fn create_session(
     intent_key: &str,
     host: Option<HostId>,
     expected_incarnation: Option<u64>,
-) -> Result<Session, String> {
+) -> Result<Session, CreateRefusal> {
     let url = format!("{base}/api/sessions");
     let resp = send(client().post(&url).json(&create_body(
         cwd,
@@ -1617,9 +1622,49 @@ pub(crate) async fn create_session(
     )))
     .await?;
     if !resp.status().is_success() {
-        return Err(refusal_text("POST", &url, resp).await);
+        return Err(CreateRefusal::read("POST", &url, resp).await);
     }
-    resp.json::<Session>().await.map_err(|e| e.to_string())
+    resp.json::<Session>()
+        .await
+        .map_err(|e| CreateRefusal::from(e.to_string()))
+}
+
+/// A refused create, and whether the helm said the world moved under it.
+///
+/// `stale` comes from the helm's precondition header, never from the text:
+/// the text is the helm's body, which can quote a remote supervisor
+/// verbatim, and a supervisor must not be able to make this form discard
+/// its intent key and re-read. Every other failure (transport, decoding, a
+/// refusal without the header) converts from its message with `stale` false.
+#[derive(Debug)]
+pub(crate) struct CreateRefusal {
+    pub(crate) stale: bool,
+    pub(crate) text: String,
+}
+
+impl From<String> for CreateRefusal {
+    fn from(text: String) -> Self {
+        CreateRefusal { stale: false, text }
+    }
+}
+
+impl CreateRefusal {
+    async fn read(method: &str, url: &str, resp: reqwest::Response) -> Self {
+        let stale = is_stale_precondition(resp.headers());
+        CreateRefusal {
+            stale,
+            text: refusal_text(method, url, resp).await,
+        }
+    }
+}
+
+/// Whether a refusal carries the helm's stale-connection precondition.
+///
+/// Split out so the header rule is testable without a live response.
+fn is_stale_precondition(headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get(farhelm_proto::http::PRECONDITION_HEADER)
+        .is_some_and(|value| value == farhelm_proto::http::PRECONDITION_INCARNATION)
 }
 
 /// POST `/api/sessions/{source}/replace` with an override body — SPEC.md's
@@ -1659,7 +1704,7 @@ pub(crate) async fn replace_session_with(
     intent_key: &str,
     host: Option<HostId>,
     expected_incarnation: Option<u64>,
-) -> Result<Session, String> {
+) -> Result<Session, CreateRefusal> {
     let url = format!(
         "{base}/api/sessions/{}/replace",
         encode_path_segment(source)
@@ -1670,9 +1715,11 @@ pub(crate) async fn replace_session_with(
     });
     let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
-        return Err(refusal_text("POST", &url, resp).await);
+        return Err(CreateRefusal::read("POST", &url, resp).await);
     }
-    resp.json::<Session>().await.map_err(|e| e.to_string())
+    resp.json::<Session>()
+        .await
+        .map_err(|e| CreateRefusal::from(e.to_string()))
 }
 
 /// One create's request body — the single builder both [`create_session`]
@@ -1787,23 +1834,6 @@ pub(crate) async fn submit_fresh_create(
     resp.json::<Session>()
         .await
         .map_err(|error| FreshCreateError::Unresolved(error.to_string()))
-}
-
-/// Classify a create refusal: `(stale, prose)`, where `stale` says the helm
-/// refused because the world moved under the request — re-read and re-seed,
-/// rather than show a permanent error — and `prose` is the sentence with the
-/// machine marker ([`farhelm_proto::http::INCARNATION_MARKER`], which the helm
-/// appends) stripped for display.
-///
-/// Every OTHER 409 (a host that is not connected, a supervisor's own refusal)
-/// carries no marker and must not be answered by re-reading, which is why
-/// this is a marker check and not a status check.
-pub(crate) fn precondition_of(refusal: &str) -> (bool, String) {
-    let trimmed = refusal.trim_end();
-    match trimmed.strip_suffix(farhelm_proto::http::INCARNATION_MARKER) {
-        Some(prose) => (true, prose.trim_end().to_string()),
-        None => (false, refusal.to_string()),
-    }
 }
 
 /// The JavaScript the WEB (wasm) build's random client-side identifiers
@@ -3629,26 +3659,31 @@ mod tests {
         );
     }
 
-    /// A create refusal is recognized as stale by its MARKER, and the marker
-    /// is stripped before the sentence is shown.
+    /// A create refusal is stale only when the helm's precondition header
+    /// says so, whatever the text contains.
     ///
-    /// The marker is what tells a client "the world moved, re-read" apart
-    /// from every other 409, which must NOT be answered by re-reading; and it
-    /// is a machine token a user cannot act on, so it never reaches the form.
+    /// Stale is the one refusal the form answers by discarding its intent
+    /// key and re-reading. The text can quote a remote supervisor verbatim,
+    /// and staleness used to be a marker at the end of that text, so a
+    /// supervisor that ended its message with the marker could trigger it.
     #[farhelm_testtrace::test]
-    fn a_stale_create_refusal_is_classified_by_marker_and_shown_without_it() {
-        let (stale, prose) = precondition_of(
-            "host 1 is not the connection this request was prepared against \
-             [farhelm:precondition/incarnation]",
+    fn a_stale_create_refusal_is_recognized_only_by_the_helm_header() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        assert!(!is_stale_precondition(&headers));
+        headers.insert(
+            farhelm_proto::http::PRECONDITION_HEADER,
+            reqwest::header::HeaderValue::from_static("incarnation"),
         );
-        assert!(stale);
-        assert_eq!(
-            prose,
-            "host 1 is not the connection this request was prepared against"
+        assert!(is_stale_precondition(&headers));
+        headers.insert(
+            farhelm_proto::http::PRECONDITION_HEADER,
+            reqwest::header::HeaderValue::from_static("something-else"),
         );
-        let (stale, prose) = precondition_of("host 1 is not connected");
-        assert!(!stale);
-        assert_eq!(prose, "host 1 is not connected");
+        assert!(!is_stale_precondition(&headers));
+        let refusal = CreateRefusal::from(
+            "ends like the old marker [farhelm:precondition/incarnation]".to_string(),
+        );
+        assert!(!refusal.stale);
     }
 
     /// An edit sends the profile's WHOLE definition, every field present.

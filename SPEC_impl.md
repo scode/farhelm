@@ -962,6 +962,25 @@ holds a stall, and hides a closed tab) and show the reason as text, so reason wo
 helm and `terminal.js` compared English sentences they each kept a copy of, and only the disabled browser suite would
 have noticed a rewording.
 
+### Errors crossing levels of abstraction
+
+An error code or response at one level of abstraction is never, by default, equivalent to one at another level. The same
+name or number does not carry the same meaning once it crosses a layer: a supervisor's `ErrorKind::Unauthorized` says a
+session-scoped peer asked for something outside its slice, while the helm's HTTP 401 tells a browser it is signed out.
+Translating a code across levels is valid only through explicit, case-by-case reasoning, recorded where the translation
+happens. A blanket mapping from one layer's codes to another's is exactly the default equivalence this rule forbids,
+even when every current code happens to line up.
+
+The helm applies this at its HTTP boundary. `SupervisorError` records whether the helm decided the kind itself or built
+it from a supervisor's `ControlMsg::Error` reply, and `http_error` translates a supervisor-decided kind through
+`supervisor_reply_status`, where each arm says why its status is the right one given that the supervisor is untrusted. A
+supervisor's `Unauthorized` becomes 502, never 401. Signals that make a client act on its own state are produced only by
+the helm's own reasoning: the device-authentication 401 comes only from the auth middleware, the definitely- unaccepted
+create outcome only for a local failure or a supervisor's `CheckoutConflict` (whose mkdir it owns), and the
+stale-connection precondition only as a header from the helm's own precondition check, never from anything a supervisor
+wrote in a message body. The agent relay's error classification (`error_kind`) and the terminal WebSocket were not
+audited against this rule when it was written.
+
 `SessionInfo::last_work_started_at` is the millisecond ordering key for the session list's stable work bursts. It was
 added within protocol version 20 under the same additive rule: absent decodes to zero, and zero falls back to
 `created_at * 1000` with saturating integer arithmetic. It never falls back to `last_activity_at`, because continued

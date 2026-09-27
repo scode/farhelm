@@ -32,24 +32,71 @@
 //!
 //! A 409, because it is "the world moved, ask again" rather than anything
 //! wrong with the request. Error bodies in this API are PROSE shown verbatim
-//! (`crate::http_error`), so the machine-readable part is a stable marker
-//! appended to the sentence — [`INCARNATION_MARKER`]. A client branches on the
-//! marker and may strip a trailing bracketed one before display; a conflict
-//! carrying NO marker is one of the other kinds (a host that is not connected,
-//! a supervisor's own refusal) and is not retried by re-reading. A value that
-//! is not a number never reaches here at all — axum's extractor rejects it as
-//! a 400, which is the right split: unparseable is a client bug, stale is a
-//! world that moved.
+//! (`crate::http_error`), so the machine-readable part travels in a header,
+//! `farhelm_proto::http::PRECONDITION_HEADER`, which `http_error` sets when it
+//! finds an [`IncarnationStale`] in the error. It used to be a marker appended
+//! to the body, but a body can carry a remote supervisor's text verbatim, and
+//! a supervisor that ended its message with the marker could make the client
+//! discard its intent and re-read. A conflict without the header is one of
+//! the other kinds (a host that is not connected, a supervisor's own refusal)
+//! and is not retried by re-reading. A value that is not a number never
+//! reaches here at all — axum's extractor rejects it as a 400, which is the
+//! right split: unparseable is a client bug, stale is a world that moved.
 
 use crate::manager::SessionClaim;
-use farhelm_proto::ErrorKind;
 
-/// The marker an incarnation-precondition refusal ends with.
+/// The incarnation-precondition refusal: the request named a connection the
+/// host is no longer on.
 ///
-/// Stable across releases: it is API, not diagnostics. Defined in
-/// `farhelm-proto` so the UI, which branches on it, reads the same constant
-/// this module appends.
-pub(crate) const INCARNATION_MARKER: &str = farhelm_proto::http::INCARNATION_MARKER;
+/// Its own type so `http_error` can recognize it and add the precondition
+/// header, and so `error_kind` can classify it as `Conflict` (which the agent
+/// relay relies on) without the message having to carry anything a client
+/// parses. `Display` is the sentence a user is shown.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "host {host} is not the connection this request was prepared against (it named connection \
+     {expected}, and this host is now on connection {current}): a retarget, an adoption, or a \
+     reconnection has replaced what answers on that host, and profile ids from the previous \
+     install can resolve here to something else entirely — so nothing was changed. Re-read the \
+     host and try again"
+)]
+pub(crate) struct IncarnationStale {
+    host: crate::store::HostId,
+    expected: u64,
+    current: u64,
+}
+
+/// This request's own validation failure, quoted as context on a different
+/// outcome that takes precedence.
+///
+/// A keyed fresh create whose local validation fails asks the supervisor for
+/// the recorded outcome of that key, and when the supervisor refuses, its
+/// refusal is what the client must see, with the local failure quoted after
+/// it. Quoting is text, so this keeps the one fact the client acts on:
+/// whether that local failure was a stale connection.
+#[derive(Debug, thiserror::Error)]
+#[error("current request validation also failed: {text}")]
+pub(crate) struct AlsoFailedValidation {
+    text: String,
+    stale: bool,
+}
+
+impl AlsoFailedValidation {
+    pub(crate) fn of(local: &anyhow::Error) -> Self {
+        AlsoFailedValidation {
+            text: format!("{local:#}"),
+            stale: crate::find_cause::<IncarnationStale>(local).is_some(),
+        }
+    }
+}
+
+/// Whether the helm refused this request because its connection went stale,
+/// either directly or as a quoted local failure. `http_error` sets the
+/// precondition header from this and from nothing else.
+pub(crate) fn is_stale(e: &anyhow::Error) -> bool {
+    crate::find_cause::<IncarnationStale>(e).is_some()
+        || crate::find_cause::<AlsoFailedValidation>(e).is_some_and(|quoted| quoted.stale)
+}
 
 /// Refuse unless `expected` names the connection `claim` was taken on.
 ///
@@ -67,15 +114,9 @@ pub(crate) fn incarnation_holds(claim: &SessionClaim, expected: Option<u64>) -> 
     if expected == claim.incarnation {
         return Ok(());
     }
-    Err(anyhow::Error::new(crate::SupervisorError {
-        kind: ErrorKind::Conflict,
-        message: format!(
-            "host {} is not the connection this request was prepared against (it named connection \
-             {expected}, and this host is now on connection {}): a retarget, an adoption, or a \
-             reconnection has replaced what answers on that host, and profile ids from the previous \
-             install can resolve here to something else entirely — so nothing was changed. Re-read \
-             the host and try again {INCARNATION_MARKER}",
-            claim.host, claim.incarnation
-        ),
+    Err(anyhow::Error::new(IncarnationStale {
+        host: claim.host,
+        expected,
+        current: claim.incarnation,
     }))
 }
