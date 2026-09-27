@@ -311,8 +311,6 @@ One line per open item. This file must always match the feedback files in this d
   run.
 - `failed-download-leaves-part-file.md` — a failed asset download leaves up to 1 GiB of .part in helm state until
   restart.
-- `install-step-error-leaks-uploaded-temp.md` — install_uploaded_source returns before removing the uploaded temporary
-  when its metadata read or mode repair fails.
 - `tilde-remote-paths-never-expand.md` — a ~/ remote_farhelm or remote_state_dir is single-quoted and never expands, so
   the host never connects.
 - `reach-misreads-escaped-xdg-config-home.md` — an escaped XDG_CONFIG_HOME (path with a space) is misclassified as

@@ -3878,6 +3878,106 @@ mod tests {
         }
     }
 
+    /// Run each ssh command's remote shell locally, except that the first
+    /// ssh launch fails the way a dropped connection does (exit 255, remote
+    /// command never run). Counts ssh launches so a test can see the cleanup
+    /// attempt that follows.
+    struct FirstSshDropsLauncher {
+        ssh_launches: Mutex<usize>,
+    }
+
+    impl CommandLauncher for FirstSshDropsLauncher {
+        fn spawn(
+            &self,
+            command: &mut tokio::process::Command,
+        ) -> std::io::Result<tokio::process::Child> {
+            assert_eq!(command.as_std().get_program().to_string_lossy(), "ssh");
+            let launch = {
+                let mut launches = self.ssh_launches.lock().unwrap();
+                *launches += 1;
+                *launches
+            };
+            let mut child = tokio::process::Command::new("sh");
+            if launch == 1 {
+                child
+                    .arg("-c")
+                    .arg("printf '%s\\n' 'Connection closed by remote host' >&2; exit 255");
+            } else {
+                child
+                    .arg("-c")
+                    .arg(command.as_std().get_args().last().unwrap());
+            }
+            child
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true);
+            isolate_process_group(&mut child);
+            child.spawn()
+        }
+    }
+
+    /// A dropped connection at the very start of the install step still
+    /// removes the uploaded temporary.
+    ///
+    /// Why: the install step first reads the installed file's metadata, and a
+    /// failure there used to return at once, leaving the complete uploaded
+    /// payload (tens of megabytes) behind in the host's farhelm or bin
+    /// directory; only a failed final verify-and-move cleaned up. Spec: the
+    /// metadata read fails, the next ssh command removes the temporary, the
+    /// installed file is untouched, and the error still names the original
+    /// failure.
+    #[farhelm_testtrace::test]
+    async fn install_step_failure_before_verification_removes_the_temporary() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("farhelm");
+        let temporary = root.path().join(".farhelm.farhelm-tmp-nonce");
+        tokio::fs::write(&destination, b"installed bytes")
+            .await
+            .unwrap();
+        tokio::fs::write(&temporary, b"uploaded payload bytes")
+            .await
+            .unwrap();
+        let launcher = Arc::new(FirstSshDropsLauncher {
+            ssh_launches: Mutex::new(0),
+        });
+        let backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::clone(&launcher) as Arc<dyn CommandLauncher>,
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let error = backend
+            .install_uploaded_source(
+                &ProvisioningTarget::Ssh {
+                    destination: "scripted.example".to_string(),
+                },
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                &destination,
+                &temporary,
+                0o755,
+            )
+            .await
+            .expect_err("a dropped connection must fail the install step");
+        assert!(
+            error.rendered().contains("Connection closed"),
+            "the original failure must stay visible: {error:?}"
+        );
+        assert!(
+            *launcher.ssh_launches.lock().unwrap() >= 2,
+            "a cleanup command must follow the failure"
+        );
+        assert!(
+            !tokio::fs::try_exists(&temporary).await.unwrap(),
+            "the uploaded temporary must not be left behind"
+        );
+        assert_eq!(
+            tokio::fs::read(&destination).await.unwrap(),
+            b"installed bytes"
+        );
+    }
+
     /// Failed SFTP and a successful transfer with the wrong digest both
     /// remove the nonce temporary without replacing the installed binary.
     /// The second case proves that a zero SFTP exit is not proof of payload
