@@ -7503,6 +7503,16 @@ impl Supervisor {
         // produce that is not about the filesystem.
         let snapshot = IntegrationSnapshot::resolve(&argv, agent_kind, resume_template)
             .map_err(|e| RequestError::new(ErrorKind::InvalidRequest, e.to_string()))?;
+        // The DERIVED template is held to the same rule as an override. The
+        // override check above cannot see it: a kind derives its template from
+        // the invocation, so an invocation whose program is `{conversation}`
+        // yields a template `decode_session_row` refuses at load. Loading
+        // fails as a whole on one bad row, so accepting it here would leave the
+        // supervisor unable to start after its next restart.
+        if let Some(template) = snapshot.resume_template.as_deref() {
+            crate::agent_kind::ensure_resume_template(template)
+                .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        }
         // The agent will report its own `getcwd()`, which the kernel has
         // already resolved, so correlation has to compare against the
         // resolved spelling or a session created through a symlink could
@@ -22495,6 +22505,54 @@ exit 0
                 && refusal.contains("PROGRAM")
                 && refusal.contains("belongs in an argument slot"),
             "the refusal uses the shared placeholder-as-program wording: {refusal}"
+        );
+    }
+
+    /// A raw create whose program is `{conversation}` is refused when its
+    /// kind would DERIVE a resume template from it.
+    ///
+    /// Why it matters: the derived template (`{conversation} ... --resume
+    /// {conversation}`) is one the row loader refuses, and one refused row
+    /// fails the whole store load, so accepting the create left the host's
+    /// supervisor unable to start after its next restart. Spec: create and
+    /// load agree; the create is refused with `InvalidRequest` naming the
+    /// placeholder.
+    #[farhelm_testtrace::test]
+    async fn a_raw_create_refuses_a_derived_template_with_a_conversation_program() {
+        let state = StateDir::new();
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = work.path().to_string_lossy().to_string();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let refusal = match sup
+            .validate_create(CreateInputs {
+                github_checkout: None,
+                cwd: &cwd,
+                parent: None,
+                mode: CreateMode::Raw {
+                    invocation: format!(
+                        "{} --model x",
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER
+                    ),
+                    agent_kind: Some(AgentKind::Claude),
+                    resume_template: None,
+                    source_profile: None,
+                    launch: None,
+                },
+                title: None,
+                cols: 80,
+                rows: 24,
+            })
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("a derived template the loader refuses must not validate"),
+        };
+        assert_eq!(error_kind(&refusal), ErrorKind::InvalidRequest);
+        assert!(
+            format!("{refusal:#}").contains(crate::agent_kind::CONVERSATION_PLACEHOLDER),
+            "the refusal names the placeholder: {refusal:#}"
         );
     }
 
