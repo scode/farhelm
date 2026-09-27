@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `sweep-can-claim-supervisor-or-tmux-server.md` — nothing stops the kill sweep from claiming the supervisor itself or
-  its private tmux server.
 - `nondumpable-daemons-escape-sweep.md` — non-dumpable daemons such as ssh-agent survive stop and delete on hosts
   without a systemd user manager.
 - `offline-rotate-creates-fresh-database.md` — `token rotate` against a wrong state dir creates a fresh DB and reports

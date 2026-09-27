@@ -1194,7 +1194,12 @@
 - Completion criteria: the generated supervisor unit strips the three session markers, with a unit-generation test
   covering it; SPEC_impl.md states that the systemd supervisor unit strips session markers and why; remove the feedback
   file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the shared supervisor unit template now strips the three session markers with
+  `UnsetEnvironment=`, pinned by the exact-text unit test and a new test tying the stripped names to the supervisor's
+  marker constants. SPEC_impl.md records the rule, its reason, and what it leaves uncovered. The focused recorded run
+  passed the unit-rendering and provisioning unit tests. Fresh gpt-6-astra high review reported no findings. Draft PR
+  [#1032](https://github.com/scode/farhelm/pull/1032/changes) is on bookmark `pr/supervisor-unit-strips-markers`, jj
+  change `vznqxoro`.
 
 ## nondumpable-daemons-escape-sweep.md
 

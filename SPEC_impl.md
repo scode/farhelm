@@ -2476,6 +2476,17 @@ explicit UPDATE restarts the supervisor. Limiting the unit stop to its main proc
 as running `farhelm supervisor run` manually: stopping the supervisor detaches management, while tmux continues to own
 the session processes and terminals until the user deletes them or the host reboots.
 
+The supervisor unit also sets `UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID`. The kill sweep
+claims every process carrying a session's markers and has no exemption for the supervisor or its private tmux server. A
+tab's startup file that runs a bare `systemctl --user import-environment`, or
+`dbus-update-activation-environment
+--systemd --all`, copies that tab's markers into the user manager; a supervisor
+started afterwards would inherit them, and deleting that session or closing that tab would make it signal itself, and a
+tmux server it started would take every session's panes with it. A systemd-managed supervisor never legitimately belongs
+to a session, so stripping the markers is free. This covers supervisors started through the generated unit (local setup
+and provisioning share it); one started by hand from an environment carrying markers, and other user services that
+inherited them, are not protected, and the sweep deliberately has no protected-process set.
+
 Motivation for shipping tmux ourselves when absent or too old: apt needs root, and SPEC.md forbids requiring it; a
 static tmux under our own lib dir keeps the no-root promise without asking the user to install anything.
 

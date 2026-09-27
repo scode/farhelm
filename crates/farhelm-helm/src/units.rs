@@ -109,6 +109,19 @@ pub struct HelmUnitInputs<'a> {
 /// durable sessions, so restarting their manager must stop only the
 /// supervisor process rather than systemd's default whole control group.
 ///
+/// So is `UnsetEnvironment=` for the three session markers
+/// (`FARHELM_SESSION_ID`, `FARHELM_AGENT_ID`, `FARHELM_TAB_ID`). The kill
+/// sweep claims every process carrying a session's markers, and nothing
+/// exempts the supervisor or its tmux server. A tab's startup file that runs
+/// a bare `systemctl --user import-environment` (or `dbus-update-activation-
+/// environment --systemd --all`) copies that tab's markers into the user
+/// manager, and the next supervisor it starts would inherit them: deleting
+/// that session, or closing that tab, would then make the supervisor signal
+/// itself, and a tmux server it started would take every session's panes
+/// with it. A supervisor systemd manages never legitimately belongs to a
+/// session, so stripping them costs nothing. This covers only supervisors
+/// started through this unit; SPEC_impl.md records the limit.
+///
 /// Fails when any path cannot cross a text boundary faithfully (see
 /// [`path_text`]) or when a `PATH` component contains `:`, which systemd's
 /// `Environment=` grammar cannot represent.
@@ -432,6 +445,35 @@ fn render_template(template: &str, values: &[(&str, &str)]) -> String {
 mod tests {
     use super::*;
 
+    /// The supervisor unit strips exactly the markers the kill sweep claims
+    /// processes by.
+    ///
+    /// The unit spells the names as literal text, while the supervisor sets
+    /// and reads them through its own constants. If a marker were renamed
+    /// there and not here, the unit would keep stripping a name nothing uses,
+    /// and a supervisor that inherited the new marker from a polluted user
+    /// manager could be claimed by its own sweep again, with every exact-text
+    /// test still green.
+    #[farhelm_testtrace::test]
+    fn the_supervisor_unit_strips_the_sweeps_session_markers() {
+        use farhelm_supervisor::launch::{AGENT_ID_ENV_VAR, SESSION_ID_ENV_VAR, TAB_ID_ENV_VAR};
+        let unit = render_supervisor_unit(&SupervisorUnitInputs {
+            farhelm: Path::new("/usr/local/bin/farhelm"),
+            tmux: Path::new("/usr/bin/tmux"),
+            state_dir: Path::new("/srv/farhelm"),
+        })
+        .unwrap();
+        let unset = unit
+            .lines()
+            .find_map(|line| line.strip_prefix("UnsetEnvironment="))
+            .expect("the supervisor unit carries an UnsetEnvironment= line");
+        let mut stripped: Vec<&str> = unset.split_whitespace().collect();
+        stripped.sort_unstable();
+        let mut markers = vec![SESSION_ID_ENV_VAR, AGENT_ID_ENV_VAR, TAB_ID_ENV_VAR];
+        markers.sort_unstable();
+        assert_eq!(stripped, markers);
+    }
+
     /// The complete text of both units, pinned.
     ///
     /// These templates ARE the lifecycle policy — `KillMode=process` is
@@ -467,6 +509,7 @@ mod tests {
                 "Environment=\"PATH=/home/u/.local/bin:/home/linuxbrew/.linuxbrew/bin:",
                 "/usr/local/bin:/usr/bin:/bin\"\n",
                 "Environment=\"FARHELM_TMUX=/home/linuxbrew/.linuxbrew/bin/tmux\"\n",
+                "UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID\n",
                 "KillMode=process\n",
                 "Restart=on-failure\n",
                 "\n",
