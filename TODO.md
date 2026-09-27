@@ -405,15 +405,18 @@ are large mostly because of their tests.
   worth keeping before extending it. The current limitation is explicitly accepted in SPEC.md.
 
 - Close the cross-host execution hole in agent-requested session creation and cloning, then remove their temporary
-  exception from the host-isolation policy. These operations currently let a remote host cause arbitrary execution on
-  another host; this is explicitly accepted temporarily to defer redesign, not permission to add more such operations.
-  Preserve the eventual ability for agents to orchestrate sessions across hosts through an explicitly authorized launch
-  policy, potentially trusted profiles, without letting the requesting host choose arbitrary execution. Include the
-  existing agent/supervisor-originated creation and retry paths: a delayed resubmission must be considered when deciding
-  what launch authority remains valid, including whether a forgotten retry key can launch a session again. Permanent
-  retention of these agent-originated retry records is not required; their replay exposure is accepted pending this
-  work. Do not add further exceptions or infer a waiver of user-initiated GUI request correctness. Cross-host stop and
-  rename remain intentionally allowed bounded operations.
+  exception from the host-isolation policy. The end state: only explicitly trusted environments may spawn sessions on,
+  or interrogate the session and profile data of, other hosts; arbitrary attached supervisors lose both. In scope next
+  to create, clone, and their retry paths: `ResolveProfile` (which hands any attached host any profile's full resolved
+  launch bundle today) and the fleet-wide session and host listings. These operations currently let a remote host cause
+  arbitrary execution on another host; this is explicitly accepted temporarily to defer redesign, not permission to add
+  more such operations. Preserve the eventual ability for agents to orchestrate sessions across hosts through an
+  explicitly authorized launch policy, potentially trusted profiles, without letting the requesting host choose
+  arbitrary execution. Include the existing agent/supervisor-originated creation and retry paths: a delayed resubmission
+  must be considered when deciding what launch authority remains valid, including whether a forgotten retry key can
+  launch a session again. Permanent retention of these agent-originated retry records is not required; their replay
+  exposure is accepted pending this work. Do not add further exceptions or infer a waiver of user-initiated GUI request
+  correctness. Cross-host stop and rename remain intentionally allowed bounded operations.
 
 - Let the user mark each host as "yolo is fine" or "yolo is not fine", controlling which hosts appear red in the session
   list. This could also support warnings when the user is about to run an unsandboxed agent on a host marked "yolo is

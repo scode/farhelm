@@ -1395,7 +1395,14 @@
   The `ResolveProfile` arm carries a comment naming the temporary exception it depends on. The `agent_requests.rs` and
   `client.rs` trust docs are restated as effect-scoped trust rather than connection trust. Remove the feedback file and
   its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; SPEC.md's temporary cross-host creation exception now names profile resolution as covered by it
+  and ending with it, and the "Remote input" paragraph points there; SPEC_impl.md gained "What the helm believes from a
+  supervisor" with the effect-scoped trust rule and `ResolveProfile`'s dependence on the exception. The helm logs every
+  `ResolveProfile` answer (origin host, supervisor-claimed asking session, profile id), the arm carries a comment naming
+  the exception, and the relay's trust docs in `agent_requests.rs` and `client.rs` are restated as effect-scoped trust.
+  TODO.md's Maybe later cross-host entry is widened to the trusted-environments end state, naming `ResolveProfile` and
+  the fleet listings. Draft PR [#1039](https://github.com/scode/farhelm/pull/1039/changes), jj change `uuslzvxl`,
+  bookmark `pr/resolveprofile-temporary-exception`.
 
 ## tmux-cwd-format-expanded-on-create.md
 

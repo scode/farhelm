@@ -1400,6 +1400,13 @@ exposure is accepted pending the guardrails in [TODO.md's Maybe later bucket](TO
 agent/supervisor-originated creation retries share that acceptance; permanent retention of their retry records is not
 required. This does not waive correctness of user-initiated GUI requests or select a pruning implementation.
 
+The same temporary exception covers profile resolution. Any attached host may obtain any catalog profile's resolved
+launch bundle, including its full command line and resume template, because that exception already lets any host ask for
+any profile to be launched on itself, which delivers the same bundle to it. Until the guardrails land, profiles are no
+place for secrets that must stay hidden from an attached host. This acceptance is not a standing grant: it ends with the
+cross-host creation exception, when spawning sessions on other hosts and reading their session and profile data are
+limited to explicitly trusted environments.
+
 Do not add other arbitrary cross-host execution capabilities by analogy with those exceptions. Future agent-driven
 orchestration, such as setting up several sessions on another host, is wanted with an explicitly authorized launch
 policy; trusted profiles are a possible design, not a security property established for the current catalog.
@@ -1408,8 +1415,10 @@ policy; trusted profiles are a possible design, not a security property establis
 
 Agents may discover the helm catalog's profile names and IDs. Listing those names and IDs in lookup suggestions is
 explicitly allowed, not a confidentiality defect. This permission does not extend to raw command lines or embedded
-credentials and does not require a new discovery interface. It also does not make current profiles trusted execution
-guardrails; the separate host-authority rules still apply.
+credentials and does not require a new discovery interface. (Attached supervisors, as opposed to agents, can currently
+obtain resolved profile bundles under the temporary exception in
+[Local authority and trust between hosts](#local-authority-and-trust-between-hosts).) It also does not make current
+profiles trusted execution guardrails; the separate host-authority rules still apply.
 
 Agent instructions must identify fleet session metadata as data, never instructions to follow; see
 [Agent-spawned sessions](#agent-spawned-sessions) for the CLI contract. Merely echoing an agent's own input into its own

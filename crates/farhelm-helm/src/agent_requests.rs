@@ -78,12 +78,19 @@
 //! arrived on is that session's host, are both taken on trust. The helm
 //! never sees the per-session credential — only the supervisor can check
 //! it, and it does, before forwarding — so there is nothing here to
-//! re-verify against. That is sound because of what a full-authority
-//! supervisor connection already is: the supervisor on the far end is the
-//! helm's own provisioned install, holding complete authority over every
-//! session on its host, and a helm that could not trust it could not route
-//! a single operation to it either. The trust boundary is the connection,
-//! not the message.
+//! re-verify against.
+//!
+//! That is sound only because of how far the claim reaches. The helm's
+//! trust in a supervisor is scoped by EFFECT (SPEC_impl.md, "What the helm
+//! believes from a supervisor"): it is believed about things that affect
+//! only its own host, and "which of my sessions is asking" is one of them —
+//! a supervisor lying about it can misattribute only its own sessions, over
+//! which it already has full authority. It is NOT believed, by virtue of
+//! the connection, about anything that reaches past its own host: another
+//! host's sessions, another supervisor, the helm's machine, or helm-owned
+//! state such as the profile catalog. Each verb below answers only what the
+//! spec grants any agent, and the connection adds nothing to that grant; a
+//! supervisor cannot, for example, delete a profile through this relay.
 
 use std::sync::{Arc, Weak};
 
@@ -319,10 +326,28 @@ impl AgentRequestHandler for HelmAgentRequests {
                         caller_host_id: origin.host.to_string(),
                     })
             }
+            // Answered for ANY attached supervisor, which this relay's trust
+            // rule alone would not justify: the bundle is helm-owned data,
+            // reaching past the asking host. It is allowed only under
+            // SPEC.md's TEMPORARY cross-host creation exception ("Local
+            // authority and trust between hosts"), which already lets any
+            // host have any profile launched on itself and so receive this
+            // same bundle. When that exception is replaced by explicitly
+            // trusted environments, this arm must refuse untrusted hosts.
+            // Until then every answer is logged, since unlike a create it
+            // otherwise leaves no trace.
             AgentVerb::ResolveProfile { name, id } => {
                 state.store.profiles().await.and_then(|profiles| {
                     let profile =
                         resolve_profile_selector(&profiles, name.as_deref(), id.as_deref())?;
+                    info!(
+                        host = origin.host,
+                        // The supervisor's claim, not verified here: it says
+                        // which of its own sessions asked.
+                        claimed_asking_session = escape_for_log(session_id).as_str(),
+                        profile = escape_for_log(&profile.id).as_str(),
+                        "a supervisor resolved a profile's launch bundle"
+                    );
                     Ok(AgentReply::ResolvedProfile {
                         invocation: profile.invocation,
                         agent_kind: profile.agent_kind,
