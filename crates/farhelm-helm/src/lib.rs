@@ -1529,6 +1529,10 @@ mod embedded_ui_tests {
 /// - The listener is bound FIRST, so the likely failure (port busy because
 ///   a helm is already running) happens before anything else has been set
 ///   up or written.
+/// - The state directory's single-owner lock is claimed next, BEFORE
+///   `helm.db` is opened: a serving helm's open migrates the schema, and a
+///   second helm on a different port must not upgrade the database, write
+///   the host registry, or dial the fleet under a running incumbent.
 /// - `--ensure-hosts` is ingested BEFORE the manager starts, so the
 ///   guaranteed hosts have actors from the first moment rather than after a
 ///   reconcile — and so a bad file fails startup before anything is
@@ -1605,6 +1609,7 @@ async fn run_with_ready(
         .local_addr()
         .context("reading bound helm address")?;
 
+    let ownership = token_control::claim_serving_ownership(&state_dir).await?;
     let store = store::HelmStore::open(&state_dir.join("helm.db")).await?;
     if let Some(path) = args.ensure_hosts.as_deref() {
         ensure::ingest(&store, path).await?;
@@ -1637,8 +1642,9 @@ async fn run_with_ready(
     state
         .manager
         .set_agent_requests(agent_requests::HelmAgentRequests::for_state(&state));
-    // The control socket's flock comes FIRST, and only then is the bootstrap
-    // token read into its cache. Taking them in the other order left a gap:
+    // The control socket's flock (claimed above as `ownership`) comes FIRST,
+    // and only then is the bootstrap token read into its cache. Taking them
+    // in the other order left a gap:
     // an offline `token rotate` can run between the cache fill and the flock
     // (it takes the offline path exactly because no helm owns the directory
     // yet), and a helm that then took the flock served with the pre-rotation
@@ -1646,7 +1652,7 @@ async fn run_with_ready(
     // a restart. With the flock held, an offline rotation is impossible and
     // a live one goes through this process's control socket, which updates
     // the same cache.
-    let mut token_control = token_control::serve(&state_dir, state.auth.clone()).await?;
+    let mut token_control = token_control::serve(&state_dir, ownership, state.auth.clone()).await?;
     // First run owns token creation. Browser serving must never begin with a
     // database whose bootstrap secret exists only after somebody invokes the
     // separate `token show` command.
@@ -2013,6 +2019,66 @@ mod tests {
             payload_dir: None,
             release_base_url: None,
         }
+    }
+
+    /// A second helm on another port refuses before it opens (and so
+    /// migrates) a state directory another helm already owns.
+    ///
+    /// Why it matters: the serving open migrates `helm.db`, and startup then
+    /// writes the host registry and dials the fleet. A newer helm started
+    /// beside an older running one used to do all of that before discovering
+    /// the owner lock was taken, upgrading the schema under the incumbent.
+    /// Spec: the ownership claim precedes the database open; the refused
+    /// helm leaves the schema version untouched.
+    #[farhelm_testtrace::test]
+    async fn a_second_helm_refuses_before_migrating_an_owned_state_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        // A real schema-29 database: the current schema minus what the 29→30
+        // step adds. Only a database the open CAN upgrade shows whether the
+        // refused helm upgraded it.
+        drop(crate::store::HelmStore::open(&path).await.unwrap());
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+             PRAGMA user_version = 29;",
+        )
+        .unwrap();
+        let premise = tempfile::tempdir().unwrap();
+        let unowned_copy = premise.path().join("helm.db");
+        std::fs::copy(&path, &unowned_copy).unwrap();
+        drop(crate::store::HelmStore::open(&unowned_copy).await.unwrap());
+        let upgraded: i64 = rusqlite::Connection::open(&unowned_copy)
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert!(
+            upgraded > 29,
+            "fixture premise: an unowned open upgrades this database"
+        );
+        let _incumbent = crate::token_control::claim_serving_ownership(dir.path())
+            .await
+            .expect("fixture premise: the incumbent owns the directory");
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            crate::run(crate::HelmArgs {
+                port: 0,
+                state_dir: Some(dir.path().to_path_buf()),
+                ..base_args()
+            }),
+        )
+        .await
+        .expect("a refused helm must return rather than serve");
+        let error = result.expect_err("the second helm must refuse an owned state directory");
+        assert!(
+            format!("{error:#}").contains("another process owns token control"),
+            "the refusal names the owner lock: {error:#}"
+        );
+        let after: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(after, 29, "the refused helm must not migrate helm.db");
     }
 
     /// Spec (D18): `--payload-dir` wins over `--release-base-url` when both

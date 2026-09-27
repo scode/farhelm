@@ -45,7 +45,11 @@ enum AcceptErrorDisposition {
 struct OwnershipBusy;
 
 /// Exclusive ownership of token-control decisions for one state directory.
-struct OwnershipLock {
+///
+/// A serving helm claims this with [`claim_serving_ownership`] before it
+/// opens (and migrates) `helm.db`, and keeps it for its lifetime inside the
+/// [`ControlGuard`] that [`serve`] returns.
+pub(crate) struct OwnershipLock {
     file: File,
 }
 
@@ -88,10 +92,28 @@ impl Drop for ControlGuard {
     }
 }
 
-/// Start the serving helm's local token-control endpoint.
-pub(crate) async fn serve(state_dir: &Path, auth: AuthState) -> anyhow::Result<ControlGuard> {
+/// Claim the state directory for a serving helm.
+///
+/// Taken before the helm opens `helm.db`, because opening it as the serving
+/// helm migrates the schema, and startup then writes the host registry and
+/// dials the fleet. A second helm on another port must be refused before any
+/// of that, not after it has upgraded the database under a running
+/// incumbent. The same claim is what keeps an offline `token rotate` from
+/// running while this helm serves.
+pub(crate) async fn claim_serving_ownership(state_dir: &Path) -> anyhow::Result<OwnershipLock> {
     farhelm_supervisor::ensure_private_dir(state_dir).await?;
-    let ownership = acquire_ownership(state_dir.to_path_buf()).await?;
+    acquire_ownership(state_dir.to_path_buf()).await
+}
+
+/// Start the serving helm's local token-control endpoint.
+///
+/// `ownership` is the claim from [`claim_serving_ownership`]; the returned
+/// guard keeps it for as long as the endpoint serves.
+pub(crate) async fn serve(
+    state_dir: &Path,
+    ownership: OwnershipLock,
+    auth: AuthState,
+) -> anyhow::Result<ControlGuard> {
     let path = state_dir.join(SOCKET_NAME);
     remove_stale_socket(&path)?;
     let listener = tokio::net::UnixListener::bind(&path)
@@ -453,6 +475,13 @@ fn remove_stale_socket(path: &Path) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    /// Claim the directory and start the endpoint, as a serving helm's
+    /// startup does in two separate steps.
+    async fn serve_owned(state_dir: &Path, auth: AuthState) -> anyhow::Result<ControlGuard> {
+        let ownership = claim_serving_ownership(state_dir).await?;
+        serve(state_dir, ownership, auth).await
+    }
+
     /// Descriptor exhaustion must keep token control alive, but the four
     /// peer-race errors still need their immediate retry behavior.
     #[test]
@@ -500,7 +529,8 @@ mod tests {
         let before = auth.token().await.unwrap();
         auth.mint_device().await.unwrap();
         let socket = auth.socket_session();
-        let _guard = serve(dir.path(), auth).await.unwrap();
+        let ownership = claim_serving_ownership(dir.path()).await.unwrap();
+        let _guard = serve(dir.path(), ownership, auth).await.unwrap();
 
         let after = rotate(Some(dir.path().to_path_buf())).await.unwrap();
         assert_ne!(after, before);
@@ -563,9 +593,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
         let auth = AuthState::new(store);
-        let _guard = serve(dir.path(), auth.clone()).await.unwrap();
+        let ownership = claim_serving_ownership(dir.path()).await.unwrap();
+        let _guard = serve(dir.path(), ownership, auth).await.unwrap();
 
-        let error = match serve(dir.path(), auth).await {
+        let error = match claim_serving_ownership(dir.path()).await {
             Ok(_) => panic!("the existing listener must keep the control path"),
             Err(error) => error,
         };
@@ -672,7 +703,7 @@ mod tests {
         let before = auth.token().await.unwrap();
         auth.mint_device().await.unwrap();
         let before_devices = store.device_session_count().await.unwrap();
-        let _guard = serve(dir.path(), auth).await.unwrap();
+        let _guard = serve_owned(dir.path(), auth).await.unwrap();
 
         let mut stream = tokio::net::UnixStream::connect(dir.path().join(SOCKET_NAME))
             .await
@@ -704,7 +735,7 @@ mod tests {
              BEGIN SELECT RAISE(ABORT, 'private sqlite detail'); END;",
         )
         .unwrap();
-        let _guard = serve(dir.path(), auth).await.unwrap();
+        let _guard = serve_owned(dir.path(), auth).await.unwrap();
 
         let mut stream = tokio::net::UnixStream::connect(dir.path().join(SOCKET_NAME))
             .await
@@ -734,13 +765,13 @@ mod tests {
         drop(abandoned);
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
         let auth = AuthState::new(store);
-        let guard = serve(dir.path(), auth).await.unwrap();
+        let guard = serve_owned(dir.path(), auth).await.unwrap();
         assert!(std::os::unix::net::UnixStream::connect(&socket_path).is_ok());
         drop(guard);
 
         std::fs::write(&socket_path, "do not replace").unwrap();
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
-        let error = match serve(dir.path(), AuthState::new(store)).await {
+        let error = match serve_owned(dir.path(), AuthState::new(store)).await {
             Ok(_) => panic!("a regular file must not be replaced"),
             Err(error) => error,
         };
@@ -751,7 +782,7 @@ mod tests {
         std::fs::write(&target, "target").unwrap();
         std::os::unix::fs::symlink(&target, &socket_path).unwrap();
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
-        let error = match serve(dir.path(), AuthState::new(store)).await {
+        let error = match serve_owned(dir.path(), AuthState::new(store)).await {
             Ok(_) => panic!("a symlink must not be replaced"),
             Err(error) => error,
         };
@@ -766,7 +797,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(SOCKET_NAME);
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
-        let guard = serve(dir.path(), AuthState::new(store)).await.unwrap();
+        let guard = serve_owned(dir.path(), AuthState::new(store))
+            .await
+            .unwrap();
         std::fs::remove_file(&path).unwrap();
         let replacement = std::os::unix::net::UnixListener::bind(&path).unwrap();
         drop(guard);

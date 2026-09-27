@@ -143,8 +143,6 @@ One line per open item. This file must always match the feedback files in this d
   sessions.
 - `idempotency-fingerprint-keeps-raw-cmdline.md` — idempotency fingerprints keep the raw command line (with any keys) in
   the database after Delete.
-- `second-helm-migrates-before-owner-lock.md` — a second helm on another port migrates and writes the live helm's
-  database before it discovers the owner lock is taken.
 - `provisioning-holds-host-cache-lock.md` — a provisioning run holds the host's cache-write lock throughout, freezing
   its list and hanging session-action replies.
 - `adopt-checks-current-row-not-dialed.md` — adopt checks the manager's current row, so a stale mismatch after a
