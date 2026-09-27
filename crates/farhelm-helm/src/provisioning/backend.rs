@@ -569,12 +569,18 @@ impl SystemBackend {
                 // backslash or newline in a filename in its output, so
                 // passing the path as an argument would corrupt the digest
                 // parser; this follows install.sh's sha256_of convention.
+                // `stat -L` reads the mode of the file the hash describes:
+                // `-e` and the digest follow a symlink, and without `-L` the
+                // mode was the link's own (always 777 on Linux), so an
+                // unchanged symlinked binary or unit was "repaired" by a
+                // chmod through the link on every run, or failed with EPERM.
+                // The local transport already reads the opened target's mode.
                 let output = self
                     .run_shell(
                         target,
                         &format!(
                             "if [ ! -e {path} ]; then exit 44; fi; \
-                             {} && stat -c '%a' -- {path}",
+                             {} && stat -L -c '%a' -- {path}",
                             remote_sha256sum(&path)
                         ),
                         COMMAND_TIMEOUT,
