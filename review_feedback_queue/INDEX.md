@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `create-reply-foreign-id-misroutes.md` — a create reply naming an id another host caches routes the new session's
-  operations to that other host.
 - `create-reply-sets-remembered-yolo.md` — a remote supervisor's create reply sets the helm-wide remembered
   permissions/workspace-trust defaults.
 - `create-reply-launch-mirrored-into-client-defaults.md` — the client also mirrors the reply's launch choices into its

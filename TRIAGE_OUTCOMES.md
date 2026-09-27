@@ -1760,7 +1760,16 @@
   the misleading log line and the `resolve_owner` docstring are corrected. A test covers a create reply naming an id
   another host caches. Changelog fragment. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in
   the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `record_session` now returns the `SessionOwnerAmbiguous` refusal (after requesting an immediate
+  refresh of the reporting host so the id is marked contested) instead of only logging it, and `accept_created_session`,
+  which first replies and reconciled replies both use, fails the create with a 409 naming the creating host and the
+  colliding id and saying the session may exist there; no rollback is attempted. Rename and restart replies keep
+  ignoring it, since their id was already routed. The misleading log line, `resolve_owner`'s docstring (the nonexistent
+  `AppState::contested_sessions`), and `accept_created_session`'s best-effort wording are corrected. A helm test creates
+  on one host with a reply naming another host's cached id. SPEC_impl.md's mutation write-back paragraph, which said no
+  write-back can fail a mutation, now names this one exception (the review caught the contradiction). Draft PR
+  [#1052](https://github.com/scode/farhelm/pull/1052/changes), jj change `trqunwmq`, bookmark
+  `pr/create-reply-foreign-id-refused`.
 
 ## create-reply-sets-remembered-yolo.md
 
