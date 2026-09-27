@@ -611,9 +611,20 @@ pub(crate) fn resume_text(template: Option<&[String]>) -> String {
 /// run, escaping it, and re-entering (`'it'\''s'`), which is the shell's own
 /// idiom and what [`parse_resume`] reads back. An EMPTY element is quoted too:
 /// it is a real argument, and unquoted it would simply vanish at the next
-/// parse.
+/// parse. So is one that starts with `#`, which `shell_words` reads as the
+/// start of a comment when it opens a word.
+///
+/// Not `shell_words::quote`: that also quotes `=`, `~`, `%`, and the like,
+/// which is right for text a real shell will expand but would turn every
+/// displayed `--note=x` into `'--note=x'`. This field is only ever split by
+/// `shell_words::split`, which expands nothing, so the only characters that
+/// need quoting are the ones that parser gives meaning to. It quotes a little
+/// more than that (any Unicode whitespace, where the parser only splits on
+/// space, tab, and newline), which is harmless: single quotes read back
+/// literally.
 fn quote_arg(arg: &str) -> String {
     let plain = !arg.is_empty()
+        && !arg.starts_with('#')
         && !arg
             .chars()
             .any(|c| c.is_whitespace() || matches!(c, '\'' | '"' | '\\'));
@@ -633,71 +644,39 @@ fn quote_arg(arg: &str) -> String {
     out
 }
 
-/// Parse the resume field into argv the way a command line is parsed:
-/// whitespace separates, quotes group, a backslash escapes.
+/// Parse the resume field into argv with `shell_words::split`, the parser the
+/// INVOCATION field is subject to (farhelm-proto's profile validation splits
+/// it on the way in, and the supervisor again before exec).
 ///
-/// Deliberately the vocabulary the INVOCATION field is already subject to on
-/// the far side (the supervisor shell-splits it), rather than a rule invented
-/// here — a user who can write `claude --note='two words'` in one field of
-/// this form and not the other would be entitled to call that a bug, and
-/// SPEC.md's promise that they control the invocations completely is not kept
-/// by a field that can only display what it cannot express.
+/// Deliberately the same parser rather than a rule invented here — a user who
+/// can write `claude --note='two words'` in one field of this form and not the
+/// other would be entitled to call that a bug, and SPEC.md's promise that they
+/// control the invocations completely is not kept by a field that can only
+/// display what it cannot express. The natural way to author a resume command
+/// is to copy the invocation and add `--resume {conversation}`, so any
+/// difference between the two parsers turns into a restart that runs something
+/// other than what was typed. A hand-rolled splitter used to sit here and had
+/// drifted: it dropped the backslash from `"match \d+"`, kept a word starting
+/// with `#` that the invocation parser reads as a comment, and split on
+/// non-ASCII whitespace.
 ///
-/// `Err` carries a sentence to show. An unclosed quote is a typo somebody can
-/// fix; guessing at it, or dropping the remainder, would save an argv they did
-/// not write — and a resume template is what a restart executes.
+/// This is the only place resume text is parsed: the helm and the supervisor
+/// receive the template as argv, so what this returns is what a restart runs.
 ///
-/// An empty or whitespace-only field is `Ok(None)`: an explicit "no resume
-/// template", which is a value the supervisor acts on (an integrated kind
-/// derives its own, a generic one gets none) rather than a missing field.
+/// `Err` carries a sentence to show. The only thing `shell_words` refuses is an
+/// unclosed quote, which is a typo somebody can fix; guessing at it, or
+/// dropping the remainder, would save an argv they did not write.
+///
+/// A field that splits into no arguments at all (empty, blanks, or only a
+/// comment) is `Ok(None)`: an explicit "no resume template", which is a value
+/// the supervisor acts on (an integrated kind derives its own, a generic one
+/// gets none) rather than a missing field.
 pub(crate) fn parse_resume(text: &str) -> Result<Option<Vec<String>>, String> {
-    let mut argv: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut started = false;
-    let mut quote: Option<char> = None;
-    let mut chars = text.chars();
-    while let Some(c) = chars.next() {
-        match (quote, c) {
-            // A backslash escapes the next character anywhere except inside
-            // single quotes, where it is literal — the shell's own rule, and
-            // what makes `'it'\''s'` one argument containing a quote.
-            (q, '\\') if q != Some('\'') => {
-                let Some(escaped) = chars.next() else {
-                    return Err(
-                        "the resume command ends in a backslash, which escapes nothing — remove \
-                         it, or double it for a literal backslash"
-                            .to_string(),
-                    );
-                };
-                current.push(escaped);
-                started = true;
-            }
-            (None, '\'') | (None, '"') => {
-                quote = Some(c);
-                started = true;
-            }
-            (Some(open), c) if c == open => quote = None,
-            (None, c) if c.is_whitespace() => {
-                if started {
-                    argv.push(std::mem::take(&mut current));
-                    started = false;
-                }
-            }
-            (_, c) => {
-                current.push(c);
-                started = true;
-            }
-        }
-    }
-    if let Some(open) = quote {
-        return Err(format!(
-            "the resume command has an unclosed {open} quote, so it cannot be split into \
-             arguments — close it, or escape it with a backslash if it is meant literally"
-        ));
-    }
-    if started {
-        argv.push(current);
-    }
+    let argv = shell_words::split(text).map_err(|_| {
+        "the resume command has an unclosed quote, so it cannot be split into arguments — \
+         close it, or escape it with a backslash if it is meant literally"
+            .to_string()
+    })?;
     Ok((!argv.is_empty()).then_some(argv))
 }
 
@@ -2630,13 +2609,18 @@ mod tests {
         );
 
         // The awkward ones round-trip too: a literal quote, an EMPTY argument
-        // (a real one, which an unquoted join would lose), a backslash, and
-        // surrounding whitespace.
+        // (a real one, which an unquoted join would lose), backslashes
+        // (including a trailing one), surrounding whitespace, and a leading
+        // `#` (which the parser would otherwise read as a comment).
         for argv in [
             vec!["it's".to_string()],
             vec!["a".to_string(), String::new(), "b".to_string()],
             vec!["back\\slash".to_string()],
+            vec!["match \\d+".to_string()],
+            vec!["trailing\\".to_string()],
             vec!["  padded  ".to_string()],
+            vec!["claude".to_string(), "#tag".to_string()],
+            vec!["carriage\rreturn".to_string()],
         ] {
             let shown = resume_text(Some(&argv));
             assert_eq!(
@@ -2656,13 +2640,44 @@ mod tests {
     fn an_unparseable_resume_command_is_refused_rather_than_guessed_at() {
         let unclosed = parse_resume("claude --note='two words").expect_err("an unclosed quote");
         assert!(unclosed.contains("unclosed"), "got {unclosed:?}");
-        let trailing = parse_resume("claude \\").expect_err("a dangling escape");
-        assert!(trailing.contains("backslash"), "got {trailing:?}");
 
         // An empty field is not a mistake: it is an explicit "no resume
         // template", which the supervisor acts on.
         assert_eq!(parse_resume("").expect("empty is a value"), None);
         assert_eq!(parse_resume("   ").expect("blank is a value"), None);
+    }
+
+    /// Spec: the resume field splits text exactly as the invocation field
+    /// does (`shell_words::split`), edge cases included.
+    ///
+    /// Why it matters: a resume command is usually the invocation copied over
+    /// with `--resume {conversation}` added, and it is what a restart runs. A
+    /// separate splitter used to live here and disagreed on exactly these
+    /// inputs, so a regex argument lost its backslash only after a restart.
+    #[farhelm_testtrace::test]
+    fn the_resume_field_splits_like_the_invocation_field() {
+        for text in [
+            r#"claude --append-system-prompt "match \d+" --resume {conversation}"#,
+            "claude --resume {conversation} #trailing comment",
+            "claude \\",
+            "claude\u{a0}--resume",
+            r#"claude --note="it's \"quoted\"" --x='a b'"#,
+        ] {
+            assert_eq!(
+                parse_resume(text).expect("parses"),
+                Some(shell_words::split(text).expect("parses")),
+                "{text:?} must split the way the invocation field would split it"
+            );
+        }
+        assert_eq!(
+            parse_resume(r#"claude --append-system-prompt "match \d+""#).expect("parses"),
+            Some(vec![
+                "claude".to_string(),
+                "--append-system-prompt".to_string(),
+                "match \\d+".to_string(),
+            ]),
+            "a backslash inside double quotes stays unless it escapes $ ` \" \\ or a newline"
+        );
     }
 
     /// A draft seeded from a profile round-trips the whole definition, so
