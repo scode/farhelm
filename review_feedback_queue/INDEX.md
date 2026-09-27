@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `offline-rotate-creates-fresh-database.md` — `token rotate` against a wrong state dir creates a fresh DB and reports
-  success while the real token stays live.
 - `ipv4-only-bind-allows-localhost-squat.md` — the helm binds only 127.0.0.1, so another local user can squat [::1] and
   steal the device secret via localhost.
 - `supervisor-error-forges-reauth-401.md` — a remote supervisor can forge the helm's device-auth 401 and force the web

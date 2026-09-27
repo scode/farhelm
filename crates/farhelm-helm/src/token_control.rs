@@ -152,8 +152,30 @@ pub async fn show(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
 
 /// Rotate in the serving helm when possible, falling back to an offline
 /// database transaction when no helm owns the state directory.
+///
+/// Rotation acts only on a helm that exists: a state directory with no
+/// `helm.db` is refused before anything is created, and the offline open
+/// never creates one either. Unlike `show`, which deliberately mints on
+/// first use, rotate is revocation; answering a mistyped `--state-dir` (or
+/// a shell whose `XDG_STATE_HOME` differs from the one `helm setup` pinned)
+/// with a fresh database would print a new token and exit successfully
+/// while the real helm kept the leaked one.
 pub async fn rotate(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
     let state_dir = state_dir_or_default(state_dir)?;
+    let db_path = state_dir.join("helm.db");
+    // Before `ensure_private_dir` and the ownership lock, both of which
+    // would create files. A serving helm always has its database, so this
+    // never refuses the online path.
+    let db_exists = tokio::fs::try_exists(&db_path)
+        .await
+        .with_context(|| format!("checking for a helm database at {}", db_path.display()))?;
+    if !db_exists {
+        anyhow::bail!(
+            "no helm database at {}; nothing to rotate. Check --state-dir, or XDG_STATE_HOME if you \
+             rely on the default, against the state directory your helm runs with",
+            db_path.display()
+        );
+    }
     farhelm_supervisor::ensure_private_dir(&state_dir).await?;
     let socket_path = state_dir.join(SOCKET_NAME);
     let deadline = tokio::time::Instant::now() + CONTROL_DEADLINE;
@@ -212,7 +234,7 @@ pub async fn rotate(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
                     }) => {}
                 Err(error) => return Err(error),
             }
-            let store = HelmStore::open(&state_dir.join("helm.db")).await?;
+            let store = HelmStore::open_existing(&db_path).await?;
             let token = auth::rotate_offline(&store).await?;
             drop(ownership);
             Ok(token)
@@ -572,12 +594,49 @@ mod tests {
         }
     }
 
+    /// Rotation against a state directory with no helm database fails and
+    /// leaves nothing behind.
+    ///
+    /// Rotation is how a leaked token gets revoked. Pointed at a directory
+    /// where no helm ever ran (a mistyped `--state-dir`, or a shell whose
+    /// `XDG_STATE_HOME` differs from the one `helm setup` pinned), it used to
+    /// create the directory, a lock file, and a fresh `helm.db`, rotate the
+    /// token in that, and report success while the real helm kept the leaked
+    /// token. Both the missing directory and an existing but empty one are
+    /// covered, since the directory itself used to be created too.
+    #[farhelm_testtrace::test]
+    async fn rotation_without_a_helm_database_fails_and_creates_nothing() {
+        let parent = tempfile::tempdir().unwrap();
+        let missing = parent.path().join("typo");
+        let error = rotate(Some(missing.clone()))
+            .await
+            .expect_err("a state dir that does not exist has nothing to rotate");
+        assert!(
+            format!("{error:#}").contains("no helm database"),
+            "the refusal must say why: {error:#}"
+        );
+        assert!(!missing.exists(), "the state dir must not be created");
+
+        let empty = tempfile::tempdir().unwrap();
+        rotate(Some(empty.path().to_path_buf()))
+            .await
+            .expect_err("a state dir with no helm.db has nothing to rotate");
+        let left: Vec<_> = std::fs::read_dir(empty.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(left.is_empty(), "nothing may be created: {left:?}");
+    }
+
     /// The ownership lock is claimed before the serving socket is bound. A
     /// CLI landing in that startup window re-probes the socket instead of
     /// waiting forever behind the lock the helm retains for its lifetime.
     #[farhelm_testtrace::test]
     async fn rotation_reprobes_while_a_serving_helm_finishes_startup() {
         let dir = tempfile::tempdir().unwrap();
+        // A serving helm opens its database before it claims token control,
+        // so the startup window this test models always has one.
+        HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
         farhelm_supervisor::ensure_private_dir(dir.path())
             .await
             .unwrap();

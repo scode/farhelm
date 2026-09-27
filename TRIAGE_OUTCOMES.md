@@ -1245,7 +1245,13 @@
   flag; a regression test shows rotate against an empty temporary directory fails and leaves no directory, lock, or
   database behind; add a `fix` changelog fragment; remove the feedback file and its `review_feedback_queue/INDEX.md`
   entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `rotate` checks for `helm.db` before `ensure_private_dir` and the ownership lock, refusing with
+  the resolved path, and the offline path opens through the new `HelmStore::open_existing`, which keeps migration but
+  omits SQLite's create flag via `farhelm_supervisor::db::open_private_existing`. Focused recorded runs passed the
+  token-control and auth tests, including the new empty- and missing-directory regression, and the store-level
+  never-create test. Fresh gpt-6-astra high review reported no findings. Draft PR
+  [#1034](https://github.com/scode/farhelm/pull/1034/changes) is on bookmark `pr/token-rotate-needs-existing-helm`, jj
+  change `rpkvlzol`.
 
 ## ipv4-only-bind-allows-localhost-squat.md
 
