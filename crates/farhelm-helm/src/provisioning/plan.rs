@@ -2,6 +2,7 @@
 //! execution walk the same frozen actions.
 
 use super::backend::{BackendFailure, Reach};
+use super::http::ProvisioningRequestError;
 use crate::store::{HostKind, HostRow};
 use crate::units::{SupervisorUnitInputs, render_supervisor_unit};
 use serde::Serialize;
@@ -282,14 +283,18 @@ impl PlanLayout {
     /// confirmation; execution is not allowed to derive any of them later.
     /// A destination without a file name is refused here instead of reaching
     /// the temporary-name builder, whose old unchecked assumption panicked on
-    /// values such as `/` and `..`.
+    /// values such as `/` and `..`. That refusal is a configuration problem
+    /// the user has to fix, not a host failure, so it is a typed
+    /// [`ProvisioningRequestError::Refused`] (409), never a
+    /// [`BackendFailure`] (which the HTTP layer answers as 502, the status a
+    /// client may treat as transient and retry).
     pub(super) fn plan(
         &self,
         operation: ProvisioningOperation,
         target: ProvisioningTarget,
         reach: &Reach,
         run_nonce: &str,
-    ) -> Result<ProvisioningPlan, BackendFailure> {
+    ) -> anyhow::Result<ProvisioningPlan> {
         let lib_dir = self
             .override_lib_dir
             .clone()
@@ -311,22 +316,16 @@ impl PlanLayout {
             .unwrap_or_else(|| lib_dir.join("farhelm"));
         let unit_path = unit_dir.join(&self.unit_name);
         let farhelm_name = farhelm_path.file_name().ok_or_else(|| {
-            BackendFailure::new(
-                format!(
-                    "provisioning farhelm destination {:?} has no file name",
-                    farhelm_path
-                ),
-                "",
-            )
+            anyhow::Error::new(ProvisioningRequestError::Refused(format!(
+                "provisioning farhelm destination {:?} has no file name",
+                farhelm_path
+            )))
         })?;
         let unit_name = unit_path.file_name().ok_or_else(|| {
-            BackendFailure::new(
-                format!(
-                    "provisioning unit destination {:?} has no file name",
-                    unit_path
-                ),
-                "",
-            )
+            anyhow::Error::new(ProvisioningRequestError::Refused(format!(
+                "provisioning unit destination {:?} has no file name",
+                unit_path
+            )))
         })?;
         let temporary = |path: &Path, name: &std::ffi::OsStr| {
             path.with_file_name(format!(
@@ -462,23 +461,25 @@ impl PlanLayout {
     /// relative `remote_farhelm` is accepted at registration because SSH
     /// resolves it through PATH, but is refused here: installing to a guessed
     /// absolute layout would update a binary different from the one in use.
+    /// Like [`Self::plan`]'s own refusals, that is a typed
+    /// [`ProvisioningRequestError::Refused`]: the fix is the registration,
+    /// not a retry.
     pub(super) fn plan_for_row(
         &self,
         row: &HostRow,
         target: ProvisioningTarget,
         reach: &Reach,
         run_nonce: &str,
-    ) -> Result<ProvisioningPlan, BackendFailure> {
+    ) -> anyhow::Result<ProvisioningPlan> {
         let mut layout = self.clone();
         if row.kind == HostKind::Ssh {
             if let Some(farhelm) = &row.remote_farhelm {
                 if !Path::new(farhelm).is_absolute() {
-                    return Err(BackendFailure::new(
+                    return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                         format!(
                             "updating in place needs an absolute remote_farhelm; registered value {farhelm:?} is resolved through the remote PATH instead",
                         ),
-                        "",
-                    ));
+                    )));
                 }
                 // Only the binary's own path follows the registration. The
                 // private tmux stays in Farhelm's private directory: the

@@ -600,7 +600,15 @@ mod tests {
                     "nonce",
                 )
                 .expect_err("a componentless executable must be refused, not panic");
-            assert!(error.rendered().contains(value), "{error}");
+            // A configuration refusal (409), not a host failure (502).
+            assert!(
+                matches!(
+                    error.downcast_ref::<http::ProvisioningRequestError>(),
+                    Some(http::ProvisioningRequestError::Refused(_))
+                ),
+                "{error:#}"
+            );
+            assert!(format!("{error:#}").contains(value), "{error:#}");
         }
     }
 
@@ -757,7 +765,14 @@ mod tests {
                 "nonce",
             )
             .expect_err("a PATH-resolved executable cannot be updated in place");
-        let rendered = error.rendered();
+        assert!(
+            matches!(
+                error.downcast_ref::<http::ProvisioningRequestError>(),
+                Some(http::ProvisioningRequestError::Refused(_))
+            ),
+            "a registration the user must fix is a 409 refusal, not a 502: {error:#}"
+        );
+        let rendered = format!("{error:#}");
         assert!(rendered.contains("absolute remote_farhelm"), "{rendered}");
         assert!(rendered.contains("\"farhelm\""), "{rendered}");
         assert!(rendered.contains("remote PATH"), "{rendered}");
