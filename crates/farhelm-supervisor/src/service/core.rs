@@ -14825,18 +14825,79 @@ fn tab_close_cleanup_result(
     }
 }
 
+/// How long a stopping supervisor spends closing its terminal-output
+/// clients in order before it exits anyway.
+///
+/// Comfortably inside systemd's default 90-second stop timeout, after which
+/// the unit would be SIGKILLed with the same abrupt close this exists to
+/// avoid. Ordinarily each client needs one acknowledged tmux round trip, so
+/// the budget only matters when tmux itself is wedged; the process still
+/// exits, having done what it could.
+const SHUTDOWN_OUTPUT_BUDGET: Duration = Duration::from_secs(10);
+
 /// `farhelm supervisor run` in one call: build a supervisor on `state_dir`
-/// and serve its socket until the process dies. Returns only on a fatal
-/// error — a successful supervisor never returns.
+/// and serve its socket until it is told to stop.
+///
+/// A stop is SIGTERM, SIGINT, or `stop` completing (the desktop app's stdin
+/// tether; callers without one pass a future that never completes). On any
+/// of them the supervisor closes every terminal-output client through its
+/// orderly no-output boundary, within [`SHUTDOWN_OUTPUT_BUDGET`], and then
+/// returns. That handler is the point of this function's shape, not
+/// ceremony: without it every planned stop, restart, or upgrade (which
+/// `KillMode=process` makes a SIGTERM to this process alone) killed the
+/// process with every output client still streaming, and tmux can abort
+/// its whole private server, and every session on the host, when such a
+/// client sees EOF with output queued. See
+/// [`Supervisor::shutdown_output_clients`]. SIGKILL, OOM kills and crashes
+/// remain the accepted residual recorded in BUGS.md.
+///
+/// Returns `Err` on a fatal serving error, or with `stop`'s own error after
+/// the orderly shutdown ran.
 ///
 /// `startup` carries the already-resolved process-startup overrides (see
 /// [`SupervisorStartup`]), and every one of them is REQUIRED rather than
 /// optional: this is the whole supervisor entry point, so a caller that
 /// could omit one is a launch path that silently ignores `--tmux`,
 /// `FARHELM_TMUX`, or `FARHELM_AGENT_HOOKS`.
-pub async fn run(state_dir: &Path, startup: SupervisorStartup) -> anyhow::Result<()> {
-    let sup = Supervisor::new_for_startup(state_dir, startup).await?;
-    sup.serve().await
+pub async fn run(
+    state_dir: &Path,
+    startup: SupervisorStartup,
+    stop: impl std::future::Future<Output = anyhow::Result<()>>,
+) -> anyhow::Result<()> {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    // The stop is watched from the start, not only once serving: building a
+    // supervisor runs tmux commands with no timeout of their own, and a
+    // desktop app that quits while one of them hangs must still release its
+    // managed supervisor. Nothing streams yet at that point, so there is
+    // nothing to close in order.
+    tokio::pin!(stop);
+    let sup = tokio::select! {
+        built = Supervisor::new_for_startup(state_dir, startup) => built?,
+        result = &mut stop => return result,
+    };
+    // Installed before serving starts, so there is no window in which a
+    // stop request takes the default (immediate) action.
+    let mut terminate =
+        signal(SignalKind::terminate()).context("installing the SIGTERM handler")?;
+    let mut interrupt = signal(SignalKind::interrupt()).context("installing the SIGINT handler")?;
+    let (reason, stopped) = tokio::select! {
+        result = sup.serve() => return result,
+        _ = terminate.recv() => ("SIGTERM", Ok(())),
+        _ = interrupt.recv() => ("SIGINT", Ok(())),
+        result = &mut stop => ("the stop tether", result),
+    };
+    tracing::info!(
+        reason,
+        "stopping: closing terminal-output clients in order before exit"
+    );
+    if !sup.shutdown_output_clients(SHUTDOWN_OUTPUT_BUDGET).await {
+        tracing::warn!(
+            budget = ?SHUTDOWN_OUTPUT_BUDGET,
+            "some terminal-output clients did not finish closing in time; exiting anyway"
+        );
+    }
+    stopped
 }
 
 /// Connect to a running supervisor's socket (used by `internal stdio`).

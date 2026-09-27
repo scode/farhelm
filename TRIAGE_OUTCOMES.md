@@ -1495,7 +1495,29 @@
   output-bearing clients and shows output was disabled before their close. BUGS.md's entry is narrowed to abrupt deaths
   and points at the handler. Changelog fragment. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry
   in the execution change.
-- Execution: `pending`.
+- Decision note (superseding scope, from the goal-building session): the user asked that the desktop app's stdin tether
+  exit run the same orderly output teardown as SIGTERM and SIGINT.
+- Execution: `complete`; `farhelm_supervisor::service::run` now installs SIGTERM and SIGINT handlers before serving and
+  takes the desktop tether as a stop future (`main.rs` passes it instead of racing it). Every stop runs
+  `Supervisor::shutdown_output_clients` inside one 10-second budget that also covers waiting for the attachments lock:
+  it first sets an irreversible stop boundary under that lock (a `stopping` flag in the sink registry), after which no
+  new session sink is handed out and an attach reaching the lock is refused before opening any output client; then it
+  runs whole-session delete's orderly sequence without the session filter (every forwarder's barrier published and
+  signalled under the lock before any join, sink leases dropped after their forwarders) and waits until no sink is still
+  owned and every reaper settled, then exits 0. The first review showed the planner's "an attach racing the stop is a
+  residual" was below the user's "every output client and sink"; a scope reassessment upheld that and prescribed this
+  boundary, built from the existing locks and registries. Docs on `run` and the method state why: the tmux abort,
+  `KillMode=process`, the SIGKILL residual, what the budget bounds. BUGS.md's entry is narrowed to deaths that run no
+  code. Tests: real-process e2e tests stop a supervisor holding a live, streaming attachment by SIGTERM and by closing
+  the tether, and through a `--tmux` wrapper observe an acknowledged `no-output` on both output clients after the stop
+  began, plus exit status 0 and the session surviving (confirmed to fail with the shutdown disabled); unit tests show a
+  held sink blocks completion and new sinks are refused, the budget covers a held attachments lock, and an attach that
+  got its sink before the stop is refused (confirmed to fail without the check). A second review round found that the
+  cleanup wait read live sinks and reapers in two lock holds (now one snapshot, with a test holding a released sink's
+  reaper) and that the tether was not watched during construction (now selected against it, with an e2e test that closes
+  the tether while tmux startup hangs); both confirmed to fail before the fix. Whether pinned tmux 3.7c actually aborts
+  on the old path remains unverified. Draft PR [#1043](https://github.com/scode/farhelm/pull/1043/changes), jj change
+  `ztltrkzv`, bookmark `pr/supervisor-orderly-stop`.
 
 ## checkout-can-take-archive-dir-name.md
 

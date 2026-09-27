@@ -37,7 +37,8 @@ use super::sweep::{
 use super::teardown::TeardownError;
 use super::terminals::{
     ActiveAttach, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER, InputRoute,
-    MAX_LEASE_BYTES, Terminal, TerminalId, displaced_by_attach, resolve_terminal,
+    MAX_LEASE_BYTES, SUPERVISOR_STOPPING, Terminal, TerminalId, displaced_by_attach,
+    resolve_terminal,
 };
 use super::uploads::{
     MAX_UPLOADS_PER_CONNECTION, UPLOAD_CHUNK_QUEUE, UPLOAD_SIGNAL_QUEUE, UploadCommand,
@@ -1651,6 +1652,21 @@ async fn handle_attach(
     // than whichever client's tmux calls happened to finish last.
     let mut attachments = loop {
         let attachments = sup.attachments.lock().await;
+        // Checked on every pass, under `attachments`, before any output
+        // client exists: a stop that began while this attach was bringing
+        // up its sink must not gain a new streaming client it would then
+        // have to close abruptly. Returning drops `sink`, and that lease's
+        // own destructor hands the sink to its orderly shutdown, which the
+        // stopping supervisor waits for.
+        if sup.is_stopping() {
+            drop(attachments);
+            permit.send(error_frame(
+                req_id,
+                ErrorKind::Conflict,
+                SUPERVISOR_STOPPING.to_string(),
+            ));
+            return;
+        }
         if !sup.has_output_reap_for_key(&key) {
             break attachments;
         }
@@ -5925,6 +5941,118 @@ mod tests {
                 .contains(&INTENT_KEY_CAP.to_string())
         );
     }
+    /// Spec: an attach that already holds its session sink when a stop
+    /// begins is refused once it reaches `attachments`, before it opens any
+    /// output client, and the stop then completes with that sink closed in
+    /// order.
+    ///
+    /// Why: attach brings its sink up outside the `attachments` lock, so a
+    /// stop can start in between. Letting that attach install would leave a
+    /// fresh streaming client the stopping supervisor never closes in
+    /// order, which is exactly the abrupt close the stop exists to prevent.
+    /// The test holds `attachments` itself to park the attach at that point
+    /// deterministically, the way a stop's drain would.
+    #[farhelm_testtrace::test]
+    async fn an_attach_holding_its_sink_is_refused_once_the_supervisor_stops() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = uuid::Uuid::new_v4().to_string();
+        let tmux_name = format!("fh-{id}");
+        let pane = sup
+            .tmux
+            .create_session(&tmux_name, "/", 80, 24, &[], &["sleep".into(), "60".into()])
+            .await
+            .expect("fixture premise: a tmux session to attach to");
+        let mut entry = entry_with(
+            Some(Terminal {
+                tmux_name: tmux_name.clone(),
+                pane,
+            }),
+            LastOutcome::Running,
+        );
+        entry.info.id = id.clone();
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::new(entry));
+
+        let held = sup.attachments.lock().await;
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let attach = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            let id = id.clone();
+            async move {
+                let mut input_routes = HashMap::new();
+                let mut tasks = tokio::task::JoinSet::new();
+                handle_control(
+                    &sup,
+                    ControlMsg::Attach {
+                        req_id: 7,
+                        session_id: id,
+                        channel: 1,
+                        cols: 80,
+                        rows: 24,
+                        terminal: TerminalSelector::default(),
+                        lease: "stop-test".to_string(),
+                        if_unowned: false,
+                    },
+                    ConnectionCtx {
+                        tx: &tx,
+                        priority: &tx,
+                        input_routes: &mut input_routes,
+                        upload_routes: &mut no_uploads(),
+                        tasks: &mut tasks,
+                    },
+                )
+                .await;
+            }
+        });
+        // The attach has its sink once the registry holds a live lease for
+        // the session; it is then parked on `attachments`, which this test
+        // holds.
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                let live = sup
+                    .sinks
+                    .lock()
+                    .expect("sink registry")
+                    .get(&tmux_name)
+                    .is_some_and(|entry| {
+                        matches!(entry, crate::service::terminals::SinkRegistryEntry::Live(handle)
+                            if handle.strong_count() > 0)
+                    });
+                if live {
+                    return;
+                }
+                // sleep-ok: polling interval while the attach brings up its real sink client
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the attach must acquire its sink before reaching attachments");
+        // Establish the stop boundary the way `shutdown_output_clients`
+        // does: under `attachments`.
+        sup.sinks.lock().expect("sink registry").stopping = true;
+        drop(held);
+
+        attach.await.expect("attach task must not panic");
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("the attach must reply").body)
+                .expect("the attach reply must decode");
+        let ControlMsg::Error { kind, message, .. } = reply else {
+            panic!("an attach racing a stop must be refused, got {reply:?}");
+        };
+        assert_eq!(kind, ErrorKind::Conflict);
+        assert_eq!(message, SUPERVISOR_STOPPING);
+        assert!(sup.attachments.lock().await.is_empty());
+        assert!(
+            sup.shutdown_output_clients(Duration::from_secs(10)).await,
+            "the refused attach's sink must close in order and let the stop complete"
+        );
+    }
+
     /// A tab attach must give the shared connection read loop back when a
     /// lifecycle operation holds the session claim. The claim protects tab
     /// resolution and takeover, but waiting for a stop or delete to finish

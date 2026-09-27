@@ -201,6 +201,7 @@ tokio = { version = "1", features = [
   "sync",
   "time",
   "fs",
+  "signal",
 ] }
 # Not linked by any runtime code — the supervisor renders its one TOML
 # value by hand (`agent_kind::toml_basic_string`) rather than depending on

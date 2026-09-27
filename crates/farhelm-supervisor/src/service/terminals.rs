@@ -847,6 +847,20 @@ impl SessionSinkHandle {
     }
 }
 
+/// The refusal an attach or a new session sink gets once the supervisor has
+/// begun stopping (see [`SinkRegistryState::stopping`]). Retryable: the
+/// supervisor is about to exit, and a restarted one accepts attaches again.
+pub(crate) const SUPERVISOR_STOPPING: &str =
+    "the supervisor is stopping; attach again once it is running";
+
+/// Whether a reaper's completion channel still promises a result: nothing
+/// has been published yet AND its sender is alive. A dropped sender means
+/// the reaper task is gone and nothing will ever settle it, so a shutdown
+/// wait must stop counting it rather than spin on it.
+fn still_reaping(done: &SinkReapReceiver) -> bool {
+    done.borrow().is_none() && done.has_changed().is_ok()
+}
+
 type SinkReapOutcome = Option<Result<(), Arc<str>>>;
 type SinkReapSender = watch::Sender<SinkReapOutcome>;
 type SinkReapReceiver = watch::Receiver<SinkReapOutcome>;
@@ -866,6 +880,17 @@ pub(crate) struct SinkRegistryState {
     entries: HashMap<String, SinkRegistryEntry>,
     /// Candidate opens and reaps that every same-session ensure must wait for.
     pub(crate) candidates: HashMap<String, Vec<SinkReapReceiver>>,
+    /// The supervisor is stopping: no new sink candidate or live lease may be
+    /// handed out, and no new attachment may install.
+    ///
+    /// Irreversible, and set only by [`Supervisor::shutdown_output_clients`]
+    /// while it holds `attachments` (lock order `attachments` then `sinks`).
+    /// Kept here rather than in an atomic beside it because refusing a sink
+    /// and publishing one must be ONE registry decision: a flag checked before
+    /// taking this lock could let an ensure slip a new live lease past a stop
+    /// that has already started waiting. Attach reads it under `attachments`,
+    /// so an attach that got its sink before the stop still cannot install.
+    pub(crate) stopping: bool,
 }
 
 impl std::ops::Deref for SinkRegistryState {
@@ -1637,6 +1662,93 @@ impl Supervisor {
         })?
     }
 
+    /// Whether this supervisor has begun stopping; see
+    /// [`SinkRegistryState::stopping`] for who sets it and why it lives there.
+    pub(crate) fn is_stopping(&self) -> bool {
+        self.sinks.lock().expect("sink registry poisoned").stopping
+    }
+
+    /// Wait until no terminal-output client anywhere in this supervisor is
+    /// still owned or crossing its shutdown boundary: no `Reaping`
+    /// output-reap entry, no live or `Reaping` session sink, and no pending
+    /// sink candidate.
+    ///
+    /// Used only by [`Supervisor::shutdown_output_clients`] when the process
+    /// is about to exit. Unlike the per-key and per-session waits it has no
+    /// budget of its own (the caller bounds the whole shutdown) and it does
+    /// not fail on a `Failed` entry: at exit there is nothing a caller could
+    /// do about an unconfirmed client except stop waiting for it, so those
+    /// are skipped and only live reapers are waited for.
+    pub(crate) async fn wait_for_all_output_cleanup(&self) {
+        const LIVE_SINK_RESCAN: Duration = Duration::from_millis(20);
+        loop {
+            // Output-reap and sink-reap receivers are the same watch type.
+            let mut pending: Vec<OutputReapReceiver> = Vec::new();
+            {
+                let registry = self
+                    .output_reaps
+                    .lock()
+                    .expect("output-reap registry poisoned");
+                for entry in registry.values() {
+                    if let OutputReapEntry::Reaping(done) = entry
+                        && still_reaping(done)
+                    {
+                        pending.push(done.clone());
+                    }
+                }
+            }
+            // Sink reapers, candidates, and live ownership are read in ONE
+            // hold of the sink registry. A last lease drop replaces `Live`
+            // with `Reaping` under this same lock, so a single snapshot sees
+            // the sink either as still owned (rescan) or as a reaper (wait);
+            // two separate reads could see neither and return while the new
+            // reaper has not disabled output yet. A live sink is owned by a
+            // drained attachment whose lease drop has not run or by an
+            // attach that got its sink before the stop and is about to be
+            // refused; its transition has no notification, so it is polled.
+            // The weak count is read without upgrading: a strong reference
+            // taken here would itself postpone the last owner's teardown.
+            let live_sinks = {
+                let sinks = self.sinks.lock().expect("sink registry poisoned");
+                for entry in sinks.values() {
+                    if let SinkRegistryEntry::Reaping(done) = entry
+                        && still_reaping(done)
+                    {
+                        pending.push(done.clone());
+                    }
+                }
+                for candidates in sinks.candidates.values() {
+                    pending.extend(
+                        candidates
+                            .iter()
+                            .filter(|done| still_reaping(done))
+                            .cloned(),
+                    );
+                }
+                sinks.values().any(|entry| {
+                    matches!(entry, SinkRegistryEntry::Live(handle) if handle.strong_count() > 0)
+                })
+            };
+            if pending.is_empty() {
+                if !live_sinks {
+                    return;
+                }
+                tokio::time::sleep(LIVE_SINK_RESCAN).await;
+                continue;
+            }
+            for mut done in pending {
+                while still_reaping(&done) {
+                    if done.changed().await.is_err() {
+                        break;
+                    }
+                }
+            }
+            // A settled reaper may still be one scheduling turn from
+            // removing its registry entry; re-read rather than trust it.
+            tokio::task::yield_now().await;
+        }
+    }
+
     /// Wait outside `attachments` for every old output client on one session.
     ///
     /// A test seam for the whole-session registry contract. Production delete
@@ -1918,6 +2030,7 @@ impl Supervisor {
         tmux_name: &str,
     ) -> anyhow::Result<SessionSinkLease> {
         enum Lookup {
+            Stopping,
             Candidate,
             Live(Arc<SessionSinkHandle>),
             Reaping(watch::Receiver<Option<Result<(), Arc<str>>>>),
@@ -1934,12 +2047,15 @@ impl Supervisor {
                 let registry = Arc::clone(&self.sinks);
                 let mut sinks = registry.lock().expect("sink registry poisoned");
                 Self::prune_dead_sinks(&mut sinks);
-                let candidate_pending = sinks.candidates.get(tmux_name).is_some_and(|candidates| {
-                    candidates
-                        .iter()
-                        .any(|done| !matches!(&*done.borrow(), Some(Ok(()))))
-                });
-                if candidate_pending {
+                let candidate_pending = !sinks.stopping
+                    && sinks.candidates.get(tmux_name).is_some_and(|candidates| {
+                        candidates
+                            .iter()
+                            .any(|done| !matches!(&*done.borrow(), Some(Ok(()))))
+                    });
+                if sinks.stopping {
+                    Lookup::Stopping
+                } else if candidate_pending {
                     Lookup::Candidate
                 } else {
                     sinks.candidates.remove(tmux_name);
@@ -1964,6 +2080,7 @@ impl Supervisor {
                 }
             };
             let candidate = match lookup {
+                Lookup::Stopping => anyhow::bail!(SUPERVISOR_STOPPING),
                 Lookup::Candidate => {
                     if let Some(gate) = self.seams.faults.sink_candidate_wait_gate() {
                         gate().await;
