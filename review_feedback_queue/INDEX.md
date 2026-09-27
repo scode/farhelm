@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `archive-root-accepts-active-checkout.md` — the archive move accepts an active managed checkout (or the source itself)
-  as its archive directory.
 - `inode-reuse-defeats-ownership-check.md` — the `(dev, ino)` ownership check can't tell a recreated directory from the
   original, so Delete can archive a user's folder.
 - `archive-dir-owner-not-checked.md` — the archive directory's owner and mode aren't checked, so another account in a

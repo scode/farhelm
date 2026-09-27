@@ -1560,7 +1560,16 @@
   source-is-the-archive-directory case gets its own clear error instead of a raw `EINVAL`. Tests cover an active
   checkout at the archive path, both as another row and as the row being moved. Changelog fragment. Remove the feedback
   file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; a row that is, contains, or sits inside its root's archive directory gets `SourceIsArchiveRoot`
+  from `refuse_overlapping_archive` (before archiving or recovery touch anything, since such a move can never have
+  completed), and a new `refuse_archive_destination_checkout` refuses with `ArchiveRootIsCheckout` when another
+  non-retired checkout occupies the archive directory: a fresh archive checks it before writing its journal, and
+  recovery checks it only on paths that would still rename. The review found that checking it before recovery's
+  matching-destination completion would strand an archive an older version had already finished; that case now
+  completes. Tests cover both refusals through `archive_move` (rows stay `allocated`, nothing moves), an
+  `archive_pending` squatter through `reconcile_archive`, and recovery completing a finished move into a squatter. Draft
+  PR [#1045](https://github.com/scode/farhelm/pull/1045/changes), jj change `mztxqtvn`, bookmark
+  `pr/archive-refuses-checkout-destination`.
 
 ## inode-reuse-defeats-ownership-check.md
 
