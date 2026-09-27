@@ -1901,27 +1901,42 @@ impl Supervisor {
     /// registered reap failure: either one can overlap every later client
     /// for this tmux session. Recording `Failed` makes that uncertainty a
     /// durable in-process barrier instead of an error seen by only one caller.
+    ///
+    /// The losing request waits at most `sink_ready` for the reap. A sink
+    /// shutdown that cannot confirm the safe boundary retries forever
+    /// (`shutdown_session_sink_until_safe`), so an unbounded join would pin
+    /// this attach indefinitely. On expiry the reaper task is detached, not
+    /// cancelled: it keeps the candidate's completion barrier unresolved, so
+    /// every later ensure for this session still waits on or refuses the
+    /// unconfirmed loser, and it still records `Failed` if the shutdown fails.
     async fn reap_competing_sink(
         &self,
         tmux_name: &str,
         candidate: SessionSinkCandidate,
     ) -> anyhow::Result<()> {
         let sinks = Arc::clone(&self.sinks);
-        let tmux_name = tmux_name.to_string();
-        tokio::spawn(async move {
+        let task_tmux_name = tmux_name.to_string();
+        let reaper = tokio::spawn(async move {
             if let Err(message) = candidate.shutdown().await {
                 sinks.lock().expect("sink registry poisoned").insert(
-                    tmux_name.clone(),
+                    task_tmux_name.clone(),
                     SinkRegistryEntry::Failed(Arc::clone(&message)),
                 );
                 anyhow::bail!(
-                    "a competing session sink for {tmux_name} could not be reaped: {message}"
+                    "a competing session sink for {task_tmux_name} could not be reaped: {message}"
                 );
             }
             Ok(())
-        })
-        .await
-        .context("joining the competing session-sink reaper")?
+        });
+        tokio::time::timeout(self.timeouts.sink_ready, reaper)
+            .await
+            .with_context(|| {
+                format!(
+                    "the competing session sink for {tmux_name} was not reaped within {:?}",
+                    self.timeouts.sink_ready
+                )
+            })?
+            .context("joining the competing session-sink reaper")?
     }
 
     /// Wait for every candidate open or reap already published for a session.
@@ -2561,6 +2576,67 @@ mod tests {
 
         release.notify_one();
         future.await.expect("the competing sink is reaped");
+    }
+
+    /// A losing attach whose reap never finishes fails within the request
+    /// budget instead of hanging, and the loser still blocks later opens.
+    ///
+    /// A sink shutdown that cannot confirm tmux's safe boundary retries
+    /// forever, so joining it without a bound once pinned the losing attach
+    /// indefinitely. The bound must not erase the loser's candidate barrier:
+    /// that barrier is what keeps a later client from overlapping the
+    /// unconfirmed one.
+    #[farhelm_testtrace::test]
+    async fn a_competing_sink_reap_that_never_finishes_is_bounded() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe_and_timeouts(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts {
+                sink_ready: Duration::from_millis(25),
+                ..SupervisorTimeouts::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
+        let candidate = SessionSinkHandle {
+            tmux_name: "fh-test".to_string(),
+            task: Some(tokio::spawn(async move {
+                let _ = shutdown_rx.await;
+                std::future::pending::<()>().await;
+                Ok(())
+            })),
+            shutdown: Some(shutdown),
+            state: watch::channel(Some(1)).0,
+        };
+        let mut guarded =
+            SessionSinkCandidate::begin("fh-test".to_string(), Arc::clone(&sup.sinks));
+        guarded.set_handle(candidate);
+
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            sup.reap_competing_sink("fh-test", guarded),
+        )
+        .await
+        .expect("the losing attach must regain control within its budget")
+        .expect_err("an unfinished reap must fail the losing attach");
+        assert!(
+            format!("{error:#}").contains("was not reaped within"),
+            "the error must name the bounded reap: {error:#}"
+        );
+        // The barrier must still block a later open, not merely remain
+        // registered: a released barrier keeps its map entry until the next
+        // wait prunes it, so only an actual wait distinguishes the two.
+        let barrier =
+            tokio::time::timeout(Duration::from_secs(5), sup.await_sink_candidates("fh-test"))
+                .await
+                .expect("the candidate wait is itself bounded")
+                .expect_err("the detached reaper must keep the loser's candidate barrier");
+        assert!(
+            format!("{barrier:#}").contains("did not settle within"),
+            "a later open must wait on the unresolved loser: {barrier:#}"
+        );
     }
 
     /// A competing client whose exit is unconfirmed blocks every later open.

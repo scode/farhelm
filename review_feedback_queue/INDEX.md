@@ -51,7 +51,6 @@ One line per open item. This file must always match the feedback files in this d
 - `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
   to read.
 - `plain-retry-erases-pending-fresh-window.md` — plain retry downgrades a pending fast reconnect to a slow probe.
-- `reap-competing-sink-waits-unboundedly.md` — losing a sink-install race can hang an attach forever.
 - `refresh-timeout-misses-profile-and-commit-tail.md` — refresh timeout misses the profile and commit tail, freezing a
   host as stale-connected.
 - `reload-adopts-stale-pane.md` — reload adopts a stale dead pane as the new generation's terminal.
