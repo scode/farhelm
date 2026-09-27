@@ -9547,7 +9547,17 @@ impl Supervisor {
                         )
                         .await);
                 }
-                return Err(self.abandon_launching_record(reserved, error).await);
+                return Err(self
+                    .abandon_launching_record(
+                        reserved,
+                        error,
+                        &info,
+                        &snapshot,
+                        canonical_cwd.as_deref(),
+                        generation,
+                        launch_scope.clone(),
+                    )
+                    .await);
             }
             Err(SpawnFailure::Tmux {
                 spec_path, error, ..
@@ -9628,7 +9638,17 @@ impl Supervisor {
                                  was allocated and is kept for inspection and deletion",
                             ), retained_snapshot.as_ref().expect("the allocator follows the durable session insert")).await);
                         }
-                        error = self.abandon_launching_record(reserved, error).await;
+                        error = self
+                            .abandon_launching_record(
+                                reserved,
+                                error,
+                                &info,
+                                &snapshot,
+                                canonical_cwd.as_deref(),
+                                generation,
+                                launch_scope.clone(),
+                            )
+                            .await;
                     }
                     // Both remaining arms RETAIN the launching row, so
                     // neither may settle the reservation: an agent may be
@@ -9851,7 +9871,17 @@ impl Supervisor {
                          checkout itself was allocated and is kept for inspection and deletion",
                     ), retained_snapshot.as_ref().expect("the allocator follows the durable session insert")).await;
                 } else {
-                    result = self.abandon_launching_record(reserved, result).await;
+                    result = self
+                        .abandon_launching_record(
+                            reserved,
+                            result,
+                            &info,
+                            &snapshot,
+                            canonical_cwd.as_deref(),
+                            generation,
+                            launch_scope.clone(),
+                        )
+                        .await;
                 }
             } else {
                 self.publish_retained_launch(
@@ -13342,10 +13372,22 @@ impl Supervisor {
     /// not recorded, so the caller is told that too
     /// ([`unrecorded_outcome`]) rather than being handed an error it would
     /// reasonably read as final.
+    ///
+    /// A row this process could not remove is also PUBLISHED, as `Launching`,
+    /// from the caller's `info`/`snapshot`/... (the same facts every other
+    /// retaining exit hands [`Self::publish_retained_launch`]): listing and
+    /// every lifecycle operation read the in-memory map, so an unpublished
+    /// row could not be seen, stopped, or deleted until the next restart.
+    #[allow(clippy::too_many_arguments)]
     async fn abandon_launching_record(
         &self,
         reserved: &Reserved,
         error: anyhow::Error,
+        info: &SessionInfo,
+        snapshot: &IntegrationSnapshot,
+        canonical_cwd: Option<&str>,
+        generation: i64,
+        scope: Option<String>,
     ) -> anyhow::Error {
         let settlement = reserved.settlement(ReservationOutcome::Failed {
             kind: error_kind(&error),
@@ -13356,6 +13398,16 @@ impl Supervisor {
         match self.store.delete_session(id, settlement).await {
             Ok(()) => error,
             Err(e) => {
+                self.publish_retained_launch(
+                    info,
+                    None,
+                    snapshot,
+                    canonical_cwd,
+                    LastOutcome::Launching,
+                    generation,
+                    scope,
+                )
+                .await;
                 let removal = format!(
                     "additionally, the launching record for session {id} could not be removed \
                      ({e:#}); it will list as unknown until it is deleted"
