@@ -1161,6 +1161,13 @@ impl Forwarder {
         } else {
             end
         };
+        // The arbiters below identify "this attachment" by the forwarder
+        // task that reports the verdict. Channel ids are reused, so a client
+        // that detaches and reattaches on the same channel of the same
+        // connection produces a replacement that matches on channel and
+        // connection alone; only the forwarder's task id tells it apart.
+        // `run` always executes as the task `ActiveAttach::forwarder` joins.
+        let origin = tokio::task::id();
         match end {
             ForwarderEnd::Requested | ForwarderEnd::ClientGone => {}
             ForwarderEnd::TerminalEnded => {
@@ -1169,6 +1176,7 @@ impl Forwarder {
                     AttachmentKey::new(&self.session_id, self.terminal),
                     self.channel,
                     self.tx,
+                    origin,
                     "session terminal ended".to_string(),
                 );
             }
@@ -1182,6 +1190,7 @@ impl Forwarder {
                     AttachmentKey::new(&self.session_id, self.terminal),
                     self.channel,
                     self.tx,
+                    origin,
                     format!("output stream failed: {reason}"),
                 );
             }
@@ -1197,6 +1206,7 @@ impl Forwarder {
                     AttachmentKey::new(&self.session_id, self.terminal),
                     self.channel,
                     self.tx,
+                    origin,
                 );
             }
         }
@@ -1505,11 +1515,13 @@ async fn stalled_past_deadline(
 /// spawning this, and the signal-then-await below reaps the handle whenever it
 /// finishes.)
 ///
-/// The identity check is the same two-part one every other ownership
-/// check in this module uses (channel plus owning connection): by the
-/// time this runs, a takeover may already have installed a different
-/// attachment for this terminal, and tearing THAT one down would detach
-/// an innocent client.
+/// The identity check adds the reporting forwarder's task id (`origin`) to
+/// the channel-plus-connection check other ownership checks in this module
+/// use: by the time this runs, a takeover may already have installed a
+/// different attachment for this terminal, or the same client may have
+/// detached and reattached on the very same channel, and tearing either one
+/// down would kill a live terminal. Channel and connection cannot tell that
+/// reattach from the stalled original; the forwarder task can.
 ///
 /// Scoped to ONE terminal, deliberately (PLAN_M4.md item 3 settles this):
 /// a client whose agent view is healthy but whose background tab wedged
@@ -1522,21 +1534,22 @@ fn detach_stalled(
     key: AttachmentKey,
     channel: u32,
     tx: mpsc::Sender<Frame>,
+    origin: tokio::task::Id,
 ) {
     let sup = Arc::clone(sup);
     tokio::spawn(async move {
         let mut attachments = sup.attachments.lock().await;
-        let mine = attachments
-            .get(&key)
-            .is_some_and(|a| a.channel == channel && a.notify.same_channel(&tx));
+        let mine = attachments.get(&key).is_some_and(|a| {
+            a.channel == channel && a.notify.same_channel(&tx) && a.forwarder.id() == origin
+        });
         if !mine {
-            // A takeover (or a delete, or the connection dying) got here
-            // first, so this stall belongs to an attachment that no longer
-            // exists. Returning WITHOUT notifying is the point: the winner
-            // is using the same channel id on the same connection, so a
-            // stalled notice sent now would reach the new client and race
-            // — or overtake — the truthful notice its own teardown path
-            // already sent to the loser.
+            // A takeover, a detach-and-reattach, a delete, or the connection
+            // dying got here first, so this stall belongs to an attachment
+            // that no longer exists. Returning WITHOUT notifying is the
+            // point: a replacement may be using the same channel id on the
+            // same connection, so a stalled notice sent now would reach the
+            // new client and race — or overtake — the truthful notice its
+            // own teardown path already sent to the loser.
             return;
         }
         let removed = attachments.remove(&key);
@@ -1578,12 +1591,16 @@ fn detach_stalled(
 /// awaits this very task. The separate arbiter identity-checks and removes the
 /// still-current attachment instead. An explicit restart, takeover, close, or
 /// connection teardown that removed it first therefore owns the only notice;
-/// the stale natural verdict is discarded.
+/// the stale natural verdict is discarded. "Still current" includes the
+/// reporting forwarder's task id (`origin`), because a detach and reattach on
+/// the same channel of the same connection installs a replacement that
+/// matches on channel and connection alone.
 fn detach_naturally(
     sup: &Arc<Supervisor>,
     key: AttachmentKey,
     channel: u32,
     tx: mpsc::Sender<Frame>,
+    origin: tokio::task::Id,
     reason: String,
 ) {
     let sup = Arc::clone(sup);
@@ -1592,9 +1609,9 @@ fn detach_naturally(
             gate().await;
         }
         let mut attachments = sup.attachments.lock().await;
-        let mine = attachments
-            .get(&key)
-            .is_some_and(|a| a.channel == channel && a.notify.same_channel(&tx));
+        let mine = attachments.get(&key).is_some_and(|a| {
+            a.channel == channel && a.notify.same_channel(&tx) && a.forwarder.id() == origin
+        });
         if !mine {
             return;
         }
