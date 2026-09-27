@@ -53,11 +53,27 @@ pub const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// before anything is read from it. `label` names the database in errors
 /// ("session database", "helm database").
 pub fn open_private(path: &Path, label: &str) -> anyhow::Result<Connection> {
+    open_private_with(path, label, OpenFlags::SQLITE_OPEN_CREATE)
+}
+
+/// [`open_private`] for a database that must already exist: identical
+/// except that `SQLITE_OPEN_CREATE` is omitted, so an absent file is an
+/// error rather than a fresh, empty database.
+///
+/// For callers whose whole point is to act on state someone else created,
+/// where a mistyped path answered with a new empty database would report
+/// success while the real one is untouched (offline `token rotate` is the
+/// case that needed it). The flag omission is the guarantee; a caller that
+/// wants a friendlier message for the absent case checks first, but that
+/// check alone would race the file's deletion.
+pub fn open_private_existing(path: &Path, label: &str) -> anyhow::Result<Connection> {
+    open_private_with(path, label, OpenFlags::empty())
+}
+
+fn open_private_with(path: &Path, label: &str, create: OpenFlags) -> anyhow::Result<Connection> {
     let conn = Connection::open_with_flags(
         path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_CREATE
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | create | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .with_context(|| format!("opening {label} {}", path.display()))?;
     {

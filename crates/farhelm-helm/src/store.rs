@@ -2900,7 +2900,23 @@ impl HelmStore {
     /// an incumbent helm must use [`Self::open_without_migration`] instead;
     /// see the module docs' "Divergences" section for the boundary.
     pub async fn open(path: &Path) -> anyhow::Result<HelmStore> {
-        Self::open_inner(path, true).await
+        Self::open_inner(path, true, true).await
+    }
+
+    /// [`Self::open`], migrating as it does, but for a database that must
+    /// already exist: nothing is created when the file is absent.
+    ///
+    /// For offline `token rotate`, which is revocation. Pointed at a state
+    /// directory where no helm ever ran (a mistyped `--state-dir`, or a shell
+    /// whose `XDG_STATE_HOME` differs from the one `helm setup` pinned), the
+    /// creating open minted a fresh database, rotated the token in it, and
+    /// reported success while the real helm kept the leaked token. Unlike
+    /// [`Self::open_existing_current_schema`], an older schema is still
+    /// accepted and migrated: token control deliberately keeps that
+    /// tolerance, since it runs with the state directory's ownership lock
+    /// held and no helm serving it.
+    pub async fn open_existing(path: &Path) -> anyhow::Result<HelmStore> {
+        Self::open_inner(path, true, false).await
     }
 
     /// Crate-internal access to the shared connection for sibling modules
@@ -2918,7 +2934,7 @@ impl HelmStore {
     /// until an operation needs a schema feature they do not have; newer
     /// schemas are refused by the same version check as [`Self::open`].
     pub async fn open_without_migration(path: &Path) -> anyhow::Result<HelmStore> {
-        Self::open_inner(path, false).await
+        Self::open_inner(path, false, true).await
     }
 
     /// Open an EXISTING database at the CURRENT schema, creating and
@@ -3008,7 +3024,11 @@ impl HelmStore {
         })
     }
 
-    async fn open_inner(path: &Path, may_migrate: bool) -> anyhow::Result<HelmStore> {
+    async fn open_inner(
+        path: &Path,
+        may_migrate: bool,
+        may_create: bool,
+    ) -> anyhow::Result<HelmStore> {
         let path = path.to_path_buf();
         let (conn, schema_version) = tokio::task::spawn_blocking(move || -> anyhow::Result<(Connection, i64)> {
             // Explicit flags rather than `Connection::open`'s defaults —
@@ -3018,7 +3038,11 @@ impl HelmStore {
             // feature this module wants regardless) and why
             // `SQLITE_OPEN_NO_MUTEX` is correct (this module already
             // serializes every access through its own `Mutex`).
-            let mut conn = farhelm_supervisor::db::open_private(&path, "helm database")?;
+            let mut conn = if may_create {
+                farhelm_supervisor::db::open_private(&path, "helm database")?
+            } else {
+                farhelm_supervisor::db::open_private_existing(&path, "helm database")?
+            };
             // Not durable in the database file — SQLite enforces foreign
             // keys only when a connection has asked for it, so every open
             // must set this pragma itself. See the module docs'
@@ -6304,6 +6328,36 @@ mod tests {
         let db_path = dir.path().join("helm.db");
         let store = HelmStore::open(&db_path).await.expect("open");
         (dir, store)
+    }
+
+    /// `open_existing` never creates a database, and otherwise opens like
+    /// `open`.
+    ///
+    /// Offline `token rotate` relies on this for revocation: the creating
+    /// open answered a mistyped state directory with a fresh database, so a
+    /// rotation "succeeded" against nothing. The absent case must fail and
+    /// leave no file; an existing database must open, migrate, and keep its
+    /// rows, since token control deliberately tolerates older schemas.
+    #[farhelm_testtrace::test]
+    async fn open_existing_refuses_an_absent_database_and_opens_a_present_one() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        HelmStore::open_existing(&db_path)
+            .await
+            .expect_err("an absent database must not be created");
+        assert!(!db_path.exists(), "the refused open must leave no file");
+
+        let created = HelmStore::open(&db_path).await.expect("create");
+        let hosts = created.list_hosts().await.expect("hosts");
+        drop(created);
+        let reopened = HelmStore::open_existing(&db_path)
+            .await
+            .expect("an existing database opens");
+        assert_eq!(
+            reopened.list_hosts().await.expect("hosts").len(),
+            hosts.len(),
+            "reopening must keep the existing rows"
+        );
     }
 
     /// Count the four history tables without exposing a production-only
