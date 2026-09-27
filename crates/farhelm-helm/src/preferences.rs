@@ -90,6 +90,7 @@ pub(crate) async fn put_preferences(
         && store::parse_sort_key(sort).is_none()
     {
         return http_error(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: format!(
                 "{sort:?} is not a session list order; this helm serves created, activity, and \
@@ -101,6 +102,7 @@ pub(crate) async fn put_preferences(
         && !store::is_known_remembered_permissions_word(word)
     {
         return http_error(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: format!(
                 "{word:?} is not a remembered structured-launch permissions mode; this helm \
@@ -115,6 +117,7 @@ pub(crate) async fn put_preferences(
         && selected.len() > MAX_SESSION_ID_BYTES
     {
         return http_error(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
             message: format!(
                 "last_selected exceeds {MAX_SESSION_ID_BYTES} bytes; no session id is that long"

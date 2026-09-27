@@ -92,6 +92,7 @@ const CLIENT_UPLOAD_STALL_TIMEOUT: std::time::Duration = std::time::Duration::fr
 /// would wrongly suggest the browser's request was itself the problem.
 fn upload_ended_error(reason: String) -> axum::response::Response {
     http_error(anyhow::Error::new(SupervisorError {
+        origin: crate::client::ErrorOrigin::Helm,
         kind: ErrorKind::Internal,
         message: reason,
     }))

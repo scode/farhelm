@@ -2792,7 +2792,7 @@ async fn a_replace_with_body_shape_problem_is_refused_before_routing() {
 
 /// A "replace with" body whose `expected_incarnation` names a connection
 /// the source's host is no longer on is a 409 carrying
-/// [`crate::precondition::INCARNATION_MARKER`] before the live read, the
+/// the precondition header (`farhelm_proto::http::PRECONDITION_HEADER`) before the live read, the
 /// create, or the delete — the same precondition an ordinary create's
 /// `expected_incarnation` gets, applied to the override's own claim. The
 /// listing is untouched afterwards.
@@ -2816,7 +2816,7 @@ async fn a_replace_with_stale_incarnation_is_refused_before_anything_is_created(
         .expect("the local host has an actor")
         .incarnation;
 
-    let (status, body) = post_text(
+    let (status, precondition_headers, body) = post_text_headers(
         &harness,
         "/api/sessions/sess-1/replace",
         serde_json::json!({
@@ -2826,7 +2826,7 @@ async fn a_replace_with_stale_incarnation_is_refused_before_anything_is_created(
     .await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
     assert!(
-        body.contains(crate::precondition::INCARNATION_MARKER),
+        is_stale_precondition(&precondition_headers),
         "a client must be able to tell this from a host that is merely busy: {body}"
     );
 
@@ -4205,7 +4205,7 @@ async fn close_tab_error_reply_maps_to_404_with_the_supervisors_message() {
 ///
 /// Spec: `POST /api/sessions` with an `expected_incarnation` that does not
 /// match the host's current connection is a 409 carrying
-/// [`crate::precondition::INCARNATION_MARKER`], forwarded nowhere; the same
+/// the precondition header (`farhelm_proto::http::PRECONDITION_HEADER`), forwarded nowhere; the same
 /// body naming the current connection is created normally.
 ///
 /// Profile ids are helm-wide, but the action still names one installation.
@@ -4284,7 +4284,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
         .expect("the local host has an actor")
         .incarnation;
 
-    let (status, body) = post_text(
+    let (status, precondition_headers, body) = post_text_headers(
         &harness,
         "/api/sessions",
         serde_json::json!({
@@ -4296,7 +4296,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
     .await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
     assert!(
-        body.contains(crate::precondition::INCARNATION_MARKER),
+        is_stale_precondition(&precondition_headers),
         "a client must be able to tell this from a host that is merely busy: {body}"
     );
 
@@ -4357,14 +4357,14 @@ async fn a_browse_prepared_against_a_replaced_connection_reaches_no_supervisor()
         .expect("local actor")
         .incarnation;
 
-    let (status, body) = post_text(
+    let (status, precondition_headers, body) = post_text_headers(
         &harness,
         "/api/browse-directory",
         serde_json::json!({"host": local, "cwd": "/work", "expected_incarnation": current - 1}),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
-    assert!(body.contains(crate::precondition::INCARNATION_MARKER));
+    assert!(is_stale_precondition(&precondition_headers), "{body}");
 
     let (status, body) = post_text(
         &harness,
@@ -4501,6 +4501,15 @@ async fn post_text(
 ) -> (axum::http::StatusCode, String) {
     let (status, _, text) = post_text_headers(harness, uri, body).await;
     (status, text)
+}
+
+/// Whether a refusal carries the helm's stale-connection precondition header,
+/// the one signal a client may act on by discarding its intent and
+/// re-reading. Checked on the header because the body can quote a supervisor.
+fn is_stale_precondition(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get(farhelm_proto::http::PRECONDITION_HEADER)
+        .is_some_and(|value| value == farhelm_proto::http::PRECONDITION_INCARNATION)
 }
 
 /// Retain outcome headers as well as prose: a Conflict's text cannot prove
@@ -7721,12 +7730,10 @@ async fn fresh_rest_reconciliation_precedes_mutable_resolution_and_binds_install
         );
 
         body["intent_key"] = serde_json::json!("unknown-key");
-        let (status, text) = post_text(&harness, "/api/sessions", body.clone()).await;
+        let (status, precondition_headers, text) =
+            post_text_headers(&harness, "/api/sessions", body.clone()).await;
         assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
-        assert!(
-            text.contains(crate::precondition::INCARNATION_MARKER),
-            "{text}"
-        );
+        assert!(is_stale_precondition(&precondition_headers), "{text}");
 
         body["intent_key"] = serde_json::json!("unknown-stale-config");
         body["expected_incarnation"] = serde_json::json!(claim.incarnation);
@@ -8902,9 +8909,9 @@ async fn github_repository_rest_routes_config_and_preserves_incomplete_status() 
     assert!(!text.contains("secret"));
     let mut stale = body;
     stale["expected_incarnation"] = serde_json::json!(claim.incarnation + 1);
-    let (status, text) = post_text(&harness, route, stale).await;
+    let (status, precondition_headers, text) = post_text_headers(&harness, route, stale).await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
-    assert!(text.contains(crate::precondition::INCARNATION_MARKER));
+    assert!(is_stale_precondition(&precondition_headers));
     finished_tx.send(()).unwrap();
     peer.await.unwrap();
 }

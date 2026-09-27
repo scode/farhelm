@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `supervisor-error-forges-reauth-401.md` — a remote supervisor can forge the helm's device-auth 401 and force the web
-  UI to the token prompt.
 - `agent-label-leaks-env-prefix.md` — the fleet-wide `agent` label takes the first shell word, leaking a leading
   `KEY=secret` and showing `env` for env-prefixed launches.
 - `helm-answers-resolveprofile-to-any-supervisor.md` — the helm answers `ResolveProfile` with raw profile command lines

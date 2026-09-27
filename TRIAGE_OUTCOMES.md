@@ -1313,4 +1313,14 @@
   401 or the stale-create signal; add a changelog fragment; remove the feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change. Auditing the agent relay and terminal WebSocket for
   the same pattern is out of this item's scope unless the user adds it.
-- Execution: `pending`.
+- Execution: `complete`; `SupervisorError` gained an `origin` (`Helm` or `SupervisorReply`, set only where a
+  supervisor's `ControlMsg::Error` becomes one), and `http_error` translates supervisor-decided kinds through
+  `supervisor_reply_status`, one justified arm per kind, with `Unauthorized` becoming 502; `error_kind` and so the agent
+  relay are unchanged. The stale-connection refusal is now the typed `precondition::IncarnationStale` (or a quoted
+  `AlsoFailedValidation` on the keyed fresh path), signalled by the helm-only `x-farhelm-precondition` header instead of
+  a body marker, and the UI's create calls return a `CreateRefusal` whose `stale` comes only from that header.
+  SPEC_impl.md records the cross-level rule. Recorded runs passed the whole `farhelm-helm` and `farhelm-ui` packages
+  after one in-session failure on the fresh path's quoted refusal, fixed by `AlsoFailedValidation`; the desktop and wasm
+  `web` builds compile. Fresh gpt-6-astra high review reported no findings. Draft PR
+  [#1036](https://github.com/scode/farhelm/pull/1036/changes) is on bookmark `pr/remote-errors-cannot-sign-out`, jj
+  change `lpyuqsyw`.

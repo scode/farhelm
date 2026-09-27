@@ -71,6 +71,7 @@ pub(crate) fn resolve_profile_name(profiles: &[Profile], name: &str) -> anyhow::
         .collect::<Vec<_>>()
         .join(", ");
         return Err(anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: farhelm_proto::ErrorKind::InvalidRequest,
             message: format!(
                 "profile name {name:?} did not resolve uniquely; candidates: {}",
@@ -131,6 +132,7 @@ pub(crate) struct ProfileSpec {
 /// Render a catalog field refusal as a typed 400 response at the helm API.
 fn catalog_validation_error(message: String) -> axum::response::Response {
     http_error(anyhow::Error::new(crate::SupervisorError {
+        origin: crate::client::ErrorOrigin::Helm,
         kind: farhelm_proto::ErrorKind::InvalidRequest,
         message,
     }))
@@ -199,6 +201,7 @@ pub(crate) async fn create_catalog_profile(
         }
         Ok(Ok(crate::store::ProfileCreation::CatalogFull)) => {
             http_error(anyhow::Error::new(crate::SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
                 kind: farhelm_proto::ErrorKind::InvalidRequest,
                 message: format!(
                     "this helm already holds the maximum of {} profiles; delete one before creating another",
@@ -252,6 +255,7 @@ pub(crate) async fn update_catalog_profile(
         Ok(Err(error)) => http_error(error),
         Ok(Ok(Some(profile))) => axum::Json(profile).into_response(),
         Ok(Ok(None)) => http_error(anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: farhelm_proto::ErrorKind::NotFound,
             message: "profile not found".to_string(),
         })),
@@ -284,6 +288,7 @@ pub(crate) async fn delete_catalog_profile(
         Ok(Err(error)) => http_error(error),
         Ok(Ok(true)) => axum::Json(serde_json::json!({})).into_response(),
         Ok(Ok(false)) => http_error(anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
             kind: farhelm_proto::ErrorKind::NotFound,
             message: "profile not found".to_string(),
         })),

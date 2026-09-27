@@ -3375,11 +3375,11 @@ pub(super) fn CreateSessionForm(
                                 } else {
                                     github_attempt.set(Some((bound.clone(), attempt)));
                                 }
-                                Err(format!("{}; {}", failure.message(), if retired {
+                                Err(api::CreateRefusal::from(format!("{}; {}", failure.message(), if retired {
                                     "nothing was accepted; review the refreshed preview and press launch again"
                                 } else {
                                     "the original request is retained; retry reconciles that request without allocating a different checkout"
-                                }))
+                                })))
                             }
                         }
                     } else { match &bound.replace_source {
@@ -3442,7 +3442,7 @@ pub(super) fn CreateSessionForm(
                             // would describe a machine the user is not looking
                             // at and may not even be true.
                             if create_target.peek().as_ref() == target_now.as_ref() {
-                                let (stale, prose) = api::precondition_of(&e);
+                                let api::CreateRefusal { stale, text: prose } = e;
                                 if stale {
                                     // The world moved between preparing this
                                     // create and routing it — the id now
