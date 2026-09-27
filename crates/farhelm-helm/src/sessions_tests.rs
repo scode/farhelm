@@ -1614,7 +1614,9 @@ async fn a_plain_replace_does_not_remember_the_listed_rows_profile() {
 /// The simplest replace: a live, raw-invocation source. SPEC.md's contract
 /// is a NEW id carrying the source's cwd, title, and invocation, with the
 /// old id gone from the list at once — this pins that promise against the
-/// real handler and a scripted supervisor.
+/// real handler and a scripted supervisor. The removed source's read/unread
+/// row goes too, as it does for a plain delete (SPEC_impl.md's
+/// `session_seen` paragraph): replace used to leave it behind.
 #[farhelm_testtrace::test]
 async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -1716,6 +1718,21 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     });
 
     harness.await_refreshed(local).await;
+    harness
+        .store
+        .mark_seen("sess-1", 1_700_000_000)
+        .await
+        .unwrap();
+    assert_eq!(
+        harness
+            .store
+            .seen_activity(&["sess-1".to_string()])
+            .await
+            .unwrap()
+            .get("sess-1"),
+        Some(&1_700_000_000),
+        "fixture premise: the source's seen-state row exists before the replace"
+    );
     let (status, body) = post_text(
         &harness,
         "/api/sessions/sess-1/replace",
@@ -1723,6 +1740,15 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert!(
+        harness
+            .store
+            .seen_activity(&["sess-1".to_string()])
+            .await
+            .unwrap()
+            .is_empty(),
+        "the replaced source's seen-state row must not survive it"
+    );
     let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
     assert_eq!(session.id, "sess-2");
     assert_eq!(session.cwd, "/sess-1");
