@@ -422,6 +422,11 @@ root and no configuration GUI. The root must already exist on the target host; `
 captured home. Clearing an override restores inheritance; an empty hook override disables the inherited hook.
 Configuration changes affect new attempts, not an already accepted attempt or its retries.
 
+Farhelm is not designed for a working-copy root that other local accounts can write to, such as a group-shared folder or
+a sticky, `/tmp`-style directory. Keeping the root, and so its checkouts and the archive folder inside it, in a location
+only the user can write is the user's responsibility. Farhelm does not check the root's owner or mode, and the ownership
+and archive promises in this section assume no other account can create, replace, or take over entries in it.
+
 Before Launch becomes available, the composer shows the exact host and path. Preview creates no directory and reserves
 nothing. An unnamed checkout uses the lowest available positive `repo-N` and that basename as its session title. An
 explicit title keeps its printable display spelling while the path uses `repo-` followed by its lowercase ASCII slug;
