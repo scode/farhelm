@@ -2,6 +2,7 @@
   "matching": 1,
   "sessions": [
     {
+      "agent_kind": "codex",
       "annotation": "left a note",
       "canonical_cwd": "/home/user/src/widgets",
       "created_at": 1700000000,

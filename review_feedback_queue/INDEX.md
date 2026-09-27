@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `agent-label-leaks-env-prefix.md` — the fleet-wide `agent` label takes the first shell word, leaking a leading
-  `KEY=secret` and showing `env` for env-prefixed launches.
 - `helm-answers-resolveprofile-to-any-supervisor.md` — the helm answers `ResolveProfile` with raw profile command lines
   to any supervisor; only the asking supervisor refuses it.
 - `tmux-cwd-format-expanded-on-create.md` — session create passes the cwd to tmux `-c` unescaped: `#` paths start the

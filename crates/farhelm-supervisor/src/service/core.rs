@@ -6126,6 +6126,7 @@ impl Supervisor {
                         canonical_cwd: row.canonical_cwd.clone(),
                         invocation: row.invocation,
                         resume_template: snapshot.resume_template.clone(),
+                        agent_kind: snapshot.kind,
                         launch: row.launch,
                         // Placeholder only: `ListSessions` recomputes
                         // `status` fresh from tmux plus the recorded
@@ -8458,6 +8459,7 @@ impl Supervisor {
                     canonical_cwd: row.canonical_cwd,
                     invocation: row.invocation,
                     resume_template: snapshot.resume_template.clone(),
+                    agent_kind: snapshot.kind,
                     launch: row.launch,
                     status: SessionStatus::Unknown,
                     annotation: None,
@@ -9388,6 +9390,7 @@ impl Supervisor {
             canonical_cwd: canonical_cwd.clone(),
             invocation: invocation.clone(),
             resume_template: snapshot.resume_template.clone(),
+            agent_kind: snapshot.kind,
             launch,
             // Create-time placeholder, deliberately NOT a live status:
             // `SessionCreated`'s own docs say creation establishes that
@@ -11534,6 +11537,7 @@ impl Supervisor {
             canonical_cwd: entry.info.canonical_cwd.clone(),
             invocation: entry.info.invocation.clone(),
             resume_template: entry.snapshot.resume_template.clone(),
+            agent_kind: entry.snapshot.kind,
             launch: entry.info.launch.clone(),
             // Deliberately not a fabricated live status: the pane exists, but
             // whether the agent's own `exec` inside it succeeds is a
@@ -13488,6 +13492,7 @@ impl Supervisor {
             canonical_cwd: row.canonical_cwd.clone(),
             invocation: row.invocation.clone(),
             resume_template: row.resume_template.clone(),
+            agent_kind: snapshot.kind,
             launch: row.launch.clone(),
             status: SessionStatus::Unknown,
             annotation: None,
@@ -16140,6 +16145,7 @@ pub(crate) mod tests {
     pub(crate) fn entry_with(terminal: Option<Terminal>, outcome: LastOutcome) -> SessionEntry {
         SessionEntry {
             info: SessionInfo {
+                agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
                 title: "t".to_string(),
@@ -17815,6 +17821,81 @@ pub(crate) mod tests {
             crate::scope::unit_name(&scoped_id, 0),
             "reload must re-derive the unit from the stored generation and \
              launch_scoped flag rather than leaving the entry unscoped"
+        );
+    }
+
+    /// Spec: a reloaded session's `SessionInfo::agent_kind` is the kind its
+    /// stored row recorded, not something re-derived from the invocation.
+    ///
+    /// The helm builds the fleet-wide `agent` label from this field alone
+    /// (so that no command-line text can reach that label), which makes the
+    /// reload path the one that matters most: every session a supervisor
+    /// restart brings back is described by it. The invocation here is
+    /// deliberately one basename recognition would NOT call Claude, so only
+    /// the stored column can explain the answer.
+    #[farhelm_testtrace::test]
+    async fn reload_reports_the_stored_agent_kind() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+
+        let id = uuid::Uuid::new_v4().to_string();
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    id: id.clone(),
+                    parent: None,
+                    title: "kind".to_string(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "ANTHROPIC_API_KEY=sk-not-for-agents my-wrapper".to_string(),
+                    launch: None,
+                    tmux_name: "fh-kind-gone".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Interrupted,
+                    agent_kind: farhelm_proto::AgentKind::Claude,
+                    // An integrated kind must carry a conversation-bearing
+                    // template, or reload refuses the row outright.
+                    resume_template: Some(vec![
+                        "my-wrapper".to_string(),
+                        "--resume".to_string(),
+                        "{conversation}".to_string(),
+                    ]),
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("insert an interrupted row");
+
+        let (sessions, _) = Supervisor::reload_sessions(
+            &sup.state_dir,
+            &sup.store,
+            &sup.tmux,
+            &SupervisorSeams::default(),
+            true,
+        )
+        .await
+        .expect("reload");
+
+        assert_eq!(
+            sessions[&id].info.agent_kind,
+            farhelm_proto::AgentKind::Claude
         );
     }
 

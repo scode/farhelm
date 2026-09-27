@@ -1348,7 +1348,14 @@
   supervisor, yields `custom`); `agent_label` uses it; the `AgentSession::agent` doc matches. Tests cover a raw
   `KEY=secret claude` session, a composer-built Goose session, a recognized raw agent, and an unrecognized program.
   Changelog fragment. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `SessionInfo` gained an additive `agent_kind` (serde default `generic`) that the supervisor
+  fills from its recorded integration snapshot on every build path, and the helm's `agent_label` returns the profile's
+  snapshotted name, the kind's word, or `custom`, never reading the invocation. Judged additive within protocol 31: an
+  old helm ignores the field and keeps its old label; a new helm reading an old supervisor shows `custom`. SPEC_impl.md
+  and the `AgentSession::agent` doc state the closed-vocabulary rule. Recorded runs passed the proto, helm, UI
+  HTTP-contract, and a new supervisor reload test. Fresh gpt-6-astra high review found one stale clone explanation, now
+  fixed. Draft PR [#1038](https://github.com/scode/farhelm/pull/1038/changes), jj change `yorprtsp`, bookmark
+  `pr/agent-label-closed-vocabulary`.
 
 ## helm-answers-resolveprofile-to-any-supervisor.md
 

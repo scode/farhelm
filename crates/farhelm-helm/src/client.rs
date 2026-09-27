@@ -3842,6 +3842,7 @@ mod tests {
 
     fn session(id: &str) -> SessionInfo {
         SessionInfo {
+            agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: id.into(),
             title: id.into(),

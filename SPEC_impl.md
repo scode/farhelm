@@ -1187,11 +1187,13 @@ One divergence is worth stating rather than discovering later. A RAW clone — o
 copies the invocation and nothing else, so the target re-derives the integrated kind from the invocation's first token
 and takes that kind's default resume template. A source created with an explicit `agent_kind` (including the explicit
 "no integration" the tri-state can express) or a custom `resume_template` therefore clones into a session whose
-conversation capture, status classification and restart behavior may differ from the original's. Nothing the helm can
-read carries those values: `SessionInfo` — the shape `drain_sessions` returns and the helm's only view of another host's
-session — exposes `invocation` and `source_profile` and no integration fields at all. Copying them means putting them on
-the wire, populating them everywhere a supervisor builds a session row, and persisting them for a reload to find.
-Refusing the raw clone instead is not available: SPEC.md promises a raw session "clones as that invocation".
+conversation capture, status classification and restart behavior may differ from the original's. `SessionInfo` — the
+shape `drain_sessions` returns and the helm's only view of another host's session — now carries the recorded
+`agent_kind` (for the fleet `agent` label), but not the custom resume template, and an older supervisor's rows report
+`generic` without saying whether that was chosen or merely absent. Copying the integration faithfully would still mean
+putting the template on the wire and telling an explicit `generic` apart from a missing field; the invocation-only clone
+contract stands until something needs more. Refusing the raw clone instead is not available: SPEC.md promises a raw
+session "clones as that invocation".
 
 The discovery verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is the same whole-fleet listing the UI reads, cut
@@ -1201,10 +1203,12 @@ because a partial fleet listing is otherwise shaped exactly like a complete one 
 be indistinguishable from "that session is past the cut". The byte allowance exists because rows bound nothing about
 size: session creation admits tens of kilobytes of caller-supplied text per row, and a fleet of legally fat records
 would otherwise produce an answer no frame could carry — discarded whole, reaching the agent as `Internal` rather than
-as the partial listing the verb promises. The per-session `agent` field is a non-secret label — the source profile's
-snapshotted name, or the invocation's program basename — never the raw command line. Users put credentials in command
-lines, this listing is readable with any one attached session's credential, and its reader is a model that will quote
-what it read, so arguments must not cross this wire at all.
+as the partial listing the verb promises. The per-session `agent` field is a non-secret label drawn from a closed
+vocabulary — the source profile's snapshotted name, or the word for the integrated agent kind the supervisor recorded
+for the session (carried on `SessionInfo`), or `custom` when there is none — and never text derived from the invocation.
+Users put credentials in command lines, this listing is readable with any one attached session's credential, and its
+reader is a model that will quote what it read, so nothing from the command line may cross this wire at all. Even the
+program's basename is not safe: a leading `NAME=secret` assignment is the first word.
 
 The session list is served WHOLE on this wire (protocol 14). `ListSessions` carries nothing but its request id, and
 `SessionList` answers with every session the supervisor has, cut at `LIST_SESSIONS_CAP` (a few hundred rows, one

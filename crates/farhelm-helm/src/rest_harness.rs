@@ -82,6 +82,7 @@ fn test_cadence() -> Cadence {
 /// needs and no test is about.
 pub(crate) fn session(id: &str, created_at: i64) -> SessionInfo {
     SessionInfo {
+        agent_kind: farhelm_proto::AgentKind::Generic,
         parent: None,
         id: id.to_string(),
         title: id.to_string(),

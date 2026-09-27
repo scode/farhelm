@@ -1717,6 +1717,7 @@ mod tests {
         let oversized = ControlMsg::SessionList {
             req_id,
             sessions: vec![SessionInfo {
+                agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
                 title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
@@ -1781,6 +1782,7 @@ mod tests {
         let msg = ControlMsg::SessionCreated {
             req_id: 7,
             session: SessionInfo {
+                agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
@@ -1819,6 +1821,7 @@ mod tests {
         let msg = ControlMsg::SessionRestarted {
             req_id: 9,
             session: SessionInfo {
+                agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
