@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `checkout-can-take-archive-dir-name.md` — a fresh checkout can be named `farhelm-archived-working-copies`; later
-  deletes move checkouts into it and its session is undeletable.
 - `archive-root-accepts-active-checkout.md` — the archive move accepts an active managed checkout (or the source itself)
   as its archive directory.
 - `inode-reuse-defeats-ownership-check.md` — the `(dev, ino)` ownership check can't tell a recreated directory from the

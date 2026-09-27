@@ -1536,7 +1536,12 @@
   `ARCHIVE_DIR_NAME` regardless of what the registry holds (the occupancy scan reports the name as taken when it is the
   candidate, or the basename rule skips it). A test uses a root with no registry rows. Changelog fragment. Remove the
   feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the occupancy scan both the preview and the create-time recheck use (`occupied_related_names`)
+  now reports `ARCHIVE_DIR_NAME` as occupied whenever it is related to the repository's name, whether or not it exists,
+  instead of skipping it, so a title that composes to the reserved name is refused as occupied. A test covers the three
+  repository/title splits that produce the name, in an empty root and in one where the archive directory exists. Draft
+  PR [#1044](https://github.com/scode/farhelm/pull/1044/changes), jj change `txkxuztw`, bookmark
+  `pr/reserve-archive-dir-name`.
 
 ## archive-root-accepts-active-checkout.md
 
