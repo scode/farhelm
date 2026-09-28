@@ -53,6 +53,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Clicking outside the panel should close it, the same way Escape does. Both rows share the panel lifecycle in
   `crates/farhelm-ui/src/menu_panel.rs`, so the fix belongs there rather than per row; the profiles popup in
   `profiles.rs` already handles outside intent and may be the pattern to reuse.
+- **Delete button in the session header.** Deleting the current session means finding its row in the sidebar and aiming
+  for that row's `⋯` menu. Add a delete button to the top-right actions in the session header (`titlebar-actions` in
+  `crates/farhelm-ui/src/session_view.rs`) as a shortcut. It still confirms, inline in the header the way the replace
+  button does, so both clicks land in the same place. Use the red of the menu's delete confirmation (`btn-danger`) so it
+  reads as destructive next to the blue header actions.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
