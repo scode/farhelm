@@ -163,8 +163,8 @@ One line per open item. This file must always match the feedback files in this d
   and offers to install a second, crash-looping copy.
 - `linger-failure-blocks-update-restart.md` — the optional linger step runs before restart/attach and most loginctl
   failures are fatal, so UPDATE never restarts.
-- `remote-mode-check-reads-symlink-mode.md` — the remote metadata check hashes a symlink's target but reads the link's
-  mode, chmodding through links or replacing them.
+- `remote-mode-check-reads-symlink-mode.md` — installing over a symlinked binary or unit destination replaces the
+  symlink with a regular file.
 - `embedded-payload-cleanup-blocks-helm-start.md` — a failure deleting the retired embedded-payloads cache aborts helm
   startup.
 - `installer-lock-flag-rolls-back-other-install.md` — install.sh keeps LOCK_ACQUIRED=1 after releasing the lock, so its
