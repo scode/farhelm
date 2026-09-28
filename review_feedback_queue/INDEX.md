@@ -71,8 +71,6 @@ One line per open item. This file must always match the feedback files in this d
   negative, contrary to its docs.
 - `restart-sweep-on-abortable-connection-task.md` — restart's stop-and-sweep runs on a connection task that a client
   disconnect aborts mid-kill.
-- `sigkill-misses-stopped-dropouts.md` — a process SIGSTOPped but missing from the sweep's final enumeration is left
-  frozen.
 - `crash-mid-sweep-leaves-frozen-tree.md` — a supervisor death between SIGSTOP and SIGKILL leaves the tree frozen and
   listed as running.
 - `delete-roots-only-agent-pane.md` — Delete roots its process walk only on the agent pane, so tab, split-pane and

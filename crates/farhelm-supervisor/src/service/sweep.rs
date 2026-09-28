@@ -722,6 +722,22 @@ impl StoppedProcessGuard {
     fn disarm(&mut self) {
         self.armed = false;
     }
+
+    /// Every identity this sweep froze, plus `last`, the final enumeration.
+    ///
+    /// The final SIGKILL and its confirmation cover this whole set rather
+    /// than `last` alone. A process frozen in an earlier pass can be missing
+    /// from the last enumeration while still alive (an unreadable process
+    /// row, or a setuid exec that moved it out of the owner filter); killing
+    /// only `last` and then disarming would leave it stopped forever, with
+    /// neither SIGKILL nor this guard's SIGCONT. Signalling a recorded
+    /// identity that has since exited is harmless: `signal_validated`
+    /// re-checks its start time first.
+    fn kill_set(&self, last: &HashMap<u32, u64>) -> HashMap<u32, u64> {
+        let mut all = self.identities.clone();
+        all.extend(last);
+        all
+    }
 }
 
 impl Drop for StoppedProcessGuard {
@@ -1142,9 +1158,10 @@ async fn kill_process_tree_with_grace(
         prioritize_quiesce_failure(&mut errors, &quiesce_growth);
     }
 
-    errors.extend(signal_all(&found.identities, libc::SIGKILL));
+    let kill_set = stopped.kill_set(&found.identities);
+    errors.extend(signal_all(&kill_set, libc::SIGKILL));
     stopped.disarm();
-    errors.extend(confirm_gone(&found.identities, KILL_CONFIRM_TIMEOUT).await);
+    errors.extend(confirm_gone(&kill_set, KILL_CONFIRM_TIMEOUT).await);
 
     if errors.is_empty() {
         Ok(())
@@ -3212,6 +3229,30 @@ mod tests {
             .expect("the test process must have a process row");
         let changed = (pid, actual_starttime.wrapping_add(1));
         assert_eq!(validate_root_identity(Some(changed), "changed"), None);
+    }
+
+    /// The final SIGKILL covers every identity the sweep froze, including
+    /// one that dropped out of the last enumeration.
+    ///
+    /// Why it matters: a stopped process that the last enumeration could not
+    /// see (an unreadable process row, or a setuid exec that changed its
+    /// owner) used to receive neither SIGKILL nor the guard's SIGCONT, and
+    /// stayed frozen holding its ports and files after stop or delete.
+    #[test]
+    fn the_final_kill_set_includes_identities_frozen_in_earlier_passes() {
+        let mut stopped = StoppedProcessGuard::new();
+        stopped.record(&HashMap::from([(100, 1), (200, 2)]));
+        stopped.record(&HashMap::from([(300, 3)]));
+        let last = HashMap::from([(100, 1), (400, 4)]);
+
+        let kill_set = stopped.kill_set(&last);
+
+        assert_eq!(
+            kill_set,
+            HashMap::from([(100, 1), (200, 2), (300, 3), (400, 4)]),
+            "every frozen identity and every finally enumerated one must be killed"
+        );
+        stopped.disarm();
     }
 
     /// `signal_validated`'s entire reason to exist: a pid whose CURRENT
