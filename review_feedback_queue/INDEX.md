@@ -135,8 +135,6 @@ One line per open item. This file must always match the feedback files in this d
   freezes status for every session.
 - `launch-path-prepends-binary-directory.md` — the launch shim prepends Farhelm's whole binary directory to PATH,
   shadowing the user's claude/tmux.
-- `startup-sweep-keeps-staged-spec-copies.md` — the startup sweep keeps staged `.tmp-` copies of launch specs for live
-  sessions.
 - `idempotency-fingerprint-keeps-raw-cmdline.md` — idempotency fingerprints keep the raw command line (with any keys) in
   the database after Delete.
 - `provisioning-holds-host-cache-lock.md` — a provisioning run holds the host's cache-write lock throughout, freezing

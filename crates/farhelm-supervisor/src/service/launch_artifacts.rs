@@ -275,13 +275,23 @@ pub(crate) async fn remove_launch_artifacts_for_session(
     }
 }
 
+/// Whether a staged temp name (`.<id>.<generation>.json.tmp-<uuid>`) stages
+/// a launch SPEC rather than a status sentinel. See `sweep_launch_dir` for
+/// why the two are treated differently at startup.
+fn staged_spec_name(name: &str) -> bool {
+    name.split_once(".tmp-")
+        .is_some_and(|(stem, _)| stem.ends_with(".json"))
+}
+
 /// Whether a staged launch artifact belongs to `session_id`.
 ///
 /// Staging prefixes the final launch name with a dot and appends `.tmp-<uuid>`;
 /// a failed post-publication unlink can therefore leave a second,
-/// credential-bearing copy beside the published file. Both startup sweeping
-/// and teardown identify the owner before deleting anything so a concurrent
-/// launch for a surviving session is not disturbed. Invalid stems are
+/// credential-bearing copy beside the published file. Teardown, and the
+/// startup sweep's handling of staged STATUS files, identify the owner before
+/// deleting anything so a concurrent launch for a surviving session is not
+/// disturbed. (Staged specs are removed at startup whoever owns them; see
+/// `sweep_launch_dir`.) Invalid stems are
 /// deliberately rejected as owners, leaving them eligible for the startup
 /// sweep's existing orphan cleanup.
 fn staged_name_belongs_to(name: &str, session_id: &str) -> bool {
@@ -398,11 +408,21 @@ pub(crate) async fn sweep_launch_dir(
 
         let should_remove = if crate::files::is_staged_temp_name(&name) {
             // A restart leaves the old shim alive. Its unpublished staged
-            // sentinel is still launch-failure evidence, so only staging
-            // whose parsed owner is absent is orphaned at startup.
-            !sessions
-                .keys()
-                .any(|session_id| staged_name_belongs_to(&name, session_id))
+            // sentinel is still launch-failure evidence, so a staged
+            // `.status` is orphaned only when its parsed owner is absent.
+            //
+            // A staged `.json` is different: only a supervisor writes specs,
+            // and this sweep runs after this one proved it is the state
+            // directory's sole owner and before it launches anything, so a
+            // staged spec present now was left by a dead supervisor (a crash
+            // between link and unlink, or mid-write) and can never be
+            // finished or read. Keeping it only kept a hidden second copy of
+            // the command line and session token until the session was
+            // deleted, so it goes whoever owns it.
+            staged_spec_name(&name)
+                || !sessions
+                    .keys()
+                    .any(|session_id| staged_name_belongs_to(&name, session_id))
         } else if let Some((id, generation)) = crate::launch::parse_launch_file_name(&name) {
             // Names are `<id>.<generation>.json|status`: launch files are
             // per-LAUNCH (`launch::spec_path_for_launch`). Two rules:
@@ -469,6 +489,10 @@ mod tests {
         // predecessor).
         std::fs::write(launch_dir.join("live.3.json"), b"{}").unwrap();
         std::fs::write(launch_dir.join(".orphan.0.json.tmp-deadbeef"), b"partial").unwrap();
+        // A live session's staged SPEC: only a supervisor writes specs, so
+        // at startup this one was left by a dead supervisor and is an
+        // unreadable second copy of the session's command line and token.
+        std::fs::write(launch_dir.join(".live.3.json.tmp-deadbeef"), b"credentials").unwrap();
         std::fs::write(
             launch_dir.join(".live.3.status.tmp-deadbeef"),
             b"unpublished exec failure",
@@ -496,6 +520,10 @@ mod tests {
         assert!(
             !launch_dir.join(".orphan.0.json.tmp-deadbeef").exists(),
             "an orphaned staged temp file must be removed"
+        );
+        assert!(
+            !launch_dir.join(".live.3.json.tmp-deadbeef").exists(),
+            "a staged spec is a dead supervisor's debris even for a live session"
         );
         assert!(
             launch_dir.join(".live.3.status.tmp-deadbeef").exists(),
