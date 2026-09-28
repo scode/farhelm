@@ -2113,6 +2113,35 @@ enum FreshCreateFingerprint {
     },
 }
 
+/// Checkout basenames the registry still claims directly under
+/// `canonical_root`: every non-retired row there, by its recorded path's name
+/// (or its allocated name before a path is recorded).
+///
+/// Checkout naming scans the disk for free names, but the nesting rule
+/// ([`fresh_root_constraint_error`]) refuses any path an active row claims,
+/// and the two disagree whenever a claimed folder is gone from disk (removed
+/// by hand while its session is still listed, or moved by a Delete that then
+/// failed). Untitled naming then proposed that same name on every attempt,
+/// and it was refused as a nested checkout that does not exist. Treating
+/// these names as occupied keeps naming and the nesting rule in agreement;
+/// the rule itself stays as the backstop.
+fn registry_claimed_basenames(
+    canonical_root: &str,
+    rows: &[crate::working_copies::WorkingCopyRow],
+) -> std::collections::HashSet<String> {
+    rows.iter()
+        .filter(|row| row.allocation_state != crate::working_copies::AllocationState::Retired)
+        .filter(|row| row.canonical_root == canonical_root)
+        .filter_map(|row| match row.canonical_path.as_deref() {
+            Some(path) => std::path::Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string),
+            None => Some(row.original_basename.clone()),
+        })
+        .collect()
+}
+
 /// Design C's destination split: which kind of working directory a
 /// validated create is about to use, carrying exactly the facts the
 /// launch needs for each kind and nothing manufactured ahead of time.
@@ -4811,21 +4840,25 @@ impl Supervisor {
             crate::working_copies::OCCUPANCY_SCAN_CAP,
         )?;
         let occupied = scan.names;
-        let name = checkout_basename(&repo, title, &|candidate| occupied.contains(candidate))
-            .map_err(|error| match error {
-                farhelm_proto::github_checkout::NameError::EmptySlug => RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    "the name contains no usable characters; use letters, digits or hyphens",
-                ),
-                farhelm_proto::github_checkout::NameError::Occupied => RequestError::new(
-                    ErrorKind::Conflict,
-                    "a directory with that checkout name already exists; choose another title",
-                ),
-                other => RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    format!("cannot propose a checkout directory name: {other}"),
-                ),
-            })?;
+        let rows = sup.store.working_copy_rows().await?;
+        let claimed = registry_claimed_basenames(&canonical_root, &rows);
+        let name = checkout_basename(&repo, title, &|candidate| {
+            occupied.contains(candidate) || claimed.contains(candidate)
+        })
+        .map_err(|error| match error {
+            farhelm_proto::github_checkout::NameError::EmptySlug => RequestError::new(
+                ErrorKind::InvalidRequest,
+                "the name contains no usable characters; use letters, digits or hyphens",
+            ),
+            farhelm_proto::github_checkout::NameError::Occupied => RequestError::new(
+                ErrorKind::Conflict,
+                "a directory with that checkout name already exists; choose another title",
+            ),
+            other => RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!("cannot propose a checkout directory name: {other}"),
+            ),
+        })?;
 
         let cwd = Path::new(&canonical_root)
             .join(&name.basename)
@@ -4839,9 +4872,7 @@ impl Supervisor {
             )
             .into());
         }
-        if let Some(message) =
-            fresh_root_constraint_error(&cwd, &sup.store.working_copy_rows().await?)
-        {
+        if let Some(message) = fresh_root_constraint_error(&cwd, &rows) {
             return Err(RequestError::new(ErrorKind::InvalidRequest, message).into());
         }
 
@@ -7778,10 +7809,21 @@ impl Supervisor {
                 format!("could not scan the checkout root for a free name: {e}"),
             )
         })?;
+        // The same registry claims the preview counted (see
+        // `registry_claimed_basenames`), or the two would disagree.
+        let claimed = registry_claimed_basenames(
+            &canonical_root,
+            &self.store.working_copy_rows().await.map_err(|e| {
+                RequestError::new(
+                    ErrorKind::Internal,
+                    format!("could not read the checkout registry: {e:#}"),
+                )
+            })?,
+        );
         let proposed = farhelm_proto::github_checkout::checkout_basename(
             &resolved.repo,
             title,
-            &|candidate| occupied.names.contains(candidate),
+            &|candidate| occupied.names.contains(candidate) || claimed.contains(candidate),
         )
         .map_err(|error| {
             let kind = if matches!(error, farhelm_proto::github_checkout::NameError::Occupied) {
@@ -17991,6 +18033,64 @@ pub(crate) mod tests {
             "reload must re-derive the unit from the stored generation and \
              launch_scoped flag rather than leaving the entry unscoped"
         );
+    }
+
+    /// Untitled checkout naming skips a name the registry still claims under
+    /// the same root, even when that folder is gone from disk.
+    ///
+    /// Why: naming scanned only the disk, while the nesting rule refuses any
+    /// path an active registry row claims. A claimed folder removed by hand
+    /// (or moved by a Delete that then failed) was therefore proposed again
+    /// on every attempt and refused as a nested checkout that does not exist.
+    /// Spec: active rows under the root count as occupied (by recorded path,
+    /// or allocated name before one is recorded); retired rows and rows under
+    /// another root do not; the untitled pick moves past the claimed name.
+    #[farhelm_testtrace::test]
+    fn untitled_naming_skips_names_the_registry_still_claims() {
+        fn row(
+            root: &str,
+            path: Option<&str>,
+            basename: &str,
+            state: crate::working_copies::AllocationState,
+        ) -> crate::working_copies::WorkingCopyRow {
+            crate::working_copies::WorkingCopyRow {
+                id: basename.to_string(),
+                canonical_root: root.to_string(),
+                canonical_path: path.map(str::to_string),
+                repo_owner: "owner".to_string(),
+                repo_name: "bar".to_string(),
+                original_basename: basename.to_string(),
+                origin_session_id: "sess".to_string(),
+                root_identity: None,
+                path_identity: None,
+                root_birth_ns: None,
+                path_birth_ns: None,
+                allocation_state: state,
+                archive_destination: None,
+                preparation_snapshot: None,
+                created_at: 0,
+            }
+        }
+        use crate::working_copies::AllocationState::{Allocated, ArchivePending, Planned, Retired};
+        let rows = vec![
+            row("/src", Some("/src/bar-1"), "bar-1", Allocated),
+            row("/src", Some("/src/bar-2"), "bar-2", ArchivePending),
+            row("/src", None, "bar-3", Planned),
+            row("/src", Some("/src/bar-4"), "bar-4", Retired),
+            row("/elsewhere", Some("/elsewhere/bar-5"), "bar-5", Allocated),
+        ];
+        let claimed = registry_claimed_basenames("/src", &rows);
+        let mut names: Vec<_> = claimed.iter().cloned().collect();
+        names.sort();
+        assert_eq!(names, vec!["bar-1", "bar-2", "bar-3"]);
+
+        // Nothing is on disk: the untitled pick must still skip every claim.
+        let repo = farhelm_proto::parse_github_repo("owner/bar").unwrap();
+        let picked = farhelm_proto::github_checkout::checkout_basename(&repo, None, &|candidate| {
+            claimed.contains(candidate)
+        })
+        .unwrap();
+        assert_eq!(picked.basename, "bar-4");
     }
 
     /// Spec: a reloaded session's `SessionInfo::agent_kind` is the kind its
