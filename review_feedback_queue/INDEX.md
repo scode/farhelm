@@ -348,8 +348,6 @@ One line per open item. This file must always match the feedback files in this d
   is re-queued.
 - `tab-close-errors-linger.md` — tab-close errors for tabs that have since disappeared stay on screen for the view's
   life.
-- `desktop-startup-misleading-helm-refusal.md` — late desktop startup failures can be reported as "embedded helm stopped
-  unexpectedly".
 - `window-maximize-fence-never-clears.md` — if the window manager ignores the restored maximize, window geometry is
   never tracked for the run.
 - `copy-feedback-timer-cut-short.md` — a second header copy click cuts the "copied" feedback short.
