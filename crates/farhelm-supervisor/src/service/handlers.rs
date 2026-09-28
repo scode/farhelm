@@ -858,6 +858,28 @@ async fn handle_create_session(
         )
         .await
     {
+        // A session-authenticated create can never newly create the asking
+        // session, so a result naming the asker is an idempotency replay of
+        // the create that made it: the key is host-scoped and the fingerprint
+        // does not include the asker, so a child whose bundle was inherited
+        // from its parent reproduces the parent's keyed spawn exactly.
+        // Reporting it as "the child" would send the caller's later stop or
+        // restart at itself. Nothing was created, so refusing has no effect
+        // to undo; `Conflict` says the key is what must change. (Another
+        // session reusing the key is still handed the original child; that
+        // would need the asker in the fingerprint.)
+        Ok(session) if restricted_auth.is_some_and(|auth| auth.session_id == session.id) => {
+            reply_error(
+                tx,
+                req_id,
+                ErrorKind::Conflict,
+                "the idempotency key replayed the create that made the calling session, so no \
+                 new session was created; retry with a key that has not been used on this host, \
+                 or with none at all"
+                    .to_string(),
+            )
+            .await;
+        }
         Ok(session) => {
             send_reply(tx, &ControlMsg::SessionCreated { req_id, session }).await;
         }
@@ -7993,6 +8015,80 @@ mod tests {
                 .captured_conversation
                 .as_deref(),
             Some(at_cap.as_str())
+        );
+    }
+
+    /// A child that re-runs its parent's keyed spawn is refused rather than
+    /// told it created itself.
+    ///
+    /// Why it matters: an `--inherit-agent` child carries its parent's exact
+    /// launch bundle, and a spawn key is host-scoped with no asker in the
+    /// fingerprint, so the child's identical spawn replays the create that
+    /// made the child. `farhelm spawn` prints the result as the new child's
+    /// id, and an agent that then stops or restarts "its child" would hit
+    /// itself. Spec: the replay is refused with `Conflict` and creates
+    /// nothing.
+    #[farhelm_testtrace::test]
+    async fn restricted_create_refuses_a_replay_that_names_the_asker() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let parent = authenticated_parent(&sup, state.path(), "self-replay-parent").await;
+        let spawn = |req_id| ControlMsg::CreateSession {
+            req_id,
+            parent: None,
+            cwd: state.path().to_string_lossy().into_owned(),
+            invocation: None,
+            source_profile: None,
+            profile_name: None,
+            profile_id: None,
+            inherit_agent: true,
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: Some("self-replay-key".to_string()),
+            agent_kind: None,
+            resume_template: None,
+            launch: None,
+            github_checkout: None,
+        };
+
+        handle_restricted_control(&sup, spawn(61), &tx, &parent, None).await;
+        let first: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("spawn reply").body).expect("decode");
+        let ControlMsg::SessionCreated { session: child, .. } = first else {
+            panic!("the parent's keyed spawn must create a child: {first:?}");
+        };
+        let child_auth = farhelm_proto::SessionAuth {
+            session_id: child.id.clone(),
+            token: sup
+                .store
+                .session_token(&child.id)
+                .await
+                .expect("read child credential")
+                .expect("the spawned child has a credential"),
+        };
+
+        handle_restricted_control(&sup, spawn(62), &tx, &child_auth, None).await;
+        let replay: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("replay reply").body).expect("decode");
+        assert!(
+            matches!(
+                &replay,
+                ControlMsg::Error {
+                    req_id: 62,
+                    kind: ErrorKind::Conflict,
+                    message,
+                } if message.contains("made the calling session")
+            ),
+            "a replay naming the asker must be refused as a key conflict: {replay:?}"
+        );
+        assert_eq!(
+            sup.store.load_all().await.expect("load sessions").len(),
+            2,
+            "the refused replay must not create a session"
         );
     }
 
