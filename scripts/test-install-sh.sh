@@ -2838,6 +2838,28 @@ check "M3 (loopback URL redirecting to another host): the redirected requests re
   [ "$(grep -c 'redirect-real' "$SERVER_LOG")" -gt "$M3_BEFORE" ]
 
 # ===========================================================================
+# Scenario: the app bundle's Info.plist mode does not follow the caller's
+# umask (triage: app-info-plist-uses-caller-umask).
+#
+# Why this matters: Info.plist's LSEnvironment can inject code into the app,
+# and under a permissive umask such as 002 the heredoc that writes it left it
+# group-writable, where every other local account in `staff` could edit it.
+# Spec: the plist is 0644 whatever the umask, like the rest of the bundle.
+# ===========================================================================
+echo
+echo "== P1: Info.plist mode under umask 002 =="
+HOME_P1="$WORKDIR/home-p1"
+mkdir -p "$HOME_P1"
+P1_OLD_UMASK=$(umask)
+umask 002
+check "P1 premise: the installer runs under umask 002" [ "$(umask)" = 0002 ]
+run_install "$MAC_TOOLS" "$HOME_P1" "$HOME_P1/.local/bin" "$BASE/good" 1.2.3
+umask "$P1_OLD_UMASK"
+check "P1: macOS-shaped install exits 0" [ "$RC" -eq 0 ]
+check "P1: Info.plist is 0644 despite the umask" \
+  [ "$(stat -c %a "$HOME_P1/Applications/Farhelm.app/Contents/Info.plist")" = 644 ]
+
+# ===========================================================================
 echo
 echo "== summary =="
 echo "$CHECKS checks, $FAILURES failed"

@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `app-info-plist-uses-caller-umask.md` — install.sh writes Farhelm.app's Info.plist with the caller's umask, so another
-  local account may inject LSEnvironment.
 - `setup-pins-relative-path-tmux.md` — helm setup can pin a tmux found via a relative PATH entry like "." into the
   boot-time supervisor unit.
 - `install-lock-owner-unchecked.md` — the install lock and journal are trusted without checking their owner, so a
