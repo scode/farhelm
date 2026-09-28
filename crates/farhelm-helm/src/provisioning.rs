@@ -675,6 +675,55 @@ mod tests {
         );
     }
 
+    /// The ssh probe finds a farhelm installed by the install script in
+    /// `~/.local/bin` even when that directory is not on the probe's PATH.
+    ///
+    /// Why it matters: a non-interactive ssh command does not read the login
+    /// profile that usually adds `~/.local/bin` to PATH, so a host running
+    /// Farhelm from the standard installer probed as having no supervisor,
+    /// and the helm offered to install a second copy over it. The script is
+    /// run under a local `sh` with a controlled HOME and PATH, the same shape
+    /// the remote side sees.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn the_probe_script_finds_an_install_script_binary_off_path() {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let farhelm = bin.join("farhelm");
+        std::fs::write(&farhelm, "#!/bin/sh\nprintf 'ARGS:%s\\n' \"$*\"\n").unwrap();
+        std::fs::set_permissions(
+            &farhelm,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
+
+        // An empty PATH directory the fixture owns: a system directory could
+        // hold a real farhelm that `command -v` would (correctly) prefer.
+        // The script needs nothing from PATH; the shell is named absolutely
+        // and everything it runs is a builtin.
+        let empty_path = home.path().join("empty-path");
+        std::fs::create_dir(&empty_path).unwrap();
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(SystemBackend::probe_script("farhelm", None))
+            .env_clear()
+            .env("HOME", home.path())
+            .env("PATH", &empty_path)
+            .output()
+            .expect("run the probe script under sh");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("{REMOTE_RESOLVED_PREFIX}{}", farhelm.display())),
+            "the probe must resolve the install-script binary: {stderr}"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "ARGS:internal stdio",
+            "the probe must exec that binary's stdio proxy"
+        );
+    }
+
     /// A bare executable name is valid for SSH steady state, but an update
     /// must not install a guessed absolute copy that the remote PATH ignores.
     #[farhelm_testtrace::test]

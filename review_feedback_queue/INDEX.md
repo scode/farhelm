@@ -159,8 +159,8 @@ One line per open item. This file must always match the feedback files in this d
   recorded remote_farhelm/remote_state_dir.
 - `payload-dir-must-be-writable.md` — --payload-dir writes .extracted/ into the operator's directory, so read-only or
   shared release dirs fail every run.
-- `probe-misses-install-sh-supervisor.md` — the probe misses a farhelm in ~/.local/bin off the ssh PATH and offers to
-  install a second, crash-looping copy.
+- `probe-misses-install-sh-supervisor.md` — the probe misses a supervisor whose farhelm is in a custom install directory
+  and offers to install a second, crash-looping copy.
 - `linger-failure-blocks-update-restart.md` — the optional linger step runs before restart/attach and most loginctl
   failures are fatal, so UPDATE never restarts.
 - `remote-mode-check-reads-symlink-mode.md` — the remote metadata check hashes a symlink's target but reads the link's
