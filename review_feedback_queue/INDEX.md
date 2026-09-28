@@ -4,9 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `release-gate-runs-unpinned-privileged-container-before-signed-build.md` — the release build job runs an unpinned
-  `centos:stream9` image `--privileged` on the runner before `dist build`, so a poisoned image yields a validly signed
-  release.
 - `app-info-plist-uses-caller-umask.md` — install.sh writes Farhelm.app's Info.plist with the caller's umask, so another
   local account may inject LSEnvironment.
 - `setup-pins-relative-path-tmux.md` — helm setup can pin a tmux found via a relative PATH entry like "." into the

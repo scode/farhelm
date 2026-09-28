@@ -2094,7 +2094,10 @@
 - Completion criteria: the residuals documentation names these trust roots and the ordering, with why they are accepted;
   no workflow or script behavior changes. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in
   the execution change.
-- Execution: `pending`.
+- Execution: `complete`; dist-workspace.toml's header comments gain "Accepted trust roots in the release build"
+  (root-installed apt packages, the privileged CentOS container on a mutable tag, GitHub actions by version tag), beside
+  the generated workflow's residuals. PR [#1147](https://github.com/scode/farhelm/pull/1147/changes), jj change
+  `zztrkkpw`, bookmark `pr/release-trust-roots`.
 
 ## app-info-plist-uses-caller-umask.md
 
