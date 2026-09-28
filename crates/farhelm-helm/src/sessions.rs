@@ -3376,6 +3376,17 @@ async fn finish_replacement(
             message,
         }));
     }
+    // The deleted source's read/unread row goes with it, exactly as in
+    // `delete_session` (SPEC_impl.md: deleting a session drops its
+    // `session_seen` row explicitly). Best effort: a stray row is harmless
+    // and must not turn a finished replace into a failure.
+    if let Err(error) = state.store.clear_seen(id).await {
+        warn!(
+            session_id = manager::peer_text(id).as_str(),
+            error = %error,
+            "could not clear the replaced session's seen state; a stray row may remain"
+        );
+    }
     forget_session(state, claim, id).await;
     Ok(created)
 }

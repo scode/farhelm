@@ -284,7 +284,6 @@ One line per open item. This file must always match the feedback files in this d
   ListSessions on its host.
 - `incarnation-counter-restarts-per-process.md` — incarnation numbers restart each helm process, so expected_incarnation
   can match a different install after restart.
-- `replace-keeps-session-seen-row.md` — replace deletes the source without dropping its session_seen row, unlike delete.
 - `replace-leaks-claimed-profile-invocation.md` — Replace launches whichever catalog profile a remote host claims,
   sending its full command line to that host.
 - `restart-rename-reply-id-unchecked.md` — restart and rename replies are recorded and returned without checking they
