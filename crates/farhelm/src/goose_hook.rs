@@ -9,6 +9,22 @@ use std::io::{BufRead, Read, Write};
 
 const MAX_FRAME_BYTES: u64 = 64 * 1024;
 
+/// The conversation report the Goose adapter hands the shared hook reporter,
+/// built from `AGENT_SESSION_ID` (`None` when that is unset or not UTF-8).
+///
+/// A missing id still produces a payload, with no `session_id` in it, rather
+/// than skipping the report: the reporter then logs
+/// `bad-payload missing-session-id` like any other malformed report. Skipping
+/// it left the hook log empty, and that log is the one place a reporter
+/// failure is supposed to show.
+pub fn report_payload(session_id: Option<String>) -> Value {
+    let mut report = json!({ "source": "goose" });
+    if let Some(session_id) = session_id {
+        report["session_id"] = session_id.into();
+    }
+    report
+}
+
 /// Serve bounded newline-delimited MCP messages until EOF or a broken peer.
 pub fn serve(mut input: impl BufRead, mut output: impl Write, instructions: Option<&str>) {
     loop {
