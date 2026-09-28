@@ -317,8 +317,6 @@ One line per open item. This file must always match the feedback files in this d
   the host never connects.
 - `reach-misreads-escaped-xdg-config-home.md` — an escaped XDG_CONFIG_HOME (path with a space) is misclassified as
   relative and refused.
-- `planning-refusal-returns-502.md` — planning refusals (relative remote_farhelm) surface as 502 Bad Gateway instead of
-  the typed 409.
 - `redirect-limit-off-by-one.md` — the release download refuses the fifth redirect though five are documented.
 - `release-download-unbounded-under-host-lock.md` — release downloads have no overall deadline and run under the host
   lock, blocking removal while throttled.
