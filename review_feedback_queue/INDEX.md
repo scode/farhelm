@@ -117,8 +117,6 @@ One line per open item. This file must always match the feedback files in this d
   the checkout stuck `archive_pending` forever.
 - `failed-plan-does-not-reserve-checkout-name.md` — a failed clone's plan doesn't reserve its folder name, so a later
   clone is silently co-owned and archived early.
-- `untitled-checkout-naming-ignores-registry.md` — untitled checkout naming ignores registry-claimed folders, so preview
-  proposes a name the nested-checkout rule rejects.
 - `checkout-name-scan-case-sensitive.md` — the checkout name scan is case-sensitive, so on macOS a case-variant folder
   makes every launch conflict.
 - `delete-holds-directory-lock-whole-teardown.md` — every Delete holds the host-wide directory lock through its whole
