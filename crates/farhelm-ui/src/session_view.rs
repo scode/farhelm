@@ -25,7 +25,7 @@ use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostLookup, HostsRead, is_connected, stale_session_notice};
 use crate::ops::ReadGate;
-use crate::peer::PeerLine;
+use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
 use crate::reconnect::reconnect_policy;
 use crate::restart_with::RestartWithDialog;
@@ -1938,11 +1938,23 @@ pub(crate) fn SessionView(
             // one sentence that says what to do next. Conditional, so they
             // cost the steady state nothing.
             //
+            //
+            // Both render through `PeerLine`, as every refusal does
+            // (`api::refusal_text`'s contract): the helm's text can quote
+            // peer-supplied values, and a bidi or invisible character there
+            // could reorder or hide part of a line that reports a
+            // destructive outcome (a failed replace names both sessions).
             if let Some(err) = restart_error.read().clone() {
-                div { class: "restart-error", "{err}" }
+                PeerLine {
+                    class: "restart-error".to_string(),
+                    parts: vec![DetailPart::peer(err)],
+                }
             }
             if let Some(err) = replace_error.read().clone() {
-                div { class: "replace-error", "replace: {err}" }
+                PeerLine {
+                    class: "replace-error".to_string(),
+                    parts: vec![DetailPart::text("replace: "), DetailPart::peer(err)],
+                }
             }
             // Worded to state the FACT (the helm stopped listing this
             // session) and the CONSEQUENCE (what is shown may be stale),
@@ -2155,8 +2167,14 @@ pub(crate) fn SessionView(
                 // lines do not reshuffle on every render — a `HashMap` has no
                 // order of its own, and rows jumping around under the strip
                 // would make a second failure look like a replaced one.
+                //
+                // A tab-open refusal can quote the dead shell's last output,
+                // so the text is a direction-isolated, escaped peer run,
+                // `PeerLine`'s own markup inside the keyed line.
                 for (key , err) in sorted_tab_errors(&tab_errors.read()) {
-                    div { key: "{key}", class: "tab-error", "data-tab-error": "{key}", "{err}" }
+                    div { key: "{key}", class: "tab-error", "data-tab-error": "{key}",
+                        span { class: "peer-value", dir: "ltr", "{display_peer(&err)}" }
+                    }
                 }
                 // Fatal to the terminals, not to the view: the metadata, the
                 // restart affordance, and the tab strip all still work, and

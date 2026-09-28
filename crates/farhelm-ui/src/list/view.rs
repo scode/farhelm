@@ -2685,8 +2685,16 @@ pub(crate) fn ListView(
         }
         match &*listing.read() {
             None => rsx! { div { class: "status", "loading sessions…" } },
+            // The helm's refusal text, rendered as the peer text it may
+            // quote (see `api::refusal_text`).
             Some(Err(e)) => rsx! {
-                div { class: "status error", "failed to load sessions: {e}" }
+                crate::peer::PeerLine {
+                    class: "status error".to_string(),
+                    parts: vec![
+                        crate::peer::DetailPart::text("failed to load sessions: "),
+                        crate::peer::DetailPart::peer(e.clone()),
+                    ],
+                }
             },
             Some(Ok(listing)) => rsx! {
                 // The plain empty-fleet line, which is deliberately NOT the
