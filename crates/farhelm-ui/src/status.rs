@@ -346,7 +346,7 @@ pub(crate) fn StatusBadgeView(
 /// record outlives everything it described and is all that is left to
 /// lose (and, since restart landed, the only route back into that
 /// conversation).
-pub(crate) fn confirm_consequence(status: &SessionStatus) -> &'static str {
+fn confirm_consequence_for_agent(status: &SessionStatus) -> &'static str {
     match status {
         SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
             "still running — deleting kills the agent:"
@@ -356,15 +356,51 @@ pub(crate) fn confirm_consequence(status: &SessionStatus) -> &'static str {
         }
         SessionStatus::Exited { .. } => "delete anyway:",
         SessionStatus::Interrupted => {
-            "interrupted by a host reboot — nothing left to kill; deleting discards the session:"
+            "interrupted by a host reboot, which ended the agent; deleting discards the session:"
         }
         // `Error` never OPENS this prompt (see `on_delete`'s own gate),
         // but a prompt already open for a LIVE session CAN land here —
         // see this function's own docs — so this arm is reachable, not
         // merely a defensive completeness case.
-        SessionStatus::Error { .. } => {
-            "the agent never started — nothing to kill; deleting discards the session:"
-        }
+        SessionStatus::Error { .. } => "the agent never started; deleting discards the session:",
+    }
+}
+
+/// The delete confirmation's consequence text: the agent's part from its
+/// status, preceded by what happens to the session's terminal tabs when
+/// there are any.
+///
+/// SPEC.md's Delete rule asks for a confirmation "that says so when anything
+/// is still alive", and a tab is: Stop and an agent's own exit both leave
+/// tabs running, so a stopped session's prompt that spoke only about its
+/// agent would undersell what the click destroys.
+pub(crate) fn confirm_consequence(status: &SessionStatus, tabs: usize) -> String {
+    with_tabs("deleting", tabs, confirm_consequence_for_agent(status))
+}
+
+/// [`confirm_consequence`]'s counterpart for Replace, which deletes the
+/// source session (tabs included) after creating its replacement.
+pub(crate) fn replace_consequence(status: &SessionStatus, tabs: usize) -> String {
+    with_tabs("replacing", tabs, replace_consequence_for_agent(status))
+}
+
+/// Prefix an agent consequence with the tab clause, or return it unchanged
+/// when the listing shows no tabs.
+///
+/// The agent consequences are worded about the AGENT only (no "nothing to
+/// kill" for the whole session), because a session whose agent never
+/// started or was ended by a reboot can still have a tab running a build,
+/// and the combined sentence must not both warn and reassure.
+fn with_tabs(verb: &str, tabs: usize, agent: &str) -> String {
+    match tabs {
+        0 => agent.to_string(),
+        1 => format!(
+            "1 terminal tab is still open, and {verb} closes it with everything running in it; {agent}"
+        ),
+        n => format!(
+            "{n} terminal tabs are still open, and {verb} closes them with everything running in \
+             them; {agent}"
+        ),
     }
 }
 
@@ -390,7 +426,7 @@ pub(crate) fn confirm_consequence(status: &SessionStatus) -> &'static str {
 /// anyway:" — replace has no analogous "there is nothing to reconsider"
 /// shortcut to fall back on, so its own consequence is spelled out in full
 /// even for a session that was already at rest.
-pub(crate) fn replace_consequence(status: &SessionStatus) -> &'static str {
+fn replace_consequence_for_agent(status: &SessionStatus) -> &'static str {
     match status {
         SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
             "still running — replacing kills the agent and discards the conversation; a fresh \
@@ -406,11 +442,11 @@ pub(crate) fn replace_consequence(status: &SessionStatus) -> &'static str {
              its place:"
         }
         SessionStatus::Interrupted => {
-            "interrupted by a host reboot — nothing left to kill, but replacing still discards \
+            "interrupted by a host reboot, which ended the agent, but replacing still discards \
              the conversation; a fresh session with the same settings takes its place:"
         }
         SessionStatus::Error { .. } => {
-            "the agent never started — nothing to kill; a fresh session with the same settings \
+            "the agent never started; a fresh session with the same settings \
              takes its place:"
         }
     }
@@ -658,6 +694,50 @@ mod tests {
     /// result, nor about the SEPARATE title element sitting next to it
     /// (both exercised by the Playwright suite instead, not by anything
     /// callable from this unit test).
+    /// Why this matters: Delete and Replace tear down a session's terminal
+    /// tabs too, and a prompt that mentioned only the agent let a user
+    /// confirm away a running dev server without being told. Spec: with
+    /// tabs, both prompts lead with how many tabs close; without, the
+    /// wording is exactly the agent-only text.
+    #[farhelm_testtrace::test]
+    fn delete_and_replace_wording_names_open_tabs() {
+        let exited = SessionStatus::Exited { exit_code: Some(0) };
+        assert_eq!(
+            confirm_consequence(&exited, 0),
+            confirm_consequence_for_agent(&exited)
+        );
+        assert_eq!(
+            confirm_consequence(&exited, 1),
+            "1 terminal tab is still open, and deleting closes it with everything running in \
+             it; delete anyway:"
+        );
+        assert!(
+            replace_consequence(&exited, 3)
+                .starts_with("3 terminal tabs are still open, and replacing closes them")
+        );
+        assert_eq!(
+            replace_consequence(&exited, 0),
+            replace_consequence_for_agent(&exited)
+        );
+        // An Error session can have tabs (opening one needs a terminal, not
+        // a live agent), so its prompt must not promise there is nothing
+        // to kill while also warning that tabs close.
+        let error = SessionStatus::Error {
+            detail: "exec_failed argv0=/nope errno=2".to_string(),
+        };
+        assert_eq!(
+            confirm_consequence(&error, 1),
+            "1 terminal tab is still open, and deleting closes it with everything running in \
+             it; the agent never started; deleting discards the session:"
+        );
+        let replace_error = replace_consequence(&error, 2);
+        assert!(
+            replace_error.starts_with("2 terminal tabs are still open")
+                && !replace_error.contains("nothing to kill"),
+            "{replace_error}"
+        );
+    }
+
     #[farhelm_testtrace::test]
     fn confirm_consequence_wording_differs_between_live_and_unknown() {
         for live in [
@@ -666,13 +746,13 @@ mod tests {
             SessionStatus::Idle,
         ] {
             assert_eq!(
-                confirm_consequence(&live),
+                confirm_consequence_for_agent(&live),
                 "still running — deleting kills the agent:",
                 "every live status costs the same delete, so every one must say so: {live:?}"
             );
         }
         assert_eq!(
-            confirm_consequence(&SessionStatus::Unknown),
+            confirm_consequence_for_agent(&SessionStatus::Unknown),
             "status unknown — the agent may still be running and will be killed:"
         );
     }
@@ -687,7 +767,7 @@ mod tests {
     /// and starts naming what deleting actually costs.
     #[farhelm_testtrace::test]
     fn interrupted_consequence_promises_no_kill() {
-        let wording = confirm_consequence(&SessionStatus::Interrupted);
+        let wording = confirm_consequence_for_agent(&SessionStatus::Interrupted);
         assert!(
             !wording.contains("kills") && !wording.contains("will be killed"),
             "nothing survives a reboot for a delete to kill: {wording}"
@@ -708,7 +788,7 @@ mod tests {
     /// "finished"), not borrow `Interrupted`'s reboot-specific phrasing.
     #[farhelm_testtrace::test]
     fn error_consequence_promises_no_kill_and_names_no_reboot() {
-        let wording = confirm_consequence(&SessionStatus::Error {
+        let wording = confirm_consequence_for_agent(&SessionStatus::Error {
             detail: "exec_failed argv0=/nope errno=2".to_string(),
         });
         assert!(
@@ -781,14 +861,14 @@ mod tests {
             SessionStatus::Waiting,
             SessionStatus::Idle,
         ] {
-            let wording = replace_consequence(&live);
+            let wording = replace_consequence_for_agent(&live);
             assert!(
                 wording.contains("still running") && wording.contains("kills the agent"),
                 "every live status costs the same kill, so every one must say so: {live:?} -> \
                  {wording}"
             );
         }
-        let unknown = replace_consequence(&SessionStatus::Unknown);
+        let unknown = replace_consequence_for_agent(&SessionStatus::Unknown);
         assert!(
             unknown.contains("may still be running") && unknown.contains("will be killed"),
             "an unresolved status may not round up to a live status's certainty: {unknown}"
@@ -803,12 +883,12 @@ mod tests {
     /// since an ordinary exit needs no such explanation.
     #[farhelm_testtrace::test]
     fn replace_consequence_never_promises_a_kill_for_an_already_ended_session() {
-        let exited = replace_consequence(&SessionStatus::Exited { exit_code: Some(0) });
+        let exited = replace_consequence_for_agent(&SessionStatus::Exited { exit_code: Some(0) });
         assert!(
             !exited.contains("kills the agent") && !exited.contains("will be killed"),
             "an exited agent leaves nothing for replace to kill: {exited}"
         );
-        let interrupted = replace_consequence(&SessionStatus::Interrupted);
+        let interrupted = replace_consequence_for_agent(&SessionStatus::Interrupted);
         assert!(
             !interrupted.contains("kills the agent") && !interrupted.contains("will be killed"),
             "a host reboot already ended the agent; replace cannot kill it again: {interrupted}"
@@ -825,7 +905,7 @@ mod tests {
     /// `Interrupted`'s reboot framing for an unrelated failure.
     #[farhelm_testtrace::test]
     fn replace_consequence_error_promises_no_kill_and_names_no_reboot() {
-        let wording = replace_consequence(&SessionStatus::Error {
+        let wording = replace_consequence_for_agent(&SessionStatus::Error {
             detail: "exec_failed argv0=/nope errno=2".to_string(),
         });
         assert!(
@@ -857,13 +937,13 @@ mod tests {
             SessionStatus::Interrupted,
         ];
         for status in discards {
-            let wording = replace_consequence(&status);
+            let wording = replace_consequence_for_agent(&status);
             assert!(
                 wording.contains("discard"),
                 "{status:?}'s wording must warn that the conversation is discarded: {wording}"
             );
         }
-        let error_wording = replace_consequence(&SessionStatus::Error {
+        let error_wording = replace_consequence_for_agent(&SessionStatus::Error {
             detail: "exec_failed argv0=/nope errno=2".to_string(),
         });
         assert!(
@@ -894,7 +974,7 @@ mod tests {
             },
         ];
         for status in statuses {
-            let wording = replace_consequence(&status);
+            let wording = replace_consequence_for_agent(&status);
             assert!(
                 wording.contains("fresh session") && wording.contains("takes its place"),
                 "{status:?}'s wording must promise a replacement, not just a consequence: \

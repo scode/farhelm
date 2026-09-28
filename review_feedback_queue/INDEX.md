@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `delete-ended-session-kills-live-tabs.md` — deleting a session whose agent ended skips confirmation and kills its
-  still-running terminal tabs.
 - `delete-lacks-liveness-precondition.md` — an unconfirmed delete from a stale ended row can kill a freshly restarted
   agent; DELETE carries no precondition.
 - `header-replace-confirm-ignores-cancel.md` — the header Replace confirm lacks the prompt-open check, so

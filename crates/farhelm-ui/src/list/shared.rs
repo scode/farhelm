@@ -19,10 +19,41 @@ use crate::{Host, HostId, HostKind, Session, SessionStatus};
 /// dedicated type is what makes that impossible rather than merely
 /// unlikely, unlike `on_open` (which keeps taking the whole `Session`: it
 /// needs every field to populate `SessionView`).
+///
+/// `tabs` is the number of terminal tabs the listing shows for the session.
+/// Deleting tears those down too, and unlike an ended agent's stray
+/// descendants the UI can see them, so they decide the confirmation as much
+/// as the agent's status does (see [`DeleteTarget::needs_confirmation`]).
 #[derive(Debug, Clone)]
 pub(super) struct DeleteTarget {
     pub(super) id: String,
     pub(super) status: SessionStatus,
+    pub(super) tabs: usize,
+}
+
+impl DeleteTarget {
+    /// The fields `on_delete` decides from, taken from the row's session.
+    pub(super) fn for_session(session: &Session) -> Self {
+        Self {
+            id: session.id.clone(),
+            status: session.status.clone(),
+            tabs: session.tabs.len(),
+        }
+    }
+
+    /// Whether this click must open the inline confirmation instead of
+    /// deleting at once.
+    ///
+    /// SPEC.md's Delete rule: confirmation "that says so when anything is
+    /// still alive". An agent that has not ended is alive; so is any listed
+    /// terminal tab, even after the agent has exited, because Stop and an
+    /// agent's own exit both leave tabs running (a dev server, a build).
+    /// Only an ended agent with no tabs deletes unconfirmed. That can still
+    /// kill process-tree leftovers the UI cannot see, a residual
+    /// `on_delete`'s own comment accepts.
+    pub(super) fn needs_confirmation(&self) -> bool {
+        !self.status.has_ended() || self.tabs > 0
+    }
 }
 
 /// The display state `ListView` derives for one `SessionRow` render.
@@ -489,6 +520,33 @@ pub(super) fn host_options(hosts: &[Host]) -> Vec<HostOption> {
 pub(super) mod tests {
     use super::super::row::row_specimen;
     use super::*;
+
+    /// Why this matters: Delete used to decide from the agent's status
+    /// alone, so one click on a stopped session silently killed the dev
+    /// servers and builds still running in its tabs. Spec: an ended agent
+    /// with listed tabs asks first; an ended agent with none still deletes
+    /// at once; a live agent always asks.
+    #[farhelm_testtrace::test]
+    fn delete_confirms_whenever_an_agent_or_a_tab_is_still_alive() {
+        let tab = || crate::Tab { id: "tab-1".into() };
+        let exited_with_tabs = Session {
+            tabs: vec![tab(), tab()],
+            ..row_specimen("with-tabs")
+        };
+        let exited_bare = row_specimen("bare");
+        let running_bare = Session {
+            status: SessionStatus::Running,
+            ..row_specimen("running")
+        };
+        // Premise: the specimen's agent has ended.
+        assert!(exited_bare.status.has_ended());
+
+        let with_tabs = DeleteTarget::for_session(&exited_with_tabs);
+        assert_eq!(with_tabs.tabs, 2);
+        assert!(with_tabs.needs_confirmation());
+        assert!(!DeleteTarget::for_session(&exited_bare).needs_confirmation());
+        assert!(DeleteTarget::for_session(&running_bare).needs_confirmation());
+    }
 
     /// A CONNECTED host as the create dialog would be offered it —
     /// `phase: None` is what "connected" means to an option.

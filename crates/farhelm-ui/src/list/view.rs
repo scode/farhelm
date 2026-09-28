@@ -1639,14 +1639,18 @@ pub(crate) fn ListView(
         {
             return;
         }
-        // The split is exactly `has_ended()` vs. everything else, which is
-        // to say: a status the UI knows to be finished deletes straight
-        // away, and the rest — the three live statuses and `Unknown` —
-        // go through a confirmation. Asking the status rather than
+        // The agent half of the split is exactly `has_ended()` vs.
+        // everything else, which is to say: a status the UI knows to be
+        // finished can delete straight away, and the rest — the three live
+        // statuses and `Unknown` — go through a confirmation. Asking the status rather than
         // listing the variants is what kept this correct THROUGH M6.75's
         // liveness split, which added two live variants and needed no edit
         // here (see `SessionStatus::has_ended`).
-        if target.status.has_ended() {
+        if !target.needs_confirmation() {
+            // Reached only for an ended agent with no listed tabs: open
+            // tabs are live processes the UI can see, so they always
+            // confirm (see `DeleteTarget::needs_confirmation`).
+            //
             // Deliberately unconfirmed, a known residual: the AGENT
             // process has exited, but process-tree descendants it
             // spawned (a stray MCP server, a dev server) can outlive it,

@@ -2185,7 +2185,10 @@
   session with no tabs still deletes immediately; delete and Replace consequences mention tabs when there are any;
   row-level tests cover the exited-with-tabs and exited-without-tabs cases. Remove this feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; Delete asks first when the agent is live or any tab is open; the delete and Replace
+  consequences name how many tabs will close, and the ended-agent wording no longer claims nothing is left to kill. UI
+  tests cover the confirmation rule and the wording. PR [#1151](https://github.com/scode/farhelm/pull/1151/changes), jj
+  change `qqkkplmz`, bookmark `pr/delete-confirms-open-tabs`.
 
 ## delete-lacks-liveness-precondition.md
 
