@@ -2067,7 +2067,11 @@
   test-only variable, and refuses non-loopback `http://` there; `scripts/test-install-sh.sh` uses the new name and
   covers a refused non-loopback `http://` value and an ignored `FARHELM_RELEASE_BASE_URL`. Remove this feedback file and
   its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the installer's fixture hook is now `FARHELM_INSTALL_TEST_BASE_URL`, plain http is accepted
+  only for a loopback host with curl held there by `--connect-to`, and `FARHELM_RELEASE_BASE_URL` no longer affects the
+  installer. SPEC.md states that the installer trusts GitHub over TLS and the upstream repository. test-install-sh.sh
+  cases M1-M3 and a remote-redirect fixture cover it. PR [#1146](https://github.com/scode/farhelm/pull/1146/changes), jj
+  change `sspxrktu`, bookmark `pr/installer-ignores-helm-mirror`.
 
 ## release-gate-runs-unpinned-privileged-container-before-signed-build.md
 

@@ -324,6 +324,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             f.write("%s %s\n" % (self.address_string(), fmt % args))
 
     def do_GET(self):
+        # A redirect to a host that does not exist (.invalid never
+        # resolves): only reachable if the installer pins every connection
+        # of its loopback test mode to this machine, which is the point.
+        remote = "/redirect-remote/"
+        if self.path.startswith(remote):
+            target = "http://remote.invalid:%d/redirect-real/%s" % (port, self.path[len(remote):])
+            self.send_response(302)
+            self.send_header("Location", target)
+            self.end_headers()
+            return
         prefix = "/redirect/"
         if self.path.startswith(prefix):
             target = "/redirect-real/" + self.path[len(prefix):]
@@ -457,7 +467,7 @@ run_install() {
     PATH="$path_dir" \
     HOME="$home" \
     FARHELM_INSTALL_DIR="$install_dir" \
-    FARHELM_RELEASE_BASE_URL="$base_url" \
+    FARHELM_INSTALL_TEST_BASE_URL="$base_url" \
     FARHELM_VERSION="$version" \
     "$@" \
     /bin/sh "$INSTALL_SH" >"$out_file" 2>"$err_file"
@@ -478,7 +488,7 @@ run_install_bg() {
     PATH="$path_dir" \
     HOME="$home" \
     FARHELM_INSTALL_DIR="$install_dir" \
-    FARHELM_RELEASE_BASE_URL="$base_url" \
+    FARHELM_INSTALL_TEST_BASE_URL="$base_url" \
     FARHELM_VERSION="$version" \
     /bin/sh "$INSTALL_SH" >"$WORKDIR/bg-out" 2>"$WORKDIR/bg-err" &
   BG_PID=$!
@@ -1841,7 +1851,7 @@ mkdir -p "$HOMEDEFAULT"
 DEFAULT_OUT=$(mktemp "$WORKDIR/out.XXXXXX")
 DEFAULT_ERR=$(mktemp "$WORKDIR/err.XXXXXX")
 set +e
-env -i PATH="$TOOLCHAIN_FULL" HOME="$HOMEDEFAULT" FARHELM_RELEASE_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
+env -i PATH="$TOOLCHAIN_FULL" HOME="$HOMEDEFAULT" FARHELM_INSTALL_TEST_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
   /bin/sh "$INSTALL_SH" >"$DEFAULT_OUT" 2>"$DEFAULT_ERR"
 DEFAULT_RC=$?
 set -e
@@ -2168,7 +2178,7 @@ check "F7: journal-free backup debris is gone" [ ! -e "$INSTALLBACKUPDEBRIS/.far
 check "F7: debris cleanup emits one notice" contains "$ERR" "removed committed backup debris"
 check "F7: a foreign neighboring file is untouched" \
   [ "$(cat "$INSTALLBACKUPDEBRIS/.not-a-farhelm-backup")" = "foreign bytes" ]
-check "F7: override source is reported" contains "$ERR" "using FARHELM_RELEASE_BASE_URL=$BASE/good"
+check "F7: override source is reported" contains "$ERR" "using FARHELM_INSTALL_TEST_BASE_URL=$BASE/good"
 
 HOMEBACKUPJOURNAL="$WORKDIR/homebackupjournal"
 INSTALLBACKUPJOURNAL="$HOMEBACKUPJOURNAL/.local/bin"
@@ -2189,16 +2199,16 @@ INSTALLINVALIDBASE="$HOMEINVALIDBASE/.local/bin"
 run_install "$TOOLCHAIN_FULL" "$HOMEINVALIDBASE" "$INSTALLINVALIDBASE" \
   "http://user:pass@127.0.0.1:$SERVER_PORT/good" 1.2.3
 check "F7: override userinfo is refused" [ "$RC" -eq 1 ]
-check "F7: userinfo refusal names FARHELM_RELEASE_BASE_URL" \
-  contains "$ERR" "FARHELM_RELEASE_BASE_URL"
+check "F7: userinfo refusal names FARHELM_INSTALL_TEST_BASE_URL" \
+  contains "$ERR" "FARHELM_INSTALL_TEST_BASE_URL"
 check "F7: userinfo refusal creates no install state" \
   [ ! -e "$INSTALLINVALIDBASE" ]
 
 run_install "$TOOLCHAIN_FULL" "$HOMEINVALIDBASE" "$INSTALLINVALIDBASE" \
   "$BASE/good?query=refused" 1.2.3
 check "F7: override query is refused" [ "$RC" -eq 1 ]
-check "F7: query refusal names FARHELM_RELEASE_BASE_URL" \
-  contains "$ERR" "FARHELM_RELEASE_BASE_URL"
+check "F7: query refusal names FARHELM_INSTALL_TEST_BASE_URL" \
+  contains "$ERR" "FARHELM_INSTALL_TEST_BASE_URL"
 
 # ===========================================================================
 # Scenario: stale-lock recovery finds its recovery DESTINATION corrupted
@@ -2242,7 +2252,7 @@ mkdir -p "$HOMEUMASK"
 set +e
 # shellcheck disable=SC2016 # the single quotes are deliberate: "$1" must reach the INNER sh, not expand in this one
 env -i PATH="$TOOLCHAIN_FULL" HOME="$HOMEUMASK" FARHELM_INSTALL_DIR="$INSTALLUMASK" \
-  FARHELM_RELEASE_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
+  FARHELM_INSTALL_TEST_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
   /bin/sh -c 'umask 000; exec /bin/sh "$1"' _ "$INSTALL_SH" >"$WORKDIR/f9-out" 2>"$WORKDIR/f9-err"
 F9_RC=$?
 set -e
@@ -2259,7 +2269,7 @@ mkdir -p "$HOMEUMASKMAC"
 set +e
 # shellcheck disable=SC2016 # the single quotes are deliberate: "$1" must reach the INNER sh, not expand in this one
 env -i PATH="$MAC_TOOLS" HOME="$HOMEUMASKMAC" FARHELM_INSTALL_DIR="$INSTALLUMASKMAC" \
-  FARHELM_RELEASE_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
+  FARHELM_INSTALL_TEST_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
   /bin/sh -c 'umask 000; exec /bin/sh "$1"' _ "$INSTALL_SH" >"$WORKDIR/f9-mac-out" 2>"$WORKDIR/f9-mac-err"
 F9_MAC_RC=$?
 set -e
@@ -2293,7 +2303,7 @@ mkdir -p "$INSTALLCOLON"
 DECEPTIVE_PATH="$TOOLCHAIN_FULL:$HOMECOLON/.local/bin:extra:/usr/bin"
 set +e
 env -i PATH="$DECEPTIVE_PATH" HOME="$HOMECOLON" FARHELM_INSTALL_DIR="$INSTALLCOLON" \
-  FARHELM_RELEASE_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
+  FARHELM_INSTALL_TEST_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
   /bin/sh "$INSTALL_SH" >"$WORKDIR/f15-out" 2>"$WORKDIR/f15-err"
 F15_RC=$?
 set -e
@@ -2763,6 +2773,69 @@ if [ "$(id -u)" -ne 0 ]; then
   chmod 600 "$K5_KEPT"
   check "K5 (unreadable file): the kept copy keeps its bytes" [ "$(cat "$K5_KEPT")" = "unreadable" ]
 fi
+
+# ===========================================================================
+# Scenario: the installer's download source (triage:
+# installer-mirror-var-drops-https-no-signature).
+#
+# Why this matters: the installer used to honour FARHELM_RELEASE_BASE_URL,
+# the helm's documented mirror setting, dropping its HTTPS-only pinning and
+# checking no signature. An operator who exported it for the helm got an
+# unauthenticated install. Spec: only the test-only
+# FARHELM_INSTALL_TEST_BASE_URL redirects the installer; plain HTTP is
+# accepted there only for a loopback fixture; the helm's variable has no
+# effect on the installer at all.
+# ===========================================================================
+echo
+echo "== M1-M2: installer download source =="
+
+HOME_M1="$WORKDIR/home-m1"
+INSTALL_M1="$HOME_M1/.local/bin"
+run_install "$TOOLCHAIN_FULL" "$HOME_M1" "$INSTALL_M1" "http://mirror.example.invalid/good" 1.2.3
+check "M1 (non-loopback http test URL): refused with exit 1" [ "$RC" -eq 1 ]
+check "M1 (non-loopback http test URL): the refusal names the variable" \
+  contains "$ERR" "FARHELM_INSTALL_TEST_BASE_URL must be an https URL"
+check "M1 (non-loopback http test URL): no install state is created" [ ! -e "$INSTALL_M1" ]
+
+# A curl double records the URL it was asked for and fails, so the check
+# needs no network and proves where the installer would have downloaded
+# from with only the helm's variable set.
+TOOLS_M2="$WORKDIR/toolchain-m2"
+mkdir -p "$TOOLS_M2"
+cp -a "$TOOLCHAIN_FULL"/. "$TOOLS_M2/"
+rm -f "$TOOLS_M2/curl"
+M2_LOG="$WORKDIR/m2-curl.log"
+: >"$M2_LOG"
+cat >"$TOOLS_M2/curl" <<CURLEOF
+#!/bin/sh
+for arg in "\$@"; do
+  case "\$arg" in
+    http://* | https://*) printf '%s\n' "\$arg" >>"$M2_LOG" ;;
+  esac
+done
+exit 22
+CURLEOF
+chmod 755 "$TOOLS_M2/curl"
+HOME_M2="$WORKDIR/home-m2"
+INSTALL_M2="$HOME_M2/.local/bin"
+run_install "$TOOLS_M2" "$HOME_M2" "$INSTALL_M2" "" 1.2.3 FARHELM_RELEASE_BASE_URL="$BASE/good"
+check "M2 premise: the curl double was asked for at least one URL" [ -s "$M2_LOG" ]
+check "M2 (helm mirror variable set): no request goes to that mirror" not_contains "$(cat "$M2_LOG")" "$BASE"
+check "M2 (helm mirror variable set): the download goes to GitHub over HTTPS" \
+  contains "$(head -n 1 "$M2_LOG")" "https://github.com/"
+check "M2 (helm mirror variable set): the installer does not mention it" not_contains "$ERR" "FARHELM_RELEASE_BASE_URL"
+
+# A loopback test URL that redirects to another host must still only talk
+# to this machine: the redirect names remote.invalid, which cannot resolve,
+# so the install only succeeds if every connection was pinned to loopback.
+HOME_M3="$WORKDIR/home-m3"
+INSTALL_M3="$HOME_M3/.local/bin"
+mkdir -p "$HOME_M3"
+M3_BEFORE=$(grep -c 'redirect-real' "$SERVER_LOG" || true)
+run_install "$TOOLCHAIN_FULL" "$HOME_M3" "$INSTALL_M3" "$BASE/redirect-remote" 1.2.3
+check "M3 (loopback URL redirecting to another host): install exits 0" [ "$RC" -eq 0 ]
+check "M3 (loopback URL redirecting to another host): the redirected requests reached this machine" \
+  [ "$(grep -c 'redirect-real' "$SERVER_LOG")" -gt "$M3_BEFORE" ]
 
 # ===========================================================================
 echo

@@ -171,6 +171,17 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     case "$vrbu_host" in
       *@* | :*) return 1 ;;
     esac
+    # Plain HTTP only reaches this machine. The fixture server the test
+    # suites run is loopback HTTP; anything else must be HTTPS so the
+    # download cannot be read or rewritten on the way.
+    case "$vrbu_value" in
+      http://*)
+        case "$vrbu_host" in
+          127.0.0.1 | 127.0.0.1:* | localhost | localhost:* | '[::1]' | '[::1]:'*) ;;
+          *) return 1 ;;
+        esac
+        ;;
+    esac
   }
 
   # Emits $1 as one single-quoted POSIX shell word (embedded single quotes
@@ -193,12 +204,21 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # or output behavior. The timeouts bound how long an unreachable or
   # stalled release host can delay failure: a little over 10 minutes per
   # request, from --max-time 600.
+  #
+  # The `loopback` mode serves only FARHELM_INSTALL_TEST_BASE_URL's plain-HTTP
+  # fixture. HTTP must stay allowed for redirects there (the fixture's own
+  # 302 test serves the next hop over HTTP), so instead of a protocol pin it
+  # uses --connect-to to send EVERY connection, redirects included, to the
+  # validated loopback host. A redirect to some other host therefore still
+  # only ever talks to this machine; plain HTTP never leaves it.
   curl_get() {
     if [ "$CURL_PROTOCOL_MODE" = default ]; then
       curl -q --connect-timeout 15 --max-time 600 \
         --proto '=https' --proto-redir '=https' "$@"
     else
-      curl -q --connect-timeout 15 --max-time 600 "$@"
+      curl -q --connect-timeout 15 --max-time 600 \
+        --proto '=http,https' --proto-redir '=http,https' \
+        --connect-to "::$CURL_LOOPBACK_HOST:" "$@"
     fi
   }
 
@@ -931,16 +951,34 @@ EOF
     HAS_DESKTOP=0
     [ "$TARGET" = "aarch64-apple-darwin" ] && HAS_DESKTOP=1
 
-    # An explicit base URL is a test/mirror channel. Keep HTTP usable there
-    # (the fixture server is intentionally loopback HTTP), while the normal
-    # GitHub channel remains pinned against HTTPS downgrade redirects.
-    if [ -n "${FARHELM_RELEASE_BASE_URL:-}" ]; then
-      if ! validate_release_base_url "$FARHELM_RELEASE_BASE_URL"; then
-        printf 'FARHELM_RELEASE_BASE_URL must be an http or https URL with a host and no userinfo, query, or fragment; refusing it\n' >&2
+    # FARHELM_INSTALL_TEST_BASE_URL exists only so this script's own test
+    # suites can point it at a fixture server instead of GitHub. It
+    # deliberately has its own name: the helm's release mirror setting,
+    # FARHELM_RELEASE_BASE_URL, is safe for the helm because it verifies the
+    # release signature, and this script verifies none (SPEC.md,
+    # "Installation and updates"), so the helm's variable left exported in a
+    # shell must never redirect an install. Plain HTTP is accepted only for
+    # a loopback fixture (see validate_release_base_url); an HTTPS value
+    # keeps the same no-downgrade pinning as the default GitHub channel.
+    if [ -n "${FARHELM_INSTALL_TEST_BASE_URL:-}" ]; then
+      if ! validate_release_base_url "$FARHELM_INSTALL_TEST_BASE_URL"; then
+        printf 'FARHELM_INSTALL_TEST_BASE_URL must be an https URL, or an http URL on this machine (127.0.0.1, localhost or [::1]), with a host and no userinfo, query, or fragment; refusing it\n' >&2
         exit 1
       fi
-      CURL_PROTOCOL_MODE=override
-      printf 'using FARHELM_RELEASE_BASE_URL=%s\n' "$FARHELM_RELEASE_BASE_URL" >&2
+      case "$FARHELM_INSTALL_TEST_BASE_URL" in
+        http://*)
+          CURL_PROTOCOL_MODE=loopback
+          # The validator accepted only 127.0.0.1, localhost or [::1],
+          # optionally with a port; keep just the host for --connect-to.
+          CURL_LOOPBACK_HOST=${FARHELM_INSTALL_TEST_BASE_URL#http://}
+          CURL_LOOPBACK_HOST=${CURL_LOOPBACK_HOST%%/*}
+          case "$CURL_LOOPBACK_HOST" in
+            '['*) CURL_LOOPBACK_HOST="${CURL_LOOPBACK_HOST%%]*}]" ;;
+            *) CURL_LOOPBACK_HOST=${CURL_LOOPBACK_HOST%%:*} ;;
+          esac
+          ;;
+      esac
+      printf 'using FARHELM_INSTALL_TEST_BASE_URL=%s\n' "$FARHELM_INSTALL_TEST_BASE_URL" >&2
     fi
 
     # 2. Prerequisites.
@@ -1036,11 +1074,9 @@ EOF
     fi
     VERSION_NUM=${VERSION_TAG#v}
 
-    # FARHELM_RELEASE_BASE_URL is deliberately undocumented in the README:
-    # it exists so this script's own tests (and nothing else) can point it
-    # at a fixture server instead of github.com. A real install always
-    # uses the release's normal download URL.
-    BASE_URL=${FARHELM_RELEASE_BASE_URL:-$DOWNLOAD_PREFIX/$VERSION_TAG}
+    # A real install always uses the release's normal download URL; the
+    # test-only override is described where it is validated above.
+    BASE_URL=${FARHELM_INSTALL_TEST_BASE_URL:-$DOWNLOAD_PREFIX/$VERSION_TAG}
     BASE_URL=${BASE_URL%/}
 
     INSTALL_DIR=${FARHELM_INSTALL_DIR:-$HOME/.local/bin}
