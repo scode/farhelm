@@ -332,8 +332,6 @@ One line per open item. This file must always match the feedback files in this d
   outright.
 - `grok-prompt-hooks-exceed-payload-cap.md` — the hook's small-payload assumption may not hold for Grok's prompt/stop
   callbacks.
-- `desktop-auth-check-no-deadline.md` — desktop-auth.js's credential check has no timeout, so startup can hang on
-  "Starting Farhelm…".
 - `row-ops-counter-leaks-on-unmount.md` — row_ops leaks when the browser token prompt unmounts the list mid-operation,
   disabling header actions.
 - `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
