@@ -263,6 +263,17 @@ impl Supervisor {
                     .filter_map(|tab| crate::scope::tab_unit_name(session_id, &tab.id)),
             );
         }
+        // Settle a stale "no manager" verdict BEFORE enumerating. The row's
+        // recorded launch unit is the durable evidence that earns one
+        // re-probe, and the sweep below would spend it anyway; spending it
+        // after the globs had been skipped would kill only the names tmux
+        // still listed, missing older generations and closed tabs, and then
+        // publish "deleted" over them. A second negative stays final, so the
+        // sweep's own re-probe costs nothing extra.
+        if entry.scope.is_some() && !self.seams.scopes.available().await {
+            self.seams.scopes.reprobe().await;
+        }
+
         for glob in [
             crate::scope::tab_unit_glob(session_id),
             crate::scope::launch_unit_glob(session_id),
@@ -1185,6 +1196,81 @@ mod tests {
         assert!(
             !crate::attachments::session_dir(state.path(), &id).exists(),
             "successful retry must remove the attachment directory"
+        );
+    }
+
+    /// Delete re-probes a stale "no manager" verdict before enumerating the
+    /// session's scopes, so the units only the manager can list are killed.
+    ///
+    /// Why it matters: an older generation's scope or a closed tab's scope
+    /// is found only by asking the manager, and it may hold a daemon that
+    /// left the process tree and scrubbed its environment. Enumerating under
+    /// the stale verdict skipped that listing; the sweep's later re-probe
+    /// then killed only the recorded unit and Delete removed the row, leaving
+    /// the daemon running with nothing left to find it. Spec: the recorded
+    /// launch unit earns one re-probe before enumeration, and a successful
+    /// one puts the manager-listed units in the kill set.
+    #[farhelm_testtrace::test]
+    async fn delete_reprobes_a_stale_negative_verdict_before_listing_scopes() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let older_generation =
+            crate::scope::unit_name(&id, 7).expect("a UUID id must name a scope unit");
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |op: &crate::scope::ScopeOp| {
+                observed.lock().unwrap().push(op.clone());
+            }) as crate::scope::ScopeOpSink
+        };
+        let (_state, sup, entry) = scoped_session(
+            crate::scope::ScopeManager::fake_reprobing_with_matching_units_vanishing(
+                false,
+                true,
+                vec![older_generation.clone()],
+                3,
+                sink,
+            ),
+            &id,
+        )
+        .await;
+        assert!(
+            !sup.seams.scopes.available().await,
+            "fixture premise: the cached verdict is a stale negative"
+        );
+
+        assert!(
+            sup.teardown_session(&entry, &id, test_admission(&sup).await)
+                .await
+                .is_ok(),
+            "a re-probed manager that confirms its units gone allows Delete"
+        );
+
+        let observed = observed.lock().expect("op sink mutex poisoned");
+        // The fake lists units whatever its verdict, so the kill alone would
+        // also pass with the re-probe left to the sweep. The ordering is the
+        // distinguishing observable: the permitted re-probe (the second
+        // probe) must come before the first listing.
+        let reprobe_at = observed
+            .iter()
+            .enumerate()
+            .filter(|(_, op)| matches!(op, crate::scope::ScopeOp::Probe))
+            .nth(1)
+            .map(|(at, _)| at)
+            .expect("the recorded launch unit must earn one re-probe");
+        let first_list_at = observed
+            .iter()
+            .position(|op| matches!(op, crate::scope::ScopeOp::List(_)))
+            .expect("Delete must ask the manager for the session's units");
+        assert!(
+            reprobe_at < first_list_at,
+            "the stale verdict must be re-probed before listing: {observed:?}"
+        );
+        assert!(
+            observed.iter().any(|op| matches!(
+                op,
+                crate::scope::ScopeOp::Kill { unit, .. } if *unit == older_generation
+            )),
+            "the manager-listed older generation must be killed: {observed:?}"
         );
     }
 

@@ -67,8 +67,6 @@ One line per open item. This file must always match the feedback files in this d
 - `unvalidated-state-dir-on-add.md` — adding a host with a bad state-dir path permanently bricks the entry.
 - `unvalidated-state-dir-on-ensure.md` — a bad state-dir line in the ensure file bricks a host on every boot.
 - `unvalidated-state-dir-on-probe.md` — probed registration with a bad state-dir path permanently bricks the entry.
-- `delete-lists-scopes-before-reprobe.md` — Delete lists systemd scopes before its re-probe, so a stale verdict skips
-  old-run and closed-tab scopes.
 - `tab-close-skips-scope-on-stale-verdict.md` — tab close skips the tab's cgroup whenever the cached manager verdict is
   negative, contrary to its docs.
 - `cancelled-scope-probe-wedges-verdict.md` — a cancelled systemd probe leaves the verdict stuck at Probing, hanging
