@@ -3777,6 +3777,16 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             intent_key,
         } => {
             validate_target(source_session_id)?;
+            // Absent and empty are different requests: an absent --cwd makes
+            // the helm use the source session's directory, while an explicit
+            // empty one would replace it with "" and fail only at the target.
+            // The collapse below is only safe once "" has been refused here.
+            if cwd.as_deref() == Some("") {
+                return Err(
+                    "--cwd must not be empty; omit it to use the source session's directory"
+                        .to_string(),
+                );
+            }
             validate_create_fields(
                 host.as_deref(),
                 cwd.as_deref().unwrap_or_default(),
@@ -3824,7 +3834,9 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
 /// what happens to them here is a size bound and nothing else.
 ///
 /// `cwd` arrives as `""` for a `Clone` that named none, and that is the
-/// wire's `None` rather than an empty directory. It contributes nothing to
+/// wire's `None` rather than an empty directory (an explicitly empty clone
+/// `--cwd` is refused before this is called, so `""` here always means
+/// absent). It contributes nothing to
 /// the sum, correctly: the directory such a clone will actually use is the
 /// SOURCE's, which was bounded when the source was created and never
 /// travels through this doorway at all.
@@ -5891,6 +5903,25 @@ mod tests {
             intent_key: None,
         });
         assert!(control_host.unwrap_err().contains("control character"));
+
+        // An explicitly empty clone --cwd is refused at this hop: the helm
+        // would otherwise use "" instead of the source's directory. Absent
+        // stays legal (it means "the source's directory").
+        let clone_cwd = |cwd: Option<&str>| {
+            validate_agent_verb(&AgentVerb::Clone {
+                source_session_id: Some("source".to_string()),
+                host: Some("host".to_string()),
+                cwd: cwd.map(str::to_string),
+                title: None,
+                intent_key: None,
+            })
+        };
+        assert!(
+            clone_cwd(Some(""))
+                .unwrap_err()
+                .contains("--cwd must not be empty")
+        );
+        assert!(clone_cwd(None).is_ok());
 
         // A host name is bounded on its OWN allowance rather than against
         // the create payload, because it is routing metadata the helm

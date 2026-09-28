@@ -672,10 +672,21 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
         AgentVerb::Clone {
             source_session_id,
             host,
+            cwd,
             ..
         } => {
             required(source_session_id.as_deref(), "--source-session")?;
-            required(host.as_deref(), "--host")
+            required(host.as_deref(), "--host")?;
+            // Optional, but not empty: an absent cwd falls back to the source
+            // session's directory, while `Some("")` would replace it with an
+            // empty path that only the target supervisor then refuses.
+            if cwd.as_deref() == Some("") {
+                return Err(
+                    "--cwd must not be empty; omit it to use the source session's directory"
+                        .to_string(),
+                );
+            }
+            Ok(())
         }
         AgentVerb::ResolveProfile { name, id } => {
             let selectors = [name.as_deref(), id.as_deref()];
@@ -1630,6 +1641,31 @@ mod tests {
     use super::*;
     use crate::hosts::{HostStateView, HostView, RefreshView};
     use farhelm_proto::{ProfileExistence, RestartOffer, SessionInfo, SourceProfile};
+
+    /// The helm's own clone validation refuses an explicitly empty cwd.
+    ///
+    /// Why it matters: the helm treats supervisors as untrusted, and a clone
+    /// with `cwd: Some("")` would otherwise replace the source session's
+    /// directory with an empty path that only the target supervisor then
+    /// refuses, possibly after the request's idempotency key was recorded.
+    /// Spec: `Some("")` is refused here; an absent cwd stays legal.
+    #[farhelm_testtrace::test]
+    fn clone_validation_refuses_an_explicitly_empty_cwd() {
+        let clone = |cwd: Option<&str>| AgentVerb::Clone {
+            source_session_id: Some("source".to_string()),
+            host: Some("host".to_string()),
+            cwd: cwd.map(str::to_string),
+            title: None,
+            intent_key: None,
+        };
+        assert!(
+            validate_authoritative_verb(&clone(Some("")))
+                .unwrap_err()
+                .contains("--cwd must not be empty")
+        );
+        assert!(validate_authoritative_verb(&clone(None)).is_ok());
+        assert!(validate_authoritative_verb(&clone(Some("/work"))).is_ok());
+    }
 
     fn host_view(id: i64, name: &str, kind: &'static str, state: HostStateView) -> HostView {
         HostView {
