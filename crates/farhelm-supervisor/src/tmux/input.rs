@@ -26,6 +26,13 @@ impl TmuxDriver {
         pane: &str,
     ) -> anyhow::Result<InputClient> {
         let deadline = tokio::time::Instant::now() + self.exchange_timeout;
+        // Attached to the exact SESSION, like the output client and the sink,
+        // not to the bare pane: attaching by pane makes that pane's window
+        // the session's current window (so a tab would become "current" and
+        // stay so), and a bare `%N` is not even scoped to this session. Input
+        // still reaches only `pane`, through the session-paired `send-keys`
+        // target below.
+        let session_target = format!("={session}");
         let mut child = self
             .command()
             .arg("-C")
@@ -33,7 +40,7 @@ impl TmuxDriver {
             .arg("-f")
             .arg("no-output")
             .arg("-t")
-            .arg(pane)
+            .arg(&session_target)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

@@ -243,8 +243,6 @@ One line per open item. This file must always match the feedback files in this d
   a non-exec tmux wrapper.
 - `startup-reap-misnames-terminal-clients.md` — the startup reap addresses leftover control clients as `client-<pid>`,
   missing terminal-backed ones and failing startup.
-- `input-client-attaches-by-bare-pane.md` — the input client attaches by bare pane id, making a tab the session's
-  current window.
 - `tab-close-kills-before-detach.md` — closing a tab kills its window before detaching its viewer, producing a spurious
   "terminal input failed".
 - `pane-states-skips-markers-single-window.md` — `pane_states` skips tab markers when no session has two windows, hiding
