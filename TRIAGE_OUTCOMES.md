@@ -2369,7 +2369,11 @@
   an OSC 8 link shows its exact target and leaving hides it; clicking still opens directly with no `confirm()` or other
   prompt; a test covers the hover display for a link whose label differs from its target. Remove this feedback file and
   its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; SPEC.md states the rule; hovering an OSC 8 link shows its host and full target inside the
+  terminal element (middle-shortened past 300 characters), and click still opens directly. JS unit tests and the
+  terminal-links browser spec (Chromium and WebKit) cover it. PR
+  [#1158](https://github.com/scode/farhelm/pull/1158/changes), jj change `ytxkpzkk`, bookmark
+  `pr/terminal-link-target-on-hover`.
 
 ## token-prompt-invites-password-manager.md
 

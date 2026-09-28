@@ -944,6 +944,29 @@ samp {
 .header-copy:focus-visible .copy-glyph { display: inline; }
 .header-copy.copied { color: var(--fg-bright); }
 
+/* Where a hovered OSC 8 terminal link actually goes (terminal-links.js,
+   `showLinkTarget`). Lives inside the terminal's element but is fixed to the
+   viewport at the pointer, isolated so a target's own text cannot reorder
+   the display, and never wider than the window. The host sits on its own
+   first line and very long targets are shortened in the middle by the
+   script, so nothing that matters needs scrolling. */
+.terminal-link-target {
+  position: fixed;
+  z-index: 40;
+  box-sizing: border-box;
+  max-width: calc(100vw - 8px);
+  padding: 4px 6px;
+  background: var(--bg-2);
+  color: var(--fg-1);
+  box-shadow: var(--shadow-menu);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+  pointer-events: none;
+}
+.terminal-link-target strong { color: var(--fg-bright); }
+
 /* The hidden-characters warning after a header copy. It hangs below the
    titlebar (its positioning anchor) instead of living inside the copy
    button, whose text shrinks and ellipsizes in a crowded header: the

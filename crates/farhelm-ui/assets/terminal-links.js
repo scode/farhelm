@@ -106,7 +106,164 @@
     return true;
   }
 
-  const api = { openTerminalUrl, isPlainWebUrl };
+  /**
+   * The parts of an OSC 8 link target to show on hover, host flagged for
+   * emphasis.
+   *
+   * An OSC 8 hyperlink's underlined text is whatever the program printed and
+   * need not resemble its target, so hovering shows the target itself (see
+   * SPEC.md, Terminal experience); the click still opens directly, with no
+   * confirmation. The parts come from the PARSED URL rather than the raw
+   * string, so what is emphasized is the host a browser would actually
+   * contact: `https://github.com@evil.example/` shows `evil.example`, and an
+   * internationalized host shows its punycode form, which cannot pose as a
+   * lookalike of an ASCII name. A target that does not parse is shown whole
+   * and unemphasized.
+   *
+   * @param {string} uri
+   * @returns {{text: string, host: boolean}[]}
+   */
+  function linkTargetParts(uri) {
+    let parsed;
+    try {
+      parsed = new URL(uri);
+    } catch {
+      return [{ text: uri, host: false }];
+    }
+    if (!parsed.host) return [{ text: uri, host: false }];
+    // Either half of the userinfo keeps the `@` form, so a password-only
+    // target (`https://:secret@host/`) is shown exactly, not silently
+    // shortened.
+    const credentials =
+      parsed.username || parsed.password
+        ? `${parsed.username}${parsed.password ? `:${parsed.password}` : ''}@`
+        : '';
+    return [
+      { text: `${parsed.protocol}//${credentials}`, host: false },
+      { text: parsed.host, host: true },
+      { text: `${parsed.pathname}${parsed.search}${parsed.hash}`, host: false },
+    ];
+  }
+
+  /**
+   * The full target line: the URL's own serialization when it parses (so an
+   * empty trailing `?` or `#`, which the component getters drop, is still
+   * shown, and the host appears in the punycode form it is contacted by),
+   * else the raw string.
+   *
+   * @param {string} uri
+   * @returns {string}
+   */
+  function displayedTarget(uri) {
+    try {
+      return new URL(uri).href;
+    } catch {
+      return uri;
+    }
+  }
+
+  // Targets longer than this are shown shortened in the middle, with the
+  // number of omitted characters said out loud. The host is always shown in
+  // full on its own line, so what a click would contact is never the part
+  // that gets cut.
+  const TARGET_DISPLAY_LIMIT = 300;
+
+  /**
+   * The target text to show under the host line: the whole target when it
+   * is short, otherwise its start and end around an explicit marker naming
+   * how much was left out.
+   *
+   * @param {string} text
+   * @returns {string}
+   */
+  function shortenedTarget(text) {
+    if (text.length <= TARGET_DISPLAY_LIMIT) return text;
+    const keep = Math.floor((TARGET_DISPLAY_LIMIT - 20) / 2);
+    const omitted = text.length - 2 * keep;
+    return `${text.slice(0, keep)} …[${omitted} characters]… ${text.slice(-keep)}`;
+  }
+
+  /**
+   * Show `uri` (an OSC 8 link's target) near the pointer while it hovers the
+   * link. See `linkTargetParts` for what is shown and why.
+   *
+   * The display lives INSIDE `owner`, the hovered terminal's own root
+   * element: it is hidden or removed together with that terminal (tab
+   * switch, reconnect, restored snapshot, disposal) without any teardown
+   * hook, and one terminal's lifecycle can never touch another terminal's
+   * display. Built with `textContent` only, so program output never
+   * becomes markup. The first line is the host alone (or the whole target
+   * when it has no host); the second is the target, shortened in the middle
+   * when it is very long.
+   *
+   * @param {MouseEvent} event
+   * @param {string} uri
+   * @param {HTMLElement} owner
+   */
+  function showLinkTarget(event, uri, owner) {
+    let display = owner.querySelector(':scope > .terminal-link-target');
+    if (!display) {
+      display = document.createElement('div');
+      display.className = 'terminal-link-target';
+      display.setAttribute('role', 'tooltip');
+      display.dir = 'ltr';
+      owner.appendChild(display);
+    }
+    const parts = linkTargetParts(uri);
+    const hostPart = parts.find((part) => part.host);
+    const lines = [];
+    if (hostPart) {
+      const hostLine = document.createElement('div');
+      const strong = document.createElement('strong');
+      strong.textContent = hostPart.text;
+      hostLine.appendChild(strong);
+      lines.push(hostLine);
+    }
+    const targetLine = document.createElement('div');
+    targetLine.className = 'terminal-link-target-url';
+    targetLine.textContent = shortenedTarget(displayedTarget(uri));
+    lines.push(targetLine);
+    display.replaceChildren(...lines);
+    // Place it below-right of the pointer, then pull it back inside the
+    // viewport: a link on the last rows or near the right edge would
+    // otherwise put the target where the page cannot scroll to it. Flips
+    // above the pointer when there is no room below.
+    display.hidden = false;
+    display.style.left = '0px';
+    display.style.top = '0px';
+    const box = display.getBoundingClientRect();
+    const margin = 4;
+    let left = event.clientX + 12;
+    let top = event.clientY + 16;
+    if (left + box.width > window.innerWidth - margin) {
+      left = window.innerWidth - margin - box.width;
+    }
+    if (top + box.height > window.innerHeight - margin) {
+      top = event.clientY - 8 - box.height;
+    }
+    display.style.left = `${Math.max(margin, left)}px`;
+    display.style.top = `${Math.max(margin, top)}px`;
+  }
+
+  /**
+   * Hide `owner`'s hover display when the pointer leaves the link.
+   *
+   * @param {HTMLElement} owner
+   */
+  function hideLinkTarget(owner) {
+    const display = owner.querySelector(':scope > .terminal-link-target');
+    if (display) display.hidden = true;
+  }
+
+  const api = {
+    openTerminalUrl,
+    isPlainWebUrl,
+    linkTargetParts,
+    shortenedTarget,
+    displayedTarget,
+    showLinkTarget,
+    hideLinkTarget,
+  };
   if (typeof window !== 'undefined') window.farhelmTerminalLinks = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();
