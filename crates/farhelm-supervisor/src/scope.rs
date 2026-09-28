@@ -293,6 +293,9 @@ enum Mode {
         exists_calls: std::sync::Mutex<std::collections::HashMap<String, usize>>,
         matching_units: Vec<String>,
         sink: ScopeOpSink,
+        /// When set, each probe waits for a permit before answering, so a
+        /// test can hold a probe in flight and cancel its caller there.
+        probe_gate: Option<Arc<tokio::sync::Semaphore>>,
     },
 }
 
@@ -351,7 +354,10 @@ struct Tools {
 /// live user session is not a failure mode this tool needs to be robust to.
 pub struct ScopeManager {
     mode: Mode,
-    verdict: tokio::sync::Mutex<Verdict>,
+    /// A synchronous mutex because every critical section is await-free, and
+    /// because [`ProbeRollback`] must restore the verdict from `Drop`, where
+    /// an async lock cannot be awaited.
+    verdict: std::sync::Mutex<Verdict>,
     verdict_changed: tokio::sync::Notify,
 }
 
@@ -366,6 +372,47 @@ enum Verdict {
     Probing,
     Usable(Option<Arc<Tools>>),
     Unusable { reprobed: bool },
+}
+
+/// Owner of a published `Probing` verdict until the probe's answer replaces
+/// it.
+///
+/// Either [`Self::publish`] installs the probe's answer, or dropping the
+/// guard (the probing future was cancelled) restores the verdict that was
+/// there before. Both wake every caller parked on `Probing`, so no outcome
+/// of the probe can leave them waiting forever. A cancelled re-probe
+/// restores the un-spent negative, so the next caller with durable
+/// evidence may still re-probe.
+struct ProbeRollback<'a> {
+    manager: &'a ScopeManager,
+    previous: Option<Verdict>,
+}
+
+impl ProbeRollback<'_> {
+    /// Install the probe's verdict and release the waiters.
+    fn publish(mut self, verdict: Verdict) {
+        self.previous = None;
+        self.replace(verdict);
+    }
+
+    fn replace(&self, verdict: Verdict) {
+        // Poison is tolerated here because this also runs from `Drop`,
+        // possibly while unwinding, where a second panic would abort.
+        *self
+            .manager
+            .verdict
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = verdict;
+        self.manager.verdict_changed.notify_waiters();
+    }
+}
+
+impl Drop for ProbeRollback<'_> {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            self.replace(previous);
+        }
+    }
 }
 
 impl std::fmt::Debug for ScopeManager {
@@ -386,7 +433,7 @@ impl ScopeManager {
     pub fn systemd() -> ScopeManager {
         ScopeManager {
             mode: Mode::Systemd,
-            verdict: tokio::sync::Mutex::new(Verdict::Unprobed),
+            verdict: std::sync::Mutex::new(Verdict::Unprobed),
             verdict_changed: tokio::sync::Notify::new(),
         }
     }
@@ -396,7 +443,7 @@ impl ScopeManager {
     pub fn disabled() -> ScopeManager {
         ScopeManager {
             mode: Mode::Disabled,
-            verdict: tokio::sync::Mutex::new(Verdict::Unprobed),
+            verdict: std::sync::Mutex::new(Verdict::Unprobed),
             verdict_changed: tokio::sync::Notify::new(),
         }
     }
@@ -448,6 +495,21 @@ impl ScopeManager {
             matching_units,
             sink,
         )
+    }
+
+    /// A fake whose probes each wait for one permit from `gate` before
+    /// answering from `probe_answers`.
+    #[cfg(test)]
+    pub(crate) fn fake_with_probe_gate(
+        probe_answers: Vec<bool>,
+        gate: Arc<tokio::sync::Semaphore>,
+        sink: ScopeOpSink,
+    ) -> ScopeManager {
+        let mut manager = ScopeManager::fake_with(probe_answers, false, None, Vec::new(), sink);
+        if let Mode::Fake { probe_gate, .. } = &mut manager.mode {
+            *probe_gate = Some(gate);
+        }
+        manager
     }
 
     /// A fake manager that lists `matching_units` for every requested glob.
@@ -560,8 +622,9 @@ impl ScopeManager {
                 exists_calls: std::sync::Mutex::new(std::collections::HashMap::new()),
                 matching_units,
                 sink,
+                probe_gate: None,
             },
-            verdict: tokio::sync::Mutex::new(Verdict::Unprobed),
+            verdict: std::sync::Mutex::new(Verdict::Unprobed),
             verdict_changed: tokio::sync::Notify::new(),
         }
     }
@@ -612,7 +675,7 @@ impl ScopeManager {
             // has no stored permit and could fire in the gap before await.
             notified.as_mut().enable();
             let should_probe = {
-                let mut verdict = self.verdict.lock().await;
+                let mut verdict = self.verdict.lock().expect("scope verdict mutex poisoned");
                 match &*verdict {
                     Verdict::Usable(tools) => return tools.clone(),
                     Verdict::Unusable { reprobed } if !allow_reprobe || *reprobed => return None,
@@ -632,17 +695,26 @@ impl ScopeManager {
                 notified.set(self.verdict_changed.notified());
                 continue;
             };
+            // `Probing` is now published, and the probe below can take many
+            // seconds. If this future is dropped mid-probe (a caller running on
+            // an aborted connection task), the rollback puts the previous
+            // verdict back and wakes the waiters; without it `Probing` would
+            // stay forever and every later scope operation would park on it.
+            let rollback = ProbeRollback {
+                manager: self,
+                previous: Some(if reprobed {
+                    Verdict::Unusable { reprobed: false }
+                } else {
+                    Verdict::Unprobed
+                }),
+            };
             let tools = self.probe().await;
             let available = tools.is_some();
-            {
-                let mut verdict = self.verdict.lock().await;
-                *verdict = if available {
-                    Verdict::Usable(tools)
-                } else {
-                    Verdict::Unusable { reprobed }
-                };
-            }
-            self.verdict_changed.notify_waiters();
+            rollback.publish(if available {
+                Verdict::Usable(tools)
+            } else {
+                Verdict::Unusable { reprobed }
+            });
         }
     }
 
@@ -655,9 +727,16 @@ impl ScopeManager {
                 probe_answers,
                 available,
                 sink,
+                probe_gate,
                 ..
             } => {
                 sink(&ScopeOp::Probe);
+                if let Some(gate) = probe_gate {
+                    gate.acquire()
+                        .await
+                        .expect("the probe gate is never closed")
+                        .forget();
+                }
                 let answer = probe_answers.lock().unwrap().pop_front().unwrap_or(false);
                 available.store(answer, std::sync::atomic::Ordering::SeqCst);
                 answer.then(|| {
@@ -1444,6 +1523,55 @@ mod tests {
         assert!(scopes.available().await);
         assert!(scopes.available().await);
         assert_eq!(*ops.lock().unwrap(), vec![ScopeOp::Probe]);
+    }
+
+    /// A probe whose caller is cancelled mid-probe does not leave the
+    /// verdict stuck: the next caller probes again and gets an answer.
+    ///
+    /// Why it matters: the probe publishes `Probing` and can take seconds,
+    /// and restart's reap runs on a connection task that is aborted when the
+    /// client goes away. A cancelled probe that left `Probing` in place parked
+    /// every later stop, delete, restart and scoped create forever. Spec: the
+    /// previous verdict is restored and waiters are woken.
+    #[farhelm_testtrace::test]
+    async fn a_cancelled_probe_restores_the_verdict_for_the_next_caller() {
+        let probes = Arc::new(tokio::sync::Notify::new());
+        let sink = {
+            let probes = Arc::clone(&probes);
+            Arc::new(move |op: &ScopeOp| {
+                if matches!(op, ScopeOp::Probe) {
+                    probes.notify_one();
+                }
+            }) as ScopeOpSink
+        };
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let scopes = Arc::new(ScopeManager::fake_with_probe_gate(
+            vec![true, true],
+            Arc::clone(&gate),
+            sink,
+        ));
+
+        let owner = tokio::spawn({
+            let scopes = Arc::clone(&scopes);
+            async move { scopes.available().await }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), probes.notified())
+            .await
+            .expect("fixture premise: the first caller owns an in-flight probe");
+        owner.abort();
+        assert!(
+            owner
+                .await
+                .expect_err("the owner was aborted")
+                .is_cancelled(),
+            "fixture premise: the probe owner was cancelled, not finished"
+        );
+
+        gate.add_permits(1);
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(5), scopes.available())
+            .await
+            .expect("a caller after a cancelled probe must not wait forever");
+        assert!(answer, "the next caller probes again and gets the answer");
     }
 
     /// A negative verdict is normally final, but durable teardown evidence

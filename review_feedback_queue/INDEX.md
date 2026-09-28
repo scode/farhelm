@@ -69,8 +69,6 @@ One line per open item. This file must always match the feedback files in this d
 - `unvalidated-state-dir-on-probe.md` — probed registration with a bad state-dir path permanently bricks the entry.
 - `tab-close-skips-scope-on-stale-verdict.md` — tab close skips the tab's cgroup whenever the cached manager verdict is
   negative, contrary to its docs.
-- `cancelled-scope-probe-wedges-verdict.md` — a cancelled systemd probe leaves the verdict stuck at Probing, hanging
-  every later lifecycle operation.
 - `restart-sweep-on-abortable-connection-task.md` — restart's stop-and-sweep runs on a connection task that a client
   disconnect aborts mid-kill.
 - `sigkill-misses-stopped-dropouts.md` — a process SIGSTOPped but missing from the sweep's final enumeration is left
