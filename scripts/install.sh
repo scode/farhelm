@@ -346,8 +346,17 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
       exit 1
     fi
 
-    esm_type_lines=$(tar tvzf "$esm_archive" -- "$esm_member" 2>/dev/null)
-    esm_type_count=$(printf '%s\n' "$esm_type_lines" | grep -c .)
+    # Each substitution below has its own failure path. The script runs
+    # under `set -e`, so an assignment whose command fails would otherwise
+    # end the run right here, silently (tar's own error is discarded), before
+    # any of this function's named refusals could print. `grep -c` exits 1
+    # when it counts zero lines, so `|| true` keeps its "0" for the check
+    # below instead of ending the run.
+    esm_type_lines=$(tar tvzf "$esm_archive" -- "$esm_member" 2>/dev/null) || {
+      printf '%s: tar could not list %s in the archive; refusing\n' "$esm_label" "$esm_member" >&2
+      exit 1
+    }
+    esm_type_count=$(printf '%s\n' "$esm_type_lines" | grep -c . || true)
     if [ "$esm_type_count" -ne 1 ]; then
       printf '%s: %s reports %s metadata records for %s, expected exactly 1\n' "$esm_label" "tar tv" "$esm_type_count" "$esm_member" >&2
       exit 1

@@ -1263,6 +1263,31 @@ check "non-regular member exits 1" [ "$RC" -ne 0 ]
 check "non-regular member names the problem" contains "$ERR" "is not a regular file"
 
 # ===========================================================================
+# Scenario: tar lists the member by name but cannot produce its verbose
+# (type) listing. The installer runs under `set -e`, and that listing's
+# failure used to end the run right at the assignment, silently (tar's error
+# is discarded), before the extraction step's named refusals could print. A
+# `tar` shim fails only the verbose listing; every other use goes to the real
+# one.
+# ===========================================================================
+echo
+echo "== tar cannot list the member's type =="
+TVFAIL_TOOLS="$WORKDIR/toolchain-tvfail"
+mkdir -p "$TVFAIL_TOOLS"
+cp -a "$TOOLCHAIN_FULL"/. "$TVFAIL_TOOLS/"
+REAL_TAR=$(command -v tar)
+rm -f "$TVFAIL_TOOLS/tar"
+# shellcheck disable=SC2016 # $1 and $@ belong to the generated shim, not here
+printf '#!/bin/sh\ncase "$1" in\n  tvzf) exit 2 ;;\nesac\nexec %s "$@"\n' "$REAL_TAR" \
+  >"$TVFAIL_TOOLS/tar"
+chmod 755 "$TVFAIL_TOOLS/tar"
+HOMETVFAIL="$WORKDIR/hometvfail"
+mkdir -p "$HOMETVFAIL"
+run_install "$TVFAIL_TOOLS" "$HOMETVFAIL" "$HOMETVFAIL/.local/bin" "$BASE/good" 1.2.3
+check "tv-listing failure exits 1" [ "$RC" -ne 0 ]
+check "tv-listing failure is explained, not silent" contains "$ERR" "could not list"
+
+# ===========================================================================
 # Scenario: version normalization, including the -rc.N and -dev.N prereleases
 # (D15). Both suffixes go through the same pattern, so both are driven here:
 # a pattern edit that kept one and dropped the other would otherwise only

@@ -326,8 +326,6 @@ One line per open item. This file must always match the feedback files in this d
   containing a directory named target.
 - `relative-install-dir-installs-under-cwd.md` — a relative or quoted-~ FARHELM_INSTALL_DIR installs under the current
   directory with misleading messages.
-- `installer-extract-exits-silently.md` — extract_sole_member exits silently under set -e instead of printing its
-  refusal.
 - `hook-log-truncation-erases-concurrent-line.md` — hook-log truncation races a concurrent append and can erase another
   hook's line.
 - `grok-double-null-field-refused.md` — a Grok callback with both spellings of an optional field set to null is refused
