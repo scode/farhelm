@@ -336,8 +336,6 @@ One line per open item. This file must always match the feedback files in this d
   sidebar keeps deleted/stale rows.
 - `desktop-copy-fallback-never-runs.md` — the native clipboard writer never rejects, so the header copy fallback never
   runs and failures show "copied".
-- `seen-queue-drops-manual-report.md` — the seen-state write queue drops the newer caller's report when the same value
-  is re-queued.
 - `tab-close-errors-linger.md` — tab-close errors for tabs that have since disappeared stay on screen for the view's
   life.
 - `window-maximize-fence-never-clears.md` — if the window manager ignores the restored maximize, window geometry is
