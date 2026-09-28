@@ -489,6 +489,16 @@ impl DesktopBootstrap {
                 }
             })
             .context("starting embedded helm monitor")?;
+        // Every `?` below drops `shutdown_tx`, which stops the embedded helm
+        // cleanly, and the monitor above would then refuse with "embedded
+        // helm stopped unexpectedly", racing the real startup error through
+        // the same refusal path (on macOS, two native alerts, or the wrong
+        // one). Until startup succeeds and `Drop for DesktopBootstrap` takes
+        // over, this guard marks that shutdown as expected. It is declared
+        // after `shutdown_tx`, so it drops first and the flag is set before
+        // the helm can observe the dropped sender.
+        let mut startup_failure =
+            ExpectHelmShutdownUnlessDisarmed(Some(Arc::clone(&expected_helm_shutdown)));
         let base = format!("http://{addr}");
 
         let state_path = state_dir.join(APP_STATE_FILE);
@@ -526,6 +536,7 @@ impl DesktopBootstrap {
             persisted_secret: persisted.webview_device_secret,
             smoke_client_log_marker: std::env::var("FARHELM_SMOKE_CLIENT_LOG_MARKER").ok(),
         };
+        startup_failure.disarm();
         Ok(Self {
             webview,
             state_dir: window_state_dir,
@@ -547,6 +558,27 @@ impl DesktopBootstrap {
     /// appears in the URL or rendered markup.
     pub fn webview_bootstrap(&self) -> WebviewBootstrap {
         self.webview.clone()
+    }
+}
+
+/// Marks the embedded helm's shutdown as expected when dropped, unless
+/// disarmed: armed across the fallible tail of [`DesktopBootstrap::start`],
+/// where an early return stops the helm on purpose and its monitor must not
+/// report that as the helm dying.
+struct ExpectHelmShutdownUnlessDisarmed(Option<Arc<AtomicBool>>);
+
+impl ExpectHelmShutdownUnlessDisarmed {
+    /// Startup succeeded; the returned bootstrap's own `Drop` owns the flag.
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for ExpectHelmShutdownUnlessDisarmed {
+    fn drop(&mut self) {
+        if let Some(expected) = self.0.take() {
+            expected.store(true, Ordering::Release);
+        }
     }
 }
 
@@ -1366,6 +1398,36 @@ mod tests {
             Err("fixture cancelled")
         );
         assert_eq!(peer.read(&mut [0; 1]).unwrap(), 0);
+    }
+
+    /// The startup guard marks the embedded helm's shutdown as expected when
+    /// startup fails, and leaves it alone once startup succeeds.
+    ///
+    /// Why: a startup error after the helm is ready stops the helm on purpose,
+    /// and without the flag the helm's monitor refused with "embedded helm
+    /// stopped unexpectedly", racing the real error (on macOS, a second or
+    /// wrong native alert). Spec: dropping the armed guard sets the flag;
+    /// dropping a disarmed one does not, so the bootstrap's own `Drop` stays
+    /// the only thing that expects a shutdown after success.
+    #[farhelm_testtrace::test]
+    fn the_startup_guard_expects_the_helm_shutdown_only_on_failure() {
+        let expected = Arc::new(AtomicBool::new(false));
+        drop(ExpectHelmShutdownUnlessDisarmed(Some(Arc::clone(
+            &expected,
+        ))));
+        assert!(
+            expected.load(Ordering::Acquire),
+            "a failed startup expects the shutdown"
+        );
+
+        let expected = Arc::new(AtomicBool::new(false));
+        let mut guard = ExpectHelmShutdownUnlessDisarmed(Some(Arc::clone(&expected)));
+        guard.disarm();
+        drop(guard);
+        assert!(
+            !expected.load(Ordering::Acquire),
+            "a successful startup leaves it alone"
+        );
     }
 
     /// EOF and an overlarge header cannot earn the success response used by the proxy test.
