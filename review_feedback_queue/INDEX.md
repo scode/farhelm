@@ -185,8 +185,6 @@ One line per open item. This file must always match the feedback files in this d
   with no retry until relaunch.
 - `session-view-leaks-page-lock.md` — the session view's restart/replace claim is not released on unmount, leaving every
   page action disabled until reload.
-- `header-replace-prompt-omits-kill-warning.md` — the header Replace confirmation never says a running agent and its
-  tabs will be killed.
 - `row-menu-drifts-on-row-height-change.md` — an open row menu can float over a different row when a row above gains a
   detail line at the same index.
 - `uploads-aborted-silently-on-remount.md` — terminal reconnect or restart remount silently aborts in-flight uploads
