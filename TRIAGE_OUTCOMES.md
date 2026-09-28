@@ -2300,7 +2300,11 @@
   the warning appears only for values with escaped characters; a test covers a bidi override and a newline in the
   invocation (escaped display, raw copy, warning shown). Remove this feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the header's title, folder and command render through `display_peer` in a direction-isolated
+  `.peer-value`; copies stay raw, and copying a value with presentation-unsafe characters shows a warning anchored below
+  the titlebar. The new Playwright case in e2e/tests/header.spec.ts passed on Chromium and WebKit. PR
+  [#1155](https://github.com/scode/farhelm/pull/1155/changes), jj change `pporvtoz`, bookmark
+  `pr/session-header-escapes-peer-text`.
 
 ## titles-raw-in-confirm-prompts.md
 

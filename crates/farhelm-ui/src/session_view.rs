@@ -1690,7 +1690,14 @@ pub(crate) fn SessionView(
                     // (`StatusBadgeView`'s own doc).
                     StatusBadgeView { badge, dot_onclick: |_| {}, dot_title: None }
                 }
-                span { class: "title", title: "{shown_title}", "{shown_title}" }
+                // Peer text: the title, directory and command come from the
+                // session's host and from agents, so each is escaped and
+                // direction-isolated like every other peer value (see
+                // `peer.rs`), tooltips included. Native tooltips cannot be
+                // isolated, so escaping is what keeps them honest there.
+                span { class: "title", title: "{display_peer(&shown_title)}",
+                    span { class: "peer-value", dir: "ltr", "{display_peer(&shown_title)}" }
+                }
                 // Its own `if`, not nested under the badge's: see
                 // `activity_destination` for why an absent badge must not
                 // take the age with it.
@@ -1704,16 +1711,44 @@ pub(crate) fn SessionView(
                 button {
                     r#type: "button",
                     class: if copied_directory().is_some() { "header-copy copied" } else { "header-copy" },
-                    title: "{shown.cwd} — click to copy",
+                    title: "{display_peer(&shown.cwd)} — click to copy",
+                    // The clipboard gets the raw bytes (a copy that differed
+                    // from the value would be useless); the feedback says
+                    // when those bytes hold characters the display escaped.
                     onclick: { let cwd = shown.cwd.clone(); move |_| copy_value(cwd.clone(), copied_directory) },
-                    if copied_directory().is_some() { "✓ copied" } else { span { class: "copy-glyph", "📋" } } "{shown.cwd}"
+                    // The short feedback replaces the value while it shows;
+                    // a hidden-characters warning does NOT live in here,
+                    // because this button shrinks and clips in a crowded
+                    // header. See `.copy-warning` below.
+                    if copied_directory().is_some() {
+                        span { class: "copy-feedback", "✓ copied" }
+                    } else {
+                        span { class: "copy-glyph", "📋" }
+                        span { class: "peer-value", dir: "ltr", "{display_peer(&shown.cwd)}" }
+                    }
                 }
                 button {
                     r#type: "button",
                     class: if copied_command().is_some() { "header-copy copied" } else { "header-copy" },
-                    title: "{shown.invocation} — click to copy",
+                    title: "{display_peer(&shown.invocation)} — click to copy",
                     onclick: { let invocation = shown.invocation.clone(); move |_| copy_value(invocation.clone(), copied_command) },
-                    if copied_command().is_some() { "✓ copied" } else { span { class: "copy-glyph", "📋" } } "{shown.invocation}"
+                    if copied_command().is_some() {
+                        span { class: "copy-feedback", "✓ copied" }
+                    } else {
+                        span { class: "copy-glyph", "📋" }
+                        span { class: "peer-value", dir: "ltr", "{display_peer(&shown.invocation)}" }
+                    }
+                }
+                // The warning floats below the header, anchored to the
+                // titlebar rather than inside the copy button, so no amount
+                // of crowding can clip it: the clipboard now holds bytes the
+                // label did not show, and that is the one thing this copy
+                // must not leave unsaid.
+                if let Some(warning) = copied_directory()
+                    .and(copy_warning("folder", &shown.cwd))
+                    .or(copied_command().and(copy_warning("command", &shown.invocation)))
+                {
+                    div { class: "copy-warning", role: "status", "{warning}" }
                 }
                 div { class: "titlebar-actions",
                     // SPEC.md: "Opening an interrupted session offers
@@ -2487,9 +2522,49 @@ fn restart_button_label(offer: RestartOffer) -> &'static str {
     }
 }
 
+/// The warning a header copy shows after copying `value`, when there is one.
+///
+/// The copy is always the raw value, so when it contains characters the
+/// header shows escaped (`<U+202E>`, a newline), the clipboard does not hold
+/// what the label reads like, and a command pasted into a shell runs the
+/// clipboard's version. A command can legitimately contain a newline, so this
+/// warns rather than refusing. `what` names the field ("command", "folder").
+fn copy_warning(what: &str, value: &str) -> Option<String> {
+    value
+        .chars()
+        .any(farhelm_proto::text::is_presentation_unsafe)
+        .then(|| format!("⚠ the copied {what} contains hidden characters, shown above as <U+…>"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Why this matters: the header's command tooltip is the only full view
+    /// of a long command, and its copy button is how people take it to a
+    /// shell. A right-to-left override or a newline from a host or agent
+    /// could make the shown command read differently from the copied bytes.
+    /// Spec: the shown value escapes both (so the display is honest), and
+    /// the copy feedback warns that the copied value contains hidden
+    /// characters; a plain value gets the plain feedback.
+    #[farhelm_testtrace::test]
+    fn header_peer_text_is_escaped_and_the_copy_warns_about_hidden_characters() {
+        let spoofed = "ls \u{202E}fdp.exe\nrm -rf ~";
+        let shown = display_peer(spoofed);
+        assert!(
+            shown.contains("<U+202E>") && shown.contains("<U+000A>"),
+            "{shown}"
+        );
+        assert!(
+            !shown.contains('\u{202E}') && !shown.contains('\n'),
+            "{shown}"
+        );
+        assert_eq!(
+            copy_warning("command", spoofed).as_deref(),
+            Some("⚠ the copied command contains hidden characters, shown above as <U+…>")
+        );
+        assert_eq!(copy_warning("command", "claude --resume"), None);
+    }
 
     /// Restart-with needs both saved structured settings and a captured
     /// conversation; the disabled explanation must identify which fact is

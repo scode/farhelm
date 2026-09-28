@@ -943,6 +943,27 @@ samp {
 .header-copy:hover .copy-glyph,
 .header-copy:focus-visible .copy-glyph { display: inline; }
 .header-copy.copied { color: var(--fg-bright); }
+
+/* The hidden-characters warning after a header copy. It hangs below the
+   titlebar (its positioning anchor) instead of living inside the copy
+   button, whose text shrinks and ellipsizes in a crowded header: the
+   warning is the one message a copy must never lose, so it wraps rather
+   than clipping and is capped only by the viewport. */
+.titlebar { position: relative; }
+.copy-warning {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 10px;
+  z-index: 30;
+  max-width: min(60ch, 80vw);
+  white-space: normal;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  color: var(--fg-bright);
+  box-shadow: var(--shadow-menu);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+}
 .header-replace-anchor { position: relative; display: inline-flex; }
 
 /* The session's status, in the header rather than in a band of its own —

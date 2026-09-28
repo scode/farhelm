@@ -294,3 +294,82 @@ test("header actions stay ordered, copy full values, and open the right flows", 
     await cleanupSession(request, session.id);
   }
 });
+
+/**
+ * Why this matters: the header's command tooltip is the only full view of a
+ * long command, and its copy button is how people take it to a shell. A host
+ * or agent can put a direction override or a newline in the command, so the
+ * shown text could read differently from the bytes copied. Spec: the header
+ * shows the command escaped (`<U+202E>`, `<U+000A>`) in a direction-isolated
+ * element and in its tooltip, the clipboard receives the exact raw bytes,
+ * and after copying the button shows a readable hidden-characters warning;
+ * an ordinary value keeps the ordinary feedback.
+ */
+test("header copy shows escaped peer text, copies raw bytes, and warns", async ({
+  page,
+  request,
+}) => {
+  const cwd = "/tmp";
+  // Everything after `#` is a shell comment on both lines, so the agent
+  // still starts normally.
+  const invocation = `${FAKE_AGENT_INVOCATION} # \u202Eabc\n# tail`;
+  // A long title and a narrow window crowd the header so the copy buttons
+  // shrink, which is the condition that used to clip an in-button warning.
+  await page.setViewportSize({ width: 900, height: 700 });
+  const session = await createSession(request, {
+    title: `header-peer-${Date.now()}-${"x".repeat(120)}`,
+    cwd,
+    invocation,
+  });
+  try {
+    await page.goto("/");
+    const sessionRow = row(page, session.id);
+    await expect(sessionRow).toBeVisible();
+    await sessionRow.locator(".session-row-open").click();
+    await waitForSessionRevealed(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+
+    const command = page.locator(".titlebar .header-copy").nth(1);
+    const shown = command.locator(".peer-value");
+    await expect(shown).toHaveAttribute("dir", "ltr");
+    await expect(shown).toContainText("<U+202E>abc<U+000A># tail");
+    expect(await shown.textContent(), "no raw override reaches the page").not.toContain("\u202E");
+    await expect(command).toHaveAttribute("title", /<U\+202E>abc<U\+000A># tail — click to copy$/);
+    expect(
+      await command.evaluate((el) => el.scrollWidth > el.clientWidth),
+      "premise: the crowded header has shrunk the command button",
+    ).toBe(true);
+
+    await page.evaluate(() => {
+      (window as any).__headerCopies = [];
+      (window as any).__farhelmNativeClipboardWrite = (value: string) => {
+        (window as any).__headerCopies.push(value);
+      };
+    });
+    await command.click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__headerCopies), {
+        message: "the clipboard gets the exact raw command",
+      })
+      .toEqual([invocation]);
+    const warning = page.locator(".titlebar .copy-warning");
+    await expect(warning).toHaveText(
+      "⚠ the copied command contains hidden characters, shown above as <U+…>",
+    );
+    // Readable, not merely present: nothing clips it and it lies inside the
+    // viewport even in the crowded header this test sets up.
+    const box = await warning.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box && viewport && box.x >= 0 && box.x + box.width <= viewport.width).toBe(true);
+    expect(await warning.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+    // An ordinary value gets the ordinary feedback and no warning.
+    await page.locator(".titlebar .header-copy").nth(0).click();
+    await expect(page.locator(".titlebar .header-copy").nth(0).locator(".copy-feedback")).toHaveText(
+      "✓ copied",
+    );
+    await expect(warning).toHaveCount(0);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
