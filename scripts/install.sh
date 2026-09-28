@@ -394,6 +394,33 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     fi
   }
 
+  # Prints the SHA-256 the executable-directory ownership record says this
+  # installer last wrote for binary $1 ("farhelm" or "farhelm-desktop"), or
+  # nothing when there is no usable record or it names no digest for that
+  # binary. The record is NUL-separated (magic, canonical directory, CLI
+  # digest, desktop digest, then a final NUL). The digests are read from the
+  # END: the directory field may legally contain newlines, so counting
+  # forward after `tr` would misalign on such a path, while the two digests
+  # never do. A symlinked or non-regular record is treated as absent, the
+  # same stance publish_installation_record takes toward writing one.
+  recorded_digest_of() {
+    rdo_record="$INSTALL_DIR/.farhelm-installation"
+    if [ -L "$rdo_record" ] || [ ! -f "$rdo_record" ]; then
+      return 0
+    fi
+    rdo_magic=$(tr '\000' '\n' <"$rdo_record" | head -n 1) || return 0
+    [ "$rdo_magic" = farhelm-standalone ] || return 0
+    # The last line is the desktop digest (possibly empty), the one before
+    # it the CLI digest.
+    case "$1" in
+      farhelm) rdo_back=1 ;;
+      farhelm-desktop) rdo_back=0 ;;
+      *) return 0 ;;
+    esac
+    tr '\000' '\n' <"$rdo_record" | awk -v back="$rdo_back" '{ line[NR] = $0 } END { if (NR > back) print line[NR - back] }'
+    return 0
+  }
+
   # True iff DIR has one of the only three shapes this script's own lock
   # ever takes: empty (the brief window right after `mkdir` but before the
   # pid file is written), just "pid", or "pid" plus the recovery "journal"
@@ -1109,6 +1136,44 @@ EOF
       refuse_unless_absent_or_regular "$INSTALL_DIR/$name"
     done
 
+    # Only a destination the ownership record vouches for (its SHA-256 is the
+    # one this installer last wrote) is the installer's to replace outright.
+    # Anything else keeps its bytes under a visible name: a file of the user's
+    # own that happens to be called farhelm, or a Farhelm installed before the
+    # record existed (#673), which then leaves one harmless copy behind.
+    #
+    # A HARD LINK, made before the transaction below touches anything, rather
+    # than a rename: the journaled park/install loop and its rollback stay
+    # exactly as they are, and there is no crash point that loses the file.
+    # A rename after commit would have one: a crash between removing the
+    # journal and that rename strands the file at .NAME.old, which the next
+    # run deletes as committed debris. With the link, the file is reachable
+    # under the kept name from the moment the link exists, whatever happens
+    # next (after a rollback it is simply reachable under both names).
+    KEPT_NOTES=""
+    kept_stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    for name in $binaries; do
+      dest="$INSTALL_DIR/$name"
+      [ -e "$dest" ] || continue
+      # Only a successful match proves ownership. A file this run cannot
+      # even read (mode 000, say) proves nothing, so it takes the keep path
+      # like any other unvouched-for file rather than aborting the install.
+      recorded_sha=$(recorded_digest_of "$name")
+      if [ -n "$recorded_sha" ] && existing_sha=$(sha256_of "$dest" 2>/dev/null) \
+        && [ "$existing_sha" = "$recorded_sha" ]; then
+        continue
+      fi
+      kept="$INSTALL_DIR/$name.replaced-$kept_stamp"
+      if [ -e "$kept" ] || [ -L "$kept" ]; then
+        kept="$kept-$$"
+      fi
+      if ! ln "$dest" "$kept"; then
+        printf 'could not keep a copy of the existing %s as %s; move it aside and re-run the installer\n' "$dest" "$kept" >&2
+        exit 1
+      fi
+      KEPT_NOTES="${KEPT_NOTES}The existing $dest was not one this installer recorded installing, so it was kept as $kept.$NEWLINE"
+    done
+
     replaced_something=0
 
     for name in $binaries; do
@@ -1317,6 +1382,9 @@ PLIST_EOF
       else
         printf 'Installed farhelm %s to %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
       fi
+    fi
+    if [ -n "$KEPT_NOTES" ]; then
+      printf '%s' "$KEPT_NOTES"
     fi
     if [ -n "$BUNDLE_NOTE" ]; then
       printf '%s\n' "$BUNDLE_NOTE"

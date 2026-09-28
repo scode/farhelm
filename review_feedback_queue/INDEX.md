@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `installer-overwrites-user-farhelm-file.md` — install.sh replaces and deletes any existing regular file named
-  farhelm/farhelm-desktop without an ownership check.
 - `installer-deletes-farhelm-app-on-grep.md` — install.sh rm -rf's any ~/Applications/Farhelm.app whose Info.plist
   mentions farhelm, ignoring its own receipt.
 - `installer-mirror-var-drops-https-no-signature.md` — install.sh honours the helm's FARHELM_RELEASE_BASE_URL, dropping

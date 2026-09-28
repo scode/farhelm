@@ -33,6 +33,12 @@ release; `FARHELM_VERSION` selects a specific version, including a prerelease. T
 preserve user data, but already-running processes need restarting to use the new executables. Quit the desktop app
 before updating and relaunch it afterward. Follow the installer's restart guidance for services and other processes.
 
+The installer only replaces a `farhelm` (or, on macOS, `farhelm-desktop`) in the install directory when its checksum
+matches the executable-directory record below, meaning it is the file the installer itself last put there. Any other
+file with that name, such as a wrapper script of your own or a Farhelm installed before these records existed, is kept
+under a visible name like `farhelm.replaced-20260928T221500Z` in the same directory, and the installer's closing message
+names it. Delete the kept copy once you no longer need it.
+
 Older releases without app-bundle resources install the executables but leave any existing app bundle unchanged. After
 selecting such a release, launching that existing app can therefore still run its previous version. The app-bundle
 opt-out also leaves an existing bundle unchanged.

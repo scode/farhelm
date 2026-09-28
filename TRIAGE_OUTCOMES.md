@@ -2011,7 +2011,11 @@
   installed executable, preserving the journaled rollback guarantees; `scripts/test-install-sh.sh` covers a recorded
   update (no leftover), a foreign file (kept and reported), and a pre-record install (kept and reported). Remove this
   feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; install.sh replaces an existing `farhelm`/`farhelm-desktop` only when its checksum matches the
+  ownership record; anything else is hard-linked to `NAME.replaced-<UTC stamp>` before the transaction and named in the
+  closing message, and a failed link refuses. SPEC.md and docs/install_uninstall.md describe it; test-install-sh.sh
+  cases K1-K5 cover it. PR [#1144](https://github.com/scode/farhelm/pull/1144/changes), jj change `mwuvtsso`, bookmark
+  `pr/installer-keeps-foreign-farhelm`.
 
 ## installer-deletes-farhelm-app-on-grep.md
 
