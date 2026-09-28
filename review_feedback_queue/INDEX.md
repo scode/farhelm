@@ -167,8 +167,6 @@ One line per open item. This file must always match the feedback files in this d
   symlink with a regular file.
 - `embedded-payload-cleanup-blocks-helm-start.md` — a failure deleting the retired embedded-payloads cache aborts helm
   startup.
-- `installer-lock-flag-rolls-back-other-install.md` — install.sh keeps LOCK_ACQUIRED=1 after releasing the lock, so its
-  exit handler can roll back a concurrent installer's live transaction.
 - `installer-stale-lock-recovery-not-exclusive.md` — two installers recovering the same stale lock can both replay the
   journal, deleting the restored binary.
 - `installer-bundle-swap-unlocked.md` — the app-bundle step runs after the lock is released with rm -rf then mv, so
