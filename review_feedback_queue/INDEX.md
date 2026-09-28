@@ -280,8 +280,6 @@ One line per open item. This file must always match the feedback files in this d
   actor out of sync until restart.
 - `hostnotfound-refresh-keeps-serving.md` — an identity-less actor for a deleted host keeps serving, because its
   refreshes never write the store and so never see the row is gone.
-- `nudge-break-skips-cache-bump.md` — a cache change committed while a nudge is pending is never announced on the event
-  feed.
 - `alias-change-may-not-bump-feed.md` — an alias-only registry change can skip the fleet-revision bump, leaving other
   clients on the old name.
 - `session-detail-drains-full-list.md` — every fleet-revision bump makes each open session view trigger a full
