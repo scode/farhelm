@@ -332,8 +332,6 @@ One line per open item. This file must always match the feedback files in this d
   outright.
 - `grok-prompt-hooks-exceed-payload-cap.md` — the hook's small-payload assumption may not hold for Grok's prompt/stop
   callbacks.
-- `row-ops-counter-leaks-on-unmount.md` — row_ops leaks when the browser token prompt unmounts the list mid-operation,
-  disabling header actions.
 - `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
   sidebar keeps deleted/stale rows.
 - `sidebar-rename-not-reflected-in-header.md` — renaming the open session never updates its header, which reads a

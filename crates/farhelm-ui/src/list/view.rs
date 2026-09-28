@@ -583,6 +583,20 @@ pub(crate) fn ListView(
     // this component never mounts before it has (see `SharedPreferences`).
     let mut preferences = use_context::<SharedPreferences>();
     let mut row_ops = row_ops;
+    // `row_ops` outlives this component (it lives in `AppBody`), but the row
+    // tasks that would decrement it do not: unmounting the list, as the
+    // browser build does behind its token prompt on any 401, drops them
+    // mid-flight. A fresh mount has no row operation of its own yet, so the
+    // count is brought back to that here; left stale, the session view's
+    // `PaneGate` refused every claim and auto-select never ran until a page
+    // reload. Row operations start only from click handlers, so none can
+    // have begun before this runs. Written only when stale, so an ordinary
+    // mount does not touch the parent's signal during render.
+    use_hook(move || {
+        if *row_ops.peek() != 0 {
+            row_ops.set(0);
+        }
+    });
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
     // The same generation discipline the hosts read has, for the same
     // reason and against a slower race: a listing read that started before
