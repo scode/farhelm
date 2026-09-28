@@ -2051,7 +2051,6 @@ mod tests {
     }
 
     use std::fmt;
-    use std::fmt::Write as _;
     use std::fs;
     use std::os::unix::fs::{PermissionsExt as _, symlink};
     use std::path::{Path, PathBuf};

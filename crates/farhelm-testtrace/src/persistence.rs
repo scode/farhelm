@@ -748,7 +748,6 @@ fn cstring(bytes: impl AsRef<[u8]>) -> Result<CString, std::ffi::NulError> {
 mod tests {
     use std::borrow::Cow;
     use std::fs;
-    use std::os::fd::AsRawFd as _;
     use std::path::Path;
 
     use super::*;

@@ -13118,6 +13118,11 @@ impl Supervisor {
     /// before deciding anything. Both carry the spec path so a caller
     /// unwinding can remove the credential-bearing file it left behind.
     #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::result_large_err,
+        reason = "one launch per call, never a hot path; the tmux failure hands the caller owned \
+                  cleanup handles (spec path, replacement or created terminal) by value"
+    )]
     async fn spawn_agent(
         &self,
         id: &str,
