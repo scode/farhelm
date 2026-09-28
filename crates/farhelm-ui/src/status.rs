@@ -416,6 +416,39 @@ pub(crate) fn replace_consequence(status: &SessionStatus) -> &'static str {
     }
 }
 
+/// The header restart confirmation, under the same no-guessing discipline as
+/// [`confirm_consequence`] and [`replace_consequence`]: a live status says
+/// the agent IS stopped first, `Unknown` only admits it may be, and the ended
+/// statuses (reachable when the status changes while the prompt is open)
+/// never claim a running agent. `Exited` still mentions a stop: an agent
+/// that exited can leave descendants running, and restart reaps them first
+/// (SPEC.md's restart cleanup), so "nothing to stop" would be a promise the
+/// restart does not keep. A host reboot (`Interrupted`) and a launch that
+/// never started (`Error`) leave nothing behind.
+///
+/// The prompt opens for `Unknown` on purpose (a reloaded live pane can read
+/// as `Unknown` until its sampler catches up, and an unconfirmed restart of
+/// a live agent is refused), so saying "still running" there would state as
+/// fact what the UI does not know, right before a process-tree kill.
+pub(crate) fn restart_consequence(status: &SessionStatus) -> &'static str {
+    match status {
+        SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
+            "still running — restarting stops the agent and its whole process tree first:"
+        }
+        SessionStatus::Unknown => {
+            "status unknown — the agent may still be running; restarting stops it and its whole \
+             process tree first if so:"
+        }
+        SessionStatus::Exited { .. } => {
+            "the agent has exited — restarting first stops anything it left running:"
+        }
+        SessionStatus::Interrupted => {
+            "interrupted by a host reboot — nothing left to stop; restart it:"
+        }
+        SessionStatus::Error { .. } => "the agent never started — nothing to stop; restart it:",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -690,6 +723,52 @@ mod tests {
             wording.contains("discard"),
             "the honest consequence is losing the session record itself: {wording}"
         );
+    }
+
+    /// The restart prompt claims a running agent only for a live status.
+    ///
+    /// Why it matters: the header asks before restarting an `Unknown`
+    /// session too, and its fixed "still running" sentence stated as fact
+    /// what the UI did not know, right before a process-tree kill. Spec:
+    /// live statuses say the agent is stopped first; `Unknown` admits it may
+    /// be running; ended statuses (a prompt left open across a status change)
+    /// never claim a running agent, and only `Interrupted` and `Error`, which
+    /// leave nothing behind, say there is nothing to stop.
+    #[farhelm_testtrace::test]
+    fn restart_consequence_claims_running_only_for_live_statuses() {
+        for live in [
+            SessionStatus::Running,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+        ] {
+            let wording = restart_consequence(&live);
+            assert!(
+                wording.contains("still running") && wording.contains("stops the agent"),
+                "{live:?} -> {wording}"
+            );
+        }
+        let unknown = restart_consequence(&SessionStatus::Unknown);
+        assert!(
+            unknown.contains("may still be running") && !unknown.contains("still running —"),
+            "an unresolved status may not round up to a live status's certainty: {unknown}"
+        );
+        let exited = restart_consequence(&SessionStatus::Exited { exit_code: Some(0) });
+        assert!(
+            !exited.contains("still running") && !exited.contains("nothing"),
+            "an exited agent may have left descendants that restart stops: {exited}"
+        );
+        for gone in [
+            SessionStatus::Interrupted,
+            SessionStatus::Error {
+                detail: "exec_failed argv0=/nope errno=2".to_string(),
+            },
+        ] {
+            let wording = restart_consequence(&gone);
+            assert!(
+                wording.contains("nothing") && !wording.contains("still running"),
+                "{gone:?} -> {wording}"
+            );
+        }
     }
 
     /// [`replace_consequence`]'s own version of the no-guessing pin above:
