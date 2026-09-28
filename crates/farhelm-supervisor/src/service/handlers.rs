@@ -3508,9 +3508,37 @@ pub(crate) async fn handle_restricted_control(
             // both sides of the relay read, so a verb added to the enum
             // cannot be fenced on one side and not the other.
             // Refusal delivery may wait on the writer, outside the fence.
-            let outcome = {
+            //
+            // The fence wait is bounded. An earlier mutation still inside its
+            // budgets holds the fence for at most `agent_deliver` +
+            // `agent_upcall`, so a request that waits that long is queued
+            // behind one whose answer budget already expired and whose fence
+            // the relay retains for up to `agent_fence_retain` (ten minutes).
+            // The asking CLI has no timeout of its own because the supervisor
+            // bounds the exchange; an unbounded wait here would let a request
+            // its caller long since abandoned run minutes later. Nothing has
+            // been relayed at that point, so `Unavailable` is a safe retry.
+            let outcome = 'fenced: {
                 let fence = if request.is_mutating() {
-                    Some(sup.agent_request_locks.claim(&auth.session_id).await)
+                    let deadline = tokio::time::Instant::now()
+                        + sup.timeouts.agent_deliver
+                        + sup.timeouts.agent_upcall;
+                    match sup
+                        .agent_request_locks
+                        .claim_before(&auth.session_id, deadline)
+                        .await
+                    {
+                        Some(fence) => Some(fence),
+                        None => {
+                            break 'fenced farhelm_proto::AgentOutcome::Err {
+                                kind: ErrorKind::Unavailable,
+                                message: "an earlier change requested by this session is still \
+                                          in progress; this request was not sent, so it is safe \
+                                          to retry later"
+                                    .to_string(),
+                            };
+                        }
+                    }
                 } else {
                     None
                 };
@@ -5207,6 +5235,69 @@ mod tests {
             serde_json::from_slice::<ControlMsg>(&answered.body).unwrap(),
             ControlMsg::AgentResponse { req_id: 2, .. }
         ));
+    }
+
+    /// A mutating agent request gives up on a fence held past the relay's
+    /// budgets and answers `Unavailable` instead of waiting indefinitely.
+    ///
+    /// Why it matters: a mutation whose answer budget expired keeps its
+    /// fence for up to `agent_fence_retain` (ten minutes). The asking CLI
+    /// has no timeout of its own, so without this bound the next mutation
+    /// from the same session would park that long and could still run after
+    /// its caller gave up. Spec: after `agent_deliver` + `agent_upcall` the
+    /// request is refused as `Unavailable`, having relayed nothing.
+    #[farhelm_testtrace::test]
+    async fn a_mutating_agent_request_stops_waiting_for_a_retained_fence() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe_and_timeouts(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts {
+                agent_deliver: Duration::from_millis(10),
+                agent_upcall: Duration::from_millis(20),
+                ..SupervisorTimeouts::default()
+            },
+        )
+        .await
+        .unwrap();
+        let auth = authenticated_parent(&sup, state.path(), "asker").await;
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let _retained = sup.agent_request_locks.claim("asker").await;
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            handle_restricted_control(
+                &sup,
+                ControlMsg::AgentRequest {
+                    req_id: 3,
+                    session_id: "asker".to_string(),
+                    request: AgentVerb::Rename {
+                        session_id: Some("asker".to_string()),
+                        expected_title: Some("old title".to_string()),
+                        title: "new title".to_string(),
+                    },
+                },
+                &tx,
+                &auth,
+                None,
+            ),
+        )
+        .await
+        .expect("the fence wait must be bounded by the relay budgets");
+        let answered = rx.try_recv().expect("the refused mutation answers");
+        assert!(
+            matches!(
+                serde_json::from_slice::<ControlMsg>(&answered.body).unwrap(),
+                ControlMsg::AgentResponse {
+                    req_id: 3,
+                    outcome: farhelm_proto::AgentOutcome::Err {
+                        kind: ErrorKind::Unavailable,
+                        ref message,
+                    },
+                } if message.contains("still in progress")
+            ),
+            "a request that never got the fence must be refused as Unavailable"
+        );
     }
 
     /// Spec: the delete fence is claimed BEFORE the asker's credential is
