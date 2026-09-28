@@ -1328,6 +1328,7 @@ fn AppBody() -> Element {
                                     session: session.clone(),
                                     gate: ops::PaneGate::new(page_ops, row_ops),
                                     on_replaced: move |replacement: Session| current.set(Some(replacement)),
+                                    selection: current,
                                     prefill_request,
                                 }
                             },
