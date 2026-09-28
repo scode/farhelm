@@ -54,8 +54,6 @@ One line per open item. This file must always match the feedback files in this d
 - `refresh-timeout-misses-profile-and-commit-tail.md` — refresh timeout misses the profile and commit tail, freezing a
   host as stale-connected.
 - `reload-adopts-stale-pane.md` — reload adopts a stale dead pane as the new generation's terminal.
-- `restricted-create-holds-lifecycle-claim-across-reply.md` — restricted create holds the lifecycle claim across the
-  reply send.
 - `revocation-during-admission-orphans-attachment.md` — revocation racing a slow attach orphans the attachment, pinning
   session ownership.
 - `send-upload-ignores-cancellation.md` — the transfer's queue send ignores cancellation, stalling deletes.

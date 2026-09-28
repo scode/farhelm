@@ -734,9 +734,15 @@ async fn handle_create_session(
         Some(mode) => mode,
         None => resolve_create_selector(sup, &admission, CreateSelector::Derived).await,
     };
+    // Every refusal from here on releases `guards` before replying:
+    // `send_reply` may wait on a full writer queue, and the guards include
+    // the host-wide create mutex and, for a restricted create, the parent
+    // session's lifecycle claim. A client that stops reading must not freeze
+    // stop, delete, or archive of that parent (or every other create).
     let mode = match mode {
         Ok(mode) => mode,
         Err((kind, message)) => {
+            drop(guards);
             reply_error(tx, req_id, kind, message).await;
             return;
         }
@@ -816,6 +822,7 @@ async fn handle_create_session(
         None
     };
     if let Some(message) = refusal {
+        drop(guards);
         reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
