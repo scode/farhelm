@@ -283,8 +283,6 @@ One line per open item. This file must always match the feedback files in this d
   can match a different install after restart.
 - `replace-leaks-claimed-profile-invocation.md` — Replace launches whichever catalog profile a remote host claims,
   sending its full command line to that host.
-- `restart-rename-reply-id-unchecked.md` — restart and rename replies are recorded and returned without checking they
-  describe the requested session.
 - `list-ingress-id-validation-gap.md` — session-list ingress admits empty, control-character and dot-segment ids, and
   the UI's %2E guard does not hold.
 - `add-confirm-rewrites-row-before-busy-check.md` — confirming ADD rewrites an existing row and reconnects before the

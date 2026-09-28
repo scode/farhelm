@@ -395,6 +395,34 @@ fn created_session(session: SessionInfo) -> anyhow::Result<SessionInfo> {
     created_session_from(session, "CreateSession", "SessionCreated")
 }
 
+/// Accept a mutation reply only if it describes the session that was asked
+/// about.
+///
+/// Restart and rename answer with the session's recomputed `SessionInfo`,
+/// which the helm records into its view and returns to the caller (agents
+/// included). Nothing checked that it was the SAME session: a misbehaving
+/// host could answer "X renamed" with Y's details, planting Y's row on its
+/// own cache or, for a host with no identity, in memory with no cross-host
+/// check at all. Refused as a typed invalid reply, since the request itself
+/// was sent and may have taken effect.
+fn same_session(
+    session: SessionInfo,
+    requested: &str,
+    request: &'static str,
+    reply: &'static str,
+) -> anyhow::Result<SessionInfo> {
+    if session.id != requested {
+        return Err(anyhow::Error::new(
+            SupervisorTransportError::SentInvalidReply {
+                request,
+                reply,
+                problem: "the reply describes a different session",
+            },
+        ));
+    }
+    Ok(session)
+}
+
 /// [`created_session`]'s checks for a created session that arrives in some
 /// other reply, named in the refusal.
 ///
@@ -2898,7 +2926,9 @@ impl SupervisorClient {
             )
             .await?
         {
-            ControlMsg::SessionRestarted { session, .. } => Ok(session),
+            ControlMsg::SessionRestarted { session, .. } => {
+                same_session(session, id, "RestartSession", "SessionRestarted")
+            }
             other => Err(wrong_reply("RestartSession", &other)),
         }
     }
@@ -2938,7 +2968,9 @@ impl SupervisorClient {
             )
             .await?
         {
-            ControlMsg::SessionRenamed { session, .. } => Ok(session),
+            ControlMsg::SessionRenamed { session, .. } => {
+                same_session(session, id, "RenameSession", "SessionRenamed")
+            }
             other => Err(wrong_reply("RenameSession", &other)),
         }
     }
@@ -5510,6 +5542,74 @@ mod tests {
                 })
             ),
             "{error:#}"
+        );
+        peer.await.unwrap();
+    }
+
+    /// A rename or restart answered with a DIFFERENT session's details is
+    /// refused, not recorded.
+    ///
+    /// Why: the helm writes these replies into its view and hands them to
+    /// the caller (agents included), and nothing checked they described the
+    /// session asked about, so a misbehaving host could answer "X renamed"
+    /// with Y's details and plant Y's row. Spec: both verbs refuse such a
+    /// reply as a typed invalid reply naming their own exchange.
+    #[farhelm_testtrace::test]
+    async fn a_rename_or_restart_reply_for_another_session_is_refused() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            for _ in 0..2 {
+                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let reply = match request {
+                    ControlMsg::RenameSession { req_id, .. } => ControlMsg::SessionRenamed {
+                        req_id,
+                        session: session("someone-else"),
+                    },
+                    ControlMsg::RestartSession { req_id, .. } => ControlMsg::SessionRestarted {
+                        req_id,
+                        session: session("someone-else"),
+                    },
+                    other => panic!("unexpected request {other:?}"),
+                };
+                writer.write_control(&reply).await.unwrap();
+            }
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let renamed = client
+            .rename_session("sess-1", "new title", None)
+            .await
+            .expect_err("a rename reply for another session must be refused");
+        assert!(
+            matches!(
+                renamed.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentInvalidReply {
+                    request: "RenameSession",
+                    ..
+                })
+            ),
+            "{renamed:#}"
+        );
+        let restarted = client
+            .restart_session_with("sess-1", RestartMode::Fresh, false, None)
+            .await
+            .expect_err("a restart reply for another session must be refused");
+        assert!(
+            matches!(
+                restarted.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentInvalidReply {
+                    request: "RestartSession",
+                    ..
+                })
+            ),
+            "{restarted:#}"
         );
         peer.await.unwrap();
     }
