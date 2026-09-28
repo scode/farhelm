@@ -340,9 +340,5 @@ One line per open item. This file must always match the feedback files in this d
   life.
 - `window-maximize-fence-never-clears.md` — if the window manager ignores the restored maximize, window geometry is
   never tracked for the run.
-- `session-view-errors-raw-peer-text.md` — session-view restart/replace/tab error lines render supervisor refusal text
-  without peer escaping.
-- `row-tooltips-raw-peer-text.md` — the sidebar row's directory and host tooltips are raw while the title tooltip is
-  escaped.
 - `csp-limits-only-framing.md` — the helm's CSP only sets frame-ancestors, so an injection could exfiltrate the device
   secret anywhere.

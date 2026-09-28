@@ -1505,7 +1505,10 @@ pub(super) fn SessionRow(
                     class: "session-row-open",
                     // Keep the full directory discoverable when compact mode
                     // removes the metadata line and its own tooltip.
-                    title: if compact { session.cwd.clone() },
+                    // Native tooltips do not inherit DOM direction isolation,
+                    // so every peer-derived `title` goes through
+                    // `display_peer`, like the title's own tooltip.
+                    title: if compact { display_peer(&session.cwd) },
                     // The accessible counterpart of the visual highlight:
                     // the sidebar is a navigation-shaped list of open
                     // buttons, and `aria-current` is the native way to say
@@ -1701,7 +1704,7 @@ pub(super) fn SessionRow(
                             span {
                                 class: "session-host peer-value",
                                 dir: "ltr",
-                                title: "{host_name}",
+                                title: "{display_peer(host_name)}",
                                 "{host_name}"
                             }
                             span { class: "session-host-separator", ":" }
@@ -1716,7 +1719,7 @@ pub(super) fn SessionRow(
                         // `title` carries the UNABBREVIATED path, which is
                         // what makes the `~` safe: see `abbreviate_home`
                         // for whose home it does and does not know about.
-                        span { class: "session-cwd", title: "{session.cwd}",
+                        span { class: "session-cwd", title: "{display_peer(&session.cwd)}",
                             span { class: "session-cwd-text", dir: "ltr", "{cwd_shown}" }
                         }
                     }
