@@ -33,10 +33,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Claude foreground ownership.** Assess whether native or shelled-out Claude children can replace or withdraw the
-  foreground conversation's restart target, then define the smallest admission check that preserves legitimate
-  clear/new/switch/fork/resume transitions. This is an assessment task, not a claim that every vendor path has been
-  reproduced.
 - **Pi foreground ownership.** Assess whether native or shelled-out Pi children can replace or withdraw the foreground
   conversation's restart target, then define the smallest admission check that preserves legitimate foreground
   transitions. This is an assessment task, not a claim that every vendor path has been reproduced.

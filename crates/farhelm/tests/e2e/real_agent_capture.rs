@@ -792,6 +792,152 @@ async fn real_claude_session_reports_its_identity_across_clear() {
     drop(slot);
 }
 
+/// Claude Code for real: a `claude` the session starts through its own Bash
+/// tool, carrying a Farhelm reporting hook of its own, cannot replace the
+/// session's conversation.
+///
+/// This audits the vendor facts Claude's positional admission rule rests
+/// on, which no fixture can: that a child started from Claude's Bash tool
+/// inherits the session credential (so without the rule its report WOULD
+/// land), and that the Bash tool runs it through a shell that stays
+/// resident, which puts the child at least two links below the pane where
+/// the rule refuses it. `child.sh` `exec`s the child so the Bash tool's own
+/// shell is the only intermediary, the tightest shape a shell-out takes.
+/// It records the child's ancestry to `child-ancestry.txt` first, and the
+/// test prints that file, so a failure (or a vendor change) names the chain
+/// that was actually observed.
+///
+/// Costs two short Haiku turns (the parent's, and the child's `-p`), and
+/// runs the parent with `--dangerously-skip-permissions` inside a scratch
+/// directory so its Bash tool does not stop on an approval prompt. The
+/// child gets its hook from `--settings`, standing in for a user- or
+/// project-level settings hook: that is the path a shelled-out sub-agent
+/// has to a reporter, since the parent's injected `--settings` lives in
+/// the parent's argv and is not inherited.
+#[farhelm_testtrace::test]
+#[ignore = "needs real Claude Code credentials and network; two short model turns; run deliberately"]
+async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation() {
+    let slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let state = farhelm_teststate::tempdir().expect("state dir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let home = std::path::PathBuf::from(
+        std::env::var_os("HOME").expect("a real-agent run needs a real HOME"),
+    );
+    let (sup, client, accepting) = serving_supervisor(state.path(), home).await;
+    let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
+    let sock = state.path().join("tmux.sock");
+
+    let hook = format!(
+        "{} internal hook --vendor claude",
+        shell_words::quote(farhelm_bin())
+    );
+    let settings = serde_json::json!({
+        "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": hook}]}]}
+    })
+    .to_string();
+    let script = format!(
+        "#!/bin/sh\n\
+         p=$$\n\
+         : > child-ancestry.txt\n\
+         while [ \"$p\" -gt 1 ]; do\n\
+         \tps -o pid=,ppid=,comm= -p \"$p\" >> child-ancestry.txt\n\
+         \tp=$(ps -o ppid= -p \"$p\" | tr -d ' ')\n\
+         done\n\
+         exec claude -p --model haiku --settings {} 'Reply with the single word CHILDOK.'\n",
+        shell_words::quote(&settings)
+    );
+    std::fs::write(work.path().join("child.sh"), script).expect("child.sh");
+
+    let session = client
+        .create_session(
+            &work.path().to_string_lossy(),
+            "claude --dangerously-skip-permissions --model haiku",
+            None,
+            100,
+            30,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("launching the real claude: {e:#}"));
+    let tmux_name = format!("fh-{}", session.id);
+    let (chan, _replay, mut rx) = client
+        .attach_live(&session.id, 100, 30)
+        .await
+        .expect("attach");
+    // Drained for the same reason as in the `/clear` audit above.
+    let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
+    wait_for_agent_ready(
+        &client,
+        &sock,
+        &session.id,
+        chan,
+        "Claude Code v",
+        &["Accessing workspace", "Do you trust"],
+    )
+    .await;
+    let parent =
+        wait_for_reported_identity(&sup, &client, state.path(), &session.id, None, 120).await;
+
+    let prompt = "Use your Bash tool to run exactly this command and nothing else: sh ./child.sh";
+    client.send_input(chan, prompt.as_bytes().to_vec()).await;
+    let log_path = state
+        .path()
+        .join("hook-log")
+        .join(format!("{}.log", session.id));
+    let child_line = |text: &str| {
+        text.lines()
+            .find(|line| !line.contains(&parent))
+            .map(str::to_string)
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
+    let child = loop {
+        let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+        if let Some(line) = child_line(&log) {
+            break line;
+        }
+        let pane = pane_within(&sock, &tmux_name, deadline).await;
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the shelled-out child never reported; hook log:\n{log}\n--- pane:\n{pane}"
+        );
+        // Enter is re-pressed only while the prompt still sits in the
+        // composer, as in `submit_prompt`.
+        if pane.contains(prompt) {
+            client.send_input(chan, b"\r".to_vec()).await;
+        }
+        // sleep-ok: pace conditional Enter retries while polling the hook log in this manual audit.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    };
+    let ancestry = std::fs::read_to_string(work.path().join("child-ancestry.txt"))
+        .unwrap_or_else(|e| format!("<no ancestry recorded: {e}>"));
+    eprintln!("observed child ancestry (pid ppid comm), innermost first:\n{ancestry}");
+
+    assert!(
+        child.contains(" refused conflict ") && child.contains("nested below"),
+        "the child's report must reach the supervisor and be refused for its ancestry \
+         (`no-credential` would mean the Bash tool no longer passes the credential through); \
+         line: {child}\nancestry:\n{ancestry}"
+    );
+    let snapshot = sup
+        .session_snapshot(&session.id)
+        .await
+        .expect("snapshot")
+        .expect("present");
+    assert_eq!(
+        snapshot.captured_conversation.as_deref(),
+        Some(parent.as_str()),
+        "the session must still resume the foreground's conversation"
+    );
+    assert_resume_names(&snapshot, &parent);
+
+    // Teardown before the permit is released, as in the `/clear` audit.
+    accepting.stop().await;
+    drain.abort();
+    drop(client);
+    drop(sup);
+    drop(tmux);
+    drop(slot);
+}
+
 /// Codex for real, across a `/new`.
 ///
 /// Codex's timing is the mirror image of Claude's and the reason nothing in

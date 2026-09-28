@@ -2694,7 +2694,12 @@ impl IntegrationSnapshot {
 /// versioned ownership provenance and its exact-resume offers require it.
 ///
 /// Codex, Grok, and OMP have complete proofs. Goose, Claude, and Pi keep
-/// their arm false until their own proof lands. Admission, durable writers,
+/// their arm false until their own proof lands. `false` does not mean "no
+/// check": Claude's legacy admission still refuses a report unless the pane
+/// process or its direct child ran the hook (a positional check, with no
+/// record proof and no versioned provenance), so flipping Claude here would
+/// be a separate decision that withdraws every existing Claude resume
+/// offer until its next proven report. Admission, durable writers,
 /// the refresh mirror, and every offer surface consult this one predicate,
 /// so a later kind needs one deliberate flip rather than scattered match
 /// changes. New framework entry points default to deny; legacy paths are

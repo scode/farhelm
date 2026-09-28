@@ -7121,12 +7121,32 @@ mod tests {
     /// report driven through it would answer `NotFound` for a reason that
     /// has nothing to do with what is under test.
     ///
-    /// Claude-kind with a placeholder-carrying resume template, so an
+    /// Goose-kind with a placeholder-carrying resume template, so an
     /// accepted report can actually turn into `RestartOffer::Resume`: a
     /// Generic session has no integration, and its offer would stay
     /// `FreshOnly` no matter what was reported — an assertion that passed
     /// for the wrong reason.
+    ///
+    /// Goose rather than Claude because these tests pin the legacy
+    /// admission mechanics (claim, shape, generation fence, replace,
+    /// store-failure handling), which Goose and Claude share. A Claude
+    /// report additionally has to come from the session's foreground
+    /// process, which a fixture with no pane and a reply channel with no
+    /// kernel peer can never satisfy; the Claude-specific refusal has its
+    /// own tests via [`reporting_session_of`].
     async fn reporting_session(sup: &Arc<Supervisor>, id: &str) -> farhelm_proto::SessionAuth {
+        reporting_session_of(sup, id, AgentKind::Goose).await
+    }
+
+    /// [`reporting_session`] with the durable and in-memory kind chosen by
+    /// the caller. The invocation and resume template stay `claude`-spelled
+    /// for every kind: nothing on the report path reads them beyond the
+    /// template's placeholder slot.
+    async fn reporting_session_of(
+        sup: &Arc<Supervisor>,
+        id: &str,
+        kind: AgentKind,
+    ) -> farhelm_proto::SessionAuth {
         let claimed = sup
             .store
             .insert_session(
@@ -7148,7 +7168,7 @@ mod tests {
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
-                    agent_kind: AgentKind::Claude,
+                    agent_kind: kind,
                     resume_template: Some(vec![
                         "claude".to_string(),
                         "--resume".to_string(),
@@ -7173,7 +7193,7 @@ mod tests {
         let mut entry = entry_with(None, LastOutcome::Running);
         entry.info.id = id.to_string();
         entry.snapshot = IntegrationSnapshot {
-            kind: AgentKind::Claude,
+            kind,
             resume_template: None,
         };
         sup.sessions
@@ -7197,7 +7217,7 @@ mod tests {
         req_id: u64,
         conversation: &str,
     ) -> ControlMsg {
-        send_report_with_vendor(sup, auth, req_id, conversation, ReportVendor::Claude).await
+        send_report_with_vendor(sup, auth, req_id, conversation, ReportVendor::Goose).await
     }
 
     /// [`send_report`] with the discriminator chosen by the caller, for
@@ -7228,7 +7248,7 @@ mod tests {
             auth,
             req_id,
             conversation,
-            ReportVendor::Claude,
+            ReportVendor::Goose,
             source,
         )
         .await
@@ -7543,7 +7563,7 @@ mod tests {
 
         for (req_id, vendor) in [
             (71u64, ReportVendor::Codex),
-            (72, ReportVendor::Goose),
+            (72, ReportVendor::Claude),
             (73, ReportVendor::Pi),
             (74, ReportVendor::Omp),
             (75, ReportVendor::Grok),
@@ -7555,7 +7575,7 @@ mod tests {
                 ..
             } = reply
             else {
-                panic!("a {vendor:?} report to a Claude session must be refused: {reply:?}");
+                panic!("a {vendor:?} report to a Goose session must be refused: {reply:?}");
             };
             assert_eq!(kind, ErrorKind::InvalidRequest);
             assert_eq!(
@@ -7612,6 +7632,78 @@ mod tests {
         );
     }
 
+    /// A Claude report that cannot be attributed to the session's
+    /// foreground process is refused as a `Conflict` and changes nothing:
+    /// not the stored identity, not the in-memory capture, not the offer.
+    /// A malformed id is still refused as `InvalidRequest` first.
+    ///
+    /// Why this test matters: Claude admission requires the hook to have
+    /// been run by the pane process or its direct child, so that a
+    /// shelled-out `claude` holding the inherited credential cannot replace
+    /// its parent's conversation. A report with no kernel-attributed peer
+    /// is the cheapest shape of "cannot be attributed", and it must fail
+    /// closed rather than fall through to the old credential-only
+    /// acceptance. The ordering half pins that the positional check runs
+    /// after the no-I/O shape check, so a bad id never costs a tmux or
+    /// process-table read. The positional rule itself is covered by the
+    /// corridor tests in `procs` and end to end in `e2e/hook_identity.rs`.
+    #[farhelm_testtrace::test]
+    async fn an_unattributed_claude_report_is_refused_and_changes_nothing() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session_of(&sup, "claude-session", AgentKind::Claude).await;
+        assert!(
+            sup.store
+                .record_reported_conversation(&auth.session_id, 0, "conv-parent")
+                .await
+                .expect("seed the parent's reported identity"),
+            "the seeded identity must land for the unchanged-assertions below to mean anything"
+        );
+
+        let reply =
+            send_report_with_vendor(&sup, &auth, 90, "conv-child", ReportVendor::Claude).await;
+        let ControlMsg::Error { req_id, kind, .. } = reply else {
+            panic!("an unattributed Claude report must be refused: {reply:?}");
+        };
+        assert_eq!(req_id, 90);
+        assert_eq!(kind, ErrorKind::Conflict);
+
+        let reply =
+            send_report_with_vendor(&sup, &auth, 91, "--resume", ReportVendor::Claude).await;
+        let ControlMsg::Error { req_id, kind, .. } = reply else {
+            panic!("an implausible Claude id must be refused: {reply:?}");
+        };
+        assert_eq!(req_id, 91);
+        assert_eq!(
+            kind,
+            ErrorKind::InvalidRequest,
+            "the shape check must answer before any attribution is attempted"
+        );
+
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session still exists")
+                .captured_conversation
+                .as_deref(),
+            Some("conv-parent"),
+            "a refused report must not replace the stored identity"
+        );
+        let state = sup.sessions.lock().await[&auth.session_id]
+            .run
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
+        assert!(
+            !matches!(state, CaptureState::Reported { .. }),
+            "a refused report must not advance the in-memory capture: {state:?}"
+        );
+    }
+
     /// A report carrying a present subagent identity is rejected on every
     /// kind, while a wrong-typed identity is rejected as malformed rather
     /// than coerced to absent.
@@ -7653,7 +7745,7 @@ mod tests {
                 &auth,
                 req_id,
                 "conv-subagent",
-                ReportVendor::Claude,
+                ReportVendor::Goose,
                 agent_id,
             )
             .await;
@@ -7677,7 +7769,7 @@ mod tests {
             &auth,
             79,
             "conv-null-agent",
-            ReportVendor::Claude,
+            ReportVendor::Goose,
             Some(serde_json::Value::Null),
         )
         .await;
@@ -8185,7 +8277,7 @@ mod tests {
     /// larger report envelope needed for Pi's encoded locator.
     ///
     /// Pin both sides of this boundary rather than borrowing the envelope cap:
-    /// growing that cap must not change what this Claude fixture submits. The
+    /// growing that cap must not change what this plain-id fixture submits. The
     /// direction matters: a cap that refused at exactly 128 would not fail
     /// loudly anywhere — the session would simply stop being resumable the
     /// day a vendor's id format grew, and the scan fallback would cover for

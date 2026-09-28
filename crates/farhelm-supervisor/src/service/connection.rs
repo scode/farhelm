@@ -167,7 +167,8 @@ pub(crate) struct ConnectionCtx<'a> {
 /// Generic over the byte stream so tests can drive it over an in-process
 /// duplex pipe with the same code path production uses over the unix
 /// socket. `peer` is the kernel peer PID and process start token sampled at
-/// accept; a stream without that evidence cannot make a Codex foreground claim.
+/// accept; a stream without that evidence cannot make a foreground claim for
+/// any kind that attributes its reports to a process (Codex, Grok, OMP, Claude).
 /// An auth-bearing hello enters the restricted session dispatcher; an ordinary
 /// local peer keeps the full-authority path.
 pub async fn handle_connection<S>(

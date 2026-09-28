@@ -166,6 +166,11 @@ pub enum Script {
     /// and a report — which is the only way to test that a report wins.
     ///
     /// See [`hook_report`] for the markers and what each one proves.
+    ///
+    /// It also takes `nested-report <id>`, which fires the same hook from
+    /// a second copy of this fixture run through a resident shell, standing
+    /// in for a shelled-out sub-agent that inherited the credential; see
+    /// [`nested_hook_report`].
     HookReport,
     /// The whole agent-facing chain, acted out end to end: read the
     /// injected `SessionStart` hook out of this launch's own `--settings`
@@ -823,8 +828,10 @@ enum RecordShape {
 /// printed so tests key on the record genuinely existing rather than on a
 /// sleep — the same discipline `FAKE-AGENT READY` established.
 ///
-/// `hook_reports` adds ONE extra input form, `report <id>`, and nothing
-/// else ([`Script::HookReport`]). It is a flag rather than a second copy of
+/// `hook_reports` adds two extra input forms and nothing else
+/// ([`Script::HookReport`]): `report <id>`, the foreground's own hook, and
+/// `nested-report <id>`, the same hook fired by a shelled-out child (see
+/// [`nested_hook_report`]). It is a flag rather than a second copy of
 /// this function because every property above has to hold for a hooked
 /// session too: the whole point of the hook tests is that a session can
 /// hold a scan-visible record AND a report at the same time, and a
@@ -841,6 +848,12 @@ fn record_agent(
     )?;
     let cwd = std::env::current_dir().context("reading the fixture's working directory")?;
     let cwd = cwd.to_string_lossy().into_owned();
+
+    // The one-shot child half of `nested-report`: fire one hook as this
+    // process's own child and exit, with no prompt loop and no record.
+    if hook_reports && let Some(conversation) = option_after(std::env::args(), REPORT_ONCE_FLAG) {
+        return report_once(shape, &conversation);
+    }
 
     let mut out = std::io::stdout().lock();
     write!(out, "\x1b[?2004h")?;
@@ -940,6 +953,9 @@ fn record_agent(
             (line, _) if hook_reports && line.starts_with(REPORT_COMMAND) => {
                 hook_report(shape, line[REPORT_COMMAND.len()..].trim(), &mut out)?;
             }
+            (line, _) if hook_reports && line.starts_with(NESTED_REPORT_COMMAND) => {
+                nested_hook_report(&home, line[NESTED_REPORT_COMMAND.len()..].trim(), &mut out)?;
+            }
             _ => {
                 if current.is_none() {
                     let (id, path) = write_record(shape, &home, &cwd)?;
@@ -964,6 +980,120 @@ fn record_agent(
 /// `tests/e2e/hook_identity.rs` too, where it shows up as a fixture that
 /// never answers rather than as a compile error.
 const REPORT_COMMAND: &str = "report ";
+
+/// The prefix of [`Script::HookReport`]'s nested input form,
+/// `nested-report <id>`. Spelled again in `tests/e2e/hook_identity.rs`,
+/// for the same reason as [`REPORT_COMMAND`].
+const NESTED_REPORT_COMMAND: &str = "nested-report ";
+
+/// The flag that turns a `hook-report` invocation into the one-shot child
+/// [`nested_hook_report`] starts: fire one report for the given id, print
+/// the markers, exit.
+const REPORT_ONCE_FLAG: &str = "--report-once";
+
+/// The value following `flag` in `args`, if the flag is present with one.
+fn option_after(args: impl Iterator<Item = String>, flag: &str) -> Option<String> {
+    let mut args = args.skip_while(|arg| arg != flag);
+    args.next()?;
+    args.next()
+}
+
+/// Stand in for a shelled-out sub-agent reporting through its parent's
+/// session credential: the foreground fixture (the pane process) runs a
+/// shell, the shell runs a second copy of this fixture, and that copy runs
+/// the real hook for `conversation`.
+///
+/// The ancestry is the whole point, so each link is pinned rather than
+/// assumed. The shell command ends in `; :` so the shell cannot `exec` the
+/// child away: a single `sh -c` between pane and hook is correctly
+/// admitted by Claude's positional rule (it is either a trampoline or the
+/// pane's direct child), and a fixture that let it disappear would see the
+/// child's report accepted and blame the rule. The child prints its
+/// parent's image name (`NESTED-PARENT:`), so a test can see that a live
+/// shell, not the pane, ran it. Everything past the child is the same
+/// genuine hook, socket, and inherited credential [`hook_report`] uses.
+///
+/// Markers: the child's own `NESTED-PARENT:` and [`hook_report`] lines,
+/// replayed, then `NESTED-REPORT-DONE:<id>` once the shell has exited, or
+/// `NESTED-REPORT-FAILED:<id>` with the reason. `HOOK-REPORTED:` only means
+/// the hook ran; whether the supervisor accepted or refused it is in the
+/// hook log and the stored identity.
+fn nested_hook_report(
+    home: &std::path::Path,
+    conversation: &str,
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
+    let fixture = std::env::current_exe().context("locating this fixture's own executable")?;
+    let mut child = std::process::Command::new("/bin/sh")
+        .args([
+            "-c",
+            "\"$0\" fake-agent --script hook-report --record-home \"$1\" --report-once \"$2\"; :",
+        ])
+        .arg(&fixture)
+        .arg(home)
+        .arg(conversation)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("spawning the nested reporter's shell")?;
+    // Twice the hook's own deadline: the child waits on its hook under
+    // HOOK_CHILD_DEADLINE, and this wait must not fire first.
+    let Some(status) = wait_bounded(&mut child, HOOK_CHILD_DEADLINE * 2, "the nested reporter")?
+    else {
+        writeln!(out, "NESTED-REPORT-FAILED:{conversation} hung\r")?;
+        return Ok(());
+    };
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    child
+        .stdout
+        .take()
+        .context("the nested reporter was spawned with a piped stdout")?
+        .read_to_end(&mut stdout)
+        .context("reading the nested reporter's stdout")?;
+    child
+        .stderr
+        .take()
+        .context("the nested reporter was spawned with a piped stderr")?
+        .read_to_end(&mut stderr)
+        .context("reading the nested reporter's stderr")?;
+    for line in String::from_utf8_lossy(&stdout).lines() {
+        writeln!(out, "{}\r", line.trim_end_matches('\r'))?;
+    }
+    if status.success() && stderr.is_empty() {
+        writeln!(out, "NESTED-REPORT-DONE:{conversation}\r")?;
+    } else {
+        writeln!(
+            out,
+            "NESTED-REPORT-FAILED:{conversation} status={status} stderr={}\r",
+            String::from_utf8_lossy(&stderr).trim()
+        )?;
+    }
+    Ok(())
+}
+
+/// The child half of [`nested_hook_report`]: name the parent that ran this
+/// process, then fire one hook through [`hook_report`] as this process's
+/// own direct child.
+fn report_once(shape: RecordShape, conversation: &str) -> anyhow::Result<()> {
+    let parent = std::os::unix::process::parent_id().to_string();
+    let name = std::process::Command::new("ps")
+        .args(["-o", "comm=", "-p", &parent])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .context("asking ps for the nested reporter's parent")?;
+    let mut out = std::io::stdout().lock();
+    writeln!(
+        out,
+        "NESTED-PARENT:{}",
+        String::from_utf8_lossy(&name.stdout).trim()
+    )?;
+    hook_report(shape, conversation, &mut out)?;
+    out.flush()?;
+    Ok(())
+}
 
 /// Longest this fixture waits for one hook child — [`hook_report`]'s, and
 /// the injected `SessionStart` hook [`run_injected_hook`] runs — before
