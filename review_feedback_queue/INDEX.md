@@ -64,8 +64,6 @@ One line per open item. This file must always match the feedback files in this d
 - `superseded-reap-watchers-never-exit.md` — superseded output-reap watchers never exit, leaking a task per churn cycle.
 - `tmux-kill-runs-unbounded-under-global-lock.md` — teardown's tmux calls run unbounded under the global lock.
 - `untracked-mutations-leak-on-wedged-tmux.md` — untracked mutations leak permit, claim, and fence against wedged tmux.
-- `unvalidated-state-dir-on-add.md` — adding a host with a bad state-dir path permanently bricks the entry.
-- `unvalidated-state-dir-on-ensure.md` — a bad state-dir line in the ensure file bricks a host on every boot.
 - `unvalidated-state-dir-on-probe.md` — probed registration with a bad state-dir path permanently bricks the entry.
 - `tab-close-skips-scope-on-stale-verdict.md` — tab close skips the tab's cgroup whenever the cached manager verdict is
   negative, contrary to its docs.
@@ -345,8 +343,6 @@ One line per open item. This file must always match the feedback files in this d
 - `incarnation-counter-restarts-per-process.md` — incarnation numbers restart each helm process, so expected_incarnation
   can match a different install after restart.
 - `replace-keeps-session-seen-row.md` — replace deletes the source without dropping its session_seen row, unlike delete.
-- `remote-state-dir-unvalidated.md` — remote_state_dir is stored unchecked (empty/NUL), so the host registers but never
-  connects.
 - `aggregate-duplicates-identityless-id.md` — an identity-less host's live rows are not deduplicated against cached
   claims, listing one session twice.
 - `replace-leaks-claimed-profile-invocation.md` — Replace launches whichever catalog profile a remote host claims,
