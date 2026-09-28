@@ -1192,16 +1192,18 @@ fn send_error_text(error: SendError) -> String {
 /// is the one caller-chosen deadline, and `PreferencesGate`'s docs say why
 /// it earns the exception the paged listing lost.)
 async fn send_inner(
-    mut request: reqwest::RequestBuilder,
+    request: reqwest::RequestBuilder,
     timeout: std::time::Duration,
 ) -> Result<reqwest::Response, SendError> {
     #[cfg(native_desktop)]
     let deadline = tokio::time::Instant::now() + timeout;
-    if let Some(secret) = crate::auth::device_secret() {
-        request = request.bearer_auth(secret);
-    }
     #[cfg(native_desktop)]
-    let retry = request.try_clone();
+    let (request, retry) = authorize_with_retry_copy(request, crate::auth::device_secret());
+    #[cfg(not(native_desktop))]
+    let request = match crate::auth::device_secret() {
+        Some(secret) => request.bearer_auth(secret),
+        None => request,
+    };
     #[cfg(native_desktop)]
     let request_timeout = remaining(deadline)?;
     #[cfg(not(native_desktop))]
@@ -1257,6 +1259,27 @@ async fn send_inner(
         }));
     }
     Ok(resp)
+}
+
+/// Attach the current device secret, keeping a copy of the request WITHOUT it
+/// for the one refresh-and-retry.
+///
+/// The copy must be taken before the credential is attached. reqwest's
+/// `bearer_auth` appends an `Authorization` header rather than replacing
+/// one, and the helm reads the first; a copy carrying the old secret made
+/// the retry send the revoked secret first, so the documented recovery after
+/// a token rotation or device eviction could never succeed.
+#[cfg(native_desktop)]
+fn authorize_with_retry_copy(
+    request: reqwest::RequestBuilder,
+    secret: Option<String>,
+) -> (reqwest::RequestBuilder, Option<reqwest::RequestBuilder>) {
+    let retry = request.try_clone();
+    let request = match secret {
+        Some(secret) => request.bearer_auth(secret),
+        None => request,
+    };
+    (request, retry)
 }
 
 /// Refresh and retry inside the original request's absolute deadline.
@@ -3458,6 +3481,45 @@ mod tests {
         assert!(started.elapsed() >= std::time::Duration::from_millis(150));
         assert!(started.elapsed() < std::time::Duration::from_millis(250));
         drop(listener);
+    }
+
+    /// The desktop refresh-and-retry sends exactly one credential: the
+    /// refreshed one.
+    ///
+    /// Why it matters: the retry copy used to be taken after the old secret
+    /// was attached, and reqwest appends rather than replaces the header, so
+    /// the retry carried the revoked secret first and the helm (which reads
+    /// the first value) refused it again. Spec: the first attempt carries the
+    /// current secret, and the retry, once `retry_desktop_request` attaches
+    /// the refreshed secret the same way, carries only that one. Checked on
+    /// the built requests: sending one would need a Dioxus runtime for the
+    /// build-skew bookkeeping every response goes through.
+    #[cfg(native_desktop)]
+    #[farhelm_testtrace::test]
+    fn desktop_retry_carries_only_the_refreshed_secret() {
+        let authorization = |request: reqwest::RequestBuilder| {
+            request
+                .build()
+                .expect("a plain GET builds")
+                .headers()
+                .get_all(reqwest::header::AUTHORIZATION)
+                .iter()
+                .map(|value| value.to_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        let (first, retry) = authorize_with_retry_copy(
+            client().get("http://127.0.0.1:9/retried"),
+            Some("revoked".to_string()),
+        );
+        assert_eq!(authorization(first), ["Bearer revoked"]);
+        let retry = retry
+            .expect("a plain GET can be copied")
+            .bearer_auth("refreshed");
+        assert_eq!(
+            authorization(retry),
+            ["Bearer refreshed"],
+            "the retry must carry only the refreshed secret"
+        );
     }
 
     /// A blank install field must reach the wire as ABSENT, and a non-blank

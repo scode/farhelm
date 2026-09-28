@@ -179,8 +179,6 @@ One line per open item. This file must always match the feedback files in this d
   while the helm is pinned to the new one.
 - `receiptless-app-bundle-blocks-uninstall.md` — on macOS a Farhelm.app without a receipt refuses the whole uninstall,
   and the advice cannot work under the no-bundle opt-out.
-- `desktop-401-retry-sends-revoked-secret.md` — the desktop 401 retry appends a second Authorization header, so the helm
-  reads the revoked one and the retry fails.
 - `desktop-reauth-remount-loses-action.md` — the desktop credential refresh remounts the app before the retry runs,
   silently losing the action that hit the 401.
 - `desktop-reauth-failure-dead-end.md` — a transient webview re-auth failure after rotation leaves only an error line
