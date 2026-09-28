@@ -1208,9 +1208,13 @@ pub(crate) fn SessionView(
         let base = replace_base.clone();
         let id = replace_session_id.clone();
         let preferences = replace_preferences;
+        // The shown session's host fields: the reply is bare, and it becomes
+        // the selection as-is. See `list::with_source_host`.
+        let source = current.peek().clone();
         spawn(async move {
             match replace_session(&base, &id).await {
                 Ok(new_session) => {
+                    let new_session = crate::list::with_source_host(new_session, &source);
                     crate::list::remember_selection(&base, preferences, &new_session.id);
                     on_replaced.call(new_session);
                 }

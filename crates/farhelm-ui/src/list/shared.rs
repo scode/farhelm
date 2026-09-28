@@ -408,6 +408,26 @@ pub(super) fn effective_create_host(
         .or_else(|| default_create_host(hosts, open_host))
 }
 
+/// Fill a plain Replace reply's host fields from the session it replaced.
+///
+/// The replace endpoint answers with the supervisor's bare `SessionInfo`, so
+/// `host`, `host_identity` and `host_name` all decode as `None`, and both
+/// plain Replace paths hand that reply straight to `AppBody` as the new
+/// selection, which nothing later refreshes from the listing. With no host,
+/// New defaulted to the local machine and an empty directory after replacing
+/// a remote session, instead of the selected session's host and directory.
+/// Replace never changes host, so the source row's values are the truth.
+/// Values the reply itself carries win (`or`, not overwrite), as in
+/// [`enrich_created_session`].
+pub(crate) fn with_source_host(reply: Session, source: &Session) -> Session {
+    Session {
+        host: reply.host.or(source.host),
+        host_identity: reply.host_identity.or_else(|| source.host_identity.clone()),
+        host_name: reply.host_name.or_else(|| source.host_name.clone()),
+        ..reply
+    }
+}
+
 /// Fill the helm-owned host fields a create reply deliberately omits.
 ///
 /// `POST /api/sessions` answers with bare `SessionInfo` — no host, no
@@ -637,6 +657,41 @@ pub(super) mod tests {
             identity: Some(None),
         };
         assert_eq!(default_create_host(&hosts, Some(&selection)), Some(2));
+    }
+
+    /// A plain Replace reply takes the replaced session's host fields.
+    ///
+    /// Why: the reply is bare `SessionInfo`, and the replacement becomes the
+    /// selection with no later listing refresh of it; without its host, New
+    /// after replacing a remote session proposed the local machine with an
+    /// empty directory. Spec: missing host, identity and host name come from
+    /// the source row; values the reply carries are kept.
+    #[farhelm_testtrace::test]
+    fn a_replace_reply_takes_the_source_rows_host() {
+        let mut source = row_specimen("old");
+        source.host = Some(5);
+        source.host_identity = Some(Some("install-5".to_string()));
+        source.host_name = Some("builder".to_string());
+        let filled = with_source_host(row_specimen("new"), &source);
+        assert_eq!(
+            (
+                filled.id.as_str(),
+                filled.host,
+                filled.host_identity,
+                filled.host_name
+            ),
+            (
+                "new",
+                Some(5),
+                Some(Some("install-5".to_string())),
+                Some("builder".to_string())
+            )
+        );
+
+        let mut carried = row_specimen("new");
+        carried.host = Some(9);
+        let kept = with_source_host(carried, &source);
+        assert_eq!(kept.host, Some(9), "a reply's own host is authoritative");
     }
 
     /// A create reply is bare `SessionInfo`; the enrichment is what makes
