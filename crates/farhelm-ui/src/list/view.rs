@@ -1572,6 +1572,14 @@ pub(crate) fn ListView(
                     if let Some(Ok(current)) = listing.write().as_mut() {
                         current.sessions.retain(|s| s.id != id);
                     }
+                    // A listing read already in flight started before the
+                    // helm finished this delete, and it would otherwise
+                    // commit as the newest read (the refresh below only
+                    // queues behind it), putting the deleted row back with
+                    // its Delete button live until the refresh lands. The
+                    // fence supersedes every read that started before this
+                    // confirmed delete (see `ReadGate::fence`).
+                    listing_reads.write().fence();
                     end_row_op(&id);
                     // AFTER the local bookkeeping, so a selection change
                     // this triggers repaints against the already-updated
