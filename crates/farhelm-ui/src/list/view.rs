@@ -2160,10 +2160,28 @@ pub(crate) fn ListView(
                 let base = resolve_base.clone();
                 spawn(async move {
                     match fetch_session(&base, &id).await {
-                        Ok(Some(session)) => on_open.call(session),
-                        // Definitely gone (or unreadable): the fallback may
-                        // proceed on the next effect run.
-                        _ => remembered_dead.set(Some(id)),
+                        // The lookup can take up to a minute, so it re-checks
+                        // at completion the same guards the synchronous branch
+                        // below applies: a row the user clicked meanwhile, or
+                        // an action in progress, wins over the late answer.
+                        Ok(Some(session)) => {
+                            let idle = selected.peek().is_none()
+                                && !ops.busy_now()
+                                && !row_phases
+                                    .peek()
+                                    .values()
+                                    .any(|phase| *phase == RowPhase::Pending);
+                            if idle {
+                                on_open.call(session);
+                            }
+                        }
+                        // Definitely gone: the fallback may proceed on the
+                        // next effect run.
+                        Ok(None) => remembered_dead.set(Some(id)),
+                        // A failed or timed-out read says nothing about the
+                        // session; the next listing commit reruns this effect
+                        // and tries again.
+                        Err(_) => {}
                     }
                     resolving_remembered.set(false);
                 });
