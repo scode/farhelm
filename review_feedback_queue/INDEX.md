@@ -328,8 +328,6 @@ One line per open item. This file must always match the feedback files in this d
   containing a directory named target.
 - `relative-install-dir-installs-under-cwd.md` — a relative or quoted-~ FARHELM_INSTALL_DIR installs under the current
   directory with misleading messages.
-- `setup-restart-marker-read-error-ignored.md` — setup treats an unreadable restart marker as no restart owed and
-  reports success.
 - `installer-extract-exits-silently.md` — extract_sole_member exits silently under set -e instead of printing its
   refusal.
 - `hook-log-truncation-erases-concurrent-line.md` — hook-log truncation races a concurrent append and can erase another

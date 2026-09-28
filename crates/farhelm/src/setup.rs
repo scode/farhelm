@@ -692,7 +692,18 @@ fn install(
     // now matches and looks unchanged. `enable --now` does not repair
     // that: it starts a stopped unit, it does not restart a running one.
     for (unit, changed) in planned.iter().zip(&changed_units) {
-        let owed = restart_marker(unit_dir, unit.name).exists();
+        // `try_exists`, not `exists`: the latter reads ANY metadata error
+        // (permission denied, I/O error) as "no marker", which would skip a
+        // restart an earlier run owes and report success while the running
+        // unit keeps its old configuration: the very outcome the markers
+        // exist to prevent. An unreadable marker stops setup instead.
+        let marker = restart_marker(unit_dir, unit.name);
+        let owed = marker.try_exists().with_context(|| {
+            format!(
+                "could not tell whether {} (a restart owed by an earlier setup run) exists",
+                marker.display()
+            )
+        })?;
         if opts.dry_run {
             if owed {
                 // Already owed by an earlier run: this one is not
