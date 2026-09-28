@@ -617,36 +617,19 @@ pub(crate) async fn set_destination(
     }
 }
 
-/// The alias `state.manager`'s live snapshot currently publishes for
-/// `host`, or `None` if the host has no snapshot (removed, or never
-/// reconciled). Used by [`set_alias`] to decide whether a sync actually
-/// made the alias observable, rather than trusting the store's own
-/// changed/unchanged bookkeeping — see that function's own doc for why the
-/// two can disagree.
-fn published_alias(state: &AppState, host: HostId) -> Option<String> {
-    state
-        .manager
-        .snapshots()
-        .into_iter()
-        .find(|snapshot| snapshot.id == host)
-        .and_then(|snapshot| snapshot.alias)
-}
-
 /// `POST /api/hosts/{id}/alias` — replace the display alias without changing
 /// where the manager dials. Synchronizing the registry republishes the alias
-/// into snapshots, and a real change explicitly wakes every event client.
+/// into snapshots.
 ///
-/// The bump is based on whether the PUBLISHED snapshot's alias actually
-/// changed across this call's own sync, not on `update_alias`'s store-level
-/// `changed` return. Those two can disagree: if an earlier request wrote the
-/// same value durably but its OWN sync then failed (the branch just above
-/// returns before ever reaching a bump), a retry of that same value reports
-/// `changed = false` from the store — nothing new was written — while this
-/// retry's sync is nonetheless the first one to actually reach the
-/// manager's snapshot and, through it, every subscribed client. Bumping
-/// only on the store's flag would leave those clients stale indefinitely;
-/// comparing the snapshot before and after this call's sync catches the
-/// retry regardless of what the store itself reports.
+/// This handler does not decide whether to wake event clients. The reconcile
+/// that first APPLIES the new row to its actor announces it
+/// (`ConnectionManager::sync_registry` bumps for any changed row), whether
+/// that is this call's own sync or an unrelated one that ran in between. The
+/// earlier shape compared the published alias before and after this call's
+/// sync, and lost the announcement when another reconcile applied the edit
+/// first. It also covers a retry whose store write reports no change because
+/// an earlier attempt wrote the same value but failed to sync: this sync is
+/// still the first to change the actor's row, so it still announces.
 pub(crate) async fn set_alias(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
@@ -656,17 +639,14 @@ pub(crate) async fn set_alias(
     if let Err(error) = state.store.update_alias(host, spec.alias.as_deref()).await {
         return http_error(error);
     }
-    let before = published_alias(&state, host);
+    // The reconcile that applies the new alias announces it (whether it is
+    // this one or an unrelated one that ran first); see `sync_registry`.
     if let Err(error) = state.manager.sync_registry().await {
         return http_error(error.context(format!(
             "host {host}'s alias was changed but could not be synchronized"
         )));
     }
-    let after = published_alias(&state, host);
     drop(serialized);
-    if before != after {
-        state.manager.events().bump();
-    }
     match host_view(&state, host).await {
         Ok(view) => axum::Json(view).into_response(),
         Err(error) => http_error(error),
