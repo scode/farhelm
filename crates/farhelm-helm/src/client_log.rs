@@ -294,7 +294,7 @@ pub(crate) async fn post_client_log(
             target: "webview_console",
             dropped,
             "client-log entries dropped by server-side caps; further drops this window \
-             are counted but not logged individually"
+             are not reported"
         );
     }
 
@@ -422,7 +422,7 @@ mod tests {
         assert_eq!(first_drop.admitted, 50);
         assert_eq!(first_drop.warn_dropped, Some(12));
 
-        // Later drops in the same window: counted implicitly, never warned.
+        // Later drops in the same window are neither warned nor counted.
         assert!(window.account(start, 20, 3).warn_dropped.is_none());
 
         // A new window re-arms the warn.
