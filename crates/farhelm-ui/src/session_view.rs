@@ -1627,9 +1627,14 @@ pub(crate) fn SessionView(
     let restart_with_description = with_reason.clone().unwrap_or_else(|| {
         "resume this session's conversation with changed launch settings".to_string()
     });
-    let copied_directory = use_signal(|| false);
-    let copied_command = use_signal(|| false);
-    let copy_value = move |value: String, mut copied: Signal<bool>| {
+    // Each button's feedback is `Some(click)` while it shows, naming the
+    // click that raised it, so a click's timer clears only its OWN feedback.
+    // A plain flag let the first of two quick clicks clear the flag the
+    // second had just set, cutting its "copied" short.
+    let copied_directory = use_signal(|| None::<u64>);
+    let copied_command = use_signal(|| None::<u64>);
+    let mut copy_clicks = use_signal(|| 0_u64);
+    let mut copy_value = move |value: String, mut copied: Signal<Option<u64>>| {
         let encoded = serde_json::to_string(&value).unwrap_or_else(|_| "\"\"".into());
         // The desktop bridge is preferred because browser clipboard access is
         // permission-gated in a webview. A bridge can still be present but
@@ -1639,12 +1644,19 @@ pub(crate) fn SessionView(
             "(() => {{ const v = {encoded}; const fallback = () => {{ try {{ navigator.clipboard?.writeText?.(v)?.catch(() => {{}}); }} catch (_) {{}} }}; try {{ const native = window.__farhelmNativeClipboardWrite; if (typeof native === \"function\") {{ const result = native(v); if (result && typeof result.catch === \"function\") result.catch(fallback); }} else {{ fallback(); }} }} catch (_) {{ fallback(); }} }})()"
         );
         document::eval(&js);
+        let click = {
+            let mut clicks = copy_clicks.write();
+            *clicks += 1;
+            *clicks
+        };
         spawn(async move {
-            copied.set(true);
+            copied.set(Some(click));
             // `sleep_ms` rather than tokio directly: the web build targets
             // wasm, where tokio's timer is not linked (see `reader::sleep_ms`).
             sleep_ms(1500).await;
-            copied.set(false);
+            if *copied.peek() == Some(click) {
+                copied.set(None);
+            }
         });
     };
     let header_session = shown.clone();
@@ -1678,17 +1690,17 @@ pub(crate) fn SessionView(
                 }
                 button {
                     r#type: "button",
-                    class: if copied_directory() { "header-copy copied" } else { "header-copy" },
+                    class: if copied_directory().is_some() { "header-copy copied" } else { "header-copy" },
                     title: "{shown.cwd} — click to copy",
                     onclick: { let cwd = shown.cwd.clone(); move |_| copy_value(cwd.clone(), copied_directory) },
-                    if copied_directory() { "✓ copied" } else { span { class: "copy-glyph", "📋" } } "{shown.cwd}"
+                    if copied_directory().is_some() { "✓ copied" } else { span { class: "copy-glyph", "📋" } } "{shown.cwd}"
                 }
                 button {
                     r#type: "button",
-                    class: if copied_command() { "header-copy copied" } else { "header-copy" },
+                    class: if copied_command().is_some() { "header-copy copied" } else { "header-copy" },
                     title: "{shown.invocation} — click to copy",
                     onclick: { let invocation = shown.invocation.clone(); move |_| copy_value(invocation.clone(), copied_command) },
-                    if copied_command() { "✓ copied" } else { span { class: "copy-glyph", "📋" } } "{shown.invocation}"
+                    if copied_command().is_some() { "✓ copied" } else { span { class: "copy-glyph", "📋" } } "{shown.invocation}"
                 }
                 div { class: "titlebar-actions",
                     // SPEC.md: "Opening an interrupted session offers

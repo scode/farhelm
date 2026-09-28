@@ -346,7 +346,6 @@ One line per open item. This file must always match the feedback files in this d
   life.
 - `window-maximize-fence-never-clears.md` — if the window manager ignores the restored maximize, window geometry is
   never tracked for the run.
-- `copy-feedback-timer-cut-short.md` — a second header copy click cuts the "copied" feedback short.
 - `session-view-errors-raw-peer-text.md` — session-view restart/replace/tab error lines render supervisor refusal text
   without peer escaping.
 - `row-tooltips-raw-peer-text.md` — the sidebar row's directory and host tooltips are raw while the title tooltip is
