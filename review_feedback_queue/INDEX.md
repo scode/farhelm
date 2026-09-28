@@ -320,8 +320,6 @@ One line per open item. This file must always match the feedback files in this d
   the build type.
 - `uninstall-creates-setup-lock-file.md` — uninstall and setup --uninstall create .farhelm-setup.lock (and possibly the
   unit dir) and never report it.
-- `installer-stale-lock-own-pid-live.md` — a stale lock carrying the current shell's pid is treated as live, so every
-  later run refuses.
 - `interrupt-before-install-record-publish.md` — an interrupt between commit and record publish leaves new binaries with
   the old receipt; uninstall's refusal reads like tampering.
 - `setup-build-tree-heuristic-misfires.md` — setup refuses installed binaries under an empty TMPDIR or any path

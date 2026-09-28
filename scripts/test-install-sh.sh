@@ -1104,6 +1104,43 @@ run_install "$TOOLCHAIN_FULL" "$HOMECRASH" "$INSTALLCRASH" "$BASE/good" 1.2.3
 check "F31: an ordinary run after recovery succeeds" [ "$RC" -eq 0 ]
 
 # ===========================================================================
+# Scenario: a stale lock that names the installer's OWN pid. In containers
+# and other deterministic launch environments sh often gets the same small
+# pid every start, so a SIGKILLed run's lock can name the pid of the next
+# run itself; `kill -0 $$` always succeeds, and the installer used to refuse
+# every run as "already running". A wrapper records its own pid in the lock
+# and then `exec`s the installer, which therefore inherits that exact pid.
+# ===========================================================================
+echo
+echo "== stale lock naming the installer's own pid =="
+HOMEOWNPID="$WORKDIR/homeownpid"
+INSTALLOWNPID="$HOMEOWNPID/.local/bin"
+mkdir -p "$INSTALLOWNPID"
+run_install "$TOOLCHAIN_FULL" "$HOMEOWNPID" "$INSTALLOWNPID" "$BASE/good" 1.2.3
+check "own-pid setup: initial install exits 0" [ "$RC" -eq 0 ]
+mkdir "$INSTALLOWNPID/.farhelm-install.lock"
+chmod 0700 "$INSTALLOWNPID/.farhelm-install.lock"
+OWNPID_WRAPPER="$WORKDIR/own-pid-wrapper.sh"
+# A literal wrapper that takes both paths from its environment, so no path
+# is ever spliced into shell text (a space or metacharacter in the checkout
+# or TMPDIR would otherwise break it or run as code).
+cat >"$OWNPID_WRAPPER" <<'WRAPPER'
+#!/bin/sh
+echo $$ >"$OWNPID_LOCK_PID"
+exec /bin/sh "$OWNPID_REAL_INSTALL"
+WRAPPER
+REAL_INSTALL_SH=$INSTALL_SH
+INSTALL_SH=$OWNPID_WRAPPER
+run_install "$TOOLCHAIN_FULL" "$HOMEOWNPID" "$INSTALLOWNPID" "$BASE/good" 1.2.3 \
+  OWNPID_LOCK_PID="$INSTALLOWNPID/.farhelm-install.lock/pid" \
+  OWNPID_REAL_INSTALL="$REAL_INSTALL_SH"
+INSTALL_SH=$REAL_INSTALL_SH
+check "own-pid: a lock naming the installer's own pid is treated as stale" [ "$RC" -eq 0 ]
+check "own-pid: it is not reported as another running install" \
+  not_contains "$ERR" "is already running"
+check "own-pid: the stale lock is gone afterwards" [ ! -e "$INSTALLOWNPID/.farhelm-install.lock" ]
+
+# ===========================================================================
 # Scenario: Apple silicon under Rosetta (F12) -- `uname -m` reports
 # `x86_64` (the CURRENT process is translated) while `sysctl -n
 # hw.optional.arm64` confirms the underlying hardware is Apple silicon;
