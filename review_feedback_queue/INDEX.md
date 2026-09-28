@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `provisioning-chmods-shared-directories.md` — provisioning chmods the existing unit dir, and on UPDATE the binary's
-  dir (possibly $HOME), exposing files to other accounts.
 - `sftp-misparses-ipv6-and-uri-destinations.md` — the sftp upload parses IPv6-literal and ssh:// destinations as a
   different host than ssh, so the payload can go elsewhere.
 - `installer-overwrites-user-farhelm-file.md` — install.sh replaces and deletes any existing regular file named

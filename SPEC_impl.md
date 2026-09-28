@@ -2562,8 +2562,10 @@ plans retain a single install action because they do not transfer over the netwo
 installed-file mode drift. Provisioning may create directories with explicit modes and repair permissions on directories
 dedicated to Farhelm; the supervisor state directory is private to its user (`0700`). Existing shared directories,
 including a shared executable directory or the systemd user-unit directory, must retain their permissions. If those
-permissions prevent installation, report the obstacle rather than changing them. This ownership restriction is
-maintainer-confirmed policy; existing provisioning paths still require assessment against it.
+permissions prevent installation, report the obstacle rather than changing them. Each plan's `EnsureDirectories` step
+marks every directory dedicated or shared: a dedicated one converges on its mode with `install -d -m` (which chmods an
+existing directory, and that is the point), while a shared one is handed to `install -d` only when it is missing, and
+the confirmation text says an existing one keeps its permissions.
 
 The supervisor unit uses `KillMode=process`. Sessions started through Farhelm belong to the private tmux server that the
 supervisor launches, so systemd's default `control-group` policy would kill that server and every session whenever an

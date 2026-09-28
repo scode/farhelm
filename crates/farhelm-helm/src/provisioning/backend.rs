@@ -1913,6 +1913,15 @@ impl ProvisioningBackend for SystemBackend {
         match target {
             ProvisioningTarget::Local => {
                 for directory in directories {
+                    // A shared directory that already exists is left exactly
+                    // as it is; see `DirectorySpec`.
+                    if directory.shared
+                        && tokio::fs::metadata(&directory.path)
+                            .await
+                            .is_ok_and(|metadata| metadata.is_dir())
+                    {
+                        continue;
+                    }
                     tokio::fs::create_dir_all(&directory.path)
                         .await
                         .map_err(|error| {
@@ -1925,14 +1934,20 @@ impl ProvisioningBackend for SystemBackend {
                 }
             }
             ProvisioningTarget::Ssh { .. } => {
+                // `install -d -m` chmods a directory that already exists, so a
+                // shared one is only handed to it when it is missing.
                 let commands = directories
                     .iter()
                     .map(|directory| {
-                        Ok(format!(
-                            "install -d -m {:o} -- {}",
-                            directory.mode,
-                            shell_path(&directory.path)?
-                        ))
+                        let path = shell_path(&directory.path)?;
+                        Ok(if directory.shared {
+                            format!(
+                                "{{ [ -d {path} ] || install -d -m {:o} -- {path}; }}",
+                                directory.mode
+                            )
+                        } else {
+                            format!("install -d -m {:o} -- {path}", directory.mode)
+                        })
                     })
                     .collect::<Result<Vec<_>, _>>()?
                     .join(" && ");

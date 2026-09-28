@@ -978,7 +978,7 @@ mod tests {
         let expected = format!(
             "Farhelm will perform these steps for user@absent:\n\
              host: ubuntu, x86_64\n\
-             1. create or reuse directories {} (mode 0755), {} (mode 0700), {} (mode 0755)\n\
+             1. create or reuse directories {} (mode 0755), {} (mode 0700), {} (created with mode 0755 if missing; an existing directory keeps its permissions)\n\
              2. upload Farhelm to temporary file {} and verify its digest\n\
              3. install Farhelm at {} via temporary file {} and atomic rename\n\
              4. write user unit {unit} at {} via temporary file {} and atomic rename\n\
@@ -3059,6 +3059,78 @@ mod tests {
                     && reason.contains("farhelm helm setup")
         ));
         assert!(parse_reach_output(with_owner("someone-else").as_bytes()).is_err());
+    }
+
+    /// Why this matters: GNU `install -d -m` chmods a directory that already
+    /// exists, and provisioning used to run it on the user's shared
+    /// directories (the systemd user-unit directory, a registered binary's
+    /// bin directory, possibly `$HOME`), turning a private `0700` directory
+    /// world-readable. SPEC.md lets provisioning enforce modes only on
+    /// directories dedicated to Farhelm. For both executor branches (the
+    /// remote one's shell command runs locally here): an existing shared
+    /// directory keeps its mode, a missing one is created with the plan's
+    /// mode, and a dedicated directory is still repaired to its mode.
+    #[farhelm_testtrace::test]
+    async fn ensure_directories_leaves_existing_shared_directories_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode_of = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o7777;
+        let local = ProvisioningTarget::Local;
+        let remote = ProvisioningTarget::Ssh {
+            destination: "scripted.example".to_string(),
+        };
+        for target in [local, remote] {
+            let root = tempfile::tempdir().unwrap();
+            let backend = SystemBackend {
+                control_dir: root.path().to_path_buf(),
+                linger: LingerBehavior::Simulated(Ok(())),
+                launcher: Arc::new(ScriptedSftpLauncher {
+                    temporary: root.path().join("unused"),
+                    bytes: "",
+                    exit_status: 0,
+                }),
+                runtime_units: false,
+                fail_before_rename: false,
+            };
+            let shared_existing = root.path().join("home");
+            let shared_missing = root.path().join("units/systemd/user");
+            let dedicated = root.path().join("lib");
+            std::fs::create_dir(&shared_existing).unwrap();
+            std::fs::set_permissions(&shared_existing, std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+            std::fs::create_dir(&dedicated).unwrap();
+            std::fs::set_permissions(&dedicated, std::fs::Permissions::from_mode(0o700)).unwrap();
+            // Premises: a restrictive shared directory, a dedicated one whose
+            // mode is wrong, and a shared one that does not exist yet.
+            assert_eq!(mode_of(&shared_existing), 0o700);
+            assert_eq!(mode_of(&dedicated), 0o700);
+            assert!(!shared_missing.exists());
+            backend
+                .ensure_directories(
+                    &target,
+                    &[
+                        DirectorySpec {
+                            path: dedicated.clone(),
+                            mode: 0o755,
+                            shared: false,
+                        },
+                        DirectorySpec {
+                            path: shared_existing.clone(),
+                            mode: 0o755,
+                            shared: true,
+                        },
+                        DirectorySpec {
+                            path: shared_missing.clone(),
+                            mode: 0o755,
+                            shared: true,
+                        },
+                    ],
+                )
+                .await
+                .unwrap();
+            assert_eq!(mode_of(&shared_existing), 0o700, "{target:?}: shared kept");
+            assert_eq!(mode_of(&shared_missing), 0o755, "{target:?}: created");
+            assert_eq!(mode_of(&dedicated), 0o755, "{target:?}: dedicated repaired");
+        }
     }
 
     /// Why this matters: the ownership field is produced by a shell snippet
