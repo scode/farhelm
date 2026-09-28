@@ -47,5 +47,5 @@ mod row;
 mod shared;
 mod view;
 
-pub(crate) use shared::OpenDestination;
+pub(crate) use shared::{OpenDestination, with_source_host};
 pub(crate) use view::{HeaderPrefillRequest, ListView, SharedPreferences, remember_selection};

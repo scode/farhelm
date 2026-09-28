@@ -1758,9 +1758,22 @@ pub(crate) fn ListView(
         errors.write().remove(&id);
         let base = replace_base.clone();
         let refresh = replace_refresh.clone();
+        // The source row's host fields, taken now: the reply is bare, and
+        // the row may be gone from the listing by the time it lands. See
+        // `with_source_host`.
+        let source = listing.peek().as_ref().and_then(|listing| {
+            listing
+                .as_ref()
+                .ok()
+                .and_then(|listing| listing.sessions.iter().find(|s| s.id == id).cloned())
+        });
         spawn(async move {
             match replace_session(&base, &id).await {
                 Ok(session) => {
+                    let session = match &source {
+                        Some(source) => super::with_source_host(session, source),
+                        None => session,
+                    };
                     remember_selection(&base, preferences, &session.id);
                     on_open.call(session);
                     refresh(Trigger::Explicit);
