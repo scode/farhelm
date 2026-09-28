@@ -334,8 +334,6 @@ One line per open item. This file must always match the feedback files in this d
   callbacks.
 - `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
   sidebar keeps deleted/stale rows.
-- `deleted-row-reappears-without-read-fence.md` — delete doesn't fence older listing reads, so an in-flight read can
-  briefly restore the deleted row.
 - `desktop-copy-fallback-never-runs.md` — the native clipboard writer never rejects, so the header copy fallback never
   runs and failures show "copied".
 - `replace-reply-missing-host-fields.md` — plain Replace stores the bare helm reply without host fields, so New defaults
