@@ -3419,8 +3419,17 @@ mod tests {
             RedirectDecision::Follow,
             "an http mirror redirecting within http is not a downgrade"
         );
+        // `hops` counts the redirect being decided (reqwest's `previous()`
+        // includes the original URL), so the documented "at most five hops"
+        // means the fifth is followed and the sixth refused. The boundary
+        // used to sit one lower, stopping at four.
         assert_eq!(
             release_redirect_decision(Some(&https), &object_store, 5),
+            RedirectDecision::Follow,
+            "the fifth redirect is within the documented five hops"
+        );
+        assert_eq!(
+            release_redirect_decision(Some(&https), &object_store, 6),
             RedirectDecision::TooManyHops
         );
         // A loopback or private destination is deliberately NOT refused:
