@@ -144,7 +144,10 @@ See the "Talking to Farhelm from inside a session" in
 ## What you will see
 
 Claude: nothing new. The session row offers "resume conversation" within seconds of launch, before you have typed
-anything, because Claude fires the hook at process start.
+anything, because Claude fires the hook at process start. Only a hook run by the session's own foreground Claude counts:
+the pane process, or its direct child under a one-level wrapper. A `claude` that the session starts through its shell (a
+shelled-out sub-agent) inherits the session's credential, but if it reports a conversation Farhelm refuses it, and the
+hook log records a `refused conflict` line. A nested invocation cannot replace its parent's target.
 
 Codex: on the launches that get the flags, the `⚠ --dangerously-bypass-hook-trust is enabled` line above the composer,
 and the resume offer only after your first prompt — Codex fires `SessionStart` at first prompt submission, not at

@@ -603,6 +603,92 @@ async fn a_second_report_replaces_the_first() {
     serving.stop().await;
 }
 
+/// A shelled-out child that inherited the session credential and fires its
+/// own reporting hook cannot replace the foreground's conversation: the
+/// supervisor refuses it, and the foreground's report stays the restart
+/// target.
+///
+/// Why this test matters: this is the overwrite Claude's positional
+/// admission rule exists to stop. A `claude` run from the foreground's Bash
+/// tool inherits `FARHELM_SESSION_TOKEN` along with the rest of the
+/// environment, and if it picks up a reporting hook (a user- or
+/// project-level settings hook, say) its `SessionStart` names a different
+/// conversation. Before the rule, credential and id shape were all
+/// admission asked for, so the child's id silently became what a restart
+/// would resume.
+///
+/// The fixture's nested shape is pinned rather than assumed: the child's
+/// parent is a live `sh` (it printed so), which puts the child two links
+/// below the pane. The refusal is read from the hook log, not inferred from
+/// the unchanged identity alone, because the hook is silent either way and
+/// "not stored" would also pass if the child had never reached the
+/// supervisor at all.
+#[farhelm_testtrace::test]
+async fn a_shelled_out_child_cannot_replace_the_foreground_report() {
+    let (h, fixtures, serving) = hook_harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = hook_session(&h, &fixtures, work.path()).await;
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+
+    report(&h, chan, &mut rx, &mut seen, "conv-parent").await;
+
+    let from = seen.len();
+    h.client
+        .send_input(chan, b"nested-report conv-child\r".to_vec())
+        .await;
+    wait_for_after_from(
+        &mut rx,
+        &mut seen,
+        from,
+        "NESTED-PARENT:",
+        // The whole success marker, not a prefix: terminal output arrives
+        // in arbitrary chunks, and a wait satisfied mid-marker would fail
+        // the assertions below for a run that actually succeeded.
+        "NESTED-REPORT-DONE:conv-child",
+        30,
+    )
+    .await;
+    let text = String::from_utf8_lossy(&seen[from..]).into_owned();
+    // `ps -o comm=` prints the bare name on Linux and argv[0] with its
+    // path on macOS (`/bin/sh`), so only the basename is compared.
+    let parent = marker_value(&seen[from..], "NESTED-PARENT:");
+    assert_eq!(
+        parent.rsplit('/').next(),
+        Some("sh"),
+        "the child must have been run by a live shell below the pane, or the premise of the \
+         refusal is gone (parent {parent:?}); transcript:\n{text}"
+    );
+    assert!(
+        text.contains("HOOK-REPORTED:conv-child") && text.contains("HOOK-STDOUT-EMPTY"),
+        "a refused hook still finishes silently; transcript:\n{text}"
+    );
+
+    let log = hook_log_lines(&h, &session.id);
+    let child = log
+        .iter()
+        .find(|line| line.contains(" conv-child "))
+        .unwrap_or_else(|| panic!("the child's hook must have left a log line: {log:?}"));
+    assert!(
+        child.contains(" refused conflict ") && child.contains("nested below"),
+        "the supervisor must have refused the child for its ancestry: {child}"
+    );
+    assert!(
+        log.iter()
+            .any(|line| line.contains(" acked ") && line.contains(" conv-parent ")),
+        "the foreground's own report must have been acked: {log:?}"
+    );
+
+    let snapshot = snapshot_of(&h, &session.id).await;
+    assert_eq!(
+        snapshot.captured_conversation.as_deref(),
+        Some("conv-parent"),
+        "the refused child must not replace the foreground's identity; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
+    serving.stop().await;
+}
+
 /// The SAME conversation reported twice is two hook runs, and the second
 /// one is genuinely observed as the second.
 ///

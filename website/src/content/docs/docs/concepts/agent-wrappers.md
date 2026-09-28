@@ -88,6 +88,15 @@ that is the one thing farhelm cannot check for you. Its own tests stand in `sh -
 wrapper stops at the agent command and forwards the rest is something only you can verify — `ps -o args= -p <agent pid>`
 against a live session shows what actually reached the agent.
 
+For Claude there is one more condition on the shape: the wrapper must start Claude as its own direct child. Farhelm only
+accepts a Claude report from the session's pane process or that process's direct child, which is what keeps a `claude`
+the session starts through its shell (a shelled-out sub-agent) from replacing the conversation you are in. A resident
+wrapper that runs Claude itself is exactly one level, so it keeps reporting. A chain of two resident launchers — a
+wrapper that runs a script, which in turn runs Claude without `exec` — puts Claude too far below the pane: its reports
+are refused, the hook log records a `refused conflict` line, and the restart offer falls back to the record scan. A
+launcher that `exec`s (as `env` does, and as a script ending in `exec claude "$@"` does) replaces itself rather than
+staying in the chain, so it adds no level.
+
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —
 no sweep will claim a process that does not carry it), `FARHELM_AGENT_ID` (the same session id again, under a name that
 says this process belongs to the session's AGENT rather than to one of its terminal tabs; that is the marker a stop

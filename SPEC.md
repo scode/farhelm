@@ -953,6 +953,16 @@ Compaction preserves the conversation, and a verified new conversation replaces 
 remain stored but are not offered as exact resume targets. Missing or changed transcript evidence refuses Resume rather
 than silently launching fresh or selecting a different historical conversation.
 
+Claude reports must come from a hook run by the session's pane process or by that process's direct child, so a `claude`
+started underneath the foreground one — a shelled-out sub-agent that inherited the session credential and loaded a
+reporting hook from its own settings — cannot replace or withdraw the foreground's conversation. The rule is positional:
+Farhelm does not recognize Claude's executable and does not read the injected hook out of anyone's command line, because
+both are vendor details that change independently of Farhelm. A plain launch makes the pane process Claude itself and a
+one-level wrapper profile makes Claude its direct child, so both keep reporting; a wrapper chain deeper than that loses
+hook capture and falls back to Claude's record scan. Native sub-agents never report: Claude fires no `SessionStart` for
+them, and any report naming a sub-agent is refused for every kind. Claude takes no versioned ownership proof, so its
+existing captures stay resumable across the change.
+
 Grok reports must come from one native `grok` process under the owned pane, launched with `--no-leader` before any real
 end-of-options boundary. The only admitted descendants are the documented reporter command and its narrow shell
 trampoline; a nested Grok or another session-hosting runtime cannot replace the parent selection. `SessionStart` with
@@ -985,10 +995,11 @@ vendor discriminator naming the adapter that produced it — the injected hook c
 asset — and a report addressed to a session of another kind is refused before any vendor state is consulted. The
 discriminator routes; it does not prove. Codex and Grok admission require foreground and record proofs, and their exact
 resume additionally requires versioned proof that the binding was admitted under those proofs, with the historical Codex
-exception described in SPEC_impl.md. Goose, Claude, and Pi retain their existing admission and resume rules; the
-discriminator alone adds no foreground protection. Old senders that predate the discriminator fail closed rather than
-reporting untagged. A refused report changes nothing: no stored identity, no offer, no ambiguity verdict, no pending
-state. Resume is never silently turned into fresh, and historical captures are never rewritten to look proven.
+exception described in SPEC_impl.md. Claude admission requires the positional check above but no versioned proof, so its
+resume rules are unchanged. Goose and Pi retain their existing admission and resume rules; for them the discriminator
+alone adds no foreground protection. Old senders that predate the discriminator fail closed rather than reporting
+untagged. A refused report changes nothing: no stored identity, no offer, no ambiguity verdict, no pending state. Resume
+is never silently turned into fresh, and historical captures are never rewritten to look proven.
 
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. A launch
 whose program is `omp` gets Farhelm's private extension when the invocation is an interactive-shaped launch; utility

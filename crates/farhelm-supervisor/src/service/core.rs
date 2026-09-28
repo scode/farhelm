@@ -13872,7 +13872,9 @@ impl Supervisor {
     /// [`CaptureState`]'s ladder). For Codex, the credential alone does not
     /// establish authority: the reporter must belong to the current foreground
     /// process. Becoming resumable additionally requires the exact transcript
-    /// to identify its root conversation.
+    /// to identify its root conversation. For Claude, the hook must have been
+    /// run by the pane process or its direct child, which keeps a shelled-out
+    /// child from replacing its parent's conversation.
     /// A second accepted report for the same launch REPLACES the first —
     /// `/clear` and `/new` start a new conversation inside a running
     /// process, and the id they retire is exactly the one that must not be
@@ -13979,7 +13981,9 @@ impl Supervisor {
     /// restart's whole-process-tree sweep before the replacement runs.
     /// Codex and Grok additionally require the peer to remain attributable
     /// to the current pane's foreground process around exact-record
-    /// verification.
+    /// verification, and OMP to its launched runtime. Claude requires the
+    /// peer's hook to have been run by the pane process or its direct child,
+    /// checked once before the write.
     /// How long a report waits for the session's capture claim before
     /// giving up with a `Conflict` rejection.
     ///
@@ -14092,6 +14096,7 @@ impl Supervisor {
                 id,
                 report.conversation,
                 report.source,
+                report.peer,
                 kind,
                 generation,
                 entry,
@@ -14608,19 +14613,32 @@ impl Supervisor {
         Self::finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
     }
     /// Legacy admission for kinds whose ownership proof is not yet
-    /// implemented: today's acceptance (credential, shape, generation
-    /// fence, unconditional replace within the generation) behind the new
-    /// discriminator gate, under the shared claim discipline.
+    /// implemented: the original acceptance (credential, shape, generation
+    /// fence, replace within the generation) behind the discriminator gate,
+    /// under the shared claim discipline.
     ///
-    /// The write deliberately does NOT touch `capture_ownership_version`:
-    /// these rows stay at 0 — ownership not established under this
-    /// contract — until their kind's PR wires proof, writes 1, and flips
-    /// the predicate. Preserved, not re-blessed.
+    /// Claude additionally has to pass [`Supervisor::claude_foreground`]
+    /// before the write: the hook must have been run by the session's pane
+    /// process or its direct child, so a shelled-out `claude` that
+    /// inherited the credential cannot replace its parent's conversation.
+    /// That check sits after the id-shape check, so a malformed report
+    /// still answers `InvalidRequest` without any tmux or process
+    /// inspection. Goose and Pi ignore `peer` and are admitted as before.
+    ///
+    /// The write deliberately does NOT touch `capture_ownership_version`,
+    /// Claude's included: these rows stay at 0 — ownership not established
+    /// under the versioned contract — until their kind's PR wires a proof,
+    /// writes 1, and flips the predicate. Claude's positional check stops
+    /// replacement without that flip, which would otherwise withdraw the
+    /// resume offer of every existing Claude session. Preserved, not
+    /// re-blessed.
+    #[allow(clippy::too_many_arguments)]
     async fn report_conversation_legacy(
         &self,
         id: &str,
         conversation: String,
         source: String,
+        peer: Option<crate::procs::ProcessIdentity>,
         kind: AgentKind,
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
@@ -14667,6 +14685,28 @@ impl Supervisor {
                 ErrorKind::InvalidRequest,
                 "the reported conversation identity does not match this session's agent kind",
             ));
+        }
+        if kind == AgentKind::Claude {
+            let peer = peer.ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "the Claude report has no kernel-attributed local process",
+                )
+            })?;
+            let emitter = self
+                .claude_foreground(&row, peer)
+                .await
+                .inspect_err(|error| {
+                    warn!(
+                        session = %id, generation, source = %source, error = %error,
+                        "refused a Claude conversation report that did not come from this \
+                         session's foreground process"
+                    );
+                })?;
+            info!(
+                session = %id, generation, emitter_pid = emitter.pid,
+                "attributed a Claude foreground conversation report"
+            );
         }
         // The injected failure STANDS IN for the store call rather than
         // preceding it, so a test can exercise this function's own failure
@@ -14873,6 +14913,30 @@ impl Supervisor {
                 RequestError::new(
                     ErrorKind::Internal,
                     "Grok process attribution could not complete",
+                )
+            })?
+            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
+    }
+
+    /// Bind the socket peer to the Claude session's foreground by position
+    /// (see `procs::claude_corridor`), after the shared owned-pane lookup
+    /// that also covers the publication gap Claude's startup report lands
+    /// in. One pass suffices: unlike Codex, Claude admission reads no
+    /// vendor file between attribution and the write, so a repeat walk
+    /// would guard nothing. No lifecycle lock, for the same reason as
+    /// [`Supervisor::codex_foreground`].
+    async fn claude_foreground(
+        &self,
+        row: &StoredSession,
+        peer: crate::procs::ProcessIdentity,
+    ) -> Result<crate::procs::ProcessIdentity, RequestError> {
+        let pid = self.owned_pane_pid(row, "Claude").await?;
+        tokio::task::spawn_blocking(move || crate::procs::foreground_claude_emitter(peer, pid))
+            .await
+            .map_err(|_| {
+                RequestError::new(
+                    ErrorKind::Internal,
+                    "Claude process attribution could not complete",
                 )
             })?
             .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
