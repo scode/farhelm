@@ -515,9 +515,19 @@ fn inspect_bundle_at(
     }
     let origin = field_path(&fields[1], record_path, "origin directory")?;
     if origin.as_os_str().as_bytes() != flat_root.as_os_str().as_bytes() {
-        return repair_refusal(
-            record_path,
-            "its origin does not match the selected flat installation",
+        // Not a damaged receipt: a valid one that names another installation
+        // (a Mac can hold a default and a custom-directory install, but only
+        // one Farhelm.app). The generic repair advice, rerunning the
+        // installer, would rebuild the app from THIS installation and take it
+        // away from the other one, so this refusal says what actually helps.
+        bail!(
+            "ownership receipt {} says {} belongs to the Farhelm installation in {}, not the one \
+             being uninstalled from {}; uninstall that installation with its own `farhelm \
+             uninstall` first, or move the app aside, then retry",
+            path_text(record_path),
+            path_text(root),
+            path_text(&origin),
+            path_text(flat_root)
         );
     }
     let hashes = [
@@ -1011,7 +1021,7 @@ pub(crate) mod tests {
                 "{case}: {diagnostic}"
             );
             let evidence = match case {
-                "foreign-origin" => "origin does not match",
+                "foreign-origin" => "belongs to the Farhelm installation in",
                 "symlink" => "regular file",
                 "disagreement" => "disagrees",
                 _ => unreachable!(),
@@ -1069,6 +1079,9 @@ pub(crate) mod tests {
         let contents = bundle.join("Contents");
         let elsewhere = fixture.root.path().join("elsewhere");
         fs::create_dir(&elsewhere).expect("elsewhere");
+        // The receipt must name a physical canonical path to be read at all
+        // (on macOS the temporary root sits behind the /var symlink).
+        let elsewhere = fs::canonicalize(&elsewhere).expect("canonical elsewhere");
         let cli_hash = Fixture::digest(b"cli");
         let desktop_hash = Fixture::digest(b"desktop");
         let plist_hash = Fixture::digest(b"plist");
@@ -1084,11 +1097,17 @@ pub(crate) mod tests {
         let mut record = parts.join(&0);
         record.push(0);
         Fixture::write(&contents.join(FLAT_RECORD), &record);
+        let refusal = inspect(&fixture.inputs(PlatformArtifacts::Macos))
+            .unwrap_err()
+            .to_string();
+        // The remedy must point at the other installation: the generic
+        // "rerun the installer" advice would rebuild the app from this one
+        // and take it away from its real owner.
         assert!(
-            inspect(&fixture.inputs(PlatformArtifacts::Macos))
-                .unwrap_err()
-                .to_string()
-                .contains("origin")
+            refusal.contains(&path_text(&elsewhere))
+                && refusal.contains("farhelm uninstall")
+                && !refusal.contains("rerun the installer"),
+            "the refusal must name the owning installation and its remedy: {refusal}"
         );
     }
 
