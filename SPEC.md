@@ -1506,9 +1506,11 @@ If those permissions prevent installation, report the obstacle rather than silen
 does not authorize incidental changes to unrelated host configuration.
 
 Farhelm is not designed for install directories that other local accounts can write to, whether provisioning's lib,
-state, or binary directory on a host or a shared directory it writes into. Keeping them writable only by the user is the
-user's responsibility, and Farhelm's installation, update, and recovery guarantees assume no other account can create or
-replace entries in them.
+state, or binary directory on a host, a shared directory it writes into, or the standalone installer's install directory
+(`~/.local/bin` or `FARHELM_INSTALL_DIR`). Keeping them writable only by the user is the user's responsibility, and
+Farhelm's installation, update, recovery, and uninstall guarantees assume no other account can create or replace entries
+in them. A group-writable or sticky shared directory is outside what the installer's lock, journal, and backup
+safeguards defend against.
 
 On a host provisioned from the hosts panel, the supervisor unit (`farhelm-supervisor.service`) has one owner. A unit
 without `farhelm helm setup`'s managed-by marker belongs to provisioning, and ADD and UPDATE may replace it. A unit that

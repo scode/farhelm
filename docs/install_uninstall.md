@@ -20,9 +20,11 @@ It downloads release archives for your platform and checks their checksums befor
 default location is `~/.local/bin/farhelm`. On macOS, it also installs `~/.local/bin/farhelm-desktop` and creates
 `~/Applications/Farhelm.app`, with copies of the executables inside the bundle.
 
-Set `FARHELM_INSTALL_DIR` to choose another executable directory. The macOS app still goes in `~/Applications`;
-`FARHELM_NO_APP_BUNDLE=1` skips creating or updating that bundle. Set installer options on the `sh` side of the pipe,
-for example:
+Set `FARHELM_INSTALL_DIR` to choose another executable directory, one only you can write to: the installer's update and
+crash-recovery safeguards assume no other account can create or replace files there, and a directory shared with other
+local accounts (group-writable, or a sticky `/tmp`-style one) is not supported. The macOS app still goes in
+`~/Applications`; `FARHELM_NO_APP_BUNDLE=1` skips creating or updating that bundle. Set installer options on the `sh`
+side of the pipe, for example:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | FARHELM_INSTALL_DIR="$HOME/bin" sh
