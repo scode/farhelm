@@ -235,8 +235,6 @@ One line per open item. This file must always match the feedback files in this d
   instead of the real error.
 - `spawn-lookup-timeout-message-misleads.md` — a timed-out spawn profile lookup says a retry may repeat the request,
   though nothing was created.
-- `conversation-id-logged-raw-on-store-error.md` — an unchecked reported conversation id is written raw into a log line
-  when the session read fails.
 - `pi-locator-newlines-reach-logs.md` — Pi conversation locators are logged as sent and can carry raw newlines into
   supervisor logs.
 - `output-client-shutdown-can-retry-forever.md` — the per-terminal output client can get stuck retrying shutdown when
