@@ -3766,6 +3766,17 @@ impl HostActor {
                 let superseded = error
                     .downcast_ref::<HostStoreError>()
                     .is_some_and(|e| matches!(e, HostStoreError::IdentityMismatch { .. }));
+                // A row deleted under a live connection (a path that removes
+                // the row without stopping this actor) is refused on every
+                // later refresh for the same reason, so it too ends the
+                // connection: back in the run loop, the row reload finds it
+                // gone and retires this actor, instead of it staying
+                // connected, draining, and answering upcalls for a host the
+                // registry no longer has. An identity-less host never writes
+                // here, so this covers identified hosts only.
+                let removed = error
+                    .downcast_ref::<HostStoreError>()
+                    .is_some_and(|e| matches!(e, HostStoreError::HostNotFound(_)));
                 // This one is the STORE's own text rather than a peer's,
                 // but it is normalized identically: one shape of retained
                 // failure string is easier to reason about than two, and a
@@ -3779,8 +3790,13 @@ impl HostActor {
                 );
                 RefreshStep {
                     health: RefreshHealth::Failed { error },
-                    end_connection: superseded
-                        .then_some("this connection's identity is no longer the row's"),
+                    end_connection: if superseded {
+                        Some("this connection's identity is no longer the row's")
+                    } else if removed {
+                        Some("this host's registry row is gone")
+                    } else {
+                        None
+                    },
                     live: LiveSessions::Clear,
                     contested: None,
                     truncated: None,
@@ -7512,6 +7528,70 @@ mod tests {
                 .unwrap()
                 .is_empty(),
             "the superseded identity's refresh must not repopulate the purged cache"
+        );
+    }
+
+    /// A connected host whose registry row is deleted without stopping its
+    /// actor must stop serving and retire at its next refresh.
+    ///
+    /// Such a row is refused by every later cache write (`HostNotFound`),
+    /// and the actor only re-reads its row between connections. Before, the
+    /// refusal was recorded as an ordinary failed refresh, so the host stayed
+    /// `Connected`, kept its transport open, and kept answering for a host
+    /// the registry no longer had, until some unrelated reconcile dropped it.
+    /// Ending the connection sends the actor back to the row reload, which
+    /// retires it.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_refresh_for_a_deleted_row_ends_the_connection_and_retires() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("removed.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    identity: Some("identity-removed".to_string()),
+                    sessions: vec![session("orphan", 100)],
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Ok { .. },
+                        ..
+                    }
+                )
+            })
+            .await
+            .expect("actor is running");
+
+        // Deleted behind the actor's back: the store alone, no stop_actor.
+        fixture.store.remove_ssh_host(host).await.unwrap();
+
+        // Bounded, on the paused clock, so a connection that never ends
+        // fails this test instead of hanging it: the refresh loop keeps
+        // timers armed, so virtual time runs through many refresh
+        // intervals before the bound fires.
+        tokio::time::timeout(
+            Duration::from_secs(24 * 60 * 60),
+            fixture
+                .manager
+                .wait_for_state(host, |state| matches!(state, HostState::Retired { .. })),
+        )
+        .await
+        .expect("a refresh refused for a deleted row must end the connection")
+        .expect("the actor is still in the map, retired");
+        assert!(
+            status_client(&fixture.manager, host).is_none(),
+            "a host the registry no longer has must not stay routable"
         );
     }
 
