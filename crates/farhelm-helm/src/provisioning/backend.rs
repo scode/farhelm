@@ -870,7 +870,7 @@ impl SystemBackend {
     /// Install only the verified remote temporary, without a second upload.
     /// Rechecking the digest at this boundary protects the bytes across the
     /// separately reported upload and install actions.
-    async fn install_uploaded_source(
+    pub(super) async fn install_uploaded_source(
         &self,
         target: &ProvisioningTarget,
         source_hash: &str,
@@ -878,15 +878,27 @@ impl SystemBackend {
         temporary: &Path,
         mode: u32,
     ) -> Result<ActionOutcome, BackendFailure> {
-        if let Some(installed) = self.metadata_on_target(target, destination).await?
-            && installed.hash == source_hash
-        {
+        // Every failure from here on happens with the uploaded temporary
+        // (a complete payload, tens of megabytes) already on the host, so it
+        // goes through `cleanup_temporary_failure`: returning early would
+        // leave that file behind in the host's farhelm or bin directory on
+        // one transient ssh failure. That includes the already-installed
+        // branch's own removal: its failure earns the same one further
+        // cleanup attempt. The helper stays outside this block so a failed
+        // cleanup is reported, not retried recursively.
+        let already_installed = async {
+            let Some(installed) = self.metadata_on_target(target, destination).await? else {
+                return Ok(None);
+            };
+            if installed.hash != source_hash {
+                return Ok(None);
+            }
             let repaired = installed.mode != mode;
             if repaired {
                 self.set_target_mode(target, destination, mode).await?;
             }
             self.remove_temporary(target, temporary).await?;
-            return Ok(ActionOutcome::Skipped(format!(
+            Ok::<_, BackendFailure>(Some(ActionOutcome::Skipped(format!(
                 "{} already has the requested payload{}",
                 destination.display(),
                 if repaired {
@@ -894,7 +906,16 @@ impl SystemBackend {
                 } else {
                     String::new()
                 }
-            )));
+            ))))
+        };
+        match already_installed.await {
+            Ok(Some(outcome)) => return Ok(outcome),
+            Ok(None) => {}
+            Err(primary) => {
+                return Err(self
+                    .cleanup_temporary_failure(target, temporary, primary)
+                    .await);
+            }
         }
         let install = self
             .require_shell(
