@@ -266,8 +266,6 @@ One line per open item. This file must always match the feedback files in this d
   never started" error.
 - `creates-accepted-while-boot-id-unreadable.md` — creates are accepted while the boot id is unreadable and are later
   misclassified as interrupted.
-- `failed-create-rollback-row-unpublished.md` — when a failed create's rollback fails, the kept row is never published
-  and can't be listed or deleted.
 - `abort-relaunch-failure-status-desync.md` — a failed restore after a failed restart leaves displayed and stored status
   out of sync.
 - `create-replay-codex-offer-conflict.md` — a create replay can fail with an unrelated "Codex restart offer changed"
