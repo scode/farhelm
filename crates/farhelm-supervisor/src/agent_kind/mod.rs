@@ -307,6 +307,13 @@ pub fn parse_locator(vendor: LocatorVendor, value: &str) -> anyhow::Result<Sessi
     let json = value
         .strip_prefix(vendor.prefix())
         .ok_or_else(|| anyhow::anyhow!("not a {} locator", vendor.name()))?;
+    // JSON allows whitespace such as a newline between tokens, but the
+    // accepted string itself is stored and logged, so a raw control
+    // character would split supervisor log lines. Genuine reports are
+    // compact JSON (as `encode_locator` produces) and never contain one.
+    if json.chars().any(char::is_control) {
+        anyhow::bail!("{} locator contains control characters", vendor.name());
+    }
     let locator: SessionLocator = serde_json::from_str(json)?;
     validate_locator(vendor, &locator)?;
     Ok(locator)
@@ -4337,6 +4344,41 @@ mod tests {
         // and its template derivation is unchanged.
         let pi_argv = ["pi".to_string(), "--".to_string(), "hello".to_string()];
         assert!(IntegrationSnapshot::resolve(&pi_argv, Some(AgentKind::Pi), None).is_ok());
+    }
+
+    /// A locator with a raw control character is refused even where JSON
+    /// would accept it as whitespace.
+    ///
+    /// Why it matters: the accepted locator string is stored and logged as
+    /// reported, so a newline between JSON tokens split supervisor log
+    /// lines. Genuine reporters send compact JSON, which still parses.
+    #[farhelm_testtrace::test]
+    fn locators_with_control_characters_are_refused() {
+        for vendor in [LocatorVendor::Pi, LocatorVendor::Omp] {
+            let encoded = encode_locator(
+                vendor,
+                SessionLocator {
+                    version: 1,
+                    session_id: "session-1".to_string(),
+                    session_file: Some("/tmp/session.jsonl".to_string()),
+                },
+            )
+            .expect("encode");
+            assert!(parse_locator(vendor, &encoded).is_ok());
+            let spread = encoded.replacen('{', "{\n", 1);
+            assert!(
+                serde_json::from_str::<SessionLocator>(
+                    spread.strip_prefix(vendor.prefix()).unwrap()
+                )
+                .is_ok(),
+                "fixture premise: the newline is valid JSON whitespace"
+            );
+            let refusal = parse_locator(vendor, &spread).expect_err("a raw newline is refused");
+            assert!(
+                refusal.to_string().contains("control characters"),
+                "{refusal}"
+            );
+        }
     }
 
     /// Each locator vendor's durable token round-trips paths that are hostile
