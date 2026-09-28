@@ -204,3 +204,22 @@ test("a stalled exchange body is aborted by the absolute deadline", async () => 
 
   assert.deepEqual(ipc.sent, [{ error: "exchange aborted" }]);
 });
+
+// The saved-credential check runs on nearly every launch and nothing else
+// times it out, so a helm that accepts the request and never answers used to
+// leave the window on "Starting Farhelm…" forever. It is bounded like the
+// exchange, and the timeout reaches native as an ordinary, visible error.
+test("a validation request that never answers times out as an error", async () => {
+  const ipc = channel([
+    { base: "http://127.0.0.1:7433", token: "token", persisted: "persisted-device" },
+  ]);
+  class UnusedSocket {}
+  const browser = platform((_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(new Error("aborted")));
+  }), UnusedSocket);
+  browser.validationTimeoutMs = 10;
+
+  await authenticate(ipc, browser);
+
+  assert.deepEqual(ipc.sent, [{ error: "webview device validation timed out" }]);
+});

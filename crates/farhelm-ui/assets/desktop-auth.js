@@ -41,11 +41,31 @@
         || "";
       let authenticated = false;
       if (secret) {
-        const validation = await platform.fetch(`${bootstrap.base}/api/auth/device`, {
-          method: "GET",
-          headers: { "Authorization": `Bearer ${secret}` },
-          cache: "no-store",
-        });
+        // Bounded like the exchange below. Nothing else times this step
+        // out (the native side waits on this script without a deadline),
+        // so a helm that accepts the connection and never answers used to
+        // leave the window on "Starting Farhelm…" forever with no error.
+        // A timeout is reported through the ordinary error path instead.
+        const controller = new platform.AbortController();
+        const deadline = platform.setTimeout(function () {
+          controller.abort();
+        }, platform.validationTimeoutMs || 5000);
+        let validation;
+        try {
+          validation = await platform.fetch(`${bootstrap.base}/api/auth/device`, {
+            method: "GET",
+            headers: { "Authorization": `Bearer ${secret}` },
+            cache: "no-store",
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (controller.signal.aborted) {
+            throw new Error("webview device validation timed out");
+          }
+          throw error;
+        } finally {
+          platform.clearTimeout(deadline);
+        }
         if (validation.ok) {
           if (!(await accepted(secret))) {
             throw new Error("webview event socket failed after device validation");
