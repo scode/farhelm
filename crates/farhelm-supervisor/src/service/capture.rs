@@ -1122,6 +1122,14 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
             // launch-to-first-input gap is unbounded by design.
             continue;
         };
+        // A kind with no record directory never scans (it relies on its own
+        // report), so the overlap rule below guards nothing for it. Skipping
+        // it first keeps two report-only sessions started together in one
+        // directory from being declared ambiguous, with a warning that their
+        // conversations cannot be captured, when their reports still will be.
+        let Some(root) = integration.record_root(home, cwd) else {
+            continue;
+        };
         let window = CaptureWindow::around(at, bounds);
         let key = (crate::store::agent_kind_column(entry.snapshot.kind), cwd);
         if let Some(rival) = occupied.get(&key).and_then(|group| {
@@ -1136,9 +1144,6 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
             .await;
             continue;
         }
-        let Some(root) = integration.record_root(home, cwd) else {
-            continue;
-        };
         scanning.push(Scanning {
             entry,
             integration,
@@ -2098,6 +2103,77 @@ mod tests {
             ),
             "and the reported identity must survive the attempt"
         );
+    }
+
+    /// Two report-only sessions started together in one directory are not
+    /// declared ambiguous.
+    ///
+    /// Why it matters: the overlap rule protects the record SCAN, and a
+    /// report-only kind (here Codex) has no record directory and never scans.
+    /// Running the rule for it anyway logged that neither session's
+    /// conversation could be captured and wrote a durable ambiguity flag,
+    /// while their own reports were still on the way. Spec: no ambiguity
+    /// write for a kind with no record root, however the windows overlap.
+    #[farhelm_testtrace::test]
+    async fn overlapping_report_only_sessions_are_not_declared_ambiguous() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = std::fs::canonicalize(work.path())
+            .expect("canonicalize")
+            .to_string_lossy()
+            .to_string();
+        let attempts: Arc<StdMutex<Vec<(CaptureWrite, String)>>> =
+            Arc::new(StdMutex::new(Vec::new()));
+        let seen = Arc::clone(&attempts);
+        let fault: CaptureStoreFault = Arc::new(move |write, id| {
+            seen.lock()
+                .expect("fault log poisoned")
+                .push((write, id.to_string()));
+            Err(anyhow::anyhow!("no write reaches the store in this test"))
+        });
+        let sup = supervisor_over(&state, home.path(), Some(fault)).await;
+
+        let now = crate::agent_kind::now_unix();
+        let a = entry_of_kind(
+            AgentKind::Codex,
+            "codex-a",
+            &cwd,
+            Some(now - 20),
+            CaptureState::Unclaimed,
+        );
+        let b = entry_of_kind(
+            AgentKind::Codex,
+            "codex-b",
+            &cwd,
+            Some(now - 20),
+            CaptureState::Unclaimed,
+        );
+        assert!(
+            a.snapshot
+                .integration()
+                .expect("Codex is integrated")
+                .record_root(home.path(), &cwd)
+                .is_none(),
+            "fixture premise: Codex is report-only"
+        );
+
+        capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b)], true).await;
+
+        assert!(
+            attempts.lock().expect("fault log poisoned").is_empty(),
+            "a report-only kind must not reach any capture write: {:?}",
+            attempts.lock().unwrap()
+        );
+        for entry in [&a, &b] {
+            assert!(
+                matches!(
+                    *entry.run.capture.lock().expect("capture mutex poisoned"),
+                    CaptureState::Unclaimed
+                ),
+                "the session must stay unclaimed for its own report"
+            );
+        }
     }
 
     /// The same gating, reached the way production reaches it: through a

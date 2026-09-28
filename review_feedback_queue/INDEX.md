@@ -284,8 +284,6 @@ One line per open item. This file must always match the feedback files in this d
   happened".
 - `claude-scan-budget-never-settles.md` — Claude record-scan capture can never complete in a large project directory and
   rescans forever.
-- `capture-ambiguity-flags-report-only-kinds.md` — the capture pass marks report-only agents ambiguous and logs false
-  "can't capture" warnings.
 - `env-wrapper-hides-command-not-found.md` — Farhelm's own `env` wrapper turns "command not found" for Goose, Pi and OMP
   into exited (127) instead of error.
 - `host-write-lock-split-on-actor-respawn.md` — the per-host write lock lives on the actor handle, so a respawn lets
