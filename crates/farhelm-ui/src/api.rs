@@ -2226,6 +2226,19 @@ type SeenWriteReport = Box<dyn FnOnce(Result<(), String>)>;
 #[derive(Default)]
 struct SeenWrites(std::collections::HashMap<String, SeenWriteSlot>);
 
+/// How a settled seen-state PUT ends its writer's turn: see
+/// [`SeenWrites::finished`].
+enum SeenSettle {
+    /// A different value was recorded while the PUT was out: send again,
+    /// and report nothing for the value just sent.
+    Superseded,
+    /// The PUT's value is the newest recorded one; report its outcome. A
+    /// caller that re-recorded that SAME value while the PUT was out left a
+    /// report of its own waiting in the slot, returned here so it hears the
+    /// same outcome instead of being dropped.
+    Final { waiting: Option<SeenWriteReport> },
+}
+
 impl SeenWrites {
     /// Record a new local choice for `id`. Returns whether the caller must
     /// start a writer (none is running for this id yet).
@@ -2272,15 +2285,22 @@ impl SeenWrites {
     /// slot is pruned and the caller reports the outcome through the
     /// `SeenWriteReport` [`Self::next_to_send`] handed back alongside
     /// `sent`.
-    fn finished(&mut self, id: &str, sent: Option<i64>) -> bool {
+    ///
+    /// A newer caller that recorded the SAME value while the PUT was out
+    /// (an automatic mark and a manual "mark read" often carry the same
+    /// activity stamp) is still waiting in the slot with its own report.
+    /// That report is handed back with the settle so it is called with the
+    /// same outcome; dropping it lost a manual toggle's failure, and its
+    /// success never cleared an earlier "seen:" error on the row.
+    fn finished(&mut self, id: &str, sent: Option<i64>) -> SeenSettle {
         let Some(slot) = self.0.get(id) else {
-            return false;
+            return SeenSettle::Final { waiting: None };
         };
         if slot.latest != sent {
-            return true;
+            return SeenSettle::Superseded;
         }
-        self.0.remove(id);
-        false
+        let waiting = self.0.remove(id).and_then(|slot| slot.report);
+        SeenSettle::Final { waiting }
     }
 
     /// The writer was cancelled mid-request (its task dropped): release the
@@ -2372,8 +2392,12 @@ fn spawn_seen_writer(base: String, id: String) {
                 break;
             };
             let result = mark_seen(&base, &id, value).await;
-            let superseded = with_seen_writes(|writes| writes.finished(&id, value));
-            if !superseded {
+            if let SeenSettle::Final { waiting } =
+                with_seen_writes(|writes| writes.finished(&id, value))
+            {
+                if let Some(waiting) = waiting {
+                    waiting(result.clone());
+                }
                 report(result);
                 break;
             }
@@ -4221,7 +4245,7 @@ mod preference_write_tests {
 /// actually settle as the reported outcome.
 #[cfg(test)]
 mod seen_write_tests {
-    use super::SeenWrites;
+    use super::{SeenSettle, SeenWrites};
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -4232,11 +4256,16 @@ mod seen_write_tests {
     /// loop again (a newer value was recorded mid-flight).
     fn settle_one(queue: &mut SeenWrites, id: &str, outcome: Result<(), String>) -> Option<bool> {
         let (sent, report) = queue.next_to_send(id)?;
-        let superseded = queue.finished(id, sent);
-        if !superseded {
-            report(outcome);
+        match queue.finished(id, sent) {
+            SeenSettle::Superseded => Some(true),
+            SeenSettle::Final { waiting } => {
+                if let Some(waiting) = waiting {
+                    waiting(outcome.clone());
+                }
+                report(outcome);
+                Some(false)
+            }
         }
-        Some(superseded)
     }
 
     /// Every `(label, outcome)` pair a test's report closures recorded, in
@@ -4284,7 +4313,7 @@ mod seen_write_tests {
         // !superseded` guard — calling it here would be testing a shape the
         // production code never takes).
         assert!(
-            queue.finished("sess-1", sent),
+            matches!(queue.finished("sess-1", sent), SeenSettle::Superseded),
             "settling a superseded value must send the writer around again"
         );
         drop(automatic_report);
@@ -4309,6 +4338,42 @@ mod seen_write_tests {
             queue.next_to_send("sess-1").is_none(),
             "a drained slot must be pruned, not left idle forever"
         );
+    }
+
+    /// A caller that re-records the value already in flight hears that
+    /// write's outcome too, alongside the caller that started it.
+    ///
+    /// Why: an automatic mark and a manual "mark read" often carry the same
+    /// activity stamp. The manual caller's report used to be dropped when the
+    /// in-flight PUT of that same value settled, so a manual toggle's failure
+    /// never reached its row and its success never cleared an earlier error.
+    /// Spec: both reports receive the settled outcome, exactly once each, and
+    /// the slot is pruned.
+    #[farhelm_testtrace::test]
+    fn a_same_value_recorded_mid_flight_hears_the_in_flight_outcome() {
+        let mut queue = SeenWrites::default();
+        let reported: ReportedOutcomes = Rc::new(RefCell::new(Vec::new()));
+        let report_for = |label: &'static str| {
+            let reported = Rc::clone(&reported);
+            Box::new(move |result: Result<(), String>| {
+                reported.borrow_mut().push((label, result));
+            })
+        };
+        assert!(queue.record("sess-1", Some(1_700_000_000), report_for("automatic")));
+        let (sent, automatic_report) = queue.next_to_send("sess-1").expect("a value to send");
+        assert!(!queue.record("sess-1", Some(1_700_000_000), report_for("manual")));
+
+        let SeenSettle::Final { waiting } = queue.finished("sess-1", sent) else {
+            panic!("an equal value is not a newer one");
+        };
+        let failure = Err("seen: helm unavailable".to_string());
+        waiting.expect("the manual caller's report is handed back")(failure.clone());
+        automatic_report(failure.clone());
+        assert_eq!(
+            reported.borrow().as_slice(),
+            &[("manual", failure.clone()), ("automatic", failure)],
+        );
+        assert!(queue.next_to_send("sess-1").is_none(), "the slot is pruned");
     }
 
     /// Two independent sessions never share a writer or a report — the
