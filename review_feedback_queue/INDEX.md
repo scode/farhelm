@@ -110,8 +110,8 @@ One line per open item. This file must always match the feedback files in this d
   host-wide create/delete mutex.
 - `clone-discloses-source-invocation.md` — cloning a raw-invocation session onto the asker's host discloses the source's
   full command line.
-- `tmux-run-bytes-unbounded-under-lock.md` — one-shot tmux commands have no timeout, and resize runs one under the
-  supervisor-wide attachments lock.
+- `tmux-run-bytes-unbounded-under-lock.md` — one-shot tmux commands other than resize have no timeout, so an
+  unresponsive tmux server can hang startup and per-connection requests.
 - `sink-shutdown-retries-forever-after-delete.md` — deleting a busy session can leave its sink client stuck in an
   endless shutdown-retry loop.
 - `input-client-notifications-pile-up.md` — idle input clients never read tmux notifications, so tmux server memory
