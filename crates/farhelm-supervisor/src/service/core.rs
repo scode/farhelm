@@ -10786,11 +10786,20 @@ impl Supervisor {
                             *entry.run.outcome.lock().expect("outcome mutex poisoned") =
                                 claim.prior.outcome.clone();
                         }
-                        Err(e) => warn!(
-                            session = %id, error = %format!("{e:#}"),
-                            "could not restore the outcome this failed restart replaced; the \
-                             session lists as unknown until it is restarted again"
-                        ),
+                        Err(e) => {
+                            warn!(
+                                session = %id, error = %format!("{e:#}"),
+                                "could not restore the outcome this failed restart replaced; the \
+                                 session lists as unknown until it is restarted again"
+                            );
+                            // The store still holds the relaunch's
+                            // `Launching` claim, so memory says the same:
+                            // publishing the stop's old outcome instead
+                            // would show a status the store contradicts,
+                            // and it would change on its own at reload.
+                            *entry.run.outcome.lock().expect("outcome mutex poisoned") =
+                                LastOutcome::Launching;
+                        }
                     }
                 } else {
                     // An agent may be running under the new generation.
