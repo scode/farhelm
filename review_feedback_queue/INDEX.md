@@ -247,8 +247,6 @@ One line per open item. This file must always match the feedback files in this d
   "terminal input failed".
 - `pane-states-skips-markers-single-window.md` — `pane_states` skips tab markers when no session has two windows, hiding
   a surviving tab.
-- `tmux-probe-can-hang-on-setsid-child.md` — `probe_tmux` can hang forever on a setsid'd descendant holding its pipes,
-  despite its bounded-probe promise.
 - `startup-tmux-version-check-unbounded.md` — the supervisor's startup `tmux -V` check has no time or output limit.
 - `tab-session-token-in-tmux-argv.md` — opening a tab puts the session token on the tmux client's command line, briefly
   visible to other accounts.

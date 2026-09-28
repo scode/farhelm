@@ -752,14 +752,20 @@ fn still_held(which: &str) -> String {
 struct ProbeGroup(u32);
 
 impl ProbeGroup {
-    /// Kill the whole group, reap the leader, and join both reader
+    /// Kill the whole group, reap the leader, and abandon both reader
     /// threads, then report the overrun that got us here.
     ///
     /// The order is load-bearing. The group is killed BEFORE the leader is
     /// reaped where that is still possible, because a group whose members
-    /// have all been reaped no longer reserves its id. The joins come last
-    /// and are bounded by the kill: with every writer dead, the pipes are
-    /// closed and both readers see EOF.
+    /// have all been reaped no longer reserves its id.
+    ///
+    /// The readers are NOT joined. The kill reaches only the probe's own
+    /// process group, and a descendant that left it (`setsid`, or a shell's
+    /// job control) survives with the pipes still open, so a reader blocked
+    /// on EOF could wait for as long as that descendant lives. Dropping the
+    /// captures detaches those threads instead: the probe returns within its
+    /// budget, and a detached reader ends on its own once the pipe closes,
+    /// having already read at most its bounded share.
     ///
     /// The residual risk is honest to state: if the leader was already
     /// reaped and the group is now genuinely empty, its id could in
@@ -780,8 +786,8 @@ impl ProbeGroup {
         unsafe { libc::kill(-(self.0 as i32), libc::SIGKILL) };
         let _ = child.kill();
         let _ = child.wait();
-        stdout.finish();
-        stderr.finish();
+        drop(stdout);
+        drop(stderr);
         TmuxProbeError::Overran(detail)
     }
 }
@@ -794,8 +800,9 @@ struct Capture {
 
 impl Capture {
     /// Wait for the reader thread to end. Only safe to call once every
-    /// writer for its pipe is gone, which is why the callers either saw
-    /// EOF or killed the group first.
+    /// writer for its pipe is gone, which is why it is called only after
+    /// both readers saw EOF; an overrun abandons the readers instead (see
+    /// [`ProbeGroup::retire`]).
     fn finish(self) {
         let _ = self.reader.join();
     }
@@ -4346,6 +4353,18 @@ mod tests {
     /// that are NOT tmux is production behaviour and needs real child
     /// processes to exercise.
     #[cfg(unix)]
+    /// A fixture path spelled for use inside a single-quoted `bash -c`
+    /// script: tempdir paths contain no quotes, so plain text is enough, and
+    /// this refuses the one character that would break the quoting.
+    fn pidfile_arg(path: &Path) -> String {
+        let text = path.display().to_string();
+        assert!(
+            !text.contains('\''),
+            "fixture paths must not contain a quote: {text}"
+        );
+        text
+    }
+
     fn probe_fixture(dir: &Path, name: &str, body: &str) -> PathBuf {
         use std::io::Write as _;
         use std::os::unix::fs::OpenOptionsExt as _;
@@ -4414,6 +4433,68 @@ mod tests {
         let error = probe_tmux(&flooding).expect_err("a flood is not a version");
         assert!(matches!(error, TmuxProbeError::Overran(_)), "{error:?}");
         assert!(error.to_string().contains("more than"), "{error}");
+    }
+
+    /// A descendant that left the probe's process group cannot stall the
+    /// probe either.
+    ///
+    /// Why it matters: the group kill cannot reach such a descendant, so it
+    /// keeps the inherited stdout open, and the probe used to join its
+    /// reader thread without a limit, hanging `farhelm helm setup` or the
+    /// desktop app's startup check for as long as the descendant lived.
+    /// `set -m` gives the fixture's background job its own process group,
+    /// the same escape a daemonizing wrapper performs. Spec: the probe still
+    /// returns `Overran` within its budget.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn a_descendant_outside_the_group_cannot_stall_the_probe() {
+        let dir = tempfile::tempdir().expect("fixture dir");
+        let pidfile = dir.path().join("escaped.pid");
+        let leader_file = dir.path().join("leader.pid");
+        // Run under bash, not the script's /bin/sh: dash (Linux's usual sh)
+        // cannot enable job control without a terminal, and would silently
+        // leave the background job in the probe's group, where the group
+        // kill closes the pipes and the test proves nothing. `exec` keeps
+        // the probe's own process as the leader, whose pid is recorded so
+        // the escape itself can be checked below.
+        let escaping = probe_fixture(
+            dir.path(),
+            "escapes",
+            &format!(
+                "exec bash -c 'printf \"%s\\n\" \"$$\" > {leader}; set -m; sleep 120 & printf \"%s\\n\" \"$!\" > {pid}; printf \"tmux {TMUX_FLOOR}\\n\"'",
+                leader = pidfile_arg(&leader_file),
+                pid = pidfile_arg(&pidfile),
+            ),
+        );
+
+        let (done, answer) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(probe_tmux(&escaping));
+        });
+        let result = answer.recv_timeout(Duration::from_secs(20));
+        let read_pid = |path: &Path| -> Option<i32> {
+            std::fs::read_to_string(path)
+                .ok()
+                .and_then(|pid| pid.trim().parse().ok())
+        };
+        let escaped = read_pid(&pidfile);
+        let leader = read_pid(&leader_file);
+        // SAFETY: getpgid only reads the process table.
+        let escaped_group = escaped.map(|pid| unsafe { libc::getpgid(pid) });
+        if let Some(pid) = escaped {
+            // SAFETY: failure-safe cleanup of the fixture's own descendant,
+            // which the probe's group kill deliberately could not reach.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+        let error = result
+            .expect("the probe must return within its budget despite the escaped descendant")
+            .expect_err("a held-open pipe is not an answer");
+        assert!(
+            escaped_group.is_some_and(|group| group > 0 && Some(group) != leader),
+            "fixture premise: the descendant left the probe's process group \
+             (group {escaped_group:?}, probe leader {leader:?})"
+        );
+        assert!(matches!(error, TmuxProbeError::Overran(_)), "{error:?}");
     }
 
     /// The probe must not leave anything of its own running.
