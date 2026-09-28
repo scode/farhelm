@@ -2277,7 +2277,10 @@
 - Completion criteria: the optimistic delete closes an open row menu whose row moved; a menu on a row above the deleted
   one stays open; a unit test covers deleting a row above the open menu (closed) and below it (still open). Remove this
   feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the optimistic delete reports whether the open menu's row moved or was removed, and the list
+  closes the menu then. A unit test covers a removal above, at and below the open row. PR
+  [#1154](https://github.com/scode/farhelm/pull/1154/changes), jj change `kmoyypml`, bookmark
+  `pr/row-menu-closes-after-delete`.
 
 ## session-header-raw-peer-text.md
 

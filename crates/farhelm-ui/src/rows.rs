@@ -187,6 +187,33 @@ pub(crate) fn menu_row_reordered(
     previous_index != current_index
 }
 
+/// Remove `removed` from `sessions` (this client's own optimistic delete)
+/// and report whether the row holding the open actions menu, `open_id`,
+/// moved or went away as a result.
+///
+/// The optimistic removal edits the listing in place instead of going
+/// through `commit_listing`, so [`menu_row_reordered`]'s check never sees it,
+/// and a menu open on a row below the deleted one would stay where its
+/// panel was measured, now beside a different row. Its buttons still act on
+/// the original row, but it reads as the neighbour's, and for an ended
+/// session with no tabs Delete runs with no prompt naming the row. The
+/// caller closes the menu when this returns true, exactly as a reordering
+/// listing would.
+pub(crate) fn remove_row_reporting_menu_move(
+    sessions: &mut Vec<Session>,
+    removed: &str,
+    open_id: Option<&str>,
+) -> bool {
+    let Some(open_id) = open_id else {
+        sessions.retain(|session| session.id != removed);
+        return false;
+    };
+    let before = sessions.iter().position(|session| session.id == open_id);
+    sessions.retain(|session| session.id != removed);
+    let after = sessions.iter().position(|session| session.id == open_id);
+    before != after
+}
+
 /// Whether the list should say "no sessions" and nothing else.
 ///
 /// The plain empty-fleet line replaces the banner, the rows, and every
@@ -505,6 +532,43 @@ mod tests {
             working_copy: None,
             seen_activity_at: None,
         }
+    }
+
+    /// Why this matters: after this client deletes a row, a menu opened on
+    /// a row below it used to stay put while the rows shifted up, so it
+    /// read as the next row's menu and its Delete could remove a session
+    /// the user did not mean. Spec: removing a row above the open menu, or
+    /// the menu's own row, reports a move (the caller closes the menu);
+    /// removing a row below it, or with no menu open, does not.
+    #[farhelm_testtrace::test]
+    fn an_optimistic_removal_above_the_open_menu_reports_a_move() {
+        let listing = || vec![session("a", "A"), session("b", "B"), session("c", "C")];
+
+        let mut sessions = listing();
+        assert!(remove_row_reporting_menu_move(
+            &mut sessions,
+            "a",
+            Some("b")
+        ));
+        assert_eq!(sessions.len(), 2, "the row is removed either way");
+
+        let mut sessions = listing();
+        assert!(!remove_row_reporting_menu_move(
+            &mut sessions,
+            "c",
+            Some("b")
+        ));
+
+        let mut sessions = listing();
+        assert!(remove_row_reporting_menu_move(
+            &mut sessions,
+            "b",
+            Some("b")
+        ));
+
+        let mut sessions = listing();
+        assert!(!remove_row_reporting_menu_move(&mut sessions, "a", None));
+        assert_eq!(sessions.len(), 2);
     }
 
     /// The rename's user-visible promise is that the new title shows up at

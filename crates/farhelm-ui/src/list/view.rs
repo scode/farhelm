@@ -21,7 +21,8 @@ use crate::provisioning::ProvisioningTraceShape;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::rows::{
     self, absence_is_evidence, apply_optimistic_renames, count_banner, listing_is_complete,
-    menu_row_reordered, retire_vanished_renames, settle_optimistic_renames,
+    menu_row_reordered, remove_row_reporting_menu_move, retire_vanished_renames,
+    settle_optimistic_renames,
 };
 use crate::{ApiBase, HostId, Session};
 
@@ -1578,7 +1579,14 @@ pub(crate) fn ListView(
                     // an id that no longer exists, a confusing failure
                     // for an action that had already succeeded.
                     if let Some(Ok(current)) = listing.write().as_mut() {
-                        current.sessions.retain(|s| s.id != id);
+                        let open_menu = menu_open.peek().clone();
+                        if remove_row_reporting_menu_move(
+                            &mut current.sessions,
+                            &id,
+                            open_menu.as_deref(),
+                        ) {
+                            menu_open.set(None);
+                        }
                     }
                     // A listing read already in flight started before the
                     // helm finished this delete, and it would otherwise
