@@ -123,11 +123,18 @@ pub fn default_state_dir() -> anyhow::Result<std::path::PathBuf> {
 /// directory a helm or supervisor started from those units would pick for
 /// itself. An empty value counts as unset, matching the shell's
 /// `${VAR:-default}` and [`default_state_dir`].
+///
+/// A RELATIVE value counts as unset too, as the XDG Base Directory spec
+/// asks and as the unit-directory rule already does for `XDG_CONFIG_HOME`.
+/// Taken literally it would resolve against each process's own working
+/// directory: systemd starts the services in `$HOME`, while an operator
+/// command like `farhelm helm token show` runs wherever the shell is, so the
+/// two would read different state trees.
 pub fn default_state_dir_for(
     xdg_state_home: Option<&std::ffi::OsStr>,
     home: &std::path::Path,
 ) -> std::path::PathBuf {
-    match xdg_state_home.filter(|value| !value.is_empty()) {
+    match xdg_state_home.filter(|value| usable_xdg_state_home(value)) {
         Some(xdg) => std::path::PathBuf::from(xdg).join("farhelm"),
         None => home.join(".local").join("state").join("farhelm"),
     }
@@ -144,15 +151,21 @@ fn default_state_dir_from(
     xdg: Option<std::ffi::OsString>,
     home: Option<std::ffi::OsString>,
 ) -> anyhow::Result<std::path::PathBuf> {
-    let xdg = xdg.filter(|value| !value.is_empty());
+    let xdg = xdg.filter(|value| usable_xdg_state_home(value));
     let home = home.filter(|value| !value.is_empty());
     if xdg.is_none() && home.is_none() {
-        anyhow::bail!("neither XDG_STATE_HOME nor HOME is set; use --state-dir");
+        anyhow::bail!("neither an absolute XDG_STATE_HOME nor HOME is set; use --state-dir");
     }
     Ok(default_state_dir_for(
         xdg.as_deref(),
         std::path::Path::new(home.as_deref().unwrap_or_default()),
     ))
+}
+
+/// Whether an `XDG_STATE_HOME` value is one to honor: non-empty and
+/// absolute. See [`default_state_dir_for`] for why a relative one is ignored.
+fn usable_xdg_state_home(value: &std::ffi::OsStr) -> bool {
+    !value.is_empty() && std::path::Path::new(value).is_absolute()
 }
 
 #[cfg(test)]
@@ -243,5 +256,33 @@ mod tests {
             ),
             std::path::PathBuf::from("/xdg/farhelm")
         );
+    }
+
+    /// A relative `XDG_STATE_HOME` is ignored, on both entry points.
+    ///
+    /// Why: taken literally it resolves against each process's working
+    /// directory, and `farhelm helm setup` pinned it unresolved into both
+    /// units. systemd starts them in `$HOME` while an operator command runs
+    /// wherever its shell is, so `farhelm helm token show` could read a
+    /// different state tree and print a token the running helm rejects. The
+    /// XDG Base Directory spec says to ignore a relative value. Spec: the home
+    /// layout is used instead, and with no HOME either, the environment path
+    /// refuses rather than inventing one.
+    #[farhelm_testtrace::test]
+    fn a_relative_xdg_state_home_is_ignored() {
+        let expected = std::path::PathBuf::from("/home/u/.local/state/farhelm");
+        assert_eq!(
+            super::default_state_dir_for(
+                Some(std::ffi::OsStr::new("relative/state")),
+                std::path::Path::new("/home/u")
+            ),
+            expected
+        );
+        assert_eq!(
+            super::default_state_dir_from(Some("relative/state".into()), Some("/home/u".into()))
+                .unwrap(),
+            expected
+        );
+        assert!(super::default_state_dir_from(Some("relative/state".into()), None).is_err());
     }
 }

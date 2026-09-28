@@ -104,7 +104,8 @@ impl SetupContext {
 #[derive(clap::Args, Default)]
 pub struct SetupOptions {
     /// State directory to pin. Default:
-    /// ${XDG_STATE_HOME:-$HOME/.local/state}/farhelm.
+    /// ${XDG_STATE_HOME:-$HOME/.local/state}/farhelm (a relative
+    /// XDG_STATE_HOME is ignored).
     ///
     /// Resolved once and pinned into BOTH units either way, so the helm
     /// and its supervisor cannot end up on different trees and lose each
