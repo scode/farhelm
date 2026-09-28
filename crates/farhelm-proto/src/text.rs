@@ -26,10 +26,24 @@
 ///   follows it, so "recorded X, reported Y" can be made to read with the two
 ///   swapped while the bytes are unchanged.
 /// - Invisible characters that let two different values render identically:
-///   the soft hyphen U+00AD, the Mongolian vowel separator U+180E, the
-///   zero-width space, non-joiner and joiner U+200B–U+200D, the word joiner
-///   and invisible operators U+2060–U+2064, and the zero-width no-break space
-///   (byte-order mark) U+FEFF.
+///   the soft hyphen U+00AD, the combining grapheme joiner U+034F, the Hangul
+///   fillers U+115F, U+1160, U+3164 and U+FFA0, the Khmer inherent vowels
+///   U+17B4–U+17B5, the Mongolian vowel separator U+180E, the zero-width
+///   space, non-joiner and joiner U+200B–U+200D, the word joiner and
+///   invisible operators U+2060–U+2064, the deprecated format characters
+///   U+206A–U+206F, the zero-width no-break space (byte-order mark) U+FEFF,
+///   the interlinear annotation controls U+FFF9–U+FFFB, and the tag block
+///   U+E0000–U+E007F.
+///
+/// Variation selectors (U+FE00–U+FE0F, U+E0100–U+E01EF) are deliberately NOT
+/// here, although they render as nothing: ordinary emoji carry them ("❤️"
+/// is U+2764 U+FE0F), and escaping them would mangle every session title
+/// that uses one. The tag block is escaped anyway, although subdivision flag
+/// emoji use it, because those are rare in titles and tags are otherwise
+/// pure hidden payload. Where two values must never look alike whatever they
+/// contain (host identities, which are UUIDs), the surface escapes all
+/// non-ASCII itself rather than relying on this list; see the UI's
+/// `peer::display_identity`.
 ///
 /// This is a KNOWN-BAD list, not a Unicode general-category test: the standard
 /// library has no category tables, and escaping everything non-ASCII would
@@ -41,15 +55,23 @@ pub fn is_presentation_unsafe(ch: char) -> bool {
         || matches!(
             ch,
             '\u{00AD}'
+                | '\u{034F}'
                 | '\u{061C}'
+                | '\u{115F}'
+                | '\u{1160}'
+                | '\u{17B4}'..='\u{17B5}'
                 | '\u{180E}'
                 | '\u{200B}'..='\u{200F}'
                 | '\u{2028}'
                 | '\u{2029}'
                 | '\u{202A}'..='\u{202E}'
                 | '\u{2060}'..='\u{2064}'
-                | '\u{2066}'..='\u{2069}'
+                | '\u{2066}'..='\u{206F}'
+                | '\u{3164}'
                 | '\u{FEFF}'
+                | '\u{FFA0}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{E0000}'..='\u{E007F}'
         )
 }
 
@@ -87,11 +109,53 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_unsafe_set_is_exactly_the_documented_families() {
         let unsafe_chars = [
-            '\n', '\r', '\t', '\0', '\u{1b}', '\u{7f}', '\u{85}', '\u{9f}', '\u{00AD}', '\u{061C}',
-            '\u{180E}', '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}', '\u{2028}',
-            '\u{2029}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}', '\u{202E}', '\u{2060}',
-            '\u{2061}', '\u{2062}', '\u{2063}', '\u{2064}', '\u{2066}', '\u{2067}', '\u{2068}',
-            '\u{2069}', '\u{FEFF}',
+            '\n',
+            '\r',
+            '\t',
+            '\0',
+            '\u{1b}',
+            '\u{7f}',
+            '\u{85}',
+            '\u{9f}',
+            '\u{00AD}',
+            '\u{061C}',
+            '\u{180E}',
+            '\u{200B}',
+            '\u{200C}',
+            '\u{200D}',
+            '\u{200E}',
+            '\u{200F}',
+            '\u{2028}',
+            '\u{2029}',
+            '\u{202A}',
+            '\u{202B}',
+            '\u{202C}',
+            '\u{202D}',
+            '\u{202E}',
+            '\u{2060}',
+            '\u{2061}',
+            '\u{2062}',
+            '\u{2063}',
+            '\u{2064}',
+            '\u{2066}',
+            '\u{2067}',
+            '\u{2068}',
+            '\u{2069}',
+            '\u{FEFF}',
+            '\u{034F}',
+            '\u{115F}',
+            '\u{1160}',
+            '\u{17B4}',
+            '\u{17B5}',
+            '\u{206A}',
+            '\u{206F}',
+            '\u{3164}',
+            '\u{FFA0}',
+            '\u{FFF9}',
+            '\u{FFFB}',
+            '\u{E0000}',
+            '\u{E0041}',
+            '\u{E007F}',
         ];
         for ch in unsafe_chars {
             assert!(
@@ -101,8 +165,35 @@ mod tests {
             );
         }
         let safe_chars = [
-            'a', ' ', '~', 'é', 'ß', 'Ж', 'ع', '日', '😀', '\u{00AC}', '\u{00AE}', '\u{200A}',
-            '\u{2010}', '\u{2027}', '\u{202F}', '\u{2065}', '\u{206A}', '\u{FEFE}',
+            'a',
+            ' ',
+            '~',
+            'é',
+            'ß',
+            'Ж',
+            'ع',
+            '日',
+            '😀',
+            '\u{00AC}',
+            '\u{00AE}',
+            '\u{200A}',
+            '\u{2010}',
+            '\u{2027}',
+            '\u{202F}',
+            '\u{2065}',
+            '\u{FEFE}',
+            '\u{034E}',
+            '\u{17B3}',
+            '\u{17B6}',
+            '\u{2070}',
+            '\u{3165}',
+            '\u{FFF8}',
+            '\u{FFFC}',
+            '\u{E0080}',
+            // Variation selectors stay unescaped so emoji keep rendering.
+            '\u{FE0F}',
+            '\u{FE00}',
+            '\u{E0100}',
         ];
         for ch in safe_chars {
             assert!(

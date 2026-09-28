@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `display-peer-misses-invisible-chars.md` — display_peer's escape list misses invisible characters, so two identities
-  can render identically in the adopt prompt.
 - `osc8-link-target-never-shown.md` — OSC 8 hyperlinks from terminal output open their hidden target in the browser
   without ever showing it.
 - `token-prompt-invites-password-manager.md` — the browser token prompt is a password field, so password managers offer

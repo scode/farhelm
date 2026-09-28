@@ -2345,7 +2345,11 @@
   renders blank; the adopt prompt escapes all non-ASCII in recorded and reported identities, with a test where the two
   differ only by a variation selector and render distinguishably; session titles with emoji variation selectors still
   render unescaped. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `is_presentation_unsafe` gains U+034F, the Hangul fillers, U+17B4-U+17B5, U+206A-U+206F,
+  U+FFF9-U+FFFB and the tag block (variation selectors deliberately excluded), and host identities render through
+  `display_identity`, which escapes all non-ASCII. Proto and UI tests cover both. PR
+  [#1157](https://github.com/scode/farhelm/pull/1157/changes), jj change `snqktrlz`, bookmark
+  `pr/more-invisible-characters-escaped`.
 
 ## osc8-link-target-never-shown.md
 
