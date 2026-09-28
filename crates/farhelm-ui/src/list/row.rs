@@ -716,6 +716,35 @@ fn invocation_switches<'a>(
     switches
 }
 
+/// A session title as the sidebar shows it: escaped with `display_peer` and
+/// direction-isolated in a `.peer-value` span with `dir="ltr"`.
+///
+/// Titles are peer text (agents may rename any session), and the row and
+/// both confirmations must show them the same safe way: escaping keeps
+/// invisible and override characters from making two titles look alike,
+/// and isolation keeps a title's own strong-RTL text from reordering the
+/// sentence around it (see `peer.rs`). One component for all three surfaces
+/// means none can drift. The attributes are formatted values on purpose, so
+/// they reach the DOM as dynamic attributes a headless test can observe.
+#[component]
+fn PeerTitle(class: &'static str, title: String, quoted: bool, tooltip: bool) -> Element {
+    let shown = display_peer(&title);
+    let text = if quoted {
+        format!("\"{shown}\"")
+    } else {
+        shown.clone()
+    };
+    let isolated = "ltr";
+    rsx! {
+        span {
+            class: "{class} peer-value",
+            dir: "{isolated}",
+            title: tooltip.then(|| shown.clone()),
+            "{text}"
+        }
+    }
+}
+
 #[cfg(test)]
 std::thread_local! {
     // How often the real row component ran in the callback-memoization
@@ -1615,7 +1644,15 @@ pub(super) fn SessionRow(
                             // Native tooltips do not inherit DOM direction
                             // isolation. Escape invisible directional controls
                             // in this new display surface like other peer text.
-                            span { class: "session-title", title: display_peer(&session.title), "{session.title}" }
+                            // Titles are peer text (agents may rename any
+                            // session), so the row shows them escaped and
+                            // direction-isolated, not just in the tooltip.
+                            PeerTitle {
+                                class: "session-title",
+                                title: session.title.clone(),
+                                quoted: false,
+                                tooltip: true,
+                            }
                             if compact {
                                 if session.stale {
                                     span { class: "compact-qualifier", title: "stale",
@@ -1918,7 +1955,15 @@ pub(super) fn SessionRow(
                                 class: "confirm-consequence",
                                 "{confirm_consequence(&session.status, session.tabs.len())}"
                             }
-                            span { class: "confirm-title", "\"{session.title}\"" }
+                            // The last check before an irreversible action:
+                            // an override or invisible character in a title
+                            // must not make this quote name another session.
+                            PeerTitle {
+                                class: "confirm-title",
+                                title: session.title.clone(),
+                                quoted: true,
+                                tooltip: false,
+                            }
                             if session.working_copy.is_some() {
                                 // Membership includes ordinary borrowers. Do not
                                 // promise a move from a stale client-side count;
@@ -1971,7 +2016,15 @@ pub(super) fn SessionRow(
                                 class: "confirm-consequence",
                                 "{replace_consequence(&session.status, session.tabs.len())}"
                             }
-                            span { class: "confirm-title", "\"{session.title}\"" }
+                            // The last check before an irreversible action:
+                            // an override or invisible character in a title
+                            // must not make this quote name another session.
+                            PeerTitle {
+                                class: "confirm-title",
+                                title: session.title.clone(),
+                                quoted: true,
+                                tooltip: false,
+                            }
                             button {
                                 r#type: "button",
                                 class: "btn btn-danger confirm-replace",
@@ -2524,6 +2577,137 @@ mod tests {
     #[farhelm_testtrace::test]
     fn menu_label_wraps_the_clamped_title_in_session_wording() {
         assert_eq!(menu_label("short"), "session actions for short");
+    }
+
+    /// Why this matters: agents may rename any session, and a title with an
+    /// invisible character or a direction override could render identically
+    /// to another session's, or make the delete and replace confirmations
+    /// quote a different title than the one they act on. Spec: the row's
+    /// visible title and both confirmation quotes show the escaped form
+    /// (`display_peer`) and never the raw control characters.
+    #[farhelm_testtrace::test]
+    fn titles_render_escaped_in_the_row_and_both_confirmations() {
+        std::thread_local! {
+            static PROMPT: std::cell::Cell<(bool, bool)> = const { std::cell::Cell::new((false, false)) };
+        }
+        const SPOOF: &str = "build\u{200B} \u{202E}lanif";
+
+        fn app() -> Element {
+            let on_open = use_callback(|_: Session| {});
+            let on_clone = use_callback(|_: Session| {});
+            let on_replace_with = use_callback(|_: Session| {});
+            let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
+            let on_replace = use_callback(|_: Session| {});
+            let on_confirm_replace = use_callback(|_: String| {});
+            let on_cancel_replace = use_callback(|_: String| {});
+            let on_stop = use_callback(|_: String| {});
+            let on_delete = use_callback(|_: DeleteTarget| {});
+            let on_confirm_delete = use_callback(|_: String| {});
+            let on_cancel_delete = use_callback(|_: String| {});
+            let on_rename_start = use_callback(|_: (String, String)| {});
+            let on_menu_toggle = use_callback(|_: String| {});
+            let (confirming, confirming_replace) = PROMPT.with(std::cell::Cell::get);
+            let session = Session {
+                title: SPOOF.to_string(),
+                ..row_specimen("spoofed")
+            };
+            rsx! {
+                SessionRow {
+                    session,
+                    compact: false,
+                    state: RowState {
+                        error: None,
+                        busy: false,
+                        confirming,
+                        confirming_replace,
+                        renaming: false,
+                        nav_disabled: false,
+                        // The confirmations live inside the actions menu.
+                        menu_open: confirming || confirming_replace,
+                        composer_transfer_open: false,
+                        selected: false,
+                        locality: HostLocality::Unknown,
+                        activity: None,
+                    },
+                    on_open,
+                    on_clone,
+                    on_replace_with,
+                    on_mark_seen,
+                    on_replace,
+                    on_confirm_replace,
+                    on_cancel_replace,
+                    on_stop,
+                    on_delete,
+                    on_confirm_delete,
+                    on_cancel_delete,
+                    on_rename_start,
+                    on_menu_toggle,
+                }
+            }
+        }
+
+        let escaped = display_peer(SPOOF);
+        let quoted = format!("\"{escaped}\"");
+        // Premise: escaping changes this title.
+        assert_ne!(escaped, SPOOF);
+        for prompt in [(false, false), (true, false), (false, true)] {
+            PROMPT.with(|cell| cell.set(prompt));
+            let mut dom = VirtualDom::new(app);
+            // The actual text payloads the DOM receives, not a Debug dump
+            // (which would escape the very characters under test).
+            let edits = dom.rebuild_to_vec().edits;
+            let texts: Vec<String> = edits
+                .iter()
+                .filter_map(|edit| match edit {
+                    dioxus::core::Mutation::CreateTextNode { value, .. }
+                    | dioxus::core::Mutation::SetText { value, .. } => Some(value.clone()),
+                    _ => None,
+                })
+                .collect();
+            // Isolation: every title surface is a `PeerTitle`, whose class and
+            // `dir` reach the DOM as dynamic attributes.
+            let attribute = |name: &str, wanted: &dyn Fn(&str) -> bool| {
+                edits
+                    .iter()
+                    .filter(|edit| {
+                        matches!(edit, dioxus::core::Mutation::SetAttribute {
+                            name: attr,
+                            value: dioxus::core::AttributeValue::Text(value),
+                            ..
+                        } if *attr == name && wanted(value))
+                    })
+                    .count()
+            };
+            let isolated_titles = attribute("class", &|value: &str| {
+                value.split(' ').any(|class| class == "peer-value")
+                    && (value.contains("session-title") || value.contains("confirm-title"))
+            });
+            let expected = 1 + usize::from(prompt.0 || prompt.1);
+            assert_eq!(
+                isolated_titles, expected,
+                "{prompt:?}: each title surface is a .peer-value span"
+            );
+            assert!(
+                attribute("dir", &|value: &str| value == "ltr") >= expected,
+                "{prompt:?}: each title surface carries dir=ltr"
+            );
+            assert!(
+                texts
+                    .iter()
+                    .all(|text| !text.contains('\u{202E}') && !text.contains('\u{200B}')),
+                "{prompt:?}: a raw control character reached a text node: {texts:?}"
+            );
+            assert!(
+                texts.iter().any(|text| text == &escaped),
+                "{prompt:?}: the row shows the escaped title: {texts:?}"
+            );
+            let confirmation_mounted = texts.iter().any(|text| text == &quoted);
+            assert_eq!(
+                confirmation_mounted,
+                prompt.0 || prompt.1,
+                "{prompt:?}: the open confirmation quotes the escaped title, and only then: {texts:?}"
+            );
+        }
     }
 
     /// Repeated parent refreshes must update direct callback props in place
