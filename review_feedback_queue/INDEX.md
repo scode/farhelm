@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `setup-pins-relative-path-tmux.md` — helm setup can pin a tmux found via a relative PATH entry like "." into the
-  boot-time supervisor unit.
 - `install-lock-owner-unchecked.md` — the install lock and journal are trusted without checking their owner, so a
   shared-dir co-user can redirect recovery.
 - `delete-ended-session-kills-live-tabs.md` — deleting a session whose agent ended skips confirmation and kills its
