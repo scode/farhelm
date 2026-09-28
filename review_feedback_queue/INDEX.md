@@ -229,8 +229,6 @@ One line per open item. This file must always match the feedback files in this d
   inserts a token.
 - `unauthenticated-bearer-contends-sqlite.md` — any unauthenticated Bearer value is hashed and looked up in SQLite,
   letting a local flood contend the DB lock.
-- `clone-refusal-names-wrong-flag.md` — clone refusals for a bad source id name `--session` and tell the agent to name
-  itself.
 - `clone-source-missing-from-truncated-list.md` — `agent clone` reports the source gone when the source host's list was
   truncated at 500.
 - `credential-refusal-surfaces-as-broken-pipe.md` — a session-credential refusal can reach the CLI as "Broken pipe"

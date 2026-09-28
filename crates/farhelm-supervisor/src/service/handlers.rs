@@ -3667,33 +3667,34 @@ pub(crate) async fn handle_restricted_control(
 /// resolver may send it upward, so a session presenting it directly is
 /// refused here before the helm can disclose a launch bundle.
 fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
-    fn validate_target(target: &Option<String>) -> Result<(), String> {
+    /// Bound one session-id field. `flag` and `remedy` name the CLI option
+    /// the caller actually has and what to put there, because the lifecycle
+    /// verbs (`--session`, which may name the asker itself) and clone
+    /// (`--source-session`, any session) share these rules but not their
+    /// wording.
+    fn validate_target(target: &Option<String>, flag: &str, remedy: &str) -> Result<(), String> {
         let Some(target) = target else {
-            return Err(
-                "--session is required; name the asking session explicitly to act on it"
-                    .to_string(),
-            );
+            return Err(format!("{flag} is required; {remedy}"));
         };
         if target.is_empty() {
-            return Err(
-                "--session must not be empty; name the asking session explicitly to act on it"
-                    .to_string(),
-            );
+            return Err(format!("{flag} must not be empty; {remedy}"));
         }
         if target.len() > MAX_SESSION_ID_BYTES {
             return Err(format!(
-                "an explicit --session target is {} bytes, exceeding the {MAX_SESSION_ID_BYTES}-\
+                "an explicit {flag} target is {} bytes, exceeding the {MAX_SESSION_ID_BYTES}-\
                  byte limit every session id is already held to",
                 target.len()
             ));
         }
         if target.chars().any(char::is_control) {
-            return Err(
-                "an explicit --session target must not contain control characters".to_string(),
-            );
+            return Err(format!(
+                "an explicit {flag} target must not contain control characters"
+            ));
         }
         Ok(())
     }
+    const LIFECYCLE_FLAG: &str = "--session";
+    const LIFECYCLE_REMEDY: &str = "name the asking session explicitly to act on it";
     match verb {
         AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Profiles {} => Ok(()),
         AgentVerb::Rename {
@@ -3701,7 +3702,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             expected_title,
             title,
         } => {
-            validate_target(session_id)?;
+            validate_target(session_id, LIFECYCLE_FLAG, LIFECYCLE_REMEDY)?;
             if title.len() > CREATE_FIELD_CAP {
                 return Err(format!(
                     "title is {} bytes, exceeding the {CREATE_FIELD_CAP}-byte limit",
@@ -3734,7 +3735,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             Ok(())
         }
         AgentVerb::Stop { session_id } | AgentVerb::Restart { session_id, .. } => {
-            validate_target(session_id)
+            validate_target(session_id, LIFECYCLE_FLAG, LIFECYCLE_REMEDY)
         }
         AgentVerb::Create {
             host,
@@ -3776,7 +3777,11 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             title,
             intent_key,
         } => {
-            validate_target(source_session_id)?;
+            validate_target(
+                source_session_id,
+                "--source-session",
+                "name the session to copy",
+            )?;
             // Absent and empty are different requests: an absent --cwd makes
             // the helm use the source session's directory, while an explicit
             // empty one would replace it with "" and fail only at the target.
@@ -5922,6 +5927,22 @@ mod tests {
                 .contains("--cwd must not be empty")
         );
         assert!(clone_cwd(None).is_ok());
+
+        // A bad clone source names the flag clone actually has, and not the
+        // lifecycle verbs' "name the asking session" remedy: the source can
+        // be any session.
+        let empty_source = validate_agent_verb(&AgentVerb::Clone {
+            source_session_id: Some(String::new()),
+            host: Some("host".to_string()),
+            cwd: None,
+            title: None,
+            intent_key: None,
+        })
+        .unwrap_err();
+        assert!(
+            empty_source.contains("--source-session") && !empty_source.contains("asking session"),
+            "{empty_source}"
+        );
 
         // A host name is bounded on its OWN allowance rather than against
         // the create payload, because it is routing metadata the helm
