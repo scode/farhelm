@@ -30,7 +30,7 @@
 //! its docs), so it is stated once here and inherited by every remote
 //! command built on top of it. `ssh_stdio_args` builds the steady-state
 //! `farhelm internal stdio` proxy; provisioning reuses the prefix for its
-//! discovery, reach checks, convergence commands, and sftp transport.
+//! discovery, reach checks, convergence commands, and payload uploads.
 
 use anyhow::Context;
 use farhelm_proto::io::ClosedBeforeHello;

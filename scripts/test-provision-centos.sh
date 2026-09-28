@@ -12,8 +12,8 @@
 # coverage at all.
 #
 # GitHub hosts no non-Ubuntu Linux runner, so the honest stand-in is a
-# systemd-booted CentOS Stream 9 container ON the runner, reached over ssh and
-# sftp exactly like any other remote host: the helm dials an ssh destination,
+# systemd-booted CentOS Stream 9 container ON the runner, reached over ssh
+# exactly like any other remote host: the helm dials an ssh destination,
 # the container answers with its own sshd, its own PAM stack, its own systemd
 # user manager, and its own `/etc/os-release`. Nothing about the transport is
 # simulated.
@@ -214,8 +214,8 @@ echo "== building the CentOS Stream 9 image"
 cat >"$run_dir/Dockerfile" <<EOF
 FROM quay.io/centos/centos:stream9
 # systemd is the point of the image: provisioning writes a user unit and
-# expects a user manager to start it. openssh-server is the transport, and it
-# brings the sftp subsystem the payload push needs.
+# expects a user manager to start it. openssh-server is the transport; the
+# payload push streams over plain ssh, so no sftp subsystem is needed.
 RUN dnf -y install --setopt=install_weak_deps=False systemd openssh-server \\
   && dnf clean all
 RUN ssh-keygen -A && systemctl enable sshd

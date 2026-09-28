@@ -769,7 +769,7 @@ impl SystemBackend {
                 destination: ssh_destination,
             } => {
                 async {
-                    self.sftp_put(ssh_destination, source, temporary).await?;
+                    self.ssh_put(ssh_destination, source, temporary).await?;
                     // Same first-line test as `units::is_managed`, run in the
                     // command that renames so no plan can outlive it.
                     // `head -n 1` for the same reasons the reach check uses
@@ -863,7 +863,7 @@ impl SystemBackend {
         }
         self.remove_temporary(target, temporary).await?;
         let upload = async {
-            self.sftp_put(ssh_destination, source, temporary).await?;
+            self.ssh_put(ssh_destination, source, temporary).await?;
             self.require_shell(
                 target,
                 &format!(
@@ -979,10 +979,25 @@ impl SystemBackend {
         }
     }
 
-    /// Transfer one staged payload to its nonce-scoped remote temporary.
-    /// The remote file's byte growth is the only progress signal: batch SFTP
-    /// may be quiet while it writes and may print output while it is stuck.
-    async fn sftp_put(
+    /// Stream one local file to `remote` over the same `ssh` command every
+    /// other provisioning step uses, by running `cat > <remote>` there with
+    /// the file on its stdin.
+    ///
+    /// This replaced an `sftp` upload. sftp parses its destination with its
+    /// own grammar (`[user@]host[:path]`, the first colon ending the host), so
+    /// an IPv6-literal or `ssh://user@host:port` registration dialed a
+    /// different host for this one step than ssh did for all the others. One
+    /// command builder means one host, and the remote side needs nothing
+    /// beyond the `sh` and `cat` the rest of provisioning already requires
+    /// (no sftp subsystem). The pipe is byte-exact because the helm's ssh never
+    /// requests a terminal.
+    ///
+    /// A successful return does not prove the bytes arrived intact: a local
+    /// read that ends early looks like EOF to `cat`. The caller's digest check
+    /// on the remote temporary is what proves the transfer. The remote file's
+    /// byte growth is the only progress signal; the pipes can be quiet while
+    /// bytes flow and are not evidence of progress while they do not.
+    async fn ssh_put(
         &self,
         destination: &str,
         source: &Path,
@@ -992,52 +1007,64 @@ impl SystemBackend {
             .await
             .map_err(|error| BackendFailure::new("reading staged payload size", error.to_string()))?
             .len();
-        let batch = format!("put {} {}\n", sftp_path(source)?, sftp_path(remote)?);
-        let mut command = tokio::process::Command::new("sftp");
-        command.args(["-b", "-"]);
-        command.args(
-            crate::ssh::ssh_base_args(destination, &self.control_dir.join("ssh-cm-%C")).map_err(
-                |error| BackendFailure::new("building the sftp command", error.to_string()),
-            )?,
-        );
+        let mut command = self
+            .ssh_command(destination, format!("cat > {}", shell_path(remote)?))
+            .map_err(|error| {
+                BackendFailure::new("building the payload transfer command", error.to_string())
+            })?;
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         isolate_process_group(&mut command);
-        let mut child = self
-            .launcher
-            .spawn(&mut command)
-            .map_err(|error| BackendFailure::new("spawning sftp", error.to_string()))?;
-        let mut stdin = child.stdin.take().expect("piped sftp stdin");
-        use tokio::io::AsyncWriteExt;
-        if let Err(error) = stdin.write_all(batch.as_bytes()).await {
-            terminate_child(&mut child).await;
-            return Err(BackendFailure::new(
-                "writing the sftp batch",
-                error.to_string(),
-            ));
-        }
-        drop(stdin);
-        let output = capture_sftp_child(
+        let mut input = tokio::fs::File::open(source).await.map_err(|error| {
+            BackendFailure::new("opening the staged payload", error.to_string())
+        })?;
+        let mut child = self.launcher.spawn(&mut command).map_err(|error| {
+            BackendFailure::new("spawning the payload transfer", error.to_string())
+        })?;
+        let mut stdin = child.stdin.take().expect("piped transfer stdin");
+        // Feed stdin from its own task so the supervision loop below can watch
+        // the remote file grow (and kill a stalled transfer) while the copy is
+        // blocked on a full pipe. Dropping `stdin` at the end is the EOF that
+        // lets the remote `cat` finish.
+        let feeder = tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            let copied = tokio::io::copy(&mut input, &mut stdin).await;
+            let flushed = stdin.shutdown().await;
+            copied.and(flushed)
+        });
+        let output = capture_transfer_child(
             child,
             source_bytes,
             || self.remote_transfer_size(destination, remote),
             TRANSFER_IDLE_TIMEOUT,
             TRANSFER_PROGRESS_POLL,
         )
-        .await?;
+        .await;
+        let fed = feeder.await;
+        let output = output?;
         if output.code != Some(0) {
             return Err(BackendFailure::new(
-                format!("transferring {} with sftp", source.display()),
+                format!("transferring {} over ssh", source.display()),
                 output.stderr,
             ));
         }
-        Ok(())
+        match fed {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(error)) => Err(BackendFailure::new(
+                format!("streaming {} to the host", source.display()),
+                error.to_string(),
+            )),
+            Err(error) => Err(BackendFailure::new(
+                "joining the payload transfer feeder",
+                error.to_string(),
+            )),
+        }
     }
 
-    /// Observe bytes at the remote temporary, not activity in sftp's pipes.
+    /// Observe bytes at the remote temporary, not activity in the transfer's pipes.
     /// Missing files and failed probes cannot start or renew the idle deadline;
     /// an existing zero-byte file is the first observable transfer state.
     async fn remote_transfer_size(&self, destination: &str, remote: &Path) -> Option<u64> {
@@ -1451,13 +1478,14 @@ pub(super) async fn capture_child(
     finish_child_output(status, stdout_task, stderr_task, &mut signal_rx, context).await
 }
 
-/// Supervise sftp using growth of its remote temporary as the progress oracle.
+/// Supervise a payload transfer using growth of its remote temporary as the
+/// progress oracle.
 /// No transfer deadline runs before the nonce file exists: a slow SSH control
 /// connection has no byte-progress signal to distinguish it from a stall.
 /// Failed size probes do not count as progress. An in-flight probe may delay a
 /// stall report by its own bounded command timeout, but cannot extend the
 /// next idle deadline without observed bytes.
-pub(super) async fn capture_sftp_child<F, Fut>(
+pub(super) async fn capture_transfer_child<F, Fut>(
     mut child: tokio::process::Child,
     source_bytes: u64,
     mut remote_size: F,
@@ -1468,9 +1496,9 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = Option<u64>>,
 {
-    let context = "the sftp transfer";
-    let stdout = child.stdout.take().expect("captured sftp stdout");
-    let stderr = child.stderr.take().expect("captured sftp stderr");
+    let context = "the payload transfer";
+    let stdout = child.stdout.take().expect("captured transfer stdout");
+    let stderr = child.stderr.take().expect("captured transfer stderr");
     let (signal_tx, mut signal_rx) = tokio::sync::mpsc::unbounded_channel();
     let _signal_guard = signal_tx.clone();
     let stdout_task = tokio::spawn(drain_capped(stdout, "stdout", signal_tx.clone()));
@@ -2185,27 +2213,6 @@ pub(super) fn remote_sha256sum(path: &str) -> String {
 /// there is no host stderr to carry.
 pub(super) fn path_text(path: &Path) -> Result<String, BackendFailure> {
     crate::units::path_text(path).map_err(|error| BackendFailure::new(format!("{error:#}"), ""))
-}
-
-/// Encode one batch-mode sftp path. Sftp has its own quoting grammar and
-/// cannot reuse shell quoting safely.
-pub(super) fn sftp_path(path: &Path) -> Result<String, BackendFailure> {
-    let text = path.to_str().ok_or_else(|| {
-        BackendFailure::new(
-            format!("path {} is not valid UTF-8", path.to_string_lossy()),
-            "sftp batch paths are text",
-        )
-    })?;
-    if text.contains('\0') || text.contains('\n') || text.contains('\r') {
-        return Err(BackendFailure::new(
-            format!("path {text:?} cannot be represented in an sftp batch"),
-            "",
-        ));
-    }
-    Ok(format!(
-        "\"{}\"",
-        text.replace('\\', "\\\\").replace('"', "\\\"")
-    ))
 }
 
 /// Set the final mode on a temporary file before its atomic rename.
