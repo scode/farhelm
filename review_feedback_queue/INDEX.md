@@ -133,8 +133,6 @@ One line per open item. This file must always match the feedback files in this d
   makes every launch conflict.
 - `delete-holds-directory-lock-whole-teardown.md` — every Delete holds the host-wide directory lock through its whole
   teardown, stalling creates and restarts.
-- `conversation-program-bricks-supervisor.md` — a create whose program is `{conversation}` stores a resume template the
-  loader refuses, so the supervisor can't start.
 - `restart-refused-after-stopping-agent.md` — a consented restart can stop the agent and then refuse to relaunch because
   the offer changed during the stop.
 - `create-retry-duplicates-agent-without-manager.md` — without a systemd user manager, a create retry can launch beside
