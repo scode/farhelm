@@ -276,8 +276,6 @@ One line per open item. This file must always match the feedback files in this d
   seed that landed meanwhile.
 - `refresh-starved-by-seeds.md` — steady creates/renames through the helm can discard every refresh while the host
   reports healthy.
-- `identityless-early-create-unroutable.md` — a session created on a just-connected identity-less host is not recorded
-  and 404s until the first refresh.
 - `host-edits-not-cancellation-safe.md` — a client disconnect between a host edit's commit and its reconcile leaves the
   actor out of sync until restart.
 - `add-host-rollback-leaves-actor.md` — a failed add-host rollback deletes the row but not an actor a concurrent

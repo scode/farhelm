@@ -6546,6 +6546,106 @@ async fn a_session_created_on_an_identity_less_host_is_routable_at_once() {
     assert_eq!(value["total"], 1);
     peer.abort();
 }
+
+/// A session created on an identity-less host BEFORE its first session
+/// listing has completed must be routable at once too.
+///
+/// Such a host's in-memory list used to exist only after a successful
+/// refresh, and recording a created session into a list that does not exist
+/// is refused. A create accepted in the window after the host connected (or
+/// while its refreshes kept failing) therefore answered "no such session" to
+/// every operation until a refresh succeeded. The host's first listing is
+/// held for the whole test, so the window stays open throughout.
+#[farhelm_testtrace::test]
+async fn a_session_created_before_an_identity_less_hosts_first_refresh_is_routable() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        loop {
+            let Ok(Some(frame)) = reader.read_frame().await else {
+                return;
+            };
+            match parse_control(&frame) {
+                Ok(ControlMsg::CreateSession { req_id, .. }) => writer
+                    .write_control(&ControlMsg::SessionCreated {
+                        req_id,
+                        session: rest_harness::session("early-new", 900),
+                    })
+                    .await
+                    .unwrap(),
+                Ok(ControlMsg::StopSession { req_id, session_id }) => {
+                    assert_eq!(session_id, "early-new");
+                    writer
+                        .write_control(&ControlMsg::SessionStopped { req_id })
+                        .await
+                        .unwrap();
+                }
+                _ => return,
+            }
+        }
+    });
+
+    let (builder, host) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "user@no-identity-early",
+            rest_harness::HostScript {
+                identity: None,
+                sessions: Vec::new(),
+                peer: Some(client_side),
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let release_first_list = builder.hold_first_list(host);
+    let harness = builder.start().await;
+    let state = harness
+        .await_state(host, |state| state.phase() == "connected")
+        .await;
+    assert!(
+        matches!(
+            state,
+            crate::manager::HostState::Connected {
+                last_refresh: crate::manager::RefreshHealth::Pending,
+                ..
+            }
+        ),
+        "fixture premise: no refresh has completed: {state:?}"
+    );
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions",
+        serde_json::json!({ "cwd": "/tmp", "invocation": "agent", "host": host }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/early-new/stop",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::OK,
+        "a session created before the first refresh must route immediately: {body}"
+    );
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(row_ids(&value), vec!["early-new"]);
+    drop(release_first_list);
+    peer.abort();
+}
+
 /// Every session mutation reads the catalog before it asks the supervisor.
 ///
 /// A broken catalog must not turn a completed create, restart, or rename
