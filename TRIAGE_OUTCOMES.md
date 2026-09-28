@@ -2254,7 +2254,13 @@
   then cancel, duplicate confirm, wrong key, refused claim, and protection of a subsequent owner, plus a small headless
   `VirtualDom` test for prompt teardown and task cancellation and one header-wiring regression. Remove this feedback
   file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; a shared `ConfirmSlot` helper now backs the header Replace, the interrupted-session card's
+  Replace, tab close and host removal: confirm acts only on a still-open prompt, and the Replace prompts' lock guard
+  moves into the task. Fallback taken as agreed: the header Restart prompt stays off the helper (it shares state with
+  Restart With) and its cancel releases the lock only while the prompt is open. Tests cover the confirm-after-cancel
+  race, a later lock owner, unmount, and a confirmed task being cancelled. PR
+  [#1153](https://github.com/scode/farhelm/pull/1153/changes), jj change `ypqunpzo`, bookmark
+  `pr/confirm-prompts-cancel-race`.
 
 ## row-menu-drifts-after-own-delete.md
 

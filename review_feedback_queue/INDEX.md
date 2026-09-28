@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `header-replace-confirm-ignores-cancel.md` — the header Replace confirm lacks the prompt-open check, so
-  cancel-then-confirm still replaces (deletes) the session.
 - `row-menu-drifts-after-own-delete.md` — an open row menu drifts onto another row after this client's own delete, so
   its Delete can hit the wrong session.
 - `session-header-raw-peer-text.md` — the session header shows title/cwd/command raw and copies raw bytes, so bidi text
