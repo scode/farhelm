@@ -2521,6 +2521,13 @@ way, and the UI never replays a spent token. Discovery records the resolved supe
 identity together so a later helm dials the same installation that answered the probe. UPDATE starts from those recorded
 coordinates rather than assuming the standard layout.
 
+The supervisor-unit ownership rule in SPEC.md is enforced twice on remote hosts. The reach check reports whether the
+user-unit directory already holds a `farhelm-supervisor.service` whose first line is setup's managed-by marker (the same
+test `units::is_managed` applies), and such a host gets the `Manual` outcome ADD and UPDATE both refuse on, before any
+plan exists. The remote unit write repeats the test in the same shell command that renames the new unit into place,
+because a retained plan is confirmed later and setup may have run on the host in between. The local executor branch has
+no such check: the panel never installs a unit on the helm's own machine.
+
 The Hosts header's `update all` button reads the current host snapshot and enqueues the same binding-captured UPDATE
 request that each available SSH row's menu would send. The row's permanently mounted provisioning panel retains its own
 intent, one-use plan, submission claim, and progress. Rows with no current Update offer are skipped, so an ADD in flight

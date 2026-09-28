@@ -1922,7 +1922,12 @@
   ADD and UPDATE refuse with a clear hand-off message when it carries setup's marker, before any action runs; tests
   cover a setup-marked remote unit being refused on both ADD and UPDATE and an unmarked unit still being replaced.
   Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the reach check reports the remote unit's first-line owner and turns a setup-marked unit into
+  the Manual hand-off that Add and Update refuse; the remote unit write re-checks the marker in the same command (exit
+  77), and an unreadable unit fails closed (exit 78). SPEC.md and SPEC_impl.md state the rule. Tests cover the reach
+  parsing, the reach script against fixture units, and a write refused for a marked destination. PR
+  [#1141](https://github.com/scode/farhelm/pull/1141/changes), jj change `ozlzuymu`, bookmark
+  `pr/setup-managed-remote-unit`.
 
 ## provisioning-chmods-shared-directories.md
 
