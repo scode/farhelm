@@ -120,8 +120,6 @@ One line per open item. This file must always match the feedback files in this d
   supervisor-wide attachments lock.
 - `sink-shutdown-retries-forever-after-delete.md` — deleting a busy session can leave its sink client stuck in an
   endless shutdown-retry loop.
-- `tab-input-starts-capture-clock.md` — typing into a tab starts the agent's capture clock, so the conversation can go
-  uncaptured or ambiguous.
 - `input-client-notifications-pile-up.md` — idle input clients never read tmux notifications, so tmux server memory
   grows per open terminal.
 - `csh-login-shell-breaks-agent-launch.md` — the agent launch form `$SHELL -l -i -c …` may fail under csh/tcsh login

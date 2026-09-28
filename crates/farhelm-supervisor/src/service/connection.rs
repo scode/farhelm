@@ -490,7 +490,14 @@ where
                             }
                             _ => (None, false),
                         };
-                        if delivered {
+                        // Only the agent's own terminal starts the capture
+                        // clock: the correlator anchors on the first input
+                        // that could have prompted the AGENT to write its
+                        // record. Keystrokes in a tab reach a different pane
+                        // (possibly running another copy of the same agent
+                        // CLI), so anchoring on them could miss the agent's
+                        // record or claim the tab's conversation instead.
+                        if delivered && route.key.terminal == TerminalId::Agent {
                             note_first_input(&sup, entry);
                         }
                         match send_result {

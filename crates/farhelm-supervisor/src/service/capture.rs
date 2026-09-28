@@ -587,8 +587,12 @@ impl Supervisor {
     }
 }
 
-/// Record that input has been DELIVERED to this session's pane, if this
-/// is the first time (PLAN_M3.md item 8's correlator).
+/// Record that input has been DELIVERED to this session's agent pane, if
+/// this is the first time (PLAN_M3.md item 8's correlator).
+///
+/// Callers pass only input delivered to the agent's terminal
+/// (`TerminalId::Agent`); input to the session's other tabs never reaches
+/// the agent and must not anchor its capture window.
 ///
 /// ## Why the first delivered input, and why here
 ///
