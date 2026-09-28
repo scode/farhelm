@@ -691,7 +691,12 @@ EOF
         exit 1
         ;;
     esac
-    if kill -0 "$other_pid" 2>/dev/null; then
+    # A lock naming OUR OWN pid is stale by definition: this shell never
+    # wrote it. `kill -0 $$` always succeeds, so without this check a
+    # container that starts sh with the same small pid every time would find
+    # its own pid in a lock a SIGKILLed run left behind and refuse forever.
+    # Unlike reuse by an unrelated process, this case is certain.
+    if [ "$other_pid" != "$$" ] && kill -0 "$other_pid" 2>/dev/null; then
       printf 'another farhelm install/update (pid %s) is already running against %s; wait for it to finish, then retry\n' "$other_pid" "$INSTALL_DIR" >&2
       exit 1
     fi
@@ -700,9 +705,9 @@ EOF
       if rollback_from_journal; then
         rm -f "$JOURNAL"
         remove_owned_lock
-        printf 'recovered from an interrupted install/update (stale lock, pid %s no longer running): restored the previous installation; re-run this script to retry\n' "$other_pid" >&2
+        printf 'recovered from an interrupted install/update (stale lock recording pid %s): restored the previous installation; re-run this script to retry\n' "$other_pid" >&2
       else
-        printf 'found an interrupted install/update (stale lock, pid %s no longer running) and could not fully roll it back; %s and %s are LEFT IN PLACE for inspection -- see the lines above for what could not be restored, then re-run this script\n' "$other_pid" "$LOCK_DIR" "$JOURNAL" >&2
+        printf 'found an interrupted install/update (stale lock recording pid %s) and could not fully roll it back; %s and %s are LEFT IN PLACE for inspection -- see the lines above for what could not be restored, then re-run this script\n' "$other_pid" "$LOCK_DIR" "$JOURNAL" >&2
       fi
       exit 1
     fi
