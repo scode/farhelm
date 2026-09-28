@@ -371,6 +371,19 @@ fn admit_detail(
     Admission::Apply
 }
 
+/// The title a view showing `shown` should take from the parent's selection,
+/// or `None` to leave its own copy alone.
+///
+/// Only a selection of the SAME session with a DIFFERENT title counts. The
+/// comparison is against the view's own copy rather than against the
+/// selection's previous value, because the parent's copy is not updated by
+/// the view's own reads: a rename back to a title the parent still held is
+/// no change to the parent's value, yet the view's copy must follow it.
+fn followed_title(selected: Option<&Session>, shown: &Session) -> Option<String> {
+    let selected = selected?;
+    (selected.id == shown.id && selected.title != shown.title).then(|| selected.title.clone())
+}
+
 #[component]
 pub(crate) fn SessionView(
     session: Session,
@@ -383,6 +396,9 @@ pub(crate) fn SessionView(
     /// Reports a replacement's new session to `AppBody`, which owns the
     /// selected session and therefore controls the keyed view remount.
     on_replaced: EventHandler<Session>,
+    /// `AppBody`'s selected session itself, read so this view can follow a
+    /// sidebar rename of the session it shows (see the selection effect).
+    selection: ReadSignal<Option<Session>>,
     /// One-shot bridge to the list's existing clone composer.
     prefill_request: Signal<Option<crate::list::HeaderPrefillRequest>>,
 ) -> Element {
@@ -848,6 +864,50 @@ pub(crate) fn SessionView(
     // notice sits above.
     let mount_detail = request_detail.clone();
     use_hook(move || mount_detail(Trigger::Explicit));
+
+    // A later write to the parent's selection for THIS session (a sidebar
+    // rename, which `AppBody` patches into the selection precisely so the
+    // header never sits on the old name, or a re-open of the same row) is
+    // newer evidence than anything this view has read. The view is keyed by
+    // id, so such a write re-renders it without a remount, and nothing else
+    // carried the new title in: with the event feed off (a latched build
+    // mismatch) the header, and the Clone and Replace-with prefills built
+    // from it, kept the old title for as long as the view stayed open.
+    //
+    // Subscribed to the selection SIGNAL, so it runs on every write, even
+    // one that leaves the selection's value unchanged (a rename back to a
+    // title the parent's copy still held). On each such write it
+    //
+    // - fences the detail reads, so a reply captured before the rename
+    //   cannot commit over it afterwards, whatever title that reply carries;
+    // - takes the selection's title if it differs (`followed_title`);
+    // - and requests a fresh detail read, because the fence also discards
+    //   whatever else the fenced reply carried (status, offer, tabs) and,
+    //   with the feed off, nothing else would read again.
+    //
+    // The first run is the mount itself, whose read is requested just above;
+    // fencing it would only throw that read away.
+    let rename_detail = request_detail.clone();
+    let mut selection_followed = use_signal(|| false);
+    use_effect(move || {
+        let selection = selection.read();
+        let Some(selected) = selection.as_ref() else {
+            return;
+        };
+        if selected.id != current.peek().id {
+            return;
+        }
+        if !*selection_followed.peek() {
+            selection_followed.set(true);
+            return;
+        }
+        detail_reads.write().fence();
+        let followed = followed_title(Some(selected), &current.peek());
+        if let Some(title) = followed {
+            current.write().title = title;
+        }
+        rename_detail(Trigger::Explicit);
+    });
 
     // Whether the session currently READS stale, as a memo rather than a
     // plain read, and that distinction is what keeps the effect below from
@@ -2588,6 +2648,32 @@ mod tests {
             );
         }
     }
+    /// A detail read issued before a followed rename is refused once the
+    /// rename is applied, while a later read still applies.
+    ///
+    /// Why: with the feed off, the view's mount read may still be in flight
+    /// when a sidebar rename is applied to the header; committing that read
+    /// afterwards restored the old title with nothing to correct it. The
+    /// selection effect fences the detail gate on every later write of the
+    /// selection for this session (and requests a fresh read to replace the
+    /// discarded one), and this pins the admission half of that: the held
+    /// read is `Superseded`, and a read started after the fence is admitted
+    /// normally.
+    #[farhelm_testtrace::test]
+    fn a_detail_read_issued_before_a_followed_rename_is_refused() {
+        let mut reads = ReadGate::default();
+        let held = reads.start();
+        // The selection effect following a rename.
+        reads.fence();
+        assert_eq!(
+            admit_detail(&mut reads, held, 0, 0),
+            Admission::Superseded,
+            "the pre-rename read must not restore the old title"
+        );
+        let later = reads.start();
+        assert_eq!(admit_detail(&mut reads, later, 0, 0), Admission::Apply);
+    }
+
     /// An older detail reply must never overwrite a newer one, and the case
     /// that matters is the one that happens: the NEWER read completing
     /// first.
@@ -2745,6 +2831,54 @@ mod tests {
             error.contains("never started"),
             "an errored session's own reason leads instead: {error}"
         );
+    }
+
+    /// The open view follows a rename of its session from the parent's
+    /// selection, judged against the view's own copy.
+    ///
+    /// Why: the view is keyed by id and renders its header from its own copy,
+    /// so a sidebar rename never reached the header while live updates were
+    /// off. Comparing against the view's copy (not the selection's previous
+    /// value) matters for a rename back to a title the parent still held: the
+    /// parent's value does not change, yet the view showing a newer title must
+    /// follow. Spec: same id and different title → take it; same title,
+    /// another session, or no selection → leave the view alone.
+    #[farhelm_testtrace::test]
+    fn the_view_follows_a_rename_of_its_own_session() {
+        fn titled(id: &str, title: &str) -> Session {
+            Session {
+                id: id.to_string(),
+                title: title.to_string(),
+                cwd: "/tmp".to_string(),
+                canonical_cwd: None,
+                invocation: "agent".to_string(),
+                launch: None,
+                status: SessionStatus::Running,
+                annotation: None,
+                restart_offer: RestartOffer::FreshOnly,
+                created_at: 0,
+                last_activity_at: 0,
+                tabs: Vec::new(),
+                host: None,
+                host_identity: None,
+                host_name: None,
+                stale: false,
+                source_profile: None,
+                github_repo: None,
+                working_copy: None,
+                seen_activity_at: None,
+            }
+        }
+        // The view shows B (learned from its own read); the parent's
+        // selection says A, as after a sidebar rename back to A.
+        let shown = titled("sess", "B");
+        assert_eq!(
+            followed_title(Some(&titled("sess", "A")), &shown),
+            Some("A".to_string())
+        );
+        assert_eq!(followed_title(Some(&titled("sess", "B")), &shown), None);
+        assert_eq!(followed_title(Some(&titled("other", "A")), &shown), None);
+        assert_eq!(followed_title(None, &shown), None);
     }
 
     /// `status_badge_destination` routes a session's badge to AT MOST ONE
