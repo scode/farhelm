@@ -392,11 +392,26 @@ pub enum SupervisorTransportError {
 /// than the `Internal` an unclassified error becomes. See that variant and
 /// `agent_requests::transport_outcome` for the vocabulary.
 fn created_session(session: SessionInfo) -> anyhow::Result<SessionInfo> {
+    created_session_from(session, "CreateSession", "SessionCreated")
+}
+
+/// [`created_session`]'s checks for a created session that arrives in some
+/// other reply, named in the refusal.
+///
+/// A retried fresh-checkout create is answered by `GithubCheckoutReconciled`
+/// rather than `SessionCreated`, but it carries the same untrusted session
+/// into the same cache write-back, create history and REST reply, so it gets
+/// the same checks. It used to skip them.
+fn created_session_from(
+    session: SessionInfo,
+    request: &'static str,
+    reply: &'static str,
+) -> anyhow::Result<SessionInfo> {
     use crate::session_cache::MAX_SESSION_ID_BYTES;
     let refuse = |problem: &'static str| {
         anyhow::Error::new(SupervisorTransportError::SentInvalidReply {
-            request: "CreateSession",
-            reply: "SessionCreated",
+            request,
+            reply,
             problem,
         })
     };
@@ -2700,7 +2715,15 @@ impl SupervisorClient {
             )
             .await?
         {
-            ControlMsg::GithubCheckoutReconciled { session, .. } => Ok(session),
+            ControlMsg::GithubCheckoutReconciled { session, .. } => session
+                .map(|session| {
+                    created_session_from(
+                        session,
+                        "ReconcileGithubCheckout",
+                        "GithubCheckoutReconciled",
+                    )
+                })
+                .transpose(),
             other => Err(wrong_reply("ReconcileGithubCheckout", &other)),
         }
     }
@@ -5437,6 +5460,57 @@ mod tests {
 
         let session = client.rename_session("sess-1", TITLE, None).await.unwrap();
         assert_eq!(session.id, "sess-1");
+        peer.await.unwrap();
+    }
+
+    /// A reconciled fresh-checkout reply is refused on the same id rules as
+    /// a create reply.
+    ///
+    /// Why: a retried fresh-checkout create is answered by
+    /// `GithubCheckoutReconciled`, whose session flows into the same cache,
+    /// create history and REST reply as a `SessionCreated` one, but it used to
+    /// skip the id checks, so a misbehaving host could hand back an id the UI
+    /// cannot open. Spec: an id with a control character is refused as a
+    /// typed invalid reply naming the reconcile exchange.
+    #[farhelm_testtrace::test]
+    async fn a_reconciled_checkout_with_a_malformed_id_is_refused() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ReconcileGithubCheckout { req_id, .. } = request else {
+                panic!("expected ReconcileGithubCheckout, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::GithubCheckoutReconciled {
+                    req_id,
+                    session: Some(session("forged\nline")),
+                })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let error = client
+            .reconcile_github_checkout("key".to_string(), "client".to_string(), 80, 24)
+            .await
+            .expect_err("a malformed reconciled id must be refused");
+        assert!(
+            matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentInvalidReply {
+                    request: "ReconcileGithubCheckout",
+                    ..
+                })
+            ),
+            "{error:#}"
+        );
         peer.await.unwrap();
     }
 

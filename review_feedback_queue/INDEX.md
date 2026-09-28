@@ -287,8 +287,6 @@ One line per open item. This file must always match the feedback files in this d
   describe the requested session.
 - `list-ingress-id-validation-gap.md` — session-list ingress admits empty, control-character and dot-segment ids, and
   the UI's %2E guard does not hold.
-- `reconciled-checkout-skips-created-session.md` — a reconciled fresh-checkout reply bypasses created_session's id
-  validation.
 - `add-confirm-rewrites-row-before-busy-check.md` — confirming ADD rewrites an existing row and reconnects before the
   busy check, moving an in-flight UPDATE's host.
 - `cancelled-start-run-leaves-host-busy.md` — dropping the confirm request inside start_run leaves the host busy (409)
