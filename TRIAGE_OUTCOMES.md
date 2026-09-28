@@ -2039,7 +2039,12 @@
   including one whose `Info.plist` mentions farhelm, is refused with the existing actionable message;
   `scripts/test-install-sh.sh` covers the recorded, legacy, half-removed, and foreign-mentioning-farhelm shapes. Remove
   this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the bundle's `.farhelm-installation` record (its tag plus this canonical install directory)
+  decides replacement, even for a half-uninstalled bundle; a record-less bundle from an earlier release is accepted only
+  by its exact file set and a single uncommented `org.scode.farhelm.desktop` identifier; anything else, including the
+  old hand-built trial bundle, is refused. test-install-sh.sh covers each shape; docs/install_uninstall.md updated. PR
+  [#1145](https://github.com/scode/farhelm/pull/1145/changes), jj change `onnluwpt`, bookmark
+  `pr/installer-bundle-ownership`.
 
 ## installer-mirror-var-drops-https-no-signature.md
 

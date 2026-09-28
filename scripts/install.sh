@@ -421,6 +421,106 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     return 0
   }
 
+  # True iff the app bundle at $1 carries this installation's own bundle
+  # record: a regular, non-symlink Contents/.farhelm-installation that starts
+  # with the `farhelm-app` identifier followed by this install directory's
+  # canonical path ($2, as publish_installation_record computed it). That is
+  # the whole ownership test for replacing the bundle; the record's digests
+  # are deliberately NOT verified here. Uninstall verifies them, because it
+  # deletes without rebuilding, but a bundle an interrupted uninstall has
+  # already half-emptied still carries a valid record and must be rebuilt,
+  # not refused.
+  #
+  # The comparison is byte-exact on the record's leading fields. POSIX sh
+  # cannot hold NUL in a variable, so the expected prefix is written to a
+  # file and both prefixes are compared by checksum; `${#}` under LC_ALL=C
+  # gives the canonical path's length in bytes.
+  bundle_record_is_ours() {
+    brio_record="$1/Contents/.farhelm-installation"
+    if [ -L "$brio_record" ] || [ ! -f "$brio_record" ]; then
+      return 1
+    fi
+    brio_len=$(LC_ALL=C; export LC_ALL; printf '%s' "$((13 + ${#2}))") || return 1
+    printf 'farhelm-app\000%s\000' "$2" >"$STAGING_DIR/bundle-record-expected" || return 1
+    head -c "$brio_len" <"$brio_record" >"$STAGING_DIR/bundle-record-actual" || return 1
+    brio_expected=$(sha256_of "$STAGING_DIR/bundle-record-expected") || return 1
+    brio_actual=$(sha256_of "$STAGING_DIR/bundle-record-actual") || return 1
+    [ "$brio_expected" = "$brio_actual" ]
+  }
+
+  # True iff every entry of directory $1 is one of the names that follow,
+  # and each of those names is present. Hidden names count; a shell glob
+  # rather than `ls` for the same reason is_our_lock gives.
+  dir_has_exactly() {
+    dhe_dir=$1
+    shift
+    for dhe_entry in "$dhe_dir"/* "$dhe_dir"/.[!.]* "$dhe_dir"/..?*; do
+      [ -e "$dhe_entry" ] || [ -L "$dhe_entry" ] || continue
+      dhe_known=0
+      for dhe_name in "$@"; do
+        [ "${dhe_entry##*/}" = "$dhe_name" ] && dhe_known=1
+      done
+      [ "$dhe_known" -eq 1 ] || return 1
+    done
+    for dhe_name in "$@"; do
+      [ -e "$dhe_dir/$dhe_name" ] || return 1
+    done
+    return 0
+  }
+
+  # True iff $1 is exactly what this script built between the bundle's
+  # introduction (#310) and its ownership record (#673): the fixed layout
+  # with no record, regular non-symlink files throughout, and an Info.plist
+  # naming the bundle identifier this script has always written. Those
+  # bundles have nothing else to prove ownership with, and leaving one in
+  # place would leave a stale second Farhelm in Launchpad and Spotlight.
+  is_legacy_installer_bundle() {
+    ilib_app=$1
+    dir_has_exactly "$ilib_app" Contents || return 1
+    dir_has_exactly "$ilib_app/Contents" Info.plist MacOS Resources || return 1
+    dir_has_exactly "$ilib_app/Contents/MacOS" farhelm farhelm-desktop || return 1
+    dir_has_exactly "$ilib_app/Contents/Resources" Farhelm.icns || return 1
+    for ilib_file in Contents/Info.plist Contents/MacOS/farhelm Contents/MacOS/farhelm-desktop Contents/Resources/Farhelm.icns; do
+      if [ -L "$ilib_app/$ilib_file" ] || [ ! -f "$ilib_app/$ilib_file" ]; then
+        return 1
+      fi
+    done
+    for ilib_dir in "" /Contents /Contents/MacOS /Contents/Resources; do
+      [ -L "$ilib_app$ilib_dir" ] && return 1
+    done
+    # The identifier test must see the identifier macOS will actually use,
+    # not a copy of this script's pair left inside an XML comment by someone
+    # who customised the bundle. So comments are stripped first, the plist
+    # must mention CFBundleIdentifier exactly once after that, and that one
+    # occurrence must be this script's own key line followed by its own
+    # string line. Anything else (a second key, a one-line pair, a parse
+    # this cannot follow) is not provably the installer's and is refused.
+    awk '
+      {
+        line = $0; out = ""
+        while (line != "") {
+          if (in_comment) {
+            end = index(line, "-->")
+            if (end == 0) { line = ""; continue }
+            line = substr(line, end + 3); in_comment = 0
+          } else {
+            start = index(line, "<!--")
+            if (start == 0) { out = out line; line = ""; continue }
+            out = out substr(line, 1, start - 1); line = substr(line, start + 4); in_comment = 1
+          }
+        }
+        rest = out
+        while ((at = index(rest, "CFBundleIdentifier")) > 0) { mentions++; rest = substr(rest, at + 18) }
+        if (found) {
+          if (out ~ /^[[:space:]]*<string>org\.scode\.farhelm\.desktop<\/string>[[:space:]]*$/) ok = 1
+          found = 0
+        }
+        if (out ~ /^[[:space:]]*<key>CFBundleIdentifier<\/key>[[:space:]]*$/) found = 1
+      }
+      END { exit (ok && mentions == 1 && !in_comment) ? 0 : 1 }
+    ' "$ilib_app/Contents/Info.plist"
+  }
+
   # True iff DIR has one of the only three shapes this script's own lock
   # ever takes: empty (the brief window right after `mkdir` but before the
   # pid file is written), just "pid", or "pid" plus the recovery "journal"
@@ -1281,13 +1381,17 @@ EOF
         app_parent="$HOME/Applications"
         app_path="$app_parent/Farhelm.app"
 
-        # Replace only something that plausibly IS a farhelm bundle (this
-        # script's, or the hand-rolled trial bundle that preceded it, both
-        # of which say "farhelm" in their Info.plist). Anything else at
-        # this name belongs to the user and is not this script's to
-        # delete.
+        # Replace only a bundle this installer can show it built: one that
+        # carries this installation's bundle record, or the recordless shape
+        # it built before records existed. Anything else at this name,
+        # including a bundle the user built or customised whose Info.plist
+        # merely mentions Farhelm, belongs to the user and is refused, not
+        # moved aside: a renamed .app in ~/Applications would still show up
+        # as an app, and "rename yours and re-run" is the clearer message.
+        # SPEC.md's installation rule (a file is not destroyed because its
+        # name matches) is the reason.
         if [ -e "$app_path" ]; then
-          if [ ! -f "$app_path/Contents/Info.plist" ] || ! LC_ALL=C grep -qi farhelm "$app_path/Contents/Info.plist" 2>/dev/null; then
+          if ! bundle_record_is_ours "$app_path" "$pir_canonical" && ! is_legacy_installer_bundle "$app_path"; then
             printf '%s exists and does not look like a farhelm app bundle; refusing to replace it.\n' "$app_path" >&2
             printf 'The binaries in %s are installed and usable; remove or rename that bundle and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
             exit 1

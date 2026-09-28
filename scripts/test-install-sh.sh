@@ -898,25 +898,110 @@ check "foreign Farhelm.app: the binaries were still committed" \
 check "foreign Farhelm.app: the user's bundle is untouched" \
   contains "$(cat "$HOME_FOREIGN/Applications/Farhelm.app/Contents/Info.plist")" "com.example.unrelated"
 
-# A farhelm-looking bundle (the hand-rolled trial's shape included: any
-# Info.plist that mentions farhelm) is replaced WHOLESALE — a file the old
-# bundle carried and the new one does not must be gone, because assembly is
-# rm -rf + mv of a staged tree, never an in-place edit.
+# Bundle ownership comes from the bundle's own record, not from its
+# Info.plist mentioning Farhelm (triage: installer-deletes-farhelm-app-on-grep).
+# Why this matters: the installer used to rm -rf any Farhelm.app whose
+# Info.plist contained "farhelm", which includes a bundle the user built or
+# customised, and refused its own half-uninstalled bundle. Spec: replace a
+# bundle whose record names this installation (even with Info.plist gone),
+# replace the recordless shape this script built before records existed,
+# and refuse everything else, leaving it untouched.
+
+# write_legacy_bundle APP: the recordless layout this script built between
+# the bundle's introduction (#310) and its ownership record (#673).
+write_legacy_bundle() {
+  local app=$1
+  mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n\t<key>CFBundleIdentifier</key>\n\t<string>org.scode.farhelm.desktop</string>\n\t<key>CFBundleShortVersionString</key>\n\t<string>0.9.0</string>\n</dict>\n</plist>\n' \
+    >"$app/Contents/Info.plist"
+  echo old-cli >"$app/Contents/MacOS/farhelm"
+  echo old-desktop >"$app/Contents/MacOS/farhelm-desktop"
+  echo old-icon >"$app/Contents/Resources/Farhelm.icns"
+}
+
+# A bundle that merely mentions farhelm (the old hand-rolled trial's shape
+# among them) is the user's: refused, not deleted.
 HOME_STALE="$WORKDIR/home-stale"
 mkdir -p "$HOME_STALE/Applications/Farhelm.app/Contents/MacOS"
-cat >"$HOME_STALE/Applications/Farhelm.app/Contents/Info.plist" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<plist version="1.0"><dict>
-	<key>CFBundleIdentifier</key><string>org.farhelm.desktop-trial</string>
-</dict></plist>
-EOF
-echo stale >"$HOME_STALE/Applications/Farhelm.app/Contents/MacOS/leftover"
+printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>\n\t<key>CFBundleIdentifier</key><string>org.farhelm.desktop-trial</string>\n</dict></plist>\n' \
+  >"$HOME_STALE/Applications/Farhelm.app/Contents/Info.plist"
+echo mine >"$HOME_STALE/Applications/Farhelm.app/Contents/MacOS/leftover"
 run_install "$MAC_TOOLS" "$HOME_STALE" "$HOME_STALE/.local/bin" "$BASE/good" 1.2.3
-check "trial-shaped bundle: install exits 0" [ "$RC" -eq 0 ]
-check "trial-shaped bundle: replaced with the assembled one" \
-  contains "$(cat "$HOME_STALE/Applications/Farhelm.app/Contents/Info.plist")" "org.scode.farhelm.desktop"
-check "trial-shaped bundle: no stale file survives the wholesale swap" \
-  [ ! -e "$HOME_STALE/Applications/Farhelm.app/Contents/MacOS/leftover" ]
+check "farhelm-mentioning foreign bundle: install exits 1" [ "$RC" -ne 0 ]
+check "farhelm-mentioning foreign bundle: refusal names the problem" \
+  contains "$ERR" "does not look like a farhelm app bundle; refusing to replace it."
+check "farhelm-mentioning foreign bundle: the user's files are untouched" \
+  [ "$(cat "$HOME_STALE/Applications/Farhelm.app/Contents/MacOS/leftover")" = "mine" ]
+
+# The recordless installer bundle is replaced, so an update does not leave a
+# stale second Farhelm behind.
+HOME_LEGACY="$WORKDIR/home-legacy"
+LEGACY_APP="$HOME_LEGACY/Applications/Farhelm.app"
+write_legacy_bundle "$LEGACY_APP"
+check "legacy bundle premise: it carries no record" [ ! -e "$LEGACY_APP/Contents/.farhelm-installation" ]
+run_install "$MAC_TOOLS" "$HOME_LEGACY" "$HOME_LEGACY/.local/bin" "$BASE/good" 1.2.3
+check "legacy installer bundle: install exits 0" [ "$RC" -eq 0 ]
+check "legacy installer bundle: rebuilt at the new version" \
+  contains "$(cat "$LEGACY_APP/Contents/Info.plist")" "<string>1.2.3</string>"
+check "legacy installer bundle: now carries a verifiable record" \
+  assert_bundle_record "$LEGACY_APP" "$HOME_LEGACY/.local/bin"
+
+# The same legacy shape with one extra file is no longer provably the
+# installer's: refused.
+HOME_LEGACYX="$WORKDIR/home-legacy-extra"
+LEGACYX_APP="$HOME_LEGACYX/Applications/Farhelm.app"
+write_legacy_bundle "$LEGACYX_APP"
+echo mine >"$LEGACYX_APP/Contents/MacOS/my-helper"
+run_install "$MAC_TOOLS" "$HOME_LEGACYX" "$HOME_LEGACYX/.local/bin" "$BASE/good" 1.2.3
+check "legacy shape plus a user file: install exits 1" [ "$RC" -ne 0 ]
+check "legacy shape plus a user file: the user's file is untouched" \
+  [ "$(cat "$LEGACYX_APP/Contents/MacOS/my-helper")" = "mine" ]
+
+# The legacy layout with a customised identifier, the original pair left
+# behind in an XML comment, is the user's: the comment must not vouch for it.
+HOME_LEGACYC="$WORKDIR/home-legacy-comment"
+LEGACYC_APP="$HOME_LEGACYC/Applications/Farhelm.app"
+write_legacy_bundle "$LEGACYC_APP"
+printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n<!-- Original identity:\n\t<key>CFBundleIdentifier</key>\n\t<string>org.scode.farhelm.desktop</string>\n-->\n\t<key>CFBundleIdentifier</key>\n\t<string>com.example.custom-farhelm</string>\n</dict>\n</plist>\n' \
+  >"$LEGACYC_APP/Contents/Info.plist"
+LEGACYC_PLIST=$(cat "$LEGACYC_APP/Contents/Info.plist")
+run_install "$MAC_TOOLS" "$HOME_LEGACYC" "$HOME_LEGACYC/.local/bin" "$BASE/good" 1.2.3
+check "legacy layout, commented-out identifier: install exits 1" [ "$RC" -ne 0 ]
+check "legacy layout, commented-out identifier: the bundle is untouched" \
+  [ "$(cat "$LEGACYC_APP/Contents/Info.plist")" = "$LEGACYC_PLIST" ]
+check "legacy layout, commented-out identifier: its executables are untouched" \
+  [ "$(cat "$LEGACYC_APP/Contents/MacOS/farhelm-desktop")" = "old-desktop" ]
+
+# A recorded bundle is replaced wholesale even after an interrupted
+# uninstall removed its Info.plist, and a file it gained since is gone
+# afterwards (assembly is rm -rf + mv of a staged tree, never an edit).
+HOME_HALF="$WORKDIR/home-half"
+HALF_APP="$HOME_HALF/Applications/Farhelm.app"
+mkdir -p "$HOME_HALF"
+run_install "$MAC_TOOLS" "$HOME_HALF" "$HOME_HALF/.local/bin" "$BASE/good" 1.2.3
+check "half-uninstalled bundle setup: first install exits 0" [ "$RC" -eq 0 ]
+rm -f "$HALF_APP/Contents/Info.plist"
+echo stale >"$HALF_APP/Contents/MacOS/leftover"
+check "half-uninstalled bundle premise: record present" [ -f "$HALF_APP/Contents/.farhelm-installation" ]
+check "half-uninstalled bundle premise: Info.plist gone" [ ! -e "$HALF_APP/Contents/Info.plist" ]
+run_install "$MAC_TOOLS" "$HOME_HALF" "$HOME_HALF/.local/bin" "$BASE/good-v2" 1.2.4
+check "half-uninstalled bundle: update exits 0" [ "$RC" -eq 0 ]
+check "half-uninstalled bundle: rebuilt at the new version" \
+  contains "$(cat "$HALF_APP/Contents/Info.plist")" "<string>1.2.4</string>"
+check "half-uninstalled bundle: no stale file survives the wholesale swap" \
+  [ ! -e "$HALF_APP/Contents/MacOS/leftover" ]
+
+# A record that names a DIFFERENT installation's directory does not make the
+# bundle this installation's to replace.
+HOME_OTHERDIR="$WORKDIR/home-otherdir"
+mkdir -p "$HOME_OTHERDIR"
+run_install "$MAC_TOOLS" "$HOME_OTHERDIR" "$HOME_OTHERDIR/first/bin" "$BASE/good" 1.2.3
+check "other-directory record setup: first install exits 0" [ "$RC" -eq 0 ]
+OTHERDIR_PLIST=$(cat "$HOME_OTHERDIR/Applications/Farhelm.app/Contents/Info.plist")
+run_install "$MAC_TOOLS" "$HOME_OTHERDIR" "$HOME_OTHERDIR/second/bin" "$BASE/good-v2" 1.2.4
+check "other-directory record: install exits 1" [ "$RC" -ne 0 ]
+check "other-directory record: the existing bundle is untouched" \
+  [ "$(cat "$HOME_OTHERDIR/Applications/Farhelm.app/Contents/Info.plist")" = "$OTHERDIR_PLIST" ]
 
 # ===========================================================================
 # Scenario: rollback when the FIRST replacement (farhelm itself) fails
