@@ -23,6 +23,18 @@ const SOCKET_NAME: &str = "helm-token.sock";
 const LOCK_NAME: &str = "helm-token.lock";
 const MAX_REPLY_BYTES: u64 = 128;
 const CONTROL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long a starting helm keeps retrying a held ownership lock.
+///
+/// `token show` and an offline `token rotate` hold the lock only for one
+/// short transaction (a first `show` may migrate the schema and mint the
+/// token), and `farhelm helm setup` tells the user to run `token show` right
+/// after it restarts the helm. A serving helm holds the lock for its whole
+/// life. Waiting this long rides out the CLI and still refuses a rival helm
+/// within seconds.
+const SERVING_CLAIM_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+/// Pause between a starting helm's ownership attempts; the same cadence the
+/// CLI's own retry uses.
+const SERVING_CLAIM_RETRY: std::time::Duration = std::time::Duration::from_millis(10);
 /// The first pause after an accept failure that may be caused by descriptor
 /// pressure; without it, readiness stays set while every retry fails again.
 const ACCEPT_ERROR_INITIAL_BACKOFF: std::time::Duration = std::time::Duration::from_millis(50);
@@ -100,9 +112,39 @@ impl Drop for ControlGuard {
 /// of that, not after it has upgraded the database under a running
 /// incumbent. The same claim is what keeps an offline `token rotate` from
 /// running while this helm serves.
+///
+/// A held lock is retried for up to [`SERVING_CLAIM_WAIT`], because a CLI
+/// token command may be holding it for a moment; only a lock still held after
+/// that is reported as another owner.
 pub(crate) async fn claim_serving_ownership(state_dir: &Path) -> anyhow::Result<OwnershipLock> {
+    claim_serving_ownership_observed(state_dir, || {}).await
+}
+
+/// [`claim_serving_ownership`], calling `on_busy` each time an attempt finds
+/// the lock held, so a test can prove the claim met contention before it
+/// releases the lock.
+async fn claim_serving_ownership_observed(
+    state_dir: &Path,
+    on_busy: impl Fn(),
+) -> anyhow::Result<OwnershipLock> {
     farhelm_supervisor::ensure_private_dir(state_dir).await?;
-    acquire_ownership(state_dir.to_path_buf()).await
+    let deadline = tokio::time::Instant::now() + SERVING_CLAIM_WAIT;
+    loop {
+        match acquire_ownership(state_dir.to_path_buf()).await {
+            Err(error) if error.downcast_ref::<OwnershipBusy>().is_some() => {
+                on_busy();
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(error.context(format!(
+                        "the token-control lock {} stayed held for {SERVING_CLAIM_WAIT:?}; is \
+                         another helm already serving this state directory?",
+                        state_dir.join(LOCK_NAME).display()
+                    )));
+                }
+                tokio::time::sleep(SERVING_CLAIM_RETRY).await;
+            }
+            other => return other,
+        }
+    }
 }
 
 /// Start the serving helm's local token-control endpoint.
@@ -583,6 +625,40 @@ mod tests {
         assert!(!token.is_empty());
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
         assert_eq!(auth::show_token(&store).await.unwrap(), token);
+    }
+
+    /// A starting helm waits out a token command's brief hold on the
+    /// ownership lock instead of failing startup.
+    ///
+    /// Why it matters: `token show` and an offline `token rotate` hold the
+    /// lock for a moment, and setup tells the user to run `token show` right
+    /// after restarting the helm. A single non-blocking attempt made the
+    /// helm exit with "another process owns token control" whenever the two
+    /// overlapped. Spec: a lock released within the wait is claimed.
+    #[farhelm_testtrace::test]
+    async fn a_starting_helm_waits_out_a_brief_cli_hold() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli_hold = acquire_ownership(dir.path().to_path_buf()).await.unwrap();
+        let busy = std::sync::Arc::new(tokio::sync::Notify::new());
+        let claim = tokio::spawn({
+            let dir = dir.path().to_path_buf();
+            let busy = std::sync::Arc::clone(&busy);
+            async move { claim_serving_ownership_observed(&dir, || busy.notify_one()).await }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), busy.notified())
+            .await
+            .expect("fixture premise: the claim found the lock held by the CLI");
+        assert!(
+            !claim.is_finished(),
+            "a claim that met the held lock must keep waiting rather than fail"
+        );
+
+        drop(cli_hold);
+        tokio::time::timeout(std::time::Duration::from_secs(5), claim)
+            .await
+            .expect("the claim must finish once the lock is free")
+            .expect("claim task")
+            .expect("a lock released within the wait is claimed");
     }
 
     /// Starting a second helm against the same state directory must not

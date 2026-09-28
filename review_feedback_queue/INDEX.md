@@ -88,8 +88,6 @@ One line per open item. This file must always match the feedback files in this d
   confirmed empty.
 - `same-site-navigation-passes-origin-guard.md` — the navigation guard rejects only cross-site, so a page on another
   localhost port can open the helm and take a terminal.
-- `helm-startup-fails-on-busy-token-lock.md` — the helm (or desktop app) aborts startup if a `token show`/`rotate`
-  briefly holds the token-control lock.
 - `event-feed-liveness-postponed-by-revisions.md` — the event feed's liveness check never fires on a busy fleet, so dead
   subscribers hold the 64 seats.
 - `clipboard-sink-blocks-async-worker.md` — the desktop clipboard endpoint runs blocking clipboard I/O on async workers
