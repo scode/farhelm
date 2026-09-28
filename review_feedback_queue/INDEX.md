@@ -229,8 +229,6 @@ One line per open item. This file must always match the feedback files in this d
   inserts a token.
 - `unauthenticated-bearer-contends-sqlite.md` — any unauthenticated Bearer value is hashed and looked up in SQLite,
   letting a local flood contend the DB lock.
-- `no-helm-spawn-refusal-wrong-remedy.md` — the no-helm refusal for a named spawn advises omitting --agent, which also
-  fails; the remedy is --inherit-agent.
 - `clone-empty-cwd-passes-supervisor-check.md` — `agent clone --cwd ""` passes the supervisor's relay check and can burn
   an idempotency key.
 - `clone-empty-cwd-passes-helm-check.md` — the helm's own clone validation accepts an empty cwd.
