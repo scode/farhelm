@@ -3383,6 +3383,13 @@ enum SpawnFailure {
         /// A replacement window that was created before a later tmux step
         /// failed. Its pane handle makes single-window cleanup safe.
         replacement: Option<Terminal>,
+        /// The agent terminal of a NEW session that tmux created before a
+        /// later step (marking its window) failed. Kept apart from
+        /// `replacement`, whose cleanup semantics differ: a create that
+        /// retains its row publishes this as the session's terminal, since
+        /// the agent may be running in it and the entry is the only handle
+        /// that can open, stop, or delete it.
+        created: Option<Terminal>,
         /// Whether the tmux operation was actually attempted. A fault seam
         /// before `new-window` is a confirmed no-op even though the preserved
         /// session itself still exists.
@@ -9560,7 +9567,10 @@ impl Supervisor {
                     .await);
             }
             Err(SpawnFailure::Tmux {
-                spec_path, error, ..
+                spec_path,
+                error,
+                created,
+                ..
             }) => {
                 // A tmux failure is AMBIGUOUS in a way the spec write is
                 // not: `new-session` can fail after the session already
@@ -9663,9 +9673,13 @@ impl Supervisor {
                              session {id} is kept as a launching record rather than deleted; \
                              stop or delete it to reap whatever is running there"
                         ));
+                        // The pane tmux handed back, when the failure came
+                        // after `new-session` (marking the window): without
+                        // it the running agent could not be opened until a
+                        // reload rediscovered the pane.
                         self.publish_retained_launch(
                             &info,
-                            None,
+                            created.clone(),
                             &snapshot,
                             canonical_cwd.as_deref(),
                             LastOutcome::Launching,
@@ -9682,7 +9696,7 @@ impl Supervisor {
                         ));
                         self.publish_retained_launch(
                             &info,
-                            None,
+                            created.clone(),
                             &snapshot,
                             canonical_cwd.as_deref(),
                             LastOutcome::Launching,
@@ -11041,6 +11055,12 @@ impl Supervisor {
                 error,
                 replacement,
                 tmux_attempted,
+                // A restart whose old tmux session is gone does create a
+                // new one, and `created` can then be set. This path keeps
+                // its own recovery (`unwind_failed_relaunch`) rather than
+                // publishing that pane; only the initial create consumes
+                // `created`.
+                created: _,
             }) => {
                 return Err(self
                     .unwind_failed_relaunch(
@@ -13275,6 +13295,7 @@ impl Supervisor {
                         spec_path,
                         error: error.context("injected replacement-window creation failure"),
                         replacement: None,
+                        created: None,
                         tmux_attempted: false,
                     });
                 }
@@ -13318,6 +13339,7 @@ impl Supervisor {
                             tmux_name: session,
                             pane: pane.clone(),
                         }),
+                        created: None,
                         tmux_attempted: true,
                     });
                 }
@@ -13333,6 +13355,10 @@ impl Supervisor {
                             "marking the session's agent window, without which a later reload \
                             could not tell it apart from a terminal tab",
                         ),
+                        created: existing_session.is_none().then(|| Terminal {
+                            tmux_name: tmux_name.to_string(),
+                            pane: pane.clone(),
+                        }),
                         replacement: existing_session.map(|session| Terminal {
                             tmux_name: session,
                             pane: pane.clone(),
@@ -13351,6 +13377,7 @@ impl Supervisor {
                 spec_path,
                 error,
                 replacement: None,
+                created: None,
                 tmux_attempted: true,
             }),
         }
