@@ -60,6 +60,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   renders the helm's order as served, and `crates/farhelm-ui/src/list.rs` documents the same rule, so this display hold
   needs a spec amendment alongside the code. Sessions that are created or removed while the order is held are an open
   question: they may have to be exempt from the hold.
+- **Make session delete and tab exit feel responsive.** Deleting a session takes a few seconds before the UI reflects
+  it, and a tab whose shell exits lingers too. Two parts:
+  - Show a visual indicator the moment a delete is confirmed, saying the agent is being stopped, and keep it until the
+    supervisor's reply lands. Details to be decided. The UI keeps the row until the reply because the supervisor answers
+    only once the whole process tree is confirmed gone, and most of that time is the agent's own SIGTERM handling: in
+    two observed deletes, `claude` and its `rust-analyzer` children took about 2.5 s to exit (`KILL_GRACE` in
+    `crates/farhelm-supervisor/src/service/sweep.rs` caps that wait at 5 s).
+  - Stop polling for exited terminal tabs. Today a tab's shell exiting leaves a dead pane (the server-wide
+    `remain-on-exit on`), which the supervisor finds on its next 2 s tick (`reap_dead_tabs` in
+    `crates/farhelm-supervisor/src/service/ticker.rs`), so up to 2 s passes before the reap even starts. Candidates are
+    tmux's `pane-died` hook, a control-mode subscription on `#{pane_dead}` (`refresh-client -B`, which tmux rate-limits
+    to once a second, so it shortens the wait rather than removing it), or turning `remain-on-exit` off for tab windows
+    so tmux closes the window itself and control clients see `%window-close`.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
