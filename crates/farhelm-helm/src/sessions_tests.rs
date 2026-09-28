@@ -864,7 +864,10 @@ async fn delete_session_happy_path_returns_200_with_empty_object_body() {
             .await
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -893,6 +896,59 @@ async fn delete_session_happy_path_returns_200_with_empty_object_body() {
     assert_eq!(value, serde_json::json!({}));
 
     peer.await.unwrap();
+}
+
+/// Why this matters: the browser's unconfirmed delete relies on the
+/// supervisor refusing a session that is alive after all, which only works
+/// if the helm forwards the precondition instead of dropping it. Spec:
+/// `?only_if_nothing_alive=true` reaches the supervisor as
+/// `DeleteSession::only_if_nothing_alive: true`, and a plain DELETE sends
+/// false (the unconditional delete).
+#[farhelm_testtrace::test]
+async fn delete_session_forwards_the_only_if_nothing_alive_precondition() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use tower::ServiceExt;
+
+    for (uri, expected) in [
+        ("/api/sessions/sess-1?only_if_nothing_alive=true", true),
+        ("/api/sessions/sess-1", false),
+    ] {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::DeleteSession {
+                req_id,
+                only_if_nothing_alive,
+                ..
+            } = request
+            else {
+                panic!("expected DeleteSession, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::SessionDeleted { req_id })
+                .await
+                .unwrap();
+            only_if_nothing_alive
+        });
+
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let request = axum::http::Request::builder()
+            .method("DELETE")
+            .uri(uri)
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = harness.router().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK, "{uri}");
+        assert_eq!(peer.await.unwrap(), expected, "{uri}");
+    }
 }
 
 /// Deleting an unknown id must 404 from the helm's own owner lookup,
@@ -955,7 +1011,10 @@ async fn delete_session_drops_the_seen_row() {
             .await
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -1330,7 +1389,10 @@ async fn delete_session_succeeds_even_when_clearing_the_seen_row_fails() {
             .await
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -1703,7 +1765,10 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
 
         // The delete half: the OLD id, sent only once the new one exists.
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -1959,7 +2024,10 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
             .unwrap();
 
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -2066,7 +2134,10 @@ async fn replace_of_a_structured_session_preserves_its_resume_template() {
             .unwrap();
 
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -2173,7 +2244,10 @@ async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invoca
             .unwrap();
 
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -2311,7 +2385,10 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
             .unwrap();
 
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -2613,7 +2690,10 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
         sync_created();
         writer.write_frame(&created_reply(req_id)).await.unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -2642,7 +2722,10 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
         sync_created();
         writer.write_frame(&created_reply(req_id)).await.unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -2781,7 +2864,10 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
             .unwrap();
 
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -2991,7 +3077,10 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
             .unwrap();
 
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
@@ -8612,7 +8701,9 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                             .await
                             .unwrap();
                     }
-                    ControlMsg::DeleteSession { req_id, session_id } if replacing => {
+                    ControlMsg::DeleteSession {
+                        req_id, session_id, ..
+                    } if replacing => {
                         assert_eq!(session_id, "sess-1");
                         deletes += 1;
                         writer
@@ -8868,7 +8959,10 @@ async fn fresh_reconciliation_does_not_trust_remote_profile_defaults() {
                 if replacing {
                     let message =
                         parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-                    let ControlMsg::DeleteSession { req_id, session_id } = message else {
+                    let ControlMsg::DeleteSession {
+                        req_id, session_id, ..
+                    } = message
+                    else {
                         panic!("expected source deletion: {message:?}");
                     };
                     assert_eq!(session_id, "sess-1");
@@ -9193,7 +9287,10 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
             }
             if attempt < 2 {
                 let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-                let ControlMsg::DeleteSession { req_id, session_id } = message else {
+                let ControlMsg::DeleteSession {
+                    req_id, session_id, ..
+                } = message
+                else {
                     panic!("expected deletion of original, got {message:?}");
                 };
                 assert_eq!(session_id, "sess-1");

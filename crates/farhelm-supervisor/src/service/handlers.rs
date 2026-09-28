@@ -1403,6 +1403,7 @@ async fn handle_delete_session(
     tasks: &mut tokio::task::JoinSet<()>,
     req_id: u64,
     session_id: String,
+    only_if_nothing_alive: bool,
 ) {
     let mutation_sup = Arc::clone(sup);
     let mutation_id = session_id.clone();
@@ -1459,6 +1460,32 @@ async fn handle_delete_session(
                         format!("no such session: {}", truncate_for_error(&mutation_id)),
                     )
                 })?;
+            // Checked under the lifecycle claim, so nothing can relaunch the
+            // agent or open a tab between this answer and the teardown it
+            // guards. See `ControlMsg::DeleteSession::only_if_nothing_alive`.
+            if only_if_nothing_alive
+                && let Some(alive) =
+                    mutation_sup
+                        .still_alive_for_delete(&entry)
+                        .await
+                        .map_err(|error| {
+                            RequestError::new(
+                                ErrorKind::Internal,
+                                format!(
+                                    "could not check whether this session is still running, so \
+                                 nothing was deleted: {error:#}"
+                                ),
+                            )
+                        })?
+            {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    format!(
+                        "{alive}; deleting it now would kill that without a confirmation, so \
+                         nothing was deleted. Confirm the delete to go ahead"
+                    ),
+                ));
+            }
             mutation_sup
                 .teardown_session(&entry, &mutation_id, _directory_admission)
                 .await
@@ -2874,8 +2901,20 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         ControlMsg::StopSession { req_id, session_id } => {
             handle_stop_session(sup, ctx.tx, ctx.tasks, req_id, session_id).await
         }
-        ControlMsg::DeleteSession { req_id, session_id } => {
-            handle_delete_session(sup, ctx.tx, ctx.tasks, req_id, session_id).await
+        ControlMsg::DeleteSession {
+            req_id,
+            session_id,
+            only_if_nothing_alive,
+        } => {
+            handle_delete_session(
+                sup,
+                ctx.tx,
+                ctx.tasks,
+                req_id,
+                session_id,
+                only_if_nothing_alive,
+            )
+            .await
         }
         ControlMsg::Attach {
             req_id,
@@ -5051,6 +5090,7 @@ mod tests {
             ControlMsg::DeleteSession {
                 req_id: 1,
                 session_id: "s1".to_string(),
+                only_if_nothing_alive: false,
             },
         )
         .await;
@@ -5117,6 +5157,7 @@ mod tests {
                     ControlMsg::DeleteSession {
                         req_id,
                         session_id: "s1".to_string(),
+                        only_if_nothing_alive: false,
                     },
                 )
                 .await,
@@ -5424,6 +5465,7 @@ mod tests {
             ControlMsg::DeleteSession {
                 req_id: 2,
                 session_id: "asker".to_string(),
+                only_if_nothing_alive: false,
             },
         )
         .await;
@@ -6989,6 +7031,7 @@ mod tests {
                 ControlMsg::DeleteSession {
                     req_id: 45,
                     session_id: auth.session_id.clone(),
+                    only_if_nothing_alive: false,
                 }
             },
         )

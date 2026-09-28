@@ -2214,7 +2214,12 @@
   open tab (refused), flag set with nothing alive (deleted), and flag unset with a live agent (deleted, as today); a
   helm REST test covers pass-through; a UI test covers the unconfirmed path sending the flag and a refusal surfacing as
   an error. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; an unconfirmed delete sends `only_if_nothing_alive`; the supervisor checks the agent and every
+  tab (reading window markers unconditionally) under the lifecycle claim and refuses with Conflict; the helm forwards
+  the flag, and Replace sets it when its confirmation showed nothing alive. A failed sidebar delete refreshes the
+  listing. Tests: supervisor e2e refusal while alive, the lone-tab-after-agent-window case, helm forwarding, and the
+  UI's delete URL. PR [#1152](https://github.com/scode/farhelm/pull/1152/changes), jj change `vnrtroqw`, bookmark
+  `pr/delete-rechecks-liveness`.
 
 ## header-replace-confirm-ignores-cancel.md
 

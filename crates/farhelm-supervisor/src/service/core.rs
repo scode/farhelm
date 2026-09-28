@@ -11838,6 +11838,73 @@ impl Supervisor {
     /// tab a REPLY should offer. Teardown must not use this — it
     /// enumerates per-tab scopes and a hidden corpse still owns one; see
     /// [`Self::session_tabs_including_dead`].
+    /// What of this session is still alive right now, phrased as the reason
+    /// an unconfirmed delete refuses, or `None` when nothing is.
+    ///
+    /// Serves `ControlMsg::DeleteSession::only_if_nothing_alive`, and uses
+    /// the same notion of a live agent a restart without consent refuses on:
+    /// a live pane owned by this session, or a launch not yet confirmed that
+    /// has no terminal to probe. Any open terminal tab counts too, because a
+    /// delete closes tabs and whatever runs in them. Every "cannot tell"
+    /// answers alive (a pane held by an unrecognized tmux session) or fails
+    /// (a tmux query error): the question exists to avoid killing something
+    /// nobody agreed to kill, so uncertainty must never read as "safe".
+    pub(crate) async fn still_alive_for_delete(
+        &self,
+        entry: &SessionEntry,
+    ) -> anyhow::Result<Option<String>> {
+        if terminal_less_launch_may_be_live(entry) {
+            return Ok(Some(
+                "this session's launch was never confirmed and it has no known terminal, so its \
+                 agent may still be running"
+                    .to_string(),
+            ));
+        }
+        let Some(terminal) = entry.terminal.as_ref() else {
+            return Ok(None);
+        };
+        match self
+            .tmux
+            .pane_process(&terminal.tmux_name, &terminal.pane)
+            .await
+            .context("checking whether this session's agent is still running")?
+        {
+            PaneProbe::Owned(pane) if !pane.dead => {
+                return Ok(Some("this session's agent is still running".to_string()));
+            }
+            PaneProbe::Owned(_) | PaneProbe::Gone => {}
+            PaneProbe::ForeignOwner { owner } => {
+                if !self.known_session_tmux_name(&owner).await {
+                    return Ok(Some(
+                        "this session's recorded terminal now belongs to an unrecognized tmux \
+                         session, so whether its agent is running cannot be told"
+                            .to_string(),
+                    ));
+                }
+            }
+        }
+        // Markers read unconditionally, not through `session_tabs`: that
+        // listing skips the marker read when no session has more than one
+        // window, and after the agent's own window is gone a surviving tab
+        // can be the session's only window (see `pane_states_with_markers`).
+        // Missing it here would let an "unconfirmed" delete kill that tab.
+        let states = self
+            .tmux
+            .pane_states_with_markers()
+            .await
+            .context("listing this session's terminal tabs")?;
+        let tabs: Vec<_> =
+            tabs_from_pane_states(states.values(), &terminal.tmux_name, Some(&terminal.pane))
+                .into_iter()
+                .filter(|tab| !tab.dead)
+                .collect();
+        Ok(match tabs.len() {
+            0 => None,
+            1 => Some("this session has 1 terminal tab open".to_string()),
+            n => Some(format!("this session has {n} terminal tabs open")),
+        })
+    }
+
     pub(crate) async fn session_tabs(&self, terminal: &Terminal) -> anyhow::Result<Vec<TabInfo>> {
         let states = self.tmux.pane_states().await?;
         Ok(
@@ -17134,6 +17201,69 @@ pub(crate) mod tests {
             // sleep-ok: tmux reports shell exit asynchronously; retry the selected dead-pane premise until the original deadline.
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+
+    /// Why this matters: the unconfirmed-delete guard exists so a delete the
+    /// user did not confirm never kills something alive. Its tab check once
+    /// used the ordinary tab listing, which skips the marker read when no
+    /// session has more than one window, so with the agent's window gone a
+    /// lone surviving tab was invisible and the guard let the delete kill
+    /// it. Spec: with the agent pane gone and one live tab left as the
+    /// session's only window, `still_alive_for_delete` reports the tab.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let created = sup
+            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
+            .await
+            .expect("agent session");
+        sup.open_tab(&created.id).await.expect("terminal tab");
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("session entry");
+        let agent = entry.terminal.clone().expect("agent terminal");
+        sup.tmux
+            .kill_pane_for_test(&agent.pane)
+            .await
+            .expect("remove the agent pane");
+        // Premises: the agent pane is gone, the tab keeps the tmux session
+        // alive, and the ordinary listing no longer finds that tab.
+        assert!(
+            !sup.tmux
+                .pane_states()
+                .await
+                .expect("post-kill pane states")
+                .contains_key(&agent.pane)
+        );
+        assert!(
+            sup.tmux
+                .has_session(&agent.tmux_name)
+                .await
+                .expect("session liveness")
+        );
+        assert!(
+            sup.session_tabs(&agent)
+                .await
+                .expect("ordinary listing")
+                .is_empty(),
+            "fixture premise: the ordinary listing misses the lone tab"
+        );
+
+        let alive = sup
+            .still_alive_for_delete(&entry)
+            .await
+            .expect("guard check");
+        assert_eq!(
+            alive.as_deref(),
+            Some("this session has 1 terminal tab open")
+        );
     }
 
     /// A dead agent pane must be replaced inside its surviving tmux session.

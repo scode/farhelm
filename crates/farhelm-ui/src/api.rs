@@ -2430,10 +2430,22 @@ fn spawn_seen_writer(base: String, id: String) {
 /// delete was definitely refused) or that the source's removal is unknown
 /// and must be checked (the delete's own reply was lost) — see
 /// `do_replace_session`'s doc on the helm side for which is which.
-pub(crate) async fn replace_session(base: &str, id: &str) -> Result<Session, String> {
+///
+/// `only_if_nothing_alive` asks the helm to refuse the source's delete if
+/// anything of it turns out to be alive (see `crate::status::shows_nothing_alive`
+/// for when the UI sets it); the replacement is still created, and the
+/// refusal arrives as the usual "both sessions exist" error.
+pub(crate) async fn replace_session(
+    base: &str,
+    id: &str,
+    only_if_nothing_alive: bool,
+) -> Result<Session, String> {
     let intent_key = mint_intent_key().await?;
     let url = format!("{base}/api/sessions/{}/replace", encode_path_segment(id));
-    let body = serde_json::json!({ "intent_key": intent_key });
+    let body = serde_json::json!({
+        "intent_key": intent_key,
+        "only_if_nothing_alive": only_if_nothing_alive,
+    });
     let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
@@ -2444,13 +2456,33 @@ pub(crate) async fn replace_session(base: &str, id: &str) -> Result<Session, Str
 /// DELETE a session. See `stop_session`'s docs — same error-surfacing
 /// shape (including the body-read-failure context), different verb and
 /// endpoint.
-pub(crate) async fn delete_session(base: &str, id: &str) -> Result<(), String> {
-    let url = format!("{base}/api/sessions/{}", encode_path_segment(id));
+///
+/// `only_if_nothing_alive` adds `?only_if_nothing_alive=true`: the delete
+/// the user was not asked to confirm, which the supervisor refuses with a
+/// conflict (surfaced as the ordinary error text) instead of killing an
+/// agent or tab that is alive after all.
+pub(crate) async fn delete_session(
+    base: &str,
+    id: &str,
+    only_if_nothing_alive: bool,
+) -> Result<(), String> {
+    let url = delete_url(base, id, only_if_nothing_alive);
     let resp = send(client().delete(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("DELETE", &url, resp).await);
     }
     Ok(())
+}
+
+/// The URL [`delete_session`] sends, split out so the precondition's
+/// query string is checkable without a helm.
+fn delete_url(base: &str, id: &str, only_if_nothing_alive: bool) -> String {
+    let url = format!("{base}/api/sessions/{}", encode_path_segment(id));
+    if only_if_nothing_alive {
+        format!("{url}?only_if_nothing_alive=true")
+    } else {
+        url
+    }
 }
 
 /// The success body of `POST /api/sessions/{id}/tabs`: the newly opened
@@ -3364,6 +3396,22 @@ mod http_contract_tests;
 
 #[cfg(test)]
 mod tests {
+    /// Why this matters: the unconfirmed delete's whole safety net is the
+    /// precondition reaching the helm; a URL that dropped it would bring
+    /// back the silent kill of a row that was stale. Spec: set, the query
+    /// string asks for it; unset, the URL is the plain delete route.
+    #[farhelm_testtrace::test]
+    fn delete_url_carries_the_precondition_only_when_asked() {
+        assert_eq!(
+            delete_url("http://h", "a/b", true),
+            "http://h/api/sessions/a%2Fb?only_if_nothing_alive=true"
+        );
+        assert_eq!(
+            delete_url("http://h", "s1", false),
+            "http://h/api/sessions/s1"
+        );
+    }
+
     use super::*;
 
     /// Plain restart must retain its old JSON shape; restart-with carries the
