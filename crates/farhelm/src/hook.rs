@@ -1696,6 +1696,38 @@ mod tests {
         }
     }
 
+    /// A Goose report with no `AGENT_SESSION_ID` still leaves its one hook
+    /// log line, naming the missing id.
+    ///
+    /// Why: the Goose adapter used to skip the reporter entirely when the
+    /// variable was missing or not UTF-8, so the session silently never
+    /// became resumable and the hook log, the one place a reporter failure
+    /// is supposed to show, stayed empty. Spec: the adapter's payload for a
+    /// missing id is logged as `bad-payload missing-session-id` without
+    /// dialing the supervisor.
+    #[farhelm_testtrace::test]
+    fn a_goose_report_without_a_session_id_is_logged() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log").join("goose.log");
+        let payload = serde_json::to_vec(&crate::goose_hook::report_payload(None)).unwrap();
+        run_with(
+            Some(HookCredential {
+                session_id: "sess-1".to_string(),
+                token: "tok".to_string(),
+                socket: dir.path().join("absent.sock"),
+            }),
+            Cursor::new(payload),
+            TEST_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Goose,
+        );
+        let line = single_line(&log);
+        assert!(
+            line.ends_with(" bad-payload missing-session-id"),
+            "logged {line:?}"
+        );
+    }
+
     /// A `source` the vendor sent as something other than a string is
     /// treated exactly like an absent one, and renders as `-`.
     ///

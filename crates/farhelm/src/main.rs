@@ -796,23 +796,22 @@ fn main() -> anyhow::Result<()> {
                     let env = SessionEnv::from_env();
                     let hook_log = env.hook_log();
                     let credential = env.hook_credential();
-                    if let Ok(goose_id) = std::env::var("AGENT_SESSION_ID") {
-                        let payload = serde_json::to_vec(&serde_json::json!({
-                            "session_id": goose_id,
-                            "source": "goose"
-                        }))?;
-                        // The discriminator comes from the entry point
-                        // itself — this helper IS the Goose adapter — so
-                        // the persisted MCP declaration keeps invoking the
-                        // same command with no new stored flag.
-                        hook::run_with(
-                            credential,
-                            std::io::Cursor::new(payload),
-                            std::time::Duration::from_secs(2),
-                            hook_log,
-                            farhelm_proto::ReportVendor::Goose,
-                        );
-                    }
+                    // A missing (or non-UTF-8) AGENT_SESSION_ID still goes
+                    // through the reporter; see `report_payload`.
+                    let payload = serde_json::to_vec(&goose_hook::report_payload(
+                        std::env::var("AGENT_SESSION_ID").ok(),
+                    ))?;
+                    // The discriminator comes from the entry point
+                    // itself — this helper IS the Goose adapter — so
+                    // the persisted MCP declaration keeps invoking the
+                    // same command with no new stored flag.
+                    hook::run_with(
+                        credential,
+                        std::io::Cursor::new(payload),
+                        std::time::Duration::from_secs(2),
+                        hook_log,
+                        farhelm_proto::ReportVendor::Goose,
+                    );
                 }
                 let instructions =
                     (std::env::var_os(farhelm_supervisor::launch::GOOSE_INSTRUCTIONS_ENV_VAR)

@@ -334,8 +334,6 @@ One line per open item. This file must always match the feedback files in this d
   hook's line.
 - `grok-double-null-field-refused.md` — a Grok callback with both spellings of an optional field set to null is refused
   outright.
-- `goose-missing-session-id-not-logged.md` — the Goose reporter neither reports nor logs when AGENT_SESSION_ID is
-  missing.
 - `grok-prompt-hooks-exceed-payload-cap.md` — the hook's small-payload assumption may not hold for Grok's prompt/stop
   callbacks.
 - `desktop-auth-check-no-deadline.md` — desktop-auth.js's credential check has no timeout, so startup can hang on
