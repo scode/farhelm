@@ -1261,7 +1261,10 @@ each supervisor (SSH) — plus one deliberately local one.
   device secret. Refusing the names keeps any device secret from being stored under an origin another account can serve;
   a plain page load that names them and still reaches the helm is redirected to `127.0.0.1`. A device secret a browser
   stored under `localhost` before this rule remains exposed to such a squatter until the token is rotated, and a
-  squatter on `localhost` can still show a lookalike token prompt, which falls under the gap accepted above.
+  squatter on `localhost` can still show a lookalike token prompt, which falls under the gap accepted above. Whether the
+  web token is stored in the user's password manager is the user's choice: the browser prompt is an ordinary password
+  field, and Farhelm does not try to stop a browser from offering to save it or keep a synced store from holding it. A
+  saved token being autofilled into a lookalike prompt is the same port-squatter gap.
 - **Helm to supervisor**: SSH, and only SSH, for every remote supervisor. Passwordless access from the helm's machine,
   as the user, is the requirement; authentication is the user's SSH keys, and supervisors listen on no network port of
   their own. Registering a host means giving the helm its SSH destination — there is no supervisor token to manage. The

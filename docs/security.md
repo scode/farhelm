@@ -118,6 +118,11 @@ need the helm to be down: a user who types `localhost` rather than `127.0.0.1` c
 `[::1]`, which can show the same lookalike prompt. No stored secret is exposed that way, because the helm never serves
 the UI under that name.
 
+The token prompt is an ordinary password field, so a browser may offer to save the web token in its password manager,
+possibly one synced to your browser account. Whether to accept is your call; Farhelm does not try to prevent it. If you
+do save it, a lookalike page in the scenario above could get it autofilled rather than pasted, which is the same gap and
+has the same preconditions.
+
 No client-side mechanism closes it. A key the page holds, a challenge the page answers, a token that carries the helm's
 identity for the page to check — all of them are checked by code that, in this scenario, the attacker served. The
 browser has exactly one way to verify a server before running its page, and that is a TLS certificate chained to a trust
