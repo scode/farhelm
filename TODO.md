@@ -236,6 +236,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   [`lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md`](lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md):
   per-session cloud sandboxes (Tensorlake, Fly.io Sprites) with scoped credentials are where remote execution is headed.
   That goal is context for naming predicates and resolving ambiguity in this refactor, not scope for it.
+- **Consider refactoring how harnesses are represented.** Decide whether the code's representation of agent harnesses
+  should be refactored. The maintainer will supply what prompted this and what shape is wanted; ask before investigating
+  or designing.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
