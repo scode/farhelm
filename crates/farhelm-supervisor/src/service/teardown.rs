@@ -579,16 +579,34 @@ impl Supervisor {
                         // The ambiguous unresolved plan (Design C's crash
                         // window): an explicit Delete retires the record
                         // without moving the unknown directory — no
-                        // rename, no adoption. Name the preserved path in
-                        // the diagnostic so the operator can find what we
-                        // deliberately left alone.
+                        // rename, no adoption. The user is told, not just
+                        // the log (SPEC.md "Fresh GitHub checkouts": Delete
+                        // names the preserved path), and a path that could
+                        // not be checked is reported as such rather than
+                        // read as absent.
                         let path = PathBuf::from(&row.canonical_root).join(&row.original_basename);
-                        if tokio::fs::symlink_metadata(&path).await.is_ok() {
+                        let notice = match tokio::fs::symlink_metadata(&path).await {
+                            Ok(_) => Some(format!(
+                                "The checkout at {} was never fully set up, so Farhelm cannot \
+                                 tell whether the folder there is its own; it was left untouched \
+                                 for you to inspect.",
+                                path.display()
+                            )),
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                            Err(e) => Some(format!(
+                                "The checkout at {} was never fully set up, and that path could \
+                                 not be checked ({e}); if a folder is there, Farhelm left it \
+                                 untouched for you to inspect.",
+                                path.display()
+                            )),
+                        };
+                        if let Some(notice) = notice {
                             warn!(
                                 session = %session_id, path = %path.display(),
                                 "delete retired an unresolved checkout plan; the directory at \
                                  the recorded path has no established ownership and is left untouched"
                             );
+                            notices.push(notice);
                         }
                     }
                     crate::working_copies::AllocationState::Allocated
@@ -2243,6 +2261,11 @@ mod tests {
     /// Planned rows deliberately lack an accepted path. Explicit Delete must
     /// still name the candidate it leaves untouched, without adopting its inode
     /// or treating that diagnostic path as authority to archive unknown content.
+    ///
+    /// The name goes into the Delete's own notice as well as the log: SPEC.md
+    /// "Fresh GitHub checkouts" makes the user, who deleted the session from
+    /// the UI and never sees the supervisor log, the one who must learn a
+    /// folder was left behind.
     #[farhelm_testtrace::test]
     async fn deleting_an_unresolved_plan_names_and_preserves_the_unknown_path() {
         use std::os::unix::fs::MetadataExt;
@@ -2289,9 +2312,16 @@ mod tests {
                 .unwrap(),
             1
         );
-        sup.teardown_session(&entry, "planned-origin", test_admission(&sup).await)
+        let Ok(Some(notice)) = sup
+            .teardown_session(&entry, "planned-origin", test_admission(&sup).await)
             .await
-            .unwrap_or_else(|_| panic!("explicit Delete retires only the unresolved metadata"));
+        else {
+            panic!("explicit Delete retires only the unresolved metadata, with a notice");
+        };
+        assert!(
+            notice.contains(unknown.to_str().unwrap()) && notice.contains("left untouched"),
+            "the Delete's own result names the preserved path: {notice}"
+        );
         let warnings = capture
             .matching("delete retired an unresolved checkout plan")
             .unwrap();

@@ -3596,7 +3596,12 @@
   recorded in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; Delete's unresolved-plan branch (teardown.rs) now adds a notice naming the preserved path to
+  the Delete's result, using the notice channel from `missing-checkout-root-blocks-delete.md`, so it reaches the session
+  list. A path whose check fails for a reason other than absence is reported as unchecked rather than read as absent.
+  The log line stays. Regression test `deleting_an_unresolved_plan_names_and_preserves_the_unknown_path` now asserts the
+  returned notice. jj change `ukplmklxmwru`, bookmark `pr/delete-names-unresolved-plan-folder`, draft PR
+  [#1178](https://github.com/scode/farhelm/pull/1178/changes).
 
 ## checkout-name-scan-case-sensitive.md
 
