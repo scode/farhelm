@@ -5243,7 +5243,9 @@ async fn delete_after_externally_killed_tmux_session_succeeds() {
 /// and its tabs behind while reporting the session deleted.
 ///
 /// So this pins the refusal end to end: `Internal`, the row and map entry
-/// left in place for a retry, and — the assertion that makes the refusal
+/// left in place for a retry and listed as `Unknown` (the same
+/// unattributed-pane rule keeps the listing from recording the live agent
+/// as exited), and — the assertion that makes the refusal
 /// worth anything — the agent still ALIVE afterwards. A refusal that
 /// killed on its way out would be strictly worse than proceeding.
 ///
@@ -5320,16 +5322,12 @@ async fn delete_after_renamed_tmux_session_fails_closed() {
     );
     assert_eq!(
         h.client.list_sessions().await.unwrap().sessions,
-        vec![with_status(
-            session.clone(),
-            SessionStatus::Exited { exit_code: None }
-        )],
+        vec![with_status(session.clone(), SessionStatus::Unknown)],
         "a failed delete must leave the row and map entry in place for a retry; \
-         session_status requires BOTH the remembered pane id AND the remembered tmux \
-         session name to match what tmux currently reports (see that function's own docs) \
-         — the rename changes the session name tmux reports for this pane, so the identity \
-         can no longer be positively confirmed, and the honest answer is Exited, not a \
-         guess either way"
+         the renamed pane is still alive under a name no Farhelm session uses, so \
+         session_status cannot attribute it to this session and, with no settled \
+         outcome recorded, reports Unknown rather than claiming the agent exited \
+         (see session_status's own docs)"
     );
     assert!(
         !process_is_gone(pane_pid),
