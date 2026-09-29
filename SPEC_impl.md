@@ -2354,13 +2354,16 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   port scoping prevents an unrelated loopback service from receiving an ambient host-scoped credential. The loopback
   Origin guard remains defense in depth; no ambient browser credential remains, so this flow has no CSRF edge.
 - The loopback guard accepts `Host` and `Origin` only as the IPv4 literal `127.0.0.1:<port>` (bare `127.0.0.1` on port
-  80, where browsers omit the default port), plus the desktop webview's custom schemes as Origin. `localhost` and
-  `[::1]` are refused because the helm binds only IPv4 loopback, leaving `[::1]:<port>` free for another local account
-  to bind; a `localhost` origin could then be served by that account and read whatever the UI stored there. Binding
-  `[::1]` as well was rejected: IPv6 loopback can be enabled after the helm starts, so the helm cannot hold that address
-  reliably. A `GET` or `HEAD` without an `Upgrade` header whose Host is exactly one of the refused names gets a `307` to
-  the fixed `http://127.0.0.1:<port>/`, built from the literal rather than from the request; API calls and WebSocket
-  upgrades under those names get the ordinary 403.
+  80, where browsers omit the default port), plus the desktop webview's custom schemes as Origin. That exemption is a
+  scheme prefix and cannot be narrower in a useful way: dioxus-desktop hardcodes the page URL `dioxus://index.html/` on
+  Linux and macOS, so every Dioxus desktop app sends the same Origin, and `wry://` is open to any app built on wry
+  directly. Another such app's content passing the guard is the residual SPEC.md "Client to helm" accepts for this
+  browser-facing check. `localhost` and `[::1]` are refused because the helm binds only IPv4 loopback, leaving
+  `[::1]:<port>` free for another local account to bind; a `localhost` origin could then be served by that account and
+  read whatever the UI stored there. Binding `[::1]` as well was rejected: IPv6 loopback can be enabled after the helm
+  starts, so the helm cannot hold that address reliably. A `GET` or `HEAD` without an `Upgrade` header whose Host is
+  exactly one of the refused names gets a `307` to the fixed `http://127.0.0.1:<port>/`, built from the literal rather
+  than from the request; API calls and WebSocket upgrades under those names get the ordinary 403.
 - The native app embeds farhelm-helm in-process; the Linux helm is the same code behind `farhelm helm run`. The local
   supervisor is a separate process either way — the app discovers one that already answers and leaves it alone, or
   starts `farhelm supervisor run` from its sibling binary and owns that child for its own lifetime.

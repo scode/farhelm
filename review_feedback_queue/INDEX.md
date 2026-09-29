@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 - `event-feed-cap-refusal-invisible.md` — the event feed's subscriber-cap refusal is a pre-upgrade 503 that browsers
   cannot observe.
-- `any-dioxus-webview-passes-origin-guard.md` — any Dioxus or wry app's webview origin passes the helm's origin guard
-  and CORS, not just Farhelm's.
 - `output-client-shutdown-can-retry-forever.md` — the per-terminal output client can get stuck retrying shutdown when
   its session disappears while paused.
 - `claude-scan-budget-never-settles.md` — Claude record-scan capture can never complete in a large project directory and

@@ -219,8 +219,13 @@ fn legacy_loopback_redirect(
 /// means either the desktop build breaks or a web page gets CORS access it
 /// was never meant to have.
 ///
-/// Safe to allow because a web page cannot forge a custom-scheme `Origin`:
-/// only a native webview serving the app from that scheme produces one.
+/// Safe to allow against the threat this guard exists for: a web page in a
+/// browser cannot forge a custom-scheme `Origin`. It does not identify
+/// Farhelm's own window, though. Every Dioxus desktop app serves its page as
+/// `dioxus://index.html/`, and any app built on wry can use `wry://`, so
+/// content shown by another such app on the machine passes too; SPEC.md "Client to helm" accepts that for this
+/// browser-facing check, because such content still needs a credential, and
+/// rules out relying on `Origin` to establish the native app as a client.
 fn is_desktop_webview_origin(origin: &str) -> bool {
     origin.starts_with("dioxus://") || origin.starts_with("wry://")
 }

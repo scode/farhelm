@@ -3857,7 +3857,7 @@
 
 ## any-dioxus-webview-passes-origin-guard.md
 
-- Outcome: `fix code`.
+- Outcome: `fix spec` (revised 2026-09-29; originally `fix code`).
 - Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
   inspection, not runtime reproduction: present. The guard is still a bare `dioxus://`/`wry://` prefix check.
   Verification notes an exact-origin match would not help, since other Dioxus apps share `dioxus://index.html`; only a
@@ -3867,7 +3867,18 @@
   itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Revised decision (2026-09-29, supersedes the decision above): execution found the code fix impossible as scoped.
+  dioxus-desktop 0.7.10 hardcodes the page URL `dioxus://index.html/` on Linux and macOS, so every Dioxus desktop app
+  sends the same Origin, and only a Farhelm-specific scheme (a patched dependency) could tell Farhelm's window apart.
+  The user decided the Origin check is a browser-facing defense and not how the native app is identified: another Dioxus
+  or wry app's content passing it is an accepted risk for that browser check, not for the desktop app, whose
+  identification must never rely on Origin. Moving the desktop client off the loopback network path entirely is recorded
+  separately as a "Maybe later" TODO.
+- Revised completion criteria: SPEC.md states the principle, SPEC_impl.md and the guard's doc comment explain the
+  residual, and this feedback file and its index entry are removed.
+- Execution: `complete`; SPEC.md "Client to helm", SPEC_impl.md's loopback-guard bullet, `docs/security.md` and
+  `is_desktop_webview_origin`'s doc comment. Change `lsukxzqknprlktvxxynssykrtmklqqxx`, bookmark
+  `pr/spec-origin-browser-only`, draft PR [#1216](https://github.com/scode/farhelm/pull/1216/changes).
 
 ## restart-sweep-on-abortable-connection-task.md
 
