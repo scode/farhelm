@@ -1317,55 +1317,74 @@ failure can leave private evidence, but cannot authorize another directory move.
   stock Debian/Ubuntu `.bashrc` interactivity guard doesn't bail out when the profile chains it. Either way the sourced
   file set matches an SSH-and-type session, which is the contract. When `$SHELL` is unset (user-manager services on
   systemd older than 255 don't set it), the supervisor falls back to the passwd database, then `/bin/sh`.
-- Status heuristics: periodic sampling of tmux pane activity and captured tail content, sharpened per agent kind (see
-  below). Sampling must never sit on the attach/input path — SPEC.md forbids status from gating interaction. The
-  supervisor's own ticker takes the samples; classification is a pure read of the sample beside the durable outcome, and
-  sits BELOW the recorded-error and dead-pane rules in the existing precedence, so a heuristic only chooses among the
-  live statuses once sampling has produced evidence. The generic baseline is observed output alone, counted in a
-  session's OWN samples rather than in elapsed time: three consecutive samples showing an unchanged screen reads idle,
-  anything else live reads running. A new launch reads running before its first comparison. A reloaded live pane instead
-  reports provisional `unknown` until a changed screen, positive work hint, recognized waiting prompt, or three quiet
-  comparisons provide fresh status evidence; dead-pane and recorded-error outcomes bypass that provisional state. The
-  helm retains the prior status from its per-host cache for an `unknown` reply, if it has one, and replaces the rest of
-  the row as usual. Its identity-less in-memory list follows the same rule within a connection. Disconnect clears those
-  rows by the existing identity-less host rule, so there is no previous status to retain after its supervisor restarts.
-  Counting samples rather than seconds is load-bearing — the sampler works through live panes on a budgeted round robin,
-  so a session's real sampling period grows with the fleet, and any wall-clock window would eventually report a
-  continuously-working agent as idle because the HOST was busy. Waiting is never derived from activity at all (a blocked
-  agent and a finished one are equally quiet); it comes only from per-kind sharpening. Codex is the one audited
-  exception to raw comparison: the sampler takes a temporary 64 KiB visible-grid tail, recognizes only its bottom
-  composer (including its known sparkle cells and safely bounded draft rows), then applies the normal UTF-8-safe
-  4096-byte cap to canonical comparison text. It separately retains the raw 4096-byte tail for waiting recognition.
-  Unknown composer, popup, and output shapes remain unchanged. The pinned Codex `Working (elapsed • esc to interrupt)`
-  widget adjoining that composer can prevent quiet decay in both its animated and reduced-motion forms, including its
-  bounded inline context and detail rows; historical or quoted copies elsewhere in the pane do not. Waiting still wins.
-- Last-activity timestamp: the same ticker that samples for status also DATES the changes it sees, into a
+- Status heuristics: periodic sampling of each live agent pane's visible grid, read by one screen reader per agent kind
+  (`agent_kind::screen_reader`). Sampling must never sit on the attach/input path — SPEC.md forbids status from gating
+  interaction. The supervisor's own ticker takes the samples and stores one reading per successful capture; replies only
+  map the stored reading, and classification sits BELOW the recorded-error and dead-pane rules in the existing
+  precedence, so a reading only chooses among the live statuses of a pane tmux says is alive. The generic reader is
+  observed output alone, counted in a session's OWN samples rather than in elapsed time: three consecutive samples
+  showing an unchanged screen reads idle, anything else live reads running, and it never reads waiting (a blocked agent
+  and a finished one are equally quiet). Counting samples rather than seconds is load-bearing — the sampler works
+  through live panes on a budgeted round robin, so a session's real sampling period grows with the fleet, and any
+  wall-clock window would eventually report a continuously-working agent as idle because the HOST was busy. A new launch
+  reads running before its first comparison. A reloaded live pane instead reports provisional `unknown` until a changed
+  screen, a reading from recognized content, or three quiet comparisons provide fresh status evidence (a recognized idle
+  prompt therefore ends the gap on its first sample); a recognized waiting prompt is reported at once. Dead-pane and
+  recorded-error outcomes bypass that provisional state. The helm retains the prior status from its per-host cache for
+  an `unknown` reply, if it has one, and replaces the rest of the row as usual. Its identity-less in-memory list follows
+  the same rule within a connection. Disconnect clears those rows by the existing identity-less host rule, so there is
+  no previous status to retain after its supervisor restarts.
+
+  Claude Code and Codex have dedicated readers that answer from recognized content ("anchored" readings) rather than
+  change counting, because both redraw parts of their screen while idle (Claude's `/clear` hint, Codex's recap block and
+  rate-limit footer) and change counting reads every such redraw as work. The anchors are the vendors' own wording and
+  layout, preferring text shown to the user as an instruction over decoration: every dialog that asks the user something
+  ends in a key-hint footer ("Esc to cancel", "enter to submit answer", "enter continue"), Claude shows a spinner line
+  directly above its ruled `❯` input box for the whole of a turn, and Codex animates a Braille spinner in its pane title
+  for the whole of a turn (its on-screen `Working (…)` widget appears only during tool runs, never while prose streams,
+  so the title is fetched with a separate `display-message` for Codex sessions only — the title is written by the pane,
+  so it never rides the authoritative pane-fact query). A waiting prompt wins over a busy indicator. A recognized screen
+  that carries no state (a model picker, a transcript view) reads "can't tell" and the previous reading stands. A screen
+  with none of the anchors falls back to the generic reader for that sample, and after a few such samples in a row (so a
+  half-drawn startup frame does not count) the supervisor logs that once per run, without screen content, as likely rule
+  drift. The rules are tested against real captures under `crates/farhelm-supervisor/tests/fixtures/screens/`, which
+  `scripts/capture-agent-screens.py` re-captures from the installed agents (`docs/agent-screen-fixtures.md`). The
+  earlier Codex-only masking of its composer out of change comparison is gone: whenever it applied, the Codex reader now
+  recognizes the composer and answers from content, so the comparison no longer decides anything there.
+- Last-activity timestamp: the same ticker that samples for status also DATES the work it sees, into a
   `last_activity_at` column on the session row and onto the wire. It drives the row's displayed age and the helm's
   seen/unseen comparison, seeded to the session's creation time so one that has never produced output has an honest age,
-  and restored verbatim on supervisor restart. Persisting it does not contradict the rule that liveness is never
-  persisted: a status is a claim about NOW and rots the instant the process it describes moves on, while this is a claim
-  about a past instant that the passage of time cannot falsify. The two must not be conflated in the other direction
-  either — classification still reads sample COUNTS and never this clock, for the population-dependence reason above.
-  The value advances only when the observed change is at least a minute newer than what is already stored, and the
-  reason is blast radius rather than resolution. Two costs, scaling differently: a durable `UPDATE` per session per
-  crossing, which without the quantum would be a write per busy session every two seconds; and a fleet-wide UI wake,
-  which is COALESCED — the helm detects a changed session by comparing whole serialized `SessionInfo`s, but bumps the
-  invalidation feed at most once per host refresh that found anything different, however many sessions moved. So the
-  wake is bounded per refresh while the writes are bounded per session, and without a quantum a single busy agent would
-  re-render every connected client on every drain. No user distinguishes two sessions whose last output was twenty
-  seconds apart. Writes are monotonic in SQL as well as in memory, so a backwards clock step cannot make displayed
-  activity younger or undo an unseen observation; a lost write costs age precision after restart until another observed
-  change crosses the quantum, and nothing else.
-- Work-start ordering: the ticker separately advances `last_work_started_at` only when changed output moves a session
-  from a previously known idle or waiting state to running. The first sample, the first successful sample after a
-  capture failure, one or two quiet comparisons, continued output in the same burst, and completion do not advance it.
-  This uses the same live-status classifier replies use, so waiting recognition and three-comparison idle hysteresis
-  cannot drift between the badge and ordering. The key is milliseconds since the epoch, but allocation is
-  supervisor-local monotonic state rather than a bare clock read: startup seeds it to the greatest effective key across
-  every loaded row (ended rows included), and a start reserves `max(now_ms, previous + 1)` with saturation. This orders
-  same-millisecond bursts and survives a backward clock step on one supervisor. Separate supervisors still have only
-  their wall clocks and the helm's deterministic creation/id/host tie-breakers; this does not claim distributed
-  causality across skewed hosts.
+  and restored verbatim on supervisor restart. A sample dates activity when its reading is working (from recognized
+  content on every such sample; from change counting only when the screen actually changed, since change counting's
+  working also covers the quiet samples before it decays) and when waiting begins; a question that stays on screen does
+  not refresh it, and idle never does. Like work starts below, a baseline sample (a run's first, or the first after a
+  failed capture) never dates anything. Persisting it does not contradict the rule that liveness is never persisted: a
+  status is a claim about NOW and rots the instant the process it describes moves on, while this is a claim about a past
+  instant that the passage of time cannot falsify. The two must not be conflated in the other direction either —
+  classification still reads sample COUNTS and never this clock, for the population-dependence reason above. The value
+  advances only when the dated sample is at least a minute newer than what is already stored, and the reason is blast
+  radius rather than resolution. Two costs, scaling differently: a durable `UPDATE` per session per crossing, which
+  without the quantum would be a write per busy session every two seconds; and a fleet-wide UI wake, which is COALESCED
+  — the helm detects a changed session by comparing whole serialized `SessionInfo`s, but bumps the invalidation feed at
+  most once per host refresh that found anything different, however many sessions moved. So the wake is bounded per
+  refresh while the writes are bounded per session, and without a quantum a single busy agent would re-render every
+  connected client on every drain. No user distinguishes two sessions whose last output was twenty seconds apart; the
+  same quantum applies to the moment waiting begins, so a question asked within a minute of the last working stamp keeps
+  that older stamp. Writes are monotonic in SQL as well as in memory, so a backwards clock step cannot make displayed
+  activity younger or undo an unseen observation; a lost write costs age precision after restart until another dated
+  sample crosses the quantum, and nothing else.
+- Work-start ordering: the ticker separately advances `last_work_started_at` when a sample's reading moves a session
+  from idle or waiting to working, or from idle or working to waiting. Both sides must be readings of the same run's
+  successful samples: the run's first sample, the first successful sample after a capture failure, and a "can't tell"
+  screen only establish or keep a baseline. That rule is what stops a question that has been on screen for hours from
+  jumping to the top and reading "just now" after every supervisor restart, session restart, or capture recovery.
+  Continued work in the same burst, a redraw of the same question, and completion do not advance it. The badge and the
+  ordering read the same stored reading, so they cannot drift apart. The key is milliseconds since the epoch, but
+  allocation is supervisor-local monotonic state rather than a bare clock read: startup seeds it to the greatest
+  effective key across every loaded row (ended rows included), and a start reserves `max(now_ms, previous + 1)` with
+  saturation. This orders same-millisecond bursts and survives a backward clock step on one supervisor. Separate
+  supervisors still have only their wall clocks and the helm's deterministic creation/id/host tie-breakers; this does
+  not claim distributed causality across skewed hosts.
 
   New sessions start at their creation time in milliseconds. Rename and explicit restart share the same session key,
   while their new run gets fresh transition evidence, so neither operation itself promotes. A start writes immediately,
@@ -1378,20 +1397,16 @@ failure can leave private evidence, but cannot authorize another directory move.
   cannot promote overflow to REAL. Old helm cache JSON is not migrated: its serde default and creation fallback apply
   until an authoritative refresh arrives.
 - Agent-kind integrations live in the supervisor as a small trait (`AgentIntegration`; `AgentKind` is the wire enum
-  naming the kind itself): status sharpening over the sampled tail, and conversation-identity capture. Sharpening is a
-  DEFAULTED trait method that may only promote a live baseline to waiting, never invent liveness, and never panic on
-  arbitrary terminal bytes; the default is "no sharpening", which is deliberately different from the no-integration case
-  (generic sessions still get the baseline). Recognition is conservative by design — a vendor question phrase AND a
-  rendered menu of numbered answers, both at the bottom of the screen — because a status that reads waiting at a working
-  session teaches users to ignore the column, while a missed prompt merely reads idle. Claude Code: watch
-  `~/.claude/projects/<munged-cwd>/` for the session record. Audited specifics that shape this: the record appears at
-  first prompt submission, not at launch, so correlation keys on first-input time and tolerates an unbounded
-  launch-to-first-input gap; the cwd munging is non-injective (`/`, `.`, `_` all become `-`); and per-line JSON fields
-  (sessionId, cwd, timestamps) are the reliable correlators — file birth times can postdate content after rewrites. An
-  identity is claimed only when correlation is unambiguous — two near-simultaneous launches in one cwd stay uncaptured
-  rather than choosing a record arbitrarily. A scan-derived Claude identity retains its exact record locator for
-  append/restart re-verification; a Claude hook report instead remains the agent's direct answer. Codex no longer uses
-  this fallback: even a single matching rollout may belong to a nested invocation rather than the foreground.
+  naming the kind itself) for conversation-identity capture; status reading is the separate `ScreenReader` above, so a
+  kind can have either without the other. Claude Code: watch `~/.claude/projects/<munged-cwd>/` for the session record.
+  Audited specifics that shape this: the record appears at first prompt submission, not at launch, so correlation keys
+  on first-input time and tolerates an unbounded launch-to-first-input gap; the cwd munging is non-injective (`/`, `.`,
+  `_` all become `-`); and per-line JSON fields (sessionId, cwd, timestamps) are the reliable correlators — file birth
+  times can postdate content after rewrites. An identity is claimed only when correlation is unambiguous — two
+  near-simultaneous launches in one cwd stay uncaptured rather than choosing a record arbitrarily. A scan-derived Claude
+  identity retains its exact record locator for append/restart re-verification; a Claude hook report instead remains the
+  agent's direct answer. Codex no longer uses this fallback: even a single matching rollout may belong to a nested
+  invocation rather than the foreground.
 
   **Codex attribution and exact-record validation.** The Unix accept loop captures the kernel peer PID and its process
   start token before scheduling the connection handler. For a Codex report, a bounded, revalidated ancestry walk must
@@ -2276,16 +2291,16 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   session's host's clock against the helm's own, on a remote host a different machine's clock entirely (the same reason
   the relative-age column reads an activity stamp rather than a "last seen" timestamp). One caveat follows directly: the
   supervisor quantizes `last_activity_at` at the source, advancing it only when what it observes is at least a minute
-  newer than what it already holds, so output landing within that minute after a mark-read does not yet register as
-  unseen — cosmetic, and not worth a second, finer-grained stamp. The table is a helm-local write with nothing to
-  refuse: `PUT /api/sessions/{id}/seen` does not route through a session's owning host at all (unlike every lifecycle
-  verb above), so a session on an unreachable host can still be marked read or unread, and the write bumps the
-  fleet-events revision only when the stored value actually changed — a client re-marking the SAME stamp it already
-  recorded — which happens when a session is reopened with no new activity behind it, or when a client retries a PUT
-  whose response it missed — must not wake every other connected client to redraw a dot that has not moved. Deleting a
-  session drops its `session_seen` row explicitly, since nothing else cascades into a table with no foreign key; a
-  session deleted through ANOTHER helm, or dropped from a cache because its host was removed here, can leave a row
-  behind, which is accepted as garbage bounded by the number of sessions that ever existed, at a few dozen bytes each.
+  newer than what it already holds, so work landing within that minute after a mark-read does not yet register as unseen
+  — cosmetic, and not worth a second, finer-grained stamp. The table is a helm-local write with nothing to refuse:
+  `PUT /api/sessions/{id}/seen` does not route through a session's owning host at all (unlike every lifecycle verb
+  above), so a session on an unreachable host can still be marked read or unread, and the write bumps the fleet-events
+  revision only when the stored value actually changed — a client re-marking the SAME stamp it already recorded — which
+  happens when a session is reopened with no new activity behind it, or when a client retries a PUT whose response it
+  missed — must not wake every other connected client to redraw a dot that has not moved. Deleting a session drops its
+  `session_seen` row explicitly, since nothing else cascades into a table with no foreign key; a session deleted through
+  ANOTHER helm, or dropped from a cache because its host was removed here, can leave a row behind, which is accepted as
+  garbage bounded by the number of sessions that ever existed, at a few dozen bytes each.
 
 ## Standalone uninstall
 

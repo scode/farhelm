@@ -354,6 +354,10 @@ pub(crate) fn live_status(entry: &SessionEntry) -> SessionStatus {
         _ if activity.startup_provisional => SessionStatus::Unknown,
         ScreenState::Working => SessionStatus::Running,
         ScreenState::Idle => SessionStatus::Idle,
+        // Never stored: the sampler keeps the previous reading when a
+        // screen says nothing about the agent. Mapped anyway so the match
+        // stays total without a panic on a cosmetic path.
+        ScreenState::Unknown => SessionStatus::Unknown,
     }
 }
 
@@ -783,14 +787,12 @@ mod tests {
     /// recognition itself is pinned in `agent_kind`, and what this file
     /// tests is that the wiring reaches it at all.
     const CLAUDE_APPROVAL_TAIL: &str = "\
-⏺ Bash(rm -rf build)
-╭───────────────────────────────────────────────╮
-│ Do you want to run this command?              │
-│                                               │
-│ ❯ 1. Yes                                      │
-│   2. Yes, and don't ask again this session    │
-│   3. No, and tell Claude what to do instead   │
-╰───────────────────────────────────────────────╯";
+ Bash command
+   rm -rf build
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+ Esc to cancel · Tab to amend";
 
     /// A `pane_states` map containing exactly [`a_terminal`]'s pane in the
     /// given state.
@@ -834,7 +836,9 @@ mod tests {
             SessionStatus::Running
         );
 
-        show("Do you want to run this command?\n❯ 1. Yes\n  2. No");
+        show(
+            "  $ sleep 20\n› 1. Yes, proceed (y)\n  2. No (esc)\n  Press enter to confirm or esc to cancel",
+        );
         assert_eq!(
             session_status(&entry, &live, &KnownTmuxNames::default()).0,
             SessionStatus::Waiting
@@ -1208,7 +1212,7 @@ mod tests {
         );
     }
 
-    /// Sharpening is actually WIRED: an integrated session whose sampled
+    /// Screen reading is actually WIRED: an integrated session whose sampled
     /// tail carries its agent's approval prompt classifies `Waiting`, and
     /// the same tail on a session with no integration does not.
     ///
@@ -1217,11 +1221,11 @@ mod tests {
     /// per-kind knowledge is reached THROUGH the snapshot, so a generic
     /// session cannot accidentally inherit another agent's heuristics.
     #[farhelm_testtrace::test]
-    fn an_integrated_sessions_prompt_tail_is_sharpened_to_waiting() {
+    fn an_integrated_sessions_prompt_screen_reads_waiting() {
         let live = pane_map(false, None);
         // Quiet by the baseline rule — a pending approval is exactly the
         // case where nothing is being printed — so the `Waiting` below can
-        // only have come from the sharpener.
+        // only have come from the screen reader.
         let claude = entry_sampled(AgentKind::Claude, 9, 5, Some(CLAUDE_APPROVAL_TAIL));
         assert_eq!(
             session_status(&claude, &live, &KnownTmuxNames::default()).0,
@@ -1252,10 +1256,10 @@ mod tests {
     /// session used to get STUCK at `Waiting` forever.
     ///
     /// The bug was that a tail is kept until a successful capture replaces
-    /// it, while sharpening reads it on every reply. So: a pane shows an
+    /// it, while screen reading reads it on every reply. So: a pane shows an
     /// approval prompt (correctly `Waiting`), the user answers it, and this
     /// session's captures then start failing — a pane that is still alive,
-    /// so still classified from its baseline, and still sharpened from a
+    /// so still classified from its baseline, and still read from a
     /// screen that stopped being true at the first failure. Nothing
     /// recovers from that except a successful capture, and the premise of
     /// the case is that none is coming.
@@ -1263,12 +1267,12 @@ mod tests {
     /// `forget_tail` is what the sampler now calls when a session it
     /// SELECTED could not be captured, and the two halves of its contract
     /// are both asserted here because getting either wrong is its own bug:
-    /// sharpening must stop (or the session stays stuck), and the sample
+    /// reading the old screen must stop (or the session stays stuck), and the sample
     /// counts must NOT move (or a run of failures decays a live session to
     /// `Idle` on the strength of no observation at all — the same wrong
     /// inference `sample_pass` refuses to make when tmux answers nothing).
     #[farhelm_testtrace::test]
-    fn a_failed_capture_stops_sharpening_without_counting_as_a_quiet_look() {
+    fn a_failed_capture_withdraws_the_screen_reading_without_counting_as_a_quiet_look() {
         let live = pane_map(false, None);
         let entry = entry_sampled(AgentKind::Claude, 9, 5, Some(CLAUDE_APPROVAL_TAIL));
         assert_eq!(

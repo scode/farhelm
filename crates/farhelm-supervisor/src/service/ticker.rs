@@ -165,14 +165,13 @@
 use super::capture::CaptureReason;
 use super::core::{SampleRead, SessionEntry, Supervisor};
 use super::launch_artifacts::cleanup_launch_artifacts;
-use super::status::{live_status, observe_entry};
+use super::status::observe_entry;
 use super::terminals::{Terminal, tabs_from_pane_states};
 use crate::agent_kind::screen_reader::{
-    QUIET_SAMPLES_BEFORE_IDLE, Reading, SampleCounts, Screen, ScreenReader, generic_reading,
-    reader_for,
+    QUIET_SAMPLES_BEFORE_IDLE, Reading, SAMPLE_TAIL_BYTES, SampleCounts, Screen, ScreenReader,
+    ScreenState, generic_reading, reader_for,
 };
 use crate::store::LastOutcome;
-use crate::tmux::retain_pane_tail;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -208,16 +207,6 @@ use tracing::{debug, error, info, warn};
 /// Overridable per supervisor through [`crate::service::SupervisorSeams`],
 /// which is how tests get a cadence measured in milliseconds.
 pub(crate) const TICKER_INTERVAL: Duration = Duration::from_secs(2);
-
-/// How much of a sampled pane's screen is kept.
-///
-/// Enough for the bottom of a normal terminal — an 80x24 screen of dense
-/// text is under 2 KiB — with headroom for a wide one, because the
-/// readers have to see a whole approval prompt to recognize it. The cap
-/// exists because this is held per session for as long as the session
-/// lives, and a pane rendering a 500-column wall of text should not be
-/// able to grow the supervisor's resident memory through it.
-const SAMPLE_TAIL_BYTES: usize = 4096;
 
 /// How many pane tails one tick may capture.
 ///
@@ -286,22 +275,70 @@ fn advanced_activity_stamp(stored: i64, now: i64, quantum: i64) -> Option<i64> {
     (now.saturating_sub(stored) >= quantum).then_some(now)
 }
 
-/// Whether one successful comparison proves a new work burst began.
-///
-/// `Running` by itself is deliberately insufficient: it is also the
-/// conservative default before a baseline exists and after capture failure.
-/// Changed output must cross a previously observed idle or waiting boundary.
-fn observed_work_start(
-    previous: &farhelm_proto::SessionStatus,
-    current: &farhelm_proto::SessionStatus,
-    changed: bool,
-) -> bool {
-    changed
-        && matches!(
-            previous,
-            farhelm_proto::SessionStatus::Idle | farhelm_proto::SessionStatus::Waiting
+/// What folding one successful capture concluded, as the sampler needs it
+/// to date activity and order the session list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Observation {
+    /// Whether the screen differs from this run's previous capture. Only
+    /// change counting reads this; a recognized screen answers for itself.
+    pub(crate) changed: bool,
+    /// The reading this sample may count as a transition away from: the
+    /// previous stored reading of this run, or `None` when this sample only
+    /// establishes a baseline (the run's first sample, the first after a
+    /// failed capture).
+    pub(crate) prior: Option<Reading>,
+    /// This sample's reading, or `None` when the reader recognized the
+    /// screen but it says nothing about the agent (a menu the user opened),
+    /// in which case the previous reading stands and nothing transitions.
+    pub(crate) fresh: Option<Reading>,
+}
+
+impl Observation {
+    /// Whether this sample advances the session's last-activity stamp, and
+    /// with it the age a row shows and the helm's unseen comparison.
+    ///
+    /// Working refreshes it on every sample: from recognized content
+    /// whether or not the screen moved, from change counting only when it
+    /// did (change counting's working also covers the quiet samples before
+    /// it decays, which are not activity). Waiting sets it once, when it
+    /// begins, so a question left unanswered for three hours shows three
+    /// hours. Idle never does, which is what keeps an agent's own idle-time
+    /// redraws from making an untouched session look recent and unread.
+    /// A baseline sample never dates anything (see [`Self::prior`]).
+    pub(crate) fn dates_activity(&self) -> bool {
+        let (Some(prior), Some(fresh)) = (self.prior, self.fresh) else {
+            return false;
+        };
+        match fresh.state {
+            ScreenState::Working => fresh.anchored || self.changed,
+            ScreenState::Waiting => prior.state != ScreenState::Waiting,
+            ScreenState::Idle | ScreenState::Unknown => false,
+        }
+    }
+
+    /// Whether this sample begins a new work burst, which moves the session
+    /// up the recently-active order.
+    ///
+    /// Idle to working, anything to waiting (a question for the user is
+    /// work the user should see), and waiting to working (the user
+    /// answered). Continued work, a redraw of the same question, and
+    /// finishing do not. Both sides must be readings of this run's
+    /// successful samples, for the reason [`Self::prior`] gives.
+    pub(crate) fn starts_work(&self) -> bool {
+        let (Some(prior), Some(fresh)) = (self.prior, self.fresh) else {
+            return false;
+        };
+        matches!(
+            (prior.state, fresh.state),
+            (
+                ScreenState::Idle | ScreenState::Waiting,
+                ScreenState::Working
+            ) | (
+                ScreenState::Idle | ScreenState::Working,
+                ScreenState::Waiting
+            )
         )
-        && matches!(current, farhelm_proto::SessionStatus::Running)
+    }
 }
 
 /// Permits in [`Supervisor::sampling_admission`] — see that field's docs
@@ -378,20 +415,40 @@ pub(crate) struct ActivitySample {
     /// counting that as quiet would start every session's decay one step
     /// in.
     pub(crate) unchanged_streak: u64,
-    /// The screen text compared with the preceding sample, as the session's
-    /// reader shaped it ([`ScreenReader::comparison`]) and bounded to
+    /// The screen text compared with the preceding sample, bounded to
     /// [`SAMPLE_TAIL_BYTES`]. `None` before the first sample and after a
     /// failed capture ([`ActivitySample::forget_tail`]).
     pub(crate) comparison: Option<String>,
     /// What the session's screen reader concluded from the most recent
-    /// successful capture, or the change-counting reading when there is no
-    /// screen to read (before the first sample, and after a failed capture
-    /// withdrew what the last screen showed).
+    /// successful capture that said anything about the agent, or the
+    /// change-counting reading when there is no screen to read (before the
+    /// first sample, and after a failed capture withdrew what the last
+    /// screen showed). A "can't tell" screen (`ScreenState::Unknown`) is
+    /// never stored; the reading before it stands.
     ///
     /// Stored rather than recomputed per reply: replies read it and never
     /// run a reader, and the reading is a function of the capture, which is
     /// not retained.
     pub(crate) reading: Reading,
+    /// Whether [`Self::reading`] came from a successful sample of this run,
+    /// so that the next sample may count as a transition away from it.
+    ///
+    /// False for a new or reloaded run and after a failed capture. That is
+    /// the rule that keeps baselines from reordering the list: a session
+    /// that has shown the same question for hours reads `Waiting` on the
+    /// first sample after a supervisor restart, a session restart, or a
+    /// capture recovery, and if that first sample could count as "entered
+    /// waiting" the session would jump to the top of its group and read
+    /// "just now" every time — the stale-activity bug by another route.
+    transition_ready: bool,
+    /// Whether this run already logged that its dedicated screen reader
+    /// fell back to change counting. Once per run, so a vendor UI change
+    /// that breaks the rules shows up in the log without flooding it.
+    fallback_logged: bool,
+    /// How many consecutive samples of this run the dedicated reader fell
+    /// back on. The log waits for a streak so that a half-drawn frame while
+    /// the agent starts up does not read as the vendor's UI having changed.
+    fallback_streak: u64,
     /// Newest work-start key whose generation-conditional durable write has
     /// not succeeded yet.
     ///
@@ -483,34 +540,35 @@ impl ActivitySample {
     /// that were genuinely producing output, permanently. So an
     /// unverifiable change is treated as no change, and the next
     /// comparison against the re-established baseline reports the truth.
+    /// Fold a screen through the generic reader, returning whether it
+    /// changed: a test convenience for the change-counting path.
     #[cfg(test)]
     pub(crate) fn observe(&mut self, tail: String) -> bool {
-        self.observe_screen(reader_for(farhelm_proto::AgentKind::Generic), &tail, &tail)
+        self.observe_screen(reader_for(farhelm_proto::AgentKind::Generic), &tail, "")
+            .changed
     }
 
     /// Fold one successful capture through the session's reader: update the
-    /// change-counting history from the reader's comparison text, then
-    /// store what the reader concludes from the screen and that history.
+    /// change-counting history, then store what the reader concludes from
+    /// the screen, its title, and that history.
     ///
-    /// `capture` is the grid as captured at the reader's requested size and
-    /// `tail` the same grid bounded to [`SAMPLE_TAIL_BYTES`]. Production
-    /// passes the session kind's reader; `observe` is a test convenience
-    /// for the generic path.
+    /// `text` is the visible grid bounded to [`SAMPLE_TAIL_BYTES`]; `title`
+    /// is the pane title, or empty when the reader did not ask for it.
     ///
     /// The startup gap of a reloaded run ends on the first sample that is
     /// fresh evidence: an observed change, a reading from recognized screen
-    /// content, or a full quiet streak.
+    /// content, or a full quiet streak. A "can't tell" screen is recognized
+    /// but carries no state, so it ends nothing.
     pub(crate) fn observe_screen(
         &mut self,
         reader: &dyn ScreenReader,
-        capture: &str,
-        tail: &str,
-    ) -> bool {
-        let comparison = retain_pane_tail(&reader.comparison(capture), SAMPLE_TAIL_BYTES);
+        text: &str,
+        title: &str,
+    ) -> Observation {
         let mut changed = false;
         if self.samples > 0 {
             match self.comparison.as_deref() {
-                Some(previous) if previous == comparison.as_str() => self.unchanged_streak += 1,
+                Some(previous) if previous == text => self.unchanged_streak += 1,
                 Some(_) => {
                     self.unchanged_streak = 0;
                     changed = true;
@@ -522,13 +580,49 @@ impl ActivitySample {
                 None => self.unchanged_streak = 0,
             }
         }
-        self.comparison = Some(comparison);
+        self.comparison = Some(text.to_string());
         self.samples += 1;
-        self.reading = reader.read(self.counts(), &Screen { capture, tail });
-        if changed || self.reading.anchored || self.unchanged_streak >= QUIET_SAMPLES_BEFORE_IDLE {
+        let prior = self.transition_ready.then_some(self.reading);
+        let reading = reader.read(self.counts(), &Screen { text, title });
+        let fresh = (reading.state != ScreenState::Unknown).then_some(reading);
+        if let Some(reading) = fresh {
+            self.reading = reading;
+            self.transition_ready = true;
+        }
+        // Only a sample that says something about the agent may end the
+        // gap: a "can't tell" screen that changes or sits still is not
+        // evidence of work or rest, and ending the gap on it would report
+        // the default working reading nobody observed.
+        if fresh.is_some_and(|reading| {
+            changed || reading.anchored || self.unchanged_streak >= QUIET_SAMPLES_BEFORE_IDLE
+        }) {
             self.startup_provisional = false;
         }
-        changed
+        Observation {
+            changed,
+            prior,
+            fresh,
+        }
+    }
+
+    /// Record whether this sample's reading was a dedicated reader's
+    /// fallback, and say whether to log that now: once per run, after
+    /// [`QUIET_SAMPLES_BEFORE_IDLE`] fallbacks in a row. Any recognized
+    /// sample, "can't tell" included, resets the streak.
+    pub(crate) fn note_fallback(
+        &mut self,
+        observation: &Observation,
+        has_screen_rules: bool,
+    ) -> bool {
+        // A "can't tell" screen is still one the rules recognized, so it
+        // breaks a streak of unrecognized ones just as a readable screen does.
+        match observation.fresh {
+            Some(reading) if has_screen_rules && !reading.anchored => self.fallback_streak += 1,
+            _ => self.fallback_streak = 0,
+        }
+        let report = !self.fallback_logged && self.fallback_streak >= QUIET_SAMPLES_BEFORE_IDLE;
+        self.fallback_logged |= report;
+        report
     }
 
     /// The change-counting history as a reader receives it.
@@ -553,16 +647,13 @@ impl ActivitySample {
     ) {
         self.samples = samples;
         self.unchanged_streak = unchanged_streak;
-        self.reading = match screen {
-            Some(text) => reader_for(kind).read(
-                self.counts(),
-                &Screen {
-                    capture: text,
-                    tail: text,
-                },
-            ),
+        let reading = match screen {
+            Some(text) => reader_for(kind).read(self.counts(), &Screen { text, title: "" }),
             None => generic_reading(self.counts()),
         };
+        if reading.state != ScreenState::Unknown {
+            self.reading = reading;
+        }
     }
 
     /// Drop the retained screen after a capture this session was SELECTED
@@ -607,6 +698,7 @@ impl ActivitySample {
     pub(crate) fn forget_tail(&mut self) {
         self.comparison = None;
         self.reading = generic_reading(self.counts());
+        self.transition_ready = false;
     }
 }
 
@@ -1312,9 +1404,8 @@ async fn sample_pass(
         ) {
             Some(fault) => Err(fault),
             None => {
-                let capture_bytes = reader.capture_bytes().unwrap_or(SAMPLE_TAIL_BYTES);
                 sup.tmux
-                    .capture_pane_tail(&terminal.tmux_name, &terminal.pane, capture_bytes)
+                    .capture_pane_tail(&terminal.tmux_name, &terminal.pane, SAMPLE_TAIL_BYTES)
                     .await
             }
         };
@@ -1340,26 +1431,49 @@ async fn sample_pass(
                 continue;
             }
         };
-        // A reader may ask for a larger capture than the retained tail (Codex's
-        // composer masking does, so sparkle-byte count cannot shift unrelated
-        // text across the cap). Prompt recognition still reads the tail: what
-        // tmux showed at the bottom, not a masked reconstruction.
-        let status_tail = retain_pane_tail(&tail, SAMPLE_TAIL_BYTES);
-        // The old verdict is read before replacing the sample. A first or
-        // recovery sample is therefore only a baseline: it cannot invent a
-        // transition from no prior observation.
-        let previous_status = live_status(entry);
-        let changed = entry
-            .run
-            .activity
-            .lock()
-            .expect("activity mutex poisoned")
-            .observe_screen(reader, &tail, &status_tail);
-        if changed {
-            note_activity(sup, entry).await;
-            if observed_work_start(&previous_status, &live_status(entry), changed) {
-                persist_work_started(sup, entry, true).await;
+        // The title is the reader's to ask for: a separate tmux call, and
+        // only Codex uses it (its spinner lives there while prose streams).
+        // A title that cannot be read is simply absent evidence; the screen
+        // still gets read.
+        let title = if reader.wants_title() {
+            match sup
+                .tmux
+                .pane_title(&terminal.tmux_name, &terminal.pane)
+                .await
+            {
+                Ok(title) => title,
+                Err(e) => {
+                    debug!(
+                        session = %entry.info.id, error = %format!("{e:#}"),
+                        "could not read this session's pane title; reading its screen without it"
+                    );
+                    String::new()
+                }
             }
+        } else {
+            String::new()
+        };
+        let (observation, report_fallback) = {
+            let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
+            let observation = activity.observe_screen(reader, &tail, &title);
+            let report = activity.note_fallback(&observation, reader.has_screen_rules());
+            (observation, report)
+        };
+        if report_fallback {
+            // No screen content in the log: pane text can carry anything the
+            // user typed or the agent printed, secrets included.
+            warn!(
+                session = %entry.info.id, kind = ?entry.snapshot.kind,
+                "this session's screen has matched none of its agent's recognized layouts for \
+                 several samples; its status falls back to change counting (logged once per run; \
+                 the agent's UI may have changed, see docs/agent-screen-fixtures.md)"
+            );
+        }
+        if observation.dates_activity() {
+            note_activity(sup, entry).await;
+        }
+        if observation.starts_work() {
+            persist_work_started(sup, entry, true).await;
         }
     }
 }
@@ -1650,9 +1764,9 @@ mod tests {
     use super::super::core::tests::{StateDir, a_terminal, dummy_exe, entry_with, no_uploads};
     use super::super::core::{CreateInputs, CreateMode, SupervisorSeams, SupervisorTimeouts};
     use super::super::handlers::handle_control;
+    use super::super::status::live_status;
     use super::super::status::session_status;
     use super::*;
-    use crate::agent_kind::screen_reader::ScreenState;
     use crate::agent_kind::{CaptureWindowBounds, IntegrationSnapshot};
     use crate::store::{LastOutcome, StoredSession, now_unix};
     use farhelm_proto::{AgentKind, ControlMsg, SessionStatus};
@@ -2067,13 +2181,7 @@ mod tests {
         loop {
             let captured = sup
                 .tmux
-                .capture_pane_tail(
-                    &terminal.tmux_name,
-                    &terminal.pane,
-                    reader_for(AgentKind::Codex)
-                        .capture_bytes()
-                        .expect("Codex asks for a larger capture"),
-                )
+                .capture_pane_tail(&terminal.tmux_name, &terminal.pane, SAMPLE_TAIL_BYTES)
                 .await
                 .expect("the owned pane remains readable");
             if captured == expected {
@@ -2519,9 +2627,15 @@ mod tests {
         );
     }
 
-    /// A real tmux pane runs the Codex-specific capture and canonicalization
-    /// path. Four different composer frames decay to idle without moving
-    /// the durable activity cell; output above the composer then moves it.
+    /// A real tmux pane runs the Codex reader end to end: four different
+    /// composer frames (sparkle animation, draft edits) read idle and never
+    /// move the durable activity cell, although every one of them changed
+    /// the screen; a spinner in the pane title, which is how Codex shows a
+    /// running turn, then reads running and dates the session.
+    ///
+    /// Why it matters: this is the redraw-while-idle case that made idle
+    /// sessions look recent and unread, driven through the real capture,
+    /// title fetch, and sampling pass rather than a hand-built reading.
     ///
     /// The phase file is the stimulus, and exact equality with the requested
     /// trimmed frame is the readiness oracle. The test therefore waits for
@@ -2540,11 +2654,11 @@ mod tests {
         let command = format!(
             "last=''; while :; do phase=$(cat {phase_path}); if [ \"$phase\" != \"$last\" ]; \
              then case \"$phase\" in \
-             a) printf '\\033[2J\\033[Hagent output\\n\\n› Ask Codex to do anything\\n\\ncustom footer' ;; \
-             b) printf '\\033[2J\\033[Hagent output\\n⠁\\n› ⠂Ask Codex to do anything\\n⠄\\ncustom footer' ;; \
-             c) printf '\\033[2J\\033[Hagent output\\n⠈\\n›\\n\\n  edited draft\\n⠐\\ncustom footer' ;; \
-             d) printf '\\033[2J\\033[Hagent output\\n⠠\\n› another draft\\n⠁\\n⡀\\ncustom footer' ;; \
-             output) printf '\\033[2J\\033[Hagent output\\nreal tool output\\n\\n› another draft\\n\\ncustom footer' ;; \
+             a) printf '\\033[2J\\033[Hagent output\\n\\n› Ask Codex to do anything\\n\\n  custom footer' ;; \
+             b) printf '\\033[2J\\033[Hagent output\\n⠁\\n› ⠂Ask Codex to do anything\\n⠄\\n  custom footer' ;; \
+             c) printf '\\033[2J\\033[Hagent output\\n⠈\\n›\\n\\n  edited draft\\n⠐\\n  custom footer' ;; \
+             d) printf '\\033[2J\\033[Hagent output\\n⠠\\n› another draft\\n⠁\\n⡀\\n  custom footer' ;; \
+             output) printf '\\033]2;⠋ task | codex\\007\\033[2J\\033[Hagent output\\nreal tool output\\n\\n› another draft\\n\\n  custom footer' ;; \
              esac; last=$phase; fi; sleep 0.02; done"
         );
         let sup = supervisor_with(
@@ -2559,7 +2673,7 @@ mod tests {
         wait_for_pane_frame(
             &sup,
             "codex",
-            "agent output\n\n› Ask Codex to do anything\n\ncustom footer",
+            "agent output\n\n› Ask Codex to do anything\n\n  custom footer",
         )
         .await;
 
@@ -2581,13 +2695,16 @@ mod tests {
         for (phase, frame) in [
             (
                 "b",
-                "agent output\n⠁\n› ⠂Ask Codex to do anything\n⠄\ncustom footer",
+                "agent output\n⠁\n› ⠂Ask Codex to do anything\n⠄\n  custom footer",
             ),
             (
                 "c",
-                "agent output\n⠈\n›\n\n  edited draft\n⠐\ncustom footer",
+                "agent output\n⠈\n›\n\n  edited draft\n⠐\n  custom footer",
             ),
-            ("d", "agent output\n⠠\n› another draft\n⠁\n⡀\ncustom footer"),
+            (
+                "d",
+                "agent output\n⠠\n› another draft\n⠁\n⡀\n  custom footer",
+            ),
         ] {
             std::fs::write(&phase_file, phase).expect("advance the owned phase file");
             wait_for_pane_frame(&sup, "codex", frame).await;
@@ -2604,13 +2721,13 @@ mod tests {
         wait_for_pane_frame(
             &sup,
             "codex",
-            "agent output\nreal tool output\n\n› another draft\n\ncustom footer",
+            "agent output\nreal tool output\n\n› another draft\n\n  custom footer",
         )
         .await;
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
         assert!(
             stamp_of(&sup, "codex").await > before,
-            "real output above the composer must advance the activity stamp"
+            "a running turn, shown by the title spinner, must advance the activity stamp"
         );
         assert_eq!(classify(&sup, "codex").await, SessionStatus::Running);
     }
@@ -3216,7 +3333,7 @@ mod tests {
             busy.comparison
                 .as_deref()
                 .is_some_and(|tail| tail.contains("tick")),
-            "the tail is what the sharpeners read, so it has to carry the pane's real \
+            "the tail is what the screen readers read, so it has to carry the pane's real \
              text; got {:?}",
             busy.comparison
         );
@@ -3432,55 +3549,56 @@ mod tests {
         }
     }
 
-    /// Codex composer redraws and draft edits are one still screen to the
-    /// sampler, while output above that composer remains activity. This
-    /// pins the boolean that decides whether `last_activity_at` moves;
-    /// canonicalizer-only assertions cannot prove the sampler consumes it.
+    /// Codex composer redraws and draft edits change the screen but read
+    /// idle, and neither date the session nor start a work burst; the
+    /// title's spinner then reads working and does both.
+    ///
+    /// Why it matters: this pins the booleans that decide whether
+    /// `last_activity_at` and `last_work_started_at` move, at the seam the
+    /// sampler consumes, for exactly the idle redraws that caused the
+    /// stale-activity bug.
     #[farhelm_testtrace::test]
-    fn codex_normalized_samples_reach_idle_without_dating_input_but_output_is_dated() {
+    fn codex_idle_redraws_neither_date_nor_start_work_but_a_running_title_does() {
         let reader = reader_for(AgentKind::Codex);
         let frames = [
-            "output\n\n› Ask Codex to do anything\n\nfooter",
-            "output\n⠁\n› ⠂Ask Codex to do anything\n⠄\nfooter",
-            "output\n⠈\n› edited draft\n⠐\nfooter",
-            "output\n⠠\n› another draft\n⡀\nfooter",
+            "output\n\n› Ask Codex to do anything\n\n  footer",
+            "output\n⠁\n› ⠂Ask Codex to do anything\n⠄\n  footer",
+            "output\n⠈\n› edited draft\n⠐\n  footer",
+            "output\n⠠\n› another draft\n⡀\n  footer",
+            "output\n\n› 1. Fix the bug\n  2. Then the docs\n\n  footer",
+            "output\n⠁\n› 1. Fix the bug\n  2. Then the docs\n⠂\n  footer",
+            "output\n\n› a long draft\n  row 2\n  row 3\n  row 4\n  row 5\n  row 6\n\n  footer",
+            "output\n⠄\n› a long draft\n  row 2\n  row 3\n  row 4\n  row 5\n  row 6\n⠈\n  footer",
         ];
         let mut sample = ActivitySample::default();
-        let mut dated_changes = 0;
         for frame in frames {
-            let changed =
-                sample.observe_screen(reader, frame, &retain_pane_tail(frame, SAMPLE_TAIL_BYTES));
-            dated_changes += u64::from(changed);
+            let observed = sample.observe_screen(reader, frame, "codex");
+            assert!(
+                !observed.dates_activity() && !observed.starts_work(),
+                "an idle composer redraw must not date or promote: {frame:?}"
+            );
+            assert_eq!(sample.reading.state, ScreenState::Idle, "{frame:?}");
         }
-        assert_eq!(
-            sample.unchanged_streak, 3,
-            "three normalized comparisons are enough for the live classifier to report idle"
-        );
-        assert_eq!(
-            dated_changes, 0,
-            "decoration and unsubmitted input must never request a last-activity update"
-        );
 
-        let output = "output\nnew tool result\n\n› another draft\n\nfooter";
-        assert!(
-            sample.observe_screen(reader, output, &retain_pane_tail(output, SAMPLE_TAIL_BYTES)),
-            "real output above the composer must request a last-activity update"
-        );
-        assert_eq!(sample.unchanged_streak, 0);
+        let running = sample.observe_screen(reader, frames[7], "⠋ task | codex");
+        assert_eq!(sample.reading.state, ScreenState::Working);
+        assert!(running.dates_activity() && running.starts_work());
     }
 
-    /// Failure invalidates all three pieces of sampled evidence. Recovery
-    /// is a baseline even when the recovered pane displays a busy widget;
-    /// only the following comparison can date output.
+    /// A failed capture withdraws the screen's reading and makes the next
+    /// sample a baseline: it neither dates nor promotes, even when it shows
+    /// the agent working, and the sample after it counts again.
+    ///
+    /// Why it matters: capture failures come in batches (a tmux server that
+    /// stops answering drops every session's baseline at once); if recovery
+    /// counted as a transition, every session on the host would be dated
+    /// and promoted to the moment of recovery.
     #[farhelm_testtrace::test]
-    fn codex_capture_failure_clears_all_evidence_and_recovery_does_not_date_output() {
+    fn capture_failure_recovery_is_a_baseline_that_neither_dates_nor_promotes() {
         let reader = reader_for(AgentKind::Codex);
-        let busy =
-            |elapsed: &str| format!("Working ({elapsed} • esc to interrupt)\n\n› \n\nfooter");
+        let idle = "output\n\n› Ask Codex to do anything\n\nfooter";
         let mut sample = ActivitySample::default();
-        let first = busy("3s");
-        assert!(!sample.observe_screen(reader, &first, &first));
-        assert!(sample.reading.anchored, "premise: the widget is recognized");
+        sample.observe_screen(reader, idle, "codex");
         sample.forget_tail();
         assert_eq!(sample.comparison, None);
         assert!(
@@ -3488,64 +3606,185 @@ mod tests {
             "the failure withdraws what the last screen showed"
         );
 
-        let recovered = format!("recovered output\n{}", busy("4s"));
-        assert!(
-            !sample.observe_screen(reader, &recovered, &recovered),
-            "recovery has no retained baseline against which to prove a change"
-        );
+        let recovered = sample.observe_screen(reader, idle, "⠙ task | codex");
+        assert_eq!(recovered.prior, None, "recovery is a baseline");
+        assert!(!recovered.changed && !recovered.dates_activity() && !recovered.starts_work());
         assert_eq!(
             sample.reading.state,
             ScreenState::Working,
-            "fresh positive evidence is retained for status"
+            "fresh positive evidence is still the status"
         );
-        assert!(sample.reading.anchored);
-        let later = format!("later output\n{}", busy("5s"));
-        assert!(sample.observe_screen(reader, &later, &later));
+
+        let later = sample.observe_screen(reader, idle, "⠹ task | codex");
+        assert!(
+            later.dates_activity(),
+            "the next working sample dates again"
+        );
+        assert!(
+            !later.starts_work(),
+            "continued work in one burst keeps its ordering key"
+        );
     }
 
-    /// Claude has no comparison canonicalizer. Its screen remains the raw
-    /// capped tail and ordinary changes retain the pre-existing behavior.
+    /// A reloaded run stays provisional through "can't tell" screens,
+    /// whether they sit still or change, and a recognized screen then ends
+    /// the gap on its first sample.
+    ///
+    /// Why it matters: while provisional, the helm keeps the status it had
+    /// before the supervisor restarted. Ending the gap on a menu the user
+    /// left open would replace that with the default working reading, which
+    /// nothing observed.
     #[farhelm_testtrace::test]
-    fn another_integrated_harness_preserves_raw_activity_comparison() {
-        let reader = reader_for(AgentKind::Claude);
-        let raw = format!("{}tail", "x".repeat(SAMPLE_TAIL_BYTES));
-        assert_eq!(reader.comparison(&raw), raw);
-        assert_eq!(reader.capture_bytes(), None);
+    fn cant_tell_screens_do_not_end_the_startup_gap_but_a_recognized_one_does() {
+        let reader = reader_for(AgentKind::Codex);
+        let picker = |selected: &str| {
+            format!(
+                "  Select Model and Effort\n› 1. {selected}\n  2. Other\n  enter select · esc back"
+            )
+        };
+        let activity = ActivitySample::reloaded();
+        let mut sample = activity.lock().expect("activity mutex");
+        for _ in 0..=QUIET_SAMPLES_BEFORE_IDLE {
+            sample.observe_screen(reader, &picker("A"), "codex");
+        }
+        assert!(sample.startup_provisional, "a still picker is not evidence");
+        sample.observe_screen(reader, &picker("B"), "codex");
+        assert!(sample.startup_provisional, "nor is a changing one");
 
+        let idle = "output\n› Ask Codex to do anything\n  status line\n  ? for shortcuts";
+        sample.observe_screen(reader, idle, "codex");
+        assert!(!sample.startup_provisional);
+        assert_eq!(sample.reading.state, ScreenState::Idle);
+    }
+
+    /// The drift log fires once per run, and only after a streak of
+    /// fallback samples in a row; every recognized sample, "can't tell"
+    /// included, resets the streak.
+    ///
+    /// Why it matters: the log is the signal that a vendor changed its UI.
+    /// A half-drawn frame while an agent starts up must not raise it, and a
+    /// real change must raise it exactly once rather than every two seconds.
+    #[farhelm_testtrace::test]
+    fn fallback_is_logged_once_after_a_streak_of_unrecognized_samples() {
+        let reading = |state, anchored| Some(Reading { state, anchored });
+        let observed = |fresh| Observation {
+            changed: true,
+            prior: None,
+            fresh,
+        };
+        let fallback = observed(reading(ScreenState::Working, false));
+        let recognized = observed(reading(ScreenState::Idle, true));
+        let cant_tell = observed(None);
         let mut sample = ActivitySample::default();
-        let capped = retain_pane_tail(&raw, SAMPLE_TAIL_BYTES);
-        assert!(!sample.observe_screen(reader, &capped, &capped));
-        let changed = format!("{}TAIL", "x".repeat(SAMPLE_TAIL_BYTES));
-        let changed = retain_pane_tail(&changed, SAMPLE_TAIL_BYTES);
-        assert!(sample.observe_screen(reader, &changed, &changed));
-    }
 
-    /// Promotion requires positive output evidence across a known rest
-    /// boundary. This table pins the cases that look similar in a live
-    /// reply but have different authority to reorder the durable list.
-    #[farhelm_testtrace::test]
-    fn only_changed_output_after_idle_or_waiting_begins_a_work_burst() {
-        use SessionStatus::{Idle, Running, Waiting};
-
-        for previous in [Idle, Waiting] {
-            assert!(observed_work_start(&previous, &Running, true));
-            assert!(
-                !observed_work_start(&previous, &Running, false),
-                "a status change without changed output is not proof that work began"
-            );
+        assert!(
+            !sample.note_fallback(&fallback, true),
+            "a first frame is not drift"
+        );
+        assert!(!sample.note_fallback(&recognized, true));
+        assert!(!sample.note_fallback(&fallback, true));
+        assert!(
+            !sample.note_fallback(&cant_tell, true),
+            "can't tell is recognized: it resets the streak"
+        );
+        for _ in 1..QUIET_SAMPLES_BEFORE_IDLE {
+            assert!(!sample.note_fallback(&fallback, true));
         }
         assert!(
-            !observed_work_start(&Running, &Running, true),
-            "continued output in one burst must keep its existing ordering key"
+            sample.note_fallback(&fallback, true),
+            "the streak is reached"
         );
         assert!(
-            !observed_work_start(&Idle, &Idle, true),
-            "output that does not leave the classified rest state is not a running burst"
+            !sample.note_fallback(&fallback, true),
+            "and logged only once per run"
+        );
+
+        let mut generic = ActivitySample::default();
+        for _ in 0..=QUIET_SAMPLES_BEFORE_IDLE {
+            assert!(
+                !generic.note_fallback(&fallback, false),
+                "a reader with no screen rules never falls back"
+            );
+        }
+    }
+
+    /// The transitions that start a work burst and the samples that date
+    /// activity, as a table over every pair of readings.
+    ///
+    /// Why it matters: these two booleans order the session list and decide
+    /// the age and unseen dot; each row is a case the user reported or the
+    /// goal named (entering waiting promotes, answering promotes, idle
+    /// redraws do not, a long-standing question keeps its age).
+    #[farhelm_testtrace::test]
+    fn work_starts_and_activity_dates_follow_the_reading_transitions() {
+        use ScreenState::{Idle, Waiting, Working};
+        let reading = |state, anchored| Reading { state, anchored };
+        let observation = |prior: Option<Reading>, fresh: Option<Reading>, changed| Observation {
+            changed,
+            prior,
+            fresh,
+        };
+        for (prior, fresh, starts) in [
+            (Idle, Working, true),
+            (Waiting, Working, true),
+            (Idle, Waiting, true),
+            (Working, Waiting, true),
+            (Working, Working, false),
+            (Waiting, Waiting, false),
+            (Working, Idle, false),
+            (Waiting, Idle, false),
+            (Idle, Idle, false),
+        ] {
+            let seen = observation(Some(reading(prior, true)), Some(reading(fresh, true)), true);
+            assert_eq!(seen.starts_work(), starts, "{prior:?} -> {fresh:?}");
+        }
+
+        let anchored_work = observation(
+            Some(reading(Working, true)),
+            Some(reading(Working, true)),
+            false,
         );
         assert!(
-            !observed_work_start(&Waiting, &Waiting, true),
-            "a redraw of the same pending question must not promote the session"
+            anchored_work.dates_activity(),
+            "recognized work dates without a change"
         );
+        let counted_quiet = observation(
+            Some(reading(Working, false)),
+            Some(reading(Working, false)),
+            false,
+        );
+        assert!(
+            !counted_quiet.dates_activity(),
+            "change counting's quiet working samples are not activity"
+        );
+        let counted_change = observation(
+            Some(reading(Idle, false)),
+            Some(reading(Working, false)),
+            true,
+        );
+        assert!(counted_change.dates_activity() && counted_change.starts_work());
+        let entered_waiting = observation(
+            Some(reading(Working, true)),
+            Some(reading(Waiting, true)),
+            false,
+        );
+        assert!(
+            entered_waiting.dates_activity(),
+            "waiting dates when it begins"
+        );
+        let still_waiting = observation(
+            Some(reading(Waiting, true)),
+            Some(reading(Waiting, true)),
+            true,
+        );
+        assert!(!still_waiting.dates_activity(), "and not while it persists");
+        let idle_redraw = observation(Some(reading(Idle, true)), Some(reading(Idle, true)), true);
+        assert!(!idle_redraw.dates_activity() && !idle_redraw.starts_work());
+
+        let baseline = observation(None, Some(reading(Waiting, true)), false);
+        assert!(!baseline.dates_activity() && !baseline.starts_work());
+        let cant_tell = observation(Some(reading(Idle, true)), None, true);
+        assert!(!cant_tell.dates_activity() && !cant_tell.starts_work());
     }
 
     /// Equal and backward wall-clock readings still reserve distinct keys
@@ -4233,7 +4472,7 @@ mod tests {
     /// deliberately different: an empty answer is an answer — those panes
     /// are gone, so nothing will be classified from them — while a failed
     /// query is no answer at all and additionally invalidates every
-    /// retained screen (`a_failed_sample_stops_the_session_being_sharpened_
+    /// retained screen (`a_failed_sample_stops_the_session_being_read_
     /// from_a_stale_screen`, which reaches that path through
     /// `SupervisorSeams::sample_fault`). The empty case also resets the
     /// rotation cursor, where a failed query leaves it alone.
@@ -4646,7 +4885,7 @@ mod tests {
     /// otherwise succeeds, and the server-wide liveness probe failing so
     /// the pass learns nothing about anything. The second is the one a
     /// user actually notices, since the LIST path's own probe can keep
-    /// succeeding — so the session stays live, stays sharpened, and keeps
+    /// succeeding — so the session stays live, stays read as waiting, and keeps
     /// reporting a question that was answered long ago.
     ///
     /// ## And the RECOVERY, which is the half a forget can silently break
@@ -4670,7 +4909,7 @@ mod tests {
     /// The focused test below pins that transition separately from the
     /// ordinary failed-sample paths this fixture exercises.
     #[farhelm_testtrace::test]
-    async fn a_failed_sample_stops_the_session_being_sharpened_from_a_stale_screen() {
+    async fn a_failed_sample_stops_the_session_being_read_from_a_stale_screen() {
         for read in ["tail", "pane_states"] {
             let state = StateDir::new();
             let failing: Arc<AtomicBool> = Arc::default();
@@ -4752,7 +4991,7 @@ mod tests {
                 );
                 assert_eq!(
                     activity.comparison, None,
-                    "premise ({read}): the screen really is gone, not merely unsharpened"
+                    "premise ({read}): the screen really is gone, not merely unread"
                 );
             }
 
@@ -4786,16 +5025,16 @@ mod tests {
         }
     }
 
-    /// A Claude approval dialog as it renders at the bottom of a pane —
-    /// enough of the shape for the recognizer, whose own fixtures live in
-    /// `agent_kind`.
+    /// A Claude permission dialog as it renders at the bottom of a pane,
+    /// ending in the key-hint footer the Claude reader anchors on; the real
+    /// captures live in `tests/fixtures/screens/claude/`.
     const CLAUDE_APPROVAL_DIALOG: &str = "\
-╭───────────────────────────────────────────────╮
-│ Do you want to run this command?              │
-│                                               │
-│ ❯ 1. Yes                                      │
-│   2. No, and tell Claude what to do instead   │
-╰───────────────────────────────────────────────╯";
+ Bash command
+   rm -rf build
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+ Esc to cancel · Tab to amend";
 
     /// A stop the ticker never receives, for tests that drive
     /// [`sample_pass`] directly.
@@ -5382,7 +5621,7 @@ mod tests {
         }
     }
 
-    /// A pending question on a real pane reaches the per-kind sharpener
+    /// A pending question on a real pane reaches the per-kind screen reader
     /// and classifies `Waiting` — the end-to-end path PLAN_M6_75.md item
     /// 2's user-visible promise rides on.
     ///
@@ -5392,24 +5631,21 @@ mod tests {
     /// approval does. What this adds over `agent_kind`'s recognition tests
     /// is every step between them — capture-pane's rendering, the tail
     /// bound, the sample cell, the snapshot lookup that decides which
-    /// sharpener applies.
+    /// screen reader applies.
     ///
     /// The pane is SILENT after printing, so its unchanged-sample streak has
     /// carried the baseline to idle by the time it is classified: `Waiting`
-    /// here can only be a promotion by the sharpener, never the generic
+    /// here can only be a promotion by the screen reader, never the generic
     /// classifier's answer wearing a different name.
     ///
-    /// The fixture draws a selection pointer at its first option, because
-    /// the recognizer requires one — that is the signal separating a widget
-    /// from an agent's numbered prose (see
-    /// `agent_kind::looks_like_a_choice_prompt`), and a fixture without it
-    /// would be asserting that a paragraph reads as a dialog.
+    /// The fixture ends in the dialog footer Claude draws under every
+    /// question, which is what the Claude reader anchors waiting on.
     #[farhelm_testtrace::test]
     async fn a_prompt_on_a_real_pane_classifies_waiting_through_the_sampler() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
         const DIALOG: &str = "printf 'Do you want to proceed?\\n ❯ 1. Yes\\n   2. No, and tell \
-                              Claude what to do differently\\n'; sleep 300";
+                              Claude what to do differently\\n Esc to cancel · Tab to amend\\n'; sleep 300";
         install_live_session_of_kind(&sup, "asking", DIALOG, AgentKind::Claude).await;
         // The same screen on a session with no integration: the negative
         // half, in the one place where "the tail really did reach the

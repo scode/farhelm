@@ -261,6 +261,8 @@ class Recorder:
 
     staging: pathlib.Path
     scrubber: Scrubber
+    # Stop after the scenarios that need no model turn (trust, fresh prompt, menus the user opens).
+    ui_only: bool = False
     captured: list[str] = field(default_factory=list)
     missed: list[str] = field(default_factory=list)
 
@@ -324,7 +326,7 @@ def claude_spinner(screen: str) -> bool:
 
 
 def drive_claude(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
-    """Drive Claude Code through trust, idle, working, both kinds of waiting, and its idle-time `/clear` hint."""
+    """Drive Claude Code through trust, stateless menus, idle, working, both kinds of waiting, and its `/clear` hint."""
 
     # The idle hint normally needs 75 idle minutes and 100k tokens of context; both thresholds are Claude's own
     # environment variables, so the tool lowers them rather than waiting.
@@ -345,6 +347,29 @@ def drive_claude(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
         "fresh prompt",
         lambda: reach_prompt(pane, rec, lambda s: "Yes, I trust this folder" in s, answer_trust, claude_prompt_box),
     ):
+        return
+
+    # Screens that carry no state (the reader must answer "can't tell"), reachable without a model turn.
+    def model_picker() -> None:
+        pane.submit("/model", lambda s: (claude_input(s) or "").startswith("/model"))
+        screen, title = pane.wait_for("the model picker", lambda s, _t: "Enter to set as default" in s, 30)
+        rec.save("unknown", "model-picker", screen, title)
+        pane.keys("Escape")
+        pane.wait_for("the prompt box", lambda s, _t: claude_prompt_box(s), 30)
+
+    rec.attempt("model picker", model_picker)
+
+    def transcript() -> None:
+        pane.keys("C-o")
+        screen, title = pane.wait_for(
+            "the transcript view", lambda s, _t: "Showing detailed transcript" in s, 30
+        )
+        rec.save("unknown", "transcript", screen, title)
+        pane.keys("C-o")
+        pane.wait_for("the prompt box", lambda s, _t: claude_prompt_box(s), 30)
+
+    rec.attempt("transcript view", transcript)
+    if rec.ui_only:
         return
 
     def thinking_then_permission() -> None:
@@ -489,7 +514,7 @@ def codex_composer(screen: str) -> bool:
 
 
 def drive_codex(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
-    """Drive Codex through trust, idle, streaming, approval, a tool run, a recap, and (if reachable) its question form."""
+    """Drive Codex through trust, its model menu, idle, streaming, approval, a tool run, a recap, and a question form."""
 
     pane.start(work, "codex -s read-only -a on-request")
 
@@ -499,6 +524,18 @@ def drive_codex(pane: Pane, rec: Recorder, work: pathlib.Path) -> None:
             pane, rec, lambda s: "Trust this folder?" in s, lambda _s: pane.keys("Enter"), codex_composer
         ),
     ):
+        return
+
+    # A screen that carries no state (the reader must answer "can't tell"), reachable without a model turn.
+    def model_picker() -> None:
+        pane.submit("/model", lambda s: (codex_input(s) or "").startswith("/model"))
+        screen, title = pane.wait_for("the model picker", lambda s, _t: "Select Model and Effort" in s, 30)
+        rec.save("unknown", "model-picker", screen, title)
+        pane.keys("Escape")
+        pane.wait_for("the composer", lambda s, _t: codex_composer(s), 30)
+
+    rec.attempt("model picker", model_picker)
+    if rec.ui_only:
         return
 
     def streaming_then_approval() -> None:
@@ -596,7 +633,9 @@ def agent_env() -> dict[str, str]:
     }
 
 
-def capture_harness(name: str, tmux: pathlib.Path, work_root: pathlib.Path, scrubber: Scrubber) -> Recorder:
+def capture_harness(
+    name: str, tmux: pathlib.Path, work_root: pathlib.Path, scrubber: Scrubber, ui_only: bool
+) -> Recorder:
     """Capture one harness and write what it captured into its version directory.
 
     Only the scenarios this run captured are replaced. An existing fixture whose scenario timed out or was refused this
@@ -612,7 +651,7 @@ def capture_harness(name: str, tmux: pathlib.Path, work_root: pathlib.Path, scru
     work.mkdir()
     staging = work_root / f"{name}-fixtures"
     staging.mkdir()
-    rec = Recorder(staging, scrubber)
+    rec = Recorder(staging, scrubber, ui_only=ui_only)
     pane = Pane(tmux, work_root, agent_env())
     print(f"{name} {version}: capturing", file=sys.stderr)
     try:
@@ -660,6 +699,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--tmux", type=pathlib.Path, default=DEFAULT_TMUX, help="tmux binary (default: pinned)")
     parser.add_argument("--keep-work", action="store_true", help="keep the scratch directory for inspection")
     parser.add_argument("--no-test", action="store_true", help="skip running the fixture tests afterwards")
+    parser.add_argument(
+        "--ui-only",
+        action="store_true",
+        help="capture only screens that need no model turn (trust, fresh prompt, menus); keeps the other fixtures",
+    )
     return parser.parse_args(argv)
 
 
@@ -674,7 +718,7 @@ def main(argv: list[str] | None = None) -> int:
     results: dict[str, Recorder] = {}
     try:
         for name in args.harness or sorted(HARNESSES):
-            results[name] = capture_harness(name, args.tmux, work_root, scrubber)
+            results[name] = capture_harness(name, args.tmux, work_root, scrubber, args.ui_only)
     finally:
         if args.keep_work:
             print(f"scratch kept at {work_root}", file=sys.stderr)

@@ -14,6 +14,8 @@
 //! them and this module refuses any that still look identifying — a second,
 //! independent check on the one place personal data could enter.
 
+use super::screen_reader::{SAMPLE_TAIL_BYTES, SampleCounts, Screen, ScreenState, reader_for};
+use farhelm_proto::AgentKind;
 use std::path::{Path, PathBuf};
 
 /// The states a fixture's file name may promise. `unknown` is a screen the
@@ -242,4 +244,63 @@ fn screen_fixtures_email_detector_matches_addresses_only() {
     assert!(contains_email("contact alice.b@example.org now"));
     assert!(!contains_email("user@host:~/work"));
     assert!(!contains_email("@mention and a@ b"));
+}
+
+/// Every captured screen reads, through its harness's reader, as exactly the
+/// state the capture tool drove the agent into, from recognized content
+/// rather than the change-counting fallback.
+///
+/// Why it matters: this is the test that notices a vendor UI change. After
+/// an agent upgrade the capture tool writes that version's screens, and any
+/// screen the rules no longer understand fails here by harness, version,
+/// and scenario. Screens are trimmed exactly as the sampler trims them, so
+/// a rule that only matches the untrimmed grid cannot pass.
+#[test]
+fn screen_fixtures_read_as_the_state_they_were_captured_in() {
+    let mut failures = Vec::new();
+    for fixture in load_fixtures() {
+        let kind = match fixture.harness.as_str() {
+            "claude" => AgentKind::Claude,
+            "codex" => AgentKind::Codex,
+            other => panic!("no agent kind for harness {other}"),
+        };
+        let expected = match fixture.expected.as_str() {
+            "working" => ScreenState::Working,
+            "waiting" => ScreenState::Waiting,
+            "idle" => ScreenState::Idle,
+            _ => ScreenState::Unknown,
+        };
+        let text = crate::tmux::retain_pane_tail(&fixture.screen, SAMPLE_TAIL_BYTES);
+        let counts = SampleCounts {
+            samples: 9,
+            unchanged_streak: 0,
+        };
+        let reading = reader_for(kind).read(
+            counts,
+            &Screen {
+                text: &text,
+                title: &fixture.title,
+            },
+        );
+        if reading.state != expected || !reading.anchored {
+            failures.push(format!(
+                "{} {} {}-{}: expected {expected:?}, read {:?}{}",
+                fixture.harness,
+                fixture.version,
+                fixture.expected,
+                fixture.scenario,
+                reading.state,
+                if reading.anchored {
+                    ""
+                } else {
+                    " (fallback: no recognized layout)"
+                },
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "screens the readers no longer understand:\n{}",
+        failures.join("\n")
+    );
 }

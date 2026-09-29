@@ -3186,7 +3186,7 @@ impl TmuxDriver {
     /// The status sampler's read (PLAN_M6_75.md item 1): each tick takes a
     /// BUDGETED number of these — a round-robin slice of the live
     /// sessions, not all of them — both to notice that output moved since
-    /// that session's previous sample and to hand the per-kind sharpeners
+    /// that session's previous sample and to hand the per-kind screen readers
     /// something to recognize a prompt or an approval request in.
     ///
     /// Visible grid only — no `-S`, and that is the whole point rather
@@ -3194,7 +3194,7 @@ impl TmuxDriver {
     /// screen; scrollback would drag in text the agent has already moved
     /// past, which for change detection means a tail that keeps growing
     /// (every tick "different", so every session forever "running") and
-    /// for sharpening means matching a prompt shape that was answered
+    /// for screen reading means matching a prompt shape that was answered
     /// minutes ago. For a full-screen TUI this captures the alternate
     /// screen, because that is what tmux considers the pane's current
     /// grid — again what the sampler wants.
@@ -3210,6 +3210,24 @@ impl TmuxDriver {
     ) -> anyhow::Result<String> {
         self.capture_pane_plain(session, pane, None, max_bytes)
             .await
+    }
+
+    /// The title the program in `pane` last set (OSC 0/2), as tmux holds it
+    /// (`#{pane_title}`), without the trailing newline.
+    ///
+    /// A query of its own rather than a field of the pane-state listing:
+    /// the title is set by whatever runs in the pane, so it may contain
+    /// anything, a newline included, and the listing's rows are parsed as
+    /// authoritative facts that a forged row must not be able to extend
+    /// (see `control_codec::PANE_FACT_FORMAT`). Asked only for sessions
+    /// whose screen reader uses the title, as cosmetic status evidence.
+    pub async fn pane_title(&self, session: &str, pane: &str) -> anyhow::Result<String> {
+        let target = pane_in_session(session, pane);
+        let out = self
+            .run(&["display-message", "-p", "-t", &target, "#{pane_title}"])
+            .await
+            .context("reading a pane's title")?;
+        Ok(out.strip_suffix('\n').unwrap_or(&out).to_string())
     }
 
     /// The shared body of the two plain-text captures above:
@@ -5708,7 +5726,7 @@ mod tests {
     /// It matters because the status sampler compares consecutive tails to
     /// decide whether output moved — a capture that dragged scrollback in
     /// would return a strictly growing string, so every session would look
-    /// permanently busy — and because the per-kind sharpeners must match a
+    /// permanently busy — and because the per-kind screen readers must match a
     /// prompt that is on screen NOW, not one answered a hundred lines ago.
     ///
     /// Adding `-S` back to the tail capture makes this fail on its first

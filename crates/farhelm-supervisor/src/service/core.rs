@@ -17129,7 +17129,7 @@ pub(crate) mod tests {
     /// that no longer exists. Inheriting it would let the previous
     /// generation's sampled tail and its unchanged-sample streak contaminate
     /// the replacement — the new pane classified `Idle` because the OLD one
-    /// stopped changing, or sharpened to `Waiting` from a dialog the dead
+    /// stopped changing, or read as `Waiting` from a dialog the dead
     /// run was showing, on evidence gathered from a process that is gone.
     /// That cross-generation contamination is exactly what the fence exists
     /// to prevent.

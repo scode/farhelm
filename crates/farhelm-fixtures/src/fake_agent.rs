@@ -235,10 +235,10 @@ pub enum ReplayThen {
     /// Redraw one status line every second so the sampler keeps seeing a
     /// changed screen: classifies as `running`.
     Spin,
-    /// Show a yes/no menu under a "Do you want to" question and block on
-    /// stdin: the exact shape `looks_like_a_choice_prompt` in the
-    /// supervisor's `agent_kind` module promotes to `waiting`, provided the
-    /// session's kind is claude or codex (the generic kind never reads waiting).
+    /// Show a yes/no menu under a "Do you want to" question, ending in the
+    /// dialog footer Claude Code and Codex both draw, and block on stdin: a
+    /// screen the supervisor's Claude and Codex screen readers read as
+    /// `waiting` (the generic kind never reads waiting).
     Menu,
     /// Block on stdin with nothing further: goes `idle` after the
     /// classifier's quiet-sample threshold.
@@ -2827,24 +2827,24 @@ fn spin_line(elapsed: u64) -> String {
     )
 }
 
-/// The dialog [`ReplayThen::Menu`] leaves on screen. Its shape is a
-/// contract with the supervisor's choice-prompt recogniser, not decoration:
-/// a question containing "Do you want to" within a few lines above a run
-/// of numbered options that all begin with an answer word, one of them
-/// carrying the `❯` pointer. Change any of those and the pane stops
-/// classifying as waiting.
+/// The dialog [`ReplayThen::Menu`] leaves on screen. Its last line is a
+/// contract with the supervisor's Claude and Codex screen readers, not
+/// decoration: both read a dialog as waiting from its key-hint footer
+/// ("Esc to cancel"), the way the real agents end every question they ask.
+/// Drop or reword that line and the pane stops classifying as waiting.
 ///
 /// No colour escapes, on purpose: the supervisor samples the pane's
-/// rendered text, so escapes never reach the recogniser in production, but
-/// the unit test below feeds this string in directly and a coloured
-/// pointer would hide the marker from the parser there. Plain text keeps
-/// the test honest about what the classifier sees.
+/// rendered text, so escapes never reach the readers in production, but the
+/// unit test below feeds this string in directly and escapes would sit
+/// inside the footer there. Plain text keeps the test honest about what the
+/// readers see.
 fn menu_block() -> String {
     concat!(
         "\r\n",
         "Do you want to make this edit to attach.spec.ts?\r\n",
         "❯ 1. Yes\r\n",
         "  2. No, and tell me what to do differently\r\n",
+        "Esc to cancel · Tab to amend\r\n",
     )
     .to_string()
 }

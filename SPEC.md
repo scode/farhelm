@@ -630,14 +630,16 @@ the API, but parentage does not nest the list and implies nothing about VCS stat
 
 The option labelled most recent activity sorts connected running and waiting sessions first, then every other session —
 idle, unclassified, ended, and anything on an unreachable host. Inside each group the order is the most recent observed
-START of a work burst: a session promotes when it moves from known idle or waiting into running with changed output
-(both idle-to-running and waiting-to-running count), and later output inside that burst leaves the position alone.
-Moving between the groups is what idling and completion do — a finished session drops below still-running work without
-its burst key moving, and a session returning to running rejoins the first group on that same key. Creation time is the
-stable fallback where an older supervisor has no work-start observation. The last-activity time shown in the row and the
-seen/unseen comparison stay independent: they describe output recency and keep advancing with output, and neither moves
-a row. The grouping and the key are authoritative helm and supervisor data, so every client agrees without keeping a
-private rank.
+START of a work burst: a session promotes when it moves from known idle or waiting into running (both idle-to-running
+and waiting-to-running count) and when it starts waiting on the user, since a question for the user is work the user
+should see; later output inside that burst, and a question that stays on screen, leave the position alone. Only a change
+the supervisor itself observed between two of its own looks counts: the first look after a supervisor restart, a session
+restart, or a recovery from failed screen captures only establishes where the session stands. Moving between the groups
+is what idling and completion do — a finished session drops below still-running work without its burst key moving, and a
+session returning to running rejoins the first group on that same key. Creation time is the stable fallback where an
+older supervisor has no work-start observation. The last-activity time shown in the row and the seen/unseen comparison
+stay independent of the order: they describe when the agent was last working (see Status) and neither moves a row. The
+grouping and the key are authoritative helm and supervisor data, so every client agrees without keeping a private rank.
 
 A client holds back reordering while the pointer is over the list, so a row does not move out from under the pointer on
 its way to a click. The hold is display-only and remembers nothing: the helm's order stays authoritative, and the client
@@ -744,27 +746,33 @@ list-order/last-selection preference gets (see Errors and diagnostics); a failed
 any other operation.
 
 Beside the status, a session shows how long ago it was last active as a short relative age (`2m`, `3h`), with the full
-timestamp available on the row. The age describes output recency, not list position: the recently-active order groups by
-reported status first and compares burst starts inside each group, so a row can sit above another whose age is newer.
-The age is a difference between two machines' clocks and is only as good as they are, so it is never the only place the
-underlying time is recorded. It is also independent of the status beside it: a session nothing has classified yet shows
-no status and still shows its age.
+timestamp available on the row. Last active means the last time the agent was seen working, or the moment it started
+waiting on the user: a question left unanswered for three hours shows three hours, and what an agent redraws on its own
+while idle (a hint, a summary, a usage counter) does not count. The same time decides unseen, so such a redraw does not
+turn a seen session unseen either. The age is not list position: the recently-active order groups by reported status
+first and compares burst starts inside each group, so a row can sit above another whose age is newer. The age is a
+difference between two machines' clocks and is only as good as they are, so it is never the only place the underlying
+time is recorded. It is also independent of the status beside it: a session nothing has classified yet shows no status
+and still shows its age.
 
 Two cases have no age to show, and both show nothing rather than a guess. A helm predating the last-activity field sends
 no stamp, and the session's creation time stands in as the displayed age. A session with neither stamp gets no age at
 all, never one counted from 1970.
 
 Running/waiting/idle discrimination for raw TUIs is inherently heuristic, and the waiting/idle boundary especially so.
-The bar: best-effort observation-based heuristics (output activity, terminal state), optionally sharpened per agent
-profile with agent-specific heuristics. A profile may canonically remove only an audited, tightly located redraw region
-before output comparison, while retaining the raw bounded screen for approval detection; unfamiliar screens remain raw.
-It may also recognize a current vendor work indicator, but a waiting prompt wins and neither heuristic creates lifecycle
-state. Wrong status must be cosmetic only — status detection must never gate or delay interaction with the terminal.
-Farhelm-supplied integration must not make vendor configuration a condition of launching an agent. Grok is the explicit
-opt-in exception for conversation capture: users install its three documented hook entries themselves, while an
-unconfigured Grok still launches normally and remains fresh-only. OMP and Grok both use generic activity only. Their
-approval prompts show the generic running/idle classification, never waiting — a settled scope decision, not a heuristic
-waiting to be sharpened.
+The bar: best-effort observation of the agent's screen, through one screen reader per agent kind. The generic reader,
+used by every agent without a dedicated one, knows nothing about the agent: a screen that keeps changing is running, one
+that stopped changing is idle, and it never reports waiting. Claude Code and Codex have dedicated readers that recognize
+what those agents draw — their busy indicators, their input prompt at rest, and the dialogs in which they ask the user
+something — and answer from that, so an idle agent's own redraws read idle. A screen they recognize as carrying no state
+(a menu the user opened) leaves the previous status in place, and a screen they do not recognize at all falls back to
+the generic reader. Their rules are held to real screens captured from the vendors' current releases; see
+`docs/agent-screen-fixtures.md`. A reader never creates lifecycle state. Wrong status must be cosmetic only — status
+detection must never gate or delay interaction with the terminal. Farhelm-supplied integration must not make vendor
+configuration a condition of launching an agent. Grok is the explicit opt-in exception for conversation capture: users
+install its three documented hook entries themselves, while an unconfigured Grok still launches normally and remains
+fresh-only. OMP and Grok both use generic activity only. Their approval prompts show the generic running/idle
+classification, never waiting — a settled scope decision, not a reader waiting to be written.
 
 Notifications (desktop or otherwise) are explicitly out of v1. The status column is the whole story.
 

@@ -2,7 +2,7 @@
   >_ OpenAI Codex (v0.159.0)
      /tmp/fhc-xxxxxxxx/codex
 
-  What brings you to this corner of the terminal?
+  Take your time. The cursor can wait.
 
 
 
