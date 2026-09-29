@@ -31,8 +31,6 @@ One line per open item. This file must always match the feedback files in this d
   checkout sessions undeletable and unrestartable.
 - `ambiguous-restart-republishes-old-terminal.md` — an ambiguous restart failure republishes the pre-restart terminal,
   so a live agent is unopenable and killable without consent.
-- `idempotency-fingerprint-keeps-raw-cmdline.md` — idempotency fingerprints keep the raw command line (with any keys) in
-  the database after Delete.
 - `adopt-checks-current-row-not-dialed.md` — adopt checks the manager's current row, so a stale mismatch after a
   retarget adopts the old machine's identity.
 - `identity-mismatch-never-becomes-duplicate.md` — a host that reaches another entry's identity offers an adopt that
