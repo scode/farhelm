@@ -1133,3 +1133,26 @@ could not locate the repository-owned tmux from a jj workspace. Disposition: ope
 Class: unknown
 
 Cause: unknown
+
+## 2026-09-29 — webview authentication at desktop smoke boot (scripts/desktop-smoke.sh)
+
+The native desktop smoke failed with `FAIL: the webview JavaScript stack did not authenticate its event socket` in both
+attempts of the v0.19.0-rc.2 release job (GitHub Actions run `36591492646`, x86_64 Linux job, runner image
+`ubuntu-24.04` 20260920.314.1, WebKitGTK 2.52.6). The retained recorder run `bf8b80c8-54ee-41e3-b7f6-6d44c7207e2f`
+covers the first attempt: clean tag commit `af8f5ab65f15078a1295e724758fa0abc3837421`, selection
+`native desktop smoke
+legs`, sequential legs, pinned tmux 3.7c with executable SHA256
+`74c2614b1b48280e9d4c767a09fa5aee07fc66ae0d437dc3282b7bc56dc59884`, locale `C.UTF-8`, no ambient `FARHELM_*` (only the
+recorder-owned `FARHELM_TEST_TRACE_DIR`). In both failures the helm and managed supervisor came up and connected, WebKit
+printed its usual Xvfb EGL warnings, the window stayed black, and the desktop asset handler logged no request at all
+within the 30-second wait, so the page never started loading its assets. It is not a regression: a throwaway bisect
+workflow (run `36603454788`, same hosted runner type, one smoke per job, no gate steps before it) failed the same way at
+the untouched v0.18.0 base `03a3051815234e45260c567719f09bf2804b5469` in one of two jobs, and at two of six intermediate
+commits, while `af8f5ab6` passed twice; 5 of 12 CI runs failed in all. The v0.18.0 release job itself passed. Locally on
+Linux x86_64 the same commit passed 6 of 6, including runs pinned to 4 and 2 CPUs and one without a session bus.
+Disposition: open (TODO.md); release jobs that hit it are rerun rather than blocked.
+
+Class: substrate
+
+Cause: hypothesis — WebKitGTK under Xvfb on the hosted runner sometimes never loads the page, the same family as the
+black-window behavior the script's header already records for its optional pixel-driven phase.
