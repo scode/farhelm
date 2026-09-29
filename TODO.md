@@ -33,6 +33,35 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Push session changes from the supervisor to the helm.** The helm learns about a host's sessions only by polling:
+  `ListSessions` every 3 s after the previous refresh finishes (`REFRESH_INTERVAL` in
+  `crates/farhelm-helm/src/manager.rs`), plus its own post-write wakes. Everything that happens on the host by itself
+  (status changes, exits, tabs whose shell exited, sessions an agent spawned) therefore reaches the UI after up to one
+  poll interval. PLAN_M6_75.md item 3 declined a supervisor-edge push and said to revisit if that bound proved painful;
+  it has, most visibly as a tab lingering after `exit`. Have the supervisor notify every connected helm when something
+  user-visible changes, and have the helm refresh that host at once, keeping a slow poll as a backstop. What two
+  independent reviews found this has to get right:
+  - Trigger on what the user sees, not only on stored writes. Tabs, status, and the restart offer are derived when a
+    reply is built (`service/status.rs`): the listing hides a dead tab the moment its pane dies, before any reap, so the
+    notice belongs at pane death (the `pane-died` hook from #1180), and status transitions, including idle reached
+    through the three-sample hysteresis, need their own trigger points. Exclude the sampler's internal state (screen
+    tails, comparison counts, provisional classification); `SessionInfo` itself has no heartbeat-like field.
+  - Coalesce per host with a minimum gap, and do not notify because `ListSessions` ran (a feedback loop). Every feed
+    bump makes each open session view do its own live `ListSessions` round trip with a capture sweep, so bursts
+    multiply.
+  - Keep a change pending until a refresh has actually delivered it: a refresh that fails or is discarded because a
+    create or rename overtook it must not consume the notice.
+  - Reach every helm connection, not the one attachment owner `AgentRequest` routing picks.
+  - A new message is a protocol bump (versions must match exactly), and SPEC_impl.md's "no supervisor-edge push channel"
+    statement and the proto docs need amending.
+
+  The push alone does not fix the lingering tab. A tab opened and exited between two helm refreshes never appears in the
+  helm's cache, so its end state equals the cached one, no feed bump fires, and the UI keeps its optimistic tab until an
+  unrelated read (`opened_tabs` in `crates/farhelm-ui/src/session_view.rs`). The fix for that is to act on the
+  `Detached` notice with code `tab_closed`, which the UI currently ignores (`terminal.js`): either the helm bumps the
+  feed and refreshes the host when it relays one, or the UI drops the tab and re-reads, or both. That piece needs no
+  protocol change and could land first. Before measuring anything, confirm the desktop app's event feed is healthy: a
+  dead feed falls back to the UI's own 3 s poll and looks the same.
 - **Make the delete-in-progress indicator prominent.** The "stopping…" / "deleting…" state from #1175 is easy to miss: a
   6px pulsing dot and one word in the sidebar row's age slot (with the row dimmed to 60%), and the same in place of the
   session header's action buttons. In practice it goes unnoticed even when the user is looking at the session list,
