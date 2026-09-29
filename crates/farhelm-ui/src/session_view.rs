@@ -24,7 +24,7 @@ use crate::api::{
 use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostLookup, HostsRead, is_connected, stale_session_notice};
-use crate::ops::ReadGate;
+use crate::ops::{ConfirmSlot, OpGuard, ReadGate, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
 use crate::reconnect::reconnect_policy;
@@ -448,10 +448,14 @@ pub(crate) fn SessionView(
     // before deleting this one; sharing restart state would lose the
     // endpoint's partial-failure wording or make the two operations race.
     let mut replacing = use_signal(|| false);
-    let mut confirming_replace = use_signal(|| false);
+    // Each Replace prompt is a `ConfirmSlot` holding the lifecycle claim it
+    // took when it opened: confirming moves that claim into the replace
+    // task, cancelling drops it, and neither can touch a claim it does not
+    // hold (see `ConfirmSlot` for the queued-click races this closes).
+    let mut confirming_replace: ConfirmSlot<(), OpGuard> = use_confirm_slot();
     // Independent from the interrupted card's confirmation so a header
     // action cannot accidentally authorize that older surface's operation.
-    let mut confirming_header_replace = use_signal(|| false);
+    let mut confirming_header_replace: ConfirmSlot<(), OpGuard> = use_confirm_slot();
     let mut replace_error = use_signal(|| None::<String>);
     // One synchronously claimed token covers the restart prompt as well as
     // the request, so two clicks in one render frame cannot authorize
@@ -528,7 +532,8 @@ pub(crate) fn SessionView(
     let mut opening_tab = use_signal(|| false);
     let mut closing_tabs = use_signal(HashSet::<String>::new);
     // Which tab, if any, is showing the inline close confirmation.
-    let mut confirming_close = use_signal(|| None::<String>);
+    // Keyed by tab id; see `ConfirmSlot` for the queued-click races it closes.
+    let mut confirming_close: ConfirmSlot<String> = use_confirm_slot();
     // Set when a detail read gets a 404 for this session: what is on
     // screen is the last state that DID arrive, and this says so. See
     // `fetch_session` for why a 404 cannot be read as "deleted" — the
@@ -1199,7 +1204,9 @@ pub(crate) fn SessionView(
     let replace_base = base.clone();
     let replace_preferences = preferences;
     let replace_session_id = session.id.clone();
-    let replace = move || {
+    // Takes the lifecycle claim its confirmation handed over; the task owns
+    // it and releases it when it ends (or is cancelled with the view).
+    let replace = move |claim: OpGuard| {
         if replacing() {
             return;
         }
@@ -1216,6 +1223,7 @@ pub(crate) fn SessionView(
         let only_if_nothing_alive =
             crate::status::shows_nothing_alive(&source.status, source.tabs.len());
         spawn(async move {
+            let _claim = claim;
             match replace_session(&base, &id, only_if_nothing_alive).await {
                 Ok(new_session) => {
                     let new_session = crate::list::with_source_host(new_session, &source);
@@ -1225,7 +1233,6 @@ pub(crate) fn SessionView(
                 Err(error) => replace_error.set(Some(error)),
             }
             replacing.set(false);
-            lifecycle.release();
         });
     };
     let mut confirm_replace = replace.clone();
@@ -1354,7 +1361,7 @@ pub(crate) fn SessionView(
         if closing_tabs.read().contains(&tab_id) {
             return;
         }
-        confirming_close.set(Some(tab_id));
+        confirming_close.open(tab_id, ());
     };
 
     // The confirm button. Proceeds ONLY when this tab is still the one
@@ -1362,10 +1369,9 @@ pub(crate) fn SessionView(
     // confirm click queued behind a cancel (both fired in the same burst)
     // from closing a tab the user just told the UI to leave alone.
     let mut confirm_close_tab = move |tab_id: String| {
-        if confirming_close.read().as_deref() != Some(tab_id.as_str()) {
+        if confirming_close.take(&tab_id).is_none() {
             return;
         }
-        confirming_close.set(None);
         do_close_tab(tab_id);
     };
 
@@ -1561,8 +1567,7 @@ pub(crate) fn SessionView(
     // makes that a re-render loop rather than a fix.
     let active_tab = selected.read().clone().filter(|id| tabs.contains(id));
     let confirming_tab = confirming_close
-        .read()
-        .clone()
+        .current_key()
         .filter(|id| tabs.contains(id));
     // The prompt names the tab by the SAME positional label the strip
     // shows, recomputed from the list as it is right now — so a tab that
@@ -1809,6 +1814,18 @@ pub(crate) fn SessionView(
                                     class: "btn btn-neutral restart-cancel",
                                     autofocus: true,
                                     onclick: move |_| {
+                                        // Only the click that closes the prompt
+                                        // may release the claim. A cancel queued
+                                        // behind "confirm restart" finds the
+                                        // prompt already closed and the claim
+                                        // handed to the running restart, so it
+                                        // must not release it. (This prompt
+                                        // stays hand-rolled: its claim is shared
+                                        // with Restart With, which deliberately
+                                        // keeps it after a failed attempt.)
+                                        if !*confirming.peek() {
+                                            return;
+                                        }
                                         confirming.set(false);
                                         lifecycle.release();
                                     },
@@ -1848,13 +1865,15 @@ pub(crate) fn SessionView(
                             r#type: "button",
                             class: "btn btn-primary header-replace",
                             disabled: lifecycle.busy(),
-                            "aria-expanded": "{confirming_header_replace()}",
+                            "aria-expanded": "{confirming_header_replace.is_open()}",
                             onclick: move |_| {
-                                if lifecycle.claim() { confirming_header_replace.set(true); }
+                                if let Some(claim) = lifecycle.claim_guard() {
+                                    confirming_header_replace.open((), claim);
+                                }
                             },
                             "replace"
                         }
-                        if confirming_header_replace() {
+                        if confirming_header_replace.is_open() {
                             div { class: "header-confirm header-replace-confirm",
                                 // The same status-derived consequence the row's
                                 // and the interrupted card's replace prompts
@@ -1869,8 +1888,9 @@ pub(crate) fn SessionView(
                                     class: "btn btn-danger",
                                     disabled: replacing(),
                                     onclick: move |_| {
-                                        confirming_header_replace.set(false);
-                                        header_confirm_replace();
+                                        if let Some(claim) = confirming_header_replace.take(&()) {
+                                            header_confirm_replace(claim);
+                                        }
                                     },
                                     "replace"
                                 }
@@ -1878,10 +1898,7 @@ pub(crate) fn SessionView(
                                     r#type: "button",
                                     class: "btn btn-neutral",
                                     autofocus: true,
-                                    onclick: move |_| {
-                                        confirming_header_replace.set(false);
-                                        lifecycle.release();
-                                    },
+                                    onclick: move |_| confirming_header_replace.cancel_for(&()),
                                     "cancel"
                                 }
                             }
@@ -2047,16 +2064,15 @@ pub(crate) fn SessionView(
                         r#type: "button",
                         class: "btn btn-primary replace-from-notice",
                         disabled: lifecycle.busy(),
-                        "aria-expanded": "{confirming_replace()}",
+                        "aria-expanded": "{confirming_replace.is_open()}",
                         onclick: move |_| {
-                            if !lifecycle.claim() {
-                                return;
+                            if let Some(claim) = lifecycle.claim_guard() {
+                                confirming_replace.open((), claim);
                             }
-                            confirming_replace.set(true);
                         },
                         "replace"
                     }
-                    if confirming_replace() {
+                    if confirming_replace.is_open() {
                         div { class: "replace-confirm",
                             span { class: "confirm-consequence", "{crate::status::replace_consequence(&shown.status, shown.tabs.len())}" }
                             button {
@@ -2064,11 +2080,9 @@ pub(crate) fn SessionView(
                                 class: "btn btn-danger replace-confirm-submit",
                                 disabled: replacing(),
                                 onclick: move |_| {
-                                    if !confirming_replace() {
-                                        return;
+                                    if let Some(claim) = confirming_replace.take(&()) {
+                                        confirm_replace(claim);
                                     }
-                                    confirming_replace.set(false);
-                                    confirm_replace();
                                 },
                                 "confirm replace"
                             }
@@ -2076,10 +2090,7 @@ pub(crate) fn SessionView(
                                 r#type: "button",
                                 class: "btn btn-neutral replace-cancel",
                                 autofocus: true,
-                                onclick: move |_| {
-                                    confirming_replace.set(false);
-                                    lifecycle.release();
-                                },
+                                onclick: move |_| confirming_replace.cancel_for(&()),
                                 "cancel"
                             }
                         }
@@ -2147,7 +2158,10 @@ pub(crate) fn SessionView(
                         button {
                             r#type: "button",
                             class: "btn btn-danger confirm-delete confirm-close-tab",
-                            onclick: move |_| confirm_close_tab(tab_id.clone()),
+                            onclick: {
+                                let tab_id = tab_id.clone();
+                                move |_| confirm_close_tab(tab_id.clone())
+                            },
                             "confirm close"
                         }
                         button {
@@ -2160,7 +2174,10 @@ pub(crate) fn SessionView(
                             // discarded `Result` could silently drop the
                             // safety behavior.
                             autofocus: true,
-                            onclick: move |_| confirming_close.set(None),
+                            onclick: {
+                                let tab_id = tab_id.clone();
+                                move |_| confirming_close.cancel_for(&tab_id)
+                            },
                             "cancel"
                         }
                     }

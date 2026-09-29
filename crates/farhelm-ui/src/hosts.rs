@@ -65,7 +65,7 @@ use crate::menu_panel::{
     closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus, handle_menu_key,
     measurement_outcome, menu_panel_placement_style, remember_menu_item, should_measure_on_mount,
 };
-use crate::ops::OpLock;
+use crate::ops::{ConfirmSlot, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::provisioning::{
     ActionRequest, HostBinding, HostUpdateProgress, PlanConfirmation, ProvisioningMenuState,
@@ -791,7 +791,10 @@ pub(crate) fn HostsPanel(
     // showing its destination field. One at a time for both: they replace
     // the row's controls, so two open at once would be two half-finished
     // decisions competing for the same space.
-    let mut confirming_remove = use_signal(|| None::<HostId>);
+    // Keyed by host; see `ConfirmSlot` for the queued-click races it closes.
+    // Only confirmation consumption lives here: the removal claims the page
+    // lock afterwards, through `run`, not when the prompt opens.
+    let mut confirming_remove: ConfirmSlot<HostId> = use_confirm_slot();
     let mut editing = use_signal(|| None::<(HostId, EditField)>);
     let mut destination_draft = use_signal(String::new);
     let mut adding = use_signal(|| false);
@@ -935,10 +938,9 @@ pub(crate) fn HostsPanel(
         // confirmed, which is what keeps a confirm click queued behind a
         // cancel (both fired in one burst) from forgetting a host the user
         // just backed out of.
-        if *confirming_remove.peek() != Some(host) {
+        if confirming_remove.take(&host).is_none() {
             return;
         }
-        confirming_remove.set(None);
         let base = remove_base.clone();
         // A removal has no host row to report back, so it confirms itself:
         // the 200 IS the whole answer, and there is no body for a decode to
@@ -1152,7 +1154,7 @@ pub(crate) fn HostsPanel(
                         HostRow {
                             key: "{host.id}",
                             controls: HostRowControls {
-                                confirming_remove: *confirming_remove.read() == Some(host.id),
+                                confirming_remove: confirming_remove.current_key() == Some(host.id),
                                 edit_field: editing
                                     .read()
                                     .and_then(|(id, field)| (id == host.id).then_some(field)),
@@ -1214,7 +1216,9 @@ pub(crate) fn HostsPanel(
                                 {
                                     return;
                                 }
-                                confirming_remove.set(None);
+                                // Starting an edit abandons any open removal
+                                // prompt, whichever host it was for.
+                                confirming_remove.clear();
                                 // This is the ONE place that closes the menu
                                 // for an edit — the item's own click in
                                 // `HostRow` only requests the edit, never
@@ -1242,10 +1246,10 @@ pub(crate) fn HostsPanel(
                                 // See `on_edit_start` just above: the same
                                 // single-owner close, past the same guard.
                                 host_menu_open.set(None);
-                                confirming_remove.set(Some(id));
+                                confirming_remove.open(id, ());
                             },
                             on_remove_confirm: on_remove_confirm.clone(),
-                            on_remove_cancel: move |_| confirming_remove.set(None),
+                            on_remove_cancel: move |id: HostId| confirming_remove.cancel_for(&id),
                             on_provisioning: move |(id, request): (HostId, ActionRequest)| {
                                 if provisioning_busy_hosts.peek().contains(&id) {
                                     return;
@@ -1748,7 +1752,7 @@ fn HostRow(
     on_edit_cancel: EventHandler<()>,
     on_remove_start: EventHandler<HostId>,
     on_remove_confirm: EventHandler<HostId>,
-    on_remove_cancel: EventHandler<()>,
+    on_remove_cancel: EventHandler<HostId>,
     /// Route a provisioning menu command back to this row's permanently
     /// mounted provisioning component. The request carries the binding this
     /// row rendered with, captured at click time.
@@ -2474,7 +2478,7 @@ fn HostRow(
                             // `set_focus` whose discarded `Result`
                             // could drop the safety behavior silently.
                             autofocus: true,
-                            onclick: move |_| on_remove_cancel.call(()),
+                            onclick: move |_| on_remove_cancel.call(id),
                             "cancel"
                         }
                     }
@@ -3819,7 +3823,7 @@ mod tests {
             let on_edit_cancel = use_callback(|_: ()| {});
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
-            let on_remove_cancel = use_callback(|_: ()| {});
+            let on_remove_cancel = use_callback(|_: HostId| {});
             let on_provisioning = use_callback(|_: (HostId, ActionRequest)| {});
             let on_menu_toggle = use_callback(|_: HostId| {});
             rsx! {
@@ -3903,7 +3907,7 @@ mod tests {
             let on_edit_cancel = use_callback(|_: ()| {});
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
-            let on_remove_cancel = use_callback(|_: ()| {});
+            let on_remove_cancel = use_callback(|_: HostId| {});
             let on_provisioning = use_callback(|_: (HostId, ActionRequest)| {});
             let on_menu_toggle = use_callback(|_: HostId| {});
             let confirming = CONFIRMING.with(std::cell::Cell::get);

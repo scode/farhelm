@@ -175,6 +175,17 @@ impl PaneGate {
         Self { lock, row_ops }
     }
 
+    /// [`Self::claim`], returning the cancellation-safe release guard
+    /// ([`OpGuard`]) instead of a bool, so the claim can be held by a
+    /// [`ConfirmSlot`] while its prompt is open and then moved into the task
+    /// the confirmation starts.
+    pub(crate) fn claim_guard(&mut self) -> Option<OpGuard> {
+        if *self.row_ops.peek() > 0 {
+            return None;
+        }
+        self.lock.claim_guard()
+    }
+
     /// Claim the shared token, refusing while any sidebar row operation is
     /// in flight. Same contract as [`OpLock::claim`] otherwise.
     pub(crate) fn claim(&mut self) -> bool {
@@ -269,6 +280,130 @@ impl ReadGate {
     }
 }
 
+/// One inline "confirm / cancel" prompt: which target it is open for, and
+/// whatever the confirmation will own when it proceeds.
+///
+/// Every confirmation in this UI is two buttons whose clicks can arrive in
+/// the same event burst, before the render that removes them. A cancel
+/// queued just ahead of a confirm must win, and so must a confirm queued
+/// ahead of a cancel: the first click decides, the second must find nothing
+/// to act on. Hand-rolling that check in each handler is how the header's
+/// Replace shipped without it (cancel, then a queued confirm, still replaced
+/// the session) and how the lifecycle prompts' cancel handlers kept
+/// releasing the page's operation lock after a confirm had already handed
+/// it to a running task. This type makes the check the only way in, the way
+/// [`OpLock`] did for operation exclusion:
+///
+/// - [`Self::take`] is the one way a confirm handler learns the user
+///   confirmed THIS prompt. It is a synchronous test-and-clear: it yields
+///   the payload only if the prompt is still open for `key`, and leaves any
+///   other prompt untouched.
+/// - [`Self::cancel_for`] closes the prompt only if it is still open for
+///   `key`; after a `take` it does nothing.
+/// - The payload is what the confirmation owns. For the lifecycle prompts it
+///   is the [`OpGuard`] claimed when the prompt opened: it lives in the slot
+///   while the prompt is open, moves into the confirmed task on `take`, and
+///   is dropped (releasing the lock) by cancel, by [`Self::clear`], by
+///   replacement, or by the slot itself going away with its component. No
+///   handler releases the lock by hand, so none can release someone else's.
+///
+/// `Copy` because it is a handle to a signal, like [`OpLock`]. Render code
+/// uses the tracked readers ([`Self::is_open`], [`Self::current_key`]);
+/// handlers use [`Self::take`] and [`Self::cancel_for`], which `peek`.
+pub(crate) struct ConfirmSlot<K: 'static, P: 'static = ()> {
+    open: Signal<Option<(K, P)>>,
+}
+
+impl<K: 'static, P: 'static> Clone for ConfirmSlot<K, P> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<K: 'static, P: 'static> Copy for ConfirmSlot<K, P> {}
+
+impl<K: 'static, P: 'static> PartialEq for ConfirmSlot<K, P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.open == other.open
+    }
+}
+
+/// Create a closed prompt slot. A hook: call it unconditionally, once, in
+/// the component whose prompt it is. The slot's contents (a held
+/// [`OpGuard`], say) are dropped when that component unmounts.
+pub(crate) fn use_confirm_slot<K: 'static, P: 'static>() -> ConfirmSlot<K, P> {
+    ConfirmSlot {
+        open: use_signal(|| None),
+    }
+}
+
+impl<K: PartialEq + Clone + 'static, P: 'static> ConfirmSlot<K, P> {
+    /// Open the prompt for `key`, holding `payload` until it is confirmed or
+    /// dismissed. An already open prompt is REPLACED (the tab strip moves
+    /// its close prompt to the tab clicked last) and its payload dropped.
+    /// For a slot whose payload is an operation claim that drop cannot
+    /// release anyone else's claim: a second prompt could only have claimed
+    /// after the first one's claim was gone.
+    pub(crate) fn open(&mut self, key: K, payload: P) {
+        open_in(&mut self.open.write(), key, payload);
+    }
+
+    /// Consume the confirmation for `key`: the payload if the prompt is
+    /// still open for exactly that key, `None` (and nothing changed)
+    /// otherwise.
+    pub(crate) fn take(&mut self, key: &K) -> Option<P> {
+        if !self
+            .open
+            .peek()
+            .as_ref()
+            .is_some_and(|(open, _)| open == key)
+        {
+            return None;
+        }
+        take_in(&mut self.open.write(), key)
+    }
+
+    /// Dismiss the prompt if it is still open for `key`, dropping its
+    /// payload. Does nothing once a confirmation has taken it.
+    pub(crate) fn cancel_for(&mut self, key: &K) {
+        drop(self.take(key));
+    }
+
+    /// Close whatever is open, unconditionally. For reconciliation (the
+    /// target disappeared), never for an event handler: a handler must name
+    /// the prompt it was rendered for, which is what `cancel_for` does.
+    pub(crate) fn clear(&mut self) {
+        if self.open.peek().is_some() {
+            self.open.set(None);
+        }
+    }
+
+    /// Whether any prompt is open, for a RENDER (tracked read).
+    pub(crate) fn is_open(&self) -> bool {
+        self.open.read().is_some()
+    }
+
+    /// Which key the prompt is open for, for a RENDER (tracked read).
+    pub(crate) fn current_key(&self) -> Option<K> {
+        self.open.read().as_ref().map(|(key, _)| key.clone())
+    }
+}
+
+/// [`ConfirmSlot::open`]'s state change over a plain `Option`, split out
+/// (like [`claim_in`]) so the rules are testable without a Dioxus runtime.
+fn open_in<K, P>(slot: &mut Option<(K, P)>, key: K, payload: P) {
+    *slot = Some((key, payload));
+}
+
+/// [`ConfirmSlot::take`]'s test-and-clear over a plain `Option`.
+fn take_in<K: PartialEq, P>(slot: &mut Option<(K, P)>, key: &K) -> Option<P> {
+    if slot.as_ref().is_some_and(|(open, _)| open == key) {
+        slot.take().map(|(_, payload)| payload)
+    } else {
+        None
+    }
+}
+
 /// The test-and-set itself, over a plain `&mut bool`.
 ///
 /// Split out from [`OpLock::claim`] so the RULE can be exercised without a
@@ -298,6 +433,283 @@ fn claimed_owner<T>(claimed: bool, owner: impl FnOnce() -> T) -> Option<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dioxus::prelude::VirtualDom;
+
+    /// A payload that records its own drop, standing in for an `OpGuard`
+    /// so the slot rules can be checked without a Dioxus runtime.
+    struct Owned(std::rc::Rc<std::cell::Cell<bool>>);
+
+    impl Drop for Owned {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    fn owned() -> (Owned, std::rc::Rc<std::cell::Cell<bool>>) {
+        let dropped = std::rc::Rc::new(std::cell::Cell::new(false));
+        (Owned(dropped.clone()), dropped)
+    }
+
+    /// Why this matters: a cancel click and a confirm click can land in one
+    /// event burst. Spec (`ConfirmSlot`): whichever runs first decides. A
+    /// confirm after a cancel finds nothing and proceeds with nothing; a
+    /// cancel after a confirm finds nothing and releases nothing, so the
+    /// confirmed task keeps its claim.
+    #[farhelm_testtrace::test]
+    fn the_first_of_a_confirm_and_a_cancel_decides() {
+        // cancel, then confirm
+        let (payload, dropped) = owned();
+        let mut slot = None;
+        open_in(&mut slot, "prompt", payload);
+        drop(take_in(&mut slot, &"prompt")); // cancel_for
+        assert!(dropped.get(), "cancel releases what the prompt held");
+        assert!(
+            take_in(&mut slot, &"prompt").is_none(),
+            "a queued confirm finds nothing"
+        );
+
+        // confirm, then cancel
+        let (payload, dropped) = owned();
+        open_in(&mut slot, "prompt", payload);
+        let confirmed = take_in(&mut slot, &"prompt").expect("the confirm takes the payload");
+        drop(take_in(&mut slot, &"prompt")); // the queued cancel
+        assert!(
+            !dropped.get(),
+            "a queued cancel must not release the confirmed task's claim"
+        );
+        drop(confirmed);
+        assert!(dropped.get());
+    }
+
+    /// Why this matters: the second click of a double-click, or a stale
+    /// handler rendered for another target, must not act on the prompt that
+    /// is open now. Spec: a duplicate confirm gets nothing; a confirm or
+    /// cancel naming a different key leaves the open prompt and its payload
+    /// untouched.
+    #[farhelm_testtrace::test]
+    fn duplicate_and_wrong_key_clicks_change_nothing() {
+        let (payload, dropped) = owned();
+        let mut slot = None;
+        open_in(&mut slot, "tab-a", payload);
+        assert!(
+            take_in(&mut slot, &"tab-b").is_none(),
+            "a wrong key takes nothing"
+        );
+        drop(take_in(&mut slot, &"tab-b")); // a cancel rendered for tab-b
+        assert!(
+            !dropped.get() && slot.is_some(),
+            "the open prompt survives other keys"
+        );
+        let first = take_in(&mut slot, &"tab-a");
+        assert!(first.is_some());
+        assert!(
+            take_in(&mut slot, &"tab-a").is_none(),
+            "a duplicate confirm gets nothing"
+        );
+    }
+
+    /// Why this matters: a lifecycle prompt holds the page's operation claim
+    /// while it is open, and the session view that owns it can unmount
+    /// mid-prompt (the user opens another session). A claim stranded by that
+    /// would leave the whole page inert. Spec: when the component owning an
+    /// open `ConfirmSlot` goes away, the `OpGuard` it held is dropped with it
+    /// and the lock is free again; while it is mounted, the lock stays held.
+    #[farhelm_testtrace::test]
+    fn an_unmounted_prompt_releases_the_claim_it_held() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static SHOW: Cell<bool> = const { Cell::new(true) };
+            static HELD: Cell<Option<bool>> = const { Cell::new(None) };
+        }
+
+        #[component]
+        fn Prompt(lock: OpLock) -> Element {
+            let mut slot: ConfirmSlot<(), OpGuard> = use_confirm_slot();
+            use_hook(move || {
+                let mut lock = lock;
+                if let Some(claim) = lock.claim_guard() {
+                    slot.open((), claim);
+                }
+            });
+            rsx! {}
+        }
+
+        fn app() -> Element {
+            let lock = use_op_lock();
+            HELD.with(|held| held.set(Some(lock.busy_now())));
+            let show = SHOW.with(Cell::get);
+            rsx! {
+                if show {
+                    Prompt { lock }
+                }
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_to_vec();
+        // Re-render the parent so it observes the claim the child took.
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        assert_eq!(
+            HELD.with(Cell::get),
+            Some(true),
+            "premise: the open prompt holds the claim"
+        );
+
+        SHOW.with(|show| show.set(false));
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        assert_eq!(
+            HELD.with(Cell::get),
+            Some(false),
+            "unmounting the prompt must release the claim it held"
+        );
+    }
+
+    /// A claim on one shared lock cell, released on drop: the pure-rule
+    /// stand-in for an `OpGuard` over an `OpLock`.
+    struct Claim(std::rc::Rc<std::cell::Cell<bool>>);
+
+    impl Drop for Claim {
+        fn drop(&mut self) {
+            self.0.set(false);
+        }
+    }
+
+    /// Claim the shared cell with the same test-and-set `OpLock` uses.
+    fn claim(lock: &std::rc::Rc<std::cell::Cell<bool>>) -> Option<Claim> {
+        let mut held = lock.get();
+        let claimed = claim_in(&mut held);
+        lock.set(held);
+        claimed_owner(claimed, || Claim(lock.clone()))
+    }
+
+    /// Why this matters: a confirmed lifecycle prompt hands its claim to the
+    /// task it starts (the Replace request), and the manual release that
+    /// task used to end with is gone, so the claim must live exactly as long
+    /// as the task: held while the request is pending, released when the
+    /// owning view unmounts and cancels it. Spec: after `take`, the slot is
+    /// empty and the lock stays held across a pending task; unmounting the
+    /// component cancels the task and releases the lock.
+    #[farhelm_testtrace::test]
+    async fn a_confirmed_task_holds_the_claim_until_it_is_cancelled() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static SHOW: Cell<bool> = const { Cell::new(true) };
+            static HELD: Cell<Option<bool>> = const { Cell::new(None) };
+            static SLOT_OPEN: Cell<Option<bool>> = const { Cell::new(None) };
+            static REACHED: Cell<bool> = const { Cell::new(false) };
+        }
+
+        #[component]
+        fn Confirmed(lock: OpLock) -> Element {
+            let mut slot: ConfirmSlot<(), OpGuard> = use_confirm_slot();
+            let mut reached = use_signal(|| false);
+            use_hook(move || {
+                let mut lock = lock;
+                if let Some(claim) = lock.claim_guard() {
+                    slot.open((), claim);
+                }
+                // The confirm click: the claim moves into a task that stays
+                // pending, like a Replace request still in flight.
+                if let Some(claim) = slot.take(&()) {
+                    spawn(async move {
+                        let _claim = claim;
+                        reached.set(true);
+                        std::future::pending::<()>().await;
+                    });
+                }
+            });
+            SLOT_OPEN.with(|open| open.set(Some(slot.is_open())));
+            REACHED.with(|seen| seen.set(*reached.read()));
+            rsx! {}
+        }
+
+        fn app() -> Element {
+            let lock = use_op_lock();
+            HELD.with(|held| held.set(Some(lock.busy_now())));
+            let show = SHOW.with(Cell::get);
+            rsx! {
+                if show {
+                    Confirmed { lock }
+                }
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        // Drive the runtime until the task has run up to its pending point;
+        // its signal write is what wakes `wait_for_work`, so no sleep.
+        while !REACHED.with(Cell::get) {
+            tokio::time::timeout(std::time::Duration::from_secs(5), dom.wait_for_work())
+                .await
+                .expect("the confirmed task reaches its pending point");
+            dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        }
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        assert_eq!(
+            SLOT_OPEN.with(Cell::get),
+            Some(false),
+            "the confirm emptied the slot"
+        );
+        assert_eq!(
+            HELD.with(Cell::get),
+            Some(true),
+            "the pending task still holds the claim"
+        );
+
+        SHOW.with(|show| show.set(false));
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        assert_eq!(
+            HELD.with(Cell::get),
+            Some(false),
+            "unmounting cancels the task, and the claim goes with it"
+        );
+    }
+
+    /// Why this matters: a prompt that holds the page's operation claim must
+    /// never be able to release a LATER owner's claim. Spec: while a prompt
+    /// is open nobody else can claim; once its confirmed task finishes and
+    /// someone else takes the lock, a stale cancel aimed at the old prompt
+    /// finds nothing and the new owner keeps the lock (another claim is
+    /// still refused).
+    #[farhelm_testtrace::test]
+    fn a_refused_claim_opens_nothing_and_a_later_owner_is_protected() {
+        let lock = std::rc::Rc::new(std::cell::Cell::new(false));
+        let mut slot = None;
+        open_in(
+            &mut slot,
+            (),
+            claim(&lock).expect("the first prompt claims"),
+        );
+        assert!(
+            claim(&lock).is_none(),
+            "a refused claim yields nothing to open a prompt with"
+        );
+
+        let task = take_in(&mut slot, &()).expect("confirmed");
+        drop(task); // the confirmed task finishes and releases
+        assert!(!lock.get());
+
+        let later_owner = claim(&lock).expect("a later operation claims the lock");
+        drop(take_in(&mut slot, &())); // a stale cancel for the old prompt
+        assert!(
+            lock.get(),
+            "the stale cancel must not release the later owner's claim"
+        );
+        assert!(
+            claim(&lock).is_none(),
+            "the lock is still held against a third claim"
+        );
+        drop(later_owner);
+        assert!(!lock.get());
+    }
 
     /// A token can be held by exactly one claimant at a time, and a release
     /// hands it to the next.
