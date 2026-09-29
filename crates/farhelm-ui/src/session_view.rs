@@ -1858,7 +1858,7 @@ pub(crate) fn SessionView(
                                 // live agent is killed, and the prompt must say
                                 // so rather than a generic question.
                                 span { class: "confirm-consequence",
-                                    "{crate::status::replace_consequence(&shown.status)}"
+                                    "{crate::status::replace_consequence(&shown.status, shown.tabs.len())}"
                                 }
                                 button {
                                     r#type: "button",
@@ -2054,7 +2054,7 @@ pub(crate) fn SessionView(
                     }
                     if confirming_replace() {
                         div { class: "replace-confirm",
-                            span { class: "confirm-consequence", "{crate::status::replace_consequence(&shown.status)}" }
+                            span { class: "confirm-consequence", "{crate::status::replace_consequence(&shown.status, shown.tabs.len())}" }
                             button {
                                 r#type: "button",
                                 class: "btn btn-danger replace-confirm-submit",
