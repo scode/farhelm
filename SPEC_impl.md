@@ -2507,8 +2507,10 @@ risks) lives behind a feature flag in farhelm-ui, kept deliberately thin.
 
 ## Provisioning
 
-Implemented in the helm over the same system-ssh access: sftp the cross-compiled `farhelm` binary (plus a private static
-tmux build when the host has no tmux) into `~/.local/lib/farhelm/`, write user-level systemd units,
+Implemented in the helm over the same system-ssh access: stream the cross-compiled `farhelm` binary (plus a private
+static tmux build when the host has no tmux) into `~/.local/lib/farhelm/` through the same `ssh` command every other
+step uses (`cat` into a nonce temporary, then a digest check before the rename; not sftp, whose own destination grammar
+reads an IPv6 literal or an `ssh://` URI as a different host than ssh does), write user-level systemd units,
 `systemctl --user enable --now`, `loginctl enable-linger` as the optional-step (proceed-without-if-privileged per
 SPEC.md). Discovery-first: probe for a running supervisor via `farhelm internal stdio` before proposing any of this, and
 show the full concrete action list before touching the host for initial setup.

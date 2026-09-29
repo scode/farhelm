@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `sftp-misparses-ipv6-and-uri-destinations.md` — the sftp upload parses IPv6-literal and ssh:// destinations as a
-  different host than ssh, so the payload can go elsewhere.
 - `installer-overwrites-user-farhelm-file.md` — install.sh replaces and deletes any existing regular file named
   farhelm/farhelm-desktop without an ownership check.
 - `installer-deletes-farhelm-app-on-grep.md` — install.sh rm -rf's any ~/Applications/Farhelm.app whose Info.plist

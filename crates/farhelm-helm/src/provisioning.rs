@@ -7,8 +7,9 @@
 //! action in place so rerunning can resume from content and hash comparisons.
 //!
 //! Transport is deliberately below that plan. Local setup executes and
-//! copies directly; remote setup uses the user's `ssh` and `sftp`, sharing
-//! the option-safe SSH prefix with the steady-state connection manager.
+//! copies directly; remote setup uses the user's `ssh` for everything,
+//! payload uploads included, sharing the option-safe SSH prefix with the
+//! steady-state connection manager.
 
 /// The release asset inventory (plan §1) — the archive and binary names a
 /// GitHub release publishes. Drives every Rust payload source directly
@@ -140,25 +141,40 @@ mod tests {
         }
     }
 
-    /// Execute remote shell commands locally while making SFTP publish exact
-    /// fixture bytes. This isolates digest and cleanup checks from SSH setup
-    /// without replacing the backend's own shell command construction.
-    struct ScriptedSftpLauncher {
+    /// Execute remote shell commands locally, except that the payload upload
+    /// (`cat > <temporary>` over ssh) discards the real payload and publishes
+    /// exact fixture bytes instead. This isolates digest and cleanup checks
+    /// from SSH setup without replacing the backend's own shell command
+    /// construction.
+    struct ScriptedTransferLauncher {
         temporary: PathBuf,
         bytes: &'static str,
         exit_status: i32,
     }
 
-    impl CommandLauncher for ScriptedSftpLauncher {
+    impl CommandLauncher for ScriptedTransferLauncher {
         fn spawn(
             &self,
             command: &mut tokio::process::Command,
         ) -> std::io::Result<tokio::process::Child> {
             let mut child = tokio::process::Command::new("sh");
             let program = command.as_std().get_program().to_string_lossy();
-            if program == "sftp" {
-                let temporary = shell_path(&self.temporary)
-                    .map_err(|error| std::io::Error::other(error.rendered()))?;
+            assert_eq!(program, "ssh");
+            let remote = command
+                .as_std()
+                .get_args()
+                .last()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            let temporary = shell_path(&self.temporary)
+                .map_err(|error| std::io::Error::other(error.rendered()))?;
+            // The backend wraps every remote script as `sh -c <quoted>`; unwrap
+            // it to recognise the upload exactly rather than by substring.
+            let script = shell_words::split(&remote)
+                .ok()
+                .and_then(|words| words.get(2).cloned());
+            if script.as_deref() == Some(format!("cat > {temporary}").as_str()) {
                 child.arg("-c").arg(format!(
                     "cat >/dev/null; printf '%s' {} > {}; exit {}",
                     shell_words::quote(self.bytes),
@@ -166,10 +182,7 @@ mod tests {
                     self.exit_status
                 ));
             } else {
-                assert_eq!(program, "ssh");
-                child
-                    .arg("-c")
-                    .arg(command.as_std().get_args().last().unwrap());
+                child.arg("-c").arg(remote);
             }
             child
                 .stdin(Stdio::piped())
@@ -2740,7 +2753,7 @@ mod tests {
     /// Remote byte growth keeps a transfer alive beyond one idle interval,
     /// while slow control setup cannot time out before a remote file exists.
     #[farhelm_testtrace::test]
-    async fn sftp_capture_uses_remote_bytes_after_slow_setup() {
+    async fn transfer_capture_uses_remote_bytes_after_slow_setup() {
         let root = tempfile::tempdir().unwrap();
         let remote = root.path().join("upload");
         let script = format!(
@@ -2757,7 +2770,7 @@ mod tests {
         isolate_process_group(&mut command);
         let child = command.spawn().unwrap();
 
-        let result = capture_sftp_child(
+        let result = capture_transfer_child(
             child,
             10,
             || async {
@@ -2796,7 +2809,7 @@ mod tests {
     /// the stalled child's process group must stop before it can mutate the
     /// remote path after the timeout has been reported.
     #[farhelm_testtrace::test]
-    async fn sftp_capture_stall_kills_descendants_despite_output() {
+    async fn transfer_capture_stall_kills_descendants_despite_output() {
         let root = tempfile::tempdir().unwrap();
         let marker = root.path().join("late-marker");
         let started = root.path().join("descendant-started");
@@ -2828,7 +2841,7 @@ mod tests {
             terminate_child(&mut child).await;
             panic!("the descendant exited before the stall observation");
         }
-        let failure = capture_sftp_child(
+        let failure = capture_transfer_child(
             child,
             10,
             || async { Some(0) },
@@ -3083,7 +3096,7 @@ mod tests {
             let backend = SystemBackend {
                 control_dir: root.path().to_path_buf(),
                 linger: LingerBehavior::Simulated(Ok(())),
-                launcher: Arc::new(ScriptedSftpLauncher {
+                launcher: Arc::new(ScriptedTransferLauncher {
                     temporary: root.path().join("unused"),
                     bytes: "",
                     exit_status: 0,
@@ -3223,7 +3236,7 @@ mod tests {
         let backend = SystemBackend {
             control_dir: root.path().to_path_buf(),
             linger: LingerBehavior::Simulated(Ok(())),
-            launcher: Arc::new(ScriptedSftpLauncher {
+            launcher: Arc::new(ScriptedTransferLauncher {
                 temporary: temporary.clone(),
                 bytes: "provisioned unit",
                 exit_status: 0,
@@ -4059,22 +4072,6 @@ mod tests {
         }
     }
 
-    /// SFTP batch paths use double-quote escaping of their own and reject
-    /// record-breaking bytes before a batch is written.
-    #[farhelm_testtrace::test]
-    fn sftp_batch_path_encoding_has_an_independent_grammar() {
-        for (path, expected) in [
-            ("/tmp/a b", "\"/tmp/a b\""),
-            ("/tmp/a\"b", "\"/tmp/a\\\"b\""),
-            ("/tmp/a\\b", "\"/tmp/a\\\\b\""),
-        ] {
-            assert_eq!(sftp_path(Path::new(path)).unwrap(), expected);
-        }
-        for rejected in ["/tmp/a\nb", "/tmp/a\rb", "/tmp/a\0b"] {
-            assert!(sftp_path(Path::new(rejected)).is_err());
-        }
-    }
-
     /// The locale-stable production linger classifier degrades only known
     /// authorization refusals; unrelated command failures remain fatal.
     #[farhelm_testtrace::test]
@@ -4250,10 +4247,10 @@ mod tests {
         );
     }
 
-    /// Failed SFTP and a successful transfer with the wrong digest both
+    /// A failed transfer and a successful transfer with the wrong digest both
     /// remove the nonce temporary without replacing the installed binary.
-    /// The second case proves that a zero SFTP exit is not proof of payload
-    /// integrity.
+    /// The second case proves that a zero transfer exit is not proof of
+    /// payload integrity.
     #[farhelm_testtrace::test]
     async fn failed_remote_upload_removes_partial_temporary() {
         let root = tempfile::tempdir().unwrap();
@@ -4275,7 +4272,7 @@ mod tests {
             let backend = SystemBackend {
                 control_dir: root.path().to_path_buf(),
                 linger: LingerBehavior::Simulated(Ok(())),
-                launcher: Arc::new(ScriptedSftpLauncher {
+                launcher: Arc::new(ScriptedTransferLauncher {
                     temporary: temporary.clone(),
                     bytes,
                     exit_status,
@@ -4327,7 +4324,7 @@ mod tests {
         let backend = SystemBackend {
             control_dir: root.path().to_path_buf(),
             linger: LingerBehavior::Simulated(Ok(())),
-            launcher: Arc::new(ScriptedSftpLauncher {
+            launcher: Arc::new(ScriptedTransferLauncher {
                 temporary: temporary.clone(),
                 bytes: "new bytes",
                 exit_status: 0,
@@ -4390,7 +4387,7 @@ mod tests {
         let backend = SystemBackend {
             control_dir: root.path().to_path_buf(),
             linger: LingerBehavior::Simulated(Ok(())),
-            launcher: Arc::new(ScriptedSftpLauncher {
+            launcher: Arc::new(ScriptedTransferLauncher {
                 temporary: temporary.clone(),
                 bytes: "new bytes",
                 exit_status: 0,
@@ -5415,8 +5412,8 @@ mod tests {
     }
 
     /// Exercise the complete installer against a real user manager, through
-    /// direct local process/file operations, through ssh+sftp to localhost,
-    /// or through ssh+sftp to a genuinely different machine.
+    /// direct local process/file operations, through ssh to localhost, or
+    /// through ssh to a genuinely different machine.
     ///
     /// The two SELF-DIRECTED shapes (local, and ssh to localhost) keep every
     /// install/state path fixture-owned and linger simulated: the unit file
@@ -5701,8 +5698,8 @@ mod tests {
                     .lock()
                     .unwrap()
                     .iter()
-                    .all(|program| { !program.ends_with("ssh") && !program.ends_with("sftp") }),
-                "the direct local case launched ssh or sftp"
+                    .all(|program| { !program.ends_with("ssh") }),
+                "the direct local case launched ssh"
             );
         }
 
@@ -5864,7 +5861,7 @@ mod tests {
         );
     }
 
-    /// The CI-shaped transport proof: real ssh and sftp, then an SSH UPDATE
+    /// The CI-shaped transport proof: real ssh, then an SSH UPDATE
     /// that preserves and operates a tmux-held session.
     ///
     /// Destination-agnostic on purpose. By default it dials `localhost` into

@@ -1985,7 +1985,11 @@
   tests that script an `sftp` process are converted; SPEC_impl.md's provisioning description, `ssh.rs`'s module doc, and
   the CentOS provisioning script's comment no longer name sftp. Remove this feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; every provisioning upload (binary, static tmux, units) now streams over the ordinary ssh
+  command into `cat > <temporary>`; sftp and its path encoder are gone, and SPEC_impl.md and the CentOS script no longer
+  need an sftp subsystem. `scripts/test-provision-centos.sh`, required for this item, passed. PR
+  [#1143](https://github.com/scode/farhelm/pull/1143/changes), jj change `lrvklypr`, bookmark
+  `pr/provisioning-upload-over-ssh`.
 
 ## installer-overwrites-user-farhelm-file.md
 
