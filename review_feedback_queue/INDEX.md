@@ -23,8 +23,6 @@ One line per open item. This file must always match the feedback files in this d
   grows per open terminal.
 - `unstable-device-number-blocks-delete.md` — the ownership check treats `st_dev` as stable, so a remount can make
   checkout sessions undeletable and unrestartable.
-- `ambiguous-restart-republishes-old-terminal.md` — an ambiguous restart failure republishes the pre-restart terminal,
-  so a live agent is unopenable and killable without consent.
 - `adopt-checks-current-row-not-dialed.md` — adopt checks the manager's current row, so a stale mismatch after a
   retarget adopts the old machine's identity.
 - `identity-mismatch-never-becomes-duplicate.md` — a host that reaches another entry's identity offers an adopt that

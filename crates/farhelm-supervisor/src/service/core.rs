@@ -2710,6 +2710,30 @@ fn same_launch_entry(
     })
 }
 
+/// The terminal a failed relaunch's re-published entry names.
+///
+/// A definitive failure changed nothing in tmux, and a relaunch into the
+/// surviving pane keeps that pane whatever happened, so both keep the prior
+/// terminal. An ambiguous failure of a relaunch that had to build a fresh
+/// tmux session may have left a live agent in a NEW pane this code never
+/// learned, while the prior pane is gone: naming it would make opening the
+/// session target nothing, and make a later Restart read the stale pane as
+/// gone and skip its "still running" confirmation, reaping the new agent
+/// unasked. No terminal instead puts the entry under the existing
+/// terminal-less guard (`terminal_less_launch_may_be_live`) until a reload
+/// rediscovers the pane.
+fn republished_terminal(
+    definitive: bool,
+    terminal_survives: bool,
+    prior: Option<Terminal>,
+) -> Option<Terminal> {
+    if definitive || terminal_survives {
+        prior
+    } else {
+        None
+    }
+}
+
 /// Build the entry that describes a session's NEW launch generation,
 /// carrying over exactly what describes the CONVERSATION rather than the
 /// run.
@@ -10492,12 +10516,14 @@ impl Supervisor {
                 };
                 if still_exists {
                     let recovered_info = entry.info.clone();
+                    let terminal =
+                        republished_terminal(definitive, terminal_survives, entry.terminal.clone());
                     self.sessions.lock().await.insert(
                         id.clone(),
                         relaunched_entry(
                             entry,
                             recovered_info,
-                            entry.terminal.clone(),
+                            terminal,
                             claim.generation,
                             scope,
                             entry
@@ -15627,6 +15653,37 @@ pub(crate) mod tests {
             error.to_string().contains(&limit.to_string()),
             "the refusal names the limit: {error:#}"
         );
+    }
+
+    /// A failed restart that may have left a new agent in a fresh tmux
+    /// session re-publishes the entry with no terminal rather than the old,
+    /// gone pane; every other failure keeps the prior terminal.
+    ///
+    /// Why it matters: a stale pane made opening the session target nothing,
+    /// and made a later Restart read the pane as gone, skip its "still
+    /// running" confirmation, and reap the possibly-live new agent. With no
+    /// terminal the existing terminal-less guard applies instead. Specified:
+    /// ambiguous and not surviving gives `None`; definitive, or a surviving
+    /// pane, gives the prior terminal back.
+    #[farhelm_testtrace::test]
+    fn an_ambiguous_fresh_relaunch_republishes_no_terminal() {
+        let pane = |terminal: Option<Terminal>| terminal.map(|terminal| terminal.pane);
+        let prior = Some(a_terminal());
+        let prior_pane = pane(prior.clone());
+        assert!(prior_pane.is_some(), "test premise: a prior terminal");
+        assert_eq!(
+            pane(republished_terminal(false, false, prior.clone())),
+            None
+        );
+        assert_eq!(
+            pane(republished_terminal(true, false, prior.clone())),
+            prior_pane
+        );
+        assert_eq!(
+            pane(republished_terminal(false, true, prior.clone())),
+            prior_pane
+        );
+        assert_eq!(pane(republished_terminal(true, true, prior)), prior_pane);
     }
 
     /// Browsing is a host-side discovery operation, so its canonical answer
