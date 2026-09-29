@@ -238,7 +238,7 @@ pub enum ReplayThen {
     /// Show a yes/no menu under a "Do you want to" question and block on
     /// stdin: the exact shape `looks_like_a_choice_prompt` in the
     /// supervisor's `agent_kind` module promotes to `waiting`, provided the
-    /// session's kind is claude or codex (the generic kind never sharpens).
+    /// session's kind is claude or codex (the generic kind never reads waiting).
     Menu,
     /// Block on stdin with nothing further: goes `idle` after the
     /// classifier's quiet-sample threshold.
@@ -3131,19 +3131,17 @@ mod tests {
 
     /// The menu the replay fixture leaves on screen exists to make the REAL
     /// classifier say `waiting`; this pins that contract against the
-    /// supervisor's own sharpener for both integrated kinds, so a wording
-    /// change on either side fails here rather than as a screenshot whose
-    /// red dot silently went blue.
+    /// supervisor's own screen readers for both integrated kinds, so a
+    /// wording change on either side fails here rather than as a screenshot
+    /// whose red dot silently went blue.
     #[test]
-    fn replay_menu_is_promoted_to_waiting_by_the_real_sharpeners() {
-        use farhelm_proto::{AgentKind, SessionStatus};
-        use farhelm_supervisor::agent_kind::integration_for;
+    fn replay_menu_is_read_as_waiting_by_the_real_screen_readers() {
+        use farhelm_proto::AgentKind;
+        use farhelm_supervisor::agent_kind::reads_as_waiting;
         let tail = format!("earlier output\r\n{}", menu_block());
         for kind in [AgentKind::Claude, AgentKind::Codex] {
-            let integration = integration_for(kind).expect("integrated kind");
-            assert_eq!(
-                integration.sharpen(SessionStatus::Idle, &tail),
-                SessionStatus::Waiting,
+            assert!(
+                reads_as_waiting(kind, &tail),
                 "{kind:?} must read the replay menu as waiting"
             );
         }

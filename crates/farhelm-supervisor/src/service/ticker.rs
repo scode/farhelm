@@ -99,14 +99,15 @@
 //!
 //! # What the samples are for
 //!
-//! This module measures; it does not classify. `service::status`'s
-//! `live_status` reads exactly what is recorded here — how many of a
-//! session's own consecutive samples showed nothing new, and the tail it
-//! last showed — and turns it into running/waiting/idle, with the per-kind
-//! sharpeners matching a pending question or approval against that tail.
+//! This module measures and stores; it does not classify. Each successful
+//! capture is handed to the session kind's screen reader
+//! (`agent_kind::screen_reader`), which turns the screen plus this
+//! module's change-counting history — how many of the session's own
+//! consecutive samples showed nothing new — into a reading, and
+//! `service::status::live_status` maps the stored reading onto the wire.
 //!
-//! Keeping the thresholds there rather than here is what lets the whole
-//! classification be unit-tested against hand-built entries. Keeping them
+//! Keeping the rules in the readers rather than here is what lets the whole
+//! classification be unit-tested against hand-built screens and counts. Keeping them
 //! expressed in SAMPLES rather than seconds is what keeps this task free
 //! to be late — under a budgeted round robin its cadence is a function of
 //! how many sessions are live, and a classification that read a clock
@@ -166,9 +167,12 @@ use super::core::{SampleRead, SessionEntry, Supervisor};
 use super::launch_artifacts::cleanup_launch_artifacts;
 use super::status::{live_status, observe_entry};
 use super::terminals::{Terminal, tabs_from_pane_states};
+use crate::agent_kind::screen_reader::{
+    QUIET_SAMPLES_BEFORE_IDLE, Reading, SampleCounts, Screen, ScreenReader, generic_reading,
+    reader_for,
+};
 use crate::store::LastOutcome;
 use crate::tmux::retain_pane_tail;
-use farhelm_proto::{AgentKind, SessionStatus};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -196,8 +200,8 @@ use tracing::{debug, error, info, warn};
 /// Nothing depends on it because the classification does not read a clock
 /// at all: `status::live_status` counts a session's OWN consecutive
 /// unchanged samples ([`ActivitySample`]), so a longer effective period
-/// makes a transition arrive later without ever making it wrong. Tail
-/// freshness — what a sharpener matches against — has the same
+/// makes a transition arrive later without ever making it wrong. Screen
+/// freshness — what a reader recognizes prompts in — has the same
 /// population-dependent bound, with the same consequence: a prompt that
 /// appeared is noticed at the session's next sample, whenever that is.
 ///
@@ -209,17 +213,11 @@ pub(crate) const TICKER_INTERVAL: Duration = Duration::from_secs(2);
 ///
 /// Enough for the bottom of a normal terminal — an 80x24 screen of dense
 /// text is under 2 KiB — with headroom for a wide one, because the
-/// sharpeners have to see a whole approval prompt to recognize it. The cap
+/// readers have to see a whole approval prompt to recognize it. The cap
 /// exists because this is held per session for as long as the session
 /// lives, and a pane rendering a 500-column wall of text should not be
 /// able to grow the supervisor's resident memory through it.
 const SAMPLE_TAIL_BYTES: usize = 4096;
-
-/// Codex's composer cleanup needs to see farther than the retained status
-/// tail: changing three-byte sparkle cells near the final 4096-byte boundary
-/// can otherwise move unrelated text into or out of comparison. This larger
-/// capture is temporary; each sample retains only two 4096-byte strings.
-const CODEX_ACTIVITY_CAPTURE_BYTES: usize = 64 * 1024;
 
 /// How many pane tails one tick may capture.
 ///
@@ -322,10 +320,10 @@ pub(crate) const SAMPLING_ADMISSION_PERMITS: usize = 1;
 /// process has watched happen, and a value restored from disk would claim
 /// knowledge of a stretch of time nobody was looking.
 ///
-/// What the classifier (`status::live_status`) gets is deliberately raw —
-/// counts and a screen, not a verdict — so that the running/waiting/idle
-/// thresholds and the per-kind sharpening live in one place, beside the
-/// precedence rules they extend, rather than being half-decided here.
+/// The classification itself is the session kind's screen reader's: this
+/// cell only keeps the history a reader needs (counts and the previous
+/// comparison text) and stores what the reader concluded, so every rule
+/// lives in one place per harness rather than being half-decided here.
 ///
 /// # Why nothing here is a timestamp
 ///
@@ -380,21 +378,20 @@ pub(crate) struct ActivitySample {
     /// counting that as quiet would start every session's decay one step
     /// in.
     pub(crate) unchanged_streak: u64,
-    /// The pane's screen as of the last sample, bounded to
-    /// [`SAMPLE_TAIL_BYTES`] and trimmed of the blank rows a pane is
-    /// padded out with.
+    /// The screen text compared with the preceding sample, as the session's
+    /// reader shaped it ([`ScreenReader::comparison`]) and bounded to
+    /// [`SAMPLE_TAIL_BYTES`]. `None` before the first sample and after a
+    /// failed capture ([`ActivitySample::forget_tail`]).
+    pub(crate) comparison: Option<String>,
+    /// What the session's screen reader concluded from the most recent
+    /// successful capture, or the change-counting reading when there is no
+    /// screen to read (before the first sample, and after a failed capture
+    /// withdrew what the last screen showed).
     ///
-    /// Per-kind status recognition reads this raw value. Change detection
-    /// uses `comparison` below, which is identical for ordinary agents and
-    /// may remove a proven vendor redraw region for Codex.
-    pub(crate) tail: Option<String>,
-    /// The canonical screen compared with the preceding sample. This differs
-    /// from `tail` only for a recognized Codex composer, whose animation and
-    /// unsubmitted draft are not output activity.
-    comparison: Option<String>,
-    /// A positive Codex work indicator from the most recent successful
-    /// capture. It is discarded with the raw tail after a capture failure.
-    pub(crate) working: bool,
+    /// Stored rather than recomputed per reply: replies read it and never
+    /// run a reader, and the reading is a function of the capture, which is
+    /// not retained.
+    pub(crate) reading: Reading,
     /// Newest work-start key whose generation-conditional durable write has
     /// not succeeded yet.
     ///
@@ -488,20 +485,28 @@ impl ActivitySample {
     /// comparison against the re-established baseline reports the truth.
     #[cfg(test)]
     pub(crate) fn observe(&mut self, tail: String) -> bool {
-        self.observe_screen(tail.clone(), tail, false)
+        self.observe_screen(reader_for(farhelm_proto::AgentKind::Generic), &tail, &tail)
     }
 
-    /// Fold a screen whose raw status tail and activity comparison differ.
+    /// Fold one successful capture through the session's reader: update the
+    /// change-counting history from the reader's comparison text, then
+    /// store what the reader concludes from the screen and that history.
     ///
-    /// Production always calls this after applying the selected agent
-    /// integration. `observe` is a test convenience for exercising
-    /// the raw, generic path without duplicating the two identical strings.
+    /// `capture` is the grid as captured at the reader's requested size and
+    /// `tail` the same grid bounded to [`SAMPLE_TAIL_BYTES`]. Production
+    /// passes the session kind's reader; `observe` is a test convenience
+    /// for the generic path.
+    ///
+    /// The startup gap of a reloaded run ends on the first sample that is
+    /// fresh evidence: an observed change, a reading from recognized screen
+    /// content, or a full quiet streak.
     pub(crate) fn observe_screen(
         &mut self,
-        comparison: String,
-        tail: String,
-        working: bool,
+        reader: &dyn ScreenReader,
+        capture: &str,
+        tail: &str,
     ) -> bool {
+        let comparison = retain_pane_tail(&reader.comparison(capture), SAMPLE_TAIL_BYTES);
         let mut changed = false;
         if self.samples > 0 {
             match self.comparison.as_deref() {
@@ -518,23 +523,57 @@ impl ActivitySample {
             }
         }
         self.comparison = Some(comparison);
-        self.tail = Some(tail);
-        self.working = working;
         self.samples += 1;
-        if changed || working || self.unchanged_streak >= super::status::QUIET_SAMPLES_BEFORE_IDLE {
+        self.reading = reader.read(self.counts(), &Screen { capture, tail });
+        if changed || self.reading.anchored || self.unchanged_streak >= QUIET_SAMPLES_BEFORE_IDLE {
             self.startup_provisional = false;
         }
         changed
+    }
+
+    /// The change-counting history as a reader receives it.
+    pub(crate) fn counts(&self) -> SampleCounts {
+        SampleCounts {
+            samples: self.samples,
+            unchanged_streak: self.unchanged_streak,
+        }
+    }
+
+    /// Set this cell to a hand-chosen history and screen, reading the screen
+    /// with `kind`'s reader as a sample would (or falling back to change
+    /// counting when there is no screen), so classifier tests can state the
+    /// case they are about without replaying the comparisons that lead to it.
+    #[cfg(test)]
+    pub(crate) fn set_for_test(
+        &mut self,
+        kind: farhelm_proto::AgentKind,
+        samples: u64,
+        unchanged_streak: u64,
+        screen: Option<&str>,
+    ) {
+        self.samples = samples;
+        self.unchanged_streak = unchanged_streak;
+        self.reading = match screen {
+            Some(text) => reader_for(kind).read(
+                self.counts(),
+                &Screen {
+                    capture: text,
+                    tail: text,
+                },
+            ),
+            None => generic_reading(self.counts()),
+        };
     }
 
     /// Drop the retained screen after a capture this session was SELECTED
     /// for failed, without recording an observation.
     ///
     /// The bug this closes is specific and durable, which is why forgetting
-    /// is worth doing at all. A tail is not only change-detection input: it
-    /// is the evidence the per-kind sharpeners read, and they read the LAST
-    /// one indefinitely. So a session whose pane showed an approval prompt,
-    /// whose user then answered it, and whose captures then began failing
+    /// is worth doing at all. A stored reading is not refreshed until the
+    /// next successful capture, so a reading taken from a screen would
+    /// otherwise outlive that screen indefinitely. So a session whose pane
+    /// showed an approval prompt, whose user then answered it, and whose
+    /// captures then began failing
     /// — a pane that is still alive, so still classified from its
     /// baseline — would go on reporting `Waiting` forever on the strength
     /// of a screen that stopped being true at the first failure. Nothing
@@ -545,8 +584,9 @@ impl ActivitySample {
     /// look: an unreachable pane is not evidence of stillness, and letting
     /// a run of failures decay a session to `Idle` would be the same wrong
     /// inference `sample_pass` refuses to make when tmux answers nothing at
-    /// all. The baseline simply stops moving, which is honest, and
-    /// sharpening stops claiming anything, which is the point.
+    /// all. The baseline simply stops moving, which is honest, and the
+    /// reading falls back to change counting, which claims nothing about the
+    /// screen — that is the point.
     ///
     /// Change detection is unaffected in the way that matters: the next
     /// SUCCESSFUL capture has nothing to compare against, so it records no
@@ -565,9 +605,8 @@ impl ActivitySample {
     /// self-corrects on the next sample, the other is a durable ordering
     /// key that does not.
     pub(crate) fn forget_tail(&mut self) {
-        self.tail = None;
         self.comparison = None;
-        self.working = false;
+        self.reading = generic_reading(self.counts());
     }
 }
 
@@ -1085,7 +1124,7 @@ async fn sample_pass(
             debug!(
                 error = %format!("{e:#}"),
                 "could not probe pane liveness for this sampling pass; forgetting every \
-                 retained screen so nothing is sharpened from stale evidence"
+                 retained screen so nothing is read from stale evidence"
             );
             // Nothing was looked at, so nothing may be CLASSIFIED from what
             // was last seen either. The per-pane failure below invalidates
@@ -1095,7 +1134,7 @@ async fn sample_pass(
             // otherwise hold its session at `Waiting` for as long as these
             // probes keep failing, which is indefinitely, and which the
             // LIST path cannot correct because its own probe succeeding is
-            // what makes those sessions live enough to be sharpened at all.
+            // what makes those sessions live enough to be classified at all.
             //
             // Sample counts are deliberately untouched, for the same reason
             // they are on the per-pane path: an unreachable tmux is not
@@ -1258,6 +1297,7 @@ async fn sample_pass(
             break;
         }
         let (entry, terminal) = &live[(start + offset) % live.len()];
+        let reader = reader_for(entry.snapshot.kind);
         // Advanced BEFORE the capture rather than after it, so a pass that
         // stops (or whose capture fails) still leaves the rotation past
         // this session: the alternative would resample whatever the ticker
@@ -1272,11 +1312,7 @@ async fn sample_pass(
         ) {
             Some(fault) => Err(fault),
             None => {
-                let capture_bytes = if entry.snapshot.kind == AgentKind::Codex {
-                    CODEX_ACTIVITY_CAPTURE_BYTES
-                } else {
-                    SAMPLE_TAIL_BYTES
-                };
+                let capture_bytes = reader.capture_bytes().unwrap_or(SAMPLE_TAIL_BYTES);
                 sup.tmux
                     .capture_pane_tail(&terminal.tmux_name, &terminal.pane, capture_bytes)
                     .await
@@ -1288,7 +1324,7 @@ async fn sample_pass(
                 debug!(
                     session = %entry.info.id, error = %format!("{e:#}"),
                     "could not sample this session's pane; forgetting the screen it last showed \
-                     so nothing is sharpened from stale evidence"
+                     so nothing is read from stale evidence"
                 );
                 // The SELECTED-but-failed case: this session's pane was
                 // reachable enough to be chosen and its screen could not be
@@ -1304,54 +1340,27 @@ async fn sample_pass(
                 continue;
             }
         };
-        // Codex needs its larger temporary capture before the final cap so
-        // sparkle-byte count cannot shift unrelated text across 4096. The
-        // raw status tail remains separate: waiting recognition must read
-        // exactly what tmux showed, not a composer-cleaned reconstruction.
+        // A reader may ask for a larger capture than the retained tail (Codex's
+        // composer masking does, so sparkle-byte count cannot shift unrelated
+        // text across the cap). Prompt recognition still reads the tail: what
+        // tmux showed at the bottom, not a masked reconstruction.
         let status_tail = retain_pane_tail(&tail, SAMPLE_TAIL_BYTES);
-        let screen = entry.snapshot.integration().map_or_else(
-            || crate::agent_kind::ActivityScreen {
-                comparison: tail.clone(),
-                working: false,
-            },
-            |integration| integration.activity_screen(&tail),
-        );
-        let comparison = retain_pane_tail(&screen.comparison, SAMPLE_TAIL_BYTES);
         // The old verdict is read before replacing the sample. A first or
         // recovery sample is therefore only a baseline: it cannot invent a
         // transition from no prior observation.
         let previous_status = live_status(entry);
-        let (changed, was_provisional) = {
-            let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
-            let was_provisional = activity.startup_provisional;
-            let changed = activity.observe_screen(comparison, status_tail, screen.working);
-            (changed, was_provisional)
-        };
-        // Waiting is evidence from the new screen even when the screen has
-        // no earlier baseline for comparison. Retire the startup gap once
-        // that answer has been published; if a later capture fails,
-        // `forget_tail` must be able to withdraw the stale waiting claim.
-        settle_startup_wait(entry, was_provisional);
+        let changed = entry
+            .run
+            .activity
+            .lock()
+            .expect("activity mutex poisoned")
+            .observe_screen(reader, &tail, &status_tail);
         if changed {
             note_activity(sup, entry).await;
             if observed_work_start(&previous_status, &live_status(entry), changed) {
                 persist_work_started(sup, entry, true).await;
             }
         }
-    }
-}
-
-/// Accept a freshly recognized wait as enough evidence to leave startup.
-/// A later failed capture must then withdraw `Waiting` through
-/// `forget_tail`, rather than leave the helm preserving it as provisional.
-fn settle_startup_wait(entry: &SessionEntry, was_provisional: bool) {
-    if was_provisional && live_status(entry) == SessionStatus::Waiting {
-        entry
-            .run
-            .activity
-            .lock()
-            .expect("activity mutex poisoned")
-            .startup_provisional = false;
     }
 }
 
@@ -1643,6 +1652,7 @@ mod tests {
     use super::super::handlers::handle_control;
     use super::super::status::session_status;
     use super::*;
+    use crate::agent_kind::screen_reader::ScreenState;
     use crate::agent_kind::{CaptureWindowBounds, IntegrationSnapshot};
     use crate::store::{LastOutcome, StoredSession, now_unix};
     use farhelm_proto::{AgentKind, ControlMsg, SessionStatus};
@@ -1726,7 +1736,7 @@ mod tests {
     }
 
     /// [`install_entry`] for a session that claims an integrated agent
-    /// kind, which is what makes the per-kind sharpeners apply to it. The
+    /// kind, which is what makes that kind's screen reader apply to it. The
     /// snapshot is the only thing classification reads to decide that, so
     /// no launch has to be faked.
     async fn install_entry_of_kind(
@@ -1995,7 +2005,7 @@ mod tests {
             .activity
             .lock()
             .expect("activity mutex")
-            .tail
+            .comparison
             .clone();
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
         let last_captured = loop {
@@ -2060,7 +2070,9 @@ mod tests {
                 .capture_pane_tail(
                     &terminal.tmux_name,
                     &terminal.pane,
-                    CODEX_ACTIVITY_CAPTURE_BYTES,
+                    reader_for(AgentKind::Codex)
+                        .capture_bytes()
+                        .expect("Codex asks for a larger capture"),
                 )
                 .await
                 .expect("the owned pane remains readable");
@@ -3201,12 +3213,12 @@ mod tests {
             "change can only be established by comparing two samples"
         );
         assert!(
-            busy.tail
+            busy.comparison
                 .as_deref()
                 .is_some_and(|tail| tail.contains("tick")),
             "the tail is what the sharpeners read, so it has to carry the pane's real \
              text; got {:?}",
-            busy.tail
+            busy.comparison
         );
         let still = still.lock().expect("activity mutex");
         assert_eq!(
@@ -3339,7 +3351,7 @@ mod tests {
             "a change resets the decay outright; the classifier reads this as 'how many times \
              running have I seen nothing new'"
         );
-        assert_eq!(sample.tail.as_deref(), Some("hello world"));
+        assert_eq!(sample.comparison.as_deref(), Some("hello world"));
 
         assert!(sample.observe("hello there".to_string()));
         assert_eq!(sample.unchanged_streak, 0);
@@ -3426,8 +3438,7 @@ mod tests {
     /// canonicalizer-only assertions cannot prove the sampler consumes it.
     #[farhelm_testtrace::test]
     fn codex_normalized_samples_reach_idle_without_dating_input_but_output_is_dated() {
-        let integration = crate::agent_kind::integration_for(AgentKind::Codex)
-            .expect("Codex has an activity integration");
+        let reader = reader_for(AgentKind::Codex);
         let frames = [
             "output\n\n› Ask Codex to do anything\n\nfooter",
             "output\n⠁\n› ⠂Ask Codex to do anything\n⠄\nfooter",
@@ -3437,12 +3448,8 @@ mod tests {
         let mut sample = ActivitySample::default();
         let mut dated_changes = 0;
         for frame in frames {
-            let screen = integration.activity_screen(frame);
-            let changed = sample.observe_screen(
-                retain_pane_tail(&screen.comparison, SAMPLE_TAIL_BYTES),
-                retain_pane_tail(frame, SAMPLE_TAIL_BYTES),
-                screen.working,
-            );
+            let changed =
+                sample.observe_screen(reader, frame, &retain_pane_tail(frame, SAMPLE_TAIL_BYTES));
             dated_changes += u64::from(changed);
         }
         assert_eq!(
@@ -3455,13 +3462,8 @@ mod tests {
         );
 
         let output = "output\nnew tool result\n\n› another draft\n\nfooter";
-        let screen = integration.activity_screen(output);
         assert!(
-            sample.observe_screen(
-                retain_pane_tail(&screen.comparison, SAMPLE_TAIL_BYTES),
-                retain_pane_tail(output, SAMPLE_TAIL_BYTES),
-                screen.working,
-            ),
+            sample.observe_screen(reader, output, &retain_pane_tail(output, SAMPLE_TAIL_BYTES)),
             "real output above the composer must request a last-activity update"
         );
         assert_eq!(sample.unchanged_streak, 0);
@@ -3472,53 +3474,50 @@ mod tests {
     /// only the following comparison can date output.
     #[farhelm_testtrace::test]
     fn codex_capture_failure_clears_all_evidence_and_recovery_does_not_date_output() {
+        let reader = reader_for(AgentKind::Codex);
+        let busy =
+            |elapsed: &str| format!("Working ({elapsed} • esc to interrupt)\n\n› \n\nfooter");
         let mut sample = ActivitySample::default();
-        assert!(!sample.observe_screen(
-            "canonical".to_string(),
-            "Working (3s • esc to interrupt)".to_string(),
-            true,
-        ));
+        let first = busy("3s");
+        assert!(!sample.observe_screen(reader, &first, &first));
+        assert!(sample.reading.anchored, "premise: the widget is recognized");
         sample.forget_tail();
-        assert_eq!(sample.tail, None);
         assert_eq!(sample.comparison, None);
-        assert!(!sample.working);
-
         assert!(
-            !sample.observe_screen(
-                "recovered output".to_string(),
-                "Working (4s • esc to interrupt)".to_string(),
-                true,
-            ),
+            !sample.reading.anchored,
+            "the failure withdraws what the last screen showed"
+        );
+
+        let recovered = format!("recovered output\n{}", busy("4s"));
+        assert!(
+            !sample.observe_screen(reader, &recovered, &recovered),
             "recovery has no retained baseline against which to prove a change"
         );
-        assert!(
-            sample.working,
+        assert_eq!(
+            sample.reading.state,
+            ScreenState::Working,
             "fresh positive evidence is retained for status"
         );
-        assert!(sample.observe_screen(
-            "later output".to_string(),
-            "Working (5s • esc to interrupt)".to_string(),
-            true,
-        ));
+        assert!(sample.reading.anchored);
+        let later = format!("later output\n{}", busy("5s"));
+        assert!(sample.observe_screen(reader, &later, &later));
     }
 
     /// Claude has no comparison canonicalizer. Its screen remains the raw
     /// capped tail and ordinary changes retain the pre-existing behavior.
     #[farhelm_testtrace::test]
     fn another_integrated_harness_preserves_raw_activity_comparison() {
-        let integration = crate::agent_kind::integration_for(AgentKind::Claude)
-            .expect("Claude has an integration");
+        let reader = reader_for(AgentKind::Claude);
         let raw = format!("{}tail", "x".repeat(SAMPLE_TAIL_BYTES));
-        let screen = integration.activity_screen(&raw);
-        assert_eq!(screen.comparison, raw);
-        assert!(!screen.working);
+        assert_eq!(reader.comparison(&raw), raw);
+        assert_eq!(reader.capture_bytes(), None);
 
         let mut sample = ActivitySample::default();
-        let capped = retain_pane_tail(&screen.comparison, SAMPLE_TAIL_BYTES);
-        assert!(!sample.observe_screen(capped.clone(), capped, false));
+        let capped = retain_pane_tail(&raw, SAMPLE_TAIL_BYTES);
+        assert!(!sample.observe_screen(reader, &capped, &capped));
         let changed = format!("{}TAIL", "x".repeat(SAMPLE_TAIL_BYTES));
         let changed = retain_pane_tail(&changed, SAMPLE_TAIL_BYTES);
-        assert!(sample.observe_screen(changed.clone(), changed, false));
+        assert!(sample.observe_screen(reader, &changed, &changed));
     }
 
     /// Promotion requires positive output evidence across a known rest
@@ -4250,7 +4249,7 @@ mod tests {
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
         let (samples, tail) = {
             let sample = sample.lock().expect("activity mutex");
-            (sample.samples, sample.tail.clone())
+            (sample.samples, sample.comparison.clone())
         };
         assert_eq!(samples, 1, "premise: the pass before the failure worked");
         assert_eq!(cursor.as_deref(), Some("one"));
@@ -4277,7 +4276,7 @@ mod tests {
                 "a pass that found no live pane must not record an observation"
             );
             assert_eq!(
-                after.tail, tail,
+                after.comparison, tail,
                 "and must leave the previous screen in place rather than blanking it"
             );
             assert_eq!(
@@ -4607,12 +4606,11 @@ mod tests {
             .lock()
             .expect("activity mutex")
             .observe_screen(
-                CLAUDE_APPROVAL_DIALOG.to_string(),
-                CLAUDE_APPROVAL_DIALOG.to_string(),
-                false,
+                reader_for(AgentKind::Claude),
+                CLAUDE_APPROVAL_DIALOG,
+                CLAUDE_APPROVAL_DIALOG,
             );
         assert_eq!(live_status(&entry), SessionStatus::Waiting);
-        settle_startup_wait(&entry, true);
         assert!(
             !entry
                 .run
@@ -4726,9 +4724,7 @@ mod tests {
                 .insert("one".to_string(), Arc::clone(&entry));
             {
                 let mut activity = entry.run.activity.lock().expect("activity mutex");
-                activity.samples = 9;
-                activity.unchanged_streak = 9;
-                activity.tail = Some(CLAUDE_APPROVAL_DIALOG.to_string());
+                activity.set_for_test(AgentKind::Claude, 9, 9, Some(CLAUDE_APPROVAL_DIALOG));
             }
             let states = sup.tmux.pane_states().await.expect("probe");
             assert_eq!(
@@ -4755,7 +4751,7 @@ mod tests {
                     "and must not count as an observation, least of all a quiet one ({read})"
                 );
                 assert_eq!(
-                    activity.tail, None,
+                    activity.comparison, None,
                     "premise ({read}): the screen really is gone, not merely unsharpened"
                 );
             }
@@ -4771,7 +4767,7 @@ mod tests {
                 "the recovering pass is one observation, not a re-baseline ({read})"
             );
             assert!(
-                activity.tail.is_some(),
+                activity.comparison.is_some(),
                 "and it restores the screen the failure dropped ({read})"
             );
             assert_eq!(
@@ -5435,7 +5431,7 @@ mod tests {
             classify(&sup, "asking").await,
             SessionStatus::Waiting,
             "a claude-kind session showing an approval prompt is waiting; tail was {:?}",
-            asking.lock().expect("activity mutex").tail
+            asking.lock().expect("activity mutex").comparison
         );
         assert_eq!(
             classify(&sup, "unintegrated").await,
@@ -5483,7 +5479,11 @@ mod tests {
             // the sampler's observation seam; a raw-tail-only seed would
             // correctly count the next capture as baseline recovery.
             for _ in 0..4 {
-                activity.observe(CLAUDE_APPROVAL_DIALOG.to_string());
+                activity.observe_screen(
+                    reader_for(AgentKind::Claude),
+                    CLAUDE_APPROVAL_DIALOG,
+                    CLAUDE_APPROVAL_DIALOG,
+                );
             }
         }
         sup.sessions

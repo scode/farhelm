@@ -85,34 +85,33 @@
 //!   signal ([`read_record`]) rather than as a new conversation, and a
 //!   fork's new file never displaces an identity already claimed.
 //!
-//! ## Sharpening is allowed to be wrong; capture is not
+//! ## Screen reading is allowed to be wrong; capture is not
 //!
 //! The two halves have OPPOSITE failure economics, and reading one with the
 //! other's instincts is the mistake this section exists to prevent.
 //!
 //! Capture's uncertainty is unrecoverable (resuming the wrong conversation
 //! is silent and permanent), so it refuses to guess at all — see
-//! `capture`'s own docs. Sharpening's uncertainty is a badge in a list:
-//! SPEC.md fixes the waiting/idle boundary as heuristic BY CONTRACT and
-//! forbids anything about interaction from waiting on a status, so a
-//! sharpener that misses a prompt costs a session that reads idle while it
+//! `capture`'s own docs. A screen reader's uncertainty is a badge in a
+//! list: SPEC.md fixes the waiting/idle boundary as heuristic BY CONTRACT
+//! and forbids anything about interaction from waiting on a status, so a
+//! reader that misses a prompt costs a session that reads idle while it
 //! waits, and one that fires early costs the reverse. Both are cosmetic.
 //!
 //! What neither is allowed to do is cost anything else, and the properties
-//! that guarantee it are worth stating exactly rather than loosely.
-//! [`AgentIntegration::sharpen`] takes a plain `&str` and returns a status:
-//! it performs no I/O, awaits nothing, acquires no admission permit, and
-//! cannot block on anything a request needs. It IS called while its
-//! session's `activity` cell is locked, so the honest claim is "holds one
-//! per-entry leaf mutex for a substring search", not "holds no lock at
-//! all" — and not "uncontended" either, which an earlier version of this
-//! paragraph claimed: the sampler WRITES that cell every tick, so a reply
-//! and a tick can genuinely contend for it. What the leaf-lock property
-//! guarantees is the part that matters — the mutex is held across no await
-//! and alongside no other lock, so the wait is bounded by one substring
-//! search or one sample fold and can never participate in a deadlock.
+//! that guarantee it are worth stating exactly rather than loosely. A
+//! [`screen_reader::ScreenReader`] takes plain strings and returns a
+//! reading: it performs no I/O, awaits nothing, acquires no admission
+//! permit, and cannot block on anything a request needs. The sampler calls
+//! it while its session's `activity` cell is locked, so the honest claim is
+//! "holds one per-entry leaf mutex for a substring search", not "holds no
+//! lock at all". What the leaf-lock property guarantees is the part that
+//! matters — the mutex is held across no await and alongside no other
+//! lock, so the wait is bounded by one screen read or one sample fold and
+//! can never participate in a deadlock. Replies never run a reader; they
+//! read the stored result.
 
-use farhelm_proto::{AgentKind, RestartOffer, SessionStatus};
+use farhelm_proto::{AgentKind, RestartOffer};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -122,6 +121,7 @@ pub(crate) mod grok;
 pub(crate) mod omp;
 #[cfg(test)]
 mod screen_fixtures;
+pub(crate) mod screen_reader;
 pub use capture::{
     CAPTURE_PUBLICATION_GRACE, CAPTURE_WINDOW_AFTER, CAPTURE_WINDOW_BEFORE, Candidate,
     CaptureVerdict, CaptureWindow, CaptureWindowBounds, RecordCorrelators, RecordStamp,
@@ -352,11 +352,12 @@ fn validate_locator(vendor: LocatorVendor, locator: &SessionLocator) -> anyhow::
 /// tail) lives with the session, and what remains here is pure per-KIND
 /// knowledge.
 ///
-/// Every method except [`AgentIntegration::sharpen`] is required so each
-/// kind makes its capture and resume policy explicit. Returning no scan
-/// root is a real policy: report-only kinds must not infer ownership from
-/// nearby files. Sharpening is different; an unrecognized prompt retains
-/// the generic activity baseline rather than making the integration invalid.
+/// Every method is required so each kind makes its capture and resume
+/// policy explicit. Returning no scan root is a real policy: report-only
+/// kinds must not infer ownership from nearby files. Status recognition is
+/// not part of this trait; a kind's screen reader lives in
+/// [`screen_reader`], so a kind can have one without an integration and the
+/// reverse.
 pub trait AgentIntegration: Send + Sync {
     /// The resume invocation this kind gets by default, preserving the
     /// complete original launch argv before Farhelm appends per-launch hook
@@ -393,82 +394,6 @@ pub trait AgentIntegration: Send + Sync {
     /// implementation must tolerate a truncated final line rather than
     /// treating it as corruption.
     fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>>;
-
-    /// Refine the generic activity classification for one session using
-    /// the last screen the sampler captured from its pane (PLAN_M6_75.md
-    /// item 2).
-    ///
-    /// `baseline` is what `service::status` concluded from this session's
-    /// own run of unchanged samples alone — `Running` or `Idle`, never a
-    /// dead status, because a session with no live pane is never sharpened.
-    /// `tail` is the pane's visible grid as of the last SUCCESSFUL capture
-    /// (`ticker::ActivitySample::tail`), bottom-anchored and lossily
-    /// decoded; a session whose captures have started failing has no tail
-    /// at all rather than a stale one, so nothing here is ever asked to
-    /// judge a screen of unknown age.
-    ///
-    /// ## What an implementation may do
-    ///
-    /// Exactly one thing is worth doing here and it is the whole point of
-    /// the method: PROMOTE a live baseline to [`SessionStatus::Waiting`]
-    /// when the tail shows this agent's own unanswered question or approval
-    /// prompt, or leave `baseline` alone. Two rules bound that, and both
-    /// are enforced rather than trusted:
-    ///
-    /// - A NON-LIVE baseline must come back untouched. A screen is not
-    ///   evidence about a process, so a stale prompt on the pane of a
-    ///   session that has exited must not resurrect it as `Waiting`.
-    ///   [`promote_if_waiting`] is where the implementations in this module
-    ///   enforce that, at the seam, because the consumer downstream can
-    ///   only check that an ANSWER is live — not that the promotion was
-    ///   legitimate.
-    /// - Anything OTHER than `Waiting` is discarded, and this is a
-    ///   whitelist rather than a rejection of dead statuses:
-    ///   `service::status::waiting_or_baseline` takes exactly `Waiting`
-    ///   through and keeps the baseline for everything else — `Running` and
-    ///   `Idle` included. So an implementation cannot flip a session's
-    ///   activity classification either, not just its liveness. Returning
-    ///   `Idle` because a screen looks still is precisely the mistake that
-    ///   would otherwise pass, since the sampler's own count of unchanged
-    ///   looks is the only thing entitled to that answer.
-    ///
-    /// ## Why it is defaulted, and what the default means
-    ///
-    /// The default returns `baseline` unchanged, so adding a kind never
-    /// silently costs it a status. That matters because the OTHER shape —
-    /// `integration_for` returning `None` — already carries a meaning:
-    /// [`AgentKind::Generic`] has no integration at all, and generic
-    /// sessions still get the baseline classification. "No sharpening" and
-    /// "no status" must therefore be different things, and a required
-    /// method would have made every new integration write a stub that
-    /// looked like a contract.
-    ///
-    /// ## Robustness
-    ///
-    /// Wrong is cosmetic (this module's own docs); PANICKING is not.
-    /// `tail` is arbitrary terminal output that survived a lossy UTF-8
-    /// decode, so it can contain control bytes, replacement characters,
-    /// half-drawn escape sequences, and multi-byte characters at any
-    /// offset. An implementation must therefore never index or slice by
-    /// byte offset — this is a classification running on the reply path of
-    /// a supervisor that is also serving live terminals.
-    fn sharpen(&self, baseline: SessionStatus, tail: &str) -> SessionStatus {
-        let _ = tail;
-        baseline
-    }
-
-    /// Derive activity evidence from one bounded visible-grid capture.
-    ///
-    /// The default preserves every byte. An integration may canonicalize a
-    /// vendor-owned redraw region and set `working` only for a positive,
-    /// current vendor indicator. The sampler retains a separate raw status
-    /// tail, so comparison cleanup cannot erase approval evidence.
-    fn activity_screen(&self, raw: &str) -> ActivityScreen {
-        ActivityScreen {
-            comparison: raw.to_string(),
-            working: false,
-        }
-    }
 
     /// Command-line elements that make THIS launch report its conversation
     /// identity through `farhelm internal hook`, appended verbatim after the
@@ -508,17 +433,6 @@ pub trait AgentIntegration: Send + Sync {
         let _ = (hook_exe, instructions);
         Vec::new()
     }
-}
-
-/// One integration's activity interpretation of a sampled visible grid.
-///
-/// Only `comparison` can reset the generic quiet counter or date activity.
-/// `working` is a narrow vendor hint: it keeps a proven active screen from
-/// decaying to idle, but it cannot manufacture a lifecycle state and a
-/// recognized waiting prompt still wins.
-pub struct ActivityScreen {
-    pub(crate) comparison: String,
-    pub(crate) working: bool,
 }
 
 /// The command string both integrations embed in their vendor's hook
@@ -574,6 +488,26 @@ pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration>
         AgentKind::Grok => Some(&GrokIntegration),
         AgentKind::Generic => None,
     }
+}
+
+/// Whether `kind`'s screen reader reads `screen` (one visible grid, bottom
+/// last) as its agent waiting on the user.
+///
+/// A cross-crate seam for the fake agent fixture (`farhelm-fixtures`),
+/// whose replay mode must draw a menu that the real readers classify as
+/// waiting; its test pins that contract against the production reader
+/// rather than a copy of it. The supervisor itself classifies through the
+/// sampler and never calls this.
+pub fn reads_as_waiting(kind: AgentKind, screen: &str) -> bool {
+    use screen_reader::{SampleCounts, Screen, ScreenState, reader_for};
+    let screen = Screen {
+        capture: screen,
+        tail: screen,
+    };
+    reader_for(kind)
+        .read(SampleCounts::default(), &screen)
+        .state
+        == ScreenState::Waiting
 }
 
 /// Claude Code: one JSONL record per conversation, under a project
@@ -1282,15 +1216,6 @@ impl AgentIntegration for ClaudeIntegration {
         )
     }
 
-    /// Claude Code asks for permission through a bordered dialog at the
-    /// bottom of the screen: a question line, then a numbered list of
-    /// answers. [`promote_if_waiting`] is that shape plus the baseline
-    /// gate, and [`CLAUDE_QUESTION_PHRASES`] is the vocabulary it is
-    /// required to appear with.
-    fn sharpen(&self, baseline: SessionStatus, tail: &str) -> SessionStatus {
-        promote_if_waiting(baseline, tail, CLAUDE_QUESTION_PHRASES)
-    }
-
     /// `--settings <json>` carrying one SessionStart hook. Claude Code
     /// MERGES an inline `--settings` JSON's hooks with whatever the user's
     /// own settings files already declare — both fire — so this never
@@ -1356,21 +1281,6 @@ impl AgentIntegration for CodexIntegration {
 
     fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
         Ok(codex::parse_record(text)?.map(|(record, _)| record))
-    }
-
-    /// Codex asks the same way Claude does — a question followed by
-    /// numbered answers at the bottom of the screen — so it reuses the same
-    /// recognizer with its own vocabulary ([`CODEX_QUESTION_PHRASES`])
-    /// rather than a second hand-rolled matcher. The shape is shared
-    /// because both are TUIs built around the same interaction, not because
-    /// one vendor copied the other; if either diverges, the phrase list is
-    /// what changes, and only for that kind.
-    fn sharpen(&self, baseline: SessionStatus, tail: &str) -> SessionStatus {
-        promote_if_waiting(baseline, tail, CODEX_QUESTION_PHRASES)
-    }
-
-    fn activity_screen(&self, raw: &str) -> ActivityScreen {
-        codex_activity_screen(raw)
     }
 
     /// Five argv elements: the per-launch hook-trust bypass, then two `-c`
@@ -1487,7 +1397,7 @@ pub(crate) fn toml_basic_string(s: &str) -> String {
 // ---------------------------------------------------------------------
 // Prompt-shape recognition (PLAN_M6_75.md item 2)
 //
-// The one mechanism both sharpeners run on, and the vendor vocabulary
+// The one mechanism both waiting recognizers (`screen_reader`) run on, and the vendor vocabulary
 // each one runs it with. Kept together, and kept small, because the
 // pressure on this code is always in the same direction: someone notices
 // a prompt that was not caught and loosens a test. A recognizer that
@@ -1547,7 +1457,8 @@ const CODEX_SPARKLE_DOTS: [char; 8] = [
 /// or configuration rather than agent output.
 const CODEX_COMPOSER_MARKER: &str = "› <codex-composer>";
 
-/// Classify one Codex capture before the sampler applies its retained cap.
+/// Mask a recognized Codex composer out of one capture before change
+/// comparison: its sparkle animation and unsubmitted draft are not output.
 ///
 /// This recognizes one deliberately small grammar: an empty or drafted
 /// composer, bounded above and below by blank/sparkle rows, immediately
@@ -1555,24 +1466,26 @@ const CODEX_COMPOSER_MARKER: &str = "› <codex-composer>";
 /// intact. That restriction is what keeps a popup, arbitrary prompt, or
 /// output that happens to contain Braille from disappearing from activity
 /// comparison.
-fn codex_activity_screen(raw: &str) -> ActivityScreen {
+fn codex_comparison(raw: &str) -> String {
     let mut lines: Vec<&str> = raw.lines().collect();
     let Some((upper_padding, lower_padding)) = codex_composer_bounds(&lines) else {
-        return ActivityScreen {
-            comparison: raw.to_string(),
-            working: false,
-        };
+        return raw.to_string();
     };
-
-    let working = codex_status_region_start(&lines, upper_padding).is_some();
     lines.splice(
         upper_padding..=lower_padding,
         std::iter::once(CODEX_COMPOSER_MARKER),
     );
-    ActivityScreen {
-        comparison: lines.join("\n"),
-        working,
-    }
+    lines.join("\n")
+}
+
+/// Whether a Codex capture shows its current `Working (…)` widget adjoining a
+/// recognized bottom composer. A widget anywhere else on the screen is
+/// history or quoted text, not the current state.
+fn codex_working(raw: &str) -> bool {
+    let lines: Vec<&str> = raw.lines().collect();
+    codex_composer_bounds(&lines).is_some_and(|(upper_padding, _)| {
+        codex_status_region_start(&lines, upper_padding).is_some()
+    })
 }
 
 /// Locate a current Codex status widget directly above the composer.
@@ -2060,7 +1973,7 @@ struct MenuChoice<'a> {
 /// Character-wise rather than by byte offset, which is not stylistic: the
 /// input is a lossily decoded terminal screen, so a `&line[..2]` would
 /// panic the moment a dialog's border character landed at the split (see
-/// [`AgentIntegration::sharpen`]'s robustness note).
+/// `screen_reader`'s robustness note).
 ///
 /// Single digits only. Every menu either vendor shows has a handful of
 /// options, so `10.` is not a case worth admitting — and refusing it also
@@ -2143,35 +2056,6 @@ fn starts_with_answer_word(text: &str) -> bool {
     rest.chars()
         .next()
         .is_none_or(|next| ANSWER_WORD_TERMINATORS.contains(&next))
-}
-
-/// Apply one vendor's prompt vocabulary to a baseline, promoting only a
-/// LIVE baseline and only to [`SessionStatus::Waiting`].
-///
-/// The shared body of both implementations' [`AgentIntegration::sharpen`],
-/// and the place the trait's "never invent liveness" rule is actually
-/// enforced. It has to be enforced HERE, at the seam, rather than only
-/// where `service::status` consumes the result: that consumer can check
-/// that an ANSWER is live, but not that a promotion was legitimate, so a
-/// sharpener handed `Exited` and returning `Waiting` would sail straight
-/// through — a screen full of a stale prompt claiming a dead session is
-/// blocked on a human.
-///
-/// `sharpen` is a public method on a public trait, so "the only caller
-/// passes a live baseline" is a property of today's tree rather than of
-/// the API. The gate costs one comparison and removes the question.
-///
-/// Considered and rejected: narrowing the parameter to a `LiveStatus`
-/// newtype, which would make the invariant unrepresentable. It would also
-/// introduce a second status vocabulary next to the wire enum every caller
-/// already holds, and force a conversion at both ends of a seam whose
-/// entire subject matter is cosmetic. A guard plus tests buys the same
-/// property here without that.
-fn promote_if_waiting(baseline: SessionStatus, tail: &str, phrases: &[&str]) -> SessionStatus {
-    if baseline.is_live() && looks_like_a_choice_prompt(tail, phrases) {
-        return SessionStatus::Waiting;
-    }
-    baseline
 }
 
 /// The pointers a TUI draws at the currently selected option.
@@ -3213,7 +3097,41 @@ pub fn derive_kind(argv0: &str) -> AgentKind {
 
 #[cfg(test)]
 mod tests {
+    use super::screen_reader::{SampleCounts, Screen, ScreenState, reader_for};
     use super::*;
+    use farhelm_proto::SessionStatus;
+
+    /// The masked comparison text and the working hint the Codex reader
+    /// derives from one capture, as the tests below assert them.
+    struct CodexScreen {
+        comparison: String,
+        working: bool,
+    }
+
+    fn codex_screen(raw: &str) -> CodexScreen {
+        CodexScreen {
+            comparison: codex_comparison(raw),
+            working: codex_working(raw),
+        }
+    }
+
+    /// The status a live `baseline` ends up with once `kind`'s reader has
+    /// looked at `tail`: `Waiting` when the reader recognizes a pending
+    /// question, the baseline otherwise. Lets the prompt-recognition tests
+    /// below state expectations in wire statuses.
+    fn sharpened(kind: AgentKind, baseline: SessionStatus, tail: &str) -> SessionStatus {
+        let screen = Screen {
+            capture: tail,
+            tail,
+        };
+        match reader_for(kind)
+            .read(SampleCounts::default(), &screen)
+            .state
+        {
+            ScreenState::Waiting => SessionStatus::Waiting,
+            ScreenState::Working | ScreenState::Idle => baseline,
+        }
+    }
 
     /// A sanitized Codex bottom pane. Its footer text is deliberately
     /// arbitrary: users configure it, while the composer geometry is the
@@ -3227,10 +3145,9 @@ mod tests {
     /// recognized composer, or the activity sampler dates animation frames.
     #[farhelm_testtrace::test]
     fn codex_composer_particles_and_drafts_do_not_change_activity_evidence() {
-        let plain =
-            CodexIntegration.activity_screen(&codex_composer("Ask Codex to do anything", "", ""));
+        let plain = codex_screen(&codex_composer("Ask Codex to do anything", "", ""));
         for dot in CODEX_SPARKLE_DOTS {
-            let decorated = CodexIntegration.activity_screen(&codex_composer(
+            let decorated = codex_screen(&codex_composer(
                 &format!("{dot}Ask Codex to do anything"),
                 &dot.to_string(),
                 &dot.to_string(),
@@ -3238,8 +3155,8 @@ mod tests {
             assert_eq!(decorated.comparison, plain.comparison, "dot {dot:?}");
         }
 
-        let first = CodexIntegration.activity_screen(&codex_composer("draft", "", ""));
-        let edited = CodexIntegration.activity_screen(&codex_composer(
+        let first = codex_screen(&codex_composer("draft", "", ""));
+        let edited = codex_screen(&codex_composer(
             "different draft\n⠁⠂wrapped draft row",
             "",
             "",
@@ -3252,22 +3169,19 @@ mod tests {
     /// composer, including a blank first line whose prompt captures as `›`.
     #[farhelm_testtrace::test]
     fn codex_blank_draft_rows_remain_composer_after_tmux_trims_cells() {
-        let expected = CodexIntegration.activity_screen(&codex_composer("draft", "", ""));
+        let expected = codex_screen(&codex_composer("draft", "", ""));
         for frame in [
             "agent output\n\n›\n\n  draft\n\ncustom footer",
             "agent output\n⠁\n›⠂\n⠄\n  draft\n⠈\ncustom footer",
             "agent output\n\n› draft\n\n  continued\n\ncustom footer",
         ] {
-            assert_eq!(
-                CodexIntegration.activity_screen(frame).comparison,
-                expected.comparison
-            );
+            assert_eq!(codex_screen(frame).comparison, expected.comparison);
         }
         for frame in [
             "agent output\n\n› draft\nx\n\ncustom footer",
             "agent output\n\n›not a composer\n\ncustom footer",
         ] {
-            assert_eq!(CodexIntegration.activity_screen(frame).comparison, frame);
+            assert_eq!(codex_screen(frame).comparison, frame);
         }
     }
 
@@ -3280,7 +3194,7 @@ mod tests {
             CODEX_SPARKLE_DOTS[0],
             codex_composer("draft", "", "")
         );
-        let screen = CodexIntegration.activity_screen(&outside);
+        let screen = codex_screen(&outside);
         assert!(
             screen
                 .comparison
@@ -3288,7 +3202,7 @@ mod tests {
         );
 
         let popup = "output\n\n› draft\n\ncustom footer\npopup choice";
-        let screen = CodexIntegration.activity_screen(popup);
+        let screen = codex_screen(popup);
         assert_eq!(screen.comparison, popup);
     }
 
@@ -3306,7 +3220,7 @@ mod tests {
         ] {
             let busy = format!("agent output\n{status}\n\n› draft\n\ncustom footer");
             assert!(
-                CodexIntegration.activity_screen(&busy).working,
+                codex_screen(&busy).working,
                 "current status was not recognized: {status:?}"
             );
         }
@@ -3330,7 +3244,7 @@ mod tests {
             "Working (3s • esc to interrupt)\n› draft",
         ] {
             assert!(
-                !CodexIntegration.activity_screen(screen).working,
+                !codex_screen(screen).working,
                 "unproved status claimed current work: {screen:?}"
             );
         }
@@ -3344,23 +3258,15 @@ mod tests {
         let prefix = "x".repeat(4090);
         let left = format!("{prefix}\n{}", codex_composer("draft", "", ""));
         let right = format!("{prefix}\n{}", codex_composer("draft", "⠁⠂⠄⠈", "⠐⠠⡀⢀"));
-        let left = crate::tmux::retain_pane_tail(
-            &CodexIntegration.activity_screen(&left).comparison,
-            4096,
-        );
-        let right = crate::tmux::retain_pane_tail(
-            &CodexIntegration.activity_screen(&right).comparison,
-            4096,
-        );
+        let left = crate::tmux::retain_pane_tail(&codex_screen(&left).comparison, 4096);
+        let right = crate::tmux::retain_pane_tail(&codex_screen(&right).comparison, 4096);
         assert_eq!(left, right);
 
         let normalized_suffix = format!("\n{}", codex_composer("draft", "", ""));
-        let normalized_suffix = CodexIntegration
-            .activity_screen(&normalized_suffix)
-            .comparison;
+        let normalized_suffix = codex_screen(&normalized_suffix).comparison;
         let fill = "x".repeat(4097 - "é".len() - normalized_suffix.len());
         let raw = format!("é{fill}\n{}", codex_composer("draft", "", ""));
-        let normalized = CodexIntegration.activity_screen(&raw).comparison;
+        let normalized = codex_screen(&raw).comparison;
         assert_eq!(
             normalized.len(),
             4097,
@@ -5053,13 +4959,17 @@ mod tests {
     fn each_kind_recognizes_its_own_pending_question() {
         for tail in [CLAUDE_COMMAND_APPROVAL, CLAUDE_TRUST_DIALOG] {
             assert_eq!(
-                ClaudeIntegration.sharpen(SessionStatus::Idle, tail),
+                sharpened(AgentKind::Claude, SessionStatus::Idle, tail),
                 SessionStatus::Waiting,
                 "claude should have recognized:\n{tail}"
             );
         }
         assert_eq!(
-            CodexIntegration.sharpen(SessionStatus::Idle, CODEX_COMMAND_APPROVAL),
+            sharpened(
+                AgentKind::Codex,
+                SessionStatus::Idle,
+                CODEX_COMMAND_APPROVAL
+            ),
             SessionStatus::Waiting
         );
         // A running session with a question on screen is waiting too: the
@@ -5069,7 +4979,11 @@ mod tests {
         // the dialog being drawn by a long way, so the sharpener must not
         // wait for the baseline to decay before it says anything.
         assert_eq!(
-            ClaudeIntegration.sharpen(SessionStatus::Running, CLAUDE_COMMAND_APPROVAL),
+            sharpened(
+                AgentKind::Claude,
+                SessionStatus::Running,
+                CLAUDE_COMMAND_APPROVAL
+            ),
             SessionStatus::Waiting
         );
     }
@@ -5112,12 +5026,12 @@ mod tests {
             question_over_numbered_prose,
         ] {
             assert_eq!(
-                ClaudeIntegration.sharpen(SessionStatus::Idle, tail),
+                sharpened(AgentKind::Claude, SessionStatus::Idle, tail),
                 SessionStatus::Idle,
                 "claude must not have promoted:\n{tail}"
             );
             assert_eq!(
-                CodexIntegration.sharpen(SessionStatus::Running, tail),
+                sharpened(AgentKind::Codex, SessionStatus::Running, tail),
                 SessionStatus::Running,
                 "codex must not have promoted:\n{tail}"
             );
@@ -5170,7 +5084,7 @@ mod tests {
             answer_word_in_the_middle,
         ] {
             assert_eq!(
-                ClaudeIntegration.sharpen(SessionStatus::Running, tail),
+                sharpened(AgentKind::Claude, SessionStatus::Running, tail),
                 SessionStatus::Running,
                 "every option must read as an answer, or this is prose:\n{tail}"
             );
@@ -5217,12 +5131,12 @@ mod tests {
 
         for tail in [two_items, three_items, bare_words] {
             assert_eq!(
-                ClaudeIntegration.sharpen(SessionStatus::Running, tail),
+                sharpened(AgentKind::Claude, SessionStatus::Running, tail),
                 SessionStatus::Running,
                 "prose draws no selection pointer, so this is not a menu:\n{tail}"
             );
             assert_eq!(
-                CodexIntegration.sharpen(SessionStatus::Idle, tail),
+                sharpened(AgentKind::Codex, SessionStatus::Idle, tail),
                 SessionStatus::Idle,
                 "codex must not promote it either:\n{tail}"
             );
@@ -5235,7 +5149,7 @@ mod tests {
 ❯ 1. No, migration is required only for rows written before the bump.
   2. Yes, and the defaults backfill everything else.";
         assert_eq!(
-            ClaudeIntegration.sharpen(SessionStatus::Running, pointed_at),
+            sharpened(AgentKind::Claude, SessionStatus::Running, pointed_at),
             SessionStatus::Waiting,
             "premise: the pointer is the only difference"
         );
@@ -5269,7 +5183,7 @@ mod tests {
             (MAX_MENU_CHOICES + 1, SessionStatus::Running),
         ] {
             assert_eq!(
-                ClaudeIntegration.sharpen(SessionStatus::Running, &menu(count)),
+                sharpened(AgentKind::Claude, SessionStatus::Running, &menu(count)),
                 expected,
                 "a menu of {count} options"
             );
@@ -5331,7 +5245,7 @@ mod tests {
             // the menu-only signal has its own test.
             let tail = format!("Do you want to proceed?\n❯ 1. {first}\n  2. {second}");
             assert_eq!(
-                ClaudeIntegration.sharpen(SessionStatus::Running, &tail),
+                sharpened(AgentKind::Claude, SessionStatus::Running, &tail),
                 expected,
                 "options {first:?} / {second:?}"
             );
@@ -5354,14 +5268,14 @@ mod tests {
         for marker in MENU_SELECTION_MARKERS {
             let selected = format!("Do you want to proceed?\n{marker} 1. Yes\n  2. No");
             assert_eq!(
-                ClaudeIntegration.sharpen(SessionStatus::Running, &selected),
+                sharpened(AgentKind::Claude, SessionStatus::Running, &selected),
                 SessionStatus::Waiting,
                 "{marker:?} must not stop the option it points at from parsing as one"
             );
 
             let answered = format!("{selected}\n{marker}");
             assert_eq!(
-                ClaudeIntegration.sharpen(SessionStatus::Running, &answered),
+                sharpened(AgentKind::Claude, SessionStatus::Running, &answered),
                 SessionStatus::Running,
                 "{marker:?} alone is a composer prompt, and must end the scan rather than \
                  trimming away to nothing"
@@ -5393,7 +5307,8 @@ mod tests {
         // body of LOOKBACK-1 lines puts it on the last line the search is
         // allowed to read.
         assert_eq!(
-            ClaudeIntegration.sharpen(
+            sharpened(
+                AgentKind::Claude,
                 SessionStatus::Running,
                 &dialog(PROMPT_QUESTION_LOOKBACK - 1)
             ),
@@ -5401,7 +5316,11 @@ mod tests {
             "a question on the {PROMPT_QUESTION_LOOKBACK}th body line is still inside the bound"
         );
         assert_eq!(
-            ClaudeIntegration.sharpen(SessionStatus::Running, &dialog(PROMPT_QUESTION_LOOKBACK)),
+            sharpened(
+                AgentKind::Claude,
+                SessionStatus::Running,
+                &dialog(PROMPT_QUESTION_LOOKBACK)
+            ),
             SessionStatus::Running,
             "one line further is outside it, and must not be found"
         );
@@ -5426,12 +5345,16 @@ mod tests {
     fn an_empty_codex_composer_below_an_answered_modal_ends_the_scan() {
         let answered = format!("{CODEX_COMMAND_APPROVAL}\n▌ ›");
         assert_eq!(
-            CodexIntegration.sharpen(SessionStatus::Running, &answered),
+            sharpened(AgentKind::Codex, SessionStatus::Running, &answered),
             SessionStatus::Running,
             "an empty composer under the modal means the question was answered:\n{answered}"
         );
         assert_eq!(
-            CodexIntegration.sharpen(SessionStatus::Running, CODEX_COMMAND_APPROVAL),
+            sharpened(
+                AgentKind::Codex,
+                SessionStatus::Running,
+                CODEX_COMMAND_APPROVAL
+            ),
             SessionStatus::Waiting,
             "and the real modal — whose selected option is prefixed with the same glyph — must \
              still be recognized"
@@ -5456,17 +5379,13 @@ mod tests {
     #[farhelm_testtrace::test]
     fn an_answered_dialog_that_is_no_longer_the_bottom_of_the_screen_does_not_count() {
         for (what, dialog, sharpen) in [
-            (
-                "claude",
-                CLAUDE_COMMAND_APPROVAL,
-                &ClaudeIntegration as &dyn AgentIntegration,
-            ),
-            ("codex", CODEX_COMMAND_APPROVAL, &CodexIntegration),
+            ("claude", CLAUDE_COMMAND_APPROVAL, AgentKind::Claude),
+            ("codex", CODEX_COMMAND_APPROVAL, AgentKind::Codex),
         ] {
             // Exactly one line of ordinary work below the answered dialog.
             let one_line_later = format!("{dialog}\n✻ Thinking… (3s · esc to interrupt)");
             assert_eq!(
-                sharpen.sharpen(SessionStatus::Running, &one_line_later),
+                sharpened(sharpen, SessionStatus::Running, &one_line_later),
                 SessionStatus::Running,
                 "{what}: one line of progress under an answered dialog is enough to mean it \
                  was answered"
@@ -5477,7 +5396,7 @@ mod tests {
             // still on screen, but something else is now bottom-most.
             let composer_back = format!("{dialog}\n╭────────────╮\n│ >          │\n╰────────────╯");
             assert_eq!(
-                sharpen.sharpen(SessionStatus::Idle, &composer_back),
+                sharpened(sharpen, SessionStatus::Idle, &composer_back),
                 SessionStatus::Idle,
                 "{what}: a composer under the block means the question is no longer pending"
             );
@@ -5486,56 +5405,7 @@ mod tests {
             // bottom-most thing on the screen, or the assertions above
             // would pass with the recognizer removed entirely.
             assert_eq!(
-                sharpen.sharpen(SessionStatus::Running, dialog),
-                SessionStatus::Waiting,
-                "{what}: premise"
-            );
-        }
-    }
-
-    /// A NON-LIVE baseline comes back untouched, whatever the screen says.
-    ///
-    /// `sharpen` is a public method on a public trait, so "the only caller
-    /// passes a live baseline" is a fact about today's tree and not about
-    /// the API — and the guard downstream
-    /// (`status::waiting_or_baseline`) cannot help here, because `Waiting`
-    /// is exactly what that guard lets through. The
-    /// failure without this is a session that exited hours ago being
-    /// reported as blocked on a human, on the strength of the last thing
-    /// its pane happened to be showing.
-    ///
-    /// Every non-live variant against both vendors, with the tail that
-    /// WOULD promote a live baseline, so nothing passes by accident of the
-    /// fixture.
-    #[farhelm_testtrace::test]
-    fn a_non_live_baseline_is_never_promoted_by_any_screen() {
-        for (what, tail, sharpen) in [
-            (
-                "claude",
-                CLAUDE_COMMAND_APPROVAL,
-                &ClaudeIntegration as &dyn AgentIntegration,
-            ),
-            ("codex", CODEX_COMMAND_APPROVAL, &CodexIntegration),
-        ] {
-            for baseline in [
-                SessionStatus::Exited { exit_code: Some(0) },
-                SessionStatus::Exited { exit_code: None },
-                SessionStatus::Error {
-                    detail: "Permission denied".to_string(),
-                },
-                SessionStatus::Interrupted,
-                SessionStatus::Unknown,
-            ] {
-                assert_eq!(
-                    sharpen.sharpen(baseline.clone(), tail),
-                    baseline,
-                    "{what} promoted a {baseline:?} session on the strength of its screen"
-                );
-            }
-            // The live baselines it IS allowed to act on, so this test
-            // cannot pass by refusing everything.
-            assert_eq!(
-                sharpen.sharpen(SessionStatus::Idle, tail),
+                sharpened(sharpen, SessionStatus::Running, dialog),
                 SessionStatus::Waiting,
                 "{what}: premise"
             );
@@ -5584,11 +5454,8 @@ mod tests {
                 SessionStatus::Idle,
                 SessionStatus::Waiting,
             ] {
-                for integration in [
-                    &ClaudeIntegration as &dyn AgentIntegration,
-                    &CodexIntegration,
-                ] {
-                    let status = integration.sharpen(baseline.clone(), &tail);
+                for kind in [AgentKind::Claude, AgentKind::Codex] {
+                    let status = sharpened(kind, baseline.clone(), &tail);
                     assert!(
                         status.is_live(),
                         "a sharpener may only ever answer with a live status; got {status:?} \
@@ -5596,49 +5463,6 @@ mod tests {
                     );
                 }
             }
-        }
-    }
-
-    /// The DEFAULT `sharpen` returns the baseline untouched — "no
-    /// sharpening", which is a different thing from "no status".
-    ///
-    /// Worth a stub implementation of its own because the distinction is
-    /// the reason the method is defaulted at all (see its docs): a new
-    /// integration that says nothing about prompts must still leave its
-    /// sessions with the generic classification, and the shape that would
-    /// have broken that — a required method inviting a stub — is exactly
-    /// what this proves unnecessary.
-    #[farhelm_testtrace::test]
-    fn the_default_sharpener_leaves_every_baseline_alone() {
-        struct Unsharpened;
-        impl AgentIntegration for Unsharpened {
-            fn default_resume_template(&self, _original_argv: &[String]) -> Vec<String> {
-                unreachable!("this fixture exists only to exercise the defaulted method")
-            }
-            fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
-                unreachable!("this fixture exists only to exercise the defaulted method")
-            }
-            fn record_depth(&self) -> usize {
-                unreachable!("this fixture exists only to exercise the defaulted method")
-            }
-            fn is_record_file(&self, _name: &str) -> bool {
-                unreachable!("this fixture exists only to exercise the defaulted method")
-            }
-            fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
-                unreachable!("this fixture exists only to exercise the defaulted method")
-            }
-        }
-
-        for baseline in [
-            SessionStatus::Running,
-            SessionStatus::Idle,
-            SessionStatus::Waiting,
-        ] {
-            assert_eq!(
-                Unsharpened.sharpen(baseline.clone(), CLAUDE_COMMAND_APPROVAL),
-                baseline,
-                "a kind that declares no prompt knowledge must not lose its baseline"
-            );
         }
     }
 
