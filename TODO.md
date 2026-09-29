@@ -33,40 +33,136 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Push session changes from the supervisor to the helm.** The helm learns about a host's sessions only by polling:
-  `ListSessions` every 3 s after the previous refresh finishes (`REFRESH_INTERVAL` in
-  `crates/farhelm-helm/src/manager.rs`), plus its own post-write wakes. Everything that happens on the host by itself
-  (status changes, exits, tabs whose shell exited, sessions an agent spawned) therefore reaches the UI after up to one
-  poll interval. PLAN_M6_75.md item 3 declined a supervisor-edge push and said to revisit if that bound proved painful;
-  it has, most visibly as a tab lingering after `exit`. Have the supervisor notify every connected helm when something
-  user-visible changes, and have the helm refresh that host at once, keeping a slow poll as a backstop. What two
-  independent reviews found this has to get right:
-  - Trigger on what the user sees, not only on stored writes. Tabs, status, and the restart offer are derived when a
-    reply is built (`service/status.rs`): the listing hides a dead tab the moment its pane dies, before any reap, so the
-    notice belongs at pane death (the `pane-died` hook from #1180), and status transitions, including idle reached
-    through the three-sample hysteresis, need their own trigger points. Exclude the sampler's internal state (screen
-    tails, comparison counts, provisional classification); `SessionInfo` itself has no heartbeat-like field.
-  - Coalesce per host with a minimum gap, and do not notify because `ListSessions` ran (a feedback loop). Every feed
-    bump makes each open session view do its own live `ListSessions` round trip with a capture sweep, so bursts
-    multiply.
-  - Keep a change pending until a refresh has actually delivered it: a refresh that fails or is discarded because a
-    create or rename overtook it must not consume the notice.
-  - Reach every helm connection, not the one attachment owner `AgentRequest` routing picks.
-  - A new message is a protocol bump (versions must match exactly), and SPEC_impl.md's "no supervisor-edge push channel"
-    statement and the proto docs need amending.
+- **Hint session changes from the supervisor to the helm.** Today the helm learns about a host's sessions only by
+  polling: `ListSessions` 3 s after its previous refresh finishes (`REFRESH_INTERVAL` in
+  `crates/farhelm-helm/src/manager.rs`). Most of its own writes seed the cache from the reply rather than re-reading; it
+  re-reads at once only in a few cases, such as a reply reporting unknown status. The supervisor never tells the helm
+  that anything changed; the only unsolicited supervisor-to-helm messages are terminal output, `Detached`,
+  `ReplayComplete`, and `AgentRequest`. So everything that happens on a host by itself (status changes, agent exits, a
+  tab whose shell exited, sessions an agent spawned) reaches the UI up to one poll interval late. PLAN_M6_75.md item 3
+  declined a supervisor-edge push on the grounds that a ~3 s bound was acceptable, and said to revisit it if that proved
+  painful. It has: the maintainer hit it as a terminal tab lingering for a variable time after typing `exit`.
 
-  The push alone does not fix the lingering tab. A tab opened and exited between two helm refreshes never appears in the
-  helm's cache, so its end state equals the cached one, no feed bump fires, and the UI keeps its optimistic tab until an
-  unrelated read (`opened_tabs` in `crates/farhelm-ui/src/session_view.rs`). The fix for that is to act on the
-  `Detached` notice with code `tab_closed`, which the UI currently ignores (`terminal.js`): either the helm bumps the
-  feed and refreshes the host when it relays one, or the UI drops the tab and re-reads, or both. That piece needs no
-  protocol change and could land first. Before measuring anything, confirm the desktop app's event feed is healthy: a
-  dead feed falls back to the UI's own 3 s poll and looks the same.
-- **Make the delete-in-progress indicator prominent.** The "stopping…" / "deleting…" state from #1175 is easy to miss: a
-  6px pulsing dot and one word in the sidebar row's age slot (with the row dimmed to 60%), and the same in place of the
-  session header's action buttons. In practice it goes unnoticed even when the user is looking at the session list,
-  while the terminal's red "Detached: …" banner, which only arrives near the end of the delete, is what catches the eye.
-  Make the in-progress state clearly visible for the whole wait. Details to be decided when this is picked up.
+  Decided (2026-09-29, with the maintainer; do not reopen these while executing):
+  - **A hint, not a data push.** When something user-visible changes, the supervisor sends a content-free "this host
+    changed, poll now" message. The helm then refreshes that host through its existing `ListSessions` path, cache, and
+    comparison, and tells the UI. Rejected: pushing rows or deltas and dropping the poll. Much of a row is derived when
+    a reply is built (tabs, status, restart offer; `service/status.rs`), so a push-only design needs a supervisor-side
+    detector for every such change plus snapshots, sequence numbers, and resync on gaps, and any missed trigger would
+    leave the UI wrong with nothing to correct it.
+  - **Polling stays** as the backstop for anything a hint misses. It may run slower once hints exist; the new cadence is
+    an implementation choice.
+  - **General, not tab-specific.** The hint covers every user-visible session change on the host, including
+    `last_activity_at` advancing (it drives the row's age and the unseen-output marker). A tab-only fix is not a
+    substitute, because it leaves status, exits, and spawned sessions on the slow path.
+  - **The hint punches through to the UI.** A refresh a hint triggered ALWAYS raises a feed event, even when the helm's
+    cache compares equal afterwards. The helm's existing rule (raise an event only when a refresh changed a cached row)
+    stays for the backstop poll. See the lingering-tab walkthrough below for why compare-only is wrong for hints.
+  - **Protocol bump.** Helm and supervisor must match protocol versions exactly and refuse each other at connect
+    otherwise, so no fallback for older peers is needed, and the supervisor and helm halves ship together.
+
+  The lingering tab, step by step. The UI shows a tab it just opened optimistically, before any read confirms it, and
+  drops that entry only when a detail read started after the open comes back without it (`opened_tabs` in
+  `crates/farhelm-ui/src/session_view.rs`). The UI reads only when the helm raises a feed event, and opening a tab does
+  not make the helm refresh. So if the user opens a tab and types `exit` before the helm's next refresh, that refresh
+  sees "no tabs", which is what its cache already said. No event fires, and the tab stays on screen until some unrelated
+  change on the host happens to cause a read. The maintainer's two logged tests lived under a second each. Hints on open
+  and on exit only narrow this: hints are batched and each refresh is an ssh round trip, so a quick open and exit can
+  still collapse into one refresh that sees no change. The punch-through rule closes it.
+
+  Requirements, from two independent code reviews of this design and a cold read of this entry:
+  - **Trigger on user-visible changes, wherever they are observed.** Hint whenever a value the user can see actually
+    changes, whichever code path noticed it, and never merely because a read happened (a `ListSessions` that found
+    nothing new must not hint, or hints and refreshes feed each other). The sources:
+    - Pane death, including a tab's. The listing hides a dead tab the moment its pane dies, before any reap. The
+      `pane-died` hook from #1180 already wakes the supervisor there, for agent panes as well as tabs.
+    - Status transitions. Status is not stored: it is computed per reply (`live_status` and the pane probe in
+      `service/status.rs`), so the ticker has to compare the classified status before and after each sample. That
+      includes idle reached through the three-sample hysteresis.
+    - `last_activity_at` and `last_work_started_at` advancing (the ticker's writes).
+    - Restart-offer changes. These come from a ticker capture commit, an agent's conversation report
+      (`report_conversation`), and a capture sweep during `ListSessions`, including the one inside a detail read. Hint
+      when that sweep commits an actual change.
+    - Tab open and close, rename, restart, stop, exit, create, and delete.
+  - **Exclude the sampler's internal state** (screen tails, comparison counts, provisional classification). It changes
+    all the time but is not in `SessionInfo`. A check of `SessionInfo` found no heartbeat-like field:
+    - status can change at most once per ticker sample, about every 2 s per session;
+    - `last_activity_at` advances at most once a minute;
+    - `last_work_started_at` advances only on a move from idle or waiting to running;
+    - everything else changes only on user or agent actions.
+  - **Batch on the supervisor, hold pending state on the helm.** The supervisor coalesces hints and sends at most one
+    per minimum gap; the gap is an implementation choice. Each feed event makes every open session view do its own live
+    `ListSessions` round trip with a capture sweep (`sessions.rs`), so unbatched bursts multiply. On the helm, a hint
+    stays pending until a refresh that STARTED after the hint arrived has completed and raised its feed event. Number
+    the hints, as the UI's `poll_sequence` does for reads. A refresh already in flight when the hint arrives does not
+    count.
+  - **Retry at once after a discard, back off after a failure.** When the helm discards a hint-driven refresh because a
+    seeded write overtook it (`seed_epoch`: create, rename, delete, and other seeded writes), it refreshes again at
+    once; waiting for the backstop, which may be slowed, would defeat the hint. A failed refresh follows the host's
+    existing failure handling, so it cannot spin.
+  - **Send on every full-authority link.** The supervisor cannot tell a helm from other full-authority clients, and the
+    hello's `role` is not an authorization input. Links that do not want hints ignore them. SPEC.md runs one helm at a
+    time, so in practice this is that helm. `AgentRequest`'s routing, which picks the one link holding an attachment, is
+    the wrong model.
+  - **A hint must never block the supervisor.** Queue it behind terminal output on the normal writer queue, or on the
+    priority one; either is fine. If the queue is full, drop the hint: the backstop poll covers it.
+  - **Amend the docs that state the no-push design:**
+    - SPEC_impl.md's "no supervisor-edge push channel" statement, and the "refreshes every 3 seconds" cadence text if
+      the cadence changes;
+    - the proto docs on the new message;
+    - `REFRESH_INTERVAL`'s doc ("M6.75's push channel is what eventually retires polling");
+    - `service/ticker.rs`'s module doc ("Proto v10 puts no push on the supervisor edge").
+  - **Tests that prove the path is no longer poll-bound**, with the backstop effectively disabled:
+    - a tab opened and exited within one refresh interval disappears from the UI;
+    - helm unit tests that a hint-driven refresh raises a feed event when the cache compares equal, and that a pending
+      hint survives a discarded refresh.
+
+  Already established, so no need to re-investigate:
+  - #1180 did not change how long the tab stays on screen. The listing has omitted dead tabs since `61dcb3e`, long
+    before #1180. The hook only made the supervisor's reap, and the `Detached` notice with code `tab_closed`, happen
+    sooner, and `terminal.js` handles that notice silently without touching the tab strip.
+  - A session detail read is a live `ListSessions` round trip, not a cache read, so any feed event yields current data.
+
+  Open, for whoever executes:
+  - The batching gap, the backstop cadence, and whether to land as one PR or a stack.
+  - Optionally, poll on a fixed schedule instead of 3 s after each refresh finishes.
+  - Optionally, also make the UI act on the `tab_closed` notice (drop that tab and re-read). It removes an exited tab
+    fastest for the view attached to it and needs no protocol change, but it is an addition, not the fix.
+  - Before measuring latency, confirm the desktop app's event feed is healthy. A dead feed (the known macOS webview
+    bridge failure) falls back to the UI's own 3 s poll and looks the same. A quick test: rename a session from a
+    browser and watch whether the desktop app updates at once.
+- **Make the delete-in-progress indicator prominent.** Deleting a live session takes seconds, most of it the agent
+  handling its own SIGTERM. #1175 added an in-progress state for that wait. It works, but it is too subtle to notice:
+  - on the sidebar row, a 6px pulsing red dot and "stopping…" (or "deleting…" when nothing was alive) in place of the
+    last-activity age, with the row dimmed to 60%;
+  - in the session header, the same dot and word in place of the action buttons.
+
+  The maintainer missed it, even while looking at the session list, and did not realise the feature had shipped. What
+  caught the eye instead was the terminal's full-width red "Detached: …" banner, which only arrives near the end of the
+  delete and was mistaken for the indicator.
+
+  Decided (2026-09-29, with the maintainer):
+  - This entry is about prominence only. Making deletes faster is out of scope.
+  - Only the client that started the delete needs to show it; other connected clients are out of scope. The deleting set
+    is local UI state (`list/view.rs`, `session_view.rs`).
+  - These behaviours from #1175 stay:
+    - the state shows from the moment the delete is committed until the supervisor's reply;
+    - it never claims to stop something that is not running (today's "stopping…" versus "deleting…" rule);
+    - the row stays in the list until the reply;
+    - a refused delete restores the row and header, with the refusal shown.
+  - Everything else about the look may change, including what SPEC.md's Delete bullet currently pins: the dimmed row,
+    the exact words, and the header showing it in place of its actions. Amend SPEC.md in the same PR to match.
+  - The sidebar row and the session header are in scope. Other surfaces, such as an overlay on the terminal pane where
+    the user's eye actually is, may be proposed as options.
+
+  Deliberately left open: the visual design. The maintainer chose to decide it when this is picked up, so start by
+  proposing a few concrete options and get the maintainer's pick before implementing. Raise at the same time whether the
+  late "Detached: …" banner should be suppressed or reworded during a delete, rather than deciding it alone. Two
+  constraints bear on that:
+  - The delete's detach arrives with `DetachCode::Other`, the same code as a lost connection, so `terminal.js` cannot
+    tell them apart unless the Rust view passes its deleting state in.
+  - SPEC.md requires a failed delete's cleanup failure to stay visible, so a suppressed banner must come back, or be
+    replaced by something equivalent, when the delete fails.
 - **Pi foreground ownership.** Assess whether native or shelled-out Pi children can replace or withdraw the foreground
   conversation's restart target, then define the smallest admission check that preserves legitimate foreground
   transitions. This is an assessment task, not a claim that every vendor path has been reproduced.
