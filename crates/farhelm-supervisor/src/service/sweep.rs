@@ -222,10 +222,11 @@ pub(crate) enum SweepTarget {
 
 /// Selects whether a failed cgroup kill is diagnostic or blocks publication.
 ///
-/// STOP and restart retain the process-tree sweep's original guarantee even
-/// when a manager operation fails. Delete must also keep its
-/// row so the user can retry: a warning would otherwise publish success while
-/// a scrubbed daemon could remain reachable only through the cgroup.
+/// Stop, Restart and Delete refuse: SPEC.md "Lifecycle operations" makes an
+/// operation whose cleanup cannot be confirmed fail visibly instead of
+/// reporting success or relaunching, because a still-loaded scope may hold
+/// a scrubbed daemon the sweep cannot see. `Warn` remains for cleanup paths
+/// that have no user operation to fail, such as a failed create's rollback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScopeKillFailure {
     /// Preserve the sweep's result and report the scope failure in logs.
@@ -1258,16 +1259,17 @@ impl ScopeUnits {
 /// one round trip that empties most of the tree before the sweep pays for
 /// enumerating it.
 ///
-/// # Why the scope may never fail a stop
+/// # When a scope failure fails the operation
 ///
-/// The sweep's verdict is the whole answer. `Ok(())` from this function
-/// means the sweep confirmed nothing is left running, and that is exactly
-/// what it meant in M2 — item 10's "absence of a manager never degrades
-/// stop below M2's guarantees" read in the other direction: PRESENCE of a
-/// broken manager must not degrade it either. A scope kill that failed
-/// (unit already collected, manager not answering) is therefore logged and
-/// carried into the error only when the sweep ALSO failed, where it is
-/// diagnostic context for a stop that is genuinely unconfirmed.
+/// `scope_kill_failure` decides. The user's lifecycle operations (Stop,
+/// Restart, Delete, tab close) pass `Refuse`: SPEC.md "Lifecycle operations"
+/// makes an operation whose cleanup cannot be confirmed fail visibly, and a
+/// scope that could not be confirmed gone, or could not be checked at all,
+/// may still hold a scrubbed daemon the sweep cannot see, so a clean sweep is
+/// not enough. Cleanup paths with no user operation to fail, such as a failed
+/// create's rollback, pass `Warn`: there the sweep's verdict is the answer,
+/// and a scope failure is logged, or carried into the error only when the
+/// sweep also failed.
 ///
 /// `units.recorded` is the one launch scope the durable row says this launch
 /// ran in. `units.derived` contains every name inferred later: tab names,
@@ -1276,8 +1278,9 @@ impl ScopeUnits {
 /// retained rather than collected. When the cached verdict is negative, the
 /// recorded set gets one re-probe; it is evidence that this host had a
 /// manager for the launch, whereas the derived set is not. A still-negative
-/// result skips the recorded names loudly and derived names quietly, then the
-/// sweep remains the whole mechanism.
+/// result skips derived names quietly, but turns each recorded name into a
+/// scope error for `scope_kill_failure` to judge, since that scope may still
+/// hold processes; the sweep runs either way.
 ///
 /// `root_identity` is captured by the caller immediately after it observes a
 /// live pane and before any asynchronous teardown work. This function
@@ -1312,6 +1315,14 @@ pub(crate) async fn reap_process_tree(
     // launched, so it gets one chance to overturn a stale negative cache.
     // If that chance still says no, the sweep below remains the whole
     // mechanism; if it says yes, `kill_scope` settles every name normally.
+    // A recorded unit that cannot be checked is an unconfirmed cleanup, not a
+    // clean one: the launch ran in a scope, the scope may still hold a
+    // scrubbed daemon, and nothing here can look. It becomes a scope error so
+    // the caller's `ScopeKillFailure` policy decides, which for Stop, Restart,
+    // Delete and tab close means failing visibly (SPEC.md "Lifecycle
+    // operations": believing there is no user manager does not excuse
+    // skipping a scope the launch had). The sweep below still runs.
+    let mut scope_errors: Vec<String> = Vec::new();
     let units: Vec<&String> =
         if scopes.available().await || (!units.recorded.is_empty() && scopes.reprobe().await) {
             units.recorded.iter().chain(&units.derived).collect()
@@ -1326,9 +1337,13 @@ pub(crate) async fn reap_process_tree(
             for unit in &units.recorded {
                 warn!(
                     session = %session_id, unit = %unit,
-                    "the row recorded a scoped launch but this host has no usable systemd user \
-                     manager; the process-tree sweep is the whole mechanism"
+                    "the row recorded a scoped launch but this host's systemd user manager is not \
+                     usable now, so the scope cannot be checked"
                 );
+                scope_errors.push(format!(
+                    "scope {unit} could not be checked because this host's systemd user manager is \
+                     not usable now, so its cgroup may still hold processes"
+                ));
             }
             Vec::new()
         };
@@ -1336,7 +1351,6 @@ pub(crate) async fn reap_process_tree(
     // `kill_scope`'s own accumulate-never-short-circuit reason one level
     // up: a delete that stopped at the first unresponsive tab scope would
     // skip the agent's, which is the one most likely to have worked.
-    let mut scope_errors: Vec<String> = Vec::new();
     for unit in units {
         if let Err(e) = kill_scope(scopes, unit, session_id).await {
             scope_errors.push(format!("{e:#}"));
@@ -1798,7 +1812,10 @@ pub(crate) async fn stop_live_agent(
         root_identity,
         session_id,
         &SweepTarget::AgentOnly,
-        ScopeKillFailure::Warn,
+        // Refuse, like Delete: a scope that cannot be confirmed collected may
+        // still hold survivors, so Stop reports the failure and Restart does
+        // not relaunch beside them (SPEC.md "Lifecycle operations").
+        ScopeKillFailure::Refuse,
     )
     .await
     .map_err(StopFailure::Sweep)?;
@@ -2481,17 +2498,17 @@ mod tests {
         let _ = child.wait();
     }
 
-    /// A cgroup that never empties must not be reported as reaped — and must
-    /// still not fail a stop the sweep confirmed.
+    /// Under `Warn`, a cgroup that never empties must not be reported as
+    /// reaped, and must still not fail a cleanup the sweep confirmed.
     ///
-    /// Both halves matter and they pull in opposite directions. Skipping the
-    /// confirmation would let `systemctl kill`'s "signals delivered" pass for
-    /// "processes gone"; treating the unconfirmed unit as fatal would make a
-    /// stubborn cgroup fail a stop that M2 (which has no cgroups at all)
-    /// would have called complete. The scope's trouble is diagnostic, the
-    /// sweep's verdict is the answer.
+    /// Both halves matter for the `Warn` callers (rollback paths with no user
+    /// operation to fail). Skipping the confirmation would let `systemctl
+    /// kill`'s "signals delivered" pass for "processes gone"; treating the
+    /// unconfirmed unit as fatal there would fail a cleanup nobody can retry.
+    /// User lifecycle operations use `Refuse` instead; see
+    /// `reap_process_tree`'s docs.
     #[farhelm_testtrace::test]
-    async fn a_scope_that_never_goes_away_is_reported_but_does_not_fail_the_stop() {
+    async fn under_warn_a_scope_that_never_goes_away_is_reported_but_not_fatal() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let mut child = spawn_marked_process(&session_id);
         let decoy = child.id();
@@ -2517,21 +2534,17 @@ mod tests {
         let _ = child.wait();
     }
 
-    /// A manager that is present but cannot kill must not weaken stop:
-    /// PLAN_M3.md item 10's "absence of a manager never degrades stop below
-    /// M2's guarantees", read in the direction it is easier to get wrong.
+    /// The two policies split exactly on a manager that is present but cannot
+    /// kill: `Warn` lets the clean sweep stand, `Refuse` fails the operation.
     ///
-    /// The failure mode this excludes is a stop that reports failure — and,
-    /// through `StopFailure::Sweep`, refuses a restart — because a cgroup
-    /// operation errored while the sweep it exists to reinforce succeeded
-    /// completely. The sweep's verdict is the whole answer for WARN.
-    ///
-    /// The same fixture also checks REFUSE: delete needs the
-    /// cgroup error to remain visible after a clean sweep because they are
-    /// about to discard the row that would make a retry possible. The
-    /// refusal names the unit and says why the session stays retained.
+    /// `Warn` is for cleanup with no user operation to fail, where a cgroup
+    /// error must not turn a sweep that succeeded completely into a failure.
+    /// `Refuse` is what Stop, Restart, Delete and tab close use (SPEC.md
+    /// "Lifecycle operations"): the unconfirmed cgroup may still hold
+    /// processes, so the error stays visible after a clean sweep, naming the
+    /// unit and saying why the session is kept for a retry.
     #[farhelm_testtrace::test]
-    async fn a_broken_user_manager_never_fails_a_stop_the_sweep_confirmed() {
+    async fn a_broken_user_manager_splits_warn_from_refuse() {
         let session_id = uuid::Uuid::new_v4().to_string();
         let mut child = spawn_marked_process(&session_id);
         let decoy = child.id();
@@ -2621,7 +2634,7 @@ mod tests {
     /// short-circuit it), the reap returns `Ok` under REFUSE and under WARN,
     /// and the sweep still reaps the marked process either way. The
     /// companion assertion in
-    /// `a_broken_user_manager_never_fails_a_stop_the_sweep_confirmed` pins
+    /// `a_broken_user_manager_splits_warn_from_refuse` pins
     /// the other half: the same failing kills against a unit that never
     /// retires still refuse, grounded in the unit outliving its SIGKILL.
     #[farhelm_testtrace::test]

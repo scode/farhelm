@@ -599,10 +599,11 @@ impl ScopeManager {
     /// cannot actually kill anything.
     ///
     /// Its own constructor rather than a flag at every call site because it
-    /// stands for a distinct claim: item 10 says absence of a manager never
-    /// degrades stop below M2, and this is the other half of that —
-    /// PRESENCE of a broken one must not either. A stop against this manager
-    /// must still succeed on the sweep's own verdict.
+    /// stands for a distinct claim: a present manager that cannot confirm a
+    /// kill. Stop, Restart, Delete and tab close against this manager fail
+    /// visibly rather than report success, because an unconfirmed scope may
+    /// still hold processes the sweep cannot see (SPEC.md "Lifecycle
+    /// operations").
     #[cfg(test)]
     pub fn fake_failing_kills(sink: ScopeOpSink) -> ScopeManager {
         ScopeManager::fake_with(vec![true], true, None, Vec::new(), sink)

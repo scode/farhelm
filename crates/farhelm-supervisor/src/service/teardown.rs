@@ -1096,6 +1096,57 @@ mod tests {
         assert!(!hook_log.exists(), "the cleanup removes the hook trace");
     }
 
+    /// Stop fails when the session's recorded scope cannot even be checked
+    /// because the systemd user manager is not usable now.
+    ///
+    /// Why it matters: the launch ran in a scope that may still hold a
+    /// daemon the process sweep cannot see; a manager that stopped answering
+    /// (both the startup probe and the one re-probe failed) is no evidence
+    /// the scope is gone, so reporting a clean stop would hide survivors
+    /// (SPEC.md "Lifecycle operations"). Specified: with both probes negative
+    /// and a recorded scope, `stop_live_agent` returns a sweep failure.
+    #[farhelm_testtrace::test]
+    async fn stop_refuses_when_a_recorded_scope_cannot_be_checked() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (_state, sup, entry) = scoped_session(
+            crate::scope::ScopeManager::fake_reprobing(false, false, Arc::new(|_| {})),
+            &id,
+        )
+        .await;
+
+        let result = super::super::sweep::stop_live_agent(&sup, &id, &entry, None).await;
+
+        assert!(
+            matches!(result, Err(super::super::sweep::StopFailure::Sweep(_))),
+            "an uncheckable recorded scope must fail the stop"
+        );
+    }
+
+    /// Stop reports a failure when it cannot confirm that the agent's cgroup
+    /// scope is gone.
+    ///
+    /// Why it matters: a still-loaded scope may hold a daemon the process sweep
+    /// cannot see, so reporting a clean stop would hide survivors; SPEC.md's
+    /// Lifecycle operations (confirmed 2026-09-28) makes such an operation fail
+    /// visibly, as Delete already did. Specified: with a scope manager whose
+    /// kills never confirm, `stop_live_agent` returns a sweep failure.
+    #[farhelm_testtrace::test]
+    async fn stop_refuses_when_the_scope_cannot_be_confirmed() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (_state, sup, entry) = scoped_session(
+            crate::scope::ScopeManager::fake_failing_kills(Arc::new(|_| {})),
+            &id,
+        )
+        .await;
+
+        let result = super::super::sweep::stop_live_agent(&sup, &id, &entry, None).await;
+
+        assert!(
+            matches!(result, Err(super::super::sweep::StopFailure::Sweep(_))),
+            "an unconfirmed scope must fail the stop"
+        );
+    }
+
     /// A failed forwarder join must still kill the session's tmux server, but
     /// the first Delete remains visibly incomplete so a retry can finish the
     /// durable row cleanup. The fixture uses a real control client and tmux

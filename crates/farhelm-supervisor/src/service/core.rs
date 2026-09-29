@@ -10107,7 +10107,9 @@ impl Supervisor {
                 None,
                 session_id,
                 &SweepTarget::AgentOnly,
-                ScopeKillFailure::Warn,
+                // Refuse: relaunching while the prior scope may still hold
+                // survivors is the "alongside" SPEC.md forbids.
+                ScopeKillFailure::Refuse,
             )
             .await
             .context("reaping the prior run's leftover descendants before relaunching")?;
@@ -15017,6 +15019,111 @@ pub(crate) mod tests {
         assert!(
             error.to_string().contains("may still be running"),
             "the refusal must say why consent is needed: {error:#}"
+        );
+    }
+
+    /// Restart does not relaunch when it cannot confirm that the prior run's
+    /// cgroup scope is gone.
+    ///
+    /// Why it matters: a still-loaded scope may hold a daemon the process sweep
+    /// cannot see, and relaunching next to it is the "alongside" SPEC.md's
+    /// Lifecycle operations forbid; the rule confirmed on 2026-09-28 says such
+    /// an operation fails visibly instead. Specified: for an exited agent whose
+    /// recorded scope never confirms collected, restart returns an error and
+    /// the row keeps its generation.
+    #[farhelm_testtrace::test]
+    async fn restart_refuses_while_the_prior_scope_is_unconfirmed() {
+        let state = StateDir::new();
+        let cwd = tempfile::tempdir().expect("session cwd");
+        let canonical = std::fs::canonicalize(cwd.path())
+            .expect("canonical cwd")
+            .to_string_lossy()
+            .into_owned();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(crate::scope::ScopeManager::fake_failing_kills(Arc::new(
+                    |_| {},
+                ))),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let id = "5d1a8e36-1c0b-4c55-8f1e-7a2b9c4d6e01";
+        sup.store
+            .insert_session(
+                crate::store::StoredSession {
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    id: id.to_string(),
+                    parent: None,
+                    title: id.to_string(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: canonical.clone(),
+                    invocation: "agent".to_string(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: Some(canonical.clone()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: true,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed the exited session");
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.to_string();
+        entry.info.cwd = canonical.clone();
+        entry.canonical_cwd = Some(canonical);
+        entry.scope = Some(crate::scope::unit_name(id, 0).expect("a UUID names a scope"));
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.to_string(), Arc::new(entry));
+
+        let error = sup
+            .restart_session(id, RestartMode::Fresh, false, None, None, None)
+            .await
+            .expect_err("an unconfirmed prior scope must block the relaunch");
+        assert!(
+            format!("{error:#}").contains("leftover descendants"),
+            "the refusal names the unconfirmed cleanup: {error:#}"
+        );
+        assert_eq!(
+            sup.store
+                .session(id)
+                .await
+                .expect("read row")
+                .expect("row")
+                .generation,
+            0,
+            "nothing was relaunched"
         );
     }
 

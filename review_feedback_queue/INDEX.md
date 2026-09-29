@@ -19,8 +19,6 @@ One line per open item. This file must always match the feedback files in this d
   disconnect aborts mid-kill.
 - `delete-roots-only-agent-pane.md` — Delete roots its process walk only on the agent pane, so tab, split-pane and
   terminal-less processes survive.
-- `restart-relaunches-over-unconfirmed-scope.md` — restart relaunches even when the previous run's cgroup could not be
-  confirmed empty.
 - `event-feed-liveness-postponed-by-revisions.md` — the event feed's liveness check never fires on a busy fleet, so dead
   subscribers hold the 64 seats.
 - `agent-create-replays-asker-as-child.md` — a keyed `agent create` can report the asking session itself as the newly
