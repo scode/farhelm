@@ -1895,7 +1895,10 @@
 - Completion criteria: SPEC.md's availability rule states the carve-out and its reason; SPEC_impl.md's session-id
   collision rule points at it rather than leaving the conflict unreconciled. No code change. Remove this feedback file
   and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; SPEC.md's availability section now names session ownership as a deliberate exception: the helm
+  refuses to route a session two hosts claim, names both, and removing the misbehaving host is the remedy. SPEC_impl.md
+  cross-references it. No code change. PR [#1140](https://github.com/scode/farhelm/pull/1140/changes), jj change
+  `utynmzqq`, bookmark `pr/session-id-contest-spec`.
 
 ## remote-unit-overwritten-without-ownership-check.md
 

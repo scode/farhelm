@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `remote-host-contests-foreign-session-ids.md` — any remote host can make other hosts' sessions refuse every operation
-  by listing their ids.
 - `remote-unit-overwritten-without-ownership-check.md` — ADD/UPDATE replace an existing remote
   farhelm-supervisor.service (setup-managed or hand-written) with no ownership check.
 - `provisioning-chmods-shared-directories.md` — provisioning chmods the existing unit dir, and on UPDATE the binary's

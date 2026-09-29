@@ -1459,6 +1459,15 @@ from the explicitly permitted operations above. Supervisors need sensible recove
 defend their availability against hostile processes with the same local account authority. Choose proportionate remedies
 rather than assuming a quota or scheduling architecture is required.
 
+Session ownership is one deliberate exception. When a host reports a session id that another host already owns, the helm
+cannot tell which of the two is telling the truth, so it refuses to route any operation on that session (terminal, stop,
+restart, rename, delete, Replace, uploads, detail) and says which two hosts claim it, rather than guess. A misbehaving
+host can therefore make other hosts' sessions unreachable through Farhelm for as long as it keeps claiming their ids;
+their agents keep running. That loss of access is the accepted response, because the alternative is a silent misroute:
+after a host's cache is cleared by removing and re-adding it or by adoption, whichever host lists an id first would own
+it, so a hostile host could quietly receive the terminal input, uploads, and stops meant for the real one. Removing the
+misbehaving host is the remedy; the refusal clears on the next refresh after it stops claiming the ids.
+
 ### Ownership during cleanup and provisioning
 
 Farhelm supports documented interactions with its private tmux server, including creating windows from inside a session.

@@ -2122,13 +2122,14 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   routing decision, not a display one: owner lookup would resolve one host while the list showed another's row, so a
   stop aimed at one machine could land on a different one. The first claim holds and the later claimant's row is
   dropped, so the LIST stays coherent; but while both hosts keep reporting the id, ROUTING fails closed naming both,
-  because the helm has no basis for choosing which one the user meant. That contest is per-host REFRESH STATE,
-  reconstructed from each drain's own evidence rather than remembered: it clears itself when a claimant stops reporting
-  the id, goes with the host when it is removed, goes with the cache when an adoption purges it, and needs no schema to
-  survive a restart — a restart forgets the marker and the next drains re-observe the collision if it is still real,
-  which costs one refresh interval in which a genuine collision routes to the cached owner. A host that lists one
-  session id twice in a single reply is a different failure: a list that contradicts itself is refused whole, and the
-  previous cache is kept.
+  because the helm has no basis for choosing which one the user meant. SPEC.md's "Remote input, session defaults, and
+  availability" accepts the resulting loss of access as a deliberate exception to its availability rule, and says why
+  first-claim-wins routing is not the answer. That contest is per-host REFRESH STATE, reconstructed from each drain's
+  own evidence rather than remembered: it clears itself when a claimant stops reporting the id, goes with the host when
+  it is removed, goes with the cache when an adoption purges it, and needs no schema to survive a restart — a restart
+  forgets the marker and the next drains re-observe the collision if it is still real, which costs one refresh interval
+  in which a genuine collision routes to the cached owner. A host that lists one session id twice in a single reply is a
+  different failure: a list that contradicts itself is refused whole, and the previous cache is kept.
 - The order a supervisor lists in is neither validated nor relied on. The helm sorts the union of every host's rows —
   cached and in-memory alike — per request, so an unsorted or differently sorted reply costs nothing and the one host
   that serves from memory rather than from the cache needs no special handling. Session ids are still bounded at every
