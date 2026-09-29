@@ -321,7 +321,9 @@ working copy is easy to forget, and a forgotten one is lost the next time the wo
 In such a session, every TODO.md change carries an implied "jjstack make a PR and merge it" once discussion of the entry
 is done, meaning the entry is written and nothing about it is waiting on the maintainer's answer. Load the `jjstack`
 skill, put the change on the latest main, open the draft PR, and land it per that skill. A later revision of an entry
-that already landed is a new PR of its own. The only validation is `dprint check TODO.md`.
+that already landed is a new PR of its own. The only validation is `dprint check TODO.md`. These commits and PRs skip
+the `scode-commit-msg-reviewer` cold read, even where standing instructions say to always use it: for a one-line TODO
+capture it is not worth the wait.
 
 NOTE: This applies ONLY while TODO.md is the only file the session has changed. If anything else has been touched —
 code, specs, other documentation, even an unrelated edit still in the working copy — do not commit or merge anything
