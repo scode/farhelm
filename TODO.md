@@ -212,11 +212,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   diagnostic that dumps what the engine put on the clipboard (`clipboardFacts` and `render()` in
   `crates/farhelm-ui/assets/terminal.js`); it was built for the manual WKWebView check in `docs/manual-mac-checklist.md`
   ("Clipboard file names", still not captured), and two specs in `e2e/tests/terminal-attachments.spec.ts` later started
-  reading it. Neither use needs a visible element: keep the captured facts somewhere off screen that Playwright can read
-  and a person can read from Web Inspector's console, or, if that turns out worse, enable the visible dump only in test
-  builds. Decide which at execution. Rewrite the two specs and the manual checklist step (and the walkthrough in
-  `crates/farhelm-ui/src/attachments.rs`'s module doc that says to expand the dump) to match. `clipboard-name.js`'s
-  `capture()` stays, since the paste naming decision uses it. This addresses
+  reading it. Neither use needs a visible element. Replace the dump with whatever serves the automated tests best,
+  decided by what those specs need to assert (for example, the last captured facts kept on a hook script can read but
+  nothing draws); the manual check adapts to that, such as reading the same hook from Web Inspector's console. Visible
+  UI, even one gated to test builds, is not the goal. Rewrite the two specs and the manual checklist step (and the
+  walkthrough in `crates/farhelm-ui/src/attachments.rs`'s module doc that says to expand the dump) to match.
+  `clipboard-name.js`'s `capture()` stays, since the paste naming decision uses it. This addresses
   `review_feedback_queue/clipboard-facts-label-stuck.md`: remove that file and its line in
   `review_feedback_queue/INDEX.md` in the same PR.
 
