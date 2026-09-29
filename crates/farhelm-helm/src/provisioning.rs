@@ -7374,6 +7374,49 @@ mod tests {
         );
     }
 
+    /// A retired embedded-payloads cache the cleanup cannot judge is left in
+    /// place and the payload source is still built.
+    ///
+    /// Why it matters: the cleanup is disk-space housekeeping, but its errors
+    /// used to propagate out of helm startup, so an unreadable or undeletable
+    /// leftover (a root-owned file from an old `sudo` run, say) kept the web
+    /// UI and every session unreachable. Its caution must survive the change:
+    /// when it cannot decide, it must not delete. Specified: with a
+    /// `--payload-dir` that cannot be resolved (a symlink loop, so the alias
+    /// check fails the same way for every user, root included), building the
+    /// production payload source succeeds and the leftover cache and its
+    /// contents are untouched.
+    #[farhelm_testtrace::test]
+    fn an_undecidable_embedded_payloads_cleanup_does_not_block_startup() {
+        let state_dir = tempfile::tempdir().unwrap();
+        let leftover = state_dir.path().join("embedded-payloads");
+        std::fs::create_dir(&leftover).unwrap();
+        std::fs::write(leftover.join("farhelm"), b"old payload").unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let looping = elsewhere.path().join("loop");
+        std::os::unix::fs::symlink(&looping, &looping).unwrap();
+        let selected = looping.join("payloads");
+        assert!(
+            selected
+                .canonicalize()
+                .is_err_and(|error| error.kind() != std::io::ErrorKind::NotFound),
+            "fixture premise: the payload dir fails to resolve with something other than NotFound"
+        );
+
+        production_payloads(
+            PayloadSelection::Directory(selected),
+            state_dir.path(),
+            true,
+            elsewhere.path(),
+        )
+        .expect("an undecidable cleanup must not stop the helm from starting");
+        assert_eq!(
+            std::fs::read(leftover.join("farhelm")).unwrap(),
+            b"old payload",
+            "a cleanup that cannot decide must not delete"
+        );
+    }
+
     /// Spec: a leftover `<state_dir>/embedded-payloads/` cache from a
     /// pre-D2 install is removed the first time `production_payloads` runs,
     /// regardless of which source is selected — this proves it for
