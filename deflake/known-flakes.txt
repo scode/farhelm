@@ -10,3 +10,4 @@
 #
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
 nextest farhelm::e2e session_lifecycle::non_utf8_terminal_output_survives_live_stream  # non-utf8-marker-missing
+playwright terminal-restart.spec.ts Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal  # replace-refusal-row-webkit
