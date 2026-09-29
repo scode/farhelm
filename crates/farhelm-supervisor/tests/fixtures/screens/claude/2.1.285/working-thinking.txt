@@ -1,0 +1,42 @@
+
+ ▐▛███▛█   Claude Code v2.1.285
+▝▜██████▀  Sonnet 5.5 · API Usage Billing
+ ▝▝   ▝▝   /tmp/fhc-xxxxxxxx/claude
+
+
+❯ Use your Bash tool to run exactly this command: sleep 20 && echo capture-done > marker.txt
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+✶ Imagining… (2s · thinking)
+  ⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claud…
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  user@host:/tmp/fhc-xxxxxxxx/claude Sonnet 5.5 effort:medium [░░░░░░░░░░] 0%
+  ⏸ manual mode on · ← for agents

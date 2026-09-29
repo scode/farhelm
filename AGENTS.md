@@ -518,6 +518,15 @@ only thing that pushes the `readme-assets` branch; never run that push by hand, 
 Neither script is a gate: nothing in CI runs or checks the image. Changing the publish script means running its
 `--self-test`, which is its whole validation and needs no network.
 
+# Agent screen fixtures
+
+The supervisor's Claude and Codex screen readers are tested against real screens under
+`crates/farhelm-supervisor/tests/fixtures/screens/`. "Re-capture agent screens" (or "check whether the new claude/codex
+still works with the status detection") means running `python3 scripts/capture-agent-screens.py` on the development host
+and committing the new version directory it writes; `docs/agent-screen-fixtures.md` says what it drives, what it costs,
+and how to read a failure. It spends real vendor turns, so run it when asked or after an agent upgrade, never as part of
+ordinary validation.
+
 # The live install is off-limits
 
 This machine runs the maintainer's production Farhelm: the released `farhelm` binary at `~/.local/bin/farhelm` (put

@@ -1,0 +1,42 @@
+
+  >_ OpenAI Codex (v0.159.0)
+     /tmp/fhc-xxxxxxxx/codex
+
+  What brings you to this corner of the terminal?
+
+
+› Run exactly this shell command: sleep 20 && echo capture-done > marker.txt
+
+
+• Running the requested command exactly as provided.
+
+• The sandbox rejected the first execution before the command started, so I’m retrying the same command with the required execution
+  permission.
+
+• Running sleep 20 && echo capture-done > marker.txt
+
+
+
+
+
+
+
+
+
+
+
+
+  Would you like to run the following command?
+
+  Environment: local
+
+  Reason: The user explicitly requested running this exact shell command, which sleeps and writes marker.txt.
+
+  $ sleep 20 && echo capture-done > marker.txt
+
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for commands that start with `sleep 20 && echo capture-done > marker.txt` (p)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel
