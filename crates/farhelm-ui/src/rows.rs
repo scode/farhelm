@@ -187,6 +187,42 @@ pub(crate) fn menu_row_reordered(
     previous_index != current_index
 }
 
+/// The order the session list DISPLAYS while its order is held under the
+/// pointer: `held` is the id order captured when the hold began, `served` is
+/// the helm's current listing.
+///
+/// The hold exists so a row does not move out from under the pointer on its
+/// way to a click. So every session still in `held` keeps its held position
+/// relative to the others, in `held`'s order, whatever `served` says now. A
+/// session that left `served` is dropped at once rather than kept: a deleted
+/// session must never stay clickable, even if its disappearance shifts the
+/// rows below it. A session new to `served` is appended at the bottom, in
+/// `served`'s order, so it is visible straight away without moving any row
+/// above it; it takes its real place when the hold ends.
+///
+/// This only reorders. Every returned session is `served`'s copy, so status,
+/// title, and times keep updating in place during a hold. An empty `held` is
+/// no hold: the result is `served` as is.
+pub(crate) fn held_display_order(held: &[String], served: &[Session]) -> Vec<Session> {
+    if held.is_empty() {
+        return served.to_vec();
+    }
+    let by_id: HashMap<&str, &Session> = served
+        .iter()
+        .map(|session| (session.id.as_str(), session))
+        .collect();
+    let held_ids: std::collections::HashSet<&str> = held.iter().map(String::as_str).collect();
+    held.iter()
+        .filter_map(|id| by_id.get(id.as_str()).map(|session| (*session).clone()))
+        .chain(
+            served
+                .iter()
+                .filter(|session| !held_ids.contains(session.id.as_str()))
+                .cloned(),
+        )
+        .collect()
+}
+
 /// Remove `removed` from `sessions` (this client's own optimistic delete)
 /// and report whether the row holding the open actions menu, `open_id`,
 /// moved or went away as a result.
@@ -199,19 +235,43 @@ pub(crate) fn menu_row_reordered(
 /// session with no tabs Delete runs with no prompt naming the row. The
 /// caller closes the menu when this returns true, exactly as a reordering
 /// listing would.
+///
+/// "Moved" is judged on the DISPLAYED order, `held` being the list's order
+/// hold (empty when there is none; see [`held_display_order`]). Under a hold
+/// the served order is not what is on screen, and a removal can move the
+/// menu's row on screen without moving it in `sessions`, or the reverse.
 pub(crate) fn remove_row_reporting_menu_move(
     sessions: &mut Vec<Session>,
     removed: &str,
     open_id: Option<&str>,
+    held: &[String],
 ) -> bool {
     let Some(open_id) = open_id else {
         sessions.retain(|session| session.id != removed);
         return false;
     };
-    let before = sessions.iter().position(|session| session.id == open_id);
+    let before = held_display_order(held, sessions);
     sessions.retain(|session| session.id != removed);
-    let after = sessions.iter().position(|session| session.id == open_id);
-    before != after
+    menu_row_reordered(Some(&before), &held_display_order(held, sessions), open_id)
+}
+
+/// Whether the session list's order hold should end now.
+///
+/// A hold ends once the pointer has left the list, or has been completely
+/// still over it for `still_limit_ms` (SPEC.md, Session list), but never
+/// while a session row's menu is open. That menu hangs off a row the release
+/// would move, so releasing would close it under the user; its flyout also
+/// sits outside the list's own box, so a pointer on it, or a pointer that a
+/// shrinking prompt leaves over the main pane, is not reliably "inside" by
+/// the list's pointer events. With the menu closed the rule applies again
+/// on the next check, whatever happened while it was open.
+pub(crate) fn hold_should_release(
+    menu_open: bool,
+    pointer_inside: bool,
+    still_ms: u128,
+    still_limit_ms: u128,
+) -> bool {
+    !menu_open && (!pointer_inside || still_ms >= still_limit_ms)
 }
 
 /// Whether the list should say "no sessions" and nothing else.
@@ -503,6 +563,34 @@ mod tests {
     use super::*;
     use crate::SessionStatus;
 
+    /// The ids of `sessions`, in order, for comparing display orders.
+    fn ids(sessions: &[Session]) -> Vec<&str> {
+        sessions.iter().map(|session| session.id.as_str()).collect()
+    }
+
+    /// Holding the list's order under the pointer must never let a row move
+    /// under it, never keep a deleted session clickable, and never hide a new
+    /// one. Specifies: a reorder in the served list is ignored in favor of the
+    /// held order; a removed session drops out at once; a new session is
+    /// appended below every held row in served order; row data comes from the
+    /// served copy; and no hold means the served order unchanged.
+    #[farhelm_testtrace::test]
+    fn held_display_order_keeps_held_rows_drops_removed_and_appends_new() {
+        let held = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        // Served reordered c, a, b; b was removed; d and e are new; a's title
+        // changed.
+        let served = vec![
+            session("d", "new d"),
+            session("c", "c"),
+            session("a", "a renamed"),
+            session("e", "new e"),
+        ];
+        let shown = held_display_order(&held, &served);
+        assert_eq!(ids(&shown), vec!["a", "c", "d", "e"]);
+        assert_eq!(shown[0].title, "a renamed", "rows show the served data");
+        assert_eq!(ids(&held_display_order(&[], &served)), ids(&served));
+    }
+
     /// A session with the given id and title; every other field is
     /// whatever is cheapest, since only those two matter to the rename
     /// helpers below.
@@ -548,7 +636,8 @@ mod tests {
         assert!(remove_row_reporting_menu_move(
             &mut sessions,
             "a",
-            Some("b")
+            Some("b"),
+            &[]
         ));
         assert_eq!(sessions.len(), 2, "the row is removed either way");
 
@@ -556,19 +645,65 @@ mod tests {
         assert!(!remove_row_reporting_menu_move(
             &mut sessions,
             "c",
-            Some("b")
+            Some("b"),
+            &[]
         ));
 
         let mut sessions = listing();
         assert!(remove_row_reporting_menu_move(
             &mut sessions,
             "b",
-            Some("b")
+            Some("b"),
+            &[]
         ));
 
         let mut sessions = listing();
-        assert!(!remove_row_reporting_menu_move(&mut sessions, "a", None));
+        assert!(!remove_row_reporting_menu_move(
+            &mut sessions,
+            "a",
+            None,
+            &[]
+        ));
         assert_eq!(sessions.len(), 2);
+    }
+
+    /// Under an order hold, what moves on screen is the displayed order, and
+    /// a menu anchored to a row must close exactly when that row moves on
+    /// screen. Specifies: with the served order B, A, C displayed as A, B, C,
+    /// removing A moves B on screen (a move is reported) though B stays first
+    /// in the served order; removing C moves nothing on screen.
+    #[farhelm_testtrace::test]
+    fn a_held_removal_reports_moves_in_displayed_order() {
+        let served = || vec![session("b", "B"), session("a", "A"), session("c", "C")];
+        let held = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+
+        let mut sessions = served();
+        assert!(remove_row_reporting_menu_move(
+            &mut sessions,
+            "a",
+            Some("b"),
+            &held
+        ));
+        let mut sessions = served();
+        assert!(!remove_row_reporting_menu_move(
+            &mut sessions,
+            "c",
+            Some("b"),
+            &held
+        ));
+    }
+
+    /// The hold's release rule: it protects a click in progress, but must not
+    /// freeze the list, and must never release under an open row menu.
+    /// Specifies: a pointer outside the list releases; a pointer inside
+    /// releases only after the stillness limit; an open menu blocks both.
+    #[farhelm_testtrace::test]
+    fn hold_release_waits_for_leave_or_stillness_and_never_under_a_menu() {
+        assert!(hold_should_release(false, false, 0, 5_000));
+        assert!(!hold_should_release(false, true, 4_999, 5_000));
+        assert!(hold_should_release(false, true, 5_000, 5_000));
+        assert!(!hold_should_release(true, false, 0, 5_000));
+        assert!(!hold_should_release(true, true, 60_000, 5_000));
     }
 
     /// The rename's user-visible promise is that the new title shows up at

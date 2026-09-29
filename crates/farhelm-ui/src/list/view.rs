@@ -3,7 +3,9 @@
 //! `ListView` owns the fleet-wide state; row rendering and creation stay in
 //! child modules so their narrower contracts remain visible.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use dioxus::prelude::*;
 
@@ -64,6 +66,18 @@ pub(crate) struct HeaderDeleteRequest {
     /// `status::shows_nothing_alive`).
     pub(crate) only_if_nothing_alive: bool,
 }
+
+/// How long the pointer must rest completely still over the session list
+/// before a held order is released anyway. Chosen by the user: long enough
+/// to finish aiming at a row, short enough that a pointer left parked over
+/// the list does not freeze its order indefinitely.
+const ORDER_HOLD_STILL_MS: u128 = 5_000;
+
+/// How often the hold's watcher checks whether the pointer has been still
+/// for [`ORDER_HOLD_STILL_MS`]. A coarse poll rather than a timer reset on
+/// every `pointermove`, because pointer moves arrive far faster than the
+/// release needs to be precise, and a task per move would be wasted work.
+const ORDER_HOLD_POLL_MS: u64 = 250;
 
 /// Return keyboard focus to the persistent control that opened the composer.
 ///
@@ -937,6 +951,31 @@ pub(crate) fn ListView(
     // reads the FILTER: a re-sorted listing covers exactly what the same
     // filter's listing covered, so nothing about evidence changes with it.
     let mut sort = use_signal(move || stored_sort(preferences));
+    // The session list's order hold: while the pointer is over the list,
+    // the ids in the order they are displayed, so no row moves out from
+    // under the pointer on its way to a click (SPEC.md, Session list). A
+    // display-only exception to rendering the helm's order as served:
+    // nothing here is remembered or sent anywhere, and
+    // `rows::held_display_order` is the whole rule for what a hold shows.
+    //
+    // A hold always describes the committed `listing`, never the controls:
+    // a reply to a DIFFERENT query than the one on screen ends it (see
+    // `commit_listing`), because changing the host, filter, or sort is
+    // asking for a different list. That also covers a hold taken while a
+    // changed query's reply is still in flight, which froze the old rows.
+    let mut order_hold = use_signal(|| None::<Vec<String>>);
+    // The query the committed `listing` answers, which is what a new reply
+    // is compared against to decide whether the hold still applies.
+    let mut listing_query = use_signal(|| None::<(SessionFilter, ListSort)>);
+    // The hold's pointer facts, read by `rows::hold_should_release`: when the
+    // pointer last moved over the list, and whether it is over it now. Plain
+    // cells rather than signals on purpose: they change on every pointer
+    // move and nothing renders from them, so making them reactive would only
+    // schedule re-renders nobody needs. The generation retires the watcher
+    // of an ended hold when a new one starts.
+    let hold_clock = use_hook(|| Rc::new(Cell::new(web_time::Instant::now())));
+    let hold_generation = use_hook(|| Rc::new(Cell::new(0_u64)));
+    let pointer_inside = use_hook(|| Rc::new(Cell::new(false)));
     // Render the optimistic shared preference directly: compactness has no
     // separate draft or listing-read state to keep synchronized.
     let compact = stored_compact(preferences);
@@ -1031,6 +1070,14 @@ pub(crate) fn ListView(
     // enough read loses. That half needs no authority, and withholding it
     // from filtered reads is what used to leave a rename painted over the
     // server's own rows for as long as any filter was applied.
+    // Whether a reply for `requested`/`ordered_by` answers the same query as
+    // the listing on screen, which is what lets an order hold carry over.
+    let answers_listing_query = move |requested: &SessionFilter, ordered_by: ListSort| {
+        listing_query
+            .peek()
+            .as_ref()
+            .is_some_and(|(filter, sort)| filter == requested && *sort == ordered_by)
+    };
     let mut commit_listing = move |generation: u64,
                                    requested: SessionFilter,
                                    ordered_by: ListSort,
@@ -1109,7 +1156,24 @@ pub(crate) fn ListView(
                         Some(Ok(prev)) => Some(prev.sessions.as_slice()),
                         _ => None,
                     };
-                    menu_row_reordered(previous_sessions, &listing.sessions, &open_id)
+                    // Compared as DISPLAYED, not as served: while the order
+                    // is held, a served reorder moves nothing on screen and
+                    // must not close a menu whose row stayed put. The two
+                    // sides are shown under different holds when this reply
+                    // answers a different query, which ends the hold below.
+                    let previous_held = order_hold.peek().clone().unwrap_or_default();
+                    let incoming_held = if answers_listing_query(&requested, ordered_by) {
+                        previous_held.clone()
+                    } else {
+                        Vec::new()
+                    };
+                    let previous_shown = previous_sessions
+                        .map(|previous| rows::held_display_order(&previous_held, previous));
+                    menu_row_reordered(
+                        previous_shown.as_deref(),
+                        &rows::held_display_order(&incoming_held, &listing.sessions),
+                        &open_id,
+                    )
                 };
                 if reordered {
                     menu_open.set(None);
@@ -1173,6 +1237,26 @@ pub(crate) fn ListView(
                 on_removed.call(id);
             }
             retire_vanished_renames(&mut renamed.write(), &listing.sessions, index);
+        }
+        if let Ok(listing) = &fetched {
+            // A reply to the same query as the rows on screen keeps the hold
+            // and makes it adopt what it now shows, including rows the reply
+            // appended at the bottom, so a later reply cannot re-sort those
+            // among themselves while the pointer is still over them. A reply
+            // to a different query ends the hold (see `order_hold`).
+            let reconciled = match order_hold.peek().as_ref() {
+                Some(held) if answers_listing_query(&requested, ordered_by) => Some(
+                    rows::held_display_order(held, &listing.sessions)
+                        .into_iter()
+                        .map(|session| session.id)
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            };
+            if reconciled.is_some() || order_hold.peek().is_some() {
+                order_hold.set(reconciled);
+            }
+            listing_query.set(Some((requested.clone(), ordered_by)));
         }
         listing.set(Some(fetched));
     };
@@ -1626,10 +1710,14 @@ pub(crate) fn ListView(
                     // for an action that had already succeeded.
                     if let Some(Ok(current)) = listing.write().as_mut() {
                         let open_menu = menu_open.peek().clone();
+                        // Judged on the displayed order, which an order hold
+                        // can make differ from the served one.
+                        let held = order_hold.peek().clone().unwrap_or_default();
                         if remove_row_reporting_menu_move(
                             &mut current.sessions,
                             &id,
                             open_menu.as_deref(),
+                            &held,
                         ) {
                             menu_open.set(None);
                         }
@@ -2359,6 +2447,77 @@ pub(crate) fn ListView(
             "readers": [listing_surface.peek().test_snapshot(), hosts_surface.peek().test_snapshot()],
         })
     });
+    // End the order hold if `rows::hold_should_release` says so now: the
+    // pointer has left the list or been still long enough, and no session
+    // row's menu is open. Nothing else ends a hold except a reply to a
+    // different query (see `order_hold`), and because this checks the current
+    // facts rather than remembering events, a leave or a stillness timeout
+    // that happened while a menu was open simply takes effect on the next
+    // check after the menu closes.
+    let try_release_order_hold = {
+        let hold_clock = hold_clock.clone();
+        let pointer_inside = pointer_inside.clone();
+        move || {
+            if order_hold.peek().is_none() {
+                return;
+            }
+            if rows::hold_should_release(
+                menu_open.peek().is_some(),
+                pointer_inside.get(),
+                hold_clock.get().elapsed().as_millis(),
+                ORDER_HOLD_STILL_MS,
+            ) {
+                order_hold.set(None);
+            }
+        }
+    };
+    // Any pointer activity over the list: movement, a press, or a wheel
+    // scroll (which moves the rows under a still pointer, so it counts as
+    // activity too). It restarts the stillness clock, and the first one
+    // takes the hold, snapshotting the order on screen and starting the
+    // watcher that applies the release rule every `ORDER_HOLD_POLL_MS` until
+    // the hold ends.
+    let note_list_pointer = {
+        let hold_clock = hold_clock.clone();
+        let hold_generation = hold_generation.clone();
+        let pointer_inside = pointer_inside.clone();
+        let try_release_order_hold = try_release_order_hold.clone();
+        move || {
+            pointer_inside.set(true);
+            hold_clock.set(web_time::Instant::now());
+            if order_hold.peek().is_some() {
+                return;
+            }
+            let ids: Vec<String> = match listing.peek().as_ref() {
+                Some(Ok(current)) => current.sessions.iter().map(|s| s.id.clone()).collect(),
+                _ => return,
+            };
+            order_hold.set(Some(ids));
+            let generation = hold_generation.get() + 1;
+            hold_generation.set(generation);
+            let hold_generation = hold_generation.clone();
+            let mut try_release_order_hold = try_release_order_hold.clone();
+            spawn(async move {
+                loop {
+                    crate::reader::sleep_ms(ORDER_HOLD_POLL_MS).await;
+                    if hold_generation.get() != generation || order_hold.peek().is_none() {
+                        return;
+                    }
+                    try_release_order_hold();
+                }
+            });
+        }
+    };
+    // The pointer left the list: release now unless a menu is open, in which
+    // case the watcher releases once it closes.
+    let leave_list = {
+        let pointer_inside = pointer_inside.clone();
+        let mut try_release_order_hold = try_release_order_hold.clone();
+        move || {
+            pointer_inside.set(false);
+            try_release_order_hold();
+        }
+    };
     let toggle_menu = use_callback(move |id: String| {
         let currently = menu_open.peek().as_deref() == Some(id.as_str());
         menu_open.set(if currently { None } else { Some(id) });
@@ -2494,6 +2653,10 @@ pub(crate) fn ListView(
     // the same "do not wait for the feed" nudge `do_replace` gives an
     // ordinary replace's own success path.
     let created_listing = request_listing.clone();
+    // The order hold that applies to the list being shown, if any, as the
+    // ids `rows::held_display_order` keeps in place. Read (not peeked) so a
+    // hold starting or ending re-renders the rows.
+    let held_order: Vec<String> = order_hold.read().clone().unwrap_or_default();
     // Every session whose menu an outside click may have to dismiss: the one
     // whose menu is open, plus any row still holding a delete or replace
     // confirmation. Sorted so the relays render in a stable order.
@@ -2892,6 +3055,26 @@ pub(crate) fn ListView(
                         div { class: "status filter-empty", "{line}" }
                     }
                     div { class: "session-list",
+                        onpointerenter: {
+                            let mut note = note_list_pointer.clone();
+                            move |_| note()
+                        },
+                        onpointermove: {
+                            let mut note = note_list_pointer.clone();
+                            move |_| note()
+                        },
+                        onpointerdown: {
+                            let mut note = note_list_pointer.clone();
+                            move |_| note()
+                        },
+                        onwheel: {
+                            let mut note = note_list_pointer.clone();
+                            move |_| note()
+                        },
+                        onpointerleave: {
+                            let mut leave = leave_list.clone();
+                            move |_| leave()
+                        },
                         // The rows are the server's listing with this
                         // view's own just-landed renames painted over it,
                         // so a renamed session reads correctly EVERYWHERE
@@ -2908,7 +3091,13 @@ pub(crate) fn ListView(
                         // layout change) is `layout_epoch`'s job instead —
                         // see the `use_effect` near `show_create`'s
                         // declaration.
-                        for session in apply_optimistic_renames(&listing.sessions, &renamed.read()) {
+                        // While the pointer holds the order, rows keep the
+                        // positions they had when it arrived (see
+                        // `rows::held_display_order` for new and removed rows).
+                        for session in apply_optimistic_renames(
+                            &rows::held_display_order(&held_order, &listing.sessions),
+                            &renamed.read(),
+                        ) {
                             SessionRow {
                                 key: "{session.id}",
                                 compact,

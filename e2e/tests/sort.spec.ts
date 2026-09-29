@@ -51,8 +51,10 @@ import {
   forgetAutoSelect,
   listHosts,
   localHostId,
+  openRowMenu,
   patchPreferences,
   readPreferences,
+  renameSession,
   resetPreferences,
   SESSION_LISTING,
   stubFeed,
@@ -1142,5 +1144,262 @@ test.describe("session list ordering", () => {
       newestReads,
       "a cut list is not a reason to ask the helm; the pick is from the rows in hand",
     ).toEqual([]);
+  });
+
+  /** Move the pointer onto the main pane, off the session list. */
+  async function pointerOffTheList(page: Page): Promise<void> {
+    const main = (await page.locator(".app-main").boundingBox())!;
+    await page.mouse.move(main.x + main.width / 2, main.y + main.height / 2);
+  }
+
+  /**
+   * The order holds still under the pointer, and catches up once it leaves.
+   *
+   * Why this matters: the helm reorders the list as sessions change, and a
+   * row moving out from under the pointer on its way to a click opens or
+   * deletes the wrong session. Specifies, with the title sort and the feed
+   * under the test's control: while the pointer is over the list, a rename
+   * that re-sorts two rows updates the renamed row in place but leaves the
+   * order alone; a session created meanwhile appears at the very bottom; a
+   * session deleted meanwhile disappears at once; and moving the pointer off
+   * the list applies the helm's order, new session included.
+   */
+  test("the order holds under the pointer and catches up when it leaves", async ({ page, request }) => {
+    const stamp = Date.now();
+    const a = await createSession(request, { title: `hold-${stamp}-b`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(a.id);
+    const b = await createSession(request, { title: `hold-${stamp}-c`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(b.id);
+    const gone = await createSession(request, { title: `hold-${stamp}-d`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(gone.id);
+    await patchPreferences(request, { list_sort: "title" });
+    const feed = await listWithStubbedFeed(page);
+    await expect.poll(() => orderOf(page, [a.id, b.id, gone.id])).toEqual([a.id, b.id, gone.id]);
+
+    await row(page, a.id).hover();
+    // Small moves over the list between the fixture's steps keep its
+    // stillness clock from expiring, so only the pointer leaving at the end
+    // can release this hold (the stillness release has its own test below).
+    const rowBox = (await row(page, a.id).boundingBox())!;
+    let wiggle = 0;
+    const stirPointer = async () => {
+      wiggle = (wiggle + 1) % 4;
+      await page.mouse.move(rowBox.x + 20 + wiggle, rowBox.y + rowBox.height / 2);
+    };
+    await renameSession(request, b.id, `hold-${stamp}-a`);
+    feed.notify(2);
+    // The listing carrying the rename has landed: the row updates in place.
+    await expect(row(page, b.id)).toContainText(`hold-${stamp}-a`);
+    expect(await orderOf(page, [a.id, b.id]), "the re-sort waits while the pointer is over the list").toEqual([
+      a.id,
+      b.id,
+    ]);
+
+    await stirPointer();
+    const fresh = await createSession(request, { title: `hold-${stamp}-0`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(fresh.id);
+    await stirPointer();
+    feed.notify(3);
+    await expect(row(page, fresh.id)).toBeVisible();
+    expect((await renderedOrder(page)).at(-1), "a new session appears below every held row").toBe(fresh.id);
+    // A second arrival joins below the first, even though it sorts above it:
+    // once shown, the first arrival is held like every other row.
+    await stirPointer();
+    const second = await createSession(request, { title: `hold-${stamp}-+`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(second.id);
+    await stirPointer();
+    feed.notify(4);
+    await expect(row(page, second.id)).toBeVisible();
+    expect((await renderedOrder(page)).slice(-2), "arrivals keep the order they arrived in").toEqual([
+      fresh.id,
+      second.id,
+    ]);
+
+    await stirPointer();
+    await cleanupSession(request, gone.id);
+    await stirPointer();
+    feed.notify(5);
+    await expect(row(page, gone.id), "a deleted session leaves at once, hold or not").toHaveCount(0);
+
+    // Premise for the leave: the hold is still in force right before it.
+    await stirPointer();
+    expect(await orderOf(page, [a.id, b.id, fresh.id, second.id]), "still held before the pointer leaves").toEqual([
+      a.id,
+      b.id,
+      fresh.id,
+      second.id,
+    ]);
+    await pointerOffTheList(page);
+    // Well inside the five-second stillness release, so only the leave can
+    // explain the new order.
+    await expect
+      .poll(() => orderOf(page, [a.id, b.id, fresh.id, second.id]), { timeout: 2_000 })
+      .toEqual([second.id, fresh.id, b.id, a.id]);
+  });
+
+  /**
+   * A pointer resting on the list does not freeze its order for good.
+   *
+   * Why this matters: a pointer is often simply left parked over the sidebar,
+   * and a hold that lasted until it moved would leave the list stale
+   * indefinitely. Specifies: with the pointer still over the list, a held
+   * re-sort applies by itself after 5 seconds without movement.
+   */
+  test("a still pointer releases the held order after five seconds", async ({ page, request }) => {
+    const stamp = Date.now();
+    const a = await createSession(request, { title: `still-${stamp}-b`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(a.id);
+    const b = await createSession(request, { title: `still-${stamp}-c`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(b.id);
+    await patchPreferences(request, { list_sort: "title" });
+    const feed = await listWithStubbedFeed(page);
+    await expect.poll(() => orderOf(page, [a.id, b.id])).toEqual([a.id, b.id]);
+
+    await row(page, a.id).hover();
+    await renameSession(request, b.id, `still-${stamp}-a`);
+    feed.notify(2);
+    await expect(row(page, b.id)).toContainText(`still-${stamp}-a`);
+    expect(await orderOf(page, [a.id, b.id]), "premise: the order is held").toEqual([a.id, b.id]);
+    // No pointer movement from here on; only the stillness release can
+    // apply the helm's order.
+    await expect
+      .poll(() => orderOf(page, [a.id, b.id]), { timeout: 15_000 })
+      .toEqual([b.id, a.id]);
+  });
+
+  /**
+   * An open menu keeps the order held, and the hold still releases after the
+   * menu is closed.
+   *
+   * Why this matters: releasing the hold while a row's menu is open would
+   * move that row and close the menu under the user, so the release waits
+   * for the menu. That wait must not lose the release altogether: once the
+   * menu closes, the next stillness interval still has to apply the helm's
+   * order. Specifies: with a re-sort pending and a menu open, more than five
+   * still seconds leave the order held; after moving within the list and
+   * closing the menu, the order applies once the pointer is still again.
+   */
+  test("an open menu defers the release without losing it", async ({ page, request }) => {
+    const stamp = Date.now();
+    const a = await createSession(request, { title: `defer-${stamp}-b`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(a.id);
+    const b = await createSession(request, { title: `defer-${stamp}-c`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(b.id);
+    await patchPreferences(request, { list_sort: "title" });
+    const feed = await listWithStubbedFeed(page);
+    await expect.poll(() => orderOf(page, [a.id, b.id])).toEqual([a.id, b.id]);
+
+    await row(page, a.id).hover();
+    await renameSession(request, b.id, `defer-${stamp}-a`);
+    feed.notify(2);
+    await expect(row(page, b.id)).toContainText(`defer-${stamp}-a`);
+    await openRowMenu(row(page, a.id));
+    // sleep-ok: the claim is that nothing happens for longer than the five-second stillness release, so the whole window must pass.
+    await page.waitForTimeout(6_500);
+    expect(await orderOf(page, [a.id, b.id]), "the open menu keeps the order held").toEqual([a.id, b.id]);
+    await expect(row(page, a.id).locator(".session-row-menu-flyout")).toBeVisible();
+
+    // Movement within the list, then closing the menu from its own toggle.
+    await row(page, a.id).locator(".session-row-menu").hover();
+    await row(page, a.id).locator(".session-row-menu").click();
+    await expect(row(page, a.id).locator(".session-row-menu-flyout")).toHaveCount(0);
+    await expect
+      .poll(() => orderOf(page, [a.id, b.id]), { timeout: 15_000 })
+      .toEqual([b.id, a.id]);
+  });
+
+  /**
+   * A delete that moves the open menu's row on screen closes that menu, even
+   * when the row did not move in the helm's order.
+   *
+   * Why this matters: a row menu is placed from a one-time measurement of its
+   * row, so a row that moves leaves its menu beside a different session. While
+   * the order is held, what moves on screen is the DISPLAYED order, and the
+   * list's own delete removes a row without a fresh listing to compare. Specifies:
+   * with the displayed order A, B, C held while the helm's is B, A, C, deleting
+   * A while B's menu is open closes B's menu once the delete lands.
+   */
+  test("a held delete that moves the open menu's row closes that menu", async ({ page, request }) => {
+    const stamp = Date.now();
+    const a = await createSession(request, { title: `heldel-${stamp}-a`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(a.id);
+    const b = await createSession(request, { title: `heldel-${stamp}-b`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(b.id);
+    const c = await createSession(request, { title: `heldel-${stamp}-c`, cwd: "/tmp", invocation: "sleep 300" });
+    created.push(c.id);
+    await patchPreferences(request, { list_sort: "title" });
+    const feed = await listWithStubbedFeed(page);
+    await expect.poll(() => orderOf(page, [a.id, b.id, c.id])).toEqual([a.id, b.id, c.id]);
+
+    await row(page, a.id).hover();
+    await renameSession(request, b.id, `heldel-${stamp}-0`);
+    feed.notify(2);
+    await expect(row(page, b.id)).toContainText(`heldel-${stamp}-0`);
+    expect(await orderOf(page, [a.id, b.id, c.id]), "premise: the old order is held").toEqual([a.id, b.id, c.id]);
+
+    let release: (() => void) | undefined;
+    await page.route(`**/api/sessions/${a.id}`, async (route) => {
+      if (route.request().method() !== "DELETE") {
+        await route.fallback();
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await route.fallback();
+    });
+    await openRowMenu(row(page, a.id));
+    await row(page, a.id).locator(".session-row-delete").click();
+    await row(page, a.id).locator(".confirm-delete").click();
+    await expect.poll(() => release !== undefined, { message: "the DELETE reached the route" }).toBe(true);
+    await openRowMenu(row(page, b.id));
+    await expect(row(page, b.id).locator(".session-row-menu-flyout")).toBeVisible();
+
+    release!();
+    await expect(row(page, a.id)).toHaveCount(0, { timeout: 20_000 });
+    await expect(row(page, b.id).locator(".session-row-menu-flyout"), "B moved up on screen").toHaveCount(0);
+  });
+
+  /**
+   * Changing the order is asking for a different list, even if the pointer is
+   * back over the old one before the new one arrives.
+   *
+   * Why this matters: the list keeps showing the previous order's rows until
+   * the reply to the new order lands. A hold taken in that gap covers the old
+   * rows, and must not then freeze the new reply into the old order.
+   * Specifies: with the reply to a changed sort held back, a pointer entering
+   * the list does not stop that reply's order from showing once it lands.
+   */
+  test("a hold taken while a new order is loading does not freeze it", async ({ page, request }) => {
+    const stamp = Date.now();
+    const ids = await threeOrderedSessions(request, stamp);
+    await patchPreferences(request, { list_sort: "title" });
+    await listWithStubbedFeed(page);
+    const titleOrder = [ids.a, ids.m, ids.z];
+    await expect.poll(() => orderOf(page, titleOrder)).toEqual(titleOrder);
+    const createdOrder = (
+      await (await request.get("/api/sessions?sort=created")).json()
+    ).sessions
+      .map((listed: { id: string }) => listed.id)
+      .filter((id: string) => titleOrder.includes(id));
+    expect(createdOrder, "premise: the two orders differ").not.toEqual(titleOrder);
+
+    let release: (() => void) | undefined;
+    await page.route(SESSION_LISTING, async (route: Route) => {
+      const url = new URL(route.request().url());
+      if (route.request().method() === "GET" && url.searchParams.get("sort") === "created") {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      await route.fallback();
+    });
+    await page.locator(".sort-select").selectOption("created");
+    await expect.poll(() => release !== undefined, { message: "the new order's read is held" }).toBe(true);
+    await row(page, ids.a).hover();
+    release!();
+    // Well inside the five-second stillness release, so only the new reply
+    // not being held can explain the new order.
+    await expect.poll(() => orderOf(page, titleOrder), { timeout: 3_000 }).toEqual(createdOrder);
   });
 });

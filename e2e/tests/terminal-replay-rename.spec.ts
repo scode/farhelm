@@ -1588,9 +1588,15 @@ test("rename survives a real committed row reorder without moving its textarea",
 
     reverse = true;
     feed.notify(2);
+    // The pointer entered the list to open the menu, so the list's order is
+    // held (SPEC.md, Session list) until the pointer leaves or rests for five
+    // seconds. The dialog replaced the element under the pointer, which not
+    // every engine reports as leaving the list, so the reorder may only land
+    // with the stillness release; the timeout allows for it. Where the pointer
+    // rests is not what this test is about; the dialog's stability is.
     await expect.poll(() => page.locator(".session-row").evaluateAll((rows, id) =>
       rows.findIndex((row) => row.getAttribute("data-session-id") === id), first.id),
-    ).not.toBe(sourceIndex);
+    { timeout: 15_000 }).not.toBe(sourceIndex);
     expect(await field.evaluate((node) => node === (window as any).__renameReorderField)).toBe(true);
     await expect(field).toBeFocused();
     expect(await field.evaluate((node) => ({

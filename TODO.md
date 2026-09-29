@@ -39,12 +39,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the foreground
   conversation's restart target beyond the checks now landed in #814, and define any remaining smallest admission check.
   Preserve legitimate foreground transitions and avoid extending the reporter's scope without evidence.
-- **Hold session list order under the pointer.** While the mouse is over the session list, don't reorder its rows, so a
-  row doesn't move out from under the pointer on its way to a click. Apply the pending order once the pointer leaves the
-  list, or once it has been completely still over the list for 5 seconds. SPEC.md's Session list section says a client
-  renders the helm's order as served, and `crates/farhelm-ui/src/list.rs` documents the same rule, so this display hold
-  needs a spec amendment alongside the code. Sessions that are created or removed while the order is held are an open
-  question: they may have to be exempt from the hold.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).

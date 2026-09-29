@@ -639,6 +639,16 @@ seen/unseen comparison stay independent: they describe output recency and keep a
 a row. The grouping and the key are authoritative helm and supervisor data, so every client agrees without keeping a
 private rank.
 
+A client holds back reordering while the pointer is over the list, so a row does not move out from under the pointer on
+its way to a click. The hold is display-only and remembers nothing: the helm's order stays authoritative, and the client
+shows it again as soon as the pointer leaves the list or has been completely still over it for 5 seconds (a scroll
+counts as movement). During a hold, rows keep updating in place; a session that disappears is removed at once, since a
+deleted session must not stay clickable; and a new session appears at the bottom of the list, moving no row above it,
+until the hold ends and it takes its place. Changing the list's host, filter, or order is asking for a different list,
+so the hold does not apply to it. While a session row's menu is open, the hold is kept until the menu closes, even if
+the pointer leaves the list or stays still, because releasing it would move the very row the menu belongs to; pointer
+movement over the list starts the 5 seconds of stillness over.
+
 The list always carries a count of every session. The host selector is a narrowing query, so its count says how many
 matched alongside how big the whole fleet is.
 
