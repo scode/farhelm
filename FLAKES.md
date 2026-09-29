@@ -1150,12 +1150,22 @@ workflow (run `36603454788`, same hosted runner type, one smoke per job, no gate
 the untouched v0.18.0 base `03a3051815234e45260c567719f09bf2804b5469` in one of two jobs, and at two of six intermediate
 commits, while `af8f5ab6` passed twice; 5 of 12 CI runs failed in all. The v0.18.0 release job itself passed. Locally on
 Linux x86_64 the same commit passed 6 of 6, including runs pinned to 4 and 2 CPUs and one without a session bus.
-Disposition: open (TODO.md); release jobs that hit it are rerun rather than blocked.
+Disposition: fixed in #1227. The page was late, not missing: one of the bisect failures served its assets 29.8 seconds
+after launch, just past the wait. A diagnostic run on the same runner type (Actions run `36607548613`, 10 jobs of 5
+launches of the prebuilt app, launched the way the smoke's first boot does) put every launch but one per job at 30 to 36
+seconds to the first asset request, against about 3 locally, and gdb stacks taken 12 seconds in showed the app's main
+thread inside `g_application_register` → `g_dbus_proxy_new_sync`, polling with a 25-second timeout. That is GTK 3's
+`GtkApplication` startup auto-starting `org.freedesktop.portal.Desktop`, before tao's event loop, and so the window,
+exists. `libwebkit2gtk-4.1-0` recommends `xdg-desktop-portal-gtk`, so the gate's `apt-get install` put the portal on the
+runner; the user journal showed systemd starting it, its GTK backend exiting at once for want of a display, and the
+portal timing out on backend lookups instead of claiming its name. Local runs never paid this because no portal was
+installed, so activation failed in milliseconds. The gate now purges both portal packages after installing its
+dependencies.
 
 Class: substrate
 
-Cause: hypothesis — WebKitGTK under Xvfb on the hosted runner sometimes never loads the page, the same family as the
-black-window behavior the script's header already records for its optional pixel-driven phase.
+Cause: established — a D-Bus activation of the desktop portal that cannot start on the headless runner blocks GTK
+startup for D-Bus's 25-second default, which puts the first page load right at the smoke's 30-second wait.
 
 ## 2026-09-29 — `restricted_inherited_create_waits_for_parent_restart_then_inherits` (crates/farhelm-supervisor/src/service/handlers.rs)
 

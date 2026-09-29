@@ -120,13 +120,6 @@ The earlier cross-harness evidence is preserved in
   retry cycle, or accept the residual. Keep this distinct from the existing single-client stall entry, and do not weaken
   liveness assertions based on a later passing run.
 
-- **Desktop smoke webview never loads on the hosted runner.** `scripts/desktop-smoke.sh` failed with "the webview
-  JavaScript stack did not authenticate its event socket" in 5 of 12 runs on the GitHub-hosted x86_64 release runner on
-  2026-09-29, at v0.18.0 and later commits alike; it passed all 6 local runs of the rc.2 commit. The window stays black
-  and the asset handler sees no request, so the page never starts loading. It fails the release gate, which then needs a
-  rerun. Evidence and runs are in FLAKES.md (2026-09-29). First step: capture WebKit's own state at the 30-second mark
-  (web process alive, load events, a retry of the initial load) before touching the wait.
-
 - **Inherited create behind a parent Restart or Delete.** Both
   `service::handlers::tests::restricted_inherited_create_waits_for_parent_restart_then_inherits` and its Delete sibling
   in `crates/farhelm-supervisor/src/service/handlers.rs` time out after 10 seconds waiting for the parent mutation and
