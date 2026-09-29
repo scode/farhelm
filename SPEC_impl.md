@@ -2731,6 +2731,12 @@ serde-additive field can still be semantically load-bearing: the non-displacing 
 that ignores it displaces a client it was asked to leave alone, silently, on both ends), and decode tolerance is why
 such a bump is required rather than why it is unnecessary.
 
+Outside the release commit a tag points at, that number is the fixed sentinel `0.0.0-unreleased`, and release commits
+never land on main. An untagged build therefore never claims to be a release: its version readout says so, and a
+release-shaped build's default payload download names a release that does not exist and fails instead of provisioning
+hosts with some real release's binaries. The cost is that two untagged builds carry the same build stamp, so the
+client↔helm check below cannot tell them apart; installs come from tags, which always differ.
+
 The client↔helm edge has no hello to refuse at, so the helm stamps its build on every reply and the UI compares it
 against the one compiled into its bundle. A mismatch — including a helm that reports no build at all — surfaces a reload
 prompt and, more importantly, withdraws every UNATTENDED behavior that depends on the helm honoring this milestone's

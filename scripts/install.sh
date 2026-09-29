@@ -1068,7 +1068,17 @@ EOF
         candidate=""
       fi
     fi
-    if ! VERSION_TAG=$(normalize_version "$candidate"); then
+    # Builds of main carry the version 0.0.0-unreleased rather than a
+    # release number (the root Cargo.toml explains why), and the installed
+    # uninstall acceptance suite (scripts/test-uninstall.py) installs such a
+    # build through this script as its "current" release. The sentinel names
+    # no published release, so it is accepted ONLY together with the
+    # test-only base URL; pinned against GitHub it stays a version error like
+    # any other non-release suffix.
+    if [ -n "${FARHELM_INSTALL_TEST_BASE_URL:-}" ] &&
+      { [ "$candidate" = "0.0.0-unreleased" ] || [ "$candidate" = "v0.0.0-unreleased" ]; }; then
+      VERSION_TAG=v0.0.0-unreleased
+    elif ! VERSION_TAG=$(normalize_version "$candidate"); then
       printf '%s\n' "$version_error" >&2
       exit 1
     fi

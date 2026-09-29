@@ -8,6 +8,13 @@ Three kinds of release exist. A stable release `X.Y.Z` is cut from main, gets cu
 `install.sh` and `releases/latest` serve. An RC `X.Y.Z-rc.N` and a dev release `X.Y.Z-dev.N` are prereleases for trying
 a build on a real machine; they carry no curated notes. The tag, not any merge, triggers the release workflow.
 
+Main's version is always `0.0.0-unreleased`, in both the root `Cargo.toml` and `packaging/farhelm-desktop/dist.toml`.
+Every kind of release sets its real version in a release commit that lives only under its tag: a stable one on its
+`release-X.Y.Z` branch, an RC or dev one in a bump PR that is closed without merging. Never merge a release commit into
+main, and never let a bump ride into main inside another PR (a squash merge of a PR stacked on a bump commit does
+exactly that). Anything built from main then says plainly that it is not a release; the root `Cargo.toml` explains what
+a release number on main would break.
+
 # The changelog
 
 `CHANGELOG.md` at the repository root holds one section per stable release, newest first. cargo-dist finds the file on
