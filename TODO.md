@@ -33,6 +33,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Make the delete-in-progress indicator prominent.** The "stopping…" / "deleting…" state from #1175 is easy to miss: a
+  6px pulsing dot and one word in the sidebar row's age slot (with the row dimmed to 60%), and the same in place of the
+  session header's action buttons. In practice it goes unnoticed even when the user is looking at the session list,
+  while the terminal's red "Detached: …" banner, which only arrives near the end of the delete, is what catches the eye.
+  Make the in-progress state clearly visible for the whole wait. Details to be decided when this is picked up.
 - **Pi foreground ownership.** Assess whether native or shelled-out Pi children can replace or withdraw the foreground
   conversation's restart target, then define the smallest admission check that preserves legitimate foreground
   transitions. This is an assessment task, not a claim that every vendor path has been reproduced.
