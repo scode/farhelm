@@ -95,6 +95,13 @@ fn remove_with(
     if let Err(error) = remove_one(filesystem, &plan.flat.metadata, false, report) {
         writeln!(report, "retained installer receipt: {error:#}")?;
     }
+    if let BundleInspection::RetainedWithoutReceipt(root) = &plan.bundle {
+        writeln!(
+            report,
+            "left {} in place: it has no Farhelm installer receipt; move it to the Trash yourself if it is no longer wanted",
+            path_text(root)
+        )?;
+    }
     Ok(())
 }
 
@@ -218,6 +225,55 @@ mod tests {
             assert_eq!(fs::read(&sentinel).unwrap(), b"retain me");
             assert!(fixture.install.is_dir());
         }
+    }
+
+    /// A `Farhelm.app` without an installer receipt is left in place while the
+    /// verified flat installation is removed, and both the plan and the
+    /// report say the app was kept.
+    ///
+    /// Why it matters: bundles from installers that predate receipts, and
+    /// self-built or signed apps, used to refuse the entire uninstall, and the
+    /// advised reinstall does nothing under `FARHELM_NO_APP_BUNDLE` and
+    /// otherwise replaces the user's own app, so nothing documented got the
+    /// user out. Deleting an app Farhelm cannot prove it made stays excluded.
+    /// Specified: with the receipt removed and signed-app entries the
+    /// installer never writes added, inspection succeeds with the app retained,
+    /// removal deletes the flat CLI, every file of the app survives, and the
+    /// report names the kept app.
+    #[test]
+    fn a_receiptless_app_is_kept_while_the_rest_is_removed() {
+        let fixture = Fixture::new();
+        fixture.flat(Some(b"desktop"));
+        let bundle = fixture.bundle(false);
+        let contents = bundle.join("Contents");
+        std::fs::remove_file(contents.join(".farhelm-installation")).unwrap();
+        std::fs::write(contents.join("PkgInfo"), b"APPL????").unwrap();
+        std::fs::create_dir(contents.join("_CodeSignature")).unwrap();
+        std::fs::write(contents.join("_CodeSignature/CodeResources"), b"signature").unwrap();
+
+        let plan = ownership::inspect(&fixture.inputs(PlatformArtifacts::Macos))
+            .expect("a receipt-less app must not block uninstall");
+        let ownership::BundleInspection::RetainedWithoutReceipt(retained) = &plan.bundle else {
+            panic!("the app must be retained, got {:?}", plan.bundle);
+        };
+        assert_eq!(retained, &bundle);
+
+        let mut report = String::new();
+        remove(&plan, &mut report).unwrap();
+        assert!(!plan.flat.cli.exists(), "the verified CLI is removed");
+        for kept in [
+            "MacOS/farhelm",
+            "MacOS/farhelm-desktop",
+            "Info.plist",
+            "PkgInfo",
+            "_CodeSignature/CodeResources",
+        ] {
+            assert!(contents.join(kept).is_file(), "{kept} must survive");
+        }
+        assert!(
+            report.contains(&format!("left {} in place", path_text(&bundle))),
+            "{report}"
+        );
     }
 
     /// Receipt tidying after the CLI is gone must not promise an impossible

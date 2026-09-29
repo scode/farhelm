@@ -118,7 +118,10 @@ the CLI in the executable directory, rather than its copy inside `Farhelm.app`; 
 the appropriate CLI.
 
 On macOS, uninstall refuses if `~/Applications/Farhelm.app` belongs to a different executable directory. Choosing a CLI
-by full path does not bypass that check: all standalone installations share this one app-bundle location.
+by full path does not bypass that check: all standalone installations share this one app-bundle location. A
+`~/Applications/Farhelm.app` with no bundle record at all, such as one built by the installers of early September 2026
+or one you built yourself, is left in place: uninstall removes the rest of the installation and reports that it kept the
+app. Move it to the Trash yourself if you no longer want it.
 
 ## What protects against inappropriate deletion
 

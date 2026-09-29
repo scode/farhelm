@@ -27,8 +27,6 @@ One line per open item. This file must always match the feedback files in this d
   startup.
 - `no-supervisor-setup-splits-state-dir.md` — setup --no-supervisor leaves setup's own supervisor on the old state dir
   while the helm is pinned to the new one.
-- `receiptless-app-bundle-blocks-uninstall.md` — on macOS a Farhelm.app without a receipt refuses the whole uninstall,
-  and the advice cannot work under the no-bundle opt-out.
 - `desktop-reauth-remount-loses-action.md` — the desktop credential refresh remounts the app before the retry runs,
   silently losing the action that hit the 401.
 - `desktop-reauth-failure-dead-end.md` — a transient webview re-auth failure after rotation leaves only an error line
