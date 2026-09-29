@@ -385,7 +385,7 @@ server_request_count() {
 # binary to decompress, so a toolchain missing it would make every "should
 # succeed" scenario fail for a reason that has nothing to do with what is
 # actually under test. It has no "omit gzip" scenario of its own.
-BASE_TOOLS=(uname mkdir mktemp rmdir ls cp curl tar gzip sha256sum shasum openssl awk sed grep tr head cut mv rm chmod cat sysctl sleep find)
+BASE_TOOLS=(uname mkdir mktemp rmdir ls cp curl tar gzip sha256sum shasum openssl awk sed grep tr head cut mv rm chmod cat sysctl sleep find ln date)
 
 # make_toolchain DIR [OMIT...]
 # Populates DIR with symlinks to every tool in BASE_TOOLS found on this
@@ -2593,6 +2593,91 @@ check "R3 F4 (retired journal path): the planted symlink is neither followed nor
   [ -L "$INSTALL_R3F4SYM/.farhelm-install.journal" ]
 check "R3 F4 (retired journal path): its target is byte-for-byte untouched" \
   [ "$(cat "$R3_OUTSIDE")" = "outside sentinel" ]
+
+# ===========================================================================
+# Scenario: an existing farhelm the ownership record does not vouch for is
+# kept, not destroyed (triage: installer-overwrites-user-farhelm-file).
+#
+# Why this matters: the installer used to move any regular file named
+# farhelm aside and then delete it, so a user's own wrapper script in a
+# custom FARHELM_INSTALL_DIR vanished while the run reported an update.
+# Spec: a destination whose SHA-256 matches the executable-directory record
+# is replaced with no leftover; anything else (a foreign file, a Farhelm
+# from before the record existed, a recorded binary edited since) is kept
+# under a visible NAME.replaced-* name and named in the closing message.
+# ===========================================================================
+echo
+echo "== K1-K4: unrecorded existing farhelm is kept =="
+kept_files() { find "$1" -maxdepth 1 -name 'farhelm.replaced-*' | sort; }
+
+HOME_K1="$WORKDIR/home-k1"
+INSTALL_K1="$HOME_K1/bin"
+mkdir -p "$INSTALL_K1"
+printf '#!/bin/sh\necho my own wrapper\n' >"$INSTALL_K1/farhelm"
+K1_OWN=$(cat "$INSTALL_K1/farhelm")
+check "K1 premise: no ownership record before the install" [ ! -e "$INSTALL_K1/.farhelm-installation" ]
+run_install "$TOOLCHAIN_FULL" "$HOME_K1" "$INSTALL_K1" "$BASE/good" 1.2.3
+check "K1 (foreign file): the install exits 0" [ "$RC" -eq 0 ]
+K1_KEPT=$(kept_files "$INSTALL_K1")
+check "K1 (foreign file): exactly one kept copy exists" [ "$(printf '%s\n' "$K1_KEPT" | grep -c .)" -eq 1 ]
+check "K1 (foreign file): the kept copy is the user's file byte-for-byte" [ "$(cat "$K1_KEPT")" = "$K1_OWN" ]
+check "K1 (foreign file): farhelm itself was replaced" [ "$(cat "$INSTALL_K1/farhelm")" != "$K1_OWN" ]
+check "K1 (foreign file): the closing message names the kept copy" contains "$OUT" "was kept as $K1_KEPT"
+
+HOME_K2="$WORKDIR/home-k2"
+INSTALL_K2="$HOME_K2/bin"
+mkdir -p "$HOME_K2"
+run_install "$TOOLCHAIN_FULL" "$HOME_K2" "$INSTALL_K2" "$BASE/good" 1.2.3
+check "K2 setup: the first install exits 0" [ "$RC" -eq 0 ]
+check "K2 premise: the record vouches for the installed farhelm" assert_standalone_record "$INSTALL_K2" no
+run_install "$TOOLCHAIN_FULL" "$HOME_K2" "$INSTALL_K2" "$BASE/good" 1.2.3
+check "K2 (recorded update): the update exits 0" [ "$RC" -eq 0 ]
+check "K2 (recorded update): no kept copy is left behind" [ -z "$(kept_files "$INSTALL_K2")" ]
+check "K2 (recorded update): the closing message mentions no kept copy" not_contains "$OUT" "was kept as"
+
+HOME_K3="$WORKDIR/home-k3"
+INSTALL_K3="$HOME_K3/bin"
+mkdir -p "$HOME_K3"
+run_install "$TOOLCHAIN_FULL" "$HOME_K3" "$INSTALL_K3" "$BASE/good" 1.2.3
+check "K3 setup: the first install exits 0" [ "$RC" -eq 0 ]
+K3_PREVIOUS=$(cat "$INSTALL_K3/farhelm")
+# A Farhelm installed before #673 has no record at all.
+rm -f "$INSTALL_K3/.farhelm-installation"
+run_install "$TOOLCHAIN_FULL" "$HOME_K3" "$INSTALL_K3" "$BASE/good" 1.2.3
+check "K3 (pre-record install): the update exits 0" [ "$RC" -eq 0 ]
+K3_KEPT=$(kept_files "$INSTALL_K3")
+check "K3 (pre-record install): the previous farhelm is kept" [ "$(cat "$K3_KEPT")" = "$K3_PREVIOUS" ]
+check "K3 (pre-record install): the new record is written" assert_standalone_record "$INSTALL_K3" no
+
+HOME_K4="$WORKDIR/home-k4"
+INSTALL_K4="$HOME_K4/bin"
+mkdir -p "$HOME_K4"
+run_install "$TOOLCHAIN_FULL" "$HOME_K4" "$INSTALL_K4" "$BASE/good" 1.2.3
+check "K4 setup: the first install exits 0" [ "$RC" -eq 0 ]
+printf '#!/bin/sh\necho edited since\n' >"$INSTALL_K4/farhelm"
+K4_EDITED=$(cat "$INSTALL_K4/farhelm")
+run_install "$TOOLCHAIN_FULL" "$HOME_K4" "$INSTALL_K4" "$BASE/good" 1.2.3
+check "K4 (digest mismatch): the update exits 0" [ "$RC" -eq 0 ]
+check "K4 (digest mismatch): the edited file is kept" [ "$(cat "$(kept_files "$INSTALL_K4")")" = "$K4_EDITED" ]
+
+# An unreadable file proves nothing about ownership, so it is kept too; it
+# must not abort the install. Root reads mode-000 files anyway, so the
+# premise only holds for an ordinary user.
+if [ "$(id -u)" -ne 0 ]; then
+  HOME_K5="$WORKDIR/home-k5"
+  INSTALL_K5="$HOME_K5/bin"
+  mkdir -p "$INSTALL_K5"
+  printf 'unreadable\n' >"$INSTALL_K5/farhelm"
+  chmod 000 "$INSTALL_K5/farhelm"
+  check "K5 premise: the existing farhelm cannot be read" [ ! -r "$INSTALL_K5/farhelm" ]
+  run_install "$TOOLCHAIN_FULL" "$HOME_K5" "$INSTALL_K5" "$BASE/good" 1.2.3
+  check "K5 (unreadable file): the install exits 0" [ "$RC" -eq 0 ]
+  K5_KEPT=$(kept_files "$INSTALL_K5")
+  check "K5 (unreadable file): a kept copy exists" [ -n "$K5_KEPT" ]
+  check "K5 (unreadable file): the kept copy keeps its mode" [ "$(stat -c %a "$K5_KEPT")" = 0 ]
+  chmod 600 "$K5_KEPT"
+  check "K5 (unreadable file): the kept copy keeps its bytes" [ "$(cat "$K5_KEPT")" = "unreadable" ]
+fi
 
 # ===========================================================================
 echo

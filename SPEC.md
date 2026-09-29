@@ -232,6 +232,12 @@ Re-running the installer updates the installation. Its default is the latest sta
 specific release, including a prerelease. Updating the software preserves user data. Automatic updates are outside this
 initial uninstall scope, as are package-manager installations and changes to the packaging layout.
 
+Installation follows the same ownership rule as removal: a file is not destroyed merely because its name matches an
+executable the installer writes. The installer replaces an existing `farhelm` or `farhelm-desktop` outright only when
+its checksum matches what the executable-directory ownership record says the installer last put there. Anything else at
+that name, whether the user's own file or a Farhelm from before the record existed, is kept under a visible name and
+reported, and the install proceeds; no crash or interruption point may lose it.
+
 An installation must have an equally discoverable removal path. The installation instructions document
 `farhelm uninstall` alongside installation, and a successful installer run prints that command. Users of releases
 without uninstall support may need to upgrade once before using it. Supporting those older binaries directly, or
