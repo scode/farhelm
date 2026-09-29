@@ -3189,7 +3189,8 @@ samp {
 }
 
 /* The count and the clock are what the status is for, so they never shrink;
-   the step name ellipsizes instead, keeping its full text in `title`. */
+   the step name ellipsizes instead, and hovering the label shows it whole in
+   `.host-update-popup`. */
 .host-update-count,
 .host-update-elapsed {
   flex: none;
@@ -3201,6 +3202,40 @@ samp {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The running update's complete text, shown while the pointer is over the
+   inline label. Fixed rather than absolute because `.app-sidebar` scrolls
+   and is positioned, so it would clip an absolutely positioned popup at its
+   right edge, which is exactly where the truncated step name sits. The
+   coordinates come from `UpdateProgressLabel`'s measurement; nothing here
+   sets a position. It borrows the row menus' floating surface so the two
+   read as the same kind of layer, but stays below the menus (z-index 20) and
+   takes no pointer events, since it is display-only and must not keep itself
+   open by sitting under the pointer. */
+.host-update-popup {
+  position: fixed;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  max-width: 320px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  color: var(--fg-1);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* The step name is the part the popup exists for, so it is the one line
+   allowed to wrap rather than overflow the popup's own width limit. */
+.host-update-popup-step {
+  color: var(--warn);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .host-status.connecting {

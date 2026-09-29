@@ -39,11 +39,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the foreground
   conversation's restart target beyond the checks now landed in #814, and define any remaining smallest admission check.
   Preserve legitimate foreground transitions and avoid extending the reporter's scope without evidence.
-- **Terser host update progress.** The inline progress beside a host being updated (`UpdateProgressLabel` in
-  `crates/farhelm-ui/src/hosts.rs`) spends most of the narrow sidebar on the `updating:` prefix, so the step name
-  truncates to a few letters (`1/11 upload-…`). Drop the prefix so the step name gets that width, and make hovering
-  anywhere on the label show the complete text (count, full step name, elapsed time) in a tooltip-style popup. The step
-  span's native `title` already carries the full step name, but only on that span and only after the browser's delay.
 - **Dismiss row menus on outside click.** A session or host row's `⋯` actions menu stays open when the user clicks
   anywhere else, including the terminal pane, so the only way to close it with the pointer is to click `⋯` again.
   Clicking outside the panel should close it, the same way Escape does. Both rows share the panel lifecycle in
