@@ -220,6 +220,22 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `clipboard-name.js`'s `capture()` stays, since the paste naming decision uses it. This addresses
   `review_feedback_queue/clipboard-facts-label-stuck.md`: remove that file and its line in
   `review_feedback_queue/INDEX.md` in the same PR.
+- **Refactor host kind checks into named capabilities.** A functional no-op: no behavior, API, protocol, or schema
+  change. Today the helm and the UI decide things by comparing a host's kind directly (`kind == HostKind::Ssh`,
+  `kind == HostKind::Local`, or a `_` arm), about 8 sites in `crates/farhelm-helm` and about 15 in `crates/farhelm-ui`
+  as of 2026-09-29, so a third kind would silently take whichever branch the comparison defaults to. Replace each with a
+  predicate on the kind named after what that site actually decides, or with an exhaustive match where a predicate does
+  not fit, so adding a kind becomes a compile error at every decision it affects. The helm's decisions, as surveyed:
+  finding the reserved local row, recording a probe's remote install path, refusing a panel update of the local row, the
+  "no supervisor over there" hint, and classifying a local supervisor that is not running. The UI's: whether a row can
+  be edited or removed (`manageable`), the local setup hand-off, automatic update, the kind glyph, and the displayed
+  name. Also keep the kind's SQL spelling in one place (the inverse of `HostKind::from_column`) instead of the literals
+  spread through `store.rs`; the schema's CHECK constraint stays as it is. Only capabilities some current code path
+  uses: no lifecycle, ownership, or service-manager concepts, no new kind, and no sending capabilities over the wire.
+  The motivation is
+  [`lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md`](lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md):
+  per-session cloud sandboxes (Tensorlake, Fly.io Sprites) with scoped credentials are where remote execution is headed.
+  That goal is context for naming predicates and resolving ambiguity in this refactor, not scope for it.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
