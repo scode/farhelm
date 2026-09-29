@@ -15,3 +15,14 @@ with in place.
   maintainer judged to have a reasonable chance of being understood, and reserve internal names for the source. The test
   is whether the name appears somewhere the user operates, a screen, a label, or a command; if it only appears in the
   code, say what the thing does for them or which screen it is instead. (Prompted by the v0.12.0 curation, 2026-09-22.)
+- Write the first draft of every entry plain-spoken and free of jargon; do not wait to be asked. A fragment is a draft
+  written at PR time, often in the change author's vocabulary, so reword it for someone who runs Farhelm rather than
+  copying it: "the top of an open session" rather than "the session header", "adding or updating a remote host" rather
+  than "provisioning". (Prompted by the v0.19.0 curation, 2026-09-29.)
+- When an entry names a tool or a part of the system, say why it matters to someone running Farhelm, not only what
+  changed about it. The v0.19.0 entry about `farhelm helm setup` picking a `tmux` from a relative `PATH` entry only made
+  sense once it opened with "Farhelm runs every session inside tmux, and `farhelm helm setup` records which `tmux`
+  program to use for all of them." (Prompted by the v0.19.0 curation, 2026-09-29.)
+- Something users can newly do or see belongs under Added, even when its PR was typed `fix`. The v0.19.0 terminal-link
+  hover, which shows where a link really goes, came from a `fix:` PR and a `kind: fixed` fragment, and moved to Added.
+  (Prompted by the v0.19.0 curation, 2026-09-29.)
