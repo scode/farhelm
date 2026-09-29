@@ -120,15 +120,6 @@ The earlier cross-harness evidence is preserved in
   retry cycle, or accept the residual. Keep this distinct from the existing single-client stall entry, and do not weaken
   liveness assertions based on a later passing run.
 
-- **Inherited create behind a parent Restart or Delete.** Both
-  `service::handlers::tests::restricted_inherited_create_waits_for_parent_restart_then_inherits` and its Delete sibling
-  in `crates/farhelm-supervisor/src/service/handlers.rs` time out after 10 seconds waiting for the parent mutation and
-  the inherited create to both finish: two of four release-gate attempts of the same commit on the hosted runner failed
-  on one of them. Local reproduction failed in isolation, with the sweep-only (no user manager) path forced, and under
-  single-CPU contention. Evidence and the untested shared-session-id lead are in FLAKES.md (2026-09-29, both entries).
-  First step: reproduce under the workspace battery and capture which of the two handlers is still waiting, since a real
-  lock-order deadlock looks the same as load.
-
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes

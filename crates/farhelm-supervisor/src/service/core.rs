@@ -908,13 +908,16 @@ pub struct SupervisorSeams {
     pub launch_env: Vec<(String, String)>,
     /// This supervisor's access to a systemd user manager (PLAN_M3.md item
     /// 10). Defaults to the real one, which reports itself unavailable on
-    /// every host that has none — CI included.
+    /// every host that has none. Do not assume CI is such a host: the
+    /// GitHub-hosted Linux runner that runs the release gate has a systemd
+    /// user manager, so a test on the default seam probes it for real, under
+    /// a budget of up to 15 seconds (`scope::PROBE_TIMEOUT`).
     ///
     /// A seam because the two paths must BOTH be provable on one host:
-    /// `ScopeManager::disabled()` pins the fallback (the M2 behavior CI
-    /// proves by having no manager at all) on a developer machine that does
-    /// have one, and `ScopeManager::fake` makes the ordering of the scope
-    /// kill and the backstop sweep observable, which nothing about the end
+    /// `ScopeManager::disabled()` pins the fallback (the M2 behavior) on any
+    /// machine that has a manager, and `ScopeManager::fake` makes the
+    /// ordering of the scope kill and the backstop sweep observable, which
+    /// nothing about the end
     /// state can show — both mechanisms leave the same corpse.
     pub scopes: Arc<crate::scope::ScopeManager>,
     /// The shell every launch of this supervisor runs through, overriding

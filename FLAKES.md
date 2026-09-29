@@ -1178,12 +1178,21 @@ across binaries with retries 0, pinned tmux 3.7c with executable SHA256
 `f924697f00d247c2c38baaad49ba00041dc36d5f546750928d567bf847ed001c`, locale `C.UTF-8`, no ambient `FARHELM_*` (only the
 recorder-owned `FARHELM_TEST_TRACE_DIR`). The same commit passed this test in the job's first two attempts. Locally on
 Linux x86_64, 30 repetitions of the test and its Delete sibling, selected alone under the same pinned tmux, all passed
-in well under a second each. Disposition: open (TODO.md); the release job was rerun.
+in well under a second each. Disposition: fixed in #1228, with the Delete entry below. Both handlers reach
+`reap_process_tree`, whose first `ScopeManager::available` call probes the host's systemd user manager with a real
+transient scope under a 15-second budget, and the fixture used the default, real manager. The hosted runner has a user
+manager, and the probe logs its verdict at INFO either way; that line is missing from both retained traces, so the probe
+had not returned when the 10-second bound fired. The local runs never paid this: the stand-ins answered at once, and a
+local manager answers in milliseconds. Stand-ins that model a scope which never starts (`systemd-run` exits 1,
+`systemctl show` answers `not-found` successfully) fail both tests every time at 10.17 seconds with exactly the retained
+two-line trace. Why the runner's probe ran past 10 seconds is not established; a failed scope start and a manager slowed
+by the four-slot battery both fit. The fixture now uses a disabled scope manager, since the test is about lock ordering
+between the handlers and not about cgroup scopes, and its completion bound is 30 seconds, above what the fallback sweep
+and a restart may legitimately spend.
 
-Class: unknown
+Class: budget
 
-Cause: unknown — a lock-ordering deadlock between the two handlers would also time out here, so the 10-second bound
-under full-battery load is not established as the explanation.
+Cause: established — the test's 10-second bound covered a real systemd user-manager probe whose own bound is 15 seconds.
 
 ## 2026-09-29 — `restricted_inherited_create_waits_for_parent_delete_then_refuses` (crates/farhelm-supervisor/src/service/handlers.rs)
 
@@ -1202,8 +1211,10 @@ attempts to reproduce on Linux x86_64 all passed: 30 plain repetitions of the pa
 probe's own five-second query bound held and the pair passed in about five seconds), and 25 with the pair and three busy
 loops pinned to a single CPU. One untested lead: both tests use the literal session id `mutation-parent`, and a
 sweep-only teardown selects every process on the host whose environment carries that id, so the two tests running at
-once could reach each other's processes. Disposition: open (TODO.md); the release job was rerun.
+once could reach each other's processes. Disposition: fixed in #1228; see the entry above. The trace's last line is
+logged just before the sweep's first user-manager probe, not after it, so the silence is the probe itself; the
+shared-session-id lead was not the cause, since nothing in either test carries that marker.
 
-Class: unknown
+Class: budget
 
-Cause: unknown
+Cause: established — the same unfinished systemd user-manager probe as the entry above.
