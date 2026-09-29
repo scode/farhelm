@@ -566,6 +566,35 @@ What is NOT isolated, and what follows from it:
   FLAKES.md records as tripping them. A failure under that load is an environment event: keep the retained run, re-run
   narrowly when the machine is quieter, and do not log it as a flake or a regression on one observation.
 
+# Agent scratch space
+
+Anything you create outside the checkout at your own discretion goes under `/tmp/farhelm-tmp/<id>/`, where `<id>` is the
+output of one `uuidgen` you run the first time you need scratch space and reuse for the rest of the session. If you lose
+track of it (after compaction, say), mint a new one rather than guessing which existing directory is yours. The point is
+that all agent scratch on this machine is in one place, so finding it never requires digging through `/tmp` or asking
+what some directory is.
+
+That covers scratch clones and worktrees or jj workspaces made for a review or a reproduction, a separate
+`CARGO_TARGET_DIR`, downloaded or extracted archives, saved logs and diffs, draft commit messages, delegate prompt and
+result files, and experiment builds. Size does not matter: small files go there too. A `mktemp -d` that a skill asks for
+goes inside your directory, not beside it. When you hand work to a delegate or subagent, give it a subdirectory of yours
+and tell it to use that instead of minting its own.
+
+Leave these where they already go:
+
+- The checkout's own build output (`target/`, `e2e/node_modules`, the dx output), which stays wherever the build puts
+  it.
+- State created by the repo's harnesses and scripts: the `fh-it.*` and `fh-e2e.*` test directories, the desktop smoke,
+  CentOS, and installer-test directories, the recorder's run records, and deflake state. Supervisor and tmux sockets
+  live inside the test directories, unix socket paths are limited to about 108 bytes, and the teststate sweep only looks
+  directly under `/tmp`. For the same reason, do not point `TMPDIR` at your scratch directory when running tests or repo
+  scripts: plain `tempfile::tempdir()` tests honor it, and some of them bind sockets.
+- Anything of your own that binds a unix socket, such as a hand-started supervisor or a `tmux -S` server. Put that
+  directly under `/tmp` with a random name, because `/tmp/farhelm-tmp/<uuid>/` already spends over 50 of the 108 bytes.
+- Anything another rule tells you to keep somewhere specific, such as goal files and working logs.
+
+This rule governs agents, not harness code: a harness still must not use a fixed path, per the section above.
+
 # lore/
 
 `lore/` holds historical artifacts — decision records written when the decision was made. It is not part of the codebase

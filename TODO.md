@@ -39,6 +39,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the foreground
   conversation's restart target beyond the checks now landed in #814, and define any remaining smallest admission check.
   Preserve legitimate foreground transitions and avoid extending the reporter's scope without evidence.
+- **Checkout preparation test markers leak into /tmp.** The D-suite preparation tests in
+  `crates/farhelm-supervisor/src/launch.rs` (`prep-d1`, `prep-d1h`, `prep-d3*`, `prep-d4*`) write their fake git, hook,
+  and agent records as loose `/tmp/prep-<test>-<pid>.*` files. `fresh_marker` removes only the bare marker path, which
+  the fakes never write, so nothing is ever deleted: each nextest run leaves 10 to 17 files per test, and a PID reused
+  from an earlier run inherits stale stage markers that can mask an out-of-order stage or fail `no_stage_ran`. Derive
+  the markers from `PrepFixture.tmp` instead, as `preparation_scrubs_inherited_authority_and_agent_gets_its_own` already
+  does, so each test gets its own directory that is removed on drop.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
