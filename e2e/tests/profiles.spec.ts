@@ -2137,7 +2137,7 @@ test.describe("agent profiles", () => {
     // summary, so this pins provenance without restoring obsolete footer text.
     const badge = row(page, session.id).locator(".session-agent");
     await expect(badge).toContainText(before);
-    await expect(badge).toHaveAttribute("title", `profile: ${before} — command: farhelm — ${FAKE_AGENT}`);
+    await expect(badge).toHaveAttribute("title", `profile: ${before} — command: farhelm-fixtures — ${FAKE_AGENT}`);
 
     await updateProfile(request, profile.id, { name: after });
     await settleExistence(request, title, "renamed");
@@ -2159,7 +2159,7 @@ test.describe("agent profiles", () => {
     await expect(badge).not.toHaveText(after);
     await expect(badge).toHaveAttribute(
       "title",
-      `profile: ${before} (renamed since) — command: farhelm — ${FAKE_AGENT}`,
+      `profile: ${before} (renamed since) — command: farhelm-fixtures — ${FAKE_AGENT}`,
     );
 
     // The catalog, meanwhile, says the new name — the two surfaces disagree
@@ -2265,7 +2265,7 @@ test.describe("agent profiles", () => {
     // surface worth its own assertion.
     const badge = row(page, session.id).locator(".session-agent");
     await expect(badge).toContainText(name);
-    await expect(badge).toHaveAttribute("title", `profile: ${name} — command: farhelm — ${FAKE_AGENT}`);
+    await expect(badge).toHaveAttribute("title", `profile: ${name} — command: farhelm-fixtures — ${FAKE_AGENT}`);
     const presentBadgeColor = await badge.evaluate((element) => getComputedStyle(element).color);
 
     await cleanupProfile(request, profile.id);
@@ -2285,7 +2285,7 @@ test.describe("agent profiles", () => {
     await expect(badge).toContainText(name);
     await expect(badge).toHaveAttribute(
       "title",
-      `profile: ${name} — command: farhelm — ${FAKE_AGENT}`,
+      `profile: ${name} — command: farhelm-fixtures — ${FAKE_AGENT}`,
     );
     expect(await label.evaluate((element) => getComputedStyle(element).color))
       .toBe(presentLabelColor);
