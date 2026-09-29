@@ -33,6 +33,14 @@ release; `FARHELM_VERSION` selects a specific version, including a prerelease. T
 preserve user data, but already-running processes need restarting to use the new executables. Quit the desktop app
 before updating and relaunch it afterward. Follow the installer's restart guidance for services and other processes.
 
+On macOS the installer rebuilds `~/Applications/Farhelm.app` on every run, replacing the whole bundle, but only when it
+can tell the bundle is its own: the bundle's record (see below) names this install directory, or it is the recordless
+bundle releases from early September 2026 built, recognised by its exact layout and bundle identifier. The record alone
+is enough, so a bundle that an interrupted uninstall half emptied is still rebuilt, and edits or extra files inside a
+bundle whose record matches are not kept. Any other `Farhelm.app`, such as one you built or customised, or one recorded
+for a different install directory, is left untouched and the installer exits with an error after the executables
+themselves are already updated. Rename or remove that bundle and re-run the installer to get the app.
+
 The installer only replaces a `farhelm` (or, on macOS, `farhelm-desktop`) in the install directory when its checksum
 matches the executable-directory record below, meaning it is the file the installer itself last put there. Any other
 file with that name, such as a wrapper script of your own or a Farhelm installed before these records existed, is kept
