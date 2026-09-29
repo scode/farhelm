@@ -1873,3 +1873,450 @@
   the remembered profile stays unset; it fails with the new arm disabled. Draft PR
   [#1063](https://github.com/scode/farhelm/pull/1063/changes), jj change `oqwpvkuw`, bookmark
   `pr/plain-replace-keeps-default-profile`.
+
+## remote-host-contests-foreign-session-ids.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by current-code inspection at `03a3051`, not runtime reproduction. The list keeps the first
+  claimant's row and drops the duplicate, but while another host keeps listing the id, `resolve_owner` refuses every
+  operation on the real owner's session with `SessionOwnerAmbiguous` naming both hosts (terminal, stop, restart, rename,
+  delete, Replace, uploads, mark-read, detail). A hostile host can learn every fleet id through the agent `sessions`
+  listing, so it can make all other hosts' sessions unreachable through Farhelm until it is removed or stops listing
+  them. SPEC_impl.md's collision rule chose this fail-closed routing deliberately; SPEC.md's availability rule ("must
+  not disrupt unrelated hosts") does not reconcile with it. Impact is bounded: the agents keep running, the error names
+  the claimant, and the contest clears on the next refresh after the host is removed. A plain first-claim-wins
+  alternative was considered and rejected: after a cache purge (remove and re-add, or adoption), a hostile host can win
+  the race to first claim and then silently receive terminal input, uploads, and stops meant for the real owner.
+- Decision: the user chose to accept the fail-closed behaviour in the specification. Principle: when a remote host
+  claims session ids another host owns, the helm refuses to route operations on those sessions rather than risk
+  misrouting them, naming both hosts; that loss of access is the accepted response to a misbehaving host, and removing
+  that host is the remedy. This is an explicit carve-out from the availability rule, chosen because a silent misroute
+  (input or destructive operations reaching the wrong machine) is worse than a named refusal.
+- Completion criteria: SPEC.md's availability rule states the carve-out and its reason; SPEC_impl.md's session-id
+  collision rule points at it rather than leaving the conflict unreconciled. No code change. Remove this feedback file
+  and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## remote-unit-overwritten-without-ownership-check.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `03a3051`. Every provisioning plan ends in `WriteUnit` to
+  `farhelm-supervisor.service` (`provisioning/plan.rs`), and `install_source` (`provisioning/backend.rs`) compares only
+  content hashes before an atomic rename over the destination; it never reads the existing unit's managed-by marker or
+  `ExecStart=`. The local row has the equivalent refusal (`local_handoff_reason`); remote rows do not. Every remote
+  UPDATE rewrites the unit (following the running supervisor's dial path, so a setup-managed host keeps a working unit
+  but loses the marker, after which `farhelm helm setup` and `farhelm uninstall` on that machine refuse to manage it);
+  ADD does so only when the probe finds no answering supervisor. A hand-written unit under that name loses its content.
+  Bucket revised from `highest` to `high` with the user's agreement: the realistic case is a setup-managed remote host
+  updated from another helm's panel, which keeps working but confuses later setup/uninstall there.
+- Decision: the user agreed to the bounded fix. Principle: on a host provisioned from the hosts panel, an unmarked
+  `farhelm-supervisor.service` belongs to provisioning and ADD/UPDATE may replace it; a unit carrying
+  `farhelm helm setup`'s marker belongs to setup on that machine, and provisioning refuses to touch it, handing off the
+  way the local row does. A hand-written unit under that exact name on a host the user asks Farhelm to provision is the
+  user's to move aside first. The reviewer's full classification (a new provisioning marker plus migration for existing
+  unmarked units) is deliberately not adopted.
+- Completion criteria: specification states the ownership principle above; remote inspection reads the existing unit and
+  ADD and UPDATE refuse with a clear hand-off message when it carries setup's marker, before any action runs; tests
+  cover a setup-marked remote unit being refused on both ADD and UPDATE and an unmarked unit still being replaced.
+  Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## provisioning-chmods-shared-directories.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed at `03a3051` by code inspection and a local reproduction of the command's behavior. Every plan's
+  `EnsureDirectories` (`provisioning/plan.rs`) includes the systemd user-unit directory and, on UPDATE, the registered
+  binary's parent directory at `0755`; the remote executor runs `install -d -m 755 -- <dir>`
+  (`provisioning/backend.rs`), and GNU `install -d -m` chmods an existing directory (`700` became `755` locally). A
+  private home, bin, or unit directory therefore becomes readable by other accounts on the host. This contradicts
+  SPEC.md "Ownership during cleanup and provisioning" and SPEC_impl.md's provisioning rule, which already name these
+  shared directories and note that existing provisioning paths still needed assessment against the policy.
+- Decision: the user chose the code fix and wants the rule covered explicitly in the specification. Principle:
+  provisioning creates and enforces modes only on directories dedicated to Farhelm (its private lib directory and the
+  supervisor state directory); shared directories that merely hold its executable or unit files (the systemd user-unit
+  directory, the binary's parent when it is not the lib directory) are created only when missing and never chmodded, and
+  permissions that block installation are reported as an obstacle. The reviewer's follow-on about swapping the temporary
+  in a group- or world-writable binary directory is excluded: an account that can write that directory can already
+  replace the installed binary. The user expects the specification to say install directories writable by other local
+  accounts are not designed for; the existing statements cover only the working-copy root (SPEC.md) and the state
+  directory (SPEC_impl.md), so execution adds the equivalent statement for provisioning's install directories. The
+  "refuse `$HOME`, `/`, `/tmp` as binary directory" suggestion is unnecessary once shared directories are never
+  chmodded.
+- Completion criteria: specification states the dedicated-versus-shared rule explicitly (resolving the "still require
+  assessment" note) and that install directories writable by other local accounts are outside the design; remote and
+  local `EnsureDirectories` create shared directories only when missing without changing an existing mode, while
+  dedicated directories keep mode enforcement; the ADD confirmation wording no longer implies an existing shared
+  directory's mode is set; tests cover an existing restrictive shared directory keeping its mode and a dedicated
+  directory still being repaired. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the
+  execution change.
+- Execution: `pending`.
+
+## sftp-misparses-ipv6-and-uri-destinations.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at `03a3051` with an offline reproduction (OpenSSH 9.6, `-F /dev/null`, a ProxyCommand that only
+  prints its target). The payload upload (`sftp_put`, `provisioning/backend.rs`) runs `sftp -b -` with the same argv
+  every other step passes to `ssh`, but sftp ends the host name at the first colon: `fe80::1` dials `fe80`,
+  `alice@2001:db8::5` dials `0.0.7.209`, and `ssh://alice@build.example:2222` dials host `ssh` on port 22 as the local
+  user, while `ssh` dials the registered host in each case; `::1` and plain host names agree. The registry accepts these
+  destination forms. With `BatchMode=yes`, an unknown host key fails the connection, so a wrong-machine upload needs the
+  truncated name to reach a host already trusted in `known_hosts` or matched by ssh config; the payload is the public
+  release binary. The common effect is that provisioning a host registered by IPv6 literal or `ssh://` URI always fails
+  at the upload.
+- Decision: the user chose to remove sftp from provisioning entirely rather than translate or refuse destination forms,
+  so the class of ssh/sftp parsing mismatches disappears. sftp's only use is uploading payloads to a remote temporary;
+  every neighbouring step (progress via remote size, digest check, rename, temporary cleanup) already runs over ssh.
+  Streaming the payload on stdin to `cat > <temporary>` over the same ssh argv loses no capability, needs only the `sh`
+  and `cat` every other step already requires, and drops the remote sftp-subsystem requirement.
+- Completion criteria: the payload upload streams over the same ssh command as every other provisioning step, keeping
+  the remote-growth idle timeout and the existing digest check before the rename; no provisioning path invokes `sftp`;
+  tests that script an `sftp` process are converted; SPEC_impl.md's provisioning description, `ssh.rs`'s module doc, and
+  the CentOS provisioning script's comment no longer name sftp. Remove this feedback file and its
+  `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## installer-overwrites-user-farhelm-file.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `03a3051`. `scripts/install.sh` refuses a destination only when it
+  is not a regular file; the replace loop moves any existing `farhelm` (and `farhelm-desktop` on macOS) to `.<name>.old`
+  and removes that backup after commit, without comparing the existing file to the executable-directory ownership record
+  (`.farhelm-installation`, which holds the SHA-256 of each executable the installer last wrote). A user's own file with
+  that name in the install directory is destroyed while the run reports an update. SPEC.md's uninstall rule already
+  forbids deleting a foreign file merely because its name matches; the installation section is silent, so install and
+  uninstall disagree. The record exists only since #673 (2026-09-16), so older installs have none.
+- Decision: the user chose to extend the "not destroyed by name match" principle to installation. An existing
+  destination whose SHA-256 matches the record is the installer's own and is replaced as today. One with no record or a
+  mismatching digest (a foreign file, or a pre-record Farhelm install) is not refused and not deleted: it is moved aside
+  under a kept, non-reserved name and the closing message says where it went. Updates therefore never fail on this, and
+  the cost is one leftover file on the first update of a pre-record install.
+- Completion criteria: SPEC.md's installation section states the principle; `docs/install_uninstall.md` describes the
+  kept file and message; `install.sh` implements the record-digest comparison and keep-and-report path for each
+  installed executable, preserving the journaled rollback guarantees; `scripts/test-install-sh.sh` covers a recorded
+  update (no leftover), a foreign file (kept and reported), and a pre-record install (kept and reported). Remove this
+  feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## installer-deletes-farhelm-app-on-grep.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `03a3051`. The installer's only ownership test for an existing
+  `~/Applications/Farhelm.app` is that `Contents/Info.plist` exists and case-insensitively contains "farhelm"
+  (`scripts/install.sh`, deliberately loose to accept an early hand-built trial bundle); it then `rm -rf`s the bundle.
+  It never reads the bundle's own ownership record (`Contents/.farhelm-installation`, written since #673), so a
+  user-built, re-signed, or customised Farhelm.app and anything inside it is deleted without a prompt, while an
+  installer-built bundle whose `Info.plist` an interrupted uninstall already removed is refused despite a valid record.
+  This contradicts SPEC.md's rule that a foreign file or bundle is not deleted merely because its name matches, which
+  the `installer-overwrites-user-farhelm-file.md` decision extends to installation.
+- Decision: the user chose the code fix and agreed foreign bundles are refused rather than moved aside (a renamed `.app`
+  in `~/Applications` still appears as an app, and "rename your bundle and re-run" is the clearer message; the
+  executables are already installed at that point). Replace the bundle when it carries a valid installer record for this
+  installation. Bundles built between #310 (2026-09-01) and #673 (2026-09-16) have no record; recognise them narrowly by
+  the exact `CFBundleIdentifier` `org.scode.farhelm.desktop` plus the installer's fixed layout and replace them too.
+  Refuse anything else.
+- Completion criteria: `install.sh` decides bundle ownership from the record (with the narrow pre-record legacy check),
+  no longer from a substring match; a half-uninstalled bundle with a valid record is replaced; a foreign bundle,
+  including one whose `Info.plist` mentions farhelm, is refused with the existing actionable message;
+  `scripts/test-install-sh.sh` covers the recorded, legacy, half-removed, and foreign-mentioning-farhelm shapes. Remove
+  this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## installer-mirror-var-drops-https-no-signature.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `03a3051`. When `FARHELM_RELEASE_BASE_URL` is set, `install.sh`'s
+  `curl_get` drops `--proto '=https' --proto-redir '=https'`, `validate_release_base_url` accepts `http://` for any
+  host, archives are checked only against the same server's `SHA256SUMS`, and no minisign signature is checked. The
+  script's comment calls the variable an undocumented test-only hook, but the same name is the helm's documented
+  `--release-base-url` environment form (`crates/farhelm-helm/src/lib.rs`, SPEC_impl.md CLI section), where signature
+  verification makes a mirror safe. An operator who exported it for the helm gets an unauthenticated installer download
+  on the helm's machine. Exploitation additionally needs an `http://` mirror, a redirect to HTTP, or a compromised
+  mirror with an attacker positioned to tamper.
+- Decision: the user agreed to separate the names rather than add signature verification to the installer. The
+  installer's fixture hook gets its own test-only name (for example `FARHELM_INSTALL_TEST_BASE_URL`), so the helm's
+  variable no longer affects installation; in that test mode `http://` is accepted only for loopback hosts; the
+  misleading comment is corrected. The user also asked that SPEC.md itself (not SPEC_impl.md) state that the installer
+  intentionally trusts GitHub over TLS and the upstream repository, rather than verifying a release signature.
+- Completion criteria: SPEC.md's installation section states the installer's trust basis (GitHub over TLS and the
+  upstream repository); `install.sh` ignores `FARHELM_RELEASE_BASE_URL`, reads its fixture base URL only from the new
+  test-only variable, and refuses non-loopback `http://` there; `scripts/test-install-sh.sh` uses the new name and
+  covers a refused non-loopback `http://` value and an ignored `FARHELM_RELEASE_BASE_URL`. Remove this feedback file and
+  its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## release-gate-runs-unpinned-privileged-container-before-signed-build.md
+
+- Outcome: `other`.
+- Assessment: partly correct, by inspection at `03a3051`. Confirmed: `scripts/test-provision-centos.sh` builds from the
+  mutable tag `quay.io/centos/centos:stream9` with no digest and runs it `--privileged --cgroupns=host` with
+  `/sys/fs/cgroup` bound read-write; in the generated `release.yml` that step precedes `dist build` in the same Linux
+  x86_64 job; `dist-workspace.toml`'s residuals header does not mention it. Overstated: it is not the only unpinned
+  third-party executable input in the release path. The same job runs `sudo apt-get install` of Ubuntu packages, whose
+  maintainer scripts run as root on the runner under Ubuntu's signing keys alone, and every GitHub action is referenced
+  by a mutable tag rather than a commit SHA. A compromised CentOS image or dnf key chain is the same trust class the
+  pipeline already accepts for those. The precondition is a compromise of that upstream trust root, not an ordinary
+  attacker path.
+- Decision: the user chose to record the accepted trust chain rather than pin this one input. Add an entry to
+  `dist-workspace.toml`'s "Residuals in the GENERATED workflow" header (or the residuals documentation it belongs with)
+  stating that the release build trusts distribution package signing and registry/action tags as trust roots — Ubuntu
+  apt packages, the CentOS Stream image and its dnf keys, and GitHub action tags — and that the privileged CentOS
+  container runs before `dist build` on the same runner. No image digest pin; a broader pin-everything effort was not
+  requested.
+- Completion criteria: the residuals documentation names these trust roots and the ordering, with why they are accepted;
+  no workflow or script behavior changes. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in
+  the execution change.
+- Execution: `pending`.
+
+## app-info-plist-uses-caller-umask.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `03a3051`. `scripts/install.sh` writes the bundle's
+  `Contents/Info.plist` with a heredoc outside any umask subshell and never chmods it, so it takes `0666` minus the
+  caller's umask, while every sibling bundle file and directory gets an explicit mode. Under a permissive umask such as
+  `002`, another local account in the shared `staff` group could edit it and add `LSEnvironment` (for example
+  `DYLD_INSERT_LIBRARIES`) so their code runs as the user at the next launch. The default macOS umask `022` is
+  unaffected. The installer creates the writable file itself, so this is not covered by the "shared-writable locations
+  are outside the design" stance.
+- Decision: the user chose the code fix, with an inline comment explaining why the explicit mode matters (the plist is
+  launch configuration that `LSEnvironment` can turn into code execution, and the caller's umask must not decide who can
+  write it).
+- Completion criteria: `Info.plist` gets an explicit `0644` (or is written under `umask 022`) before it is hashed, with
+  that inline comment; `scripts/test-install-sh.sh` runs the macOS-shaped install under `umask 002` and checks the
+  plist's mode. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## setup-pins-relative-path-tmux.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `03a3051`. `candidates_on_path`
+  (`crates/farhelm-supervisor/src/tmux.rs`) skips only the empty PATH entry, with a comment that the directory setup
+  happened to run in is never defensible to pin; relative entries such as `.`, `./bin`, or `node_modules/.bin` mean the
+  same and still pass. `choose_tmux` in `crates/farhelm/src/setup.rs` resolves each hit against the working directory
+  and pins the first acceptable one into the supervisor unit as `FARHELM_TMUX`, so a `tmux` in an untrusted checkout
+  becomes every session's tmux at every boot, and moving the checkout breaks the unit. Requires a relative PATH entry
+  (uncommon) and running setup inside such a directory.
+- Decision: the user chose the code fix. Skip every non-absolute PATH entry in setup's tmux search, generalising the
+  empty-entry rule and its comment; explicitly named `--tmux`/`FARHELM_TMUX` values may still be relative and resolve
+  against the working directory; a no-usable-tmux refusal mentions a skipped relative candidate. If other callers of
+  `candidates_on_path` need plain `execvp` semantics, put the filter in setup's search instead of the shared helper.
+- Completion criteria: setup never pins a tmux found through a relative PATH entry; a test with `.` (and a nested
+  relative entry) on PATH ahead of a valid absolute tmux pins the absolute one, and one with only a relative candidate
+  refuses with the skipped-candidate mention; other `candidates_on_path` callers keep their intended behavior. Remove
+  this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## install-lock-owner-unchecked.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed as described at `03a3051`, under an unusual precondition. `is_our_lock` in `scripts/install.sh`
+  checks entry names, regular files, and that the lock directory is not group- or world-writable, but never the owner of
+  the lock directory, `pid`, or `journal`; stale-lock recovery replays the journal, so in a group-writable sticky
+  install directory owned by the victim, a co-user can plant a dead-pid lock with a `PARK cli` journal and their own
+  `.farhelm.old`, and the victim's next update renames it over `farhelm`. #1116 changed only the pid staleness check.
+  Without the sticky bit a co-user could replace `farhelm` directly, so the finding exists only for an install directory
+  other local accounts can write to, which the installer never creates (it masks write bits on directories it creates)
+  and which requires the user to point `FARHELM_INSTALL_DIR` at one.
+- Decision: the user agreed to settle this in the specification rather than harden the lock. Principle: the standalone
+  installer's install directory (`~/.local/bin` or `FARHELM_INSTALL_DIR`), like provisioning's install directories and
+  the working-copy root, must not be writable by other local accounts; Farhelm's installation, update, recovery, and
+  uninstall guarantees assume no other account can create or replace entries there, and keeping it so is the user's
+  responsibility. This widens the statement agreed for `provisioning-chmods-shared-directories.md`; execution should
+  place one coherent statement rather than two drifting ones. No code change.
+- Completion criteria: SPEC.md states the principle for the standalone install directory (and
+  `docs/install_uninstall.md` mentions it where custom install directories are described); no installer behavior change.
+  Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## delete-ended-session-kills-live-tabs.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `03a3051`. `ListView`'s `on_delete`
+  (`crates/farhelm-ui/src/list/view.rs`) deletes immediately whenever `target.status.has_ended()`; `DeleteTarget`
+  (`list/shared.rs`) carries only id and status, built in `list/row.rs` from a `Session` whose `tabs` are available but
+  omitted. The branch's comment justifies skipping confirmation only by the agent's invisible leftover descendants, not
+  by tabs, which the UI does know about. `status::confirm_consequence` never mentions tabs. A stopped or exited agent
+  with a dev server or build still running in a tab loses it to one unconfirmed click, contradicting SPEC.md's Delete
+  rule (confirmation "that says so when anything is still alive") and single-tab close's own confirmation.
+- Decision: the user agreed to the fix as recommended: carry the session's tab count (or a has-tabs flag) into
+  `DeleteTarget`; confirm whenever the agent has not ended or any tab is listed; make the delete and Replace
+  confirmation wording say the running tabs will be killed.
+- Completion criteria: an ended session with listed tabs opens the delete confirmation instead of deleting; an ended
+  session with no tabs still deletes immediately; delete and Replace consequences mention tabs when there are any;
+  row-level tests cover the exited-with-tabs and exited-without-tabs cases. Remove this feedback file and its
+  `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## delete-lacks-liveness-precondition.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `03a3051`. Whether a delete is confirmed is decided only in the
+  browser from the row's last-rendered status; `DELETE /api/sessions/{id}` is forwarded as
+  `ControlMsg::DeleteSession { req_id, session_id }` (`crates/farhelm-proto/src/lib.rs`), which carries no precondition,
+  and the supervisor tears down whatever is live. A row can show exited or interrupted while the agent runs again
+  (restarted from another client or by an agent, the helm's cached interrupted status right after a relaunch, a stale
+  listing), so an unconfirmed Delete, and Replace's source delete, can kill a live agent. Restart already closes the
+  same race with `stop_if_running` rechecked by the supervisor at handling time. The feedback's header-restart listing
+  trigger is its own queue item (`header-actions-skip-listing-read.md`) and is not part of this decision.
+- Decision: the user asked whether the fix would sprawl; assessed as contained (low to medium) because it mirrors
+  restart's consent pattern at each layer, and the user chose `fix code` with that bounded scope. Add a defaulted
+  precondition field (for example `only_if_nothing_alive`) to `DeleteSession`, safe across mixed versions since the
+  protocol ignores unknown fields and the default is today's unconditional delete. The supervisor checks it inside the
+  existing lifecycle claim using restart's existing liveness notion (live pane, or an unconfirmed launch with no known
+  terminal) plus any open tab window, and refuses with a Conflict. The helm's REST delete passes it through; the UI's
+  unconfirmed delete path and Replace's unconfirmed source delete send it. A refusal is shown as the ordinary delete
+  error and the row refreshes; the UI does not auto-open the confirmation. Implement together with, or after,
+  `delete-ended-session-kills-live-tabs.md`, which edits the same `DeleteTarget`/`on_delete` code.
+- Completion criteria: supervisor tests cover flag set with a live agent (refused), flag set with an ended agent and an
+  open tab (refused), flag set with nothing alive (deleted), and flag unset with a live agent (deleted, as today); a
+  helm REST test covers pass-through; a UI test covers the unconfirmed path sending the flag and a refusal surfacing as
+  an error. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## header-replace-confirm-ignores-cancel.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `03a3051`. The session header's Replace "replace" handler
+  (`crates/farhelm-ui/src/session_view.rs`) clears its flag and calls `header_confirm_replace()` without checking the
+  prompt is still open, so a cancel-then-confirm burst replaces (deletes) the session after the user cancelled, runs
+  without the lifecycle lock cancel released, and releases whatever lock another operation claimed meanwhile. Every
+  other inline confirmation hand-rolls that guard. An independent gpt-6-astra high review (read-only, 2026-09-28) also
+  identified the mirror race on the lock-claiming prompts: their cancel handlers release unconditionally, so a queued
+  confirm-then-cancel can unlock an in-flight restart or replace; the one-line guard alone does not close that.
+- Decision: the user asked whether a shared solution could stop this bug class recurring, and made `fix code`
+  conditional on an Astra high reviewer agreeing; the review returned "agree with changes", and its changes are adopted
+  as the scope. Introduce a shared confirmation primitive beside `OpLock` in `ops.rs`, following its rationale (enforce
+  the handler-time invariant once): a payload-bearing slot such as `ConfirmSlot<K, P = ()>` whose
+  `take(&K) ->
+  Option<P>` is the only way a confirm handler proceeds, with ordinary prompts carrying `()` and
+  lifecycle prompts carrying an owned guard. Add `PaneGate::claim_guard()` (preserving its sidebar-operation check);
+  lifecycle prompts store that guard while open and transfer it into the task on confirm, never release-and-reacquire;
+  cancel drops only ownership still in the slot and is a no-op after `take`; remove the corresponding manual releases.
+  Specify failed or mismatched `take` leaves the prompt untouched, explicit `open` replacement/refusal semantics,
+  `cancel_for(&key)` for event handlers, and distinct slots or keys for header Replace and interrupted Replace
+  (SPEC_impl.md's distinction). Use an opening generation if "that prompt" must reject clicks across cancel-and-reopen
+  of the same target. Migrate header Replace, header restart (non-mechanical: its closure is shared with Restart With,
+  which deliberately retains the claim after failure; preserve that), interrupted Replace, tab close (needs a tracked
+  current-key accessor), and host remove (consumption only; it claims the op lock afterwards through `run`, do not lock
+  on open). Defer profile delete (it keeps the prompt mounted during deletion and reconciles focus and notices). Leave
+  sidebar delete and row Replace on their `RowPhase` machine.
+- Completion criteria: the primitive exists with docs explaining the race it closes; the migrated prompts use it and no
+  longer hand-roll the guard or release a claim they no longer own; header Replace ignores a confirm queued after
+  cancel; lifecycle prompts ignore a cancel queued after confirm. Centralized tests cover cancel then confirm, confirm
+  then cancel, duplicate confirm, wrong key, refused claim, and protection of a subsequent owner, plus a small headless
+  `VirtualDom` test for prompt teardown and task cancellation and one header-wiring regression. Remove this feedback
+  file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## row-menu-drifts-after-own-delete.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `03a3051` (still present after #1123 touched the same path). The
+  sidebar row menu's panel is fixed-positioned at coordinates measured when it opens, so the list closes it whenever its
+  row may have moved; `commit_listing` does so via `rows::menu_row_reordered`. `do_delete`'s success path removes the
+  deleted row directly from `listing` (`crates/farhelm-ui/src/list/view.rs`, `current.sessions.retain(...)`) without
+  that check, and the next listing is compared against the already-pruned list. A menu opened on a row below the deleted
+  one therefore stays open next to a different row; its actions still target the original row, and an ended session with
+  no tabs deletes without a prompt naming it.
+- Decision: the user chose the code fix with a test: run the same reorder check around the optimistic removal (compare
+  the listing before and after `retain`) and close the menu when the open row's position changed.
+- Completion criteria: the optimistic delete closes an open row menu whose row moved; a menu on a row above the deleted
+  one stays open; a unit test covers deleting a row above the open menu (closed) and below it (still open). Remove this
+  feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## session-header-raw-peer-text.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `03a3051`; #1126 escaped neighbouring session-view text but not
+  these. The session header (`crates/farhelm-ui/src/session_view.rs`) interpolates the session title, working directory,
+  and invocation, and their `title` tooltips, raw, without `display_peer` or direction isolation, and the two copy
+  buttons copy the raw value. These values come from supervisors and agents; titles only lose control characters and
+  cwd/invocation only get a length cap, so bidi overrides, isolates, zero-width characters, and (for cwd and invocation)
+  newlines reach the header. The narrow command button leaves the tooltip as the only full view, so it can read
+  differently from the bytes copied. Harm requires the user to paste and run the copied value.
+- Decision: the user chose the recommended fix: render the title, directory, and invocation and their tooltips through
+  `display_peer` inside direction-isolated `.peer-value` elements, following #1126; keep copying the raw bytes; when a
+  copied value contains characters `display_peer` escapes, the copy feedback says it contains hidden characters (shown
+  as `<U+…>`) rather than refusing the copy, since an invocation may legitimately contain a newline.
+- Completion criteria: none of the three values or their tooltips renders raw; copy still yields the exact raw value;
+  the warning appears only for values with escaped characters; a test covers a bidi override and a newline in the
+  invocation (escaped display, raw copy, warning shown). Remove this feedback file and its
+  `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## titles-raw-in-confirm-prompts.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at `03a3051`. In `crates/farhelm-ui/src/list/row.rs` the visible row
+  title and the `confirm-title` quotes in the delete and replace confirmations render `session.title` raw without
+  direction isolation; only their tooltips go through `display_peer`. Titles lose only control characters at the
+  supervisor, so an agent rename can make two titles render identically or place an override inside the quoted title,
+  spoofing the last confirmation before an irreversible delete or replace. Screen-reader labels (`clamp_title`) also use
+  the raw title but are not a visual-spoofing surface.
+- Decision: the user chose the code fix: render the row title and both confirmation quotes through `display_peer` inside
+  `.peer-value` isolation; accessibility labels are out of scope.
+- Completion criteria: no visible sidebar title or confirmation quote renders a raw title; a test with a zero-width
+  character and a direction override in a title shows the escaped, isolated form in the row and both prompts. Remove
+  this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## display-peer-misses-invisible-chars.md
+
+- Outcome: `fix code`.
+- Assessment: partly addressed since the reviewed commit, remainder confirmed at `03a3051`. `display_peer` now uses the
+  shared known-bad list `farhelm_proto::text::is_presentation_unsafe`, so the UI and the helm's log escaper agree and
+  U+2061–U+2064 are covered. Still unescaped: U+034F, the Hangul fillers U+115F, U+1160, U+3164, U+FFA0, U+17B4–U+17B5,
+  U+206A–U+206F, U+FFF9–U+FFFB, the tag block U+E0000–U+E007F, and variation selectors. `display_peer`'s visibility
+  fallback counts U+3164 as visible, so a value of only that character renders blank. A hostile host can therefore
+  report an identity differing from the recorded one only by such characters, and the adopt prompt shows both
+  identically. Host identities are supervisor-generated UUIDs. Escaping variation selectors (and, less often, tags)
+  everywhere would mangle ordinary emoji in session titles.
+- Decision: the user chose the two-part code fix. Add the unambiguous invisibles (U+034F, the Hangul fillers,
+  U+17B4–U+17B5, U+206A–U+206F, U+FFF9–U+FFFB, and the tag block) to the shared list, which also fixes the U+3164 blank
+  fallback; leave variation selectors out for the emoji reason. Separately, render host identities in the adopt prompt
+  with every non-ASCII character escaped, since they are UUIDs, which covers variation selectors and any future
+  character the known-bad list misses exactly where the spoofing matters.
+- Completion criteria: the shared list escapes each added range, pinned in its tests; a U+3164-only value no longer
+  renders blank; the adopt prompt escapes all non-ASCII in recorded and reported identities, with a test where the two
+  differ only by a variation selector and render distinguishably; session titles with emoji variation selectors still
+  render unescaped. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## osc8-link-target-never-shown.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at `03a3051`. The terminal's xterm `linkHandler`
+  (`crates/farhelm-ui/assets/terminal.js`) defines only `activate`, which opens the OSC 8 target immediately through
+  `farhelmTerminalLinks.openTerminalUrl` (a new tab on the web, the system browser on desktop); there are no
+  `hover`/`leave` callbacks, so a program can underline trustworthy-looking text while linking elsewhere and the target
+  is never shown. xterm restricts OSC 8 targets to http(s); plain-text WebLinks are unaffected. SPEC treats terminal
+  output as untrusted and has no link-display contract. Harm needs a click and trust in the resulting page.
+- Decision: the user agreed to the light fix and explicitly forbids any confirmation dialog or prompt on link
+  activation, including a label-host versus target-host confirmation. Principle for SPEC.md's terminal section: terminal
+  hyperlinks open their http(s) target on click without a prompt, and the exact target must be visible on hover before
+  any click. Code: add `hover`/`leave` handlers that show the target in a small tooltip, set via `textContent`, with the
+  host emphasised.
+- Completion criteria: SPEC.md states the principle, including that activation is not gated by a confirmation; hovering
+  an OSC 8 link shows its exact target and leaving hides it; clicking still opens directly with no `confirm()` or other
+  prompt; a test covers the hover display for a link whose label differs from its target. Remove this feedback file and
+  its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## token-prompt-invites-password-manager.md
+
+- Outcome: `fix spec`.
+- Assessment: code confirmed, browser behavior plausible but untested, at `03a3051`. The browser token prompt
+  (`crates/farhelm-ui/src/auth.rs`) is `type="password"` with `autocomplete="off"` in a form removed after a successful
+  exchange; the reviewer reports Chromium and Firefox ignore `autocomplete="off"` on password fields and offer to save
+  such a form's value, which may sync the master web token off the machine. The lookalike-autofill half falls under the
+  local port-squatter gap SPEC.md's security section and `docs/security.md` already accept for v1. The save-and-sync
+  half requires the user to click Save; the token already travels by design (pasted into a browser, possibly on another
+  machine over an SSH forward), and keeping tokens in a password manager is a common deliberate choice. The suggested
+  code change relies on undocumented, per-browser autofill heuristics.
+- Decision: the user chose to state the principle rather than change the prompt: whether the web token is stored in the
+  user's password manager is the user's choice, and Farhelm does not try to prevent browsers from offering to save it;
+  autofill into a lookalike prompt is part of the already-accepted local port-squatter gap. No code change.
+- Completion criteria: SPEC.md's security section (and `docs/security.md` where it discusses the token prompt) states
+  this principle; no UI change. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the
+  execution change.
+- Execution: `pending`.
