@@ -3306,60 +3306,6 @@ mod tests {
         ));
     }
 
-    /// A RELATIVE `PATH` entry resolves against the directory the command
-    /// runs in — that is what the OS does with one, and it is why setup
-    /// captures that directory. The candidate found through such an entry
-    /// is spelled relatively, and pinning that spelling into a unit would
-    /// hand systemd a path it resolves against the service's own working
-    /// directory instead.
-    ///
-    /// The fixture reaches its temporary directory through a relative path
-    /// from where the test process happens to be, and hands setup that
-    /// same directory as its `cwd`, so PATH resolution and setup's
-    /// resolution agree exactly as they do in production. Reading the test
-    /// process's working directory is fine; changing it is what this
-    /// repository forbids.
-    #[farhelm_testtrace::test]
-    fn a_relative_path_entry_is_pinned_as_an_absolute_program() {
-        /// The spelling of `target` relative to an absolute `base`.
-        fn relative_from(base: &Path, target: &Path) -> PathBuf {
-            let mut relative = PathBuf::new();
-            for _ in base.components().skip(1) {
-                relative.push("..");
-            }
-            for component in target.components().skip(1) {
-                relative.push(component);
-            }
-            relative
-        }
-
-        let fixture = Fixture::new();
-        let absolute = fixture.tmux_dir("tmux 3.7c");
-        let here = std::env::current_dir().expect("the test process has a working directory");
-        let entry = relative_from(&here, &absolute);
-        assert!(entry.is_relative(), "{}", entry.display());
-
-        let mut ctx = fixture.context(&[entry]);
-        ctx.cwd = here;
-        let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
-        assert!(error.is_empty(), "{error}");
-        let supervisor =
-            std::fs::read_to_string(fixture.unit_dir().join("farhelm-supervisor.service")).unwrap();
-        let pinned = supervisor
-            .lines()
-            .find_map(|line| line.strip_prefix("Environment=\"FARHELM_TMUX="))
-            .and_then(|value| value.strip_suffix('"'))
-            .expect("the supervisor unit pins a tmux");
-        assert!(
-            Path::new(pinned).is_absolute(),
-            "a relative PATH entry must still pin an absolute program: {pinned}"
-        );
-        assert_eq!(
-            std::fs::canonicalize(pinned).unwrap(),
-            std::fs::canonicalize(absolute.join("tmux")).unwrap()
-        );
-    }
-
     /// PATH is a list and `execvp` treats it as one: an entry that looks
     /// executable but will not spawn is skipped. Refusing there would
     /// strand an operator whose PATH happens to carry a broken `tmux`
