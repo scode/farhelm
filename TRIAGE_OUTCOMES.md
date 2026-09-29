@@ -4186,7 +4186,9 @@
 - Decision: the user chose discard. `--no-supervisor` exists for supervisor management setup does not do, which is best
   effort and developer-facing.
 - Completion criteria: remove the feedback file and its index entry without code or spec changes.
-- Execution: `pending`.
+- Execution: `complete`; the feedback file and its index entry were removed with no code or spec change. Change
+  `vtkwosozrktxxwsuwwsrzpsyxyrkzvnk`, bookmark `pr/discard-no-supervisor-split`, draft PR
+  [#1211](https://github.com/scode/farhelm/pull/1211/changes).
 
 ## uninstall-creates-setup-lock-file.md
 
