@@ -3841,7 +3841,19 @@
   the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the web token no longer enters the desktop webview's JavaScript at all. When the page's stored
+  device secret is missing or refused it asks native (`need_secret`), and `DesktopBootstrapGate` mints the webview's
+  device secret itself (`mint_webview_secret` in auth.rs over `api::mint_webview_device_secret`, re-reading a rotated
+  token once) and sends only that secret. This replaces the first plan here (send the token on request and capture
+  browser primitives at first load): review showed a script injected after launch could still intercept the token
+  through other page intrinsics, and moving the exchange out of the page removes the token from reach instead. JS tests
+  `a page without a usable secret asks native to mint one` and
+  `a native mint failure is reported as the
+  authentication error`, with the rest updated to the protocol; the native
+  exchange keeps the page's former five-second bound over headers and body (`WEBVIEW_EXCHANGE_TIMEOUT`), with native
+  tests `a_refused_token_is_none_and_a_granted_one_is_the_secret` and
+  `a_stalled_exchange_body_is_cut_off_at_the_deadline`. jj change `tytynmmukovw`, bookmark `pr/desktop-token-on-demand`,
+  draft PR [#1194](https://github.com/scode/farhelm/pull/1194/changes).
 
 ## any-dioxus-webview-passes-origin-guard.md
 

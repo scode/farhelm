@@ -14,8 +14,9 @@ use dioxus::prelude::*;
 struct DesktopExchange {
     secret: Option<String>,
     error: Option<String>,
+    /// The page has no usable device secret and asks native to mint one.
     #[serde(default)]
-    retry_token: bool,
+    need_secret: bool,
     #[serde(default)]
     ready: bool,
 }
@@ -37,11 +38,31 @@ pub(crate) fn require_desktop_webview_reauth() {
 /// Native bootstrap has already authenticated reqwest. This second exchange
 /// runs inside the webview so its localStorage and WebSocket subprotocol carry
 /// a separately minted device credential. Values enter JavaScript through the
-/// eval IPC channel, never through a URL or rendered DOM. A validation 401 is
-/// the only state that mints: transport errors, capacity refusals, and failed
+/// eval IPC channel, never through a URL or rendered DOM, and the web token
+/// never enters it at all: native mints the webview's device secret itself
+/// (`mint_webview_secret`) and hands over only that. A validation 401 (or no
+/// stored secret) is the only state that mints: transport errors, capacity refusals, and failed
 /// WebSocket greetings return visibly over IPC and leave the device table
 /// alone. The generation signal explicitly restarts this future after token
 /// rotation; component-key remount behavior is not part of the contract.
+/// Mint the webview's device secret with the web token, re-reading the token
+/// once if the helm refuses it: the token file is a rotation boundary, and a
+/// rotation between reading and using it is the one refusal a retry fixes. A
+/// second refusal is reported rather than retried without bound.
+#[cfg(native_desktop)]
+async fn mint_webview_secret(base: &str) -> Result<String, String> {
+    for _ in 0..2 {
+        let token = crate::desktop::current_token()
+            .await
+            .map_err(|error| format!("reading the desktop bootstrap token: {error:#}"))?;
+        let deadline = tokio::time::Instant::now() + api::WEBVIEW_EXCHANGE_TIMEOUT;
+        if let Some(secret) = api::mint_webview_device_secret(base, &token, deadline).await? {
+            return Ok(secret);
+        }
+    }
+    Err("webview device exchange failed with 401 Unauthorized".to_string())
+}
+
 #[cfg(native_desktop)]
 #[component]
 pub(crate) fn DesktopBootstrapGate() -> Element {
@@ -65,24 +86,19 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
             document::eval(
                 "if (window.__farhelmClientLog) { window.__farhelmClientLog.disarm(); }",
             );
-            let token = match crate::desktop::current_token().await {
-                Ok(token) => token,
-                Err(error) => {
-                    failure.set(Some(format!(
-                        "reading the desktop bootstrap token: {error:#}"
-                    )));
-                    return;
-                }
-            };
             // The asset expression returns the authentication promise. Await
             // it here so Dioxus keeps the eval channel alive through every
             // recv/send pair; firing it and returning would close IPC while
             // the webview was still validating its credential.
             let mut eval =
                 document::eval(concat!("await ", include_str!("../assets/desktop-auth.js")));
+            // No web token goes to the page at all. If its stored device
+            // secret is missing or refused it asks (`need_secret`), and native
+            // mints one with the token itself, so the helm's root credential
+            // never enters JavaScript that later-shown content could have
+            // tampered with (SPEC.md "Client hardening").
             if let Err(error) = eval.send(serde_json::json!({
                 "base": config.base,
-                "token": token,
                 "persisted": config.persisted_secret,
             })) {
                 failure.set(Some(format!(
@@ -97,19 +113,15 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                     return;
                 }
             };
-            if exchange.retry_token {
-                let token = match crate::desktop::current_token().await {
-                    Ok(token) => token,
-                    Err(error) => {
-                        failure.set(Some(format!(
-                            "re-reading the desktop bootstrap token: {error:#}"
-                        )));
-                        return;
-                    }
+            if exchange.need_secret {
+                let minted = mint_webview_secret(&config.base).await;
+                let reply = match &minted {
+                    Ok(secret) => serde_json::json!({ "secret": secret }),
+                    Err(error) => serde_json::json!({ "error": error }),
                 };
-                if let Err(error) = eval.send(serde_json::json!({ "token": token })) {
+                if let Err(error) = eval.send(reply) {
                     failure.set(Some(format!(
-                        "retrying desktop authentication over IPC: {error}"
+                        "sending the minted webview credential over IPC: {error}"
                     )));
                     return;
                 }
@@ -117,7 +129,7 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                     Ok(exchange) => exchange,
                     Err(error) => {
                         failure.set(Some(format!(
-                            "desktop authentication retry IPC failed: {error}"
+                            "desktop authentication IPC failed after minting: {error}"
                         )));
                         return;
                     }
