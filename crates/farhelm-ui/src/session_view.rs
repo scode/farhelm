@@ -405,6 +405,10 @@ pub(crate) fn SessionView(
     /// One-shot bridge to the list's delete path, for the header's delete
     /// button once its confirmation is answered.
     header_delete: Signal<Option<crate::list::HeaderDeleteRequest>>,
+    /// Sessions with a delete in flight (AppBody's set, written by the
+    /// list's delete path). While this view's session is in it, the header
+    /// shows the delete's progress in place of its actions.
+    deleting: ReadSignal<std::collections::HashSet<String>>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let preferences = use_context::<crate::list::SharedPreferences>();
@@ -1658,6 +1662,7 @@ pub(crate) fn SessionView(
     // redraws the text and replaces the handler together, so the two agree.
     let header_delete_warned_nothing_alive =
         crate::status::shows_nothing_alive(&shown.status, shown.tabs.len());
+    let header_deleting = deleting.read().contains(&shown.id);
     let with_reason = restart_with_reason(&shown);
     let restart_with_description = with_reason.clone().unwrap_or_else(|| {
         "resume this session's conversation with changed launch settings".to_string()
@@ -1772,7 +1777,19 @@ pub(crate) fn SessionView(
                 {
                     div { class: "copy-warning", role: "status", "{warning}" }
                 }
-                div { class: "titlebar-actions",
+                // While a delete of this session is in flight the actions give
+                // way to its progress, the same label the sidebar row shows.
+                // They are hidden rather than unmounted: every action is
+                // already disabled for the duration (the delete is a row
+                // operation, which `PaneGate` refuses claims against), and a
+                // failed delete brings the same controls straight back.
+                div { class: if header_deleting { "titlebar-actions deleting" } else { "titlebar-actions" },
+                    if header_deleting {
+                        span { class: "delete-progress header-delete-progress", role: "status",
+                            span { class: "delete-progress-dot", "aria-hidden": "true" }
+                            "{crate::status::delete_progress_label(&shown.status, shown.tabs.len())}"
+                        }
+                    }
                     // SPEC.md: "Opening an interrupted session offers
                     // restart-with-resume" — which is why this is a
                     // first-class control in the header rather than hidden

@@ -151,6 +151,11 @@ pub(super) struct RowState {
     /// itself, which re-renders and hands each row a value that mostly has
     /// not moved.
     pub(super) activity: Option<ActivityStamp>,
+    /// Whether a delete of this session has been committed and its reply
+    /// has not landed yet, from AppBody's deleting set. The row keeps its
+    /// place until the reply (see `ListView`'s `do_delete`); this is what
+    /// tells the user it is on its way out rather than ignored.
+    pub(super) deleting: bool,
 }
 
 /// Whether a session sits on the helm's own machine, on another one, or

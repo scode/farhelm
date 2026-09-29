@@ -562,7 +562,10 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   confirmation that says so when anything is still alive. Deletion may make partial progress before failing, including
   removing attachment files while retaining the session row for retry. There is no rollback guarantee. Report the
   failure visibly and allow a later Delete to finish cleanup; a retained row does not mean previously removed state has
-  been restored.
+  been restored. Stopping a live agent can take a few seconds, since it gets its own chance to exit first, and a
+  session's row stays until the supervisor confirms the whole process tree is gone. From the moment a delete is
+  committed until that answer arrives, the row is dimmed and says it is stopping (or, when nothing was alive, deleting),
+  and the open session's header shows the same in place of its actions.
 
 Process-tree ownership is session-wide. Restart reaps any leftover descendants of the prior run before relaunching —
 never alongside them. Stop and delete reap everything the agent started. An agent exiting on its own does not trigger a

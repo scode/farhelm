@@ -1133,6 +1133,10 @@ fn AppBody() -> Element {
     // header confirms, the list performs the delete (see
     // `list::HeaderDeleteRequest` for why it is not the header's own call).
     let header_delete = use_signal(|| None::<list::HeaderDeleteRequest>);
+    // Sessions with a delete in flight. The list writes it (its delete path
+    // is the only one) and both panes read it: the row and the header show
+    // the same in-progress state until the supervisor's reply lands.
+    let deleting = use_signal(std::collections::HashSet::<String>::new);
     // The cross-pane write gate lives HERE because both panes claim or
     // consult it (see ops.rs's module doc): the shared token covers the
     // list's create/host mutations and the view's restart,
@@ -1307,6 +1311,7 @@ fn AppBody() -> Element {
                             layout_epoch,
                             prefill_request,
                             header_delete,
+                            deleting,
                         }
                     }
                     div { class: "app-main",
@@ -1336,6 +1341,7 @@ fn AppBody() -> Element {
                                     selection: current,
                                     prefill_request,
                                     header_delete,
+                                    deleting,
                                 }
                             },
                         }

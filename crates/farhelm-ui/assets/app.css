@@ -1022,6 +1022,13 @@ samp {
   flex-shrink: 0;
 }
 
+/* A delete in flight replaces the actions with its progress (see
+   `.delete-progress`); the buttons stay mounted but out of sight, since a
+   failed delete brings them straight back. */
+.titlebar-actions.deleting > :not(.header-delete-progress) {
+  display: none;
+}
+
 /* Each action is its own positioning context, because its confirmation
    hangs off it (see `.header-confirm`). `inline-flex` rather than `block`
    keeps the wrapper exactly as wide as the button inside it, so the
@@ -3169,13 +3176,38 @@ samp {
   vertical-align: 1px;
 }
 
-/* Declared AFTER the animation above, and the order is load-bearing: both
+/* A committed delete waiting on the supervisor's reply, on the session's
+   row (in the age's slot) and in its header (in place of the actions). The
+   wait is mostly the agent handling SIGTERM, a few seconds at most, and the
+   point of this is only that the click visibly took. The row dims so it
+   reads as on its way out without looking disabled for some other reason. */
+.session-row.deleting {
+  opacity: 0.6;
+}
+.delete-progress {
+  align-items: center;
+  color: var(--fg-1);
+  display: inline-flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+.delete-progress-dot {
+  animation: farhelm-status-pulse 2s ease-in-out infinite;
+  background: var(--danger);
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 6px;
+  height: 6px;
+}
+
+/* Declared AFTER the animations above, and the order is load-bearing: both
    selectors have the same specificity, so an override placed earlier in the
-   sheet (as the status badge's is) would lose to this dot's own animation
-   and keep it pulsing for someone who asked for less motion. The status is
-   still readable without the pulse, since the words say it is updating. */
+   sheet (as the status badge's is) would lose to these dots' own animation
+   and keep them pulsing for someone who asked for less motion. The status is
+   still readable without the pulse, since the words say what is happening. */
 @media (prefers-reduced-motion: reduce) {
-  .host-update-dot {
+  .host-update-dot,
+  .delete-progress-dot {
     animation: none;
   }
 }
