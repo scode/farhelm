@@ -1319,6 +1319,78 @@ mod tests {
         assert!(backend.operations.lock().unwrap().is_empty());
     }
 
+    /// An update whose confirming request is dropped while it waits for the
+    /// host's provisioning lock still runs, and does not leave the host busy.
+    ///
+    /// Why it matters: starting a run marks the host busy and then waits for
+    /// the lock before spawning the run that clears the mark, all on the
+    /// request's task. A page reload in that window left the host refusing
+    /// every later setup or update as busy until the helm restarted
+    /// (SPEC_impl.md "Who owns an accepted action"). Specified: with the
+    /// provisioning lock held, a confirmation is issued and its waiter
+    /// dropped once the host shows busy; after the lock is released the run
+    /// completes.
+    #[farhelm_testtrace::test]
+    async fn a_dropped_update_confirmation_still_runs_and_clears_busy() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "dropped.example",
+                HostScript {
+                    identity: Some("recorded-identity".to_string()),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness
+            .await_refreshed_as(host, "recorded-identity", 0)
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::skewed(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let preview = service.plan_update(host).await.unwrap();
+        *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            peer_build: "0.1.1-old".to_string(),
+            dial_farhelm: root.path().join("farhelm"),
+            dial_state_dir: Some(root.path().join("state")),
+        }));
+
+        let held = harness.manager.host_provision_lock(host).await;
+        let waiter = tokio::spawn({
+            let service = Arc::clone(&service);
+            async move {
+                service
+                    .start_update(
+                        host,
+                        ProvisionRequest {
+                            probe_id: preview.probe_id,
+                        },
+                    )
+                    .await
+            }
+        });
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !service.memory.lock().await.busy.contains(&host) {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "test premise: the confirmation must mark the host busy"
+            );
+            // sleep-ok: poll for the confirmation to reach its busy mark.
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        waiter.abort();
+        let _ = waiter.await;
+        drop(held);
+
+        assert_eq!(
+            wait_finished(&service, host).await.status,
+            RunStatus::Completed,
+            "the run must start and finish although its request was dropped"
+        );
+        assert!(!service.memory.lock().await.busy.contains(&host));
+    }
+
     /// UPDATE against a skewed supervisor — the host left behind by a
     /// protocol bump — must plan and execute, with the recorded identity
     /// carried forward unverified rather than treated as a mismatch: the

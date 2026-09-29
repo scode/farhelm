@@ -854,6 +854,21 @@ impl ProvisioningService {
         host: HostId,
         request: ProvisionRequest,
     ) -> anyhow::Result<RunAccepted> {
+        // On a helm-owned task (see `crate::run_owned`): `start_run` marks the
+        // host busy and then waits for its provisioning lock before spawning
+        // the run that clears it, so a request dropped in between (a reload
+        // while an update starts) left the host busy, and refusing every
+        // later update, until the helm restarted.
+        let service = Arc::clone(self);
+        crate::run_owned(async move { service.start_update_owned(host, request).await }).await
+    }
+
+    /// The body of [`Self::start_update`], run on a helm-owned task.
+    async fn start_update_owned(
+        self: Arc<Self>,
+        host: HostId,
+        request: ProvisionRequest,
+    ) -> anyhow::Result<RunAccepted> {
         let pending = self.consume_plan(&request.probe_id).await?;
         if !matches!(
             pending.confirmation,
