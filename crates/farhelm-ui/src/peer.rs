@@ -84,6 +84,34 @@ pub(crate) fn display_peer(raw: &str) -> String {
     }
 }
 
+/// A host identity as it should be SHOWN: every non-ASCII character escaped,
+/// not just the known-bad ones [`display_peer`] escapes.
+///
+/// The adopt prompt ("recorded as install X; now reports Y") exists so the
+/// user notices when a destination is a different install, and it only works
+/// if two different identities can never look alike. Identities are
+/// supervisor-minted UUIDs, so anything outside ASCII is already suspect,
+/// and escaping all of it also covers what the shared list deliberately
+/// leaves out (variation selectors) and whatever invisible character it does
+/// not know about yet. Titles and paths keep [`display_peer`], where
+/// escaping every non-ASCII character would mangle ordinary text.
+pub(crate) fn display_identity(raw: &str) -> String {
+    let escaped: String = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii() && !is_presentation_unsafe(ch) {
+                ch.to_string()
+            } else {
+                format!("<U+{:04X}>", ch as u32)
+            }
+        })
+        .collect();
+    // Through `display_peer` once more for its degenerate-value forms: an
+    // identity of only spaces must not render as nothing in the adopt
+    // button. On the already escaped ASCII it changes nothing else.
+    display_peer(&escaped)
+}
+
 /// One run of a rendered detail: either this UI's own words, or a value that
 /// came from somewhere else.
 ///
@@ -209,6 +237,43 @@ pub(crate) fn PeerBlock(class: String, text: String) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Why this matters: the adopt prompt exists so a user notices when a
+    /// destination reports a different install than the one recorded. Two
+    /// identities that differ only by a character that renders as nothing
+    /// (a variation selector, which the shared list leaves alone for emoji's
+    /// sake) would look identical there. Spec: identities escape every
+    /// non-ASCII character, so such a pair renders differently, while a plain
+    /// UUID renders as itself.
+    #[farhelm_testtrace::test]
+    fn identities_that_differ_invisibly_render_differently() {
+        let recorded = "8f1c2a7e-0000-4000-8000-000000000001";
+        let reported = format!("{recorded}\u{FE0F}");
+        // Premise: the ordinary peer escaping leaves the selector alone.
+        assert_eq!(display_peer(&reported), reported);
+        assert_eq!(display_identity(recorded), recorded);
+        assert_ne!(display_identity(recorded), display_identity(&reported));
+        assert!(display_identity(&reported).ends_with("<U+FE0F>"));
+        assert_eq!(display_identity(""), "(empty)");
+        // The adopt button interpolates this directly, so an all-space
+        // identity must still render as something visible.
+        assert_eq!(display_identity("   "), "(whitespace only: 3 characters)");
+    }
+
+    /// Why this matters: the shared unsafe list now covers more invisible
+    /// characters, and one of them (U+3164, a Hangul filler) is not
+    /// whitespace, so a value made only of it used to render as a blank.
+    /// Spec: such a value renders visibly escaped, and an ordinary emoji
+    /// title with a variation selector still renders as itself.
+    #[farhelm_testtrace::test]
+    fn newly_listed_invisibles_are_escaped_and_emoji_are_not() {
+        assert_eq!(display_peer("\u{3164}"), "<U+3164>");
+        assert_eq!(display_peer("a\u{034F}b\u{E0041}"), "a<U+034F>b<U+E0041>");
+        assert_eq!(
+            display_peer("ship it \u{2764}\u{FE0F}"),
+            "ship it \u{2764}\u{FE0F}"
+        );
+    }
 
     /// Peer-supplied text must not be able to lay out the sentence around
     /// it. The escaping half is asserted here; the isolation half is

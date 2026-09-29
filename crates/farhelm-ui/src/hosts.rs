@@ -66,7 +66,7 @@ use crate::menu_panel::{
     measurement_outcome, menu_panel_placement_style, remember_menu_item, should_measure_on_mount,
 };
 use crate::ops::{ConfirmSlot, OpLock, use_confirm_slot};
-use crate::peer::{DetailPart, PeerLine, display_peer};
+use crate::peer::{DetailPart, PeerLine, display_identity, display_peer};
 use crate::provisioning::{
     ActionRequest, HostBinding, HostUpdateProgress, PlanConfirmation, ProvisioningMenuState,
     ProvisioningPanel, ProvisioningTraceShape, UpdateProgressSummary,
@@ -371,9 +371,9 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
         ],
         HostPhase::IdentityMismatch { recorded, reported } => vec![
             DetailPart::text("recorded as install "),
-            DetailPart::peer(recorded),
+            DetailPart::peer(display_identity(recorded)),
             DetailPart::text("; the destination now reports "),
-            DetailPart::peer(reported),
+            DetailPart::peer(display_identity(reported)),
             DetailPart::text(", so nothing is connected until this is decided"),
         ],
         HostPhase::IdentityUnverified { recorded } => vec![
@@ -381,11 +381,11 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
                 "the host answered without an identity, so this helm cannot confirm it is still \
                  the install recorded as ",
             ),
-            DetailPart::peer(recorded),
+            DetailPart::peer(display_identity(recorded)),
         ],
         HostPhase::Duplicate { twin, identity } => vec![
             DetailPart::text("this entry reaches install "),
-            DetailPart::peer(identity),
+            DetailPart::peer(display_identity(identity)),
             DetailPart::text(format!(
                 ", which host {twin} already holds — the host itself is listed once, under that \
                  entry"
@@ -1802,7 +1802,7 @@ fn HostRow(
     let adopt_identity = adoptable(&host.state).map(str::to_string);
     let adopt_label = adopt_identity
         .as_deref()
-        .map(|reported| format!("adopt {}", display_peer(reported)));
+        .map(|reported| format!("adopt {}", display_identity(reported)));
     let remedy = state_remedy(&host.state);
     let detail = state_detail(&host.state);
     let shown_name = gui_host_name(&host.name, host.kind == HostKind::Local);
