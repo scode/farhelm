@@ -57,6 +57,13 @@
 # - xdotool typing faster than ~10 chars/s drops keystrokes into the
 #   controlled inputs (dioxus re-renders between keystrokes), so all
 #   typing uses --delay 120.
+# - An installed xdg-desktop-portal that cannot start (a headless box, where
+#   its GTK backend has no display) stalls the app's GTK startup for D-Bus's
+#   25-second activation timeout before the window exists, which lands the
+#   first page load right at the webview-authentication wait below. The
+#   release gate purges the portal packages for this reason (see
+#   .github/dist-build-setup.yml); a desktop session's working portal, or no
+#   portal at all, answers at once.
 # - State dirs must be SHORT: unix socket paths cap at ~108 bytes.
 # - The private Xvfb display has no X authentication set up (no
 #   Xauthority cookie): `-nolisten tcp` keeps it off the network, but any

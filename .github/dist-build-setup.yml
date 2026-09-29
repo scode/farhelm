@@ -384,10 +384,25 @@
   # natively. Keep these packages on the Linux/X64 gate only; ordinary CI's
   # desktop job only compiles and needs none of dx, wasm, Xvfb, or this smoke
   # harness's display tools.
+  #
+  # The purge is what keeps the smoke's first window from starting 25 seconds
+  # late. libwebkit2gtk-4.1-0 recommends xdg-desktop-portal-gtk, so the install
+  # above brings in the desktop portal, and GTK 3's GtkApplication startup
+  # asks D-Bus to auto-start `org.freedesktop.portal.Desktop` synchronously,
+  # before the window's event loop exists. On this headless runner the portal
+  # cannot come up: systemd's user manager has no DISPLAY, the GTK backend
+  # exits at once, and the portal waits out a 25-second timeout per backend it
+  # looks up. The app's main thread sits in that call for D-Bus's 25-second
+  # default, the page loads around 30 seconds after launch instead of about 6,
+  # and the smoke's 30-second wait for webview authentication failed roughly
+  # every other run (FLAKES.md, 2026-09-29). With no portal installed the
+  # activation fails in milliseconds, which is also what a machine without a
+  # desktop session does. Nothing the smoke covers depends on a portal.
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
     sudo apt-get update
     sudo apt-get install -y xvfb xdotool openbox imagemagick curl python3 libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev
+    sudo apt-get purge -y xdg-desktop-portal xdg-desktop-portal-gtk
 
 - name: Test the native desktop seams
   # This is deliberately after the release job installed wasm and dx, so the
