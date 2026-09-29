@@ -2115,7 +2115,10 @@
 - Completion criteria: `Info.plist` gets an explicit `0644` (or is written under `umask 022`) before it is hashed, with
   that inline comment; `scripts/test-install-sh.sh` runs the macOS-shaped install under `umask 002` and checks the
   plist's mode. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; install.sh sets Info.plist to 0644 after writing it, with an inline comment on why
+  (LSEnvironment can inject DYLD variables for any staff-group account); test-install-sh.sh case P1 installs under umask
+  002 and checks the mode. PR [#1148](https://github.com/scode/farhelm/pull/1148/changes), jj change `wpurklxr`,
+  bookmark `pr/app-plist-mode`.
 
 ## setup-pins-relative-path-tmux.md
 

@@ -1480,6 +1480,14 @@ EOF
 </dict>
 </plist>
 PLIST_EOF
+        # Info.plist is launch configuration: its LSEnvironment key can set
+        # DYLD_INSERT_LIBRARIES or FARHELM_* for the app, so whoever can write
+        # it can run code as the user the next time Farhelm is opened. The
+        # heredoc above creates it with the caller's umask (group-writable
+        # under a common umask of 002, and every account on a Mac is in the
+        # staff group), so it gets an explicit owner-only-writable mode like
+        # every other file in the bundle, before it is hashed into the record.
+        chmod 0644 "$bundle_stage/Contents/Info.plist" || bundle_fail "setting the Info.plist mode"
 
         bundle_cli_sha=$(sha256_of "$bundle_stage/Contents/MacOS/farhelm") || bundle_fail "hashing the staged CLI"
         bundle_desktop_sha=$(sha256_of "$bundle_stage/Contents/MacOS/farhelm-desktop") || bundle_fail "hashing the staged desktop executable"
