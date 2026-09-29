@@ -71,8 +71,6 @@ One line per open item. This file must always match the feedback files in this d
   confirmation always refuses it.
 - `uninstall-creates-setup-lock-file.md` — uninstall and setup --uninstall create .farhelm-setup.lock (and possibly the
   unit dir) and never report it.
-- `setup-build-tree-heuristic-misfires.md` — setup refuses installed binaries under an empty TMPDIR or any path
-  containing a directory named target.
 - `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
   sidebar keeps deleted/stale rows.
 - `desktop-copy-fallback-never-runs.md` — the native clipboard writer never rejects, so the header copy fallback never
