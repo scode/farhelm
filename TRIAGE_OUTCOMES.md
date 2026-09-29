@@ -4274,7 +4274,9 @@
   no working exploit is known; it is a consistency and defense-in-depth gap against the agent launch's 0600 spec file.
 - Decision: the user chose discard.
 - Completion criteria: remove the feedback file and its index entry without code or spec changes.
-- Execution: `pending`.
+- Execution: `complete`; the feedback file and its index entry were removed with no code or spec change. Change
+  `mspynmstlpunoolzkllnlsutqvkolsuv`, bookmark `pr/discard-tab-token-argv`, draft PR
+  [#1213](https://github.com/scode/farhelm/pull/1213/changes).
 
 ## send-upload-ignores-cancellation.md
 
