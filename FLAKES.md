@@ -1238,3 +1238,21 @@ established. Disposition: open (TODO.md Deflake), excluded from later sweeps.
 Class: unknown
 
 Cause: hypothesis
+
+## 2026-09-29 — Replace refusal row in a full browser sweep (e2e/tests/terminal-restart.spec.ts)
+
+`Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal` hit the 60-second test timeout on
+WebKit in deflake sweep run `0c787185-c40c-4070-a3fe-a69bc1a44a82`, the whole browser suite (`npx playwright test`, one
+browser worker, zero retries), and passed in all three exact-test reruns `452368f2-ce11-42b3-8eb2-43b31854e1de`,
+`7f8a9e9e-3f24-4fe1-913d-0df3e95bc2ab`, and `0c842a5b-e6aa-46ae-aa44-2147229374af`. All four ran at clean `main` commit
+`8e82d8b271b1015c25302bbbbb0df019b290ce76` on an 18-CPU Linux x86_64 host with pinned tmux 3.7c, executable SHA256
+`75ede1768324817dc386aee550c8e7ca68e98530af54762fcb9df0b46491b071`, and locale `C.UTF-8`; ambient `FARHELM_*` was
+scrubbed, and the recorder supplied `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`. The excerpt names
+only the timeout, not the step that stalled. The pattern matches the earlier finding that the test fails behind the rest
+of its file on WebKit and passes when selected alone. The test had an open TODO.md entry but no
+`deflake/known-flakes.txt` line, so the sweep was not excluding it; this record adds that line. Disposition: open
+(existing TODO.md entry).
+
+Class: unknown
+
+Cause: unknown
