@@ -27,10 +27,13 @@
 # silent missing asset is exactly the failure mode nobody notices until a Mac
 # user runs `install.sh`, `assets.rs`'s test module parses this file and
 # asserts the two versions are equal.
+#
+# Outside a release commit both say `0.0.0-unreleased`; the root Cargo.toml
+# explains why main never carries a release's number.
 
 [package]
 name = "farhelm-desktop"
-version = "0.14.0-rc.2"
+version = "0.0.0-unreleased"
 description = "Farhelm desktop window (webview shell around the helm)"
 repository = "https://github.com/scode/farhelm"
 homepage = "https://github.com/scode/farhelm"

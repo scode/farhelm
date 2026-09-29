@@ -2223,6 +2223,13 @@ mod tests {
     /// version-skew refusal used for incompatible protocols. The scripted
     /// hello changes only on reconnect, so both waits name a build: merely
     /// waiting for `connected` could read the previous connection.
+    ///
+    /// The peer build is `0.0.0-0`, the lowest version SemVer can express
+    /// (a numeric prerelease identifier of zero sorts before every other
+    /// prerelease), so it is older than whatever this helm's real build stamp
+    /// is: the `0.0.0-unreleased` sentinel on main and any release number
+    /// alike. A realistic-looking literal here only held until the workspace
+    /// version crossed it.
     #[farhelm_testtrace::test]
     async fn a_connected_older_build_is_flagged_without_version_skew() {
         let harness = lone_local_helm().await;
@@ -2244,7 +2251,7 @@ mod tests {
             })
             .await;
         harness.fleet.edit(host, |script| {
-            script.build = "0.14.0-rc.1".to_string();
+            script.build = "0.0.0-0".to_string();
         });
         harness.fleet.kill_connection(host);
         harness
@@ -2252,7 +2259,7 @@ mod tests {
                 matches!(
                     state,
                     crate::manager::HostState::Connected { build_version, .. }
-                        if build_version == "0.14.0-rc.1"
+                        if build_version == "0.0.0-0"
                 )
             })
             .await;
@@ -2266,7 +2273,7 @@ mod tests {
             .expect("the older host is listed")["state"];
         assert_eq!(state["phase"], "connected");
         assert_eq!(state["old_version"], true);
-        assert_eq!(state["build_version"], "0.14.0-rc.1");
+        assert_eq!(state["build_version"], "0.0.0-0");
     }
 
     /// Editing a RETIRED host must bring it back, not wedge it.

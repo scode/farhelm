@@ -926,6 +926,11 @@ fn remove_leftover_embedded_payloads(
 /// Built from `CARGO_PKG_VERSION` rather than written out, so a version bump
 /// cannot leave the default pointing at the previous release's assets — the
 /// failure that would silently provision hosts with a mismatched binary.
+///
+/// A build of main carries `0.0.0-unreleased` (root Cargo.toml), so a
+/// release-shaped build that is not a tagged release points at a release that
+/// does not exist and its download fails, rather than fetching some real
+/// release's payloads that do not match the running helm.
 fn default_release_base_url() -> anyhow::Result<url::Url> {
     let version = env!("CARGO_PKG_VERSION");
     url::Url::parse(&format!(

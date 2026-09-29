@@ -596,6 +596,7 @@ build_two_member_archive_release "$WWW/twomember" 1.2.3
 build_nonregular_member_release "$WWW/nonregular"
 build_good_release "$WWW/prerelease" 1.2.3-rc.1
 build_good_release "$WWW/prerelease-dev" 1.2.3-dev.1
+build_good_release "$WWW/unreleased" 0.0.0-unreleased
 mkdir -p "$WWW/slow"
 cp -r "$WWW/good"/. "$WWW/slow/"
 mkdir -p "$WWW/sums503" # never actually read: the server 503s the whole prefix
@@ -1406,6 +1407,26 @@ for spec in "1.2.3-dev.1" "v1.2.3-dev.1"; do
   check "FARHELM_VERSION=$spec normalizes to farhelm 1.2.3-dev.1" \
     contains "$("$HOMEV/.local/bin/farhelm" --version 2>/dev/null || true)" "farhelm 1.2.3-dev.1"
 done
+
+# The 0.0.0-unreleased sentinel every build of main carries installs ONLY
+# through the test-only base URL: test-uninstall.py depends on the first
+# half, and the second half keeps the sentinel from ever being requested from
+# GitHub, where no such release exists. Driven in both spellings because the
+# acceptance is an exact string match rather than the pattern above.
+for spec in "0.0.0-unreleased" "v0.0.0-unreleased"; do
+  HOMEV="$WORKDIR/homev-${spec//./-}"
+  mkdir -p "$HOMEV"
+  run_install "$TOOLCHAIN_FULL" "$HOMEV" "$HOMEV/.local/bin" "$BASE/unreleased" "$spec"
+  check "FARHELM_VERSION=$spec installs from the test base URL" [ "$RC" -eq 0 ]
+  check "FARHELM_VERSION=$spec installs farhelm 0.0.0-unreleased" \
+    contains "$("$HOMEV/.local/bin/farhelm" --version 2>/dev/null || true)" "farhelm 0.0.0-unreleased"
+done
+HOMEUNREL="$WORKDIR/homeunreleased-nobase"
+mkdir -p "$HOMEUNREL"
+run_install "$TOOLCHAIN_FULL" "$HOMEUNREL" "$HOMEUNREL/.local/bin" "" "0.0.0-unreleased"
+check "FARHELM_VERSION=0.0.0-unreleased without the test base URL exits 1" [ "$RC" -ne 0 ]
+check "FARHELM_VERSION=0.0.0-unreleased without the test base URL is a version error" \
+  contains "$ERR" "is not X.Y.Z"
 
 HOMEPLAIN="$WORKDIR/homeplain"
 mkdir -p "$HOMEPLAIN"

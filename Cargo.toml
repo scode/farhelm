@@ -43,27 +43,36 @@ default-members = [
 # SPEC_impl.md decision: the protocol hello carries it, and version skew is
 # handled at the edges rather than per-crate.
 #
-# ## This number is a SKEW GUARD, not a release label
+# ## Main is always `0.0.0-unreleased`; only a release commit names a release
+#
+# A real version exists only in the `chore: release X.Y.Z[-rc.N|-dev.N]`
+# commit a release tag points at, and that commit never lands on main
+# (releasing/AGENTS.md). Everything else carries this sentinel, so no build
+# that is not a tagged release can claim to be one. That matters beyond
+# labeling: a release-shaped helm downloads its provisioning payloads from
+# the GitHub release named by this number (`payloads.rs`), so an untagged
+# build carrying a real release's number would push that release's binaries
+# to remote hosts. With the sentinel it finds no such release and fails.
+# Release bumps used to merge into main. Once they stopped (#858 moved stable
+# releases onto release branches), main kept whatever number last reached it,
+# 0.14.0-rc.2 from a bump that rode along with an unrelated fix (#879), while
+# releases moved past it; this fixed value replaces that stale number.
+#
+# ## The number is also the browser-edge skew guard
 #
 # It is the build stamp the helm puts on every reply and the browser bundle
 # compares against its own (farhelm-ui's `skew` module). That comparison is
-# EXACT equality, which means the guard only works if the number actually
-# MOVES: two builds that share a version are indistinguishable to it, and a
-# stale tab open across an upgrade gets no reload prompt and keeps its
-# unattended behaviors — the silent degradation SPEC.md forbids, produced
-# by the very mechanism meant to prevent it.
-#
-# So any change to the vocabulary a bundle and a helm must agree on MUST
-# move this number, whether or not anything is being released. 0.0.3 is
-# PLAN_M7.md item 2's `PROTOCOL_VERSION` 11: restricted-peer attribution,
-# archive messages, and `Unauthorized` all change what an older peer can
-# safely understand, so the browser-edge stamp moves with the wire bump.
+# EXACT equality, so it tells two releases apart, and a release apart from an
+# unreleased build, but NOT two unreleased builds from each other: a stale
+# tab open across an upgrade between two builds of main gets no reload
+# prompt. That gap only affects development builds; installs come from
+# release tags, which always carry distinct versions.
 #
 # The helm↔supervisor edge does NOT rely on this: it has a real handshake
 # (`PROTOCOL_VERSION`) and refuses at connect. This number is what stands in
 # for that handshake on the browser edge, which has none.
 [workspace.package]
-version = "0.14.0-rc.2"
+version = "0.0.0-unreleased"
 edition = "2024"
 # cargo-dist reads `repository` to know where to cut releases and expects a
 # homepage in the package metadata. The project has no separate site, so both
