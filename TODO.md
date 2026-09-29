@@ -46,6 +46,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   from an earlier run inherits stale stage markers that can mask an out-of-order stage or fail `no_stage_ran`. Derive
   the markers from `PrepFixture.tmp` instead, as `preparation_scrubs_inherited_authority_and_agent_gets_its_own` already
   does, so each test gets its own directory that is removed on drop.
+- **Installer refuses its own app bundle after the install directory moves.** Since #1145, `scripts/install.sh` on macOS
+  replaces `~/Applications/Farhelm.app` only when the bundle's ownership record names the install directory's current
+  physical path. If that path changes between installs (`~/.local/bin` moved and replaced by a symlink to its new
+  location, a different `FARHELM_INSTALL_DIR`, a renamed home directory), every later install updates the binaries and
+  then exits 1 with "does not look like a farhelm app bundle", leaving the app on the old version. The uninstall command
+  refuses the bundle too, so only deleting it by hand recovers. An installer interrupted mid-replacement, after the
+  bundle's record is gone, lands in the same refusal. v0.18.0 replaced such a bundle. Reproduced against a fixture home
+  with a macOS `uname` shim during the v0.19.0-rc.1 installer review, not on a real Mac. Recognize a bundle whose record
+  names a directory that no longer holds a Farhelm installation as this installation moved, and say which directory the
+  record names when refusing.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
