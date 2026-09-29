@@ -947,7 +947,9 @@ EOF
   # live, refuse and ask to wait. Only past all three checks is a lock
   # treated as stale wreckage from a crash, at which point any recorded
   # transaction journal is rolled back (restoring the prior installation)
-  # before the slot is reused.
+  # before the slot is reused. That recovery runs under its own exclusive
+  # claim ($RECOVERY_CLAIM), so only one of several runs started after the
+  # same crash performs it.
   #
   # Known limitation: `kill -0` can be fooled by pid reuse on a long-uptime
   # machine (a stale lock's pid happening to be reassigned to something else
@@ -985,6 +987,34 @@ EOF
       exit 1
     fi
 
+    # Recovery itself must be exclusive. Two runs started after the same
+    # crash both reach this point; replaying the journal twice undoes the
+    # first replay's restore (the second pass read the journal before the
+    # first recorded its progress), and two runs clearing the stale lock can
+    # each delete the other's fresh one. A sidecar `mkdir` is the claim:
+    # exactly one run gets it, and the other refuses and asks for a retry,
+    # which SPEC.md "Concurrent and interrupted runs" allows. A claim left by
+    # a recovery that was itself killed is refused the same way, with the
+    # remove-by-hand advice the pid-less lock gets, because nothing can tell
+    # it from one that is still running.
+    if ! (umask 077; mkdir "$RECOVERY_CLAIM") 2>/dev/null; then
+      printf 'another farhelm install/update is recovering from an interrupted run against %s; wait a moment and retry -- if this persists, a previous recovery may itself have been interrupted, which requires removing %s by hand\n' "$INSTALL_DIR" "$RECOVERY_CLAIM" >&2
+      exit 1
+    fi
+    # The lock may have changed hands between reading its pid and winning
+    # the claim: another run can have finished recovering and taken a fresh
+    # lock. Only the same stale lock may be recovered, so both checks are
+    # repeated under the claim. The same pid text is not enough on its own:
+    # a new run that happens to get the dead run's pid (the own-pid case
+    # above) records the same text in its fresh, live lock.
+    claimed_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
+    if [ "$claimed_pid" != "$other_pid" ] ||
+      { [ "$claimed_pid" != "$$" ] && kill -0 "$claimed_pid" 2>/dev/null; }; then
+      rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
+      printf 'another farhelm install/update took over %s while this one was starting; wait for it to finish, then retry\n' "$INSTALL_DIR" >&2
+      exit 1
+    fi
+
     if [ -e "$JOURNAL" ]; then
       if rollback_from_journal; then
         rm -f "$JOURNAL"
@@ -993,6 +1023,7 @@ EOF
       else
         printf 'found an interrupted install/update (stale lock recording pid %s) and could not fully roll it back; %s and %s are LEFT IN PLACE for inspection -- see the lines above for what could not be restored, then re-run this script\n' "$other_pid" "$LOCK_DIR" "$JOURNAL" >&2
       fi
+      rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
       exit 1
     fi
 
@@ -1002,9 +1033,14 @@ EOF
     # continue within THIS invocation; there is nothing to report beyond
     # "the slot was free".
     remove_owned_lock
-    (umask 077; mkdir "$LOCK_DIR")
+    if ! (umask 077; mkdir "$LOCK_DIR") 2>/dev/null; then
+      rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
+      printf 'could not re-create the install lock %s after clearing a stale one; retry\n' "$LOCK_DIR" >&2
+      exit 1
+    fi
     printf '%s\n' "$$" >"$LOCK_DIR/pid"
     LOCK_ACQUIRED=1
+    rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
   }
 
   # The EXIT/INT/TERM/HUP handler. Always removes the ephemeral staging
@@ -1240,6 +1276,8 @@ EOF
     # launch could exec) rather than a copy.
     STAGING_DIR=$(mktemp -d "$INSTALL_DIR/.farhelm-install.XXXXXX")
     LOCK_DIR="$INSTALL_DIR/.farhelm-install.lock"
+    # The claim that makes stale-lock recovery exclusive; see acquire_lock.
+    RECOVERY_CLAIM="$LOCK_DIR.recovering"
     # Both are needed before acquire_lock (which rolls back a previous
     # run's journal) and before the EXIT trap below can fire, so they are
     # settled here rather than at the replacement phase that uses them.
