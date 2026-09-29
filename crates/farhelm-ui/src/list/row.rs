@@ -1013,6 +1013,7 @@ pub(super) fn SessionRow(
         selected,
         locality,
         activity,
+        deleting,
     } = state;
     #[cfg(test)]
     SESSION_ROW_RENDERS.with(|renders| renders.set(renders.get() + 1));
@@ -1505,7 +1506,14 @@ pub(super) fn SessionRow(
             }
         },
     ));
-    let row_class = row_class(session.stale, selected, menu_open);
+    // `deleting` is layered on rather than folded into `row_class`'s table:
+    // it is transient and independent of the other three, and doubling that
+    // exhaustive match for it would say nothing the suffix does not.
+    let row_class = match (row_class(session.stale, selected, menu_open), deleting) {
+        (class, true) => format!("{class} deleting"),
+        (class, false) => class.to_string(),
+    };
+    let delete_progress = crate::status::delete_progress_label(&session.status, session.tabs.len());
 
     rsx! {
         div {
@@ -1703,7 +1711,15 @@ pub(super) fn SessionRow(
                         // instead of inheriting a status color that would
                         // make "2m" look like a verdict.
                         span { class: "session-activity-column",
-                        if let Some(activity) = &activity {
+                        // A committed delete takes over the age's slot until
+                        // its reply lands: the one thing worth saying about a
+                        // row that is on its way out is that it is going.
+                        if deleting {
+                            span { class: "delete-progress", role: "status",
+                                span { class: "delete-progress-dot", "aria-hidden": "true" }
+                                "{delete_progress}"
+                            }
+                        } else if let Some(activity) = &activity {
                             span {
                                 class: "status-time",
                                 title: "{activity.absolute}",
@@ -2628,6 +2644,7 @@ mod tests {
                         selected: false,
                         locality: HostLocality::Unknown,
                         activity: None,
+                        deleting: false,
                     },
                     on_open,
                     on_clone,
@@ -2751,6 +2768,7 @@ mod tests {
                         selected: false,
                         locality: HostLocality::Unknown,
                         activity: None,
+                        deleting: false,
                     },
                     on_open,
                     on_clone,
@@ -2838,6 +2856,7 @@ mod tests {
                             selected: selected == id,
                             locality: HostLocality::Unknown,
                             activity: None,
+                            deleting: false,
                         },
                         on_open,
                         on_clone,

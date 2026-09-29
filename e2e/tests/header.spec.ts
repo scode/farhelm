@@ -9,7 +9,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
-import { createSession, cleanupSession, listSessions, stopSession } from "./helpers/fleet";
+import { createSession, cleanupSession, listSessions, openRowMenu, stopSession } from "./helpers/fleet";
 import { waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { FAKE_AGENT_INVOCATION } from "./helpers/terminal-suite";
@@ -476,5 +476,95 @@ test("the header delete confirms in place and deletes through the list", async (
   } finally {
     await cleanupSession(request, live.id);
     await cleanupSession(request, ended.id);
+  }
+});
+
+/**
+ * A committed delete shows its progress on the row and in the header until
+ * the supervisor's reply lands, then resolves either way.
+ *
+ * Why this matters: the supervisor answers a delete only once the session's
+ * whole process tree is gone, which for a live agent takes a few seconds of
+ * its own SIGTERM handling, and the row deliberately stays until then. Without
+ * a visible state in between, the click looks ignored. Specifies, with the
+ * DELETE reply held open by the test: the row gets its `deleting` state and a
+ * "stopping…" label in place of its age, and the open session's header shows
+ * the same label in place of its actions. A refused delete (409) clears both
+ * and leaves the row with its error and the header with its actions; a delete
+ * that goes through removes the row.
+ */
+test("a committed delete shows its progress until the reply lands", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `delete-progress-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: FAKE_AGENT_INVOCATION,
+  });
+  const build = (await request.get("/api/hosts")).headers()["x-farhelm-build"];
+  expect(build, "the helm stamps every reply with its build").toBeTruthy();
+  // Each DELETE waits for the test to release it, then either passes through
+  // or is refused the way the helm relays a supervisor conflict.
+  let release: ((outcome: "refuse" | "continue") => void) | undefined;
+  const held = page.route(`**/api/sessions/${session.id}`, async (route) => {
+    if (route.request().method() !== "DELETE") {
+      await route.fallback();
+      return;
+    }
+    const outcome = await new Promise<"refuse" | "continue">((resolve) => {
+      release = resolve;
+    });
+    release = undefined;
+    if (outcome === "refuse") {
+      await route.fulfill({
+        status: 409,
+        headers: { "content-type": "text/plain", "x-farhelm-build": build },
+        body: "held refusal",
+      });
+    } else {
+      await route.fallback();
+    }
+  });
+  await held;
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await target.locator(".session-row-open").click();
+    await waitForSessionRevealed(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(page.locator(".restart-primary")).toHaveAttribute("data-confirms", "true", {
+      timeout: 15_000,
+    });
+    const rowProgress = target.locator(".delete-progress");
+    const headerProgress = page.locator(".header-delete-progress");
+
+    // Refused: progress shows while the reply is held, then gives way to the
+    // row's error and the header's actions.
+    await openRowMenu(target);
+    await target.locator(".session-row-delete").click();
+    await target.locator(".confirm-delete").click();
+    await expect.poll(() => release !== undefined, { message: "the DELETE reached the route" }).toBe(true);
+    await expect(target).toHaveClass(/\bdeleting\b/);
+    await expect(rowProgress).toHaveText("stopping…");
+    await expect(target.locator(".status-time")).toHaveCount(0);
+    await expect(headerProgress).toHaveText("stopping…");
+    await expect(page.locator(".restart-primary")).toBeHidden();
+    release!("refuse");
+    await expect(target.locator(".action-error")).toContainText("delete: held refusal");
+    await expect(target).not.toHaveClass(/\bdeleting\b/);
+    await expect(rowProgress).toHaveCount(0);
+    await expect(headerProgress).toHaveCount(0);
+    await expect(page.locator(".restart-primary")).toBeVisible();
+
+    // Accepted, from the header this time: the same progress, then the row goes.
+    await page.locator(".header-delete").click();
+    await page.locator(".header-delete-confirm").getByRole("button", { name: "delete", exact: true }).click();
+    await expect.poll(() => release !== undefined, { message: "the DELETE reached the route" }).toBe(true);
+    await expect(rowProgress).toHaveText("stopping…");
+    await expect(headerProgress).toHaveText("stopping…");
+    release!("continue");
+    await expect(target).toHaveCount(0, { timeout: 20_000 });
+  } finally {
+    release?.("continue");
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await cleanupSession(request, session.id);
   }
 });

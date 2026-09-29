@@ -597,6 +597,10 @@ pub(crate) fn ListView(
     prefill_request: Signal<Option<HeaderPrefillRequest>>,
     /// The session header's confirmed deletes, run through `do_delete`.
     header_delete: Signal<Option<HeaderDeleteRequest>>,
+    /// Sessions with a delete in flight, written only by `do_delete` and
+    /// read by the rows here and by the session header. AppBody owns it
+    /// because the header is this view's sibling.
+    deleting: Signal<HashSet<String>>,
 ) -> Element {
     let open_host = open_destination
         .as_ref()
@@ -618,6 +622,15 @@ pub(crate) fn ListView(
     use_hook(move || {
         if *row_ops.peek() != 0 {
             row_ops.set(0);
+        }
+    });
+    // The deleting set outlives this component for the same reason and goes
+    // stale the same way: the task that would clear an entry dies with the
+    // unmount. A fresh mount has no delete of its own in flight yet.
+    let mut deleting = deleting;
+    use_hook(move || {
+        if !deleting.peek().is_empty() {
+            deleting.write().clear();
         }
     });
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
@@ -1579,6 +1592,10 @@ pub(crate) fn ListView(
         if !begin_row_op(&id) {
             return false;
         }
+        // Shown from here until the reply: the row and, if this session is
+        // open, the header switch to their in-progress state. Cleared beside
+        // each `end_row_op` below, on success and on failure alike.
+        deleting.write().insert(id.clone());
         let base = delete_base.clone();
         let refresh = delete_refresh.clone();
         spawn(async move {
@@ -1586,6 +1603,7 @@ pub(crate) fn ListView(
             match outcome.err() {
                 Some(e) => {
                     errors.write().insert(id.clone(), format!("delete: {e}"));
+                    deleting.write().remove(&id);
                     end_row_op(&id);
                     // A refusal changed nothing on the host, so no fleet
                     // event will correct a stale row; read the listing now,
@@ -1624,6 +1642,7 @@ pub(crate) fn ListView(
                     // fence supersedes every read that started before this
                     // confirmed delete (see `ReadGate::fence`).
                     listing_reads.write().fence();
+                    deleting.write().remove(&id);
                     end_row_op(&id);
                     // AFTER the local bookkeeping, so a selection change
                     // this triggers repaints against the already-updated
@@ -2904,6 +2923,7 @@ pub(crate) fn ListView(
                                     // that refusal made visible.
                                     busy: busy || row_is(&row_phases.read(), &session.id, RowPhase::Pending),
                                     confirming: row_is(&row_phases.read(), &session.id, RowPhase::ConfirmingDelete),
+                                    deleting: deleting.read().contains(&session.id),
                                     confirming_replace: row_is(&row_phases.read(), &session.id, RowPhase::ConfirmingReplace),
                                     renaming: rename_editor
                                         .read()

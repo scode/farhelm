@@ -379,6 +379,21 @@ pub(crate) fn shows_nothing_alive(status: &SessionStatus, tabs: usize) -> bool {
     status.has_ended() && tabs == 0
 }
 
+/// The in-progress label a session shows between a committed delete and
+/// the supervisor's reply, on its sidebar row and in its header.
+///
+/// Most of that wait is the agent's own SIGTERM handling, so the label says
+/// the session is being stopped. It must not say so for a session whose
+/// status says nothing is alive (the agent has ended and no tab is listed):
+/// there is nothing to stop there, only state to remove.
+pub(crate) fn delete_progress_label(status: &SessionStatus, tabs: usize) -> &'static str {
+    if shows_nothing_alive(status, tabs) {
+        "deleting…"
+    } else {
+        "stopping…"
+    }
+}
+
 /// The delete confirmation's consequence text: the agent's part from its
 /// status, preceded by what happens to the session's terminal tabs when
 /// there are any.
@@ -542,6 +557,26 @@ mod tests {
     /// `StatusBadgeView` turning `visible: false` into a dot plus clipped
     /// text is a browser fact (`.visually-hidden` has to actually clip), and
     /// the terminal spec's live-dot test is what asserts it.
+    /// The delete-in-progress label must never claim an agent is being
+    /// stopped when the session shows nothing alive to stop. Specifies:
+    /// "stopping…" for a live or unclassified agent, and for an ended agent
+    /// that still has an open tab; "deleting…" only for an ended agent with
+    /// no tabs.
+    #[farhelm_testtrace::test]
+    fn delete_progress_label_only_says_stopping_when_something_is_alive() {
+        let exited = SessionStatus::Exited { exit_code: Some(0) };
+        assert_eq!(
+            delete_progress_label(&SessionStatus::Running, 0),
+            "stopping…"
+        );
+        assert_eq!(
+            delete_progress_label(&SessionStatus::Unknown, 0),
+            "stopping…"
+        );
+        assert_eq!(delete_progress_label(&exited, 1), "stopping…");
+        assert_eq!(delete_progress_label(&exited, 0), "deleting…");
+    }
+
     #[farhelm_testtrace::test]
     fn status_badge_matches_text_and_class_for_each_status() {
         assert_eq!(
