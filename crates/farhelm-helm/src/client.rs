@@ -2991,6 +2991,19 @@ impl SupervisorClient {
     /// surfaced as a plain `anyhow::Error` rather than `SupervisorError`.
     /// Only `Ok` means the session and its state are actually gone.
     pub async fn delete_session(&self, id: &str) -> anyhow::Result<()> {
+        self.delete_session_with(id, false).await
+    }
+
+    /// [`Self::delete_session`] with the precondition the browser's
+    /// unconfirmed delete sends: when `only_if_nothing_alive` is set, the
+    /// supervisor refuses with `Conflict` instead of deleting if the agent
+    /// or any tab is alive at handling time (see
+    /// `ControlMsg::DeleteSession::only_if_nothing_alive`).
+    pub async fn delete_session_with(
+        &self,
+        id: &str,
+        only_if_nothing_alive: bool,
+    ) -> anyhow::Result<()> {
         let req_id = self.req_id();
         match self
             .request(
@@ -2998,6 +3011,7 @@ impl SupervisorClient {
                 ControlMsg::DeleteSession {
                     req_id,
                     session_id: id.to_string(),
+                    only_if_nothing_alive,
                 },
             )
             .await?

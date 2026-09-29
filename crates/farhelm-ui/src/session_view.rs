@@ -1211,8 +1211,12 @@ pub(crate) fn SessionView(
         // The shown session's host fields: the reply is bare, and it becomes
         // the selection as-is. See `list::with_source_host`.
         let source = current.peek().clone();
+        // Same rule as the sidebar's Replace: a confirmation that warned of
+        // nothing alive sends the precondition with the source delete.
+        let only_if_nothing_alive =
+            crate::status::shows_nothing_alive(&source.status, source.tabs.len());
         spawn(async move {
-            match replace_session(&base, &id).await {
+            match replace_session(&base, &id, only_if_nothing_alive).await {
                 Ok(new_session) => {
                     let new_session = crate::list::with_source_host(new_session, &source);
                     crate::list::remember_selection(&base, preferences, &new_session.id);

@@ -52,7 +52,36 @@ impl DeleteTarget {
     /// kill process-tree leftovers the UI cannot see, a residual
     /// `on_delete`'s own comment accepts.
     pub(super) fn needs_confirmation(&self) -> bool {
-        !self.status.has_ended() || self.tabs > 0
+        !crate::status::shows_nothing_alive(&self.status, self.tabs)
+    }
+
+    /// What a Delete click on this row does: open the confirmation, or
+    /// delete at once with the supervisor-side precondition attached.
+    pub(super) fn click(&self) -> DeleteClick {
+        if self.needs_confirmation() {
+            DeleteClick::Confirm
+        } else {
+            DeleteClick::DeleteGuarded
+        }
+    }
+}
+
+/// The two things a Delete click can do, so `on_delete`'s choice (and the
+/// flag its immediate delete carries) is one tested decision rather than a
+/// branch and a literal inside a component closure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DeleteClick {
+    /// Open the inline confirmation; a confirmed delete is unconditional.
+    Confirm,
+    /// Delete without asking, because the row shows nothing alive, and ask
+    /// the supervisor to refuse if the row was stale.
+    DeleteGuarded,
+}
+
+impl DeleteClick {
+    /// The `only_if_nothing_alive` flag the resulting delete request sends.
+    pub(super) fn only_if_nothing_alive(self) -> bool {
+        matches!(self, Self::DeleteGuarded)
     }
 }
 
@@ -540,6 +569,17 @@ pub(super) mod tests {
         };
         // Premise: the specimen's agent has ended.
         assert!(exited_bare.status.has_ended());
+
+        // The click's action and the flag its request carries: only the
+        // unconfirmed delete sends the supervisor-side precondition.
+        let bare = DeleteTarget::for_session(&exited_bare);
+        assert_eq!(bare.click(), DeleteClick::DeleteGuarded);
+        assert!(bare.click().only_if_nothing_alive());
+        assert_eq!(
+            DeleteTarget::for_session(&running_bare).click(),
+            DeleteClick::Confirm
+        );
+        assert!(!DeleteClick::Confirm.only_if_nothing_alive());
 
         let with_tabs = DeleteTarget::for_session(&exited_with_tabs);
         assert_eq!(with_tabs.tabs, 2);

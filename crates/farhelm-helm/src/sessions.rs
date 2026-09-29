@@ -2784,12 +2784,25 @@ pub(crate) async fn rename_session(
     }
 }
 
+/// The query string of `DELETE /api/sessions/{id}`.
+///
+/// `only_if_nothing_alive` is passed straight to the supervisor (see
+/// `ControlMsg::DeleteSession::only_if_nothing_alive`): the browser sets it
+/// on a delete it did not confirm with the user, so a row that looked ended
+/// but is running again is refused rather than killed. Absent means false,
+/// the unconditional delete every other caller wants.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct DeleteQuery {
+    #[serde(default)]
+    only_if_nothing_alive: bool,
+}
+
 /// `DELETE /api/sessions/{id}` — remove a session and all its stored state
-/// (SPEC.md's "delete"). This handler enforces nothing about liveness: it
-/// deletes unconditionally, in any state. SPEC.md's confirm-when-alive
-/// rule is normatively a CLIENT responsibility — no UI calls this route
-/// yet, and when the UI PR adds the delete action, confirming before it
-/// sends this request is that PR's job, not something to retrofit here.
+/// (SPEC.md's "delete"). The helm itself enforces nothing about liveness.
+/// SPEC.md's confirm-when-alive rule is the client's to ask; what the helm
+/// adds is the `?only_if_nothing_alive=true` precondition ([`DeleteQuery`]),
+/// which the supervisor checks at the moment of deletion so a client's
+/// stale "nothing is running" cannot turn into an unconfirmed kill.
 /// Same empty-object success body as `stop_session`; an unknown `id` maps
 /// to 404.
 ///
@@ -2815,12 +2828,16 @@ pub(crate) async fn rename_session(
 pub(crate) async fn delete_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
+    Query(query): Query<DeleteQuery>,
 ) -> impl IntoResponse {
     let (claim, client) = match route_session(&state, &id).await {
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
-    match client.delete_session(&id).await {
+    match client
+        .delete_session_with(&id, query.only_if_nothing_alive)
+        .await
+    {
         Ok(()) => {
             if let Err(error) = state.store.clear_seen(&id).await {
                 warn!(
@@ -2970,6 +2987,14 @@ pub(crate) struct ReplaceReq {
     ///   describing an ambiguity this route will not silently resolve by
     ///   picking one.
     with: Option<CreateReq>,
+    /// The same precondition as `DELETE ?only_if_nothing_alive=true`, applied
+    /// to the source delete that ends a successful replace. The browser sets
+    /// it on a Replace it did not confirm with the user. A refusal lands in
+    /// the existing "the replacement was created, the source could not be
+    /// deleted, both sessions exist" reply; nothing is rolled back and no
+    /// separate liveness check runs before the create.
+    #[serde(default)]
+    only_if_nothing_alive: bool,
 }
 
 /// One replace: a fresh session with the source's cwd, title, and agent
@@ -3039,6 +3064,7 @@ pub(crate) async fn do_replace_session(
     id: &str,
     intent_key: Option<String>,
     with: Option<CreateReq>,
+    only_if_nothing_alive: bool,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
     // Ordinary body-shape refusals, checked before anything touches the network —
     // the same precedence an ordinary create's own mutual-exclusivity
@@ -3130,6 +3156,7 @@ pub(crate) async fn do_replace_session(
             id,
             intent_key,
             with.expect("fresh body checked above"),
+            only_if_nothing_alive,
         )
         .await;
     }
@@ -3242,7 +3269,7 @@ pub(crate) async fn do_replace_session(
         },
     )
     .await?;
-    finish_replacement(state, &claim, &client, id, created).await
+    finish_replacement(state, &claim, &client, id, created, only_if_nothing_alive).await
 }
 
 /// A replacement must leave a different session alive. Run this check through
@@ -3279,6 +3306,7 @@ async fn replace_with_fresh_checkout(
     id: &str,
     intent_key: Option<String>,
     req: CreateReq,
+    only_if_nothing_alive: bool,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
     let client_identity = serde_json::to_string(&(
         "github_replace_request_v1",
@@ -3318,7 +3346,7 @@ async fn replace_with_fresh_checkout(
         Some(replacement_result_check(id)),
     )
     .await?;
-    finish_replacement(state, claim, client, id, created).await
+    finish_replacement(state, claim, client, id, created, only_if_nothing_alive).await
 }
 
 /// Delete the source only after a replacement has passed acceptance. Both a
@@ -3330,8 +3358,9 @@ async fn finish_replacement(
     client: &SupervisorClient,
     id: &str,
     created: farhelm_proto::SessionInfo,
+    only_if_nothing_alive: bool,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
-    if let Err(delete_error) = client.delete_session(id).await {
+    if let Err(delete_error) = client.delete_session_with(id, only_if_nothing_alive).await {
         // Two shapes of failure here, and they earn different words because
         // they answer a different question: did the delete happen?
         //
@@ -3401,7 +3430,15 @@ pub(crate) async fn replace_session(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<ReplaceReq>,
 ) -> impl IntoResponse {
-    match do_replace_session(&state, &id, req.intent_key, req.with).await {
+    match do_replace_session(
+        &state,
+        &id,
+        req.intent_key,
+        req.with,
+        req.only_if_nothing_alive,
+    )
+    .await
+    {
         Ok(session) => match browser_session_ready(&session) {
             Ok(()) => axum::Json(session).into_response(),
             Err(error) => http_error(error),

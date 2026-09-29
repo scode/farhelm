@@ -4803,6 +4803,68 @@ async fn delete_removes_session_terminal_and_row() {
     );
 }
 
+/// Why this matters: the browser deletes a session whose row says its
+/// agent ended without asking first, and that row can be stale (another
+/// client or an agent restarted it, or a cached status right after a
+/// relaunch), so an unconditional delete could kill a live agent nobody
+/// agreed to stop. Spec (`DeleteSession::only_if_nothing_alive`): with the
+/// flag, the supervisor itself refuses with `Conflict` while the agent is
+/// running or any terminal tab is open, and deletes once nothing is alive;
+/// without it, delete stays unconditional.
+#[farhelm_testtrace::test]
+async fn an_unconfirmed_delete_is_refused_while_anything_is_alive() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let conflict = |err: anyhow::Error| {
+        err.downcast_ref::<SupervisorError>()
+            .map(|error| (error.kind, error.message.clone()))
+            .expect("a refused delete carries a SupervisorError")
+    };
+
+    // A live agent: refused, and the session stays.
+    let (kind, message) = conflict(
+        h.client
+            .delete_session_with(&session.id, true)
+            .await
+            .expect_err("a live agent must not be deleted unconfirmed"),
+    );
+    assert_eq!(kind, ErrorKind::Conflict);
+    assert!(message.contains("agent is still running"), "{message}");
+    assert_eq!(h.client.list_sessions().await.unwrap().sessions.len(), 1);
+
+    // Agent ended, one tab open: still refused, because of the tab.
+    h.client.stop_session(&session.id).await.expect("stop");
+    wait_for_non_live_status(&h.client, &session.id, 15).await;
+    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
+    let (kind, message) = conflict(
+        h.client
+            .delete_session_with(&session.id, true)
+            .await
+            .expect_err("an open tab must not be deleted unconfirmed"),
+    );
+    assert_eq!(kind, ErrorKind::Conflict);
+    assert!(message.contains("1 terminal tab open"), "{message}");
+
+    // Nothing alive any more: the same request deletes.
+    h.client
+        .close_tab(&session.id, &tab.id)
+        .await
+        .expect("close the tab");
+    h.client
+        .delete_session_with(&session.id, true)
+        .await
+        .expect("with nothing alive the precondition holds and the delete goes ahead");
+    assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
+
+    // Without the flag a live agent is deleted, exactly as before.
+    let (live, _work2) = basic_session(&h).await;
+    h.client
+        .delete_session(&live.id)
+        .await
+        .expect("an unflagged delete stays unconditional");
+    assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
+}
+
 /// Deleting a session out from under an attached client must detach it
 /// with an explicit notice rather than leaving its stream hanging —
 /// mirroring how `second_attach_detaches_first` asserts a takeover's

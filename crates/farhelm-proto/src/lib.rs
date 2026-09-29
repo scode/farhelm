@@ -2682,7 +2682,30 @@ pub enum ControlMsg {
     /// client is told `Detached` before its connection loses the ability
     /// to reach this session at all, so it learns why rather than just
     /// going quiet.
-    DeleteSession { req_id: u64, session_id: String },
+    DeleteSession {
+        req_id: u64,
+        session_id: String,
+        /// Refuse, with `Conflict`, instead of deleting when anything of the
+        /// session is still alive at handling time: an agent that has not
+        /// ended (a live pane, or a launch not yet confirmed that has no
+        /// terminal to probe) or any open terminal tab.
+        ///
+        /// A client sets it on a delete it did NOT ask the user to confirm,
+        /// because its own row said nothing was running. That row can be
+        /// stale (another client or an agent restarted the session, a
+        /// cached status right after a relaunch), and an unconditional
+        /// delete would then kill a live agent nobody agreed to stop. It is
+        /// the delete counterpart of `RestartSession::stop_if_running`: the
+        /// supervisor, not the client's snapshot, decides at the moment of
+        /// the kill. `#[serde(default)]` false is today's unconditional
+        /// delete, so an older sender and a confirmed delete behave as
+        /// before, and an older supervisor that ignores the field gives
+        /// exactly the old behaviour rather than a failure. Serialized only
+        /// when true, so an unconditional delete keeps its original wire
+        /// shape.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        only_if_nothing_alive: bool,
+    },
     /// Acknowledges `DeleteSession`: sent only once the row, the tmux
     /// session, and (if one existed) the process tree are all positively
     /// confirmed gone. A teardown failure never yields this reply — it
@@ -4679,6 +4702,7 @@ mod tests {
         let delete = ControlMsg::DeleteSession {
             req_id: 12,
             session_id: "s1".to_string(),
+            only_if_nothing_alive: false,
         };
         assert_eq!(
             serde_json::to_value(&delete).unwrap(),
@@ -4687,6 +4711,33 @@ mod tests {
                 "req_id": 12,
                 "session_id": "s1",
             })
+        );
+
+        // The precondition appears on the wire only when set, and a body
+        // without it (every sender before the field existed) decodes as the
+        // unconditional delete.
+        let guarded = ControlMsg::DeleteSession {
+            req_id: 13,
+            session_id: "s1".to_string(),
+            only_if_nothing_alive: true,
+        };
+        assert_eq!(
+            serde_json::to_value(&guarded).unwrap(),
+            serde_json::json!({
+                "type": "delete_session",
+                "req_id": 13,
+                "session_id": "s1",
+                "only_if_nothing_alive": true,
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(serde_json::json!({
+                "type": "delete_session",
+                "req_id": 12,
+                "session_id": "s1",
+            }))
+            .unwrap(),
+            delete
         );
 
         let deleted = ControlMsg::SessionDeleted { req_id: 12 };
@@ -4716,6 +4767,7 @@ mod tests {
             ControlMsg::DeleteSession {
                 req_id: 2,
                 session_id: "s1".to_string(),
+                only_if_nothing_alive: false,
             },
             ControlMsg::SessionDeleted { req_id: 2 },
         ] {

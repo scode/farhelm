@@ -30,8 +30,8 @@ use super::create_form::{
 };
 use super::row::SessionRow;
 use super::shared::{
-    DeleteTarget, HostOption, OpenDestination, RowState, effective_create_host, host_options,
-    matching_host_option, session_locality,
+    DeleteClick, DeleteTarget, HostOption, OpenDestination, RowState, effective_create_host,
+    host_options, matching_host_option, session_locality,
 };
 use crate::rename::RenameDialog;
 
@@ -1543,18 +1543,26 @@ pub(crate) fn ListView(
     // `delete_session` and `errors`'/`pending`'s "delete:"-prefixed entry
     // in place of `on_stop`'s "stop:" one.
     let delete_refresh = request_listing.clone();
-    let mut do_delete = move |id: String| {
+    // `only_if_nothing_alive` is set by the one caller that deletes without
+    // asking (see `on_delete`): the row it decided from can be stale, and the
+    // supervisor then refuses rather than kills what nobody confirmed.
+    let mut do_delete = move |id: String, only_if_nothing_alive: bool| {
         if !begin_row_op(&id) {
             return;
         }
         let base = delete_base.clone();
         let refresh = delete_refresh.clone();
         spawn(async move {
-            let outcome = delete_session(&base, &id).await;
+            let outcome = delete_session(&base, &id, only_if_nothing_alive).await;
             match outcome.err() {
                 Some(e) => {
                     errors.write().insert(id.clone(), format!("delete: {e}"));
                     end_row_op(&id);
+                    // A refusal changed nothing on the host, so no fleet
+                    // event will correct a stale row; read the listing now,
+                    // so a row the supervisor found alive shows that and
+                    // the next Delete asks for confirmation.
+                    refresh(Trigger::Explicit);
                 }
                 None => {
                     errors.write().remove(&id);
@@ -1646,7 +1654,7 @@ pub(crate) fn ListView(
         // listing the variants is what kept this correct THROUGH M6.75's
         // liveness split, which added two live variants and needed no edit
         // here (see `SessionStatus::has_ended`).
-        if !target.needs_confirmation() {
+        if let DeleteClick::DeleteGuarded = target.click() {
             // Reached only for an ended agent with no listed tabs: open
             // tabs are live processes the UI can see, so they always
             // confirm (see `DeleteTarget::needs_confirmation`).
@@ -1677,7 +1685,10 @@ pub(crate) fn ListView(
             // spawned. There is no lingering process tree to worry about,
             // not because nothing ever ran, but because the one thing
             // that could have left descendants never got the chance to.
-            do_delete_on_confirm(target.id);
+            do_delete_on_confirm(
+                target.id,
+                DeleteClick::DeleteGuarded.only_if_nothing_alive(),
+            );
         } else {
             // Unknown must not borrow a live status's "is still running" claim
             // it has no basis for — SPEC.md's no-guessing rule means an
@@ -1725,7 +1736,7 @@ pub(crate) fn ListView(
         if !leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingDelete) {
             return;
         }
-        do_delete(id);
+        do_delete(id, false);
     };
 
     // The inline prompt's cancel button: just drops the flag. No API
@@ -1771,8 +1782,14 @@ pub(crate) fn ListView(
                 .ok()
                 .and_then(|listing| listing.sessions.iter().find(|s| s.id == id).cloned())
         });
+        // The prompt the user confirmed was worded from this same row. When it
+        // warned of nothing alive, the source delete carries the precondition,
+        // so a stale row cannot turn that confirmation into a silent kill.
+        let only_if_nothing_alive = source.as_ref().is_some_and(|source| {
+            crate::status::shows_nothing_alive(&source.status, source.tabs.len())
+        });
         spawn(async move {
-            match replace_session(&base, &id).await {
+            match replace_session(&base, &id, only_if_nothing_alive).await {
                 Ok(session) => {
                     let session = match &source {
                         Some(source) => super::with_source_host(session, source),

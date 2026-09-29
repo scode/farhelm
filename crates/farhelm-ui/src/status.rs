@@ -366,6 +366,19 @@ fn confirm_consequence_for_agent(status: &SessionStatus) -> &'static str {
     }
 }
 
+/// Whether a row showing `status` with `tabs` open tells the user nothing of
+/// the session is still running: the agent has ended and no terminal tab is
+/// listed.
+///
+/// Two things hang on it. Delete skips its confirmation only in this case,
+/// and whenever a delete or Replace goes ahead on the strength of it (no
+/// prompt at all, or a prompt that warned of nothing alive), the request
+/// carries `only_if_nothing_alive` so the supervisor refuses if the row was
+/// stale and something is running after all.
+pub(crate) fn shows_nothing_alive(status: &SessionStatus, tabs: usize) -> bool {
+    status.has_ended() && tabs == 0
+}
+
 /// The delete confirmation's consequence text: the agent's part from its
 /// status, preceded by what happens to the session's terminal tabs when
 /// there are any.
