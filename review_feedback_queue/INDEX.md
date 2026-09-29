@@ -74,5 +74,3 @@ One line per open item. This file must always match the feedback files in this d
   sidebar keeps deleted/stale rows.
 - `desktop-copy-fallback-never-runs.md` — the native clipboard writer never rejects, so the header copy fallback never
   runs and failures show "copied".
-- `window-maximize-fence-never-clears.md` — if the window manager ignores the restored maximize, window geometry is
-  never tracked for the run.
