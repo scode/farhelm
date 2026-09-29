@@ -117,8 +117,8 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
 ///
 /// Everything that identifies the session lives in ONE ~40px row: the status
 /// badge, session title, last-activity age, copyable directory and command
-/// line, and five always-visible lifecycle actions — Restart, Restart with,
-/// Replace, Clone, and Replace with. Rename stays in the sidebar, which owns navigation, and
+/// line, and six always-visible lifecycle actions — Restart, Restart with,
+/// Replace, Clone, Replace with, and Delete. Rename stays in the sidebar, which owns navigation, and
 /// tabs stay in the strip below. This replaced a stack of four bands that
 /// cost ~170px of chrome before the terminal started, on a surface whose
 /// whole point is the terminal.
@@ -162,10 +162,11 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
 ///   has no badge and still has an age.
 ///
 /// - **The action order is part of the keyboard contract.** The DOM places
-///   Restart, Restart with, Replace, Clone, and Replace with in that order, so pointer,
-///   keyboard, and assistive-technology users encounter the same controls.
-///   There is deliberately no overflow `⋯` menu: all five actions remain
-///   visible in the row, even when the identity fields have to ellipsize.
+///   Restart, Restart with, Replace, Clone, Replace with, and Delete in that
+///   order, so pointer, keyboard, and assistive-technology users encounter
+///   the same controls. There is deliberately no overflow `⋯` menu: all six
+///   actions remain visible in the row, even when the identity fields have
+///   to ellipsize.
 /// - **Directory and command line are copy buttons, not passive metadata.**
 ///   Their full values remain in the tooltip while the fields shrink before
 ///   the title. A hover or keyboard focus reveals the clipboard affordance;
@@ -401,6 +402,9 @@ pub(crate) fn SessionView(
     selection: ReadSignal<Option<Session>>,
     /// One-shot bridge to the list's existing clone composer.
     prefill_request: Signal<Option<crate::list::HeaderPrefillRequest>>,
+    /// One-shot bridge to the list's delete path, for the header's delete
+    /// button once its confirmation is answered.
+    header_delete: Signal<Option<crate::list::HeaderDeleteRequest>>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let preferences = use_context::<crate::list::SharedPreferences>();
@@ -456,6 +460,13 @@ pub(crate) fn SessionView(
     // Independent from the interrupted card's confirmation so a header
     // action cannot accidentally authorize that older surface's operation.
     let mut confirming_header_replace: ConfirmSlot<(), OpGuard> = use_confirm_slot();
+    // The header delete's confirmation holds the lifecycle claim while it is
+    // open, so a restart or replace cannot start under the question, and
+    // gives it back in the confirm handler just before the request goes to
+    // the list: the list's delete refuses to start while that same shared
+    // token is held, so a claim carried across the handoff would turn every
+    // confirmed delete into a silent no-op.
+    let mut confirming_header_delete: ConfirmSlot<(), OpGuard> = use_confirm_slot();
     let mut replace_error = use_signal(|| None::<String>);
     // One synchronously claimed token covers the restart prompt as well as
     // the request, so two clicks in one render frame cannot authorize
@@ -1636,6 +1647,17 @@ pub(crate) fn SessionView(
     // promise to `aria-label` and to the hover `title`, in front of the
     // further elaboration `offer_explanation` provides.
     let restart_label = restart_button_label(shown.restart_offer);
+    // Whether the header delete's prompt, as rendered by THIS pass, says
+    // nothing is alive, captured by its confirm handler. It must come from
+    // the same snapshot the consequence text is drawn from, not from a fresh
+    // read at click time: a detail refresh can land between the render and
+    // the click (another client restarted the session, say), and the click
+    // is still an answer to the prompt the user read. A prompt that said
+    // nothing is alive sends the supervisor-side precondition, so a stale
+    // header can never kill processes nobody was warned about. Every rerender
+    // redraws the text and replaces the handler together, so the two agree.
+    let header_delete_warned_nothing_alive =
+        crate::status::shows_nothing_alive(&shown.status, shown.tabs.len());
     let with_reason = restart_with_reason(&shown);
     let restart_with_description = with_reason.clone().unwrap_or_else(|| {
         "resume this session's conversation with changed launch settings".to_string()
@@ -1952,6 +1974,69 @@ pub(crate) fn SessionView(
                         disabled: lifecycle.busy(),
                         onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(header_replace_session.clone()))),
                         "replace with"
+                    }
+                    // A shortcut for deleting the open session without finding
+                    // its row in the sidebar. It always confirms, even for an
+                    // ended session the row would delete without asking: the
+                    // header is a single click away from the terminal, and
+                    // the confirm button lands where the delete button was,
+                    // the same two-clicks-in-one-place shape as replace. The
+                    // red is the row prompt's destructive tier, so the one
+                    // destructive action reads differently from the blue
+                    // lifecycle actions beside it.
+                    div { class: "header-delete-anchor",
+                        button {
+                            r#type: "button",
+                            class: "btn btn-danger header-delete",
+                            disabled: lifecycle.busy(),
+                            "aria-expanded": "{confirming_header_delete.is_open()}",
+                            onclick: move |_| {
+                                if let Some(claim) = lifecycle.claim_guard() {
+                                    confirming_header_delete.open((), claim);
+                                }
+                            },
+                            "delete"
+                        }
+                        if confirming_header_delete.is_open() {
+                            div { class: "header-confirm header-delete-confirm",
+                                // The row prompt's own consequence text, so
+                                // the two entry points warn about exactly the
+                                // same things (a live agent, open tabs).
+                                span { class: "confirm-consequence",
+                                    "{crate::status::confirm_consequence(&shown.status, shown.tabs.len())}"
+                                }
+                                if shown.working_copy.is_some() {
+                                    span { class: "confirm-consequence confirm-checkout-consequence",
+                                        "The checkout stays while another session uses it. Deleting its last session moves it into the working-copy archive; no files are deleted."
+                                    }
+                                }
+                                button {
+                                    r#type: "button",
+                                    class: "btn btn-danger header-delete-confirm-submit",
+                                    onclick: {
+                                        let id = shown.id.clone();
+                                        move |_| {
+                                            let Some(claim) = confirming_header_delete.take(&()) else {
+                                                return;
+                                            };
+                                            drop(claim);
+                                            header_delete.set(Some(crate::list::HeaderDeleteRequest {
+                                                id: id.clone(),
+                                                only_if_nothing_alive: header_delete_warned_nothing_alive,
+                                            }));
+                                        }
+                                    },
+                                    "delete"
+                                }
+                                button {
+                                    r#type: "button",
+                                    class: "btn btn-neutral",
+                                    autofocus: true,
+                                    onclick: move |_| confirming_header_delete.cancel_for(&()),
+                                    "cancel"
+                                }
+                            }
+                        }
                     }
                 }
             }

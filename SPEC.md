@@ -791,13 +791,15 @@ whatever the agent renders is what you see. There is no composer, no message abs
   titlebar remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
   deselecting).
 - The typical session header is one keyboard-reachable row ordered status, session name, age, directory, command line,
-  then Restart, Restart with, Replace, Clone, and Replace with. All five actions remain in the row and are fully visible
-  from a 580px main pane; narrower panes may clip the trailing actions. Restart with is greyed out when the session has
-  no stored structured launch settings or no conversation to resume; its tooltip and accessible description explain the
-  specific reason. Directory and command line are muted click-to-copy buttons that take the width their values need and
-  ellipsize only when the row runs out of room; a click confirms locally for about 1.5 seconds. Clipboard writes use the
-  native bridge first and `navigator.clipboard` second, with JSON serialization and silent failures. Replace has its own
-  anchored danger confirmation and neutral cancellation.
+  then Restart, Restart with, Replace, Clone, Replace with, and Delete. All six actions remain in the row and are fully
+  visible from a 650px main pane; narrower panes may clip the trailing actions. Restart with is greyed out when the
+  session has no stored structured launch settings or no conversation to resume; its tooltip and accessible description
+  explain the specific reason. Directory and command line are muted click-to-copy buttons that take the width their
+  values need and ellipsize only when the row runs out of room; a click confirms locally for about 1.5 seconds.
+  Clipboard writes use the native bridge first and `navigator.clipboard` second, with JSON serialization and silent
+  failures. Replace has its own anchored danger confirmation and neutral cancellation. Delete is styled as the danger
+  action and always asks first in the same anchored way, even for a session that has ended, with the same consequence
+  text the row's delete prompt shows.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a

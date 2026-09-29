@@ -1,6 +1,6 @@
 /**
  * The consolidated session header (the 2026-08 UI refresh): status, title,
- * age, copyable fields, and five lifecycle actions folded into one row over
+ * age, copyable fields, and six lifecycle actions folded into one row over
  * the tab strip. `session_view.rs`'s own docs carry the design; this file
  * proves the two properties that only a real layout engine can check —
  * that the row survives the SUPPORTED minimum width without clipping a
@@ -9,7 +9,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
-import { createSession, cleanupSession } from "./helpers/fleet";
+import { createSession, cleanupSession, listSessions, stopSession } from "./helpers/fleet";
 import { waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { FAKE_AGENT_INVOCATION } from "./helpers/terminal-suite";
@@ -18,11 +18,14 @@ function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
 }
 
-// The header's five full labels need a 580px main pane. The app still permits
+// The header's six full labels need a 650px main pane. The app still permits
 // a 320px pane, where its single row may clip; this test exercises the
-// narrowest rounded width expected to keep all five actions visible.
+// narrowest rounded width expected to keep all six actions visible. Measured
+// when Delete joined the row: the actions end at a 598px pane in Chromium and
+// a 608px pane in WebKit, and 650 keeps the same ~40px of platform font slack
+// the old five-action 580 had over its own WebKit measurement.
 const SIDEBAR_WIDTH = 340;
-const SUPPORTED_MAIN_PANE_WIDTH = 580;
+const SUPPORTED_MAIN_PANE_WIDTH = 650;
 const VIEWPORT_WIDTH = SIDEBAR_WIDTH + SUPPORTED_MAIN_PANE_WIDTH;
 const VIEWPORT_HEIGHT = 600;
 
@@ -77,6 +80,7 @@ test(
         ["restart button", restartBox],
         ["restart with button", (await page.locator(".restart-with-trigger").boundingBox())!],
         ["replace with button", (await page.locator(".header-replace-with").boundingBox())!],
+        ["delete button", (await page.locator(".header-delete").boundingBox())!],
       ] as const) {
         expect(box.x, `the ${name} must not be pushed off the left edge`).toBeGreaterThanOrEqual(0);
         expect(
@@ -210,7 +214,7 @@ test("copy fields use the header's free width before truncating", async ({ page,
 });
 
 /**
- * The session header is the only surface that exposes all five lifecycle
+ * The session header is the only surface that exposes all six lifecycle
  * actions together. This test pins their shared keyboard order, proves that
  * both copy buttons hand their complete values to the native bridge, and
  * verifies that header actions reuse the existing composer prefill paths.
@@ -243,6 +247,7 @@ test("header actions stay ordered, copy full values, and open the right flows", 
       "replace",
       "clone",
       "replace with",
+      "delete",
     ]);
 
     await page.evaluate(() => {
@@ -371,5 +376,105 @@ test("header copy shows escaped peer text, copies raw bytes, and warns", async (
     await expect(warning).toHaveCount(0);
   } finally {
     await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * Deletes the open session from its header, and only after an answered
+ * confirmation.
+ *
+ * Why this matters: the header's delete is a shortcut for the sidebar row's,
+ * so it must be at least as careful and must end in the same place. It
+ * confirms inline, anchored under the button, and cancelling sends nothing.
+ * Confirming runs the list's own delete: the row leaves the sidebar, the main
+ * pane stops showing the session, and the helm no longer lists it. The header
+ * delete also confirms for an ended session the row would delete without
+ * asking, and because that prompt said nothing was alive, the request carries
+ * the supervisor-side precondition, the same guard the row's unconfirmed
+ * delete sends.
+ */
+test("the header delete confirms in place and deletes through the list", async ({ page, request }) => {
+  const liveTitle = `header-delete-live-${Date.now()}`;
+  const live = await createSession(request, {
+    title: liveTitle,
+    cwd: "/tmp",
+    invocation: FAKE_AGENT_INVOCATION,
+  });
+  const ended = await createSession(request, {
+    title: `header-delete-ended-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  const deleteUrls: URL[] = [];
+  await page.route("**/api/sessions/*", async (route) => {
+    if (route.request().method() === "DELETE") {
+      deleteUrls.push(new URL(route.request().url()));
+    }
+    await route.fallback();
+  });
+  try {
+    await page.goto("/");
+    await row(page, live.id).locator(".session-row-open").click();
+    await waitForSessionRevealed(page, live.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(page.locator(".restart-primary")).toHaveAttribute("data-confirms", "true", {
+      timeout: 15_000,
+    });
+
+    const deleteButton = page.locator(".header-delete");
+    await expect(deleteButton).toHaveClass(/btn-danger/);
+    const confirmation = page.locator(".header-delete-confirm");
+
+    // Cancelling is free: nothing is sent and the session stays.
+    await deleteButton.click();
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation.locator(".confirm-consequence").first()).toContainText("still running");
+    const buttonBox = (await deleteButton.boundingBox())!;
+    const panelBox = (await confirmation.boundingBox())!;
+    expect(panelBox.y, "the confirmation hangs beneath the delete button").toBeGreaterThanOrEqual(
+      buttonBox.y + buttonBox.height - 1,
+    );
+    await confirmation.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(confirmation).toHaveCount(0);
+    expect(deleteUrls).toHaveLength(0);
+
+    await deleteButton.click();
+    await confirmation.getByRole("button", { name: "delete", exact: true }).click();
+    await expect(row(page, live.id)).toHaveCount(0, { timeout: 20_000 });
+    // The main pane lets go of the deleted session. Auto-select may open
+    // another one straight away, so the check is on whose header shows.
+    await expect(page.locator(".titlebar .title")).not.toContainText(liveTitle);
+    expect((await listSessions(request)).sessions.some((listed) => listed.id === live.id)).toBe(false);
+    expect(deleteUrls).toHaveLength(1);
+    expect(deleteUrls[0].searchParams.get("only_if_nothing_alive")).toBeNull();
+
+    // An ended session still confirms here, and its "nothing alive" prompt
+    // sends the precondition.
+    await stopSession(request, ended.id);
+    await expect
+      .poll(
+        async () => (await listSessions(request)).sessions.find((listed) => listed.id === ended.id)?.status?.state,
+        { timeout: 20_000 },
+      )
+      .toBe("exited");
+    await expect(row(page, ended.id).locator(".status-badge")).toHaveText(/exited/, { timeout: 20_000 });
+    await row(page, ended.id).locator(".session-row-open").click();
+    await expect(page.locator(".titlebar")).toBeVisible();
+    await deleteButton.click();
+    await expect(confirmation).toBeVisible();
+    // The premise is the prompt the user reads, not the sidebar: the header
+    // refreshes its own detail independently, and until it has the ended
+    // status its prompt still warns of a live agent (and rightly sends no
+    // precondition). "delete anyway:" is the ended, tab-less wording.
+    await expect(confirmation.locator(".confirm-consequence").first()).toHaveText("delete anyway:", {
+      timeout: 20_000,
+    });
+    await confirmation.getByRole("button", { name: "delete", exact: true }).click();
+    await expect(row(page, ended.id)).toHaveCount(0, { timeout: 20_000 });
+    expect(deleteUrls).toHaveLength(2);
+    expect(deleteUrls[1].searchParams.get("only_if_nothing_alive")).toBe("true");
+  } finally {
+    await cleanupSession(request, live.id);
+    await cleanupSession(request, ended.id);
   }
 });

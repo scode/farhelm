@@ -343,7 +343,11 @@ test("macOS header controls stay clear of native buttons while the shell scrolls
       const barBox = await bar.boundingBox();
       expect(barBox).not.toBeNull();
       expect(barBox!.y).toBeCloseTo(0, 0);
-      if (maximum > 0) {
+      // Only the narrow layout (the 661px media query) stacks the header
+      // below a fixed app bar. A wider window can still overflow sideways
+      // when the header's actions need more than the main pane has, and
+      // there the header rightly sits beside the sidebar at the top.
+      if (width < 661) {
         const headerBox = await header.boundingBox();
         expect(headerBox).not.toBeNull();
         expect(headerBox!.y).toBeGreaterThanOrEqual(barBox!.y + barBox!.height);

@@ -869,7 +869,7 @@ samp {
 }
 
 /* The consolidated header (the 2026-08 UI refresh): status, title, age,
-   copyable fields, and five lifecycle actions on ONE row, where four stacked
+   copyable fields, and six lifecycle actions on ONE row, where four stacked
    bands used to cost ~170px before the terminal began. Everything that made
    that stack — the restart explanation, the confirmations, the failure
    lines — moved to a tooltip, to anchored popovers, and to conditional bands
@@ -885,7 +885,7 @@ samp {
    status, age, and the action cluster never shrink or hide. That ordering is
    deliberate: the two copy buttons preserve their full values in `title`,
    while the actions must remain readable and keyboard reachable. At widths
-   below the header's 580px full-visibility width the row may clip; it never wraps or moves the
+   below the header's 650px full-visibility width the row may clip; it never wraps or moves the
    actions into another menu. */
 .titlebar {
   box-sizing: border-box;
@@ -987,7 +987,8 @@ samp {
   border-radius: var(--radius-md);
   font-size: 12px;
 }
-.header-replace-anchor { position: relative; display: inline-flex; }
+.header-replace-anchor,
+.header-delete-anchor { position: relative; display: inline-flex; }
 
 /* The session's status, in the header rather than in a band of its own —
    the same badge the sidebar's rows draw, so one session cannot be
