@@ -4200,7 +4200,9 @@
   "the lock". The finding's "unneeded daemon-reload" is also deliberate, so a retry can finish an earlier failed reload.
 - Decision: the user chose discard; the leftover is an empty hidden file and harmless.
 - Completion criteria: remove the feedback file and its index entry without code or spec changes.
-- Execution: `pending`.
+- Execution: `complete`; the feedback file and its index entry were removed with no code or spec change. Change
+  `wytsppnwvwwqxuzpnurkkuuwxxoqmwtz`, bookmark `pr/discard-uninstall-lock-file`, draft PR
+  [#1212](https://github.com/scode/farhelm/pull/1212/changes).
 
 ## embedded-payload-cleanup-blocks-helm-start.md
 
