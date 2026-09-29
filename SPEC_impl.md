@@ -316,7 +316,7 @@ says so and offers that same fallback or a fresh launch" is carried by the butto
 alongside the further elaboration, `title`) — naming the offer (`resume conversation`, `restart (fresh launch)`,
 `restart with the configured resume command`) rather than the action. The directory and invocation buttons carry their
 full values in `title`, shrink before the session title, and reveal a clipboard affordance on hover or keyboard focus.
-The five action buttons remain fully visible and in DOM order from a 580px main pane. The app's 320px main-pane floor is
+The six action buttons remain fully visible and in DOM order from a 650px main pane. The app's 320px main-pane floor is
 unchanged; between those widths the row may clip its trailing actions rather than wrapping or hiding them. The restart
 confirmation became a popover anchored under the button that opened it, still confirm-in-place with focus on cancel; the
 consequence sentence they lead with is the one line standing between a click and a killed process tree, and a header

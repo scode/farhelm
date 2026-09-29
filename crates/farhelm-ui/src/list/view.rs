@@ -45,6 +45,26 @@ pub(crate) enum HeaderPrefillRequest {
     ReplaceWith(Session),
 }
 
+/// One-shot request from a session header to delete the session it shows,
+/// sent after the header's own confirmation was answered.
+///
+/// The delete itself runs through the list's ordinary delete path, not a
+/// second implementation in the header: that path owns the per-row
+/// operation gate, the optimistic row removal once the reply lands, the read
+/// fence that keeps an older listing from resurrecting the row, and the
+/// selection clearing, and the header would otherwise have to duplicate all
+/// of it. Like [`HeaderPrefillRequest`], AppBody owns the signal so the
+/// request outlives the keyed session view, and ListView consumes it once.
+#[derive(Clone, PartialEq)]
+pub(crate) struct HeaderDeleteRequest {
+    pub(crate) id: String,
+    /// Whether the header's prompt warned that nothing was alive, in which
+    /// case the request carries the supervisor-side precondition the same
+    /// way every delete or replace decided on "nothing alive" does (see
+    /// `status::shows_nothing_alive`).
+    pub(crate) only_if_nothing_alive: bool,
+}
+
 /// Return keyboard focus to the persistent control that opened the composer.
 ///
 /// Closing removes the dialog's focused descendant. Without an explicit
@@ -575,6 +595,8 @@ pub(crate) fn ListView(
     /// touch this counter at all.
     layout_epoch: ReadSignal<u64>,
     prefill_request: Signal<Option<HeaderPrefillRequest>>,
+    /// The session header's confirmed deletes, run through `do_delete`.
+    header_delete: Signal<Option<HeaderDeleteRequest>>,
 ) -> Element {
     let open_host = open_destination
         .as_ref()
@@ -1550,9 +1572,12 @@ pub(crate) fn ListView(
     // `only_if_nothing_alive` is set by the one caller that deletes without
     // asking (see `on_delete`): the row it decided from can be stale, and the
     // supervisor then refuses rather than kills what nobody confirmed.
-    let mut do_delete = move |id: String, only_if_nothing_alive: bool| {
+    //
+    // Returns whether the delete started. Only the header path reads it: the
+    // row's own callers refuse busy rows before they get here.
+    let mut do_delete = move |id: String, only_if_nothing_alive: bool| -> bool {
         if !begin_row_op(&id) {
-            return;
+            return false;
         }
         let base = delete_base.clone();
         let refresh = delete_refresh.clone();
@@ -1619,6 +1644,7 @@ pub(crate) fn ListView(
                 }
             }
         });
+        true
     };
 
     // The delete button's initial click: decides whether this id needs
@@ -1734,6 +1760,7 @@ pub(crate) fn ListView(
     // Without this check, that second call would fall through to
     // `do_delete` regardless, which for the cancel-then-confirm race
     // would delete a session the user just told the UI to leave alone.
+    let mut header_do_delete = do_delete.clone();
     let confirm_delete = move |id: String| {
         // Refused OUTRIGHT while the shared token is held, BEFORE the
         // confirming flag is touched: `do_delete`'s own `begin_row_op`
@@ -1756,6 +1783,27 @@ pub(crate) fn ListView(
     let cancel_delete = move |id: String| {
         leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingDelete);
     };
+
+    // A delete the session header already confirmed. The header released its
+    // lifecycle claim just before sending this, because `begin_row_op`
+    // refuses while the shared token is held, so a request that still finds
+    // the page busy lost a race in the frame between the two: another
+    // operation claimed the token, or this row has a phase of its own (an
+    // operation in flight, or its sidebar prompt open). Nothing was deleted
+    // then, and the refusal is shown on the session's row, where every other
+    // delete failure is reported, rather than dropped silently.
+    use_effect(move || {
+        let Some(request) = header_delete.read().clone() else {
+            return;
+        };
+        header_delete.set(None);
+        if !header_do_delete(request.id.clone(), request.only_if_nothing_alive) {
+            errors.write().insert(
+                request.id,
+                "delete: not started, another operation is in progress; try again".to_string(),
+            );
+        }
+    });
 
     // Replace shares the per-row operation gate with stop, rename, and
     // delete (`begin_row_op`, which is also what enforces the
