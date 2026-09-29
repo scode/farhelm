@@ -1633,7 +1633,7 @@ mod tests {
                 cwd: "/work".into(),
                 selection: selection(
                     LaunchHarness::Codex,
-                    Some("gpt-6-sol"),
+                    Some("gpt-6.1-sol"),
                     Some(LaunchEffort::High),
                 ),
                 created_at: 1,
@@ -1839,11 +1839,11 @@ mod tests {
     #[test]
     fn known_model_cannot_cross_harnesses() {
         let catalog = vec![LaunchCatalogModel {
-            id: "gpt-6-sol".into(),
+            id: "gpt-6.1-sol".into(),
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::Low, LaunchEffort::Medium, LaunchEffort::High],
         }];
-        let wrong = selection(LaunchHarness::Claude, Some("gpt-6-sol"), None);
+        let wrong = selection(LaunchHarness::Claude, Some("gpt-6.1-sol"), None);
 
         assert!(!selection_is_compatible(&wrong, &catalog));
     }
@@ -2315,7 +2315,7 @@ mod tests {
                 efforts: vec![LaunchEffort::High],
             },
             LaunchCatalogModel {
-                id: "gpt-6-sol".into(),
+                id: "gpt-6.1-sol".into(),
                 harness: LaunchHarness::Codex,
                 efforts: vec![LaunchEffort::Low, LaunchEffort::Medium, LaunchEffort::High],
             },

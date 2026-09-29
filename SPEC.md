@@ -176,7 +176,7 @@ vendor configuration, so a prompt is possible only when neither has granted trus
 
 OpenCode is a structured harness, not a built-in profile. Its model is optional and uses OpenCode's configured default
 when omitted. For an explicit choice, Farhelm suggests `opencode/glm-5.3-flash`, `opencode/grok-4.5`,
-`opencode/grok-4.6`, `opencode/glm-5.3`, `opencode/gpt-6-luna`, `opencode/gpt-5.6-terra`, `opencode/gpt-6-sol`, and
+`opencode/grok-4.6`, `opencode/glm-5.3`, `opencode/gpt-6-luna`, `opencode/gpt-5.6-terra`, `opencode/gpt-6.1-sol`, and
 `opencode/gpt-6-astra`. The custom-model field also accepts a bare Zen model name or an `opencode/<model>` value. A bare
 value is passed as `opencode/<model>`; another provider prefix is refused. OpenCode has no offered effort choices. Its
 default permission mode adds no flag, and YOLO uses OpenCode's `--auto`, which auto-approves only permissions not
@@ -185,7 +185,7 @@ recognition.
 
 Goose, Pi, and OMP are structured harnesses, not built-in profiles. Each uses its configured model when none is chosen.
 For an explicit OpenRouter choice, Farhelm suggests `z-ai/glm-5.3-flash`, `x-ai/grok-4.5`, `x-ai/grok-4.6`,
-`z-ai/glm-5.3`, `openai/gpt-6-luna`, `openai/gpt-5.6-terra`, `openai/gpt-6-sol`, and `openai/gpt-6-astra`; a literal
+`z-ai/glm-5.3`, `openai/gpt-6-luna`, `openai/gpt-5.6-terra`, `openai/gpt-6.1-sol`, and `openai/gpt-6-astra`; a literal
 custom OpenRouter id remains available after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or
 `max` thinking and offers `approve`, `smart approve`, `chat`, and `yolo` modes. Pi requests `off`, `minimal`, `low`,
 `medium`, `high`, `xhigh`, or `max` thinking and has only the visibly labelled YOLO mode; this describes the absence of

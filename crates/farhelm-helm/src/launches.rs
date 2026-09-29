@@ -109,7 +109,7 @@ const CATALOG: &[CatalogModel] = &[
         efforts: CODEX_EFFORTS,
     },
     CatalogModel {
-        id: "gpt-6-sol",
+        id: "gpt-6.1-sol",
         harness: LaunchHarness::Codex,
         efforts: CODEX_EFFORTS,
     },
@@ -159,7 +159,7 @@ const CATALOG: &[CatalogModel] = &[
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
-        id: "openai/gpt-6-sol",
+        id: "openai/gpt-6.1-sol",
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
@@ -199,7 +199,7 @@ const CATALOG: &[CatalogModel] = &[
         efforts: PI_EFFORTS,
     },
     CatalogModel {
-        id: "openai/gpt-6-sol",
+        id: "openai/gpt-6.1-sol",
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
@@ -239,7 +239,7 @@ const CATALOG: &[CatalogModel] = &[
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
-        id: "openai/gpt-6-sol",
+        id: "openai/gpt-6.1-sol",
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
@@ -279,7 +279,7 @@ const CATALOG: &[CatalogModel] = &[
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
-        id: "opencode/gpt-6-sol",
+        id: "opencode/gpt-6.1-sol",
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
