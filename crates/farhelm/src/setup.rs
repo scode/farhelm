@@ -1346,20 +1346,47 @@ fn choose_tmux(ctx: &SetupContext, opts: &SetupOptions) -> TmuxDecision {
     // for a group this process is not in — is skipped rather than fatal.
     // Stopping at the first such shadow used to refuse setup outright on a
     // machine with a perfectly good tmux one entry further along.
-    let mut first_failure = None;
-    for candidate in candidates_on_path(&ctx.path, "tmux") {
-        let candidate = ctx.absolute(&candidate);
-        match probe_tmux(&candidate) {
-            Err(error @ TmuxProbeError::NotRunnable(_)) => {
-                first_failure.get_or_insert_with(|| refuse_tmux(&found_phrase(&candidate, &error)));
+    let decision = 'search: {
+        let mut first_failure = None;
+        for candidate in candidates_on_path(&ctx.path, "tmux") {
+            let candidate = ctx.absolute(&candidate);
+            match probe_tmux(&candidate) {
+                Err(error @ TmuxProbeError::NotRunnable(_)) => {
+                    first_failure
+                        .get_or_insert_with(|| refuse_tmux(&found_phrase(&candidate, &error)));
+                }
+                probed => break 'search finish_tmux(candidate, probed),
             }
-            probed => return finish_tmux(candidate, probed),
         }
+        // Nothing on PATH ran. The first candidate's failure is the
+        // actionable one — it is what `execvp` would have complained about,
+        // and what the operator sees at the front of their PATH.
+        first_failure.unwrap_or_else(|| refuse_tmux("none"))
+    };
+    // Any PATH-discovery refusal says so when the search walked past a tmux
+    // that a relative entry reaches: otherwise "found none", or "found tmux
+    // 3.6 at /usr/bin/tmux", contradicts the tmux the operator's own shell
+    // runs through `.`, and leaves them guessing why setup ignored it.
+    match (decision, skipped_relative_tmux(ctx)) {
+        (TmuxDecision::Refused(message), Some(skipped)) => TmuxDecision::Refused(format!(
+            "{message} PATH also reaches {skipped} through a relative entry, which setup never \
+             pins; pass --tmux {skipped} to use it anyway.",
+            skipped = skipped.display()
+        )),
+        (decision, _) => decision,
     }
-    // Nothing on PATH ran. The first candidate's failure is the actionable
-    // one — it is what `execvp` would have complained about, and what the
-    // operator sees at the front of their PATH.
-    first_failure.unwrap_or_else(|| refuse_tmux("none"))
+}
+
+/// A `tmux` that a relative (or empty) PATH entry would have found, resolved
+/// against setup's working directory, for the refusal message only.
+///
+/// `candidates_on_path` never offers these (see its docs for why), so this is
+/// purely diagnostic: it never feeds a pin.
+fn skipped_relative_tmux(ctx: &SetupContext) -> Option<PathBuf> {
+    std::env::split_paths(&ctx.path)
+        .filter(|dir| !dir.is_absolute())
+        .map(|dir| ctx.absolute(&dir.join("tmux")))
+        .find(|candidate| candidate.is_file())
 }
 
 /// Probe one named candidate and turn the outcome into a decision.
@@ -3097,6 +3124,94 @@ mod tests {
             supervisor.contains(&format!("FARHELM_TMUX={}", on_path.join("tmux").display())),
             "{supervisor}"
         );
+    }
+
+    /// A relative spelling of `target` that resolves to it from this test
+    /// process's own working directory, which is read, never changed.
+    ///
+    /// PATH discovery checks candidates with ordinary filesystem calls, so a
+    /// relative entry is resolved against the PROCESS's working directory,
+    /// not the injected `SetupContext::cwd`. A regression test for the
+    /// relative-entry filter needs an entry that really reaches a fixture
+    /// from there; otherwise dropping the filter would go unnoticed.
+    fn relative_to_process_cwd(target: &Path) -> PathBuf {
+        let cwd = std::env::current_dir().unwrap();
+        let mut relative = PathBuf::new();
+        for _ in cwd.components().skip(1) {
+            relative.push("..");
+        }
+        relative.join(target.strip_prefix("/").unwrap())
+    }
+
+    /// Why this matters: with `.` (or any relative entry) on PATH, running
+    /// setup inside a checkout that ships an executable named `tmux` used to
+    /// pin that checkout's file into the boot-time supervisor unit, so it
+    /// ran every Farhelm session at every boot. Spec: PATH discovery only
+    /// considers absolute entries, so a relative entry's tmux is never
+    /// pinned, even ahead of a good absolute one; and every refusal from PATH
+    /// discovery (nothing else found, an absolute tmux below the floor, one
+    /// that cannot run) names the skipped tmux and how to use it anyway.
+    ///
+    /// The relative entry is a nested path that reaches the fixture from the
+    /// test process's working directory, the same way `.` would reach one in
+    /// the directory setup runs from; `.` itself cannot point at a fixture
+    /// without changing that directory, which these tests never do. The
+    /// context's `cwd` is the process's real one so setup resolves the entry
+    /// the same way discovery does.
+    #[farhelm_testtrace::test]
+    fn a_tmux_reached_through_a_relative_path_entry_is_never_pinned() {
+        let setup_with = |extra: Option<&str>| {
+            let fixture = Fixture::new();
+            let checkout = fixture.root.path().join("checkout-bin");
+            std::fs::create_dir_all(&checkout).unwrap();
+            write_script(&checkout.join("tmux"), "printf 'tmux 3.7c\\n'");
+            let relative = relative_to_process_cwd(&checkout);
+            // Premise: the relative entry really reaches an acceptable tmux.
+            assert!(relative.join("tmux").is_file(), "{}", relative.display());
+            let mut path = vec![PathBuf::from("."), relative];
+            if let Some(version) = extra {
+                path.push(fixture.tmux_dir(version));
+            }
+            let mut ctx = fixture.context(&path);
+            ctx.cwd = std::env::current_dir().unwrap();
+            let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
+            let unit =
+                std::fs::read_to_string(fixture.unit_dir().join("farhelm-supervisor.service")).ok();
+            (fixture, checkout, error, unit)
+        };
+        let skipped_note = |checkout: &Path| {
+            format!(
+                "PATH also reaches {} through a relative entry, which setup never pins",
+                std::env::current_dir()
+                    .unwrap()
+                    .join(relative_to_process_cwd(checkout))
+                    .join("tmux")
+                    .display()
+            )
+        };
+
+        // An acceptable absolute tmux later on PATH is the one pinned.
+        let (fixture, _, error, unit) = setup_with(Some("tmux 3.7c"));
+        assert!(error.is_empty(), "{error}");
+        let unit = unit.expect("setup wrote the supervisor unit");
+        let absolute = fixture.root.path().join("tmuxbin/tmux");
+        assert!(
+            unit.contains(&format!("FARHELM_TMUX={}", absolute.display())),
+            "{unit}"
+        );
+        assert!(!unit.contains("checkout-bin"), "{unit}");
+
+        // Nothing else usable: refused, naming the skipped one.
+        let (_, checkout, error, unit) = setup_with(None);
+        assert!(error.contains("found none."), "{error}");
+        assert!(error.contains(&skipped_note(&checkout)), "{error}");
+        assert!(unit.is_none());
+
+        // An absolute tmux below the floor: its own detail AND the note.
+        let (_, checkout, error, unit) = setup_with(Some("tmux 3.6"));
+        assert!(error.contains("found tmux 3.6 at"), "{error}");
+        assert!(error.contains(&skipped_note(&checkout)), "{error}");
+        assert!(unit.is_none());
     }
 
     /// A relative path means "relative to where I ran this", and systemd

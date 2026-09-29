@@ -2138,7 +2138,10 @@
   relative entry) on PATH ahead of a valid absolute tmux pins the absolute one, and one with only a relative candidate
   refuses with the skipped-candidate mention; other `candidates_on_path` callers keep their intended behavior. Remove
   this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; setup's PATH discovery considers absolute entries only, and a PATH-discovery refusal names a
+  tmux a relative entry would have found and suggests `--tmux`. Tests cover the skip and the note; they fail with the
+  filter removed. PR [#1149](https://github.com/scode/farhelm/pull/1149/changes), jj change `wwmqxwvn`, bookmark
+  `pr/setup-skips-relative-path-tmux`.
 
 ## install-lock-owner-unchecked.md
 

@@ -878,11 +878,15 @@ pub fn candidates_on_path<'a>(
 ) -> impl Iterator<Item = PathBuf> + 'a {
     let program = Path::new(name);
     std::env::split_paths(path)
-        // An empty PATH entry means the current directory to the shell.
-        // Skipping it here is deliberate: the result is going to be
-        // written into a systemd unit, and "whatever directory setup
-        // happened to run in" is never a defensible thing to pin.
-        .filter(|dir| !dir.as_os_str().is_empty())
+        // Only absolute entries. An empty entry means the current directory
+        // to the shell, and `.`, `./bin` or `node_modules/.bin` mean the same
+        // thing spelled differently: whatever directory the caller happened
+        // to run in. Setup, the one production caller, pins the result into
+        // a boot-time systemd unit, and that directory (an untrusted checkout,
+        // say) is never a defensible thing to pin; its tmux would then run
+        // every session at every boot. A tmux the user really wants from
+        // such a place can still be named explicitly.
+        .filter(|dir| dir.is_absolute())
         .map(move |dir| dir.join(program))
         .filter(|candidate| is_executable_file(candidate))
 }
@@ -4607,8 +4611,9 @@ mod tests {
     /// LOOKS executable but cannot be spawned is skipped, not fatal. A
     /// `noexec` mount or a group-only execute bit produces exactly that
     /// shape, and stopping there would hide a perfectly good tmux later on
-    /// PATH. Empty entries are dropped as well — the current directory is
-    /// not something to pin into a unit file.
+    /// PATH. Empty and relative entries are dropped as well — the current
+    /// directory, however it is spelled, is not something to pin into a
+    /// unit file.
     #[cfg(unix)]
     #[farhelm_testtrace::test]
     fn path_candidates_are_offered_in_order_without_empty_entries() {
@@ -4623,8 +4628,35 @@ mod tests {
         std::fs::write(first.join("tmux"), b"#!/nonexistent/interpreter\n").unwrap();
         let usable = probe_fixture(&second, "tmux", &format!("printf 'tmux {TMUX_FLOOR}\\n'"));
 
-        let path = std::env::join_paths([std::path::PathBuf::new(), first.clone(), second.clone()])
-            .unwrap();
+        // A relative entry that really reaches an executable tmux from this
+        // test process's working directory (read, never changed): without
+        // the absolute-only filter it would be the first candidate.
+        let reachable = dir.path().join("reachable-through-relative");
+        std::fs::create_dir_all(&reachable).unwrap();
+        probe_fixture(
+            &reachable,
+            "tmux",
+            &format!("printf 'tmux {TMUX_FLOOR}\\n'"),
+        );
+        let cwd = std::env::current_dir().unwrap();
+        let mut relative = std::path::PathBuf::new();
+        for _ in cwd.components().skip(1) {
+            relative.push("..");
+        }
+        let relative = relative.join(reachable.strip_prefix("/").unwrap());
+        assert!(
+            relative.join("tmux").is_file(),
+            "premise: {}",
+            relative.display()
+        );
+        let path = std::env::join_paths([
+            std::path::PathBuf::new(),
+            std::path::PathBuf::from("."),
+            relative,
+            first.clone(),
+            second.clone(),
+        ])
+        .unwrap();
         let candidates: Vec<_> = candidates_on_path(&path, "tmux").collect();
         assert_eq!(candidates, [first.join("tmux"), usable.clone()]);
         assert_eq!(find_on_path(&path, "tmux"), Some(first.join("tmux")));
