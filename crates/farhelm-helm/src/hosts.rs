@@ -456,6 +456,19 @@ pub(crate) async fn set_yolo_safe(
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<YoloSafeSpec>,
 ) -> impl IntoResponse {
+    // Save, then announce: helm-owned for the reason `add_host` is. A
+    // request dropped between the two would leave the setting saved but
+    // every other open client showing the old one, and nothing later
+    // re-announces it (the registry reconcile does not compare this flag).
+    crate::run_owned(set_yolo_safe_owned(state, host, spec)).await
+}
+
+/// [`set_yolo_safe`]'s body, run on a helm-owned task.
+async fn set_yolo_safe_owned(
+    state: Arc<AppState>,
+    host: HostId,
+    spec: YoloSafeSpec,
+) -> axum::response::Response {
     let serialized = state.manager.host_write_lock(host).await;
     let changed = match state.store.set_yolo_safe(host, spec.yolo_safe).await {
         Ok(changed) => changed,
@@ -539,6 +552,13 @@ pub(crate) async fn add_host(
     State(state): State<Arc<AppState>>,
     axum::Json(spec): axum::Json<HostSpec>,
 ) -> impl IntoResponse {
+    // Commit, then start the actor: owned by the helm so a client that goes
+    // away between the two cannot leave a registered host with no actor.
+    crate::run_owned(add_host_owned(state, spec)).await
+}
+
+/// The body of [`add_host`], run on a helm-owned task.
+async fn add_host_owned(state: Arc<AppState>, spec: HostSpec) -> axum::response::Response {
     let added = state
         .store
         .add_ssh_host(
@@ -629,6 +649,17 @@ pub(crate) async fn set_destination(
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<HostSpec>,
 ) -> impl IntoResponse {
+    // Commit, then reconcile the live connection: helm-owned for the reason
+    // `add_host` is.
+    crate::run_owned(set_destination_owned(state, host, spec)).await
+}
+
+/// The body of [`set_destination`], run on a helm-owned task.
+async fn set_destination_owned(
+    state: Arc<AppState>,
+    host: HostId,
+    spec: HostSpec,
+) -> axum::response::Response {
     // Held across the write AND the reconcile: see this function's docs for
     // the in-flight write it fences out. Dropped before the reply is built,
     // which needs nothing from it.
@@ -741,6 +772,13 @@ pub(crate) async fn remove_host(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
 ) -> impl IntoResponse {
+    // Delete the row, then stop its actor: helm-owned so a dropped request
+    // cannot leave an actor running for a host that is no longer registered.
+    crate::run_owned(remove_host_owned(state, host)).await
+}
+
+/// The body of [`remove_host`], run on a helm-owned task.
+async fn remove_host_owned(state: Arc<AppState>, host: HostId) -> axum::response::Response {
     let Some(provisioning) = state.manager.try_host_provision_lock(host) else {
         return (
             axum::http::StatusCode::CONFLICT,
@@ -813,10 +851,16 @@ pub(crate) async fn adopt_host(
     AxPath(host): AxPath<HostId>,
     axum::Json(req): axum::Json<AdoptReq>,
 ) -> impl IntoResponse {
-    match state.manager.adopt(host, &req.reported).await {
-        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
-        Err(e) => http_error(e),
-    }
+    // `adopt` commits the new identity and then resets the host's status and
+    // nudges its actor; helm-owned so a dropped request cannot stop between
+    // the two and leave the host stuck on a mismatch it already adopted.
+    crate::run_owned(async move {
+        match state.manager.adopt(host, &req.reported).await {
+            Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+            Err(e) => http_error(e),
+        }
+    })
+    .await
 }
 
 /// `POST /api/hosts/{id}/retry` — reconnect this host now.

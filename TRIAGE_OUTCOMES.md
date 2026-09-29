@@ -3899,7 +3899,13 @@
   this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the add, retarget (`set_destination`), remove and adopt handlers in hosts.rs run their
+  commit-then-reconcile bodies through `run_owned` (lib.rs), which spawns the work on a helm-owned task and awaits it,
+  so a dropped request loses only the reply (SPEC_impl.md "Who owns an accepted action"). `run_owned` is the one small
+  shared helper the plan allows; `cancelled-start-run-leaves-host-busy.md` reuses it. Regression test
+  `owned_work_completes_after_its_waiter_is_dropped`. The YOLO-safe host setting, added on main while this stack was
+  open, saves and then announces the same way, so its handler goes through `run_owned` too. jj change `lnnlrvnylkpx`,
+  bookmark `pr/host-edits-owned-by-helm`, draft PR [#1196](https://github.com/scode/farhelm/pull/1196/changes).
 
 ## cancelled-start-run-leaves-host-busy.md
 
