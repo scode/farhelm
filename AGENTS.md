@@ -150,10 +150,8 @@ that its required systemd or SSH substrate ran.
 - `dprint check`
 - `cd website && bun install --frozen-lockfile && bun run build` — the docs website (Astro + Starlight) must build; this
   is what catches a page with missing frontmatter or a sidebar slug that names no page. Bun is the package manager the
-  Vercel project is configured with, so the lockfile is `bun.lock`; commit it with any dependency change. Vercel skips a
-  push, on main or any PR branch, unless it changes something under `website/`
-  (`website/scripts/vercel-ignore-build.sh`, wired in by `website/vercel.json`), so the site must never read files
-  outside `website/`: a change to such a file would not redeploy it.
+  Vercel project is configured with, so the lockfile is `bun.lock`; commit it with any dependency change. Vercel itself
+  never builds on a push; see "Vercel deployments" below.
 - `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
   and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
   cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
@@ -190,6 +188,22 @@ in for the desktop app's engine family). The full-suite child command is `cd e2e
 drives the built web UI against a real helm and supervisor, plus a one-time
 `cd e2e && npm install && npx playwright install chromium webkit`. Reuse matching builds and successful test results
 when the intervening diff leaves their coverage intact; see `docs/test-run-evidence.md` for recorded selections.
+
+# Vercel deployments
+
+The docs website deploys to Vercel only when asked. `website/vercel.json` turns off every Git-triggered deployment,
+because Vercel bills even a skipped push for at least a minute of build time and nearly every push leaves the site
+unchanged. Merging to main does not update the live site, and a PR gets no preview, until someone triggers one.
+
+"Trigger vercel on main", "deploy the website", and similar wording mean `website/scripts/vercel-deploy.sh main`: a
+production deployment of GitHub's current main. "Trigger vercel on this PR" (or on PR N, or on a named branch or
+bookmark) means `website/scripts/vercel-deploy.sh <pr-number>`: a preview deployment of that PR's pushed head. Resolve
+"this PR" from the current bookmark or branch with `gh pr view`; if there is no PR, ask rather than guessing one. The
+script builds from GitHub, not from the working copy, so unpushed changes are not deployed: if the working copy is ahead
+of what GitHub has, say so and ask whether to push. It waits for the build and prints the deployment URL; report that
+URL and the outcome. It needs a logged-in Vercel CLI; if `vercel api` reports being logged out, ask the user to run
+`! vercel login` rather than handling a token. A request to trigger Vercel is not a request to run the website build or
+any other check first.
 
 # Releases and the changelog
 
