@@ -1957,7 +1957,11 @@
   directory's mode is set; tests cover an existing restrictive shared directory keeping its mode and a dedicated
   directory still being repaired. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the
   execution change.
-- Execution: `pending`.
+- Execution: `complete`; provisioning's directory plan marks the systemd user-unit directory and a binary directory
+  outside the lib directory as shared: created 0755 when missing, otherwise left alone (over ssh and locally); the lib
+  and state directories are still forced to their modes. SPEC.md declares install directories other local accounts can
+  write to unsupported. PR [#1142](https://github.com/scode/farhelm/pull/1142/changes), jj change `lrzynkyu`, bookmark
+  `pr/provisioning-keeps-shared-dir-modes`.
 
 ## sftp-misparses-ipv6-and-uri-destinations.md
 

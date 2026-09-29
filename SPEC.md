@@ -1485,10 +1485,17 @@ either outcome alone as a bug or require additional recovery machinery to choose
 remain visible; recovery must not restart an agent or take control from another viewer. A retained session record does
 not promise that cleanup preserved the terminal or its scrollback.
 
-Provisioning may enforce permissions on directories dedicated to Farhelm. It must preserve permissions on existing
-shared directories merely used to hold its executable or service files. If those permissions prevent installation,
-report the obstacle rather than silently changing them. Trust in the helm does not authorize incidental changes to
-unrelated host configuration.
+Provisioning may enforce permissions on directories dedicated to Farhelm: its private lib directory and the supervisor
+state directory. It must preserve permissions on existing shared directories merely used to hold its executable or
+service files, which are the systemd user-unit directory and, when the registered binary lives outside the lib
+directory, that binary's own directory. A missing shared directory is created; an existing one is left exactly as it is.
+If those permissions prevent installation, report the obstacle rather than silently changing them. Trust in the helm
+does not authorize incidental changes to unrelated host configuration.
+
+Farhelm is not designed for install directories that other local accounts can write to, whether provisioning's lib,
+state, or binary directory on a host or a shared directory it writes into. Keeping them writable only by the user is the
+user's responsibility, and Farhelm's installation, update, and recovery guarantees assume no other account can create or
+replace entries in them.
 
 On a host provisioned from the hosts panel, the supervisor unit (`farhelm-supervisor.service`) has one owner. A unit
 without `farhelm helm setup`'s managed-by marker belongs to provisioning, and ADD and UPDATE may replace it. A unit that

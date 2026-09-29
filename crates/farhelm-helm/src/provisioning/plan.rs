@@ -57,11 +57,24 @@ impl std::fmt::Display for PayloadArch {
     }
 }
 
-/// One directory and the mode provisioning must converge on every rerun.
+/// One directory a plan needs to exist, and whose permissions it may touch.
+///
+/// SPEC.md ("Ownership during cleanup and provisioning") splits these in two.
+/// A directory dedicated to Farhelm (its private lib directory, the supervisor
+/// state directory) converges on `mode` every run, so a rerun repairs drift.
+/// A `shared` directory merely holds one of Farhelm's files next to other
+/// things (the systemd user-unit directory, a registered binary's own bin
+/// directory, possibly `$HOME` itself): it is created with `mode` only when it
+/// is missing, and an existing one keeps exactly the permissions it had.
+/// Chmodding it would expose or lock out everything else in it, and GNU
+/// `install -d -m` does chmod an existing directory, which is how that used to
+/// happen. If a shared directory's permissions prevent installation, the later
+/// write fails and reports it; nothing here widens them.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct DirectorySpec {
     pub(super) path: PathBuf,
     pub(super) mode: u32,
+    pub(super) shared: bool,
 }
 
 /// Every mutating or attaching action in the order the executor performs it.
@@ -152,7 +165,15 @@ impl ProvisioningAction {
                 directories
                     .iter()
                     .map(|directory| {
-                        format!("{} (mode {:04o})", directory.path.display(), directory.mode)
+                        if directory.shared {
+                            format!(
+                                "{} (created with mode {:04o} if missing; an existing directory keeps its permissions)",
+                                directory.path.display(),
+                                directory.mode
+                            )
+                        } else {
+                            format!("{} (mode {:04o})", directory.path.display(), directory.mode)
+                        }
                     })
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -337,10 +358,12 @@ impl PlanLayout {
         // private tmux goes. An UPDATE may install the farhelm binary
         // elsewhere (the registered path, often a shared bin directory on the
         // user's PATH); that directory is ensured too, but nothing else of
-        // Farhelm's is placed in it.
+        // Farhelm's is placed in it, which is why it is `shared` and never
+        // chmodded (see `DirectorySpec`).
         let mut directories = vec![DirectorySpec {
             path: lib_dir.clone(),
             mode: 0o755,
+            shared: false,
         }];
         if let Some(binary_dir) = farhelm_path.parent()
             && binary_dir != lib_dir
@@ -348,6 +371,7 @@ impl PlanLayout {
             directories.push(DirectorySpec {
                 path: binary_dir.to_path_buf(),
                 mode: 0o755,
+                shared: true,
             });
         }
         let mut actions = vec![ProvisioningAction::EnsureDirectories {
@@ -357,10 +381,12 @@ impl PlanLayout {
                     DirectorySpec {
                         path: state_dir.clone(),
                         mode: 0o700,
+                        shared: false,
                     },
                     DirectorySpec {
                         path: unit_dir,
                         mode: 0o755,
+                        shared: true,
                     },
                 ])
                 .collect(),
