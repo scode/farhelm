@@ -1156,3 +1156,21 @@ Class: substrate
 
 Cause: hypothesis — WebKitGTK under Xvfb on the hosted runner sometimes never loads the page, the same family as the
 black-window behavior the script's header already records for its optional pixel-driven phase.
+
+## 2026-09-29 — `restricted_inherited_create_waits_for_parent_restart_then_inherits` (crates/farhelm-supervisor/src/service/handlers.rs)
+
+The test failed with `parent mutation and restricted create must both finish: Elapsed(())`, its 10-second bound on the
+parent Restart and the inherited create completing after the test releases the parent's lifecycle claim, in the third
+attempt of the v0.19.0-rc.2 release job (GitHub Actions run `36591492646`, x86_64 Linux job, runner image `ubuntu-24.04`
+20260920.314.1). Retained recorder run `202dfc97-363a-42d2-bf94-81da09526533`: clean tag commit
+`af8f5ab65f15078a1295e724758fa0abc3837421`, selection `workspace except farhelm and farhelm-desktop`, 4 nextest slots
+across binaries with retries 0, pinned tmux 3.7c with executable SHA256
+`f924697f00d247c2c38baaad49ba00041dc36d5f546750928d567bf847ed001c`, locale `C.UTF-8`, no ambient `FARHELM_*` (only the
+recorder-owned `FARHELM_TEST_TRACE_DIR`). The same commit passed this test in the job's first two attempts. Locally on
+Linux x86_64, 30 repetitions of the test and its Delete sibling, selected alone under the same pinned tmux, all passed
+in well under a second each. Disposition: open (TODO.md); the release job was rerun.
+
+Class: unknown
+
+Cause: unknown — a lock-ordering deadlock between the two handlers would also time out here, so the 10-second bound
+under full-battery load is not established as the explanation.
