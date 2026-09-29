@@ -1258,7 +1258,9 @@ key currently gets the same permanent, interactive scope any other helm-mediated
 a security requirement for these agent-originated requests: SPEC.md's temporary creation/cloning exception also covers
 their existing retry exposure. The current implementation remains described here until a separate retention change is
 made. Session-lifetime scoping is not merely unimplemented here — it is not expressible, since the target supervisor may
-never have heard of the asking session. Spawn requires an explicit selector: `--inherit-agent` copies the asking
+never have heard of the asking session. Both kinds of key are stored scoped to the asking session (spawn's by the
+supervisor, as `spawn-<asking session>-<SHA-256 of the key>`; create's and clone's by the helm relay), so a key only
+ever replays for the session that used it. Spawn requires an explicit selector: `--inherit-agent` copies the asking
 session's exact stored launch bundle on its own supervisor and therefore works offline, while `--agent` and
 `--profile-id` send `ResolveProfile` through the existing upward relay and are refused with the `--inherit-agent` remedy
 when no helm is attached. Agent create likewise requires an explicit profile name, profile ID, or raw invocation.

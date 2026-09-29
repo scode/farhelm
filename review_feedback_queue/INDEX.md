@@ -19,8 +19,6 @@ One line per open item. This file must always match the feedback files in this d
   terminal-less processes survive.
 - `event-feed-liveness-postponed-by-revisions.md` — the event feed's liveness check never fires on a busy fleet, so dead
   subscribers hold the 64 seats.
-- `spawn-replays-asker-as-child.md` — a keyed `farhelm spawn` reusing another session's key can be handed that session's
-  child as its own new child.
 - `sink-shutdown-retries-forever-after-delete.md` — deleting a busy session can leave its sink client stuck in an
   endless shutdown-retry loop.
 - `input-client-notifications-pile-up.md` — idle input clients never read tmux notifications, so tmux server memory

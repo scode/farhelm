@@ -3929,7 +3929,15 @@
   change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `handle_create_session` reserves a spawn's intent key as
+  `spawn-<asking session>-<SHA-256 of
+  the key>` (`spawn_scoped_intent_key` in handlers.rs) before admission, so the
+  per-key lock and the reservation both use the scoped form and another session reusing the key spawns afresh. The
+  earlier self-replay refusal stays as a backstop. SPEC_impl.md states the scoping for spawn beside the agent
+  create/clone scoping. Regression tests `spawn_intent_keys_are_scoped_to_the_asking_session` and
+  `a_childs_identical_keyed_spawn_creates_its_own_child` (replacing the self-replay-refusal test); two other spawn tests
+  now address the scoped key. jj change `llosqmksnzlw`, bookmark `pr/spawn-keys-scoped-to-asker`, draft PR
+  [#1192](https://github.com/scode/farhelm/pull/1192/changes).
 
 ## window-maximize-fence-never-clears.md
 
