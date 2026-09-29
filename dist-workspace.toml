@@ -172,6 +172,34 @@
 #   permissions are hardcoded in the template. What bounds it: those jobs run
 #   this repository's own scripts, its committed lockfile, and the pinned dx —
 #   nothing a contributor cannot already influence through `ci.yml`.
+#
+# ## Accepted trust roots in the release build
+#
+# The build job that produces the signed Linux x86_64 archive also runs
+# third-party code that nothing pins by digest, on the same runner and before
+# `dist build`, and that is accepted rather than an oversight:
+#
+# - Ubuntu packages installed with `sudo apt-get install` (musl-tools, the
+#   WebKit/GTK development packages, the desktop smoke's X tooling). Their
+#   maintainer scripts run as root on the runner, trusted through Ubuntu's
+#   archive signing keys alone.
+# - The CentOS provisioning leg in `.github/dist-build-setup.yml`
+#   (`scripts/test-provision-centos.sh`), which builds from the mutable tag
+#   `quay.io/centos/centos:stream9`, installs packages with dnf against the
+#   keys inside that image, and runs it `--privileged` with the host cgroup
+#   tree mounted read-write, which is root-equivalent on the runner, before
+#   the archive is built.
+# - Every GitHub action, referenced by a mutable version tag
+#   (`actions/checkout@v6` and friends), not a commit SHA.
+#
+# A compromise of any of those upstreams could tamper with the build, and the
+# later signing job would then sign the result; signing proves the published
+# bytes are the ones the gate validated, not that the build machine was clean.
+# The three are the same class of trust (a distribution's or GitHub's own
+# publishing chain), so pinning only one of them would not change the trust
+# the release rests on. Pinning all of them is a possible future hardening
+# project, not a requirement today. What IS pinned by checksum stays pinned:
+# tmux and its libraries, the zig wheel, nextest, and minisign.
 
 [workspace]
 # A HYBRID workspace: the cargo workspace, plus one generic (non-cargo)
