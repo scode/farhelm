@@ -6963,6 +6963,25 @@ mod tests {
     /// lifecycle claim, then observe the inherited create's actual Pending
     /// directory acquisition. The manual guard controls only ordering; the
     /// production handlers perform every mutation and produce both replies.
+    ///
+    /// The scope manager is disabled, not the default real one. Delete and
+    /// Restart both reach `reap_process_tree`, whose first call to
+    /// `ScopeManager::available` probes the host's systemd user manager with
+    /// a real transient scope under a 15-second budget. That was longer than
+    /// the completion bound below, then 10 seconds, which exists to catch a
+    /// lock cycle between the two handlers, so a slow or failing probe read
+    /// as a deadlock: both tests timed out that way on the hosted release
+    /// runner, which has a user manager (FLAKES.md, 2026-09-29). Nothing here
+    /// is about cgroup scopes, so the fallback sweep keeps the lock-ordering
+    /// contract independent of the host's systemd.
+    ///
+    /// The completion bound is 30 seconds for the same reason from the other
+    /// side: it must sit above everything the two handlers may legitimately
+    /// wait on, or a slow host reads as a deadlock again. The fallback sweep
+    /// alone may spend its 5-second SIGTERM grace plus a 2-second kill
+    /// confirmation, and a Restart then relaunches through tmux. A real lock
+    /// cycle never finishes, so the larger bound only delays that failure,
+    /// and a passing run never waits for it.
     async fn restricted_create_after_parent_mutation(restart: bool) {
         let state = StateDir::new();
         let waiting = Arc::new(tokio::sync::Notify::new());
@@ -6976,6 +6995,7 @@ mod tests {
                     create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
                     ..crate::service::FaultHooks::default()
                 },
+                scopes: Arc::new(crate::scope::ScopeManager::disabled()),
                 ..SupervisorSeams::default()
             },
         )
@@ -7081,7 +7101,9 @@ mod tests {
         // Poll the create while joining the real owned parent mutation. Neither
         // operation may depend on the other's reply being consumed to release
         // admission; both queues have capacity for their one correlated reply.
-        tokio::time::timeout(Duration::from_secs(10), async {
+        // The bound is a deadlock watchdog, not a latency budget; see the
+        // doc comment for why it is 30 seconds.
+        tokio::time::timeout(Duration::from_secs(30), async {
             tokio::join!(&mut create, async {
                 while let Some(result) = mutation_tasks.join_next().await {
                     result.expect("parent mutation task");
