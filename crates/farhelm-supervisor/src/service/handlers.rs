@@ -2327,10 +2327,24 @@ async fn handle_restart_session(
     tasks: &mut tokio::task::JoinSet<()>,
     request: RestartSessionRequest,
 ) {
-    let sup2 = Arc::clone(sup);
+    // Owned by the supervisor, not the connection, for the reason Stop's is
+    // (see `handle_stop_session`): a restart first stops the old run, with
+    // its durable stop intent, its scope kill and signal escalation, and the
+    // leftover reap, all under the session's lifecycle claim. On the
+    // connection's task, a client disconnect aborted that phase part-way
+    // after the connection's shutdown grace, leaving the stop intent
+    // unfinished, the old tree signalled but not confirmed gone, and the
+    // lifecycle claim released while signals were still in flight
+    // (SPEC_impl.md "Who owns an accepted action"). The connection keeps
+    // only the reply waiter.
+    let permit = Arc::clone(&sup.admission)
+        .acquire_owned()
+        .await
+        .expect("admission semaphore is never closed");
+    let sup = Arc::clone(sup);
     let tx = tx.clone();
-    spawn_admitted(&sup.admission, tasks, async move {
-        let sup = sup2;
+    let mutation = tokio::spawn(async move {
+        let _permit = permit;
         let RestartSessionRequest {
             req_id,
             session_id,
@@ -2358,8 +2372,12 @@ async fn handle_restart_session(
                 reply_failure(&tx, req_id, &e).await;
             }
         }
-    })
-    .await;
+    });
+    tasks.spawn(async move {
+        if let Err(join) = mutation.await {
+            tracing::error!(error = %join, "the supervisor-owned session restart task failed");
+        }
+    });
 }
 
 /// Every request-shape check a rename can make lives here, ahead
@@ -5194,6 +5212,160 @@ mod tests {
                 "cancelling the connection waiter cancelled the stop sweep"
             );
             // sleep-ok: poll for completion of the detached supervisor-owned sweep.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        child.wait().expect("the owned fixture must be reaped");
+    }
+
+    /// A restart's stop phase is owned by the supervisor like Stop's: once it
+    /// has begun, cancelling the connection waiter must not cancel the sweep
+    /// of the old run.
+    ///
+    /// Why it matters: Restart used to run on the connection's task set,
+    /// which a client disconnect aborts after its shutdown grace, leaving the
+    /// stop intent unfinished, the old tree signalled but not confirmed gone,
+    /// and the lifecycle claim released while signals were in flight
+    /// (SPEC_impl.md "Who owns an accepted action"). Specified: with the
+    /// same terminal-less, marker-only fixture the Stop test uses, a
+    /// `RestartSession` whose connection tasks are aborted once it has
+    /// claimed the session still sweeps the marked process away.
+    #[farhelm_testtrace::test]
+    async fn restart_survives_connection_task_cancellation() {
+        let state = StateDir::new();
+        // A fresh marker: the sweep scans the whole process table, so a
+        // fixed id shared with another fixture (the Stop test's, or a
+        // concurrent run's) would let either sweep kill the other's child.
+        let session_id_owned = uuid::Uuid::new_v4().to_string();
+        let session_id = session_id_owned.as_str();
+        let mut child =
+            crate::procs::sleeper::spawn(&[(crate::launch::SESSION_ID_ENV_VAR, session_id)]);
+        let pid = child.id();
+        let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
+        assert_eq!(result, 0, "SIGSTOP must reach the owned fixture");
+        let mut status = 0;
+        let waited = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WUNTRACED) };
+        assert_eq!(
+            waited, pid as libc::pid_t,
+            "the fixture must report stopped"
+        );
+        assert!(libc::WIFSTOPPED(status), "fixture premise must be stopped");
+        // No systemd scope manager: the fixture is terminal-less and
+        // marker-only, and probing the host's real user manager can take up
+        // to 15 seconds, which with the stop grace would crowd the deadline
+        // below on a host that has one.
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(crate::scope::ScopeManager::disabled()),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor construction must not touch the fixture process");
+        sup.store
+            .insert_session(
+                crate::store::StoredSession {
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    id: session_id.to_string(),
+                    parent: None,
+                    title: "t".to_string(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    launch: None,
+                    tmux_name: format!("fh-{session_id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("store fixture");
+        sup.sessions.lock().await.insert(
+            session_id.to_string(),
+            fake_entry(session_id, 1_700_000_000),
+        );
+
+        let (tx, _rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::RestartSession {
+                req_id: 53,
+                session_id: session_id.to_string(),
+                mode: RestartMode::Fresh,
+                stop_if_running: true,
+                invocation: None,
+                launch: None,
+                resume_template: None,
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+
+        // The lifecycle claim is acquired at the start of the mutation. It
+        // proves the supervisor-owned task has begun before the connection-
+        // owned waiter is cancelled, while the pre-stopped fixture prevents
+        // the initial SIGTERM from ending the test process before the sweep.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if sup.lifecycle_locks.claimed_for_test(session_id) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "supervisor-owned restart task did not begin"
+            );
+            // sleep-ok: poll for the supervisor-owned restart to claim the session.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+
+        // The stopped fixture cannot act on its SIGTERM, so the detached
+        // sweep waits out the whole SIGTERM grace (five seconds) before the
+        // quiesce and SIGKILL end it; this budget must clear that grace plus
+        // the kill confirmation with room for a loaded host, or a sweep that
+        // survived the cancellation would still read as one that did not.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            let gone = matches!(
+                crate::procs::read_process(pid),
+                Ok(None) | Ok(Some((_, _, crate::procs::ProcessState::Zombie)))
+            );
+            if gone {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "cancelling the connection waiter cancelled the restart's sweep"
+            );
+            // sleep-ok: poll for completion of the detached restart's sweep.
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         child.wait().expect("the owned fixture must be reaped");
