@@ -2163,7 +2163,10 @@
 - Completion criteria: SPEC.md states the principle for the standalone install directory (and
   `docs/install_uninstall.md` mentions it where custom install directories are described); no installer behavior change.
   Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; SPEC.md's statement about install directories other accounts can write to now covers the
+  standalone installer's directory (`~/.local/bin` or `FARHELM_INSTALL_DIR`); docs/install_uninstall.md warns the same.
+  No code change. PR [#1150](https://github.com/scode/farhelm/pull/1150/changes), jj change `lwusvtpq`, bookmark
+  `pr/install-dir-writers-unsupported`.
 
 ## delete-ended-session-kills-live-tabs.md
 
