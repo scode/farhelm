@@ -646,6 +646,14 @@ pub type AgentAuthGate = SinkReservationGate;
 /// Production installs none.
 pub type ForwarderCleanupGate = SinkReservationGate;
 
+/// A hook awaited in Delete after the supervisor-wide `attachments` guard is
+/// released and before the deleted session's files are removed.
+///
+/// The slow, unbounded file cleanup must run outside that guard; a test
+/// holds this boundary to observe the guard free while cleanup is pending.
+/// Production installs none.
+pub type DeletedSessionCleanupGate = SinkReservationGate;
+
 /// A hook awaited after a tab's window exists and is marked, but before the
 /// dead-at-open-reply settle looks at its pane.
 ///
@@ -768,6 +776,8 @@ fault_hooks! {
     tab_open_fault: TabOpenFault,
     /// See [`TabSettleGate`]. `None` in production.
     tab_settle_gate: TabSettleGate,
+    /// See [`DeletedSessionCleanupGate`]. `None` in production.
+    deleted_session_cleanup_gate: DeletedSessionCleanupGate,
     /// See [`ReplacementFault`]. `None` in production.
     replacement_fault: ReplacementFault,
 }
