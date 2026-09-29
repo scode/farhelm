@@ -127,6 +127,14 @@ The earlier cross-harness evidence is preserved in
   rerun. Evidence and runs are in FLAKES.md (2026-09-29). First step: capture WebKit's own state at the 30-second mark
   (web process alive, load events, a retry of the initial load) before touching the wait.
 
+- **Inherited create behind a parent Restart.**
+  `service::handlers::tests::restricted_inherited_create_waits_for_parent_restart_then_inherits` in
+  `crates/farhelm-supervisor/src/service/handlers.rs` timed out after 10 seconds waiting for the parent Restart and the
+  inherited create to both finish, once in three release-gate runs of the same commit on the hosted runner, and passed
+  30 of 30 isolated local repetitions. Evidence in FLAKES.md (2026-09-29). First step: reproduce under the workspace
+  battery and capture which of the two handlers is still waiting, since a real lock-order deadlock looks the same as
+  load.
+
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
