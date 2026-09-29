@@ -198,6 +198,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   counts as absent. Related: `probe_once` never checks `systemd-run`'s exit status, so a scope that fails to start
   spends the full 15 seconds before the fallback, and `crates/farhelm/tests/e2e/harness.rs` records two probes of a
   loaded manager reaching different verdicts (2026-08-03).
+- **Show every update step in the host row's hover popup.** Hovering a host's inline update progress
+  (`UpdateProgressPopup` in `crates/farhelm-ui/src/hosts.rs`) shows three lines: steps done out of total, the current
+  step's name, and elapsed time. A user who bothers to hover wants detail, and a popup can use far more room than the
+  inline label, so list the run's full set of steps with the one in progress highlighted: the same information the host
+  list shows in details mode (the `provisioning-steps` list in `crates/farhelm-ui/src/provisioning.rs`), probably in the
+  same visual style. `PopupAnchor::RESERVE_PX` assumes the current three-line popup when deciding to flip it above the
+  label, so a taller popup needs that placement revisited.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
