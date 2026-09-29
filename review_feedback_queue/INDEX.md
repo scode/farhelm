@@ -49,8 +49,6 @@ One line per open item. This file must always match the feedback files in this d
   always 409s and never shows as duplicate.
 - `ssh-controlpath-too-long.md` — the ssh ControlPath under the state dir overflows sun_path for common long usernames,
   so every ssh host fails.
-- `sftp-upload-unbounded-before-temp-appears.md` — the sftp upload has no deadline until the remote temporary appears,
-  holding the host lock so even Remove hangs.
 - `update-reports-success-on-hand-started-supervisor.md` — UPDATE of a hand-started supervisor crash-loops the new unit
   and can report success while the old build keeps serving.
 - `payload-dir-must-be-writable.md` — --payload-dir writes .extracted/ into the operator's directory, so read-only or
@@ -131,8 +129,6 @@ One line per open item. This file must always match the feedback files in this d
   confirmation always refuses it.
 - `reach-misreads-escaped-xdg-config-home.md` — an escaped XDG_CONFIG_HOME (path with a space) is misclassified as
   relative and refused.
-- `release-download-unbounded-under-host-lock.md` — release downloads have no overall deadline and run under the host
-  lock, blocking removal while throttled.
 - `uninstall-creates-setup-lock-file.md` — uninstall and setup --uninstall create .farhelm-setup.lock (and possibly the
   unit dir) and never report it.
 - `interrupt-before-install-record-publish.md` — an interrupt between commit and record publish leaves new binaries with

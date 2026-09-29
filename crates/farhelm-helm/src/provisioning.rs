@@ -2389,13 +2389,18 @@ mod tests {
         wait_finished(&service, host).await;
     }
 
-    /// Host removal waits behind an in-flight run's write authority, then
-    /// purges retained progress and unconsumed UPDATE confirmations with the
-    /// durable row instead of leaving process-local ghosts.
-    /// The registered executable path is absolute because update planning
-    /// intentionally refuses relative `remote_farhelm` values.
+    /// Host removal refuses at once while a run is in flight, leaving the run
+    /// alone, and once the run is over it removes the host and purges retained
+    /// progress and unconsumed UPDATE confirmations with the durable row
+    /// instead of leaving process-local ghosts.
+    ///
+    /// Why it matters: a run can sit in a throttled download or stalled upload
+    /// for a long time, and removal waiting behind it made "Remove host" hang
+    /// (SPEC.md "Waiting between operations on one host": removal responds
+    /// promptly, if only to refuse). The registered executable path is
+    /// absolute because update planning refuses relative `remote_farhelm`.
     #[farhelm_testtrace::test]
-    async fn removal_serializes_with_runs_and_purges_provisioning_memory() {
+    async fn removal_refuses_during_a_run_and_purges_after_it() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
         let host = harness
@@ -2427,20 +2432,31 @@ mod tests {
             harness.store.clone(),
             Arc::clone(&service),
         ));
-        let mut removal = tokio::spawn(async move {
-            crate::hosts::remove_host(State(state), AxPath(host))
-                .await
-                .into_response()
-        });
+        let refused = tokio::time::timeout(
+            Duration::from_secs(10),
+            crate::hosts::remove_host(State(Arc::clone(&state)), AxPath(host)),
+        )
+        .await
+        .expect("removal must answer promptly while a run is in flight")
+        .into_response();
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
         assert!(
-            tokio::time::timeout(Duration::from_millis(50), &mut removal)
+            harness
+                .store
+                .list_hosts()
                 .await
-                .is_err(),
-            "removal bypassed the in-flight provisioning lock"
+                .unwrap()
+                .iter()
+                .any(|row| row.id == host),
+            "a refused removal leaves the host registered"
         );
 
         backend.release.notify_one();
-        assert_eq!(removal.await.unwrap().status(), StatusCode::OK);
+        wait_finished(&service, host).await;
+        let removal = crate::hosts::remove_host(State(state), AxPath(host))
+            .await
+            .into_response();
+        assert_eq!(removal.status(), StatusCode::OK);
         let memory = service.memory.lock().await;
         assert!(!memory.runs.contains_key(&host));
         assert!(!memory.busy.contains(&host));
