@@ -270,9 +270,9 @@ pub struct HelmArgs {
     /// Directory holding published release files (`farhelm-<target>.tar.gz`,
     /// `tmux-<target>`) to use as "add host" provisioning payloads instead
     /// of downloading them. For air-gapped installs and mirrors, and for
-    /// tests that would rather not reach GitHub. Must be writable: Farhelm
-    /// creates and reuses a hidden `.extracted` cache below it to hold the
-    /// materialized binaries. Farhelm does not verify files placed here —
+    /// tests that would rather not reach GitHub. Only read, so it may be
+    /// read-only or shared: the materialized binaries go to a cache in the
+    /// helm's own state directory. Farhelm does not verify files placed here —
     /// this directory was explicitly supplied by the operator, so its
     /// contents are trusted as given. Wins over `--release-base-url` when
     /// both are given (see [`HelmArgs::payload_selection`]).

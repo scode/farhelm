@@ -26,11 +26,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tracing::{info, warn};
 
-/// The private cache for operator-supplied payload materialization.
+/// The private cache for operator-supplied payload materialization, a
+/// directory of this name under the helm's state directory.
 ///
-/// This name is intentionally Farhelm-specific: `.extracted` was used by an
-/// older implementation and may contain operator-owned or otherwise legacy
-/// state, so directory-payload cleanup must never inspect it.
+/// It lives in the helm's own state rather than in `--payload-dir`, which is
+/// only read: an operator's staged release files may sit on read-only media,
+/// in a root-owned or Nix-store path, or in a mirror shared by several
+/// users, and materializing into it failed every setup and update there.
+/// Older helms made this directory, and before it `.extracted`, inside the
+/// payload directory; both are left alone there, since directory-payload
+/// cleanup must never inspect operator-owned state.
 pub(super) const DIRECTORY_PAYLOAD_CACHE: &str = ".farhelm_extract_tmp";
 
 /// The only temporary-file shape the directory source owns and may sweep.
@@ -119,21 +124,22 @@ impl PayloadSource for NoPayloads {
 /// and are not verified (D3).
 #[derive(Debug)]
 pub(super) struct DirectoryPayloads {
+    /// The operator's staged release files. Only ever read.
     dir: PathBuf,
+    /// Where materialized copies go: production passes
+    /// [`DIRECTORY_PAYLOAD_CACHE`] under the helm's state directory.
+    extracted: PathBuf,
 }
 
 impl DirectoryPayloads {
-    pub(super) fn new(dir: PathBuf) -> Self {
-        Self { dir }
+    pub(super) fn new(dir: PathBuf, extracted: PathBuf) -> Self {
+        Self { dir, extracted }
     }
 
-    /// The private materialization cache below the operator-supplied directory.
-    ///
-    /// The cache name is owned by Farhelm so cleanup can distinguish its
-    /// staging files from the legacy `.extracted` directory, which remains
-    /// entirely outside this source's lifecycle.
+    /// The private materialization cache, outside the operator-supplied
+    /// directory (see [`DIRECTORY_PAYLOAD_CACHE`]).
     fn extracted_dir(&self) -> PathBuf {
-        self.dir.join(DIRECTORY_PAYLOAD_CACHE)
+        self.extracted.clone()
     }
 
     /// A fresh, collision-proof destination for one materialization of
@@ -164,8 +170,8 @@ impl DirectoryPayloads {
 
 #[async_trait]
 impl PayloadSource for DirectoryPayloads {
-    /// Re-materializes `asset` into a brand-new, uniquely named file under
-    /// `.farhelm_extract_tmp/` on EVERY call (F2, review round 1 and 2) rather than
+    /// Re-materializes `asset` into a brand-new, uniquely named file in the
+    /// private cache on EVERY call (F2, review round 1 and 2) rather than
     /// trusting — or sharing — whatever an earlier call already produced.
     /// Not caching at all is deliberate: an "add host" run is a rare,
     /// operator-initiated action touching at most a couple of payloads, so
@@ -375,7 +381,7 @@ fn prune_stale_staging(cache_dir: &Path, max_age: Duration) {
 /// remote host, executed there as the SSH user. `create_dir_all`'s
 /// permissions follow the calling process's umask — under a permissive one
 /// (`000`), `.farhelm_extract_tmp` could end up world-writable even though the
-/// operator's own `--payload-dir` is otherwise protected. Another local
+/// helm state directory around it is otherwise protected. Another local
 /// user able to write into `.farhelm_extract_tmp` could then substitute their own
 /// binary for a legitimate materialization during the window between this
 /// source publishing a path and `prepare_payloads` reopening it, regardless
@@ -864,8 +870,8 @@ fn selected_directory_aliases_legacy_cache(
 ///    cache can be cleaned up on a later run.
 ///
 /// Every source since D2 materializes below a name of its own instead
-/// ([`DirectoryPayloads`]'s `.farhelm_extract_tmp/` sits inside the operator's own
-/// `--payload-dir`, not helm state), so a directory still called
+/// ([`DirectoryPayloads`] uses [`DIRECTORY_PAYLOAD_CACHE`] under helm state,
+/// and release sources use `payloads/`), so a directory still called
 /// `embedded-payloads` under helm state — an ordinary directory the
 /// operator did NOT just select — can only be dead weight left by the
 /// retired `EmbeddedPayloads` source, safe to remove.
@@ -1143,7 +1149,12 @@ pub(super) fn production_payloads_with_key(
     // is constructed exactly once and a future change to its constructor has
     // one call site to keep right.
     let base_url = match selection {
-        PayloadSelection::Directory(dir) => return Ok(Arc::new(DirectoryPayloads::new(dir))),
+        PayloadSelection::Directory(dir) => {
+            return Ok(Arc::new(DirectoryPayloads::new(
+                dir,
+                helm_state_dir.join(DIRECTORY_PAYLOAD_CACHE),
+            )));
+        }
         PayloadSelection::Default if !release_build => return Ok(Arc::new(NoPayloads)),
         PayloadSelection::Release { base_url } => base_url,
         PayloadSelection::Default => default_release_base_url()?,

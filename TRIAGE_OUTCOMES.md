@@ -4146,7 +4146,11 @@
 - Completion criteria: a read-only `--payload-dir` works for setup and update, with focused coverage, and this feedback
   file and its index entry are removed in the execution change; or, if the gate is hit, the item is removed as discarded
   with the reason recorded.
-- Execution: `pending`.
+- Execution: `complete`; the complexity gate was not reached. `DirectoryPayloads` takes its extraction cache as a
+  separate path, and production wiring places it at `.farhelm_extract_tmp` under the helm's state directory, so
+  `--payload-dir` is only read. Leftover caches older helms made inside a payload directory are left alone. Change
+  `kznyorrylmup`, bookmark `pr/payload-dir-read-only`, draft PR
+  [#1202](https://github.com/scode/farhelm/pull/1202/changes).
 
 ## receiptless-app-bundle-blocks-uninstall.md
 
