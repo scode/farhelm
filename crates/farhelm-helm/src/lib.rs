@@ -480,8 +480,8 @@ struct AppState {
 /// Takes the full text to place on the system clipboard; an `Err` carries a
 /// human-readable reason that is LOGGED, never surfaced to the requester —
 /// SPEC.md's terminal-experience section makes clipboard operations
-/// best-effort and silent on failure by contract. Must be callable from any
-/// tokio worker thread; implementations own whatever platform threading
+/// best-effort and silent on failure by contract. Called on tokio's blocking
+/// pool, so it may block; implementations own whatever platform threading
 /// their pasteboard requires.
 pub type ClipboardSink = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
