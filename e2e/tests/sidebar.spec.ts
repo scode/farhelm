@@ -1920,21 +1920,31 @@ test("a menu dismissed by a layout change returns focus to its toggle", async ({
   }
 });
 
-/** Reordering closes pointer-opened actions without leaving their tint on the
- * focused toggle's row. Focus return remains available for keyboard reopening. */
-test("reordering a pointer-opened menu clears its tint without losing focus", async ({ page, request }) => {
+/** A row moving under a pointer-opened menu closes it without leaving its tint
+ * on the focused toggle's row. Focus return remains available for keyboard
+ * reopening.
+ *
+ * The row is moved by deleting the row above it. A re-sort cannot do it: the
+ * pointer opened the menu, so the list's order is held (SPEC.md, Session list),
+ * and an open menu keeps that hold until it closes. A removal still applies at
+ * once under a hold, because a deleted session must not stay clickable, so it
+ * is the path by which an open menu's row can still move. */
+test("a row moving under a pointer-opened menu clears its tint without losing focus", async ({ page, request }) => {
   const sessions: string[] = [];
   try {
     const selected = await createSession(request, { title: "reorder-selected", cwd: "/tmp" });
     sessions.push(selected.id);
-    const moved = await createSession(request, { title: "aaa-reorder-target", cwd: "/tmp" });
+    const above = await createSession(request, { title: "aaa-reorder-above", cwd: "/tmp" });
+    sessions.push(above.id);
+    const moved = await createSession(request, { title: "aab-reorder-target", cwd: "/tmp" });
     sessions.push(moved.id);
     await pinAutoSelect(page, selected.id);
     await page.goto("/");
     await waitForHostsListSettled(page);
     await waitForSessionRevealed(page, selected.id);
     await page.getByRole("combobox", { name: "sort", exact: true }).selectOption({ label: "title A–Z" });
-    await expect(page.locator(".session-row").first()).toHaveAttribute("data-session-id", moved.id);
+    await expect(page.locator(".session-row").first()).toHaveAttribute("data-session-id", above.id);
+    await expect(page.locator(".session-row").nth(1)).toHaveAttribute("data-session-id", moved.id);
     const target = row(page, moved.id);
     const toggle = target.locator(".session-row-menu");
     await expect(target).not.toHaveClass(/selected/);
@@ -1945,9 +1955,9 @@ test("reordering a pointer-opened menu clears its tint without losing focus", as
     await expect(target.locator(".session-row-rename")).toBeFocused();
     await expect(target).not.toHaveCSS("background-color", restingBackground);
     await page.mouse.move(0, 0);
-    await renameSession(request, moved.id, "zzz-reorder-target");
+    await cleanupSession(request, above.id);
     await expect.poll(() => target.evaluate((node) => [...document.querySelectorAll(".session-row")].indexOf(node)))
-      .toBeGreaterThan(before);
+      .toBeLessThan(before);
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(toggle).toBeFocused();

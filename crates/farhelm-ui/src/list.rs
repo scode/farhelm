@@ -41,6 +41,12 @@
 //! is the only thing that can leave the list short, and it says so with
 //! `truncated`; a client-side sort would only ever rearrange an order the
 //! helm already produced for the sort control's own setting.
+//!
+//! The one exception is display-only and temporary: while the pointer is over
+//! the list, `view`'s order hold keeps rows where they were so none moves
+//! under the pointer (SPEC.md, Session list). It never re-sorts anything; it
+//! only delays the helm's order, and `rows::held_display_order` is the whole
+//! rule for what a held list shows.
 
 mod create_form;
 mod row;
