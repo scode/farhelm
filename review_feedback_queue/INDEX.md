@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `row-menu-drifts-after-own-delete.md` — an open row menu drifts onto another row after this client's own delete, so
-  its Delete can hit the wrong session.
 - `session-header-raw-peer-text.md` — the session header shows title/cwd/command raw and copies raw bytes, so bidi text
   can make copied commands differ from shown ones.
 - `titles-raw-in-confirm-prompts.md` — titles render unescaped in delete/replace confirmations and rows, so agent-set
