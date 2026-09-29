@@ -1303,8 +1303,8 @@ impl ScopeUnits {
 /// `root_identity` is captured by the caller immediately after it observes a
 /// live pane and before any asynchronous teardown work. This function
 /// validates the same pair again before the process walk; a changed or
-/// unreadable identity is intentionally treated as a missing pane root while
-/// marker and scope discovery continue.
+/// vanished identity is treated as a missing pane root while marker and scope
+/// discovery continue, but an unreadable one fails the sweep.
 pub(crate) async fn reap_process_tree(
     scopes: &crate::scope::ScopeManager,
     units: ScopeUnits,
@@ -1317,7 +1317,7 @@ pub(crate) async fn reap_process_tree(
     // any asynchronous teardown work. Re-read it here before adopting the
     // pane as a PPID root: if the pane exited and the kernel recycled its
     // number during that gap, the replacement must never seed this sweep.
-    let root = validate_root_identity(root_identity, session_id);
+    let root = validate_root_identity(root_identity, session_id)?;
 
     if units.recorded.is_empty() && units.possible.is_empty() && units.derived.is_empty() {
         debug!(
@@ -1424,21 +1424,66 @@ pub(crate) async fn reap_process_tree(
 /// Capture a pane process's identity at the liveness decision that authorizes
 /// a teardown. The start time travels with the pid so later work can refuse a
 /// recycled number instead of binding the sweep to an unrelated process.
-pub(crate) fn capture_process_identity(pid: u32) -> Option<(u32, u64)> {
-    match procs::read_process(pid) {
-        Ok(Some((_, starttime, _))) => Some((pid, starttime)),
-        Ok(None) | Err(_) => None,
+///
+/// `Ok(None)` means the process is gone. A process that exists but cannot be
+/// read is an `Err`, never `None`: the caller was about to reap it, and SPEC.md
+/// "Lifecycle operations" counts a process Farhelm tried to reap but could not
+/// examine as unconfirmed, never as gone, so the operation must fail rather
+/// than sweep without its root and report success.
+pub(crate) fn capture_process_identity(pid: u32) -> anyhow::Result<Option<(u32, u64)>> {
+    identity_from_read(pid, procs::read_process(pid))
+}
+
+/// [`capture_process_identity`]'s decision over one process-table read, split
+/// out so the unreadable case can be tested without an unreadable process.
+fn identity_from_read(
+    pid: u32,
+    read: Result<Option<(u32, u64, procs::ProcessState)>, String>,
+) -> anyhow::Result<Option<(u32, u64)>> {
+    match read {
+        Ok(Some((_, starttime, _))) => Ok(Some((pid, starttime))),
+        Ok(None) => Ok(None),
+        Err(error) => Err(anyhow::anyhow!(
+            "could not read the terminal's process {pid} before reaping it ({error}); \
+             refusing to report its process tree cleaned up"
+        )),
     }
 }
 
 /// Admit a carried pane identity only while the process table still reports
 /// the same `(pid, start time)` pair. A missing or changed row deliberately
-/// returns `None`, leaving marker and scope discovery to reap what it can
-/// without walking a recycled pane root.
-fn validate_root_identity(identity: Option<(u32, u64)>, session_id: &str) -> Option<(u32, u64)> {
-    let (pid, expected_starttime) = identity?;
-    match procs::read_process(pid) {
-        Ok(Some((_, starttime, _))) if starttime == expected_starttime => Some((pid, starttime)),
+/// returns `Ok(None)`, leaving marker and scope discovery to reap what it can
+/// without walking a recycled pane root. A row that cannot be read is an
+/// `Err`: the root may still be running, and sweeping without it could report
+/// a clean result while its unmarked descendants live on (SPEC.md "Lifecycle
+/// operations": unexamined is unconfirmed, never gone).
+fn validate_root_identity(
+    identity: Option<(u32, u64)>,
+    session_id: &str,
+) -> anyhow::Result<Option<(u32, u64)>> {
+    let Some((pid, expected_starttime)) = identity else {
+        return Ok(None);
+    };
+    root_from_read(
+        pid,
+        expected_starttime,
+        procs::read_process(pid),
+        session_id,
+    )
+}
+
+/// [`validate_root_identity`]'s decision over one process-table read, split
+/// out so the unreadable case can be tested without an unreadable process.
+fn root_from_read(
+    pid: u32,
+    expected_starttime: u64,
+    read: Result<Option<(u32, u64, procs::ProcessState)>, String>,
+    session_id: &str,
+) -> anyhow::Result<Option<(u32, u64)>> {
+    match read {
+        Ok(Some((_, starttime, _))) if starttime == expected_starttime => {
+            Ok(Some((pid, starttime)))
+        }
         Ok(Some((_, actual_starttime, _))) => {
             debug!(
                 session = %session_id,
@@ -1447,7 +1492,7 @@ fn validate_root_identity(identity: Option<(u32, u64)>, session_id: &str) -> Opt
                 actual_starttime,
                 "pane process identity changed before reaping; refusing it as the sweep root"
             );
-            None
+            Ok(None)
         }
         Ok(None) => {
             debug!(
@@ -1456,18 +1501,12 @@ fn validate_root_identity(identity: Option<(u32, u64)>, session_id: &str) -> Opt
                 expected_starttime,
                 "pane process disappeared before reaping; relying on marker and scope discovery"
             );
-            None
+            Ok(None)
         }
-        Err(error) => {
-            debug!(
-                session = %session_id,
-                pid,
-                expected_starttime,
-                error = %error,
-                "could not validate pane process identity before reaping; relying on marker and scope discovery"
-            );
-            None
-        }
+        Err(error) => Err(anyhow::anyhow!(
+            "could not re-read the terminal's process {pid} before reaping it ({error}); \
+             refusing to report its process tree cleaned up"
+        )),
     }
 }
 
@@ -2487,6 +2526,7 @@ mod tests {
         let mut child = spawn_marked_process(&session_id);
         let decoy = child.id();
         let root_identity = capture_process_identity(decoy)
+            .expect("the spawned pane fixture must be readable")
             .expect("the spawned pane fixture must have a readable identity");
 
         // Each recorded op carries whether the sweep's victim was still
@@ -3256,11 +3296,34 @@ mod tests {
     #[farhelm_testtrace::test]
     fn matching_pane_identity_is_admitted_as_a_sweep_root() {
         let pid = std::process::id();
-        let identity = capture_process_identity(pid).expect("the test process must be readable");
+        let identity = capture_process_identity(pid)
+            .expect("the test process must be readable")
+            .expect("the test process must exist");
         assert_eq!(
-            validate_root_identity(Some(identity), "matching"),
+            validate_root_identity(Some(identity), "matching").expect("readable"),
             Some(identity)
         );
+    }
+
+    /// A pane process that exists but cannot be read fails the teardown
+    /// instead of being treated as gone, at both the capture and the
+    /// re-validation step.
+    ///
+    /// Why it matters: dropping an unreadable root let Stop, Delete and Close
+    /// Tab skip walking the terminal's process tree and still report "nothing
+    /// left running"; SPEC.md "Lifecycle operations" counts a process Farhelm
+    /// tried to reap but could not examine as unconfirmed, never as gone.
+    /// Specified: a read error yields `Err` from both decisions, while a
+    /// missing row stays `Ok(None)`.
+    #[farhelm_testtrace::test]
+    fn an_unreadable_pane_process_is_unconfirmed_not_gone() {
+        assert!(identity_from_read(42, Err("permission denied".to_string())).is_err());
+        assert!(matches!(identity_from_read(42, Ok(None)), Ok(None)));
+        assert!(root_from_read(42, 7, Err("malformed stat".to_string()), "unreadable").is_err());
+        assert!(matches!(
+            root_from_read(42, 7, Ok(None), "vanished"),
+            Ok(None)
+        ));
     }
 
     /// A changed start time must remove the pane root before enumeration can
@@ -3274,7 +3337,10 @@ mod tests {
             .expect("the test process must be readable")
             .expect("the test process must have a process row");
         let changed = (pid, actual_starttime.wrapping_add(1));
-        assert_eq!(validate_root_identity(Some(changed), "changed"), None);
+        assert_eq!(
+            validate_root_identity(Some(changed), "changed").expect("readable"),
+            None
+        );
     }
 
     /// The final SIGKILL covers every identity the sweep froze, including
