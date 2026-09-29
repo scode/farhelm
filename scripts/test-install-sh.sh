@@ -635,19 +635,9 @@ check "fresh install writes the exact standalone metadata fields" assert_standal
 check "fresh install has no appended canonical-path newline" assert_stable_path_field "$INSTALL1"
 check "fresh install has no leftover staging/lock/backup dot-files" [ -z "$(find "$INSTALL1" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation')" ]
 
-# Relative destinations use the caller's working directory. An inherited
-# CDPATH must neither redirect their recorded identity nor add cd's stdout
-# to the path field. The decoy exists before the installer resolves it.
-pushd "$WORKDIR" >/dev/null
-mkdir -p relative-owner/cd-search/bin relative-owner/home
-pushd relative-owner >/dev/null
-check "relative ownership fixture has a distinct CDPATH destination" [ -d cd-search/bin ]
-run_install "$TOOLCHAIN_FULL" "$PWD/home" bin "$BASE/good" 1.2.3 "CDPATH=$PWD/cd-search"
-check "relative install with CDPATH succeeds" [ "$RC" -eq 0 ]
-check "relative ownership identifies the actual installed directory" assert_standalone_record "$PWD/bin" no
-check "relative install leaves the CDPATH decoy empty" [ -z "$(find cd-search/bin -mindepth 1 -print)" ]
-popd >/dev/null
-popd >/dev/null
+# Relative destinations are refused outright (see "FARHELM_INSTALL_DIR must
+# be absolute" below), which also retires the earlier check that an
+# inherited CDPATH could not redirect a relative destination's record.
 
 # A Linux destination may already contain a separately installed desktop
 # executable. The standalone record must leave that foreign artifact
@@ -1579,6 +1569,32 @@ check "claim: once the claim is free, recovery restores the previous farhelm" \
   [ "$(cat "$INSTALLCLAIM/farhelm")" = "$OLD_CLAIM_CONTENT" ]
 check "claim: recovery releases its claim" [ ! -e "$INSTALLCLAIM/.farhelm-install.lock.recovering" ]
 check "claim: recovery removes the stale lock" [ ! -e "$INSTALLCLAIM/.farhelm-install.lock" ]
+
+# ===========================================================================
+# Scenario: FARHELM_INSTALL_DIR must be absolute. A relative value installs
+# under the directory the installer happens to run in, and a quoted `~/bin`
+# reaches the installer unexpanded, creating a directory literally named `~`
+# (which a later `rm -rf ~` would turn into deleting the home directory). Both
+# are refused before anything is created. The installer runs from a scratch
+# directory here so a regression cannot write into the checkout.
+# ===========================================================================
+echo
+echo "== FARHELM_INSTALL_DIR must be absolute =="
+HOMEREL="$WORKDIR/homerel"
+CWDREL="$WORKDIR/cwdrel"
+mkdir -p "$HOMEREL" "$CWDREL"
+cd "$CWDREL"
+# shellcheck disable=SC2088 # the unexpanded ~ is the input under test.
+run_install "$TOOLCHAIN_FULL" "$HOMEREL" '~/bin' "$BASE/good" 1.2.3
+check "relative dir: a quoted ~ is refused" [ "$RC" -ne 0 ]
+check "relative dir: the refusal names the unexpanded ~ and suggests \$HOME" \
+  contains "$ERR" "starts with a literal ~ that the shell did not expand"
+run_install "$TOOLCHAIN_FULL" "$HOMEREL" 'bin' "$BASE/good" 1.2.3
+check "relative dir: a relative path is refused" [ "$RC" -ne 0 ]
+check "relative dir: the refusal says it must be absolute" contains "$ERR" "is not an absolute path"
+cd "$OLDPWD"
+check "relative dir: nothing was created in the current directory" \
+  [ -z "$(find "$CWDREL" -mindepth 1)" ]
 
 # ===========================================================================
 # Scenario: a stale lock that names the installer's OWN pid. In containers

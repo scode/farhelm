@@ -1286,6 +1286,24 @@ EOF
     BASE_URL=${BASE_URL%/}
 
     INSTALL_DIR=${FARHELM_INSTALL_DIR:-$HOME/.local/bin}
+    # Only an absolute path. A relative one installs under whatever
+    # directory `curl | sh` happened to run in, and a quoted `~/bin` is not
+    # expanded by the shell, so it creates a directory literally named `~`
+    # there, which a later `rm -rf ~` meant to tidy it would turn into
+    # deleting the home directory. The success message would repeat the
+    # relative spelling and look like confirmation.
+    case "$INSTALL_DIR" in
+      /*) ;;
+      '~'*)
+        # shellcheck disable=SC2016 # $HOME is advice to the reader, not expanded here.
+        printf 'FARHELM_INSTALL_DIR=%s starts with a literal ~ that the shell did not expand (it was quoted); use $HOME instead, for example FARHELM_INSTALL_DIR="$HOME/bin"\n' "$INSTALL_DIR" >&2
+        exit 1
+        ;;
+      *)
+        printf 'FARHELM_INSTALL_DIR=%s is not an absolute path; it must start with / (a relative path would install under the current directory)\n' "$INSTALL_DIR" >&2
+        exit 1
+        ;;
+    esac
     # Mask group/world write bits on any directory COMPONENT this specific
     # call creates (umask 000 would otherwise leave a brand-new directory
     # mode 0777, which would undermine the installed binaries' own
