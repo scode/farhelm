@@ -883,7 +883,10 @@ async function holdLockWithAdd(
   return { release };
 }
 
-/** The inline status of a running update: `updating: N/M step m:ss`. */
+/**
+ * The inline status of a running update, as text content: `updating: N/M step m:ss`.
+ * The `updating: ` prefix is visually hidden but kept for assistive technology.
+ */
 const RUNNING_PROGRESS = /updating: \d+\/\d+ \S+ \d+:\d{2}/;
 
 /**
@@ -940,10 +943,11 @@ function countUpdateRequests(page: Page, host: number): { plans: number; confirm
  *
  * Why this matters: the row used to open for every update, and the user asked
  * for it to stay compact. This pins the whole folded path: one plan and one
- * submission with no confirmation, `updating: N/M step m:ss` inline with a
- * pulse that stands down under reduced motion, no trace line, the menu toggle
- * still inside the sidebar with the longest real step name, and success
- * returning the ordinary status without ever touching the details checkbox.
+ * submission with no confirmation, `N/M step m:ss` inline with a pulse that
+ * stands down under reduced motion, no trace line, the menu toggle still
+ * inside the sidebar with the longest real step name, a hover popup that
+ * spells out what the narrow label truncates, and success returning the
+ * ordinary status without ever touching the details checkbox.
  */
 test("single Update shows inline progress without opening its row", async ({
   page,
@@ -988,7 +992,10 @@ test("single Update shows inline progress without opening its row", async ({
   // visible right edge (the sidebar clips horizontal overflow): the step
   // name truncates, while the count and the clock stay whole, left of the
   // toggle.
-  await expect(row.locator(".host-update-step")).toHaveAttribute("title", "create-directories");
+  await expect(row.locator(".host-update-step")).toHaveText(" create-directories");
+  // The visible count is bare, and `updating: ` survives only as hidden text:
+  // in a sidebar this narrow the prefix was most of the step name's room.
+  await expect(row.locator(".host-update-count .visually-hidden")).toHaveText("updating: ");
   const geometry = await row.evaluate((node) => {
     const sidebar = node.closest(".app-sidebar")!;
     const sidebarBox = sidebar.getBoundingClientRect();
@@ -1003,6 +1010,51 @@ test("single Update shows inline progress without opening its row", async ({
   });
   expect(geometry.toggleRight).toBeLessThanOrEqual(geometry.visibleRight);
   expect(geometry.clockRight).toBeLessThanOrEqual(geometry.toggleLeft);
+
+  // Hovering anywhere on the label spells out the whole status. The popup is
+  // fixed-position so the sidebar's clipping cannot cut off the step name the
+  // inline label had to truncate, and it goes away when the pointer leaves.
+  const popup = row.locator(".host-update-popup");
+  await expect(popup).toHaveCount(0);
+  await row.locator(".host-update-count").hover();
+  await expect(popup).toBeVisible();
+  await expect(popup).toContainText(/updating: \d+ of \d+ steps done/);
+  await expect(popup.locator(".host-update-popup-step")).toHaveText("create-directories");
+  await expect(popup).toContainText(/\d+:\d{2} elapsed/);
+  const popupStep = await popup.locator(".host-update-popup-step").evaluate((node) => ({
+    position: getComputedStyle(node.parentElement!).position,
+    clipped: node.scrollWidth > node.clientWidth,
+  }));
+  expect(popupStep).toEqual({ position: "fixed", clipped: false });
+  await page.mouse.move(0, 0);
+  await expect(popup).toHaveCount(0);
+
+  // With the label near the viewport's bottom edge there is no room below it,
+  // so the popup opens above instead: fixed positioning escapes the sidebar's
+  // clipping but not the viewport's, and a popup past the fold would hide the
+  // only full copy of the step name.
+  const originalViewport = page.viewportSize()!;
+  const labelBottom = await row
+    .locator(".host-update-running")
+    .evaluate((node) => node.getBoundingClientRect().bottom);
+  await page.setViewportSize({
+    width: originalViewport.width,
+    height: Math.ceil(labelBottom) + 20,
+  });
+  await row.locator(".host-update-count").hover();
+  await expect(popup).toBeVisible();
+  const placement = await popup.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    const label = node.parentElement!.getBoundingClientRect();
+    return {
+      inside: box.top >= 0 && box.bottom <= window.innerHeight,
+      above: box.bottom <= label.top,
+    };
+  });
+  expect(placement).toEqual({ inside: true, above: true });
+  await page.mouse.move(0, 0);
+  await expect(popup).toHaveCount(0);
+  await page.setViewportSize(originalViewport);
 
   const progressDot = row.locator(".host-update-dot");
   expect(await progressDot.evaluate((dot) => getComputedStyle(dot).animationName)).toBe(
