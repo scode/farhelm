@@ -1179,6 +1179,138 @@ check "newline-framed record: the refusal is the foreign-bundle one" \
 check "newline-framed record: the bundle's own file is untouched" \
   [ "$(cat "$FAKEREC_APP/Contents/my-file")" = "mine" ]
 
+# The bundle is built while the install lock is still held, and swapped by
+# renaming. Released first, another installer for the same directory could
+# commit different binaries between the bundle's two copies (a bundle mixing
+# versions under one version number) or swap the bundle at the same time; and
+# deleting the old bundle in place could be interrupted into a half-deleted
+# one no later run accepts. A `cp` double records whether the lock exists
+# each time a binary is copied into the bundle.
+HOME_BUNDLELOCK="$WORKDIR/home-bundlelock"
+INSTALL_BUNDLELOCK="$HOME_BUNDLELOCK/.local/bin"
+mkdir -p "$HOME_BUNDLELOCK"
+run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good" 1.2.3
+check "bundle lock setup: first install exits 0" [ "$RC" -eq 0 ]
+MAC_TOOLS_CPWATCH="$WORKDIR/toolchain-mac-cpwatch"
+mkdir -p "$MAC_TOOLS_CPWATCH"
+cp -a "$MAC_TOOLS"/. "$MAC_TOOLS_CPWATCH/"
+rm -f "$MAC_TOOLS_CPWATCH/cp"
+cat >"$MAC_TOOLS_CPWATCH/cp" <<'CPEOF'
+#!/bin/sh
+# Test double: a real cp that, for each copy into the bundle's executables,
+# records whether the install lock exists at that moment.
+eval "last=\${$#}"
+case "$last" in
+  */Farhelm.app/Contents/MacOS/*)
+    if [ -d "$CPWATCH_LOCK" ]; then echo held >>"$CPWATCH_LOG"; else echo free >>"$CPWATCH_LOG"; fi
+    ;;
+esac
+exec /bin/cp "$@"
+CPEOF
+chmod 755 "$MAC_TOOLS_CPWATCH/cp"
+CPWATCH_LOG_FILE="$WORKDIR/cpwatch.log"
+run_install "$MAC_TOOLS_CPWATCH" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good-v2" 1.2.4 \
+  CPWATCH_LOCK="$INSTALL_BUNDLELOCK/.farhelm-install.lock" \
+  CPWATCH_LOG="$CPWATCH_LOG_FILE"
+check "bundle lock: update exits 0" [ "$RC" -eq 0 ]
+check "bundle lock: both bundle copies ran while the install lock was held" \
+  [ "$(cat "$CPWATCH_LOG_FILE")" = "$(printf 'held\nheld')" ]
+check "bundle lock: the lock is released after the bundle step" \
+  [ ! -e "$INSTALL_BUNDLELOCK/.farhelm-install.lock" ]
+check "bundle lock: the bundle carries the new version" \
+  contains "$(cat "$HOME_BUNDLELOCK/Applications/Farhelm.app/Contents/Info.plist")" "<string>1.2.4</string>"
+check "bundle lock: the swap nests nothing inside the bundle" \
+  [ ! -e "$HOME_BUNDLELOCK/Applications/Farhelm.app/Farhelm.app" ]
+check "bundle lock: the previous bundle is not left aside" \
+  [ "$(ls -A "$HOME_BUNDLELOCK/Applications")" = "Farhelm.app" ]
+
+# Every install directory shares the one bundle name, so the bundle has its
+# own lock: a run that finds it held refuses the bundle step (the binaries
+# are installed) and leaves the lock and the bundle alone. Unrelated hidden
+# entries in ~/Applications, whatever their names, are never touched.
+mkdir "$HOME_BUNDLELOCK/Applications/.farhelm-app.lock"
+mkdir "$HOME_BUNDLELOCK/Applications/.farhelm-app-replaced.1"
+echo keep >"$HOME_BUNDLELOCK/Applications/.farhelm-app-replaced.1/sentinel"
+BUNDLELOCK_PLIST=$(cat "$HOME_BUNDLELOCK/Applications/Farhelm.app/Contents/Info.plist")
+run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good" 1.2.3
+check "bundle lock: a held bundle lock fails the bundle step" [ "$RC" -ne 0 ]
+check "bundle lock: the refusal names the bundle lock" \
+  contains "$ERR" "$HOME_BUNDLELOCK/Applications/.farhelm-app.lock"
+check "bundle lock: the binaries were still committed" \
+  [ "$("$INSTALL_BUNDLELOCK/farhelm" --version)" = "farhelm 1.2.3" ]
+check "bundle lock: the held lock is left in place" [ -d "$HOME_BUNDLELOCK/Applications/.farhelm-app.lock" ]
+check "bundle lock: the bundle is untouched while another run holds the lock" \
+  [ "$(cat "$HOME_BUNDLELOCK/Applications/Farhelm.app/Contents/Info.plist")" = "$BUNDLELOCK_PLIST" ]
+rmdir "$HOME_BUNDLELOCK/Applications/.farhelm-app.lock"
+run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good" 1.2.3
+check "bundle lock: with the lock free the bundle is rebuilt" [ "$RC" -eq 0 ]
+check "bundle lock: an unrelated hidden entry is untouched" \
+  [ "$(cat "$HOME_BUNDLELOCK/Applications/.farhelm-app-replaced.1/sentinel")" = keep ]
+check "bundle lock: nothing of the run is left behind" \
+  [ "$(find "$HOME_BUNDLELOCK/Applications" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')" = ".farhelm-app-replaced.1 Farhelm.app " ]
+
+# A swap that fails after the old bundle was moved aside puts it back: the
+# public name must never be left empty or half built by a failure. An `mv`
+# double refuses the move of the new bundle into place (source inside the
+# private build directory, destination the public name); with RESTORE_FAILS
+# set it also refuses moving the old bundle back, and then the old bundle
+# must survive at the private path the installer names, not be deleted.
+MAC_TOOLS_SWAPFAIL="$WORKDIR/toolchain-mac-swapfail"
+mkdir -p "$MAC_TOOLS_SWAPFAIL"
+cp -a "$MAC_TOOLS"/. "$MAC_TOOLS_SWAPFAIL/"
+rm -f "$MAC_TOOLS_SWAPFAIL/mv"
+cat >"$MAC_TOOLS_SWAPFAIL/mv" <<'MVEOF'
+#!/bin/sh
+# Test double: a real mv that refuses the bundle swap's move into place and,
+# when RESTORE_FAILS is set, the cleanup's move of the old bundle back.
+eval "last=\${$#}"
+first=$1
+case "$first" in
+  */.farhelm-app-build.*/Farhelm.app)
+    echo "fake mv: forced failure publishing $first" >&2
+    exit 1
+    ;;
+  */.farhelm-app-build.*/previous)
+    if [ -n "${RESTORE_FAILS:-}" ]; then
+      echo "fake mv: forced failure restoring $first" >&2
+      exit 1
+    fi
+    ;;
+esac
+exec /bin/mv "$@"
+MVEOF
+chmod 755 "$MAC_TOOLS_SWAPFAIL/mv"
+SWAP_APP="$HOME_BUNDLELOCK/Applications/Farhelm.app"
+SWAP_PLIST=$(cat "$SWAP_APP/Contents/Info.plist")
+SWAP_RECORD=$(od -An -tx1 "$SWAP_APP/Contents/.farhelm-installation")
+run_install "$MAC_TOOLS_SWAPFAIL" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good-v2" 1.2.4
+check "bundle swap failure: the install exits 1" [ "$RC" -ne 0 ]
+check "bundle swap failure: the old bundle is back in place" \
+  [ "$(cat "$SWAP_APP/Contents/Info.plist")" = "$SWAP_PLIST" ]
+check "bundle swap failure: the old bundle keeps its record" \
+  [ "$(od -An -tx1 "$SWAP_APP/Contents/.farhelm-installation")" = "$SWAP_RECORD" ]
+check "bundle swap failure: the bundle lock is released" \
+  [ ! -e "$HOME_BUNDLELOCK/Applications/.farhelm-app.lock" ]
+check "bundle swap failure: no private build directory is left" \
+  [ -z "$(find "$HOME_BUNDLELOCK/Applications" -mindepth 1 -maxdepth 1 -name '.farhelm-app-build.*')" ]
+run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good-v2" 1.2.4
+check "bundle swap failure: an ordinary re-run rebuilds the bundle" [ "$RC" -eq 0 ]
+check "bundle swap failure: the rebuilt bundle carries the new version" \
+  contains "$(cat "$SWAP_APP/Contents/Info.plist")" "<string>1.2.4</string>"
+
+SWAP_PLIST=$(cat "$SWAP_APP/Contents/Info.plist")
+run_install "$MAC_TOOLS_SWAPFAIL" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good" 1.2.3 \
+  RESTORE_FAILS=1
+check "bundle restore failure: the install exits 1" [ "$RC" -ne 0 ]
+check "bundle restore failure: the message names where the old bundle is" \
+  contains "$ERR" "could not be put back; it is at"
+SWAP_KEPT=$(find "$HOME_BUNDLELOCK/Applications" -mindepth 2 -maxdepth 2 -path '*/.farhelm-app-build.*/previous')
+check "bundle restore failure: the old bundle is kept in the private directory" [ -n "$SWAP_KEPT" ]
+check "bundle restore failure: the kept bundle is the old one" \
+  [ "$(cat "$SWAP_KEPT/Contents/Info.plist" 2>/dev/null)" = "$SWAP_PLIST" ]
+check "bundle restore failure: the bundle lock is released" \
+  [ ! -e "$HOME_BUNDLELOCK/Applications/.farhelm-app.lock" ]
+
 # ===========================================================================
 # Scenario: rollback when the FIRST replacement (farhelm itself) fails
 # (F3) -- distinct from the farhelm-desktop case above: this is the move

@@ -33,38 +33,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Installer refuses its own app bundle after an interrupted replacement.** On macOS, every install and update of
-  `scripts/install.sh` rebuilds `~/Applications/Farhelm.app` from scratch: it assembles the new bundle in its staging
-  directory, writes the ownership record (`Contents/.farhelm-installation`) into that staged copy, then runs `rm -rf` on
-  the installed bundle and `mv`s the staged one into place. Before that it only replaces a bundle it can show is its
-  own: one whose record names this installation (`bundle_record_is_ours`), one whose record names an installation that
-  moved here or no longer exists (`bundle_record_moved_here`), or the exact recordless layout the installer built before
-  records existed (`is_legacy_installer_bundle`). Anything else is refused with "exists and does not look like a farhelm
-  app bundle; refusing to replace it" and exit 1. The binaries in the install directory are already committed by then;
-  only the bundle step fails.
-
-  The gap is the `rm -rf`. Its deletion order is directory-listing order, so an installer killed partway through it
-  (Ctrl-C, a closed terminal, a crash, power loss) can leave a partial bundle whose record is already gone while other
-  files remain. That bundle has no record and is not the exact legacy layout, so every later install and update refuses
-  it with the misleading message above. It is also a dead end for the uninstaller: `farhelm uninstall` rejects a bundle
-  without a record ("ownership receipt ... is missing; rerun the installer to repair it"), so each tool sends the user
-  to the other. The only recovery is deleting `~/Applications/Farhelm.app` by hand (`FARHELM_NO_APP_BUNDLE=1` only skips
-  the bundle step). The other interruption points are fine: a kill before the `rm -rf` leaves the old bundle intact, a
-  partial bundle that still has its record is accepted because the ownership check does not verify the record's digests,
-  and a kill between `rm -rf` and `mv` leaves no bundle, which the next run builds fresh. Unverified: whether an
-  `rm -rf` that macOS App Management denies partway (the case the installer's error message mentions) can also delete
-  the record first; it exits 1 through the same path if so.
-
-  Accepting incomplete or recordless bundles in general would break the foreign-bundle safeguard (SPEC.md's installation
-  rule: a file is not destroyed because its name matches), so the fix has to keep the ownership evidence alive across
-  the replacement. The review of the moved-install-directory fix suggested doing what the uninstaller already does
-  during removal: publish the record beside the bundle (the uninstaller uses
-  `~/Applications/.Farhelm.app.uninstall-receipt`; see SPEC_impl.md and `docs/install_uninstall.md`) before the
-  `rm -rf`, accept a partial bundle when that sibling record names this installation, and remove the sibling only after
-  the `mv`. Whether the installer should reuse the uninstaller's receipt name and format or use its own is open. Split
-  out of the entry on installs after the install directory moves, which fixed the rest; `scripts/test-install-sh.sh` is
-  where the fixture for the interrupted state would go.
-
 - **Killed-shim checkout-preparation test leaks processes when it fails.** In `crates/farhelm-supervisor/src/launch.rs`,
   `d4_killed_shim_never_repeats_the_hook_or_spawns_the_agent` starts the preparation shim, whose preparation hook parks
   on a FIFO (`build_d4_fixture`), checks the hook is running under the shim, that it was called once, and that the
@@ -272,10 +240,6 @@ Real enough to keep, not established enough to act on. Each names what would set
   cut, and one unparseable leading line marks the whole scan incomplete and blocks every durable claim. Conditional on a
   supported vendor record whose first line exceeds 64 KiB and on no successful identity hook; neither verified. If
   shown: make the front of the read line-aware under a hard ceiling, or report mid-line truncation.
-- **Partially removed `Farhelm.app`.** `A2-C25`. install.sh:1084-1090 requires `Contents/Info.plist` and :1140 does
-  `rm -rf` then a cross-volume `mv` from the staging directory, so a partial failure leaves a plist-less directory the
-  guard reads as foreign. Fix would stage into a same-filesystem sibling and move the old bundle aside; a missing
-  Contents directory is not proof of ownership, and a foreign collision must never be deleted.
 - **One-sided activity clock guard.** `A6-C22`. `record_activity` (supervisor store.rs:3660-3665) accepts only forward
   moves, so a single forward clock jump pins the stamp. The notes want the whole activity, seen, and merge path
   investigated before any clock slack, and do not accept the literal permanent-freeze claim for every excursion.

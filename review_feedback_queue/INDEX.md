@@ -45,8 +45,6 @@ One line per open item. This file must always match the feedback files in this d
   shared release dirs fail every run.
 - `embedded-payload-cleanup-blocks-helm-start.md` — a failure deleting the retired embedded-payloads cache aborts helm
   startup.
-- `installer-bundle-swap-unlocked.md` — the app-bundle step runs after the lock is released with rm -rf then mv, so
-  overlaps or interrupts leave a mixed, nested or half-deleted bundle.
 - `leftover-uninstall-receipt-blocks-uninstall.md` — a stale .Farhelm.app.uninstall-receipt blocks every later uninstall
   after a reinstall; the advised rerun never clears it.
 - `setup-partial-unit-write-mismatch.md` — helm setup can fail after rewriting only the supervisor unit, leaving a

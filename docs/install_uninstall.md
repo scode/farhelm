@@ -48,6 +48,11 @@ recorded for another installation, the error names that installation's directory
 uninstall the other installation, and re-run the installer to get the app. The uninstaller's own check is unchanged: it
 still removes only a bundle recorded for the installation it is uninstalling.
 
+Only one installer run assembles `Farhelm.app` at a time, whatever install directory it uses, and it replaces the old
+bundle by moving it aside rather than deleting it in place. A run that finds another one assembling the bundle, or finds
+`~/Applications/.farhelm-app.lock` left behind by an interrupted run, exits with an error after the executables are
+already updated. Re-run the installer; if the error persists and no installer is running, remove that lock by hand.
+
 The installer only replaces a `farhelm` (or, on macOS, `farhelm-desktop`) in the install directory when its checksum
 matches the executable-directory record below, meaning it is the file the installer itself last put there. Any other
 file with that name, such as a wrapper script of your own or a Farhelm installed before these records existed, is kept
