@@ -142,6 +142,15 @@ The earlier cross-harness evidence is preserved in
   retry cycle, or accept the residual. Keep this distinct from the existing single-client stall entry, and do not weaken
   liveness assertions based on a later passing run.
 
+- **Non-UTF-8 binary marker missing from the live stream.**
+  `session_lifecycle::non_utf8_terminal_output_survives_live_stream` in `crates/farhelm/tests/e2e/session_lifecycle.rs`
+  recurred after its 2026-09-19 dismissal: READY arrived, then no live bytes at all within the 40 s wait for
+  BINARY-MARKER, in deflake sweep run `4a18b9ac-c53b-4b7b-bd70-5a1171a7bbc6`; the exact-test reruns
+  `46bba954-49cd-482e-942c-f68b356ac46d`, `e2a38976-be77-4a58-a56e-09b95da2ed98`, and
+  `4fbb16a4-6d12-4272-bffe-21bcae13e712` passed. This time the fixture teardown captured the pane, which shows the
+  marker rendered and the fixture exited with status 0, so tmux had the reply and the loss is downstream of it (control
+  output, forwarder, or client). FLAKES.md holds the earlier investigation.
+
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes

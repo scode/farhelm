@@ -1218,3 +1218,23 @@ shared-session-id lead was not the cause, since nothing in either test carries t
 Class: budget
 
 Cause: established — the same unfinished systemd user-manager probe as the entry above.
+
+## 2026-09-29 — `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), recurrence after dismissal
+
+`session_lifecycle::non_utf8_terminal_output_survives_live_stream` in `crates/farhelm/tests/e2e/session_lifecycle.rs`,
+un-ignored and dropped from the deflake exclusions on 2026-09-19 after a clean sweep, failed again in deflake sweep run
+`4a18b9ac-c53b-4b7b-bd70-5a1171a7bbc6`: READY arrived, then the live attachment received no bytes at all before the 40 s
+wait for BINARY-MARKER expired. The three exact-test repetitions `46bba954-49cd-482e-942c-f68b356ac46d`,
+`e2a38976-be77-4a58-a56e-09b95da2ed98`, and `4fbb16a4-6d12-4272-bffe-21bcae13e712` passed. The sweep ran the whole
+workspace nextest battery (`cargo nextest run --workspace --exclude farhelm-desktop`, 4 nextest slots, retries 0) at
+clean `main` commit `8e82d8b271b1015c25302bbbbb0df019b290ce76` on an 18-CPU Linux x86_64 host, with pinned tmux 3.7c,
+executable SHA256 `75ede1768324817dc386aee550c8e7ca68e98530af54762fcb9df0b46491b071`, and locale `C.UTF-8`. Ambient
+`FARHELM_*` was scrubbed; only the recorder-owned `FARHELM_TEST_TRACE_DIR` was supplied. Unlike the 2026-09-05 attempts,
+the tmux fixture's teardown diagnostics captured the failing pane: it shows the marker rendered and the fixture exited
+with status 0. So tmux received the reply, which extends the earlier receipt that the fixture flushed it; the bytes were
+lost somewhere between tmux's control-mode output and the test's client, and which layer dropped them is not
+established. Disposition: open (TODO.md Deflake), excluded from later sweeps.
+
+Class: unknown
+
+Cause: hypothesis
