@@ -3479,7 +3479,20 @@
   code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `reap_tab_tree` (Close Tab, the ticker's reap of exited tabs, and a failed open's unwind) now
+  uses the scope manager's one allowed re-probe when the cached verdict is negative before its derived tab scope is
+  skipped, and fails the close when the tab's scope cannot be confirmed gone (`ScopeKillFailure::Refuse`), per SPEC.md
+  "Lifecycle operations". Whether a tab was opened scoped is now recorded on its tmux window (`@farhelm-tab-scoped`) and
+  decides whether an uncheckable scope fails the close, because the session's own launch can have seen a different
+  manager verdict. Windows from older builds carry no marker: they are treated as scoped when their session's launch
+  was, and otherwise still get the one re-probe, their scope skipped only if the manager stays unusable (such a tab is
+  then indistinguishable from one on a host that never had a manager, where refusing would leave it unclosable).
+  Regression tests `tab_reap_reprobes_a_stale_verdict_and_refuses_an_unconfirmed_scope`,
+  `tab_reap_follows_the_tabs_own_scope_marker`, `an_unmarked_tab_of_an_unscoped_session_still_gets_the_reprobe`, and
+  `an_opened_tab_records_whether_it_was_scoped`. Not addressed by decision: a failure of the automatic reap of an exited
+  tab is logged and retried on the next pass rather than shown in the UI, which would need new protocol and UI state. jj
+  change `uvolosqwuukw`, bookmark `pr/tab-close-rechecks-scope`, draft PR
+  [#1170](https://github.com/scode/farhelm/pull/1170/changes).
 
 ## sweep-drops-unreadable-root-silently.md
 

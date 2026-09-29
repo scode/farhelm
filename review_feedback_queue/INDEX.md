@@ -13,8 +13,6 @@ One line per open item. This file must always match the feedback files in this d
 - `sftp-overall-deadline-fails-slow-links.md` — sftp transfer's 60 s overall deadline fails slow links
   deterministically.
 - `unvalidated-state-dir-on-probe.md` — probed registration with a bad state-dir path permanently bricks the entry.
-- `tab-close-skips-scope-on-stale-verdict.md` — tab close skips the tab's cgroup whenever the cached manager verdict is
-  negative, contrary to its docs.
 - `restart-sweep-on-abortable-connection-task.md` — restart's stop-and-sweep runs on a connection task that a client
   disconnect aborts mid-kill.
 - `delete-roots-only-agent-pane.md` — Delete roots its process walk only on the agent pane, so tab, split-pane and

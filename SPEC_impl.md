@@ -1766,18 +1766,25 @@ evidence, but cannot authorize another directory move.
   delivery. The manager is probed once and the answer cached, with two exceptions. A probe that runs out of time (15
   seconds overall, 5 per query) is not an answer, since a busy manager is not an absent one: that launch runs without
   its own scope, and the first launch at least a minute later probes again. A definite negative stays cached, except
-  that teardown holding a unit its durable row says was scoped gets one re-probe. The sweep ALWAYS runs afterwards as
-  the backstop, and is the whole mechanism where no user manager exists — a missing manager never degrades stop below
-  the sweep's guarantees. A broken one does not silently pass either: for a scoped launch or tab, a scope that cannot be
-  confirmed collected fails the operation even when the sweep found nothing (SPEC.md, Lifecycle operations), since the
-  scope is what catches the processes the sweep cannot see. A wrapper that fails runs before the shim can write its
-  exec-failure sentinel, so the supervisor classifies that shape (a launch spec nothing ever consumed, on a dead pane,
-  for a scoped launch) as **error** rather than letting it masquerade as a plain exit.
+  that teardown with evidence of a scope gets one re-probe: a unit its durable row says was scoped, a tab whose window
+  records that it was opened in a scope, and a tab with no record either way (skipped quietly if the manager is still
+  unusable, since nothing shows it ever had a scope). The sweep ALWAYS runs afterwards as the backstop, and is the whole
+  mechanism where no user manager exists — a missing manager never degrades stop below the sweep's guarantees. A broken
+  one does not silently pass either: for a scoped launch or tab, a scope that cannot be confirmed collected fails the
+  operation even when the sweep found nothing (SPEC.md, Lifecycle operations), since the scope is what catches the
+  processes the sweep cannot see. A wrapper that fails runs before the shim can write its exec-failure sentinel, so the
+  supervisor classifies that shape (a launch spec nothing ever consumed, on a dead pane, for a scoped launch) as
+  **error** rather than letting it masquerade as a plain exit.
 
-  Terminal tabs also receive separate scopes, named from the session and tab IDs. Delete collects those units both from
-  tmux-discovered tabs and independently from the systemd manager using the session-specific tab-unit glob. The second
-  source preserves a cleanup handle when tmux no longer supplies tab IDs. A manager enumeration failure is distinct from
-  having no usable manager; it can refuse Delete before the portable sweep.
+  Terminal tabs also receive separate scopes, named from the session and tab IDs. A tab has no database row, so whether
+  its open selected a scope is recorded as an option on its tmux window, and closing the tab decides from that whether
+  an unconfirmable scope fails the close. The session's own launch is no substitute: the agent and a later tab can see
+  different verdicts about the user manager. A window opened before that option existed is treated as scoped when the
+  session's launch was, and otherwise still gets the one re-check of the manager, its scope skipped only if the manager
+  stays unusable. Delete collects those units both from tmux-discovered tabs and independently from the systemd manager
+  using the session-specific tab-unit glob. The second source preserves a cleanup handle when tmux no longer supplies
+  tab IDs. A manager enumeration failure is distinct from having no usable manager; it can refuse Delete before the
+  portable sweep.
 
   Containment starts at the agent launch, after login-shell initialization: the cgroup wrapper and the shim's
   environment markers deliberately exclude services started by shell startup files. A detached startup-file service may

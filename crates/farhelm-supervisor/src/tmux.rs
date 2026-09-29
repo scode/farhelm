@@ -194,6 +194,51 @@ pub const TAB_WINDOW_OPTION: &str = "@farhelm-tab";
 /// equally lacks.
 pub const AGENT_WINDOW_OPTION: &str = "@farhelm-agent";
 
+/// The tmux window option recording whether a tab's shell was launched in
+/// its own cgroup scope: `yes` or `no`, written at open before
+/// [`TAB_WINDOW_OPTION`].
+///
+/// A tab has no database row, so without this its close could only infer
+/// the answer from the SESSION's scope record. That inference is wrong
+/// whenever the two launches saw different verdicts from the systemd user
+/// manager (an agent launched while the manager was unreachable, a tab
+/// opened after it came back, or the reverse), and the wrong answer in
+/// one direction skips a scope that may still hold the tab's detached
+/// descendants. Recording the tab's own selection on its own window is
+/// what lets close treat an unconfirmable scope as a failure exactly when
+/// the tab really had one (SPEC.md "Lifecycle operations").
+///
+/// Written before the tab marker so that every window rediscovery can see
+/// as a tab also carries this answer. Windows from builds that predate it
+/// carry neither value, and close falls back to the session inference for
+/// them (see [`TabScopeMarker::Unmarked`]). Like every window option it is
+/// writable by same-account processes inside the tab; a tab that forges
+/// `no` only weakens the cleanup of its own processes, which the private
+/// tmux server's same-account trust model already allows.
+pub const TAB_SCOPED_WINDOW_OPTION: &str = "@farhelm-tab-scoped";
+
+/// What a tab window's [`TAB_SCOPED_WINDOW_OPTION`] says about its shell's
+/// launch, as read back by [`TmuxDriver::tab_scope_marker`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabScopeMarker {
+    /// The tab's shell was launched in its own cgroup scope.
+    Scoped,
+    /// The tab's shell was launched without a scope.
+    Unscoped,
+    /// No usable answer: the window predates the marker, holds a value
+    /// this supervisor never writes, or is no longer the pane and tab the
+    /// caller asked about. The caller has to decide from other evidence.
+    Unmarked,
+}
+
+impl TabScopeMarker {
+    /// The value written to [`TAB_SCOPED_WINDOW_OPTION`] for a launch that
+    /// was, or was not, scoped.
+    pub fn option_value(scoped: bool) -> &'static str {
+        if scoped { "yes" } else { "no" }
+    }
+}
+
 /// One deadline covers attaching the control client, taking the replay
 /// snapshot, and enabling live output. A wedged tmux command must fail
 /// the attach request instead of leaving it holding the global
@@ -2904,6 +2949,55 @@ impl TmuxDriver {
         .await
         .map(|_| ())
         .with_context(|| format!("marking a window with {option}"))
+    }
+
+    /// Read a tab window's [`TAB_SCOPED_WINDOW_OPTION`], answering only for
+    /// the exact pane and tab the caller names.
+    ///
+    /// The window is addressed through its pane, and a `=session:.%pane`
+    /// target whose pane has vanished falls back to the session's CURRENT
+    /// pane (see [`pane_in_session`]). So the pane id and the window's tab
+    /// marker are read in the same query as the answer, and any mismatch
+    /// is [`TabScopeMarker::Unmarked`] rather than a sibling tab's
+    /// verdict. A target tmux reports as already gone is `Unmarked` too;
+    /// any other failure propagates, because guessing here would decide
+    /// whether a scope is checked at all.
+    pub async fn tab_scope_marker(
+        &self,
+        session: &str,
+        pane: &str,
+        tab_id: &str,
+    ) -> anyhow::Result<TabScopeMarker> {
+        let format =
+            format!("#{{pane_id}}\t#{{{TAB_WINDOW_OPTION}}}\t#{{{TAB_SCOPED_WINDOW_OPTION}}}");
+        let out = match self
+            .run(&[
+                "display-message",
+                "-p",
+                "-t",
+                &pane_in_session(session, pane),
+                &format,
+            ])
+            .await
+        {
+            Ok(out) => out,
+            Err(e) if self.refusal(&e).is_some() => return Ok(TabScopeMarker::Unmarked),
+            Err(e) => return Err(e).context("reading a terminal tab's scope marker"),
+        };
+        let mut fields = out.trim_end_matches('\n').split('\t');
+        let (Some(read_pane), Some(read_tab), Some(value)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            return Ok(TabScopeMarker::Unmarked);
+        };
+        if read_pane != pane || read_tab != tab_id {
+            return Ok(TabScopeMarker::Unmarked);
+        }
+        Ok(match value {
+            "yes" => TabScopeMarker::Scoped,
+            "no" => TabScopeMarker::Unscoped,
+            _ => TabScopeMarker::Unmarked,
+        })
     }
 
     /// Kill the window containing `pane`, tolerating its absence.
