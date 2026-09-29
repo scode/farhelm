@@ -419,7 +419,11 @@ not make the row look as though its menu is still open. The focused toggle or me
 dismissal or focus-return contract. **Confirm in place:** a destructive item swaps the panel's own contents for the
 consequence line and a confirm/cancel pair with focus on cancel, rather than opening a second surface; that sub-state is
 a `role="dialog"` inside the same positioned box, and it survives the panel closing, which is why it deliberately does
-not answer Escape.
+not answer Escape. The one exception is a pointer going down outside the open menu: that closes the menu and answers a
+showing confirmation with cancel, since a click elsewhere is the user leaving the question, and a prompt kept for the
+next open would greet them with a question they already walked away from. Every other dismissal still preserves it.
+Outside dismissal also never takes focus back from the control the pointer went to: the toggle handback only reclaims
+focus that is on nothing, on the document body, or still inside a row menu.
 
 Mark read/unread and stop close the menu as soon as the handler accepts the choice. Their asynchronous failures still
 appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. In-place

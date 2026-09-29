@@ -39,11 +39,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the foreground
   conversation's restart target beyond the checks now landed in #814, and define any remaining smallest admission check.
   Preserve legitimate foreground transitions and avoid extending the reporter's scope without evidence.
-- **Dismiss row menus on outside click.** A session or host row's `⋯` actions menu stays open when the user clicks
-  anywhere else, including the terminal pane, so the only way to close it with the pointer is to click `⋯` again.
-  Clicking outside the panel should close it, the same way Escape does. Both rows share the panel lifecycle in
-  `crates/farhelm-ui/src/menu_panel.rs`, so the fix belongs there rather than per row; the profiles popup in
-  `profiles.rs` already handles outside intent and may be the pattern to reuse.
 - **Delete button in the session header.** Deleting the current session means finding its row in the sidebar and aiming
   for that row's `⋯` menu. Add a delete button to the top-right actions in the session header (`titlebar-actions` in
   `crates/farhelm-ui/src/session_view.rs`) as a shortcut. It still confirms, inline in the header the way the replace

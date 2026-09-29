@@ -3605,6 +3605,105 @@ test("opening one row's menu closes the other row kind's open one", async ({ pag
 });
 
 /**
+ * A pointer-down anywhere outside an open row menu closes it, and focus stays
+ * where the pointer put it.
+ *
+ * Why this matters: before, a session or host `⋯` menu stayed open until its
+ * own toggle was clicked again, even across a click into the terminal. A
+ * pointer-opened menu has focus on its first item, and a menu that closes
+ * while it still believes focus is inside hands focus back to its toggle,
+ * which here would steal it from the terminal the user just clicked. The
+ * dismissal defers its close past the browser's focus move for that reason
+ * (see `install_row_menu_outside_dismiss`). NOTE: this suite cannot prove the
+ * deferral itself. In the web build a synchronous close was checked and also
+ * passes, since the focus change lands before the row's teardown runs; the
+ * ordering hazard is the desktop webview's, where events reach Rust over IPC.
+ * What this pins is the observable contract. Specifies, for both menu kinds: a
+ * click in the terminal closes the menu and leaves the terminal's input
+ * focused, starting from focus on the menu's first item; a click inside the
+ * panel keeps it open; and a click outside a session menu showing its delete
+ * or replace confirmation answers that prompt with cancel, so the menu
+ * reopens onto its items rather than straight back into an unanswered
+ * prompt, the session is not deleted, and focus again stays in the terminal.
+ */
+test("a click outside an open row menu closes it and leaves focus where it landed", async ({
+  page,
+  request,
+}) => {
+  const session = await createSession(request, {
+    title: `menu-outside-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await pinAutoSelect(page, session.id);
+    await page.goto("/");
+    await attachSession(page, session.id);
+    await waitForHostsListSettled(page);
+    const target = row(page, session.id);
+    const toggle = target.locator(".session-row-menu");
+    const terminal = page.locator(".xterm-screen").first();
+    const terminalHasFocus = () =>
+      page.evaluate(
+        () => document.activeElement?.classList.contains("xterm-helper-textarea") ?? false,
+      );
+
+    // A click on the panel itself, away from any item, is inside.
+    await openRowMenu(target);
+    await target.locator(".session-row-menu-panel").click({ position: { x: 2, y: 2 } });
+    await expect(target.locator(".session-row-menu-panel")).toBeVisible();
+    await terminal.click();
+    await expect(target.locator(".session-row-menu-flyout")).toHaveCount(0);
+
+    // Reopened by pointer, so focus starts on its first item: the state in
+    // which a close that runs before the focus move would hand focus back.
+    await openRowMenu(target);
+    await expect(target.locator(".session-row-menu-item").first()).toBeFocused();
+    await terminal.click();
+    await expect(target.locator(".session-row-menu-flyout")).toHaveCount(0);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect.poll(terminalHasFocus).toBe(true);
+    await expect(toggle).not.toBeFocused();
+
+    // Both confirmations are cancelled by an outside click, not left primed
+    // for the next open, and focus stays in the terminal even though the
+    // item that opened the prompt was removed while it held focus.
+    for (const [item, cancel] of [
+      [".session-row-delete", ".confirm-cancel"],
+      [".session-row-replace", ".replace-cancel"],
+    ]) {
+      await openRowMenu(target);
+      await target.locator(item).click();
+      // Focus on the prompt's cancel is the premise under test. It is set
+      // explicitly because only the delete prompt reliably autofocuses it.
+      await target.locator(cancel).focus();
+      await expect(target.locator(cancel)).toBeFocused();
+      await terminal.click();
+      await expect(target.locator(".session-row-menu-flyout")).toHaveCount(0);
+      await expect.poll(terminalHasFocus).toBe(true);
+      await openRowMenu(target);
+      await expect(target.locator(".confirm-consequence")).toHaveCount(0);
+      await expect(target.locator(item)).toBeVisible();
+      await terminal.click();
+      await expect(target.locator(".session-row-menu-flyout")).toHaveCount(0);
+    }
+    expect((await listSessions(request)).sessions.some((listed) => listed.id === session.id)).toBe(true);
+
+    // The host menu shares the same dismissal.
+    await openHostsPanel(page);
+    const hostRow = page.locator(".host-row").first();
+    await openHostMenu(hostRow);
+    await expect(hostRow.locator(".host-row-menu-item").first()).toBeFocused();
+    await terminal.click();
+    await expect(hostRow.locator(".host-row-menu-panel")).toHaveCount(0);
+    await expect(hostRow.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
+    await expect.poll(terminalHasFocus).toBe(true);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
  * The selection policy itself: a clicked session is remembered across a
  * reload, a stale remembered id falls back to the newest-created
  * session, and the automatic selection ATTACHES — all

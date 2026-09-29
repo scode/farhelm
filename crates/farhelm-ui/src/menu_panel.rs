@@ -996,6 +996,20 @@ pub(crate) fn forget_menu_focus<A: Copy, Id: 'static, const N: usize>(
 /// it. `serde_json` produces every literal here, and nothing about the
 /// row's identity is trusted beyond that.
 ///
+/// ## It never takes focus from a control outside the row menus
+///
+/// The handback exists for focus the closing menu itself was holding. It
+/// runs only when the row's bookkeeping says focus was inside the menu, but
+/// that bookkeeping can be stale: activating Delete or Replace swaps the
+/// focused item for a confirmation prompt, and the removed item's
+/// `focusout` never reaches Rust to clear it. If the user then clicks into
+/// the terminal, the outside-click dismissal closes the menu and this would
+/// pull focus straight back out of the terminal. So the script first looks
+/// at what holds focus now, and gives up unless that is nothing, the
+/// document body, or an element still inside a row menu (the menu's DOM may
+/// not be gone yet when this runs). A user's own focus choice elsewhere
+/// always wins over the handback.
+///
 /// Fire-and-forget, like every other focus call here: a renderer that
 /// cannot run this leaves the keyboard experience unimproved rather than
 /// losing a safety default (see this section's own note).
@@ -1008,6 +1022,9 @@ pub(crate) fn focus_menu_toggle(id_attr: &str, id_value: &str, toggle_selector: 
             const wanted = {id_js};
             const attrName = {attr_js};
             const toggleSelector = {toggle_js};
+            const active = document.activeElement;
+            if (active && active !== document.body &&
+                !active.closest('.session-row-menu-flyout, .host-row-menu-panel')) return;
             for (const row of document.querySelectorAll(`[${{attrName}}]`)) {{
                 if (row.getAttribute(attrName) === wanted) {{
                     row.querySelector(toggleSelector)?.focus({{ preventScroll: true }});
@@ -1015,6 +1032,98 @@ pub(crate) fn focus_menu_toggle(id_attr: &str, id_value: &str, toggle_selector: 
                 }}
             }}
         }})();"#
+    ));
+}
+
+// ===== Outside-click dismissal, shared by both rows' menus ============
+
+/// Class of the hidden buttons [`install_row_menu_outside_dismiss`] clicks to
+/// close a row menu. `ListView` renders one per menu identity it may have to
+/// dismiss and owns what each does, since `ListView` owns both menus' open
+/// state; see [`row_menu_relay_key`] for the identity each one carries.
+pub(crate) const ROW_MENU_OUTSIDE_RELAY: &str = "row-menu-outside-relay";
+
+/// The `data-row-menu` value naming one row's menu: `session:<id>` or
+/// `host:<id>`. The dismissal listener derives the same string from the
+/// open panel's row (`data-session-id` / `data-host-id`), which is how a
+/// deferred dismissal names the menu it saw open instead of whichever menu
+/// happens to be open when the relay is handled.
+pub(crate) fn row_menu_relay_key(kind: &str, id: &str) -> String {
+    format!("{kind}:{id}")
+}
+
+/// Close the open session or host row menu when a pointer goes down
+/// anywhere outside it, the way Escape does, so a menu no longer stays open
+/// until its own `⋯` is clicked again. Idempotent: the listener is
+/// installed once per page, however many times this runs.
+///
+/// "Outside" means outside the open menu's floating panel (for a session
+/// menu, its whole flyout, which includes the delete and replace
+/// confirmation prompts that replace the item list in place) and outside
+/// that menu's own toggle. The toggle is excluded so it keeps its existing
+/// behavior, closing the menu on click. Another row's toggle is outside:
+/// its `pointerdown` closes the open menu and its `click` then opens its own,
+/// which is still one click. Only trusted events count, so a script-issued
+/// `pointerdown` cannot dismiss a menu.
+///
+/// ## Why the close is deferred
+///
+/// `pointerdown` is dispatched before the browser moves focus to what was
+/// clicked. A pointer-opened session menu has focus on one of its items, and
+/// the row's close teardown hands focus back to the `⋯` toggle when its
+/// bookkeeping says focus was still inside the menu; that bookkeeping clears
+/// only on the item's `focusout`. Closing synchronously from `pointerdown`
+/// could therefore run the teardown before the focus change and steal focus
+/// back from, say, the terminal the user just clicked into. Whether it did
+/// would depend on how fast Rust sees the relay, which differs between the
+/// web build and the desktop webview. The relay click is instead queued with
+/// `setTimeout(.., 0)`, which runs after the whole `pointerdown`/`mousedown`
+/// task and its default focus change. (The teardown also refuses to take
+/// focus from an element outside the row menus; see [`focus_menu_toggle`].
+/// That guard covers the confirmation prompts, whose inside-focus
+/// bookkeeping goes stale, and makes the deferral a belt to its braces.)
+///
+/// ## Why the relay names its menu
+///
+/// The deferral opens a window in which the same gesture's `click` on
+/// another row's toggle could reach Rust first, most plausibly on the
+/// desktop webview, where both cross an asynchronous bridge. An unqualified
+/// "close whatever is open" relay would then close the menu that click just
+/// opened. So the listener records the open menu's identity at `pointerdown`
+/// and clicks only the relay carrying that identity. `ListView` keys each
+/// relay by identity, so an event aimed at a relay whose menu has since been
+/// replaced reaches no handler, and the handler it does reach closes its
+/// menu only if that menu is still the open one. A session relay also
+/// cancels its row's pending delete or replace confirmation, which is why
+/// `ListView` keeps a relay for such a row even after another menu replaced
+/// its panel.
+pub(crate) fn install_row_menu_outside_dismiss() {
+    document::eval(&format!(
+        r#"if (!window.__farhelmRowMenuOutsideDismiss) {{
+            window.__farhelmRowMenuOutsideDismiss = true;
+            document.addEventListener('pointerdown', (event) => {{
+                if (!event.isTrusted) return;
+                const open = document.querySelector('.session-row-menu-flyout, .host-row-menu-panel');
+                const target = event.target;
+                if (!open || !(target instanceof Element)) return;
+                if (open.contains(target)) return;
+                if (target.closest('.session-row-menu[aria-expanded="true"], .host-row-menu[aria-expanded="true"]')) return;
+                const sessionRow = open.closest('[data-session-id]');
+                const hostRow = open.closest('[data-host-id]');
+                const key = sessionRow
+                    ? 'session:' + sessionRow.getAttribute('data-session-id')
+                    : hostRow ? 'host:' + hostRow.getAttribute('data-host-id') : null;
+                if (key === null) return;
+                setTimeout(() => {{
+                    for (const relay of document.querySelectorAll('.{ROW_MENU_OUTSIDE_RELAY}')) {{
+                        if (relay.getAttribute('data-row-menu') === key) {{
+                            relay.click();
+                            return;
+                        }}
+                    }}
+                }}, 0);
+            }}, true);
+        }}"#
     ));
 }
 

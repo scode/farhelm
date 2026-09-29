@@ -687,6 +687,9 @@ pub(crate) fn ListView(
     // one is: this is the only component both the session list and the
     // hosts panel are mounted underneath.
     let mut host_menu_open = use_signal(|| None::<HostId>);
+    // Both menus close on a pointer-down outside them; the relay button that
+    // listener clicks is rendered at the top of this view (see there).
+    use_hook(crate::menu_panel::install_row_menu_outside_dismiss);
     // The one stable rename editor, if any, and its text draft.
     //
     // One at a time, unlike `confirming`'s set: rename is a focused edit the
@@ -2424,8 +2427,85 @@ pub(crate) fn ListView(
     // the same "do not wait for the feed" nudge `do_replace` gives an
     // ordinary replace's own success path.
     let created_listing = request_listing.clone();
+    // Every session whose menu an outside click may have to dismiss: the one
+    // whose menu is open, plus any row still holding a delete or replace
+    // confirmation. Sorted so the relays render in a stable order.
+    let outside_relay_sessions: Vec<String> = {
+        let mut ids: Vec<String> = row_phases
+            .read()
+            .iter()
+            .filter(|(_, phase)| {
+                matches!(
+                    phase,
+                    RowPhase::ConfirmingDelete | RowPhase::ConfirmingReplace
+                )
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        if let Some(open) = menu_open() {
+            ids.push(open);
+        }
+        ids.sort();
+        ids.dedup();
+        ids
+    };
 
     rsx! {
+        // Targets of `menu_panel::install_row_menu_outside_dismiss`: a pointer
+        // going down outside the open row menu clicks the relay carrying that
+        // menu's identity, and the menu closes the way Escape closes it.
+        //
+        // One relay per identity rather than one shared button: the click
+        // arrives a task after the pointer-down, and by then the same
+        // gesture's click on another row's toggle may already have opened a
+        // different menu. Each relay is keyed by its identity, so an event
+        // for a menu that has since gone reaches no handler, and each handler
+        // closes its own menu only if it is still the open one.
+        //
+        // A session menu showing its delete or replace confirmation is the one
+        // place this does more than Escape: Escape is deliberately unbound in
+        // those prompts, because closing the panel leaves the confirming phase
+        // behind and the row would reopen straight into the same prompt. A
+        // click elsewhere is taken as the prompt's safe answer, cancel, so the
+        // relay clears that phase too. Rows with a pending confirmation keep a
+        // relay even when another menu replaced their panel, so that answer is
+        // not lost to the race above. Cancelling holds no claim to release;
+        // it only forgets the phase, exactly as the prompt's cancel does.
+        for id in outside_relay_sessions {
+            button {
+                key: "session:{id}",
+                r#type: "button",
+                class: crate::menu_panel::ROW_MENU_OUTSIDE_RELAY,
+                "data-row-menu": crate::menu_panel::row_menu_relay_key("session", &id),
+                hidden: true,
+                tabindex: "-1",
+                onclick: move |_| {
+                    {
+                        let mut phases = row_phases.write();
+                        leave_phase(&mut phases, &id, RowPhase::ConfirmingDelete);
+                        leave_phase(&mut phases, &id, RowPhase::ConfirmingReplace);
+                    }
+                    if menu_open.peek().as_deref() == Some(id.as_str()) {
+                        menu_open.set(None);
+                    }
+                },
+            }
+        }
+        if let Some(host_id) = host_menu_open() {
+            button {
+                key: "host:{host_id}",
+                r#type: "button",
+                class: crate::menu_panel::ROW_MENU_OUTSIDE_RELAY,
+                "data-row-menu": crate::menu_panel::row_menu_relay_key("host", &host_id.to_string()),
+                hidden: true,
+                tabindex: "-1",
+                onclick: move |_| {
+                    if *host_menu_open.peek() == Some(host_id) {
+                        host_menu_open.set(None);
+                    }
+                },
+            }
+        }
         AppBar {
         }
         // The host list is one permanent surface. Keeping the component
