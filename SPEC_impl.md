@@ -18,6 +18,27 @@ Motivation: single language across supervisor, helm, CLI, and UI maximizes share
 real components. tokio because the chosen web stack (axum, tungstenite) lives there; no exotic async needs exist that
 would justify anything else.
 
+## Who owns an accepted action
+
+Once the helm or a supervisor accepts a request that changes state, the server owns carrying it out. The work runs on a
+task the server owns, not on the task serving the client's connection, and that connection's handler only waits for the
+result. A client that disconnects, reloads, has its credential rotated, or is cancelled loses the reply, never part of
+the work. This applies wherever a connection's task can be cancelled: helm HTTP and WebSocket handlers, which the web
+framework drops when the client goes away, and supervisor request handlers, which are aborted after a grace period when
+the helm's connection closes.
+
+The reason is that dropping an async task stops it at whatever step it had reached, while blocking work already handed
+to other threads, such as a database transaction, still finishes. A handler written as a sequence of steps (commit a
+change, then reconcile running state with it; mark a host busy, then start the job that clears the flag; start killing a
+process tree, then relaunch) is left half done by a disconnect, in a state nothing later repairs. Tolerating that with
+cleanup or recovery code at each step is the wrong fix; move the execution instead.
+
+Stop and Delete in the supervisor already follow this, so disconnect cleanup cannot strand a frozen process tree. The
+rule does not ask for work to outlive the process doing it: surviving a helm or supervisor restart is a separate matter,
+covered by each operation's own recovery rules. Nor does it prevent an accepted action from being cancelled on purpose;
+an explicit cancel, such as a Delete interrupting an upload, is part of the action's own logic, not a side effect of a
+connection closing.
+
 ## Transactional database representations
 
 A database may store multiple materialized representations of the same information, such as a session's full JSON record
@@ -45,6 +66,13 @@ leaving some requests unanswered, retaining their reply-routing bookkeeping. The
 quotas to prevent growth under that behavior is not a bug; do not spend implementation complexity on defending against
 it. This exception does not excuse unbounded accumulation during ordinary operation with a correctly behaving supervisor
 or failure to perform the specified cleanup when a connection is retired or a host is removed.
+
+## Leftover files
+
+Confirmed 2026-09-28: files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a
+fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are
+removed by the next attempt at the same operation or by the next start of the process that owns them. As with retained
+supervisor metadata, the line is accumulation without bound over time during ordinary operation.
 
 ## Session IDs in logs
 
@@ -697,10 +725,10 @@ identified by its durable pane record first, with the marker as the recovery aid
 tabs have no durable record at all and are rediscovered from their markers alone, because a pane's own processes inherit
 `TMUX` and can conjure windows a positional scan would adopt. The user's own tmux usage and config are untouched.
 
-Arbitrary changes to this private server's configuration are the local operator's responsibility. Farhelm supports its
-documented pane/window interactions and handles missing objects safely, but does not promise to restore configuration
-after arbitrary same-account changes. This does not relax exact targeting of operations or the helm/GUI's obligation to
-tolerate remote failures; see SPEC.md's maintainer-confirmed decisions.
+The private server is an implementation detail. Direct interaction with it, by the user or by a program running in a
+session, is unsupported (SPEC.md, "Ownership during cleanup and provisioning"): Farhelm handles its own objects going
+missing, but does not track, reap, or restore windows, panes, or configuration created or changed that way. This does
+not relax the helm/GUI's obligation to tolerate remote failures.
 
 The native desktop stores a versioned physical-pixel outer-frame rectangle and maximized flag separately from client
 credentials. Bootstrap's already resolved state directory is reused, so persistence cannot silently move to the current
@@ -1302,9 +1330,11 @@ orders ordinary same-path creates against that move, so a new reference either c
 directory as unavailable afterward.
 
 Root identity is checked even before accepting an apparently missing source. Common archive entry points refuse
-overlapping active registry paths, including during startup recovery. After process teardown and committed final
-retirement, Delete removes the private preparation lock and state files. This cleanup is best effort: a crash or unlink
-failure can leave private evidence, but cannot authorize another directory move.
+overlapping active registry paths, including during startup recovery. A refused or failed archive step does not fail
+Delete (SPEC.md, Fresh GitHub checkouts): the session and its checkout registry row are retired, the folder is left in
+place, and the reply carries a notice naming it. After process teardown and committed final retirement, Delete removes
+the private preparation lock and state files. This cleanup is best effort: a crash or unlink failure can leave private
+evidence, but cannot authorize another directory move.
 
 ### Runtime state
 
@@ -1709,7 +1739,10 @@ failure can leave private evidence, but cannot authorize another directory move.
   including tabs; closing one tab selects its exact `FARHELM_TAB_ID`. Agent selection also retains the existing legacy
   case with neither kind marker. These are process-ownership hints, not authenticated credentials or a promise of
   indefinite historical compatibility. Launch boundaries scrub the opposite kind's marker so nested supervisors do not
-  misclassify a new agent as an outer tab's process.
+  misclassify a new agent as an outer tab's process. On both platforms the marker is read from the memory where the
+  kernel placed the environment at exec (`/proc/<pid>/environ` on Linux, `KERN_PROCARGS2` on macOS), which is live: a
+  program that rewrites its process title can overwrite it, and SPEC.md accepts that such a detached process escapes the
+  sweep.
 
   The sweep sends SIGTERM, allows a short grace, quiesces with SIGSTOP, re-enumerates, sends SIGKILL, and polls for
   confirmed disappearance. PID/start-time revalidation narrows reuse races; it does not make the separate identity read
@@ -1727,10 +1760,11 @@ failure can leave private evidence, but cannot authorize another directory move.
   its own scope, and the first launch at least a minute later probes again. A definite negative stays cached, except
   that teardown holding a unit its durable row says was scoped gets one re-probe. The sweep ALWAYS runs afterwards as
   the backstop, and is the whole mechanism where no user manager exists — a missing manager never degrades stop below
-  the sweep's guarantees, and neither does a broken one: the sweep's verdict is the answer, and the scope's troubles are
-  diagnostic. A wrapper that fails runs before the shim can write its exec-failure sentinel, so the supervisor
-  classifies that shape (a launch spec nothing ever consumed, on a dead pane, for a scoped launch) as **error** rather
-  than letting it masquerade as a plain exit.
+  the sweep's guarantees. A broken one does not silently pass either: for a scoped launch or tab, a scope that cannot be
+  confirmed collected fails the operation even when the sweep found nothing (SPEC.md, Lifecycle operations), since the
+  scope is what catches the processes the sweep cannot see. A wrapper that fails runs before the shim can write its
+  exec-failure sentinel, so the supervisor classifies that shape (a launch spec nothing ever consumed, on a dead pane,
+  for a scoped launch) as **error** rather than letting it masquerade as a plain exit.
 
   Terminal tabs also receive separate scopes, named from the session and tab IDs. Delete collects those units both from
   tmux-discovered tabs and independently from the systemd manager using the session-specific tab-unit glob. The second

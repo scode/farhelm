@@ -77,34 +77,36 @@ user's supervisor. If one is already running — say one the user started intera
 it never restarts or replaces a running supervisor. If none exists, the user is asked whether to set one up
 automatically, and on confirmation one action installs the supervisor binary, sets up the per-user systemd layer, and
 registers the host — no separate host-side setup. Passwordless SSH is the prerequisite on the HOST side, plus, on the
-helm's own machine, access to the configured release source (GitHub by default) or a staged payload directory. With that
-in place, provisioning and everyday operation just work out of the box — reaching supervisors needs no port forwards, no
-opened firewall ports, and no address configuration beyond the SSH destination. (The web UI's own loopback-plus-forward
-story is separate; see Security.) Downloads go directly to that configured release-asset source — GitHub by default;
-neither GitHub nor a configured mirror is a relay or rendezvous service for Farhelm sessions or connections, and the
-no-relay guarantee below still holds. Nothing the supervisor does requires root: install, updates, and operation all
-happen as the SSH user (user-level systemd, files in user-owned directories). If some optional step cannot be done
-without privileges on a given host, provisioning says so and continues without it rather than escalating. Before
-touching the host for initial setup, the helm states exactly what it is about to do in concrete terms — the files it
-will place and where, the systemd units it will create, and that the supervisor will run persistently and start at boot
-— and proceeds only on confirmation. Remote updates use the same one-use plan mechanism behind the same authority, but
-the user's Update click is the authorization: no plan is shown for confirmation. While an update is running, its host
-row stays folded and shows `updating…` until a progress snapshot is available, then shows the current step,
-completed-step count, and client-measured elapsed time inline in the status spot; hovering that status shows the count,
-the elapsed time, and every step of the run with its status and the current one highlighted (in a window too short for
-the whole list, the list keeps the current step in view), since the sidebar is too narrow to show a long step name, let
-alone the rest of the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary
-upload appears as a separate step before installation, so the user can tell when network transfer is still underway.
-Success returns the status spot to its normal label and leaves the row folded unless global details are on. Failure or
-an uncertain outcome still expands the row so its step list and diagnostic remain visible. The Hosts header's
-`update all` action makes the same authorized Update request for each remote host whose individual Update action is
-available at the click. A host already busy with setup or another run is skipped rather than queued for a later update;
-the local host is excluded. Each remote host keeps its own validation, progress, and result, so one failure does not
-hide or delay the others. V1 provisioning targets any Linux host with a usable systemd user manager, on the two
-architectures cross-compiled supervisor binaries exist for. The distribution is not a requirement — nothing provisioning
-does is distribution-specific — so the plan names whichever one it found rather than refusing; CI exercises Ubuntu.
-Everything else — no usable systemd user manager, or an architecture with no payload — falls back to the manual path
-(run the binary yourself), which always remains available.
+helm's own machine, access to the configured release source (GitHub by default) or a staged payload directory (a
+developer-facing, best-effort option; see [Supported host setup](#supported-host-setup)). With that in place,
+provisioning and everyday operation just work out of the box — reaching supervisors needs no port forwards, no opened
+firewall ports, and no address configuration beyond the SSH destination. (The web UI's own loopback-plus-forward story
+is separate; see Security.) Downloads go directly to that configured release-asset source — GitHub by default; neither
+GitHub nor a configured mirror is a relay or rendezvous service for Farhelm sessions or connections, and the no-relay
+guarantee below still holds. Nothing the supervisor does requires root: install, updates, and operation all happen as
+the SSH user (user-level systemd, files in user-owned directories). If some optional step cannot be done without
+privileges on a given host, provisioning says so and continues without it rather than escalating. Before touching the
+host for initial setup, the helm states exactly what it is about to do in concrete terms — the files it will place and
+where, the systemd units it will create, and that the supervisor will run persistently and start at boot — and proceeds
+only on confirmation. Remote updates use the same one-use plan mechanism behind the same authority, but the user's
+Update click is the authorization: no plan is shown for confirmation. While an update is running, its host row stays
+folded and shows `updating…` until a progress snapshot is available, then shows the current step, completed-step count,
+and client-measured elapsed time inline in the status spot; hovering that status shows the count, the elapsed time, and
+every step of the run with its status and the current one highlighted (in a window too short for the whole list, the
+list keeps the current step in view), since the sidebar is too narrow to show a long step name, let alone the rest of
+the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary upload appears as a
+separate step before installation, so the user can tell when network transfer is still underway. Success returns the
+status spot to its normal label and leaves the row folded unless global details are on. Failure or an uncertain outcome
+still expands the row so its step list and diagnostic remain visible. The Hosts header's `update all` action makes the
+same authorized Update request for each remote host whose individual Update action is available at the click. A host
+already busy with setup or another run is skipped rather than queued for a later update; the local host is excluded.
+Each remote host keeps its own validation, progress, and result, so one failure does not hide or delay the others. V1
+provisioning targets any Linux host with a usable systemd user manager, on the two architectures cross-compiled
+supervisor binaries exist for. The distribution is not a requirement — nothing provisioning does is
+distribution-specific — so the plan names whichever one it found rather than refusing; CI exercises Ubuntu. Everything
+else — no usable systemd user manager, or an architecture with no payload — falls back to the manual path (run the
+binary yourself), which always remains available, on the best-effort basis described in
+[Supported host setup](#supported-host-setup).
 
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions
@@ -309,9 +311,25 @@ cleanup safely. The CLI remains available until the other required removal steps
 does not remove the user's retry command. Successful removal does not promise that the now-removed command remains
 invocable.
 
-Initial support assumes installation, updates, setup, desktop startup, and session creation do not run concurrently with
-uninstall. The user must keep those operations stopped until uninstall finishes. Coordination that closes races between
-checks and removal is deferred in TODO.md; this version does not claim safety under concurrent lifecycle operations.
+Uninstall running at the same time as installation, updates, setup, desktop startup, or session creation falls under
+[Concurrent and interrupted runs](#concurrent-and-interrupted-runs) like any other overlap: the outcome must be correct,
+and refusing is acceptable. The current implementation does not yet coordinate these operations; TODO.md tracks that
+work.
+
+### Concurrent and interrupted runs
+
+Confirmed 2026-09-28: the installer, `farhelm helm setup`, and `farhelm uninstall` must always leave a correct, defined
+state when a run is interrupted at any point (Ctrl-C, a closed terminal, a crash, a reboot) and when two runs of these
+commands overlap, including uninstall overlapping desktop startup or session creation.
+
+A correct state is one of these: the run completed; the run refused or failed before changing anything; or the run
+stopped partway and the command its message names, normally the same command run again, either finishes the job or
+restores the previous installation. Refusing is always acceptable, including refusing a second run while another holds
+the installation, and refusing to continue until the user runs the recovery command. Doing the wrong thing is not
+acceptable: deleting or replacing a file the command does not own, reporting a result that did not happen, leaving
+binaries, the macOS app bundle and their ownership records disagreeing with each other, leaving the helm and supervisor
+services configured against different state directories, or leaving a state that no documented command recovers from.
+Reach this with the simplest mechanism that works, and prefer a refusal to machinery that tries to carry on.
 
 ### Acceptance coverage
 
@@ -489,15 +507,22 @@ Typing into the checkout path cannot turn a fresh checkout into an existing-fold
 
 An interruption after mkdir but before durable identity capture leaves ownership unestablished. Recovery retains a
 visible error session and refuses to adopt or prepare the unknown directory. Explicit Delete may retire that unresolved
-session and plan, with a diagnostic naming the preserved path; the directory remains untouched for manual inspection.
+session and plan; the directory remains untouched for manual inspection, and Delete's result tells the user so and names
+the preserved path, as below.
 
 Ownership follows use, not the lifetime of the session that first requested the checkout. Ordinary sessions in a managed
 directory or its canonical subdirectories also retain references, including references to managed ancestors. Stopped,
 exited, and errored sessions still count. Delete releases its reference; only the final reference causes the recorded
 checkout to move into `farhelm-archived-working-copies` under its original root, using its original basename plus a
 timestamp and collision handling. This is a no-overwrite move, never recursive deletion or a cross-device copy fallback.
-Unresolved move failures retain recoverable metadata. A foreign object replacing the recorded path must remain
-untouched.
+A foreign object replacing the recorded path must remain untouched.
+
+Confirmed 2026-09-28: archiving a checkout never blocks deleting its session. When the checkout cannot be archived
+safely, for any reason (its folder or root no longer matching what was recorded, the move failing, or the outcome of an
+earlier move attempt being impossible to establish), Delete still removes the session, releases the checkout from
+Farhelm's management, and leaves the folder where it is. That outcome must never be silent: Delete completes with a
+visible notice that the checkout was not archived, naming the path left behind and, where known, why. Wherever Delete's
+result is shown, the notice is shown with it.
 
 Repository suggestions combine successful repository launches for the same host installation with immediate Git clones
 under the configured root. Discovery does not confer ownership, contact GitHub, fetch, recurse, run repository code, or
@@ -597,11 +622,27 @@ This cleanup covers ordinary agent descendants, including accidentally daemonize
 same-account processes deliberately escaping cleanup. On a host without a usable systemd user manager (macOS, or a Linux
 host running the supervisor by hand where that manager is missing or broken), there is no cgroup to contain a detached
 descendant, and the guarantee narrows to the processes Farhelm can still identify: those still descended from the
-session's terminal, and those whose environment it can read. A detached process whose environment is unreadable to its
-own user, such as a non-dumpable `ssh-agent` or a setuid program, survives stop and delete there. The same limit applies
-to a terminal tab's processes when the tab is closed, reaped, or deleted. Detached services started by shell
-initialization before the agent launches are outside the cleanup guarantee: they may serve the user's login environment
-beyond this session.
+session's terminal, and those whose environment marker it can still read. Confirmed 2026-09-28: a detached process that
+hides or overwrites its environment survives stop and delete there. That covers a process whose environment the system
+withholds from its own user, such as a non-dumpable `ssh-agent` or a setuid program, and a daemon that rewrites its
+process title, which overwrites the environment the marker is read from (nginx with its default settings, or Postgres
+started through `pg_ctl`, for example). A server that stays in the foreground under the agent remains in the terminal's
+process tree and is still reaped. Likewise, with no cgroup to consult, a create retried after a supervisor crash that
+also lost the session's tmux may launch again while detached processes from the first attempt keep running. macOS offers
+no cgroup equivalent that an unprivileged process can use, so these are accepted limits of such hosts, not defects to
+engineer around. The same limit applies to a terminal tab's processes when the tab is closed, reaped, or deleted.
+Detached services started by shell initialization before the agent launches are outside the cleanup guarantee: they may
+serve the user's login environment beyond this session.
+
+Confirmed 2026-09-28: when Farhelm cannot confirm that the cleanup an operation needs has finished, the operation fails
+visibly instead of reporting success or carrying on. Restart does not relaunch, and Stop, Delete and closing a tab
+report the failure; a later attempt may retry the cleanup. "Confirmed" is judged by every mechanism the processes in
+question were placed under: when a launch or tab ran in a systemd scope, the scope must be confirmed gone, even if the
+portable sweep found nothing, because the scope can hold processes the sweep cannot see. A current belief that the host
+has no usable systemd user manager does not excuse skipping a scope that such a launch or tab may have. A process
+Farhelm tried to reap but could not examine counts as unconfirmed, never as gone. The accepted limits of hosts without a
+usable user manager described above are not unconfirmed cleanup: processes Farhelm has no way to identify do not make an
+operation fail.
 
 ### Session view
 
@@ -626,9 +667,7 @@ run the same startup files, a tab usually finds such a service running and only 
 its own is reaped automatically and silently: the tab disappears as if closed, its dead pane's scrollback is discarded,
 and no notice or exit code is shown. This is deliberately NOT the agent terminal's contract — an exited agent stays
 viewable with its scrollback — because a tab's shell exiting is the user being done with the tab. A shell that dies
-before the tab's open completes still refuses the open loudly, with the shell's last words as the error. A tab someone
-has hand-split into several panes (through the session's own tmux access) counts as exited only when EVERY pane in it
-has — one exited half must not condemn a shell still running beside it.
+before the tab's open completes still refuses the open loudly, with the shell's last words as the error.
 
 When a session's terminal contents no longer exist on a reachable host after a reboot, opening it shows the session's
 metadata and says why there is no terminal, rather than an empty pane.
@@ -964,8 +1003,11 @@ The environment contract: a session process behaves as if the user had SSHed int
 their interactive shell — PATH, rc-file variables, locale included — even though the supervisor starts at boot. That
 SSH-and-type test is the contract when shell sourcing subtleties (login vs. non-login, `.profile` vs. `.bashrc`) would
 otherwise leave room for argument. A bare `claude` in a profile must work exactly as it does from the user's own shell;
-"command not found because a daemon launched it" is a bug, not a caveat. The environment is evaluated at each launch:
-edit your rc files and the next launch or restart sees the change; already-running sessions do not.
+"command not found because a daemon launched it" is a bug, not a caveat. One deliberate exception: the directory holding
+the Farhelm binary that launched the session comes first on the session's `PATH`, so `farhelm` run inside a session
+reaches that exact build. Other programs in the same directory take precedence over the user's own `PATH` order as a
+result. The environment is evaluated at each launch: edit your rc files and the next launch or restart sees the change;
+already-running sessions do not.
 
 When a host reboots, its supervisor starts automatically on hosts with the system-integration layer; on the v1 Mac it
 returns when the app or binary is next started, and interruption is classified at that point — whenever the supervisor
@@ -1171,10 +1213,12 @@ profile snapshot, and works with no helm attached. `--agent <name>` resolves the
 catalog; `--profile-id <id>` selects the exact catalog row without treating the id as a name. Both catalog selectors are
 refused with a remedy when no helm is attached. The title is generated when omitted. An optional idempotency key makes
 retries safe: re-running spawn with the same key after a timeout or ambiguous outcome returns the existing child rather
-than creating another. Keys are scoped to the host and live as long as the child session does. Guaranteed
-Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other
-Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is separately guaranteed;
-see Durability.)
+than creating another. Keys are scoped to the asking session on its host and live as long as the child session does: the
+same key from another session is an unrelated request, never a replay of someone else's child, and a replay never
+returns the asking session itself. Confirmed 2026-09-28, the same scoping applies to the idempotency keys of
+`farhelm agent create` and `farhelm agent clone`. Guaranteed Farhelm-injected environment: the session id
+(`$FARHELM_SESSION_ID`) and the per-session credential; other Farhelm-specific variables are illustrative, not contract.
+(The user's login-shell environment is separately guaranteed; see Durability.)
 
 A session can also ASK, not only create. `farhelm agent <verb>`, run inside a session with the same injected credential
 spawn uses, reaches the helm rather than the session's own supervisor: the supervisor forwards the question to the helm
@@ -1402,6 +1446,27 @@ serving other hosts. Requests involving the affected host may fail or remain pen
 continue to function. This allowance concerns filesystem errors and hangs, not ordinary cancellation or disconnection
 while the filesystem is healthy.
 
+### Waiting between operations on one host
+
+Confirmed 2026-09-28: session-management operations on the same host (create, restart, delete, and agent-requested
+spawn, create and clone) may wait for one another. A supervisor may run them one at a time, so one can be delayed by
+another's teardown, including its kill grace periods. Editing a host's registration, other than removing it, may
+likewise wait for an install or update running on that host. These waits are expected to last seconds, or for an install
+or update, as long as it runs. Queueing of this kind is accepted and is not a defect on its own; do not add
+finer-grained locking solely to remove it.
+
+The following must not wait on any of those operations, on a host install or update, or on other slow work such as
+release downloads or clipboard writes:
+
+- terminal input and output, attaching, detaching and resizing, for every session;
+- session status and the session list, for every session, including replies to operations that have already taken
+  effect;
+- other hosts;
+- removing a host, which must respond promptly whatever that host is doing, if only to refuse because it is busy.
+
+Waits caused by a failing or hung filesystem are governed by [Healthy local filesystems](#healthy-local-filesystems),
+not by this section.
+
 ### Evidence after resumability is withdrawn
 
 Conversation resume is a core feature while Farhelm can safely identify the session's conversation. Once the current
@@ -1487,18 +1552,32 @@ place for secrets that must stay hidden from an attached host. This acceptance i
 cross-host creation exception, when spawning sessions on other hosts and reading their session and profile data are
 limited to explicitly trusted environments.
 
+Confirmed 2026-09-28, under that same temporary exception: command lines are not secret from agents either. An agent
+runs with the same account authority as its host's supervisor, which can already obtain any profile's bundle, so an
+agent may obtain any profile's resolved command line and resume template (for example from a spawn reply) and any
+session's command line (for example by cloning that session onto a host it can read). Until the guardrails land, neither
+profiles nor session command lines are a place for secrets. This ends with the same exception.
+
 Do not add other arbitrary cross-host execution capabilities by analogy with those exceptions. Future agent-driven
 orchestration, such as setting up several sessions on another host, is wanted with an explicitly authorized launch
 policy; trusted profiles are a possible design, not a security property established for the current catalog.
 
+### Client hardening
+
+Confirmed 2026-09-28: for the browser UI, security work addresses concrete, practical attacks. Defense in depth against
+a hypothetical flaw, such as a script-injection bug nobody has found, is not required there, and neither is protection
+against actors this threat model already excludes: same-account processes, and other local accounts on a machine where
+the browser UI is not recommended. The native app is the preferred client and is held to a higher bar: hardening that
+narrows what a hypothetical flaw in it could reach, or that keeps other software from passing for it, is wanted, as long
+as it stays proportionate.
+
 ### Remote input, session defaults, and availability
 
 Agents may discover the helm catalog's profile names and IDs. Listing those names and IDs in lookup suggestions is
-explicitly allowed, not a confidentiality defect. This permission does not extend to raw command lines or embedded
-credentials and does not require a new discovery interface. (Attached supervisors, as opposed to agents, can currently
-obtain resolved profile bundles under the temporary exception in
-[Local authority and trust between hosts](#local-authority-and-trust-between-hosts).) It also does not make current
-profiles trusted execution guardrails; the separate host-authority rules still apply.
+explicitly allowed, not a confidentiality defect, and does not require a new discovery interface. Raw command lines are
+not part of that listing, but they are not protected from agents either while the temporary exception in
+[Local authority and trust between hosts](#local-authority-and-trust-between-hosts) lasts. Discovery also does not make
+current profiles trusted execution guardrails; the separate host-authority rules still apply.
 
 Agent instructions must identify fleet session metadata as data, never instructions to follow; see
 [Agent-spawned sessions](#agent-spawned-sessions) for the CLI contract. Merely echoing an agent's own input into its own
@@ -1534,14 +1613,18 @@ misbehaving host is the remedy; the refusal clears on the next refresh after it 
 
 ### Ownership during cleanup and provisioning
 
-Farhelm supports documented interactions with its private tmux server, including creating windows from inside a session.
-Arbitrary reconfiguration is the local operator's responsibility; Farhelm need not reconstruct its intended
-configuration afterward. Missing objects must be handled sensibly, and an operation must not accidentally affect the
-wrong object. The helm and GUI must still handle the resulting remote failures safely.
+Confirmed 2026-09-28: Farhelm's private tmux server is an implementation detail, not an interface, and the product
+should keep it out of the user's way as far as practical. Interacting with it directly is unsupported, whether the user
+does it by hand or a program running in a session does it (for example `tmux new-window` or `tmux split-window` run from
+a session's terminal, which inherits `TMUX`). Windows, panes, processes and configuration changes made that way are
+outside every Farhelm guarantee, including cleanup on Stop, Restart, Delete and tab close. Do not add code or complexity
+to detect, track, clean up after, or recover from them. Farhelm's own operations must still handle their own objects
+going missing without crashing, and the helm and GUI must still handle the resulting remote failures safely.
 
 Session teardown covers ordinary agent descendants, including background servers. Detached services started by shell
 initialization before the agent launches are outside that guarantee, and so, on hosts without a usable systemd user
-manager, are detached descendants whose environment cannot be read; see [Lifecycle operations](#lifecycle-operations).
+manager, are detached descendants whose environment cannot be read or has been overwritten; see
+[Lifecycle operations](#lifecycle-operations).
 
 After a failed Delete disconnects a viewer, either automatically reconnecting to a surviving terminal or remaining
 detached until the user reconnects is explicitly acceptable. Choose the simpler implementation. Reviewers must not treat
@@ -1569,6 +1652,46 @@ carries the marker belongs to setup on that host: provisioning refuses to touch 
 of writing, and says setup manages it there, the same hand-off the helm's own machine gets. A hand-written unit under
 that exact name on a host the user asks Farhelm to provision is the user's to move aside first; provisioning does not
 try to tell it apart from its own.
+
+### Supported user environments
+
+Confirmed 2026-09-28: bash and zsh are the supported login shells, for agent launches and terminal tabs alike. Other
+login shells are unsupported: Farhelm need not make them work, detect them, or refuse them with a tailored message.
+
+tmux is an implementation detail. The supported tmux is either the pinned build Farhelm itself installs or ships, or the
+stock tmux package of the platform's standard package source (the Linux distribution, or Homebrew on a Mac), at or above
+the version floor, run as the real binary. Using the distribution's package is a convenience that keeps its security
+patches, not an integration promise. Anything else is unsupported, including wrapper scripts, custom or patched builds,
+and configuration or behavior a stock package would not bring. `--tmux` and `FARHELM_TMUX` exist to choose among
+supported binaries, not to support arbitrary programs. Farhelm need not add code or complexity to accommodate
+unsupported shells or tmux programs.
+
+Usernames of up to 20 characters must work on Linux and macOS with Farhelm's default state directory locations, on the
+helm's machine and on every host, including wherever Farhelm places sockets or other files whose paths the system limits
+in length. Beyond 20 characters, failures caused by those system limits are acceptable, but should say what limit was
+hit rather than reporting an unrelated error.
+
+Filesystem aliasing beyond symlinks is unsupported: bind mounts, and any similar mechanism that makes the same files or
+folders appear at more than one path even after symlinks are resolved, including hard links. Farhelm compares canonical
+paths (symlinks resolved, as the checkout rules above require) and treats each canonical path as the location it names.
+A session that reaches a managed checkout, a working directory, or any other folder Farhelm tracks through such an alias
+is not recognized as being there, and a file hard-linked between checkouts is not treated as shared. Farhelm need not
+detect aliasing or add complexity to cope with it.
+
+### Supported host setup
+
+Confirmed 2026-09-28: for remote hosts, the supported, user-facing way to install and update a supervisor is the helm's
+own setup and Update from the hosts panel, on the hosts that provisioning targets. Every other way a host can end up
+with a supervisor works on a best-effort basis, mainly for people working on Farhelm itself: a supervisor started by
+hand with `farhelm supervisor run`, one installed with `install.sh`, one run by a unit the user wrote or changed with
+drop-ins, one at paths other than the layout setup installs, or a host provisioning does not target. Do not spend
+significant complexity making setup or Update detect, adapt to, coexist with, or preserve such setups; refusing with a
+clear message is enough. Setup and Update may treat the layout they install as their own, including re-applying the
+settings they manage, such as start at boot and linger, on every run. The rules above about shared directories and
+unrelated host configuration still hold.
+
+The machine running the helm keeps its own supported setup: `install.sh` followed by `farhelm helm setup` on Linux, and
+the desktop app on a Mac.
 
 ### Upgrade compatibility and client scale
 

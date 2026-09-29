@@ -426,15 +426,20 @@ For each item, complete these steps before asking the user for an outcome:
 3. State the assessment to the user, with the evidence and any uncertainty: confirmed, partly correct, incorrect,
    already addressed, or unresolved. Keep correctness separate from whether the issue is worth addressing.
 
+When verification shows a finding is already fixed on main, do not ask the user for an outcome: record it as `discard`
+with the comment "already fixed" and the fixing commit or PR, remove its feedback file and index entry immediately, mark
+execution complete, and move on. `discard` is used because it carries no judgment about the finding.
+
 Before presenting an item for a decision, check whether its behavior is explicitly accepted by the current SPEC.md or
-SPEC_impl.md, or its fix is already covered by an item in TODO.md's `Planned` bucket. Verify the actual trigger,
-consequence, and scope against that acceptance or planned work; sharing a subsystem or keyword is not enough. If fully
-covered, skip renewed discussion and record `other` with the exact spec section or planned item as the reason. Remove
-the feedback file and its index entry immediately, and record execution as complete for that queue cleanup; do not leave
-the item to be skipped again in later sessions. Already planned means acknowledged work, not an implemented fix. Do not
-implement it, broaden its scope, or create another TODO merely because the same issue appears in feedback. If only part
-is covered, bring the uncovered part to the user. Briefly report skipped items and their basis, then continue to the
-next undecided item. This is an exception to the per-item decision question below.
+SPEC_impl.md, its fix is already covered by an item in TODO.md's `Planned` bucket, or it matches a review-only filter in
+`review_feedback_queue/FILTER.md`. Verify the actual trigger, consequence, and scope against that acceptance, planned
+work, or filter; sharing a subsystem or keyword is not enough. If fully covered, skip renewed discussion and record
+`other` with the exact spec section, planned item, or filter as the reason. Remove the feedback file and its index entry
+immediately, and record execution as complete for that queue cleanup; do not leave the item to be skipped again in later
+sessions. Already planned means acknowledged work, not an implemented fix. Do not implement it, broaden its scope, or
+create another TODO merely because the same issue appears in feedback. If only part is covered, bring the uncovered part
+to the user. Briefly report skipped items and their basis, then continue to the next undecided item. This is an
+exception to the per-item decision question below.
 
 Assume the user knows Farhelm as a tool but has read neither the feedback nor the relevant code. Begin every item with
 plain-language context for the thing under discussion: name the user-facing feature or operation before describing any

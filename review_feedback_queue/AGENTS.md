@@ -9,6 +9,16 @@ but were not fixed in the review itself. One file per finding, plus an index.
   in this directory. Updating it is part of every change here, not a follow-up.
 - `<mnemonic-name>.md` is one piece of feedback, named briefly after the problem (`disconnect-race.md`,
   `stale-cache-on-rename.md`), never a number or a date.
+- `FILTER.md` holds the filters that keep low-value findings from automated review of committed code out of the queue
+  and out of triage. It is not a feedback file and is not listed in `INDEX.md`. Its rules decide only what is worth a
+  human's triage time; they are not product or coding rules, and nothing outside this directory's recording and triage
+  work should apply them.
+
+## Before recording a finding
+
+Check each finding from an automated review of committed code against `FILTER.md`, and do not record one that fully
+matches a filter there. The filters never apply to findings about a change still under review, or to a problem a person
+reported or asked to have fixed.
 
 ## What goes in a feedback file
 
@@ -49,7 +59,8 @@ decision and removes or narrows the item in its own draft PR. A `discard` outcom
 at this time", not that the feedback is wrong; its execution removes the file and index entry without a spec or code
 change. The outcome ledger lives outside this directory and is not a feedback file to add to `INDEX.md`.
 
-Exception: when triage verifies that a finding is fully covered by an accepted specification rule or an existing
-`Planned` item in TODO.md, record the basis in the ledger and remove the feedback file and index entry immediately.
-These items must not remain in the queue to be skipped repeatedly. Completing this queue cleanup does not mean the
-planned implementation is complete.
+Exception: when triage verifies that a finding is fully covered by an accepted specification rule, an existing `Planned`
+item in TODO.md, or a filter in `FILTER.md`, record the basis in the ledger and remove the feedback file and index entry
+immediately. These items must not remain in the queue to be skipped repeatedly. Completing this queue cleanup does not
+mean the planned implementation is complete. A filter match likewise says nothing about whether the behavior is
+acceptable in code; it only means the finding is not worth triage.

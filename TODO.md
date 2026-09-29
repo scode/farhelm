@@ -92,6 +92,23 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   details are to be worked out, including how to treat link text that is not a URL at all (a file name, "#123", "click
   here"), which never matches but is not the lookalike case this is meant to catch. SPEC.md (Terminal experience)
   currently calls the hover display the whole safeguard, so it changes with this.
+- **Coordinate uninstall with installation, setup, and runtime startup.** SPEC.md's "Concurrent and interrupted runs"
+  now requires a correct outcome (refusing is fine) when uninstall overlaps installation, updates, setup, desktop
+  startup, or session creation; the earlier carve-out that assumed these never overlap was dropped on 2026-09-28. Share
+  the relevant locks and revalidate removal targets under them, or refuse, so none of these can race uninstall's checks
+  and deletion. Prefer the simplest mechanism that gives a correct result.
+- **Keep sessions from stumbling into the private tmux.** SPEC.md now says the private tmux server is an implementation
+  detail and that interacting with it directly is unsupported ("Ownership during cleanup and provisioning"). But every
+  agent terminal and tab inherits `TMUX` pointing at that server, so a plain `tmux new-window` or `tmux split-window`,
+  typed by the user or run by an agent (for example to start a dev server in its own window), lands in Farhelm's tmux
+  instead of failing or reaching the user's own tmux. Whatever it starts there escapes Stop, Restart, Delete and tab
+  close. Find out how to make that accidental path unlikely without adding real complexity: unsetting `TMUX` (and
+  `TMUX_PANE`) in the agent and tab environments is the obvious candidate, but check what it breaks in Farhelm's own
+  launch and tab paths, and whether running tmux then silently starts or attaches to the user's own default server,
+  which may be just as confusing. This came up in review-feedback triage on 2026-09-28, from findings that agent-opened
+  tmux windows and hand-split tab panes escape cleanup; the decision was to declare that use unsupported rather than
+  reap it, with this as the follow-up to make it hard to do by accident. Deliberate access, such as pointing tmux at the
+  socket explicitly, stays out of scope.
 
 ## Doc todo
 
@@ -107,6 +124,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Tell users that closing, exiting, or deleting a terminal tab also stops services the tab shell's startup files started
   there first (an `ssh-agent`, an editor daemon, a detached tmux server), and that services started for the agent launch
   are not affected. SPEC.md's session view section states the rule.
+- Tell users what Stop, Restart, Delete and closing a tab can and cannot kill on a Mac, and on a Linux host whose
+  supervisor runs without a usable systemd user manager. There, a background process that has detached from the
+  session's terminal is found only through an environment marker, so one that hides or overwrites its environment
+  survives: non-dumpable and setuid programs, and daemons that rewrite their process title, such as nginx with default
+  settings or Postgres started through `pg_ctl`. Servers kept in the foreground under the agent are still stopped. Point
+  Mac users at running such servers in the foreground, or stopping them themselves. SPEC.md's lifecycle operations
+  section states the rule.
+- Tell users that bash and zsh are the supported login shells on every host: agents and terminal tabs start through the
+  login shell, and other shells, csh and tcsh included, may fail to launch them. SPEC.md's supported user environments
+  section states the rule.
 
 ## Tricky bugs
 
@@ -384,6 +411,17 @@ are large mostly because of their tests.
 
 ## Maybe later
 
+- **Consider dropping Linux support without a systemd user manager.** Today a Linux supervisor that finds no usable
+  `systemd --user` falls back to the same portable process sweep macOS uses, with the weaker cleanup guarantee SPEC.md's
+  lifecycle operations section describes. The macOS path must stay, because running on an ordinary MacBook is a goal,
+  but on Linux the fallback mainly serves hand-run supervisors and hosts whose user manager is missing or broken.
+  Dropping it would narrow the support and test matrix; the code saving is small, since the sweep itself is shared with
+  macOS and only the `/proc` reader is Linux-specific. Open question before deciding: a probe that times out is already
+  retried a minute later, but a definite "no usable manager" answer is cached for the supervisor's lifetime, so a
+  systemd host whose user manager is briefly broken when the supervisor first probes keeps the weaker sweep until the
+  supervisor restarts; dropping the fallback would mean refusing to launch there instead, or probing again. Came up in
+  review-feedback triage on 2026-09-28.
+
 - **Native `<dialog>` for the app's modal dialogs.** The restart-with dialog, the rename dialog (`rename.rs`), and the
   session launcher (`list/create_form.rs`, `install_composer_focus_trap`) are each a plain `div` with `role="dialog"`, a
   fixed backdrop, and a keydown-based Tab trap written in JavaScript. The restart-with dialog also marks the rest of the
@@ -418,11 +456,6 @@ are large mostly because of their tests.
 - Reconsider the first-use configuration experience for `gh:` launches when no working-copy root is configured. The
   first version refuses the launch and points to the CLI command; consider an inline GUI flow on initial use or another
   improvement that makes setup easier. Keep the general preference for CLI configuration of rarely changed settings.
-
-- Coordinate uninstall with installation, setup, and runtime startup. Share the relevant locks and revalidate removal
-  targets under them so an update, setup, desktop launch, or new session cannot race uninstall's checks and deletion.
-  Deferred from initial standalone uninstall support; that first version assumes these operations do not run
-  concurrently.
 
 - Extend Muse beyond basic terminal launching: integrate per-launch hooks/instructions, capture the correct conversation
   identity for resume, and recognize Muse's waiting/status signals. Built-in `muse` and `muse-yolo` profiles currently
