@@ -839,6 +839,10 @@ whatever the agent renders is what you see. There is no composer, no message abs
   failure — permission policy, secure-context requirements, and an engine's own clipboard behavior are outside this
   system's control — a deliberate, named exception to the Errors and diagnostics section's surface-every-error rule
   below, not a lapse in it.
+- Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind. A hyperlink a
+  program emits (OSC 8) can underline text that differs from where it goes, so hovering it shows the exact target first,
+  with its host emphasized; the hover display is the whole safeguard. Plain URLs printed as text need no such display,
+  because what is shown is what opens.
 
 ## Attachments
 

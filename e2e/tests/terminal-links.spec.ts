@@ -970,6 +970,22 @@ test("an OSC 8 span wins over its https display text, beside a working bare URL"
     await waitForTermText(page, display);
     await waitForTermText(page, bare);
 
+    // Hovering the OSC span shows where it really goes (its TARGET, not its
+    // https-looking display text), with the target's host emphasized, and
+    // the display goes away when the pointer leaves. The click below still
+    // opens directly, with no dialog.
+    const targetDisplay = page.locator(".terminal-link-target");
+    await hoverLink(page, display, display);
+    await expect(targetDisplay).toBeVisible();
+    await expect(targetDisplay.locator(".terminal-link-target-url")).toHaveText(target);
+    await expect(targetDisplay.locator("strong")).toHaveText("target.example");
+    const box = await targetDisplay.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box && viewport && box.x >= 0 && box.x + box.width <= viewport.width).toBe(true);
+    expect(box && viewport && box.y >= 0 && box.y + box.height <= viewport.height).toBe(true);
+    await page.mouse.move(1, 1);
+    await expect(targetDisplay).toBeHidden();
+
     await clickLink(page, display, display);
     await clickLink(page, bare, bare);
 

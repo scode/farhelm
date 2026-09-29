@@ -24,7 +24,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const { isPlainWebUrl } = require("../assets/terminal-links.js");
+const {
+  isPlainWebUrl,
+  linkTargetParts,
+  shortenedTarget,
+  displayedTarget,
+} = require("../assets/terminal-links.js");
 
 const SHIPPED_SOURCE = fs.readFileSync(
   path.join(__dirname, "..", "assets", "terminal-links.js"),
@@ -171,4 +176,51 @@ test("the opener passes the URI through unrewritten on both branches", () => {
   const desktop = createWindow("dioxus:");
   desktop.links.openTerminalUrl(uri);
   assert.equal(desktop.assignCalls[0], uri);
+});
+
+// Why this matters: an OSC 8 link's underlined text is whatever a program
+// printed, so the hover display is the only place a user sees where a click
+// really goes. Spec: the parts come from the parsed URL, the host a browser
+// would contact is the emphasized part (credentials before `@` are not the
+// host), an internationalized host shows as punycode, and an unparsable
+// target is shown whole without emphasis.
+test("linkTargetParts emphasizes the host a browser would actually contact", () => {
+  const host = (uri) => linkTargetParts(uri).filter((part) => part.host).map((part) => part.text);
+  const joined = (uri) => linkTargetParts(uri).map((part) => part.text).join("");
+
+  assert.deepEqual(host("https://github.com/scode/farhelm?x=1#y"), ["github.com"]);
+  assert.equal(joined("https://github.com/scode/farhelm?x=1#y"), "https://github.com/scode/farhelm?x=1#y");
+  assert.deepEqual(host("https://github.com@evil.example/login"), ["evil.example"]);
+  assert.equal(joined("https://github.com@evil.example/login"), "https://github.com@evil.example/login");
+  assert.deepEqual(host("https://ex\u0430mple.com/"), ["xn--exmple-4nf.com"]);
+  assert.deepEqual(linkTargetParts("not a url"), [{ text: "not a url", host: false }]);
+  assert.equal(joined("https://:secret@example.com/path"), "https://:secret@example.com/path");
+  assert.deepEqual(host("https://:secret@example.com/path"), ["example.com"]);
+});
+
+// Why this matters: a target thousands of characters long (credentials
+// padding before `@host`, say) must not push what a click contacts out of
+// the hover display. Spec: short targets are shown whole; long ones keep
+// their start and end around a marker that says how many characters were
+// left out, and the display stays bounded (the host has its own line).
+test("shortenedTarget keeps short targets whole and bounds long ones honestly", () => {
+  assert.equal(shortenedTarget("https://example.com/a"), "https://example.com/a");
+  const long = `https://${"a".repeat(5000)}@evil.example/path`;
+  const shown = shortenedTarget(long);
+  assert.ok(shown.length < 400, shown.length);
+  assert.ok(shown.startsWith("https://aaaa"));
+  assert.ok(shown.endsWith("@evil.example/path"));
+  assert.match(shown, /…\[\d+ characters\]…/);
+});
+
+// Why this matters: the hover line promises the exact target, and an empty
+// query or fragment is part of it (it can change what a server does). Spec:
+// the displayed target keeps a trailing `?`, `#` or `?#`, and shows the
+// host in the punycode form a browser contacts.
+test("displayedTarget keeps empty query and fragment delimiters", () => {
+  assert.equal(displayedTarget("https://example.com/path?"), "https://example.com/path?");
+  assert.equal(displayedTarget("https://example.com/path#"), "https://example.com/path#");
+  assert.equal(displayedTarget("https://example.com/path?#"), "https://example.com/path?#");
+  assert.equal(displayedTarget("https://ex\u0430mple.com/"), "https://xn--exmple-4nf.com/");
+  assert.equal(displayedTarget("not a url"), "not a url");
 });

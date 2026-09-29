@@ -2997,6 +2997,18 @@
             activate(_event, uri) {
               window.farhelmTerminalLinks.openTerminalUrl(uri);
             },
+            // An OSC 8 link's underlined text can differ from where it goes,
+            // so hovering shows the exact target (SPEC.md, Terminal
+            // experience). Activation above stays a direct open: the hover
+            // display is the whole safeguard, never a confirmation.
+            // The display is placed inside this terminal's own element, so
+            // it goes away with the terminal (see `showLinkTarget`).
+            hover(event, uri) {
+              window.farhelmTerminalLinks.showLinkTarget(event, uri, term.element);
+            },
+            leave() {
+              window.farhelmTerminalLinks.hideLinkTarget(term.element);
+            },
           },
         });
         const fit = new FitAddon.FitAddon();
