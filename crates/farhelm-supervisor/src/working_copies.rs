@@ -73,6 +73,25 @@ use thiserror::Error;
 /// same-device directory.
 pub const ARCHIVE_DIR_NAME: &str = "farhelm-archived-working-copies";
 
+/// The longest checkout path, in bytes, that admission accepts: short enough
+/// that its longest archive destination still fits the platform's path limit.
+///
+/// Archiving turns `<root>/<name>` into
+/// `<root>/farhelm-archived-working-copies/<name>-<YYYYMMDDTHHMMSSZ>`, and
+/// after a name collision appends `-<32 hex digits>` as well, 82 bytes
+/// longer in all. A checkout admitted within that margin of the limit could
+/// never be archived: every rename fails with `ENAMETOOLONG`. The limit is
+/// the platform's `PATH_MAX` less its terminating NUL (4096 bytes on Linux,
+/// 1024 on macOS), because the archive rename passes both full paths to one
+/// system call.
+pub const MAX_ADMITTED_CHECKOUT_PATH: usize = libc::PATH_MAX as usize - 1 - ARCHIVE_PATH_GROWTH;
+
+/// How many bytes archiving can add to a checkout path: a separator and the
+/// archive folder, the `-<UTC timestamp>` suffix, and one collision suffix.
+const ARCHIVE_PATH_GROWTH: usize = 1 + ARCHIVE_DIR_NAME.len() + "-YYYYMMDDTHHMMSSZ".len() + 1 + 32;
+// SPEC.md and the docs above quote this figure; keep them in step.
+const _: () = assert!(ARCHIVE_PATH_GROWTH == 82);
+
 /// Hard ceiling on directory entries an occupancy scan will inspect. A
 /// root at or beyond this size refuses to answer rather than reporting a
 /// wrong "lowest free" name (naming two working copies alike would break
@@ -1467,13 +1486,16 @@ fn unjournal(conn: &Connection, id: &str) -> Result<()> {
 /// `ENOTSUP`/`EOPNOTSUPP`; network filesystems such as NFS and CIFS, and
 /// some FUSE mounts, are the usual cause), the destination is on another
 /// filesystem (`EXDEV`), permission is missing (`EACCES`, `EPERM`), or the
-/// filesystem is read-only (`EROFS`). Anything else, an I/O error or a
+/// filesystem is read-only (`EROFS`), or the destination path is too long
+/// to resolve (`ENAMETOOLONG`, for a checkout admitted before admission
+/// reserved room for the archive suffix). Anything else, an I/O error or a
 /// timeout above all, is kept as "may have moved", because on a network
 /// filesystem the server can complete a rename whose reply is lost.
 fn rename_refused_without_moving(error: &std::io::Error) -> bool {
     // A list rather than a pattern: `ENOTSUP` and `EOPNOTSUPP` are the same
     // number on Linux and different ones on macOS.
-    const REFUSALS: [i32; 8] = [
+    const REFUSALS: [i32; 9] = [
+        libc::ENAMETOOLONG,
         libc::EINVAL,
         libc::ENOSYS,
         libc::ENOTSUP,
