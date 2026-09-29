@@ -1174,3 +1174,26 @@ Class: unknown
 
 Cause: unknown — a lock-ordering deadlock between the two handlers would also time out here, so the 10-second bound
 under full-battery load is not established as the explanation.
+
+## 2026-09-29 — `restricted_inherited_create_waits_for_parent_delete_then_refuses` (crates/farhelm-supervisor/src/service/handlers.rs)
+
+The Delete sibling of the entry above failed the same way
+(`parent mutation and restricted create must both finish:
+Elapsed(())` after 10 seconds) in the fourth attempt of the
+same v0.19.0-rc.2 release job (GitHub Actions run `36591492646`, retained recorder run
+`b6db54a7-c603-47ad-94e8-7b57e22c609b`, clean commit `af8f5ab65f15078a1295e724758fa0abc3837421`, same selection, 4
+nextest slots with retries 0, pinned tmux 3.7c with executable SHA256
+`00dddfb2de5c68b3efc121f9222c86076d6ba9f620a95ec2194689d874e12f49`, locale `C.UTF-8`, no ambient `FARHELM_*`). So the
+pair failed in two of the job's four attempts. The captured trace ends at the teardown's debug line reporting no systemd
+user manager, 46 ms into the test, and shows nothing for the remaining ten seconds. The user-manager probe had therefore
+already answered quickly, and the silence falls after it, in upload cancellation or the process-tree sweep. Local
+attempts to reproduce on Linux x86_64 all passed: 30 plain repetitions of the pair, 20 with `systemd-run` and
+`systemctl` replaced by fast-failing stand-ins to force the sweep-only path CI takes, 1 with stand-ins that hang (the
+probe's own five-second query bound held and the pair passed in about five seconds), and 25 with the pair and three busy
+loops pinned to a single CPU. One untested lead: both tests use the literal session id `mutation-parent`, and a
+sweep-only teardown selects every process on the host whose environment carries that id, so the two tests running at
+once could reach each other's processes. Disposition: open (TODO.md); the release job was rerun.
+
+Class: unknown
+
+Cause: unknown
