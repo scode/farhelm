@@ -232,6 +232,13 @@ Re-running the installer updates the installation. Its default is the latest sta
 specific release, including a prerelease. Updating the software preserves user data. Automatic updates are outside this
 initial uninstall scope, as are package-manager installations and changes to the packaging layout.
 
+The installer intentionally trusts GitHub over TLS and the upstream repository: it downloads release archives and their
+`SHA256SUMS` from the project's GitHub releases over HTTPS only (no plain-HTTP redirects) and checks archives against
+those checksums, but it does not verify the release signature the helm checks when provisioning other hosts, because a
+fresh machine has no pinned key or verifier to check it with. The helm's release mirror setting
+(`FARHELM_RELEASE_BASE_URL`) has no effect on the installer; a mirror that is safe for the helm, which verifies
+signatures, would not be safe for a download that does not.
+
 Installation follows the same ownership rule as removal: a file is not destroyed merely because its name matches an
 executable the installer writes. The installer replaces an existing `farhelm` or `farhelm-desktop` outright only when
 its checksum matches what the executable-directory ownership record says the installer last put there. Anything else at

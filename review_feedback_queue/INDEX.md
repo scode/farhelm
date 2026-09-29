@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `installer-mirror-var-drops-https-no-signature.md` — install.sh honours the helm's FARHELM_RELEASE_BASE_URL, dropping
-  HTTPS pinning with no minisign check.
 - `release-gate-runs-unpinned-privileged-container-before-signed-build.md` — the release build job runs an unpinned
   `centos:stream9` image `--privileged` on the runner before `dist build`, so a poisoned image yields a validly signed
   release.

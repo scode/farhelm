@@ -176,7 +176,7 @@ class InstalledUninstall(unittest.TestCase):
 
     def install(self, *, old=False, custom=False, no_bundle=False):
         """Run the actual shell installer and independently verify its CLI bytes."""
-        env = dict(self.env, FARHELM_RELEASE_BASE_URL=self.url + ("/old" if old else "/current"),
+        env = dict(self.env, FARHELM_INSTALL_TEST_BASE_URL=self.url + ("/old" if old else "/current"),
                    FARHELM_VERSION="0.0.1" if old else self.version)
         if custom:
             self.install_dir = self.home / "custom path 'with quotes'" / "bin"
