@@ -3630,7 +3630,13 @@
   itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `linger_failure_outcome` (provisioning/backend.rs) degrades the optional linger step for any
+  failure of the remote command (a recognized refusal keeps its wording; any other non-zero status other than ssh's 255
+  reports the status only, with the host's stderr logged rather than shown), so an Update goes on to restart the
+  supervisor. A failure to reach the host (255 or no status) stays fatal. The step order is unchanged: with every
+  command failure degraded, running linger after restart would change nothing for the user. Regression test
+  `any_remote_linger_failure_degrades_instead_of_failing_the_run`. jj change `lrlkyvvqlkwq`, bookmark
+  `pr/linger-failure-degrades`, draft PR [#1181](https://github.com/scode/farhelm/pull/1181/changes).
 
 ## add-confirm-rewrites-row-before-busy-check.md
 

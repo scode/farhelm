@@ -2116,12 +2116,18 @@ impl ProvisioningBackend for SystemBackend {
                 if output.code == Some(0) {
                     return Ok(ActionOutcome::Completed);
                 }
-                if linger_was_refused(output.code, &output.stderr) {
-                    return Ok(ActionOutcome::Degraded(
-                        "linger was refused; starts at login, not at boot".to_string(),
-                    ));
+                let outcome = linger_failure_outcome(output.code, &output.stderr);
+                if matches!(outcome, Ok(ActionOutcome::Degraded(_))) {
+                    // The host's own words go to the log, not the step
+                    // message: remote stderr is untrusted text, and the
+                    // step only needs to say linger is off.
+                    warn!(
+                        code = ?output.code,
+                        stderr = %output.stderr.trim(),
+                        "enabling linger failed; the supervisor starts at login, not at boot"
+                    );
                 }
-                Err(BackendFailure::new("enabling linger", output.stderr))
+                outcome
             }
             #[cfg(test)]
             LingerBehavior::Simulated(Ok(())) => Ok(ActionOutcome::Completed),
@@ -2275,6 +2281,36 @@ pub(super) fn hex_sha256(bytes: &[u8]) -> String {
 pub(super) fn tmux_meets_floor(output: &str) -> bool {
     farhelm_supervisor::tmux::parse_tmux_version(output)
         .is_ok_and(|version| version >= farhelm_supervisor::tmux::TMUX_FLOOR)
+}
+
+/// What a failed `loginctl enable-linger` means for the run.
+///
+/// Linger is the optional step (SPEC.md Topology: an optional step that
+/// cannot be done is reported and skipped), and it runs before an Update
+/// restarts the supervisor onto its new binary. So any failure of the remote
+/// command itself degrades the step, whatever loginctl said: a missing
+/// loginctl, an unreachable system bus, or a refusal worded in a way nothing
+/// here recognizes would otherwise fail every Update of that host, leaving it
+/// on the old version with the new files already installed. Only a failure
+/// of ssh itself (status 255, or no status) stays fatal, because then the
+/// host was not reached at all and the steps after this one cannot work
+/// either.
+pub(super) fn linger_failure_outcome(
+    code: Option<i32>,
+    stderr: &str,
+) -> Result<ActionOutcome, BackendFailure> {
+    if linger_was_refused(code, stderr) {
+        return Ok(ActionOutcome::Degraded(
+            "linger was refused; starts at login, not at boot".to_string(),
+        ));
+    }
+    match code {
+        Some(code) if code != 0 && code != 255 => Ok(ActionOutcome::Degraded(format!(
+            "linger could not be enabled (loginctl exited with status {code}); starts at login, \
+             not at boot"
+        ))),
+        _ => Err(BackendFailure::new("enabling linger", stderr.to_string())),
+    }
 }
 
 /// Recognize only a loginctl authorization refusal after the remote command
