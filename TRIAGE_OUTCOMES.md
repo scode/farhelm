@@ -2219,7 +2219,12 @@
   the flag, and Replace sets it when its confirmation showed nothing alive. A failed sidebar delete refreshes the
   listing. Tests: supervisor e2e refusal while alive, the lone-tab-after-agent-window case, helm forwarding, and the
   UI's delete URL. PR [#1152](https://github.com/scode/farhelm/pull/1152/changes), jj change `vnrtroqw`, bookmark
-  `pr/delete-rechecks-liveness`.
+  `pr/delete-rechecks-liveness`. Follow-up: the UI test the completion criteria require was missing when #1152 landed.
+  `e2e/tests/delete-precondition.spec.ts` adds it: an unconfirmed Delete on an ended, tabless row sends
+  `only_if_nothing_alive=true`, and an injected 409 shows as the row's delete error, keeps the row, opens no
+  confirmation and re-reads the listing; it passed on Chromium and WebKit. PR
+  [#1160](https://github.com/scode/farhelm/pull/1160/changes), jj change `qpszsumk`, bookmark
+  `pr/delete-precondition-browser-test`.
 
 ## header-replace-confirm-ignores-cancel.md
 
