@@ -240,15 +240,23 @@ default below applies; guessing wrong publishes the wrong binaries or version to
 - The VERSION: is this the next attempt at the SAME candidate — a previous `X.Y.Z-rc.N` exists for the target version
   and this continues it, so it is `X.Y.Z-rc.N+1` — or the FIRST rc of a new target version? If the latter, which
   component bumps is the maintainer's semantic call, not something to infer from the diff: patch (`X.Y.Z+1-rc.1`), minor
-  (`X.Y+1.0-rc.1`), or major. Name the exact resulting version string when asking, so the answer is a version, not a
-  category.
+  (`X.Y+1.0-rc.1`), or major. The default below makes that call "minor" unless the request names another version.
 
-An explicit request for an RC release without a version means `X.Y.Z-rc.N+1` IF AND ONLY IF the most recently published
-release is `X.Y.Z-rc.N`. Check published releases including prereleases, ordered by publication time; GitHub's
-`releases/latest` endpoint excludes prereleases and cannot answer this question. Announce the exact next version and
-proceed without asking about it. If the most recent release is stable, a dev release, or anything other than an RC — or
-there is no published release — still ask about the version. Do not fall back to an older RC. An explicit version always
-wins, the base still needs to be stated or confirmed, and an existing tag must never be reused.
+An explicit request for an RC release without a version has a default, decided by the most recently published release.
+Check published releases including prereleases, ordered by publication time; GitHub's `releases/latest` endpoint
+excludes prereleases and cannot answer this question.
+
+- If the most recent release is `X.Y.Z-rc.N`, the request continues that candidate: `X.Y.Z-rc.N+1`. Do not fall back to
+  an older RC.
+- Otherwise (the most recent release is stable, a dev release, or anything other than an RC), the request starts a new
+  minor candidate. Take the most recent stable `vA.B.C` and cut `A.B+1.0-rc.1`. The maintainer asked for this default on
+  2026-09-29 so that starting a new candidate does not stop to ask for a version in the common case.
+
+Announce the exact version and proceed without asking about it. Stop and ask instead when there is no published stable
+release to bump from, or when the default's tag already exists (a dev release published after an RC can make the
+"otherwise" branch land on a version that was already cut). An explicit version always wins, so a patch or major
+candidate is requested by naming it. The base still needs to be stated or confirmed, and an existing tag must never be
+reused.
 
 With both settled, the process is:
 
