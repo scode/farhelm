@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `session-header-raw-peer-text.md` — the session header shows title/cwd/command raw and copies raw bytes, so bidi text
-  can make copied commands differ from shown ones.
 - `titles-raw-in-confirm-prompts.md` — titles render unescaped in delete/replace confirmations and rows, so agent-set
   titles can impersonate another session.
 - `display-peer-misses-invisible-chars.md` — display_peer's escape list misses invisible characters, so two identities
