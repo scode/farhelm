@@ -45,8 +45,6 @@ One line per open item. This file must always match the feedback files in this d
   shared release dirs fail every run.
 - `embedded-payload-cleanup-blocks-helm-start.md` — a failure deleting the retired embedded-payloads cache aborts helm
   startup.
-- `setup-partial-unit-write-mismatch.md` — helm setup can fail after rewriting only the supervisor unit, leaving a
-  mismatched helm/supervisor pair.
 - `no-supervisor-setup-splits-state-dir.md` — setup --no-supervisor leaves setup's own supervisor on the old state dir
   while the helm is pinned to the new one.
 - `receiptless-app-bundle-blocks-uninstall.md` — on macOS a Farhelm.app without a receipt refuses the whole uninstall,

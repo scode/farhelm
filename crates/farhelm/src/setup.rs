@@ -636,40 +636,50 @@ fn install(
     // Whether each planned unit's bytes differ from what is on disk. What
     // to do about a unit that was RUNNING the old bytes is recorded on
     // disk instead, by `owe_a_restart` — see `restart_marker`.
-    let mut changed_units = Vec::new();
-    for (unit, existing) in planned.iter().zip(&existing) {
-        let changed = existing.as_deref() != Some(unit.text.as_str());
-        if opts.dry_run {
+    //
+    // Two passes over the changed units, not one: every step that can fail
+    // before a write (the status query, the restart marker) runs for BOTH
+    // units before either file is written, and the writes then happen back
+    // to back. Interleaved, a failure on the helm unit's query or marker
+    // left the supervisor unit already rewritten beside the old helm unit;
+    // when the run changed something both pin (the state directory, the
+    // binary path), the next reload started a pair that cannot find each
+    // other (SPEC.md "Concurrent and interrupted runs").
+    let changed_units: Vec<bool> = planned
+        .iter()
+        .zip(&existing)
+        .map(|(unit, existing)| existing.as_deref() != Some(unit.text.as_str()))
+        .collect();
+    if opts.dry_run {
+        for (unit, changed) in planned.iter().zip(&changed_units) {
             // The preview shows the status query too, because the restart
             // it decides is the one command here that can interrupt a
             // running helm — the last thing to spring on somebody who
             // asked what would happen.
-            if changed {
+            if *changed {
                 would_run(report, &["is-active", unit.name]);
             }
             line!(
                 report,
                 "{} {}\n{}",
-                if changed { "would write" } else { "unchanged" },
+                if *changed { "would write" } else { "unchanged" },
                 unit.path.display(),
                 unit.text
             );
-        } else if changed {
+        }
+    } else {
+        for (unit, changed) in planned.iter().zip(&changed_units) {
             // Asked BEFORE the write, because after it there is no way to
             // tell a unit that was already running from one this run just
             // started.
-            if unit_is_active(units, report, unit.name)? {
+            if *changed && unit_is_active(units, report, unit.name)? {
                 // ...and RECORDED before the write, because everything
                 // between here and the restart can fail. See
                 // `restart_marker`.
                 owe_a_restart(unit_dir, unit.name)?;
             }
-            write_unit(&unit.path, &unit.text)?;
-            line!(report, "written {}", unit.path.display());
-        } else {
-            line!(report, "unchanged {}", unit.path.display());
         }
-        changed_units.push(changed);
+        write_units_together(&planned, &existing, &changed_units, report)?;
     }
 
     // Unconditional, and cheap: systemd only rereads what changed on disk.
@@ -1043,6 +1053,52 @@ fn existing_managed_text(path: &Path) -> anyhow::Result<Option<String>> {
     } else {
         Err(foreign())
     }
+}
+
+/// Write every changed unit, and if one write fails, put back the ones this
+/// call already wrote, so a failure leaves the pair as it was.
+///
+/// The helm and supervisor units pin the same state directory and binary,
+/// so a half-written pair is worse than an unwritten one. A unit that did
+/// not exist before is removed again rather than left half-installed. The
+/// restore is best effort; if it fails too, the error says which file is
+/// left in the new form, and rerunning setup converges the pair.
+fn write_units_together(
+    planned: &[PlannedUnit],
+    existing: &[Option<String>],
+    changed: &[bool],
+    report: &mut Report,
+) -> anyhow::Result<()> {
+    let mut written: Vec<usize> = Vec::new();
+    for (index, unit) in planned.iter().enumerate() {
+        if !changed[index] {
+            line!(report, "unchanged {}", unit.path.display());
+            continue;
+        }
+        if let Err(error) = write_unit(&unit.path, &unit.text) {
+            let mut unrestored = Vec::new();
+            for &done in &written {
+                let restored = match &existing[done] {
+                    Some(previous) => write_unit(&planned[done].path, previous),
+                    None => std::fs::remove_file(&planned[done].path).map_err(anyhow::Error::from),
+                };
+                if restored.is_err() {
+                    unrestored.push(planned[done].path.display().to_string());
+                }
+            }
+            if !unrestored.is_empty() {
+                return Err(error.context(format!(
+                    "and {} could not be put back, so it holds the new unit while this one does not; \
+                     rerun setup",
+                    unrestored.join(", ")
+                )));
+            }
+            return Err(error);
+        }
+        line!(report, "written {}", unit.path.display());
+        written.push(index);
+    }
+    Ok(())
 }
 
 /// Publish one unit file through a same-directory temporary file and a
@@ -3368,6 +3424,56 @@ mod tests {
         assert_eq!(
             units.commands,
             ["show-environment", "is-active farhelm-supervisor.service"]
+        );
+    }
+
+    /// A failure deciding the second unit's restart stops setup before
+    /// either unit file is rewritten.
+    ///
+    /// Why it matters: the helm and supervisor units pin the same state
+    /// directory, and setup used to rewrite the supervisor unit before asking
+    /// about the helm unit. A failure on the helm unit's status query then
+    /// left the new supervisor unit beside the old helm unit, and the next
+    /// reload or reboot started a pair looking in different state
+    /// directories (SPEC.md "Concurrent and interrupted runs"). Specified:
+    /// with both units installed and a new state directory requested, an
+    /// unclassifiable `is-active` answer for the helm unit fails setup and
+    /// leaves both unit files byte for byte as they were.
+    #[farhelm_testtrace::test]
+    fn a_failure_on_the_second_unit_leaves_both_units_unwritten() {
+        let fixture = Fixture::new();
+        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
+        assert!(error.is_empty(), "{error}");
+        let supervisor_path = fixture.unit_dir().join("farhelm-supervisor.service");
+        let helm_path = fixture.unit_dir().join("farhelm-helm.service");
+        let supervisor_before = std::fs::read_to_string(&supervisor_path).unwrap();
+        let helm_before = std::fs::read_to_string(&helm_path).unwrap();
+
+        let moved = SetupOptions {
+            state_dir: Some(fixture.home().join("moved-state")),
+            ..SetupOptions::default()
+        };
+        let mut units = fixture.manager().script(
+            "is-active farhelm-helm.service",
+            1,
+            "",
+            "Failed to connect to bus: No such file or directory",
+        );
+        let (_, error) = run(&ctx, &moved, &mut units);
+        assert!(
+            error.contains("is-active farhelm-helm.service exited 1"),
+            "{error}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&supervisor_path).unwrap(),
+            supervisor_before,
+            "the supervisor unit must not be rewritten when the helm unit cannot be"
+        );
+        assert_eq!(std::fs::read_to_string(&helm_path).unwrap(), helm_before);
+        assert!(
+            !supervisor_before.contains("moved-state"),
+            "test premise: the requested state directory changes the supervisor unit"
         );
     }
 
