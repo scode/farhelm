@@ -822,7 +822,10 @@ impl ProvisioningService {
                 ProvisioningView::for_plan(host, run_id.clone(), &pending.plan),
             );
         }
-        let host_write = self.manager.host_write_lock(host).await;
+        // The provisioning lock, not the cache-write lock: the run holds it
+        // for minutes, and the host's session list must keep updating
+        // meanwhile. See `ActorHandle::provision_lock`.
+        let host_write = self.manager.host_provision_lock(host).await;
         if let Err(error) = self.host_row(host).await {
             let mut memory = self.memory.lock().await;
             memory.busy.remove(&host);
