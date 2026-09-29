@@ -4136,7 +4136,9 @@
   lets a serving supervisor report no identity, this mismatch becomes a real bug and the two checks must be made to
   agree.
 - Completion criteria: remove the feedback file and its index entry without code or spec changes.
-- Execution: `pending`.
+- Execution: `complete`; the feedback file and its index entry were removed with no code or spec change. Change
+  `uqozolntwxvzmvywkzpqyrpntklqqrsq`, bookmark `pr/discard-update-identity-none`, draft PR
+  [#1210](https://github.com/scode/farhelm/pull/1210/changes).
 
 ## payload-dir-must-be-writable.md
 
