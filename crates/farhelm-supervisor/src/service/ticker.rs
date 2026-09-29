@@ -1,9 +1,14 @@
 //! The supervisor's own heartbeat: one periodic task, started by `serve`,
 //! that advances the work nobody should have to ask for — activity
 //! sampling, conversation capture, and the dead-tab reap (SPEC.md's
-//! "a tab whose process exits is reaped automatically", which has no
-//! event to ride: tmux pushes no pane-death notification, and listing
-//! paths are reads that must not carry the side effect).
+//! "a tab whose process exits is reaped automatically"; listing paths are
+//! reads that must not carry the side effect).
+//!
+//! The reap also has an event to ride, so that an exited tab does not wait
+//! up to a whole interval for the next tick: the private tmux server's
+//! `pane-died` hook signals a `wait-for` channel, and the same task wakes on
+//! it and runs a reap-only pass (see [`start_ticker`]). The tick's own reap
+//! stays as the fallback for any death the wakeup misses.
 //!
 //! Until PLAN_M6_75.md item 1 this supervisor had no internal cadence at
 //! all. Everything periodic rode a request — conversation capture advanced
@@ -771,6 +776,11 @@ fn next_deadline(
 pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
     let interval = sup.seams.ticker_interval;
     let weak = Arc::downgrade(sup);
+    // A clone of the driver rather than a reach through `weak` each time:
+    // the wait below is a long-lived future, and holding an upgraded `Arc`
+    // across it would keep the supervisor alive for as long as tmux stays
+    // quiet, which is exactly what the `Weak` exists to avoid.
+    let sup_tmux = sup.tmux.clone();
     let (stop_tx, mut stop_rx) = oneshot::channel();
     let task = tokio::spawn(async move {
         // Round-robin position in the sampling budget, task-local because
@@ -804,16 +814,48 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
         // that replaces it, and for why anchoring is still what the
         // non-overrun case gets.
         let mut deadline = tokio::time::Instant::now() + interval;
+        // The pane-death wakeup. It lives in this loop, as a third arm of
+        // the same `select!`, rather than in a task of its own, so there is
+        // still exactly one reaper: a separate task would run its reap
+        // concurrently with the tick's and have the two race `close_tab`
+        // (and the session's lifecycle claim) over the same corpse. Being
+        // part of this task also means it stops with it, and dropping the
+        // future kills the `tmux wait-for` client (see
+        // `TmuxDriver::wait_for_pane_death`).
+        //
+        // A failed wait is paced by one interval before the next attempt:
+        // it fails at once when there is no server, and retrying straight
+        // away would spin tmux spawns for as long as the server is gone.
+        // The tick's own reap still covers that stretch.
+        let tmux = sup_tmux;
+        let mut pane_died = pane_death_wait(tmux.clone(), None);
         loop {
-            tokio::select! {
+            let wake = tokio::select! {
                 _ = &mut stop_rx => break,
-                _ = tokio::time::sleep_until(deadline) => {}
-            }
+                _ = tokio::time::sleep_until(deadline) => Wake::Tick,
+                died = &mut pane_died => Wake::PaneDied(died),
+            };
             let Some(sup) = weak.upgrade() else {
                 break;
             };
-            tick(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop_rx).await;
-            deadline = next_deadline(deadline, tokio::time::Instant::now(), interval);
+            match wake {
+                Wake::Tick => {
+                    tick(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop_rx).await;
+                    deadline = next_deadline(deadline, tokio::time::Instant::now(), interval);
+                }
+                Wake::PaneDied(Ok(())) => {
+                    pane_died = pane_death_wait(tmux.clone(), None);
+                    reap_pass(&sup, &mut stop_rx).await;
+                }
+                Wake::PaneDied(Err(e)) => {
+                    debug!(
+                        error = %format!("{e:#}"),
+                        "waiting for a pane death failed; the tick's reap covers exited tabs \
+                         until the next attempt"
+                    );
+                    pane_died = pane_death_wait(tmux.clone(), Some(interval));
+                }
+            }
             // A stop observed BETWEEN captures has already been taken out
             // of the channel by `stop_requested`, and a `oneshot::Receiver`
             // that has yielded its result panics when polled again — which
@@ -830,6 +872,64 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
         _stop: stop_tx,
         task: Some(task),
     }
+}
+
+/// What woke the ticker's loop.
+enum Wake {
+    /// The periodic deadline: run the whole [`tick`].
+    Tick,
+    /// The pane-death wait finished, with its result.
+    PaneDied(anyhow::Result<()>),
+}
+
+/// One pane-death wait for the ticker's `select!`, optionally delayed.
+///
+/// Boxed and pinned so the loop can hold it across iterations and replace
+/// it after each wake without re-borrowing anything; the delay is how a
+/// failed wait is paced (see [`start_ticker`]).
+fn pane_death_wait(
+    tmux: crate::tmux::TmuxDriver,
+    delay: Option<Duration>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>> {
+    Box::pin(async move {
+        if let Some(delay) = delay {
+            // sleep-ok: paces retries after a failed wait, which fails at once while the tmux server is gone.
+            tokio::time::sleep(delay).await;
+        }
+        tmux.wait_for_pane_death().await
+    })
+}
+
+/// Reap exited tabs now, outside the periodic schedule: the pane-death
+/// wakeup's half of [`start_ticker`].
+///
+/// Only the reap. Sampling and capture keep their own cadence, which a pane
+/// death says nothing about, and running them here would let every agent
+/// exit or tab exit pull the whole tick forward. The permit, the fresh
+/// pane-state read, the budget, and the stop check are the tick's own, so a
+/// wakeup reap behaves exactly like the reap at the start of a tick. A pane
+/// death that was an agent's rather than a tab's finds nothing to close and
+/// costs one `pane_states` read.
+async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
+    let _permit = Arc::clone(&sup.sampling_admission)
+        .acquire_owned()
+        .await
+        .expect("sampling semaphore is never closed");
+    let entries: Vec<Arc<SessionEntry>> = sup.sessions.lock().await.values().cloned().collect();
+    if entries.is_empty() {
+        return;
+    }
+    let states = match sup.tmux.pane_states().await {
+        Ok(states) => states,
+        Err(e) => {
+            debug!(
+                error = %format!("{e:#}"),
+                "could not read pane state for a pane-death reap; the next tick retries"
+            );
+            return;
+        }
+    };
+    reap_dead_tabs(sup, &states, &entries, stop).await;
 }
 
 /// Whether the ticker has been asked to stop.
@@ -1429,8 +1529,9 @@ const REAP_BUDGET_PER_TICK: usize = 4;
 /// (the listing paths hide dead tabs; this is what actually removes them).
 ///
 /// Lives on the ticker rather than the listing paths deliberately:
-/// listings are reads and stay side-effect-free, and tmux pushes no
-/// pane-death event to react to, so the poll is the only trigger.
+/// listings are reads and stay side-effect-free. Two triggers call it: the
+/// tick, and the pane-death wakeup's [`reap_pass`], which is what makes an
+/// exited tab disappear without waiting for the next tick.
 /// DISCOVERY rides this pass's already-fetched `pane_states` snapshot,
 /// grouped by session in one O(panes) pass; each CLOSE then pays its own
 /// resolution probe inside [`Supervisor::close_tab`], which is the
@@ -2089,8 +2190,9 @@ mod tests {
     /// issue 3; the listing paths only HIDE dead tabs).
     ///
     /// Pinned at the ticker because nothing else may do it: listings are
-    /// side-effect-free reads, and tmux's control protocol pushes no
-    /// pane-death event to react to, so the poll is the only trigger. Two
+    /// side-effect-free reads. (The pane-death wakeup calls the same reap;
+    /// `a_tab_is_reaped_on_pane_death_without_waiting_for_a_tick` covers
+    /// that trigger.) Two
     /// dead tabs in one session because a first-match-only reap would pass
     /// a single-corpse test while leaving simultaneous exits behind.
     #[farhelm_testtrace::test]
@@ -2209,6 +2311,91 @@ mod tests {
         // The daemonized child went with its tab: the reap ran the real
         // close (marker sweep included), not a bare window kill.
         wait_for_process_absence(daemon_pid).await;
+    }
+
+    /// A tab whose shell exits is reaped on the pane-death wakeup, without
+    /// waiting for the next tick.
+    ///
+    /// Why this matters: a tab's shell exiting used to leave its dead pane in
+    /// place until the next tick found it, up to a whole interval later, so a
+    /// closed shell visibly lingered. The private server's `pane-died` hook
+    /// now wakes the ticker, which runs the same reap at once. Specifies: with
+    /// the tick interval set far beyond the wait below, a live tab survives
+    /// until its shell exits, and is then closed well before any tick could
+    /// have run. The first tick is a full interval out, so only the wakeup
+    /// can explain the reap.
+    #[farhelm_testtrace::test]
+    async fn a_tab_is_reaped_on_pane_death_without_waiting_for_a_tick() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                ticker_interval: Duration::from_secs(600),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        install_live_session(&sup, "wake-reap", "sleep 600").await;
+        let tmux_name = "fh-wake-reap";
+        let trigger = state.path().join("exit-now");
+        let tab_id = uuid::Uuid::new_v4().to_string();
+        let env = vec![
+            (
+                crate::launch::SESSION_ID_ENV_VAR.to_string(),
+                "wake-reap".to_string(),
+            ),
+            (crate::launch::TAB_ID_ENV_VAR.to_string(), tab_id.clone()),
+        ];
+        // The shell holds until the test creates the trigger file, so the
+        // tab is provably live when the ticker starts and dies only after.
+        let (_window, pane) = sup
+            .tmux
+            .new_window(
+                tmux_name,
+                "/tmp",
+                &env,
+                &[
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    format!("while [ ! -e {} ]; do sleep 0.05; done", trigger.display()),
+                ],
+            )
+            .await
+            .expect("create the tab window");
+        sup.tmux
+            .mark_window(tmux_name, &pane, crate::tmux::TAB_WINDOW_OPTION, &tab_id)
+            .await
+            .expect("mark the tab window");
+
+        let ticker = start_ticker(&sup);
+        let states = sup.tmux.pane_states().await.expect("pane states");
+        assert!(
+            states.get(&pane).is_some_and(|state| !state.dead),
+            "premise: the tab is live before its shell is told to exit"
+        );
+        std::fs::write(&trigger, b"").expect("create the trigger file");
+
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            let states = sup.tmux.pane_states().await.expect("pane states");
+            let Some(state) = states.get(&pane) else {
+                break;
+            };
+            // On timeout, say which premise failed: a pane still alive means
+            // the fixture's shell never saw the trigger, while a dead pane
+            // that lingers means the wakeup or its reap did not happen.
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the tab was not reaped by the pane-death wakeup (pane dead: {})",
+                state.dead
+            );
+            // sleep-ok: waits for the wakeup's reap to remove the pane; bounded by TEST_DEADLINE, far below the 600 s tick.
+            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+        }
+        ticker.shutdown().await;
     }
 
     /// The per-tick reap budget defers, never drops: a burst of dead tabs

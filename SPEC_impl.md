@@ -686,8 +686,11 @@ refused identically on every surface — the native route is write-only by const
 ## Terminal substrate: private tmux server
 
 Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down
-generated config: status bar off, `history-limit` sized to SPEC.md's replay floor, `remain-on-exit on`. One tmux session
-per Farhelm session; window 0 is the agent terminal in practice, additional windows are the terminal tabs. Neither is
+generated config: status bar off, `history-limit` sized to SPEC.md's replay floor, `remain-on-exit on`. Every start,
+fresh or adopting a running server, also sets a global `pane-died` hook that signals a `wait-for` channel; the
+supervisor's ticker keeps one `tmux wait-for` client blocked on it and runs its dead-tab reap as soon as it fires, so a
+tab whose shell exits is closed right away instead of on the next tick, which remains the fallback. One tmux session per
+Farhelm session; window 0 is the agent terminal in practice, additional windows are the terminal tabs. Neither is
 identified by position: the supervisor stamps each window it creates with a tmux user option — the agent's window with
 the session id, a tab's window with a minted tab id that is also that tab's whole record. The agent terminal is
 identified by its durable pane record first, with the marker as the recovery aid for a session whose record is empty;

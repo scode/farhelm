@@ -429,6 +429,16 @@ pub const TMUX_FLOOR: TmuxVersion = TmuxVersion {
     patch: Some('c'),
 };
 
+/// The `wait-for` channel the private server's `pane-died` hook signals,
+/// which is what lets the supervisor reap an exited terminal tab as soon as
+/// its shell dies instead of on its next tick (see
+/// [`TmuxDriver::wait_for_pane_death`]).
+///
+/// A fixed name is fine despite several supervisors sharing a machine: a
+/// channel lives inside one tmux server, and every supervisor has its own
+/// private server on its own socket.
+pub(crate) const PANE_DIED_CHANNEL: &str = "farhelm-pane-died";
+
 /// The exact prefix `tmux -V` puts in front of the version. Nothing else
 /// is accepted: a line that does not start this way did not come from a
 /// tmux this project knows how to reason about.
@@ -2431,6 +2441,57 @@ impl TmuxDriver {
         // advertised state match what a well-behaved agent expects to see.
         self.run(&["set-option", "-s", "focus-events", "on"])
             .await?;
+        // The pane-death wakeup (see [`PANE_DIED_CHANNEL`]) is reconciled
+        // here rather than in `config_body` for the same reason as
+        // `focus-events` just above: a `-f` config line would reach only a
+        // server this call starts, never one it adopts from a previous
+        // supervisor. `set-hook` without `-a` replaces the hook rather than
+        // appending, so repeating it on every start is idempotent.
+        self.run(&[
+            "set-hook",
+            "-g",
+            "pane-died",
+            &format!("wait-for -S {PANE_DIED_CHANNEL}"),
+        ])
+        .await?;
+        Ok(())
+    }
+
+    /// Wait until some pane on the private server has died, via the
+    /// `pane-died` hook [`Self::ensure_server`] installs.
+    ///
+    /// Returns `Ok` once the hook has signalled [`PANE_DIED_CHANNEL`] since
+    /// the previous wait. tmux remembers a signal sent while nobody was
+    /// waiting and hands it to the next wait immediately (verified against
+    /// 3.7c), so deaths between two waits are coalesced, never lost. Any
+    /// pane counts, agent panes included; callers re-read pane state to
+    /// find out what actually died.
+    ///
+    /// Returns an error as soon as tmux does, which it does at once when no
+    /// server is running. That is not retried here: a caller that loops on
+    /// this must pace its retries itself, or a missing server becomes a
+    /// busy loop of tmux spawns.
+    ///
+    /// The `tmux wait-for` client is killed if this future is dropped, so a
+    /// waiter never outlives the task awaiting it. It is not a control-mode
+    /// client and never attaches to a session, so the startup sweep of
+    /// stale control clients neither sees nor needs to see it. A supervisor
+    /// killed outright can leave its blocked waiter behind; the next pane
+    /// death wakes every waiter, so that orphan exits then.
+    pub(crate) async fn wait_for_pane_death(&self) -> anyhow::Result<()> {
+        let mut command = self.command();
+        command
+            .args(["wait-for", PANE_DIED_CHANNEL])
+            .stdin(Stdio::null())
+            .kill_on_drop(true);
+        let out = command.output().await.context("spawning tmux wait-for")?;
+        if !out.status.success() {
+            anyhow::bail!(
+                "tmux wait-for {PANE_DIED_CHANNEL} failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
         Ok(())
     }
 
