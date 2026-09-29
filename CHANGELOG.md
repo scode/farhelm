@@ -16,6 +16,7 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 - The `⋯` menu on a session or host now closes when you click anywhere else, such as in the terminal, instead of staying open until you click `⋯` again. If the menu was asking you to confirm a delete or replace, clicking elsewhere cancels it, so the question is not still waiting the next time you open the menu. (#1172)
 - While a host is updating, its status in the sidebar is shorter, so more of the current step fits in the row. Hover over it to see the whole step, how far through the steps it is, and how long it has been running. (#1169)
 - When the shell in a terminal tab exits, the tab now closes right away instead of up to two seconds later. (#1180)
+- The session launcher now offers `gpt-6.1-sol` in place of `gpt-6-sol` for Codex, Goose, Pi, OMP, and OpenCode. (#1236)
 
 ### 🔧 Fixed
 
