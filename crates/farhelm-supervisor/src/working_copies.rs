@@ -243,6 +243,12 @@ pub enum IdentityStatus {
     /// A DIFFERENT object sits at the recorded path. Fail closed: never
     /// adopt, never move, never remove.
     DifferentObject,
+    /// The object at the recorded path has the recorded inode but a
+    /// different device number, and no birth time confirms it is the same
+    /// folder (see [`same_directory`]). Fails closed like
+    /// `DifferentObject`, but a refusal should say that a remount may be
+    /// the cause rather than that the folder was replaced.
+    DeviceChangedUnconfirmed,
     /// Nothing at the recorded path.
     Missing,
     /// The row has no captured identity yet (a `planned` row), so there
@@ -306,6 +312,15 @@ pub enum WorkingCopyError {
     /// captured. Destructive acts fail closed.
     #[error("identity mismatch at {path}: refusing to act on an object the row does not own")]
     IdentityMismatch { path: PathBuf },
+    /// The object at a path of interest has the captured inode but a new
+    /// device number, and no birth time can confirm it is the same object
+    /// (see `same_directory`). Fails closed like `IdentityMismatch`.
+    #[error(
+        "the device number of {path} changed since it was recorded, as a reboot or remount can do \
+         on btrfs, NFS or overlayfs, and this filesystem records no creation time to confirm it is \
+         still the same folder; refusing to act on it"
+    )]
+    DeviceChangedUnconfirmed { path: PathBuf },
     /// Overlapping active records are inconsistent ownership evidence, even
     /// when each inode matches. Moving either would invalidate the other.
     #[error(
@@ -507,8 +522,9 @@ fn observe(path: &Path) -> std::io::Result<Observed> {
     })
 }
 
-/// Whether `observed` is the directory a row recorded: the same `(dev, ino)`
-/// and, when a birth time was recorded, the same birth time.
+/// Whether `observed` is the directory a row recorded: the same inode and,
+/// when a birth time was recorded, the same birth time; without a recorded
+/// birth time, the same device as well.
 ///
 /// The one rule every ownership check in this module applies, because
 /// inode numbers are reused: a directory removed and recreated at the same
@@ -518,9 +534,38 @@ fn observe(path: &Path) -> std::io::Result<Observed> {
 /// now, means a different object. A row without one (recorded before birth
 /// times were kept, or on a filesystem without them) falls back to
 /// `(dev, ino)` alone: the accepted residual for those rows.
+///
+/// The device number is deliberately NOT required to match when a birth time
+/// did. btrfs subvolumes (Fedora's default `/home`), NFS, overlayfs and some
+/// device-mapper setups assign device numbers when the filesystem is mounted,
+/// so a reboot or remount can change it while the folder is untouched. Those
+/// are ordinary, supported setups, and requiring the old number made the
+/// session that created such a checkout unrestartable for good. Inode plus
+/// birth time still tells a folder replaced at the same path from the
+/// original, which is what the check exists for. Without a birth time there
+/// is nothing to confirm a changed device number with, so that case stays a
+/// mismatch; [`device_change_unconfirmed`] names it for the refusal.
 fn same_directory(observed: &Observed, identity: DirectoryIdentity, birth: Option<i64>) -> bool {
-    observed.identity() == identity
-        && birth.is_none_or(|recorded| observed.birth_ns == Some(recorded))
+    let (dev, ino) = identity;
+    observed.ino == ino
+        && match birth {
+            Some(recorded) => observed.birth_ns == Some(recorded),
+            None => observed.dev == dev,
+        }
+}
+
+/// Whether `observed` fails [`same_directory`] only because its device
+/// number changed, with no birth time on one side to confirm it is the same
+/// folder. Kept apart from an ordinary mismatch so the refusal can say why
+/// Farhelm cannot tell (a remount on a filesystem without birth times)
+/// rather than claim the folder was replaced.
+fn device_change_unconfirmed(
+    observed: &Observed,
+    identity: DirectoryIdentity,
+    birth: Option<i64>,
+) -> bool {
+    let (dev, ino) = identity;
+    observed.ino == ino && observed.dev != dev && (birth.is_none() || observed.birth_ns.is_none())
 }
 
 /// fsync an openable directory. The durability primitive
@@ -1270,6 +1315,9 @@ pub fn verify_identity(row: &WorkingCopyRow) -> Result<IdentityStatus> {
         Ok(observed) if same_directory(&observed, identity, row.path_birth_ns) => {
             Ok(IdentityStatus::Matches)
         }
+        Ok(observed) if device_change_unconfirmed(&observed, identity, row.path_birth_ns) => {
+            Ok(IdentityStatus::DeviceChangedUnconfirmed)
+        }
         Ok(_) => Ok(IdentityStatus::DifferentObject),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(IdentityStatus::Missing),
         Err(e) => Err(e.into()),
@@ -1411,6 +1459,9 @@ pub(crate) fn verified_root(row: &WorkingCopyRow) -> Result<PathBuf> {
         .ok_or_else(|| WorkingCopyError::WrongState(row.id.clone()))?;
     let root = PathBuf::from(&row.canonical_root);
     let observed = observe(&root)?;
+    if observed.is_dir && device_change_unconfirmed(&observed, expected, row.root_birth_ns) {
+        return Err(WorkingCopyError::DeviceChangedUnconfirmed { path: root });
+    }
     if !observed.is_dir || !same_directory(&observed, expected, row.root_birth_ns) {
         return Err(WorkingCopyError::IdentityMismatch { path: root });
     }
@@ -3161,6 +3212,96 @@ mod tests {
             verified_root(&legacy),
             Err(WorkingCopyError::IdentityMismatch { .. })
         ));
+    }
+
+    /// Spec: a checkout and root whose recorded device number no longer
+    /// matches, while inode and birth time still do, are the same folders:
+    /// `verify_identity` matches, `verified_root` passes, and archiving moves
+    /// the checkout. Without a recorded birth time the same device change is
+    /// refused as `DeviceChangedUnconfirmed`, never as a match, and a birth
+    /// time that differs as well is still a different object.
+    ///
+    /// Why: btrfs subvolumes, NFS, overlayfs and some device-mapper setups
+    /// assign device numbers at mount time, so a reboot or remount can change
+    /// them under an untouched folder, and requiring the old number made the
+    /// session that created such a checkout unrestartable for good. The
+    /// device change is planted in the recorded values because a test cannot
+    /// remount the filesystem it runs on.
+    #[test]
+    fn a_changed_device_number_with_matching_birth_time_is_the_same_folder() {
+        let conn = registry_conn();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let row = planned_row(&conn, dir.path(), "bar");
+        allocate(&conn, &row.id, None).expect("allocate");
+        let fresh = get_working_copy(&conn, &row.id)
+            .expect("row")
+            .expect("present");
+        if fresh.path_birth_ns.is_none() {
+            assert!(
+                !filesystem_reports_birth_time(dir.path()),
+                "the filesystem reports birth times, but none was recorded"
+            );
+            println!("SKIPPED: this filesystem reports no birth time to confirm a device change");
+            return;
+        }
+        let reload = || {
+            get_working_copy(&conn, &row.id)
+                .expect("row")
+                .expect("present")
+        };
+
+        conn.execute(
+            "UPDATE working_copies SET path_device = path_device + 1, \
+             root_device = root_device + 1 WHERE id = ?1",
+            rusqlite::params![row.id],
+        )
+        .expect("plant a remount's new device number");
+        let remounted = reload();
+        assert_eq!(
+            verify_identity(&remounted).expect("verify"),
+            IdentityStatus::Matches
+        );
+        assert!(verified_root(&remounted).is_ok());
+
+        conn.execute(
+            "UPDATE working_copies SET path_birth_ns = path_birth_ns - 1 WHERE id = ?1",
+            rusqlite::params![row.id],
+        )
+        .expect("plant a different birth time as well");
+        assert_eq!(
+            verify_identity(&reload()).expect("verify"),
+            IdentityStatus::DifferentObject,
+            "a replaced folder is still refused after a device change"
+        );
+
+        conn.execute(
+            "UPDATE working_copies SET path_birth_ns = NULL, root_birth_ns = NULL WHERE id = ?1",
+            rusqlite::params![row.id],
+        )
+        .expect("a row recorded without birth times");
+        let unconfirmed = reload();
+        assert_eq!(
+            verify_identity(&unconfirmed).expect("verify"),
+            IdentityStatus::DeviceChangedUnconfirmed
+        );
+        assert!(matches!(
+            verified_root(&unconfirmed),
+            Err(WorkingCopyError::DeviceChangedUnconfirmed { .. })
+        ));
+
+        conn.execute(
+            "UPDATE working_copies SET path_birth_ns = ?2, root_birth_ns = ?3 WHERE id = ?1",
+            rusqlite::params![row.id, fresh.path_birth_ns, fresh.root_birth_ns],
+        )
+        .expect("restore the recorded birth times");
+        assert!(matches!(
+            archive_move(&conn, &row.id).expect("archive after the device change"),
+            ArchiveOutcome::Archived { .. }
+        ));
+        assert!(
+            !dir.path().join("bar").exists(),
+            "the checkout must have moved to the archive"
+        );
     }
 
     /// Spec: removing an allocated checkout and recreating a directory at the

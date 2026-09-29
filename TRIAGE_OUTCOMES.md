@@ -4079,7 +4079,12 @@
 - Completion criteria: Restart (and archiving) accept a checkout whose device number changed while inode and creation
   time match, with the rationale above in the code; a replaced folder is still refused; focused regression coverage;
   remove this feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `working_copies::same_directory` requires the device number only when no birth time was
+  recorded, with the remount rationale at the comparison, so Restart, archiving and every other ownership check accept a
+  folder whose inode and birth time match after a device-number change. Where no birth time can confirm the change
+  (recorded or observed), `verify_identity` and `verified_root` refuse with a distinct `DeviceChangedUnconfirmed` answer
+  whose message names a remount as the likely cause; the identity is not re-recorded. Change `uukxsptlrovx`, bookmark
+  `pr/device-number-remount`, draft PR [#1200](https://github.com/scode/farhelm/pull/1200/changes).
 
 ## checkout-membership-misses-bind-mounts.md
 
