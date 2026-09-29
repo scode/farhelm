@@ -15586,6 +15586,151 @@ pub(crate) mod tests {
         );
     }
 
+    /// On a host without a usable systemd user manager, Delete reaps the
+    /// processes of a tab whose shell the environment-marker scan cannot see.
+    ///
+    /// Why it matters: Delete once rooted its process walk at the agent pane
+    /// alone and trusted the marker scan to find every tab process, starting
+    /// from the tab's shell. On macOS the kernel withholds the environment of
+    /// platform binaries, the tab's own login shell included, so the shell
+    /// read as unmarked, the walk never started from it, and a nohup'd job
+    /// started in the tab outlived a Delete that reported success. Specified:
+    /// with the tab's pane process replaced by a HUP-ignoring shell with an
+    /// emptied environment (standing in for the unreadable one) and a
+    /// HUP-ignoring child under it, and no scope to hold either, both are
+    /// gone once Delete returns.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn delete_reaps_an_unmarked_process_under_a_tab_shell() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(crate::scope::ScopeManager::fake_reprobing(
+                    false,
+                    false,
+                    Arc::new(|_| {}),
+                )),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let created = sup
+            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
+            .await
+            .expect("agent session");
+        let tab = sup.open_tab(&created.id).await.expect("terminal tab");
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("session entry");
+        let tmux_name = entry
+            .terminal
+            .as_ref()
+            .expect("agent terminal")
+            .tmux_name
+            .clone();
+        let tab_pane = sup
+            .tmux
+            .pane_states_with_markers()
+            .await
+            .expect("pane states")
+            .into_iter()
+            .find(|(_, state)| state.tab.as_deref() == Some(tab.id.as_str()))
+            .map(|(pane, _)| pane)
+            .expect("the opened tab's pane");
+        let PaneProbe::Owned(tab_shell) = sup
+            .tmux
+            .pane_process(&tmux_name, &tab_pane)
+            .await
+            .expect("probe the tab pane")
+        else {
+            panic!("the tab pane must belong to its session");
+        };
+
+        // `exec env -i` turns the tab's pane process itself into a shell
+        // with no session marker, and `trap "" HUP` (inherited by the job)
+        // keeps the hangup tmux sends when Delete kills the session from
+        // ending either. Only a walk rooted at the tab pane reaches them.
+        let pidfile = state.path().join("unmarked.pid");
+        sup.tmux
+            .type_line_for_test(
+                &tab_pane,
+                &format!(
+                    "exec env -i sh -c 'trap \"\" HUP; sleep 1000 & echo $! > \"$1.tmp\"; \
+                     mv \"$1.tmp\" \"$1\"; wait' sh {}",
+                    pidfile.display()
+                ),
+            )
+            .await
+            .expect("start the unmarked job in the tab");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        let pid: u32 = loop {
+            if let Ok(text) = std::fs::read_to_string(&pidfile) {
+                break text.trim().parse().expect("the job writes its pid");
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the tab never started the unmarked job"
+            );
+            // sleep-ok: the tab's shell starts the job asynchronously; poll for its pidfile inside the deadline.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        let (ppid, job_start, _) = crate::procs::read_process(pid)
+            .expect("read the job")
+            .expect("the job is running");
+        assert_eq!(
+            ppid, tab_shell.pid,
+            "fixture premise: the job is a direct child of the tab's pane process"
+        );
+        let (_, shell_start, _) = crate::procs::read_process(tab_shell.pid)
+            .expect("read the tab's pane process")
+            .expect("the tab's pane process is running");
+        for (what, process) in [("tab shell", tab_shell.pid), ("job", pid)] {
+            let environ = crate::procs::read_environ(process).unwrap_or_default();
+            assert!(
+                !environ
+                    .windows(b"FARHELM_SESSION_ID".len())
+                    .any(|window| window == b"FARHELM_SESSION_ID"),
+                "fixture premise: the {what} carries no session marker"
+            );
+        }
+
+        let deleted = sup
+            .teardown_session(&entry, &created.id, test_admission(&sup).await)
+            .await;
+
+        // A zombie counts as gone (`procs::ProcessState`): the sweep may
+        // kill the shell before it reaps the job, leaving the job an orphan
+        // zombie until its adopter reaps it, which this test cannot force.
+        let mut survivors = Vec::new();
+        for (what, process, start) in [
+            ("tab shell", tab_shell.pid, shell_start),
+            ("job", pid, job_start),
+        ] {
+            match crate::procs::read_process(process).expect("read the fixture process") {
+                Some((_, still, crate::procs::ProcessState::Running)) if still == start => {
+                    // Do not leak the fixture into later tests.
+                    // SAFETY: `kill` has no memory-safety preconditions; the
+                    // pid was just confirmed to be this test's own process.
+                    unsafe { libc::kill(process as libc::pid_t, libc::SIGKILL) };
+                    survivors.push(what);
+                }
+                _ => {}
+            }
+        }
+        assert!(deleted.is_ok(), "Delete must succeed");
+        assert!(
+            survivors.is_empty(),
+            "Delete must reap the tab's processes; survivors: {survivors:?}"
+        );
+    }
+
     /// A checkout preview refuses a path too long to archive later, and
     /// accepts one exactly at the limit.
     ///

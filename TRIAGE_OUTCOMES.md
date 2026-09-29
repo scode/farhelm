@@ -4053,7 +4053,13 @@
 - Completion criteria: on a host without a usable user manager, a process still descended from a tab's shell is reaped
   by Delete; the misleading comment is corrected; focused regression coverage; remove this feedback file and its index
   entry in the execution change, or narrow it and document the blocker if the simplicity gate is reached.
-- Execution: `pending`.
+- Execution: `complete`; Delete now roots its process walk at every live pane under the session's tmux name
+  (`other_pane_roots` in teardown.rs), including the agent pane of a session with no recorded terminal, and the sweep
+  accepts several roots. Execution showed the gap is narrower than reported: on Linux the marker scan already expanded
+  from the tab's marked shell, so it matters where the tab's shell itself shows no marker (macOS platform binaries, or a
+  pane process that replaced itself with a scrubbed environment); the regression test simulates that. Simplicity gate
+  not reached. Change `uwkqkuomrnqq`, bookmark `pr/delete-roots-every-pane`, draft PR
+  [#1199](https://github.com/scode/farhelm/pull/1199/changes).
 
 ## unstable-device-number-blocks-delete.md
 

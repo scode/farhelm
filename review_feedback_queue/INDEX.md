@@ -13,8 +13,6 @@ One line per open item. This file must always match the feedback files in this d
 - `sftp-overall-deadline-fails-slow-links.md` — sftp transfer's 60 s overall deadline fails slow links
   deterministically.
 - `unvalidated-state-dir-on-probe.md` — probed registration with a bad state-dir path permanently bricks the entry.
-- `delete-roots-only-agent-pane.md` — Delete roots its process walk only on the agent pane, so tab, split-pane and
-  terminal-less processes survive.
 - `event-feed-liveness-postponed-by-revisions.md` — the event feed's liveness check never fires on a busy fleet, so dead
   subscribers hold the 64 seats.
 - `sink-shutdown-retries-forever-after-delete.md` — deleting a busy session can leave its sink client stuck in an
