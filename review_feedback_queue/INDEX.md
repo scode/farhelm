@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `titles-raw-in-confirm-prompts.md` — titles render unescaped in delete/replace confirmations and rows, so agent-set
-  titles can impersonate another session.
 - `display-peer-misses-invisible-chars.md` — display_peer's escape list misses invisible characters, so two identities
   can render identically in the adopt prompt.
 - `osc8-link-target-never-shown.md` — OSC 8 hyperlinks from terminal output open their hidden target in the browser

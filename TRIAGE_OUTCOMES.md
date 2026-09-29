@@ -2320,7 +2320,10 @@
 - Completion criteria: no visible sidebar title or confirmation quote renders a raw title; a test with a zero-width
   character and a direction override in a title shows the escaped, isolated form in the row and both prompts. Remove
   this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the row title and both confirmation quotes render through a `PeerTitle` component
+  (`display_peer` inside a `dir="ltr"` `.peer-value`). A VirtualDom test checks the emitted text and attributes and
+  fails with the escaping or isolation removed. PR [#1156](https://github.com/scode/farhelm/pull/1156/changes), jj
+  change `mtyztyos`, bookmark `pr/sidebar-titles-escaped`.
 
 ## display-peer-misses-invisible-chars.md
 
