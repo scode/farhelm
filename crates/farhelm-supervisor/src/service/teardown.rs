@@ -90,6 +90,16 @@ struct ArchiveSkipped {
     may_have_moved: Option<Option<String>>,
 }
 
+/// Whether an archive error is the filesystem refusing the rename outright
+/// (see `working_copies::WorkingCopyError::RenameRefused`), which moved
+/// nothing, as opposed to a failure whose outcome is unknown.
+fn rename_refused(error: &anyhow::Error) -> bool {
+    matches!(
+        error.downcast_ref::<crate::working_copies::WorkingCopyError>(),
+        Some(crate::working_copies::WorkingCopyError::RenameRefused { .. })
+    )
+}
+
 /// The full path of a journaled archive destination, which the registry
 /// stores as a bare name inside the root's archive folder.
 fn journaled_destination_path(row: &crate::working_copies::WorkingCopyRow, name: &str) -> String {
@@ -838,6 +848,9 @@ impl Supervisor {
                 .await;
             let reconciled = match reconciled {
                 Ok(outcome) => outcome,
+                Err(e) if rename_refused(&e) => {
+                    return Err(ArchiveSkipped::untouched(format!("{e:#}")));
+                }
                 Err(e) => {
                     return Err(ArchiveSkipped {
                         reason: format!("an earlier archive move could not be completed: {e:#}"),
@@ -897,8 +910,14 @@ impl Supervisor {
                              move; deleting only the record");
                         Ok(())
                     }
-                    // The move may have happened before a later durability
-                    // step failed, so do not claim the folder stayed put.
+                    // A refused rename moved nothing and rolled its journal
+                    // back, so the folder is where it was.
+                    Err(e) if rename_refused(&e) => {
+                        Err(ArchiveSkipped::untouched(format!("{e:#}")))
+                    }
+                    // Otherwise the move may have happened before a later
+                    // durability step failed, so do not claim the folder
+                    // stayed put.
                     Err(e) => Err(ArchiveSkipped {
                         reason: format!("the archive move failed: {e:#}"),
                         may_have_moved: Some(self.current_archive_destination(row).await),
@@ -2659,6 +2678,87 @@ mod tests {
             "the other checkout is untouched"
         );
         assert!(sup.store.session("overlapped").await.unwrap().is_none());
+        assert!(
+            !sup.store
+                .working_copy_rows()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == checkout_id),
+            "the checkout is released from Farhelm's management"
+        );
+    }
+
+    /// When the filesystem refuses the archive rename outright, Delete
+    /// completes with a notice that the checkout stayed where it was.
+    ///
+    /// Why it matters: a refusal (an unsupported no-overwrite rename, a
+    /// permission problem) moves nothing, so a notice saying the folder "may
+    /// be" in the archive would send the user looking for a folder that was
+    /// never moved. Specified, with a read-only archive folder producing a
+    /// real `EACCES`: Delete succeeds, the notice says the checkout stays
+    /// where it is and names its path, the folder and its contents are
+    /// untouched, the archive is empty, and the checkout is released.
+    #[farhelm_testtrace::test]
+    async fn a_refused_archive_rename_leaves_the_checkout_with_a_notice() {
+        use std::os::unix::fs::PermissionsExt;
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let root = state.path().join("workroot");
+        std::fs::create_dir(&root).unwrap();
+        let archive_root = root.join(crate::working_copies::ARCHIVE_DIR_NAME);
+        std::fs::create_dir(&archive_root).unwrap();
+        let checkout_id = uuid::Uuid::new_v4().to_string();
+        {
+            let conn = sup.store.conn.lock();
+            crate::working_copies::record_planned(
+                &conn,
+                &crate::working_copies::PlannedWorkingCopy {
+                    id: checkout_id.clone(),
+                    canonical_root: root.to_str().unwrap().into(),
+                    repo_owner: "acme".into(),
+                    repo_name: "checkout".into(),
+                    original_basename: "checkout".into(),
+                    origin_session_id: "refused".into(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .unwrap();
+            crate::working_copies::allocate(&conn, &checkout_id, None).unwrap();
+        }
+        let source = root.join("checkout");
+        std::fs::write(source.join("owned"), b"uncommitted content").unwrap();
+        let entry = seeded_session(&sup, "refused", source.to_str().unwrap()).await;
+        std::fs::set_permissions(&archive_root, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // A privileged test process ignores directory permissions, and then
+        // there is no refusal to observe.
+        if std::fs::create_dir(archive_root.join("probe")).is_ok() {
+            std::fs::set_permissions(&archive_root, std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+            eprintln!("SKIPPED: directory permissions are not enforced for this process");
+            return;
+        }
+
+        let result = sup
+            .teardown_session(&entry, "refused", test_admission(&sup).await)
+            .await;
+        std::fs::set_permissions(&archive_root, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let Ok(Some(notice)) = result else {
+            panic!("a refused archive rename still deletes the session, with a notice");
+        };
+        assert!(
+            notice.contains("stays where it is") && notice.contains(&source.display().to_string()),
+            "the notice says the folder did not move and names it: {notice}"
+        );
+        assert_eq!(
+            std::fs::read(source.join("owned")).unwrap(),
+            b"uncommitted content"
+        );
+        assert_eq!(std::fs::read_dir(&archive_root).unwrap().count(), 0);
+        assert!(sup.store.session("refused").await.unwrap().is_none());
         assert!(
             !sup.store
                 .working_copy_rows()

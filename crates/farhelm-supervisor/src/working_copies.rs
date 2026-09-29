@@ -317,6 +317,16 @@ pub enum WorkingCopyError {
     ArchiveRootForeignDevice { path: PathBuf },
     #[error("the rename destination stayed occupied after {attempts} attempts")]
     DestinationExhausted { attempts: usize },
+    /// The filesystem refused the no-overwrite rename outright, so the
+    /// checkout did not move and its journal was rolled back to
+    /// `allocated`. See [`rename_refused_without_moving`] for which errors
+    /// count; a filesystem that lacks no-overwrite rename answers this way
+    /// on every attempt.
+    #[error("the filesystem refused to move {path} into the archive, so it was not moved: {cause}")]
+    RenameRefused {
+        path: PathBuf,
+        cause: std::io::Error,
+    },
     #[error("working-copy row {0} is not in the state this operation requires")]
     WrongState(String),
     #[error("working-copy row {0} not found")]
@@ -1431,6 +1441,53 @@ fn persist_journal(
     Ok(())
 }
 
+/// Return a pending row to `allocated` with no journaled destination, for a
+/// rename that provably did not move anything.
+fn unjournal(conn: &Connection, id: &str) -> Result<()> {
+    let updated = conn.execute(
+        "UPDATE working_copies SET archive_destination = NULL, allocation_state = ?2 \
+         WHERE id = ?1 AND allocation_state = ?3",
+        rusqlite::params![
+            id,
+            AllocationState::Allocated.as_str(),
+            AllocationState::ArchivePending.as_str(),
+        ],
+    )?;
+    if updated == 0 {
+        return Err(WorkingCopyError::WrongState(id.to_string()));
+    }
+    Ok(())
+}
+
+/// Whether a failed no-overwrite rename is a refusal to move at all, as
+/// opposed to a failure whose outcome is unknown.
+///
+/// Each of these errors reports that the rename was not performed: the
+/// filesystem does not support the no-overwrite flag (`EINVAL`, `ENOSYS`,
+/// `ENOTSUP`/`EOPNOTSUPP`; network filesystems such as NFS and CIFS, and
+/// some FUSE mounts, are the usual cause), the destination is on another
+/// filesystem (`EXDEV`), permission is missing (`EACCES`, `EPERM`), or the
+/// filesystem is read-only (`EROFS`). Anything else, an I/O error or a
+/// timeout above all, is kept as "may have moved", because on a network
+/// filesystem the server can complete a rename whose reply is lost.
+fn rename_refused_without_moving(error: &std::io::Error) -> bool {
+    // A list rather than a pattern: `ENOTSUP` and `EOPNOTSUPP` are the same
+    // number on Linux and different ones on macOS.
+    const REFUSALS: [i32; 8] = [
+        libc::EINVAL,
+        libc::ENOSYS,
+        libc::ENOTSUP,
+        libc::EOPNOTSUPP,
+        libc::EXDEV,
+        libc::EACCES,
+        libc::EPERM,
+        libc::EROFS,
+    ];
+    error
+        .raw_os_error()
+        .is_some_and(|code| REFUSALS.contains(&code))
+}
+
 /// Update ONLY the journaled destination on an already-pending row (the
 /// collision-retry and unrelated-destination paths).
 fn repoint_journal(conn: &Connection, id: &str, destination: &str) -> Result<()> {
@@ -1470,6 +1527,17 @@ fn rename_exclusive_into(
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 destination = format!("{}-{}", collision_stem, uuid::Uuid::new_v4().simple());
                 repoint_journal(conn, working_copy_id, &destination)?;
+            }
+            // Nothing moved, so the journal describes a move that cannot
+            // have happened. Left pending, the row would make every later
+            // recovery retry the same refused rename, and keep refusing
+            // Restart and new sessions in the folder meanwhile.
+            Err(e) if rename_refused_without_moving(&e) => {
+                unjournal(conn, working_copy_id)?;
+                return Err(WorkingCopyError::RenameRefused {
+                    path: source.to_path_buf(),
+                    cause: e,
+                });
             }
             Err(e) => return Err(e.into()),
         }
@@ -3469,50 +3537,103 @@ mod tests {
         }
     }
 
-    /// A refused rename must preserve the pending journal and original inode
-    /// so a later recovery can retry the same move. Injecting the syscall's
-    /// error is deterministic even when tests run with permission overrides.
+    /// A rename the filesystem refuses outright, during crash recovery or a
+    /// fresh archive, rolls the journal back to `allocated` and leaves the
+    /// checkout where it was; a later archive can still move it.
+    ///
+    /// Why it matters: a filesystem without no-overwrite rename (NFS, CIFS,
+    /// some FUSE mounts) refuses every attempt, and a row left pending made
+    /// every recovery retry the same rename while Restart and new sessions
+    /// in that folder stayed refused. These errors report that nothing moved,
+    /// so the pending journal describes a move that cannot have happened.
+    /// Specified, for an unsupported flag (`EINVAL`) and a permission refusal
+    /// (`EACCES`), injected at the syscall boundary so the test holds even
+    /// with permission overrides: the error is `RenameRefused`, the row is
+    /// `allocated` with no destination, the source keeps its identity, the
+    /// archive is empty, and a later ordinary archive succeeds.
     #[test]
-    fn reconcile_retains_ownership_after_a_permission_refusal_then_retries() {
+    fn a_refused_rename_rolls_the_journal_back_and_leaves_the_checkout() {
+        for errno in [libc::EINVAL, libc::EACCES] {
+            for recovering in [true, false] {
+                let conn = registry_conn();
+                let dir = tempfile::tempdir().unwrap();
+                let row = planned_row(&conn, dir.path(), "bar");
+                let allocated = allocate(&conn, &row.id, None).unwrap();
+                let archive_root = ensure_archive_root(dir.path()).unwrap();
+                let mut attempts = 0;
+                let mut refuse = |from: &Path, _to: &Path| {
+                    assert_eq!(identity_of(from).unwrap(), allocated.identity);
+                    attempts += 1;
+                    Err(std::io::Error::from_raw_os_error(errno))
+                };
+                let error = if recovering {
+                    persist_journal(&conn, &row.id, "bar-journaled", AllocationState::Allocated)
+                        .unwrap();
+                    reconcile_archive_with_effects(&conn, &row.id, None, &mut refuse)
+                        .map(|_| ())
+                        .unwrap_err()
+                } else {
+                    archive_move_with_effects(&conn, &row.id, None, &mut refuse)
+                        .map(|_| ())
+                        .unwrap_err()
+                };
+                let case = format!("errno {errno}, recovering {recovering}");
+                assert!(
+                    matches!(&error, WorkingCopyError::RenameRefused { cause, .. } if cause.raw_os_error() == Some(errno)),
+                    "{case}: {error:?}"
+                );
+                assert_eq!(attempts, 1, "{case}: only collisions retry a name");
+                let current = get_working_copy(&conn, &row.id).unwrap().unwrap();
+                assert_eq!(
+                    current.allocation_state,
+                    AllocationState::Allocated,
+                    "{case}"
+                );
+                assert_eq!(current.archive_destination, None, "{case}");
+                assert_eq!(
+                    identity_of(&dir.path().join("bar")).unwrap(),
+                    allocated.identity,
+                    "{case}"
+                );
+                assert_eq!(fs::read_dir(&archive_root).unwrap().count(), 0, "{case}");
+                assert!(
+                    matches!(
+                        archive_move(&conn, &row.id).unwrap(),
+                        ArchiveOutcome::Archived { .. }
+                    ),
+                    "{case}: a later archive still moves the checkout"
+                );
+            }
+        }
+    }
+
+    /// A rename error that does not prove nothing moved keeps the pending
+    /// journal, so recovery can still find a move that did happen.
+    ///
+    /// Why it matters: on a network filesystem the server can complete a
+    /// rename whose reply is lost, surfacing as an I/O error. Rolling that
+    /// back would forget the destination the checkout may now occupy.
+    /// Specified: an injected `EIO` leaves the row `archive_pending` with its
+    /// journaled destination.
+    #[test]
+    fn an_ambiguous_rename_error_keeps_the_pending_journal() {
         let conn = registry_conn();
         let dir = tempfile::tempdir().unwrap();
         let row = planned_row(&conn, dir.path(), "bar");
-        let allocated = allocate(&conn, &row.id, None).unwrap();
-        let archive_root = ensure_archive_root(dir.path()).unwrap();
+        allocate(&conn, &row.id, None).unwrap();
+        ensure_archive_root(dir.path()).unwrap();
         persist_journal(&conn, &row.id, "bar-journaled", AllocationState::Allocated).unwrap();
-        let mut attempts = 0;
-        let error = reconcile_archive_with_effects(&conn, &row.id, None, &mut |from, to| {
-            assert_eq!(identity_of(from).unwrap(), allocated.identity);
-            assert_eq!(to, archive_root.join("bar-journaled"));
-            assert!(!to.exists());
-            attempts += 1;
-            Err(std::io::Error::from_raw_os_error(libc::EACCES))
+        let error = reconcile_archive_with_effects(&conn, &row.id, None, &mut |_, _| {
+            Err(std::io::Error::from_raw_os_error(libc::EIO))
         })
+        .map(|_| ())
         .unwrap_err();
-        assert!(
-            matches!(error, WorkingCopyError::Io(error) if error.kind() == std::io::ErrorKind::PermissionDenied)
-        );
-        assert_eq!(
-            attempts, 1,
-            "only collisions permit an automatic name retry"
-        );
+        assert!(matches!(error, WorkingCopyError::Io(_)), "{error:?}");
         let pending = get_working_copy(&conn, &row.id).unwrap().unwrap();
         assert_eq!(pending.allocation_state, AllocationState::ArchivePending);
         assert_eq!(
             pending.archive_destination.as_deref(),
             Some("bar-journaled")
-        );
-        assert_eq!(
-            identity_of(&dir.path().join("bar")).unwrap(),
-            allocated.identity
-        );
-        assert_eq!(fs::read_dir(&archive_root).unwrap().count(), 0);
-        assert!(
-            matches!(reconcile_archive(&conn, &row.id).unwrap(), ReconcileOutcome::Moved { destination } if destination == "bar-journaled")
-        );
-        assert_eq!(
-            identity_of(&archive_root.join("bar-journaled")).unwrap(),
-            allocated.identity
         );
     }
 

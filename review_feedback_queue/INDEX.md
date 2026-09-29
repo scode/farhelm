@@ -29,8 +29,6 @@ One line per open item. This file must always match the feedback files in this d
   grows per open terminal.
 - `unstable-device-number-blocks-delete.md` — the ownership check treats `st_dev` as stable, so a remount can make
   checkout sessions undeletable and unrestartable.
-- `noreplace-rename-unsupported-strands-archive.md` — on filesystems without no-replace rename, the last Delete leaves
-  the checkout stuck `archive_pending` forever.
 - `checkout-name-scan-case-sensitive.md` — the checkout name scan is case-sensitive, so on macOS a case-variant folder
   makes every launch conflict.
 - `ambiguous-restart-republishes-old-terminal.md` — an ambiguous restart failure republishes the pre-restart terminal,

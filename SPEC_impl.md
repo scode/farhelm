@@ -1333,9 +1333,12 @@ agent's kind and launch metadata remain its actual values, rather than identifyi
 Last-reference Delete journals the source identity and archive destination before one no-replace rename. Linux uses
 `renameat2` through its syscall with `RENAME_NOREPLACE`; macOS uses `renameatx_np(RENAME_EXCL)`. Parent fsync barriers
 precede journal retirement and atomic metadata settlement. Recovery accepts a matching already-moved destination but
-does not adopt a foreign source object. No recursive-copy or delete fallback is permitted. Directory admission also
-orders ordinary same-path creates against that move, so a new reference either commits before Delete or observes the
-directory as unavailable afterward.
+does not adopt a foreign source object. No recursive-copy or delete fallback is permitted. A rename the filesystem
+refuses outright (no support for no-replace rename, as on NFS, CIFS and some FUSE mounts; a cross-device, permission or
+read-only refusal) moves nothing, so its journal is rolled back and Delete leaves the checkout in place with a notice;
+any other rename error keeps the journal, because on a network filesystem the move may have happened even though its
+reply was lost. Directory admission also orders ordinary same-path creates against that move, so a new reference either
+commits before Delete or observes the directory as unavailable afterward.
 
 Root identity is checked even before accepting an apparently missing source. Common archive entry points refuse
 overlapping active registry paths, including during startup recovery. A refused or failed archive step does not fail
