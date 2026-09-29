@@ -1730,6 +1730,31 @@ fn reconcile_archive_with_effects(
     }
 }
 
+/// Give up managing a checkout that its last session's Delete could not
+/// archive safely: the registry row goes, and the folder stays wherever it is.
+///
+/// Deliberately not [`retire`], whose `retired` state promises the directory
+/// was archived or confirmed gone. SPEC.md "Fresh GitHub checkouts" makes
+/// archiving never block Delete, so this is the outcome for every archive
+/// failure, including a removed or remounted root, a filesystem without
+/// no-replace rename, and an archive destination too long for the system.
+/// The Delete's reply names the folder so the user can deal with it; a
+/// folder still at its path keeps occupying its name for later checkouts.
+pub fn release_unarchived(conn: &Connection, working_copy_id: &str) -> Result<()> {
+    let deleted = conn.execute(
+        "DELETE FROM working_copies WHERE id = ?1 AND allocation_state IN (?2, ?3)",
+        rusqlite::params![
+            working_copy_id,
+            AllocationState::Allocated.as_str(),
+            AllocationState::ArchivePending.as_str(),
+        ],
+    )?;
+    if deleted == 0 {
+        return Err(WorkingCopyError::WrongState(working_copy_id.to_string()));
+    }
+    Ok(())
+}
+
 /// Terminal transition `archive_pending` → `retired`. Owned by the
 /// teardown slice, called AFTER its final SQLite transaction: a `retired`
 /// row is a promise that the directory is archived (or confirmed gone)

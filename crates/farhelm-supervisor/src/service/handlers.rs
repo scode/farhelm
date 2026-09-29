@@ -1551,7 +1551,9 @@ async fn handle_delete_session(
     let tx = tx.clone();
     tasks.spawn(async move {
         match mutation.await {
-            Ok((Ok(()), _permit)) => send_reply(&tx, &ControlMsg::SessionDeleted { req_id }).await,
+            Ok((Ok(notice), _permit)) => {
+                send_reply(&tx, &ControlMsg::SessionDeleted { req_id, notice }).await;
+            }
             Ok((Err(error), _permit)) => {
                 reply_error(&tx, req_id, error.kind, error.message).await;
             }
@@ -7294,7 +7296,7 @@ mod tests {
             return;
         }
         assert!(
-            matches!(mutation, ControlMsg::SessionDeleted { req_id: 45 }),
+            matches!(mutation, ControlMsg::SessionDeleted { req_id: 45, .. }),
             "{mutation:?}"
         );
         assert!(

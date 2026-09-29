@@ -207,6 +207,27 @@ fn focus_rename_toggle(id: &str) {
 #[derive(Clone, Copy)]
 pub(crate) struct SharedPreferences(pub(crate) Signal<Preferences>);
 
+/// The newest notice a completed Delete carried: today a checkout its host
+/// could not archive and left in place, unmanaged (SPEC.md "Fresh GitHub
+/// checkouts": that outcome is never silent). The session list shows it
+/// until dismissed or replaced by a newer one.
+///
+/// Shared app-wide, not local to the list, because a Replace deletes its
+/// source too, and a Replace can start from the session view or the create
+/// form as well as from the list; each sets this, and the list is where it
+/// is shown.
+#[derive(Clone, Copy)]
+pub(crate) struct DeleteNotice(pub(crate) Signal<Option<String>>);
+
+impl DeleteNotice {
+    /// Show `notice` when there is one; `None` leaves any earlier notice.
+    pub(crate) fn publish(mut self, notice: Option<String>) {
+        if let Some(notice) = notice {
+            self.0.set(Some(notice));
+        }
+    }
+}
+
 /// The remembered selection, if any: the bare session id.
 ///
 /// A bare id rather than the `{helm, id}` record the browser once kept in
@@ -677,6 +698,8 @@ pub(crate) fn ListView(
     // do on every write regardless of which session it was about. Keyed
     // by session id so each row renders only its own entry.
     let mut errors = use_signal(HashMap::<String, String>::new);
+    // Not a row error: the row is gone. See `DeleteNotice`.
+    let delete_notice = use_context::<DeleteNotice>();
     // Each row's current phase, if any: an operation in flight
     // (`RowPhase::Pending`, which disables that row's buttons and is the
     // re-entry guard the click handlers check, since the DOM update disabling
@@ -1684,6 +1707,9 @@ pub(crate) fn ListView(
         let refresh = delete_refresh.clone();
         spawn(async move {
             let outcome = delete_session(&base, &id, only_if_nothing_alive).await;
+            if let Ok(notice) = &outcome {
+                delete_notice.publish(notice.clone());
+            }
             match outcome.err() {
                 Some(e) => {
                     errors.write().insert(id.clone(), format!("delete: {e}"));
@@ -1960,7 +1986,8 @@ pub(crate) fn ListView(
         });
         spawn(async move {
             match replace_session(&base, &id, only_if_nothing_alive, allow_yolo).await {
-                Ok(session) => {
+                Ok((session, notice)) => {
+                    delete_notice.publish(notice);
                     let session = match &source {
                         Some(source) => super::with_source_host(session, source),
                         None => session,
@@ -3031,6 +3058,23 @@ pub(crate) fn ListView(
                             "{option_label}"
                         }
                     }
+                }
+            }
+        }
+        if let Some(notice) = delete_notice.0() {
+            div { class: "delete-notice",
+                crate::peer::PeerLine {
+                    class: "status".to_string(),
+                    parts: vec![crate::peer::DetailPart::peer(notice)],
+                }
+                button {
+                    class: "btn",
+                    r#type: "button",
+                    onclick: move |_| {
+                        let mut slot = delete_notice.0;
+                        slot.set(None);
+                    },
+                    "dismiss"
                 }
             }
         }

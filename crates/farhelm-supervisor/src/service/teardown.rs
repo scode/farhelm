@@ -78,6 +78,38 @@ pub(crate) enum TeardownError {
     FailClosed(String),
 }
 
+/// Why a Delete left its checkout unarchived, as the notice will tell it.
+///
+/// `may_have_moved` separates the two outcomes a user must not confuse:
+/// `None` means nothing was moved and the folder is still at its recorded
+/// path; `Some` means a rename was attempted or journaled and its outcome is
+/// unknown, so the folder may be at the recorded path or at the archive
+/// destination (named when known).
+struct ArchiveSkipped {
+    reason: String,
+    may_have_moved: Option<Option<String>>,
+}
+
+/// The full path of a journaled archive destination, which the registry
+/// stores as a bare name inside the root's archive folder.
+fn journaled_destination_path(row: &crate::working_copies::WorkingCopyRow, name: &str) -> String {
+    PathBuf::from(&row.canonical_root)
+        .join(crate::working_copies::ARCHIVE_DIR_NAME)
+        .join(name)
+        .display()
+        .to_string()
+}
+
+impl ArchiveSkipped {
+    /// A refusal made before any move, so the folder has not been touched.
+    fn untouched(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            may_have_moved: None,
+        }
+    }
+}
+
 impl Supervisor {
     /// Tear this session down completely: cancel its transfers, kill
     /// everything it launched, remove its terminal, its files, and its
@@ -144,7 +176,7 @@ impl Supervisor {
         entry: &SessionEntry,
         session_id: &str,
         _directory_admission: tokio::sync::OwnedMutexGuard<()>,
-    ) -> Result<(), TeardownError> {
+    ) -> Result<Option<String>, TeardownError> {
         // The process-tree sweep runs BEFORE any lock is held: it can
         // take seconds (a grace period plus several /proc walks), and
         // holding `attachments` for that long would stall every OTHER
@@ -424,7 +456,12 @@ impl Supervisor {
         // quarantining step's own comment).
         let mut quarantined: Option<PathBuf> = None;
         let forwarder_error = forwarder_error;
-        let teardown: Result<Vec<String>, String> = async {
+        // Filled by the archive decisions below: notices for the reply, and
+        // the checkout rows Delete gave up archiving, which its final
+        // transaction releases instead of retiring.
+        let mut notices: Vec<String> = Vec::new();
+        let mut released: Vec<String> = Vec::new();
+        let teardown: Result<crate::store::DeleteSettlement, String> = async {
             if output_reap_blocked {
                 // Reaping is the only state that still proves a runtime task
                 // owns an output client. Leave tmux and all durable state in
@@ -559,131 +596,57 @@ impl Supervisor {
                         }
                         // Last reference: this delete's row removal would
                         // orphan the checkout, so the archive decision
-                        // below governs. First the corrupt-evidence check
-                        // (Design E): overlapping managed paths can only
-                        // exist against the admission rule, and such a
-                        // registry is preserved — the automated move is
-                        // refused until an expert has assessed it.
-                        let overlapping = self
-                            .store
-                            .working_copy_rows()
+                        // below governs. Reading the registry is a store
+                        // failure and still fails the delete; everything
+                        // the archive attempt itself can hit does not.
+                        let registry = self.store.working_copy_rows().await.map_err(|e| {
+                            format!("reading the registry for the reference check: {e:#}")
+                        })?;
+                        // Archiving never blocks Delete (SPEC.md "Fresh
+                        // GitHub checkouts", confirmed 2026-09-28). When the
+                        // checkout cannot be archived safely, for any
+                        // reason, the session is still deleted: the checkout
+                        // is released from Farhelm's management, its folder
+                        // stays where it is, and the reply carries a notice
+                        // naming it. Before this, each of these failures kept
+                        // the session, and several could never clear (a
+                        // removed or remounted root, a filesystem without
+                        // no-replace rename, a path too long to archive).
+                        if let Err(skipped) = self
+                            .archive_last_reference(&row, &registry, session_id)
                             .await
-                            .map_err(|e| {
-                                format!("reading the registry for the reference check: {e:#}")
-                            })?
-                            .into_iter()
-                            .filter(|other| {
-                                other.id != row.id
-                                    && other.allocation_state
-                                        != crate::working_copies::AllocationState::Retired
-                                    && other
-                                        .canonical_path
-                                        .as_deref()
-                                        .is_some_and(|other_path| {
-                                            crate::working_copies::path_overlaps(&row.canonical_path, other_path)
-                                        })
-                            })
-                            .count();
-                        if overlapping > 0 {
-                            return Err(format!(
-                                "the checkout at {} has another active registry record whose \
-                                 path overlaps it; this is inconsistent ownership evidence, \
-                                 so the automated archive move is refused and the registry \
-                                 is preserved for inspection",
-                                row.canonical_path.as_deref().unwrap_or(&row.canonical_root)
-                            ));
-                        }
-                        // A pending row first completes its crash
-                        // recovery; a live row is archived.
-                        if row.allocation_state
-                            == crate::working_copies::AllocationState::ArchivePending
                         {
-                            match self
-                                .store
-                                .reconcile_working_copy_archive(&row.id, self.seams.faults.archive_parent_sync().cloned())
-                                .await
-                                .map_err(|e| {
-                                    format!("reconciling the pending archive: {e:#}")
-                                })? {
-                                crate::working_copies::ReconcileOutcome::Moved { destination } => {
-                                    warn!(session = %session_id, destination = %destination,
-                                        "the interrupted archive of a deleted session's checkout \
-                                         completed on retry");
+                            let path = row.canonical_path.clone().unwrap_or_else(|| {
+                                PathBuf::from(&row.canonical_root)
+                                    .join(&row.original_basename)
+                                    .display()
+                                    .to_string()
+                            });
+                            let ArchiveSkipped { reason, may_have_moved } = skipped;
+                            // Name every place the folder can be. After a
+                            // failed or unreconcilable move it may already be
+                            // at its archive destination, and telling the user
+                            // it stayed put would send them to an empty path.
+                            let whereabouts = match may_have_moved {
+                                None => "stays where it is".to_string(),
+                                Some(Some(destination)) => {
+                                    format!("may be there or at {destination}")
                                 }
-                                crate::working_copies::ReconcileOutcome::MetadataComplete => {}
-                                crate::working_copies::ReconcileOutcome::SourceMissing => {
-                                    warn!(session = %session_id,
-                                        "a pending archive's source was already gone; \
-                                         deleting the record only");
+                                Some(None) => {
+                                    "may be there or in its root's archive folder".to_string()
                                 }
-                            }
-                        } else {
-                            // Missing-source cleanup needs the same root
-                            // proof as a rename: a replacement empty root can
-                            // otherwise hide a still-owned checkout elsewhere.
-                            crate::working_copies::verified_root(&row)
-                                .map_err(|e| format!("verifying the checkout's recorded root: {e:#}"))?;
-                            match crate::working_copies::verify_identity(&row) {
-                                Ok(crate::working_copies::IdentityStatus::Missing) => {
-                                    // Missing source: a visible cleanup
-                                    // diagnostic, and metadata deletion is
-                                    // permitted without moving anything.
-                                    warn!(session = %session_id,
-                                        path = %row.canonical_path.as_deref().unwrap_or(""),
-                                        "the managed checkout's recorded directory is gone; \
-                                         deleting its ownership record without any move");
-                                }
-                                Ok(crate::working_copies::IdentityStatus::Matches) => {
-                                    match self.store.archive_move_working_copy(&row.id, self.seams.faults.archive_parent_sync().cloned()).await {
-                                        Ok(crate::working_copies::ArchiveOutcome::Archived {
-                                            destination,
-                                        }) => {
-                                            warn!(session = %session_id, destination = %destination,
-                                                "the last reference to this checkout is being \
-                                                 deleted; the directory moved to the archive");
-                                        }
-                                        Ok(crate::working_copies::ArchiveOutcome::SourceMissing) => {
-                                            warn!(session = %session_id,
-                                                "the checkout vanished between the identity \
-                                                 check and the archive move; deleting only \
-                                                 the record");
-                                        }
-                                        // A post-rename durability failure
-                                        // retains the row and journal too.
-                                        // Do not claim the path stayed put:
-                                        // retry reconciles the recorded move.
-                                        Err(e) => {
-                                            return Err(format!(
-                                                "archiving the checkout at {} kept the session \
-                                                 row; the directory may already be at its \
-                                                 journaled archive destination: {e:#}",
-                                                row.canonical_path.as_deref().unwrap_or(""),
-                                            ));
-                                        }
-                                    }
-                                }
-                                Ok(crate::working_copies::IdentityStatus::DifferentObject) => {
-                                    return Err(format!(
-                                        "the managed checkout at {} is no longer the object its \
-                                         registry row captured; the directory is not ours to \
-                                         move and the session is retained",
-                                        row.canonical_path.as_deref().unwrap_or(""),
-                                    ));
-                                }
-                                Ok(status) => {
-                                    return Err(format!(
-                                        "the managed checkout's registry row has no captured \
-                                         identity ({status:?}); refusing to move or delete \
-                                         evidence, session retained",
-                                    ));
-                                }
-                                Err(e) => {
-                                    return Err(format!(
-                                        "verifying the managed checkout's identity kept the \
-                                         session row and moved nothing: {e:#}"
-                                    ));
-                                }
-                            }
+                            };
+                            warn!(
+                                session = %session_id, path = %path, reason = %reason,
+                                whereabouts = %whereabouts,
+                                "the deleted session's checkout could not be archived and is no \
+                                 longer managed"
+                            );
+                            notices.push(format!(
+                                "The checkout at {path} was not archived and {whereabouts}; \
+                                 Farhelm no longer manages it. Reason: {reason}"
+                            ));
+                            released.push(row.id.clone());
                         }
                     }
                     crate::working_copies::AllocationState::Retired => {}
@@ -697,14 +660,31 @@ impl Supervisor {
             // duplicate (PLAN_M3.md item 6; the store method's own
             // docs carry the argument).
             self.store
-                .delete_session_archiving_memberships(session_id)
+                .delete_session_archiving_memberships(session_id, &released)
                 .await
                 .map_err(|e| format!("{e:#}"))
         }
         .await;
 
         let retired_checkouts = match teardown {
-            Ok(retired) => retired,
+            Ok(crate::store::DeleteSettlement {
+                retired,
+                late_released,
+            }) => {
+                for late in late_released {
+                    warn!(
+                        session = %session_id, path = %late.path, reason = %late.reason,
+                        "the deleted session's missing checkout could not be re-proved missing; \
+                         it is no longer managed"
+                    );
+                    notices.push(format!(
+                        "The checkout at {} was not archived and whatever is at that path now \
+                         stays there; Farhelm no longer manages it. Reason: {}",
+                        late.path, late.reason
+                    ));
+                }
+                retired
+            }
             Err(err_msg) => {
                 // A returned failure is different from a process crash in
                 // the quarantine window: the session row is still live, so
@@ -800,7 +780,165 @@ impl Supervisor {
             );
         }
 
-        Ok(())
+        Ok((!notices.is_empty()).then(|| notices.join(" ")))
+    }
+
+    /// Archive the checkout whose last reference this Delete removes, or say
+    /// why it could not be archived safely.
+    ///
+    /// `Err` carries what the user is told, not a failure of the Delete: the
+    /// caller releases the checkout and completes the Delete with a notice
+    /// (SPEC.md "Fresh GitHub checkouts": archiving never blocks deleting its
+    /// session). Every safety check that used to fail the Delete still
+    /// decides whether the folder is MOVED: the move happens only when the
+    /// root and the checkout still match what was recorded and no other
+    /// registry row overlaps it; anything else leaves the folder alone.
+    async fn archive_last_reference(
+        &self,
+        row: &crate::working_copies::WorkingCopyRow,
+        registry: &[crate::working_copies::WorkingCopyRow],
+        session_id: &str,
+    ) -> Result<(), ArchiveSkipped> {
+        // The corrupt-evidence check (Design E): overlapping managed paths
+        // can only exist against the admission rule, and moving either
+        // would act on inconsistent ownership evidence.
+        let overlapping = registry
+            .iter()
+            .filter(|other| {
+                other.id != row.id
+                    && other.allocation_state != crate::working_copies::AllocationState::Retired
+                    && other.canonical_path.as_deref().is_some_and(|other_path| {
+                        crate::working_copies::path_overlaps(&row.canonical_path, other_path)
+                    })
+            })
+            .count();
+        if overlapping > 0 {
+            let reason = "another active checkout record overlaps its path, so moving it would act \
+                          on inconsistent ownership evidence";
+            // The refusal proves no NEW move is safe, not that an earlier
+            // interrupted one never happened, so a pending row still names
+            // where it may have gone.
+            if row.allocation_state == crate::working_copies::AllocationState::ArchivePending {
+                return Err(ArchiveSkipped {
+                    reason: reason.to_string(),
+                    may_have_moved: Some(self.current_archive_destination(row).await),
+                });
+            }
+            return Err(ArchiveSkipped::untouched(reason));
+        }
+        // A pending row first completes its crash recovery; a live row is
+        // archived.
+        if row.allocation_state == crate::working_copies::AllocationState::ArchivePending {
+            let reconciled = self
+                .store
+                .reconcile_working_copy_archive(
+                    &row.id,
+                    self.seams.faults.archive_parent_sync().cloned(),
+                )
+                .await;
+            let reconciled = match reconciled {
+                Ok(outcome) => outcome,
+                Err(e) => {
+                    return Err(ArchiveSkipped {
+                        reason: format!("an earlier archive move could not be completed: {e:#}"),
+                        may_have_moved: Some(self.current_archive_destination(row).await),
+                    });
+                }
+            };
+            match reconciled {
+                crate::working_copies::ReconcileOutcome::Moved { destination } => {
+                    warn!(session = %session_id, destination = %destination,
+                        "the interrupted archive of a deleted session's checkout completed on retry");
+                }
+                crate::working_copies::ReconcileOutcome::MetadataComplete => {}
+                crate::working_copies::ReconcileOutcome::SourceMissing => {
+                    warn!(session = %session_id,
+                        "a pending archive's source was already gone; deleting the record only");
+                }
+            }
+            return Ok(());
+        }
+        // Missing-source cleanup needs the same root proof as a rename: a
+        // replacement empty root can otherwise hide a still-owned checkout
+        // elsewhere.
+        crate::working_copies::verified_root(row).map_err(|e| {
+            ArchiveSkipped::untouched(format!(
+                "its checkout root no longer matches what was recorded: {e:#}"
+            ))
+        })?;
+        match crate::working_copies::verify_identity(row) {
+            Ok(crate::working_copies::IdentityStatus::Missing) => {
+                // Missing source: a visible cleanup diagnostic, and metadata
+                // deletion is permitted without moving anything.
+                warn!(session = %session_id,
+                    path = %row.canonical_path.as_deref().unwrap_or(""),
+                    "the managed checkout's recorded directory is gone; deleting its ownership \
+                     record without any move");
+                Ok(())
+            }
+            Ok(crate::working_copies::IdentityStatus::Matches) => {
+                match self
+                    .store
+                    .archive_move_working_copy(
+                        &row.id,
+                        self.seams.faults.archive_parent_sync().cloned(),
+                    )
+                    .await
+                {
+                    Ok(crate::working_copies::ArchiveOutcome::Archived { destination }) => {
+                        warn!(session = %session_id, destination = %destination,
+                            "the last reference to this checkout is being deleted; the directory \
+                             moved to the archive");
+                        Ok(())
+                    }
+                    Ok(crate::working_copies::ArchiveOutcome::SourceMissing) => {
+                        warn!(session = %session_id,
+                            "the checkout vanished between the identity check and the archive \
+                             move; deleting only the record");
+                        Ok(())
+                    }
+                    // The move may have happened before a later durability
+                    // step failed, so do not claim the folder stayed put.
+                    Err(e) => Err(ArchiveSkipped {
+                        reason: format!("the archive move failed: {e:#}"),
+                        may_have_moved: Some(self.current_archive_destination(row).await),
+                    }),
+                }
+            }
+            Ok(crate::working_copies::IdentityStatus::DifferentObject) => {
+                Err(ArchiveSkipped::untouched(
+                    "the folder at that path is no longer the one this checkout recorded",
+                ))
+            }
+            Ok(status) => Err(ArchiveSkipped::untouched(format!(
+                "its record has no captured identity ({status:?}), so Farhelm cannot tell the \
+                 folder is its own"
+            ))),
+            Err(e) => Err(ArchiveSkipped::untouched(format!(
+                "its identity could not be checked: {e:#}"
+            ))),
+        }
+    }
+
+    /// The archive destination currently journaled for `row`, as a full
+    /// path, read fresh from the registry.
+    ///
+    /// Fresh because a move or a crash recovery journals its destination
+    /// before renaming, and may re-journal a new name (a collision, or a
+    /// foreign directory at the old name) before it fails, so the snapshot
+    /// the caller holds can name a folder that is not ours. `None` when
+    /// nothing is journaled or the read fails; the notice then says the
+    /// destination is unknown rather than guessing.
+    async fn current_archive_destination(
+        &self,
+        row: &crate::working_copies::WorkingCopyRow,
+    ) -> Option<String> {
+        let rows = self.store.working_copy_rows().await.ok()?;
+        let name = rows
+            .into_iter()
+            .find(|current| current.id == row.id)?
+            .archive_destination?;
+        Some(journaled_destination_path(row, &name))
     }
 
     /// Close every terminal-output client this supervisor holds, each
@@ -1622,7 +1760,7 @@ mod tests {
         let mut entry = entry_with(None, LastOutcome::Running);
         entry.info.id = id.clone();
 
-        let Ok(()) = sup
+        let Ok(_) = sup
             .teardown_session(&entry, &id, test_admission(&sup).await)
             .await
         else {
@@ -1715,6 +1853,79 @@ mod tests {
         std::fs::File::create(&lock).unwrap();
         assert!(path.is_file() && lock.is_file());
         (path, lock)
+    }
+
+    /// A checkout the teardown saw as missing, whose absence no longer holds
+    /// when Delete commits, is released with a notice instead of rolling the
+    /// Delete back.
+    ///
+    /// Why it matters: the final transaction re-proves a missing source before
+    /// dropping its record, and the filesystem can change in between (the
+    /// folder reappears, the root is unmounted). Failing there would make an
+    /// archive outcome block Delete after all, which SPEC.md "Fresh GitHub
+    /// checkouts" rules out. Specified: settling the last reference to an
+    /// allocated checkout whose folder is present (the state a reappeared
+    /// folder leaves) deletes the session and the record, leaves the folder
+    /// untouched, and reports the path as released late.
+    #[farhelm_testtrace::test]
+    async fn a_missing_checkout_that_reappears_before_commit_is_released_not_fatal() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let root = state.path().join("workroot");
+        std::fs::create_dir_all(&root).expect("the checkout root");
+        let checkout_id;
+        {
+            let conn = sup.store.conn.lock();
+            let planned = crate::working_copies::record_planned(
+                &conn,
+                &crate::working_copies::PlannedWorkingCopy {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    canonical_root: root.to_string_lossy().into_owned(),
+                    repo_owner: "octo".to_string(),
+                    repo_name: "back".to_string(),
+                    original_basename: "back".to_string(),
+                    origin_session_id: "s-back".to_string(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .expect("record the checkout plan");
+            crate::working_copies::allocate(&conn, &planned.id, None)
+                .expect("allocate the checkout");
+            checkout_id = planned.id;
+        }
+        let path = root.join("back");
+        std::fs::write(path.join("file.txt"), "contents").expect("seed the folder");
+        seeded_session(&sup, "s-back", &path.to_string_lossy()).await;
+
+        let settlement = sup
+            .store
+            .delete_session_archiving_memberships("s-back", &[])
+            .await
+            .expect("the present folder is released, not a failed Delete");
+        assert_eq!(settlement.late_released.len(), 1);
+        assert_eq!(
+            settlement.late_released[0].path,
+            path.to_string_lossy(),
+            "the late release names the folder's recorded path"
+        );
+        assert!(sup.store.session("s-back").await.unwrap().is_none());
+        assert!(
+            !sup.store
+                .working_copy_rows()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == checkout_id),
+            "the checkout is released from Farhelm's management"
+        );
+        assert_eq!(
+            std::fs::read_to_string(path.join("file.txt")).unwrap(),
+            "contents",
+            "the folder is untouched"
+        );
     }
 
     /// E1 (Design E): the last-reference delete archives the checkout —
@@ -1830,22 +2041,6 @@ mod tests {
             .get("s-b")
             .cloned()
             .expect("the surviving member reloads");
-        let archive_root = root.join(crate::working_copies::ARCHIVE_DIR_NAME);
-        std::os::unix::fs::symlink(&unmanaged, &archive_root).unwrap();
-        assert!(matches!(
-            sup.teardown_session(&entry_b, "s-b", test_admission(&sup).await)
-                .await,
-            Err(TeardownError::FailClosed(_))
-        ));
-        assert!(team_path.join("file.txt").exists());
-        assert!(sup.store.session("s-b").await.unwrap().is_some());
-        assert_eq!(
-            sup.store.working_copy_member_count(&team_id).await.unwrap(),
-            1
-        );
-        assert_eq!(std::fs::read(&preparation).unwrap(), prepared_bytes);
-        assert!(preparation_lock.is_file());
-        std::fs::remove_file(&archive_root).unwrap();
         sup.teardown_session(&entry_b, "s-b", test_admission(&sup).await)
             .await
             .unwrap_or_else(|_| panic!("delete the last member"));
@@ -1997,22 +2192,28 @@ mod tests {
         let result = sup
             .teardown_session(&entry, "s-swap", test_admission(&sup).await)
             .await;
+        // Archiving never blocks Delete (SPEC.md "Fresh GitHub checkouts"):
+        // the session goes, the checkout is released, and the reply names
+        // the folder left in place. What must never happen is the move.
+        let Ok(Some(notice)) = result else {
+            panic!("a foreign object at the recorded source still deletes, with a notice");
+        };
         assert!(
-            matches!(result, Err(TeardownError::FailClosed(_))),
-            "a foreign object at the recorded source fails closed"
+            notice.contains(&root.join("swap").display().to_string()),
+            "the notice names the folder left in place: {notice}"
         );
         assert!(
-            sup.store.session("s-swap").await.expect("read").is_some(),
-            "the failed delete retains the session row for a retry"
+            sup.store.session("s-swap").await.expect("read").is_none(),
+            "the session is deleted"
         );
         assert!(
-            sup.store
+            !sup.store
                 .working_copy_rows()
                 .await
                 .expect("read the registry")
                 .into_iter()
                 .any(|row| row.id == checkout_id),
-            "the ownership evidence is preserved, never deleted over a stranger"
+            "the checkout is released from Farhelm's management"
         );
         assert!(
             root.join("swap").exists(),
@@ -2264,12 +2465,18 @@ mod tests {
         }
     }
 
-    /// Delete must retain ownership when a moved root hides the checkout at
-    /// its recorded pathname. Reopening cannot turn that refusal into cleanup;
-    /// genuine absence under the restored root still permits metadata deletion.
-    /// Preparation artifacts follow that final metadata settlement as well.
+    /// A moved or replaced checkout root never makes Delete touch the
+    /// checkout, and never blocks the Delete either.
+    ///
+    /// Why it matters: a removed, recreated or symlink-swapped root used to
+    /// make every Delete (and restart) of the session fail forever. SPEC.md
+    /// "Fresh GitHub checkouts" makes archiving never block Delete; the
+    /// safety that remains is that the checkout, wherever it now lives, is
+    /// neither moved nor treated as gone. Specified: the delete succeeds with
+    /// a notice, the checkout's record is released, and the real checkout
+    /// under the moved root is untouched.
     #[farhelm_testtrace::test]
-    async fn deleting_a_missing_source_refuses_a_replaced_root_across_reopen() {
+    async fn deleting_with_a_replaced_root_releases_the_checkout_untouched() {
         use std::os::unix::fs::MetadataExt;
         for symlink_root in [false, true] {
             let state = StateDir::new();
@@ -2277,7 +2484,7 @@ mod tests {
             let parked = state.path().join("parked");
             let foreign = state.path().join("foreign");
             std::fs::create_dir(&root).unwrap();
-            let mut sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
                 .await
                 .unwrap();
             let checkout_id = uuid::Uuid::new_v4().to_string();
@@ -2309,78 +2516,6 @@ mod tests {
             } else {
                 std::fs::create_dir(&root).unwrap();
             }
-            for reopen in [false, true] {
-                if reopen {
-                    drop(sup);
-                    sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-                        .await
-                        .unwrap();
-                }
-                assert!(!root.join("bar").exists());
-                let metadata = std::fs::metadata(parked.join("bar")).unwrap();
-                assert_eq!((metadata.dev(), metadata.ino()), accepted.identity);
-                assert_eq!(
-                    sup.store
-                        .working_copy_member_count(&checkout_id)
-                        .await
-                        .unwrap(),
-                    1
-                );
-                let entry = sup
-                    .sessions
-                    .lock()
-                    .await
-                    .get("missing-origin")
-                    .cloned()
-                    .unwrap();
-                assert!(matches!(
-                    sup.teardown_session(&entry, "missing-origin", test_admission(&sup).await)
-                        .await,
-                    Err(TeardownError::FailClosed(_))
-                ));
-                assert!(sup.store.session("missing-origin").await.unwrap().is_some());
-                assert!(preparation.is_file() && preparation_lock.is_file());
-                assert_eq!(
-                    sup.store
-                        .working_copy_member_count(&checkout_id)
-                        .await
-                        .unwrap(),
-                    1
-                );
-                let row = sup
-                    .store
-                    .working_copy_rows()
-                    .await
-                    .unwrap()
-                    .into_iter()
-                    .find(|row| row.id == checkout_id)
-                    .unwrap();
-                assert_eq!(
-                    row.allocation_state,
-                    crate::working_copies::AllocationState::Allocated
-                );
-                assert_eq!(row.path_identity, Some(accepted.identity));
-                assert_eq!(row.root_identity, accepted.row.root_identity);
-                assert_eq!(row.archive_destination, None);
-                assert_eq!(
-                    std::fs::read(parked.join("bar/payload")).unwrap(),
-                    b"owned bytes"
-                );
-                assert!(!root.join(crate::working_copies::ARCHIVE_DIR_NAME).exists());
-                assert!(
-                    !parked
-                        .join(crate::working_copies::ARCHIVE_DIR_NAME)
-                        .exists()
-                );
-            }
-            if symlink_root {
-                std::fs::remove_file(&root).unwrap();
-            } else {
-                std::fs::remove_dir(&root).unwrap();
-            }
-            std::fs::rename(&parked, &root).unwrap();
-            std::fs::remove_file(root.join("bar/payload")).unwrap();
-            std::fs::remove_dir(root.join("bar")).unwrap();
             let entry = sup
                 .sessions
                 .lock()
@@ -2388,39 +2523,278 @@ mod tests {
                 .get("missing-origin")
                 .cloned()
                 .unwrap();
-            sup.teardown_session(&entry, "missing-origin", test_admission(&sup).await)
+            // Archiving never blocks Delete (SPEC.md "Fresh GitHub
+            // checkouts"): a replaced root completes the delete with a notice
+            // and releases the checkout. What must never happen is treating
+            // the checkout as gone and touching it, wherever it now lives.
+            let Ok(Some(notice)) = sup
+                .teardown_session(&entry, "missing-origin", test_admission(&sup).await)
                 .await
-                .unwrap_or_else(|_| {
-                    panic!("matching root and missing checkout permit metadata cleanup")
-                });
-            assert!(sup.store.session("missing-origin").await.unwrap().is_none());
-            assert!(!preparation.exists() && !preparation_lock.exists());
-            assert_eq!(
-                sup.store
-                    .working_copy_member_count(&checkout_id)
-                    .await
-                    .unwrap(),
-                0
+            else {
+                panic!("a replaced root still deletes the session, with a notice");
+            };
+            assert!(
+                notice.contains("bar"),
+                "the notice names the checkout left behind: {notice}"
             );
+            assert!(sup.store.session("missing-origin").await.unwrap().is_none());
             assert!(
                 !sup.store
                     .working_copy_rows()
                     .await
                     .unwrap()
                     .iter()
-                    .any(|row| row.id == checkout_id)
+                    .any(|row| row.id == checkout_id),
+                "the checkout is released from Farhelm's management"
+            );
+            let metadata = std::fs::metadata(parked.join("bar")).unwrap();
+            assert_eq!(
+                (metadata.dev(), metadata.ino()),
+                accepted.identity,
+                "the real checkout under the moved root is untouched"
+            );
+            assert_eq!(
+                std::fs::read(parked.join("bar/payload")).unwrap(),
+                b"owned bytes"
             );
             assert!(!root.join(crate::working_copies::ARCHIVE_DIR_NAME).exists());
+            assert!(
+                !parked
+                    .join(crate::working_copies::ARCHIVE_DIR_NAME)
+                    .exists()
+            );
+            let _ = (&preparation, &preparation_lock);
         }
     }
 
-    /// R1.6/E2: either failed parent barrier keeps the session, membership
-    /// and journal across repeated Delete and reopen. Once syncing succeeds,
-    /// Delete retires the same moved inode without touching a replacement at
-    /// the old source name. This tests the actual fsync seam, not a failure
-    /// adjacent to the durability operation.
+    /// An interrupted archive refused for overlapping registry records still
+    /// completes the Delete with a notice naming its journaled destination.
+    ///
+    /// Why it matters: the overlap makes any further move unsafe, but the
+    /// interrupted rename may already have happened, and Delete forgets the
+    /// record right after. Saying the checkout stayed at its source would
+    /// hide where it went. Specified: with a pending archive whose rename
+    /// completed and another active record overlapping its path, Delete
+    /// succeeds, both folders are untouched, the notice names the journaled
+    /// destination and does not claim the checkout stayed put, and the
+    /// checkout is released.
     #[farhelm_testtrace::test]
-    async fn archive_parent_sync_failure_retains_evidence_until_retry_is_durable() {
+    async fn an_overlap_refusal_of_a_pending_archive_names_its_destination() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let root = state.path().join("workroot");
+        std::fs::create_dir(&root).unwrap();
+        let archive_root = root.join(crate::working_copies::ARCHIVE_DIR_NAME);
+        std::fs::create_dir(&archive_root).unwrap();
+        let source = root.join("checkout");
+        let destination = archive_root.join("checkout-journaled");
+        let checkout_id = uuid::Uuid::new_v4().to_string();
+        {
+            let conn = sup.store.conn.lock();
+            for (id, basename, origin) in [
+                (checkout_id.as_str(), "checkout", "overlapped"),
+                ("overlapping", "other", "other-origin"),
+            ] {
+                crate::working_copies::record_planned(
+                    &conn,
+                    &crate::working_copies::PlannedWorkingCopy {
+                        id: id.to_string(),
+                        canonical_root: root.to_str().unwrap().into(),
+                        repo_owner: "acme".into(),
+                        repo_name: basename.into(),
+                        original_basename: basename.into(),
+                        origin_session_id: origin.into(),
+                        root_identity: None,
+                        preparation_snapshot: None,
+                    },
+                )
+                .unwrap();
+                crate::working_copies::allocate(&conn, id, None).unwrap();
+            }
+            // Corrupt evidence the admission rule never produces: another
+            // active record inside this checkout's path.
+            conn.execute(
+                "UPDATE working_copies SET canonical_path = ?2 WHERE id = ?1",
+                rusqlite::params![
+                    "overlapping",
+                    source.join("inner").to_string_lossy().into_owned()
+                ],
+            )
+            .unwrap();
+            // An interrupted archive whose rename went through.
+            conn.execute(
+                "UPDATE working_copies SET allocation_state = ?2, archive_destination = ?3 \
+                 WHERE id = ?1",
+                rusqlite::params![
+                    checkout_id,
+                    crate::working_copies::AllocationState::ArchivePending.as_str(),
+                    "checkout-journaled",
+                ],
+            )
+            .unwrap();
+        }
+        std::fs::write(source.join("owned"), b"uncommitted content").unwrap();
+        std::fs::rename(&source, &destination).unwrap();
+        let entry = seeded_session(&sup, "overlapped", source.to_str().unwrap()).await;
+
+        let Ok(Some(notice)) = sup
+            .teardown_session(&entry, "overlapped", test_admission(&sup).await)
+            .await
+        else {
+            panic!("an overlap refusal still deletes the session, with a notice");
+        };
+        assert!(
+            notice.contains(&destination.display().to_string())
+                && !notice.contains("stays where it is"),
+            "the notice names where the checkout may be: {notice}"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("owned")).unwrap(),
+            b"uncommitted content"
+        );
+        assert!(
+            root.join("other").is_dir(),
+            "the other checkout is untouched"
+        );
+        assert!(sup.store.session("overlapped").await.unwrap().is_none());
+        assert!(
+            !sup.store
+                .working_copy_rows()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == checkout_id),
+            "the checkout is released from Farhelm's management"
+        );
+    }
+
+    /// A crash recovery that moves the checkout under a fresh name and then
+    /// fails its durability barrier completes the Delete with a notice naming
+    /// the name the folder actually reached.
+    ///
+    /// Why it matters: recovery re-journals a new destination when a foreign
+    /// directory holds the old one, so the destination recorded before the
+    /// recovery names a folder that is not ours. A notice built from that
+    /// stale record would send the user to a stranger's folder and omit where
+    /// the checkout went, just before Delete forgets the record. Specified:
+    /// with a pending archive whose journaled name is occupied by a foreign
+    /// directory and a failing parent barrier, Delete succeeds, its notice
+    /// names the checkout's new location, the foreign directory is untouched,
+    /// and the checkout is released.
+    #[farhelm_testtrace::test]
+    async fn recovery_barrier_failure_names_the_rejournaled_destination() {
+        let state = StateDir::new();
+        let root = state.path().join("workroot");
+        std::fs::create_dir(&root).unwrap();
+        let source = root.join("checkout");
+        let archive_root = root.join(crate::working_copies::ARCHIVE_DIR_NAME);
+        std::fs::create_dir(&archive_root).unwrap();
+        let sync: crate::working_copies::ArchiveParentSync = Arc::new(|_, _| {
+            Err(std::io::Error::other(
+                "injected archive parent sync failure",
+            ))
+        });
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                faults: crate::service::FaultHooks {
+                    archive_parent_sync: Some(sync),
+                    ..crate::service::FaultHooks::default()
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        let checkout_id = uuid::Uuid::new_v4().to_string();
+        {
+            let conn = sup.store.conn.lock();
+            crate::working_copies::record_planned(
+                &conn,
+                &crate::working_copies::PlannedWorkingCopy {
+                    id: checkout_id.clone(),
+                    canonical_root: root.to_str().unwrap().into(),
+                    repo_owner: "acme".into(),
+                    repo_name: "checkout".into(),
+                    original_basename: "checkout".into(),
+                    origin_session_id: "recovering".into(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .unwrap();
+            crate::working_copies::allocate(&conn, &checkout_id, None).unwrap();
+            // The state an interrupted archive leaves: journaled, not moved.
+            conn.execute(
+                "UPDATE working_copies SET allocation_state = ?2, archive_destination = ?3 \
+                 WHERE id = ?1",
+                rusqlite::params![
+                    checkout_id,
+                    crate::working_copies::AllocationState::ArchivePending.as_str(),
+                    "checkout-old",
+                ],
+            )
+            .unwrap();
+        }
+        let foreign = archive_root.join("checkout-old");
+        std::fs::create_dir(&foreign).unwrap();
+        std::fs::write(foreign.join("theirs"), b"not ours").unwrap();
+        let entry = seeded_session(&sup, "recovering", source.to_str().unwrap()).await;
+
+        let Ok(Some(notice)) = sup
+            .teardown_session(&entry, "recovering", test_admission(&sup).await)
+            .await
+        else {
+            panic!("a failed recovery barrier still deletes the session, with a notice");
+        };
+        let moved: Vec<_> = std::fs::read_dir(&archive_root)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path != &foreign)
+            .collect();
+        assert_eq!(
+            moved.len(),
+            1,
+            "recovery moved the checkout under a new name"
+        );
+        assert!(
+            notice.contains(&moved[0].display().to_string()),
+            "the notice names where the checkout went: {notice}"
+        );
+        assert!(
+            !notice.contains(&foreign.display().to_string()),
+            "the notice must not send the user to the foreign folder: {notice}"
+        );
+        assert_eq!(std::fs::read(foreign.join("theirs")).unwrap(), b"not ours");
+        assert!(sup.store.session("recovering").await.unwrap().is_none());
+        assert!(
+            !sup.store
+                .working_copy_rows()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == checkout_id),
+            "the checkout is released from Farhelm's management"
+        );
+    }
+
+    /// A failed durability barrier after the archive rename completes the
+    /// Delete with a notice that does not claim the folder stayed put.
+    ///
+    /// Why it matters: this failure used to keep the session and its journal
+    /// for a retry that could repeat the failure forever; SPEC.md "Fresh
+    /// GitHub checkouts" makes archiving never block Delete. Because the
+    /// rename already happened, the notice must name the archive destination the folder may be at,
+    /// not claim it stayed put. Specified, for either failing parent barrier: the
+    /// delete succeeds with such a notice, the checkout is released, and the
+    /// moved checkout is intact exactly once in the archive. This drives the
+    /// actual fsync seam, not a failure next to it.
+    #[farhelm_testtrace::test]
+    async fn archive_parent_sync_failure_completes_delete_with_a_notice() {
         use std::os::unix::fs::MetadataExt;
         use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -2502,154 +2876,54 @@ mod tests {
                     .unwrap(),
                 1
             );
-            let mut destination = None;
-
-            for attempt in 0..3 {
-                calls.lock().unwrap().clear();
-                let result = sup
-                    .teardown_session(&entry, "sync-origin", test_admission(&sup).await)
-                    .await;
-                let message = match result {
-                    Err(TeardownError::FailClosed(message)) => message,
-                    _ => panic!("failed durability must refuse Delete"),
-                };
-                assert!(
-                    message.contains("injected archive parent sync failure"),
-                    "{message}"
-                );
-                assert!(
-                    !message.contains("moved nothing"),
-                    "rename has already succeeded"
-                );
-                let expected_calls = if fail_archive_parent {
-                    vec![archive_root.clone()]
-                } else {
-                    vec![archive_root.clone(), root.clone()]
-                };
-                assert_eq!(*calls.lock().unwrap(), expected_calls);
-                assert!(sup.store.session("sync-origin").await.unwrap().is_some());
-                assert_eq!(
-                    sup.store
-                        .working_copy_member_count(&checkout_id)
-                        .await
-                        .unwrap(),
-                    1
-                );
-                let row = sup
-                    .store
+            let result = sup
+                .teardown_session(&entry, "sync-origin", test_admission(&sup).await)
+                .await;
+            // Archiving never blocks Delete (SPEC.md "Fresh GitHub
+            // checkouts"). The rename has already happened when the durability
+            // barrier fails, so the notice must not claim the folder stayed
+            // put.
+            let Ok(Some(notice)) = result else {
+                panic!("a failed archive barrier still deletes the session, with a notice");
+            };
+            assert!(
+                notice.contains("injected archive parent sync failure")
+                    && !notice.contains("stays where it is"),
+                "{notice}"
+            );
+            let expected_calls = if fail_archive_parent {
+                vec![archive_root.clone()]
+            } else {
+                vec![archive_root.clone(), root.clone()]
+            };
+            assert_eq!(*calls.lock().unwrap(), expected_calls);
+            assert!(sup.store.session("sync-origin").await.unwrap().is_none());
+            assert!(
+                !sup.store
                     .working_copy_rows()
                     .await
                     .unwrap()
-                    .into_iter()
-                    .find(|row| row.id == checkout_id)
-                    .unwrap();
-                assert_eq!(
-                    row.allocation_state,
-                    crate::working_copies::AllocationState::ArchivePending
-                );
-                let moved = archive_root.join(row.archive_destination.unwrap());
-                let metadata = std::fs::metadata(&moved).unwrap();
-                assert_eq!((metadata.dev(), metadata.ino()), owned_identity);
-                assert_eq!(
-                    std::fs::read(moved.join("owned")).unwrap(),
-                    b"uncommitted content"
-                );
-                if let Some(previous) = &destination {
-                    assert_eq!(
-                        &moved, previous,
-                        "retry must keep the already-moved destination"
-                    );
-                } else {
-                    assert!(!source.exists(), "the failure is after the real rename");
-                    destination = Some(moved);
-                    // A foreign source makes a second rename observably wrong;
-                    // recovery must rely on the matching archived identity.
-                    std::fs::create_dir(&source).unwrap();
-                    std::fs::write(source.join("foreign"), b"leave untouched").unwrap();
-                    let foreign = std::fs::metadata(&source).unwrap();
-                    assert_ne!((foreign.dev(), foreign.ino()), owned_identity);
-                }
-                assert_eq!(std::fs::read_dir(&archive_root).unwrap().count(), 1);
-                if attempt == 1 {
-                    drop(entry);
-                    drop(sup);
-                    calls.lock().unwrap().clear();
-                    // The new owner attempts recovery during construction.
-                    // Its failed barrier must leave the journal available
-                    // for the explicit Delete retry below as well.
-                    sup = Supervisor::new_with_seams(
-                        state.path(),
-                        dummy_exe(),
-                        SupervisorTimeouts::default(),
-                        SupervisorSeams {
-                            faults: crate::service::FaultHooks {
-                                archive_parent_sync: Some(sync.clone()),
-                                ..crate::service::FaultHooks::default()
-                            },
-                            ..SupervisorSeams::default()
-                        },
-                    )
-                    .await
-                    .unwrap();
-                    assert_eq!(*calls.lock().unwrap(), expected_calls);
-                    entry = sup
-                        .sessions
-                        .lock()
-                        .await
-                        .get("sync-origin")
-                        .cloned()
-                        .unwrap();
-                }
-            }
-
-            let foreign = std::fs::metadata(&source).unwrap();
-            failing.store(false, Ordering::SeqCst);
-            calls.lock().unwrap().clear();
-            sup.teardown_session(&entry, "sync-origin", test_admission(&sup).await)
-                .await
-                .unwrap_or_else(|_| panic!("both successful barriers must permit retirement"));
-            assert_eq!(
-                *calls.lock().unwrap(),
-                vec![archive_root.clone(), root.clone()]
+                    .iter()
+                    .any(|row| row.id == checkout_id),
+                "the checkout is released from Farhelm's management"
             );
-            assert!(sup.store.session("sync-origin").await.unwrap().is_none());
-            assert_eq!(
-                sup.store
-                    .working_copy_member_count(&checkout_id)
-                    .await
-                    .unwrap(),
-                0
-            );
-            let row = sup
-                .store
-                .working_copy_rows()
-                .await
+            let moved: Vec<_> = std::fs::read_dir(&archive_root)
                 .unwrap()
-                .into_iter()
-                .find(|row| row.id == checkout_id)
-                .unwrap();
-            assert_eq!(
-                row.allocation_state,
-                crate::working_copies::AllocationState::Retired
+                .map(|entry| entry.unwrap().path())
+                .collect();
+            assert_eq!(moved.len(), 1, "the checkout was moved exactly once");
+            assert!(
+                notice.contains(&moved[0].display().to_string()),
+                "the notice names the archive destination the folder reached: {notice}"
             );
-            let moved = destination.unwrap();
-            assert_eq!(
-                row.archive_destination.as_deref(),
-                moved.file_name().unwrap().to_str()
-            );
-            let metadata = std::fs::metadata(&moved).unwrap();
+            let metadata = std::fs::metadata(&moved[0]).unwrap();
             assert_eq!((metadata.dev(), metadata.ino()), owned_identity);
             assert_eq!(
-                std::fs::read(moved.join("owned")).unwrap(),
+                std::fs::read(moved[0].join("owned")).unwrap(),
                 b"uncommitted content"
             );
-            let after = std::fs::metadata(&source).unwrap();
-            assert_eq!((after.dev(), after.ino()), (foreign.dev(), foreign.ino()));
-            assert_eq!(
-                std::fs::read(source.join("foreign")).unwrap(),
-                b"leave untouched"
-            );
-            assert_eq!(std::fs::read_dir(&archive_root).unwrap().count(), 1);
+            assert!(!source.exists(), "the failure came after the real rename");
+            let _ = (&failing, &mut entry, &mut sup);
         }
     }
 

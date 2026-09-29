@@ -27,8 +27,6 @@ One line per open item. This file must always match the feedback files in this d
   endless shutdown-retry loop.
 - `input-client-notifications-pile-up.md` — idle input clients never read tmux notifications, so tmux server memory
   grows per open terminal.
-- `missing-checkout-root-blocks-delete.md` — a removed, recreated or unmounted checkout root makes its sessions
-  permanently undeletable.
 - `unstable-device-number-blocks-delete.md` — the ownership check treats `st_dev` as stable, so a remount can make
   checkout sessions undeletable and unrestartable.
 - `noreplace-rename-unsupported-strands-archive.md` — on filesystems without no-replace rename, the last Delete leaves

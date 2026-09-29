@@ -1490,6 +1490,24 @@ pub struct ProfileSnapshot {
     pub name: String,
 }
 
+/// What [`SessionStore::delete_session_archiving_memberships`] settled.
+pub struct DeleteSettlement {
+    /// Checkout IDs whose last membership and ownership record went with
+    /// this Delete.
+    pub retired: Vec<String>,
+    /// Checkouts the teardown saw as missing whose absence could not be
+    /// re-proved at commit time, released unarchived instead. The Delete
+    /// owes the user a notice for each (SPEC.md "Fresh GitHub checkouts").
+    pub late_released: Vec<LateRelease>,
+}
+
+/// One checkout released at commit time: the folder's recorded path and
+/// why its absence could not be re-proved.
+pub struct LateRelease {
+    pub path: String,
+    pub reason: String,
+}
+
 /// The supervisor's session database.
 ///
 /// Wraps the connection in `Arc<Mutex<..>>` (a std, not tokio, mutex —
@@ -3332,19 +3350,27 @@ impl SessionStore {
     /// `abandon_launching_record`), where the launch provably did not happen
     /// and settling its reservation `Created` would be a lie.
     ///
-    /// Returns only checkout IDs whose last membership and ownership record
+    /// `released` names checkouts the caller already decided to give up
+    /// unarchived; their records are deleted without any filesystem proof.
+    ///
+    /// Returns the checkout IDs whose last membership and ownership record
     /// were settled by this commit. After process teardown, the caller may
     /// remove their private preparation files; a failed transaction returns
     /// no cleanup authority, including for confirmed-missing directories.
+    /// It also returns the confirmed-missing checkouts whose absence no
+    /// longer held at commit time, which were released instead and need a
+    /// notice of their own.
     pub async fn delete_session_archiving_memberships(
         &self,
         id: &str,
-    ) -> anyhow::Result<Vec<String>> {
+        released: &[String],
+    ) -> anyhow::Result<DeleteSettlement> {
         let id = id.to_string();
+        let released = released.to_vec();
         self.conn
             .call(
                 "session delete task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<Vec<String>> {
+                move |conn: &mut Connection| -> anyhow::Result<DeleteSettlement> {
                     let tx = conn
                         .transaction()
                         .context("beginning the session delete transaction")?;
@@ -3361,6 +3387,7 @@ impl SessionStore {
                             .context("reading the deleted session's memberships")?
                     };
                     let mut retired = Vec::new();
+                    let mut late_released = Vec::new();
                     for working_copy_id in membership_ids {
                         crate::working_copies::remove_member(&tx, &id, &working_copy_id)
                             .context("removing the deleted session's membership")?;
@@ -3378,6 +3405,15 @@ impl SessionStore {
                                     "membership {working_copy_id} names a missing registry row"
                                 )
                             })?;
+                            // Delete could not archive this checkout safely
+                            // and gives it up instead (SPEC.md "Fresh GitHub
+                            // checkouts": archiving never blocks Delete).
+                            if released.contains(&working_copy_id) {
+                                crate::working_copies::release_unarchived(&tx, &working_copy_id)
+                                    .context("releasing the unarchived checkout's record")?;
+                                retired.push(working_copy_id);
+                                continue;
+                            }
                             match state.allocation_state {
                                 crate::working_copies::AllocationState::ArchivePending => {
                                     crate::working_copies::retire(&tx, &working_copy_id)
@@ -3388,10 +3424,46 @@ impl SessionStore {
                                         .context("retiring the unresolved plan's record")?;
                                 }
                                 crate::working_copies::AllocationState::Allocated => {
-                                    crate::working_copies::retire_missing(&tx, &working_copy_id)
-                                        .context(
-                                            "retiring the confirmed-missing checkout's record",
-                                        )?;
+                                    match crate::working_copies::retire_missing(
+                                        &tx,
+                                        &working_copy_id,
+                                    ) {
+                                        Ok(()) => {}
+                                        // The filesystem changed since the
+                                        // teardown saw the source missing (a
+                                        // folder reappeared, the root went
+                                        // away, a stat failed). That is still
+                                        // an archive outcome, which never
+                                        // blocks Delete: give the record up
+                                        // and tell the caller, rather than
+                                        // rolling the whole Delete back.
+                                        Err(
+                                            error @ (crate::working_copies::WorkingCopyError::IdentityMismatch {
+                                                ..
+                                            }
+                                            | crate::working_copies::WorkingCopyError::Io(_)),
+                                        ) => {
+                                            crate::working_copies::release_unarchived(
+                                                &tx,
+                                                &working_copy_id,
+                                            )
+                                            .context("releasing the unarchived checkout's record")?;
+                                            late_released.push(LateRelease {
+                                                path: state.canonical_path.clone().unwrap_or_else(
+                                                    || state.canonical_root.clone(),
+                                                ),
+                                                reason: format!(
+                                                    "its folder changed while the session was \
+                                                     being deleted: {error:#}"
+                                                ),
+                                            });
+                                        }
+                                        Err(error) => {
+                                            return Err(anyhow::Error::from(error).context(
+                                                "retiring the confirmed-missing checkout's record",
+                                            ));
+                                        }
+                                    }
                                 }
                                 crate::working_copies::AllocationState::Retired => {}
                             }
@@ -3401,7 +3473,10 @@ impl SessionStore {
                     tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
                         .context("deleting session row")?;
                     tx.commit().context("committing the session delete")?;
-                    Ok(retired)
+                    Ok(DeleteSettlement {
+                        retired,
+                        late_released,
+                    })
                 },
             )
             .await

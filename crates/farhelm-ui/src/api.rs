@@ -1785,7 +1785,7 @@ pub(crate) async fn replace_session_with(
     host: Option<HostId>,
     expected_incarnation: Option<u64>,
     allow_yolo: bool,
-) -> Result<Session, CreateRefusal> {
+) -> Result<(Session, Option<String>), CreateRefusal> {
     let mut with_body = create_body(cwd, agent, title, intent_key, host, expected_incarnation);
     if allow_yolo {
         allow_yolo_on_sensitive_host(&mut with_body);
@@ -1802,9 +1802,28 @@ pub(crate) async fn replace_session_with(
     if !resp.status().is_success() {
         return Err(CreateRefusal::read("POST", &url, resp).await);
     }
-    resp.json::<Session>()
+    replace_reply(resp).await.map_err(CreateRefusal::from)
+}
+
+/// Read a successful replace reply: the new session, plus the notice the
+/// source's Delete carried when there was one (the helm adds it to the
+/// session object as `delete_notice`; see the helm's `replace_reply`).
+///
+/// The notice matters because a replacement in another folder can release
+/// the source's last checkout reference, and a checkout that could not be
+/// archived must never be released silently (SPEC.md "Fresh GitHub
+/// checkouts"). An older helm sends no such field, which reads as no notice.
+async fn replace_reply(resp: reqwest::Response) -> Result<(Session, Option<String>), String> {
+    let mut body = resp
+        .json::<serde_json::Value>()
         .await
-        .map_err(|e| CreateRefusal::from(e.to_string()))
+        .map_err(|e| e.to_string())?;
+    let notice = body
+        .as_object_mut()
+        .and_then(|fields| fields.remove("delete_notice"))
+        .and_then(|notice| notice.as_str().map(str::to_owned));
+    let session = serde_json::from_value::<Session>(body).map_err(|e| e.to_string())?;
+    Ok((session, notice))
 }
 
 /// One create's request body — the single builder both [`create_session`]
@@ -1888,7 +1907,7 @@ pub(crate) async fn submit_fresh_create(
     base: &str,
     source: Option<&str>,
     body: &serde_json::Value,
-) -> Result<Session, FreshCreateError> {
+) -> Result<(Session, Option<String>), FreshCreateError> {
     let (url, payload) = match source {
         Some(source) => (
             format!(
@@ -1921,9 +1940,11 @@ pub(crate) async fn submit_fresh_create(
             FreshCreateError::Unresolved(text)
         });
     }
-    resp.json::<Session>()
+    // A plain create's reply has no `delete_notice`, so one reader serves
+    // both.
+    replace_reply(resp)
         .await
-        .map_err(|error| FreshCreateError::Unresolved(error.to_string()))
+        .map_err(FreshCreateError::Unresolved)
 }
 
 /// The JavaScript the WEB (wasm) build's random client-side identifiers
@@ -2513,7 +2534,7 @@ pub(crate) async fn replace_session(
     id: &str,
     only_if_nothing_alive: bool,
     allow_yolo: bool,
-) -> Result<Session, ActionRefusal> {
+) -> Result<(Session, Option<String>), ActionRefusal> {
     let intent_key = mint_intent_key().await?;
     let url = format!("{base}/api/sessions/{}/replace", encode_path_segment(id));
     let mut body = serde_json::json!({
@@ -2527,9 +2548,7 @@ pub(crate) async fn replace_session(
     if !resp.status().is_success() {
         return Err(ActionRefusal::read("POST", &url, resp).await);
     }
-    resp.json::<Session>()
-        .await
-        .map_err(|e| ActionRefusal::from(e.to_string()))
+    replace_reply(resp).await.map_err(ActionRefusal::from)
 }
 
 /// DELETE a session. See `stop_session`'s docs — same error-surfacing
@@ -2540,17 +2559,53 @@ pub(crate) async fn replace_session(
 /// the user was not asked to confirm, which the supervisor refuses with a
 /// conflict (surfaced as the ordinary error text) instead of killing an
 /// agent or tab that is alive after all.
+///
+/// `Ok(Some(notice))` is a completed delete that left something the user
+/// must be told about, today a checkout the host could not archive and left
+/// in place (SPEC.md "Fresh GitHub checkouts": that outcome is never
+/// silent). The notice is peer text from the host. A success whose body
+/// cannot be read or decoded is still a completed delete, but it may have
+/// carried such a notice, so it yields a notice saying so rather than
+/// passing for a delete with nothing to report (see [`delete_reply_notice`]).
 pub(crate) async fn delete_session(
     base: &str,
     id: &str,
     only_if_nothing_alive: bool,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let url = delete_url(base, id, only_if_nothing_alive);
     let resp = send(client().delete(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("DELETE", &url, resp).await);
     }
-    Ok(())
+    Ok(delete_reply_notice(
+        resp.text().await.map_err(|e| e.to_string()),
+    ))
+}
+
+/// The notice a successful delete's body carries, given the body as read.
+///
+/// `{}` (what an older helm sends, and what a delete with nothing to report
+/// sends) is no notice. A body that could not be read or is not the expected
+/// JSON is a notice of its own: the delete happened, but whatever it had to
+/// report was lost, and a lost archive notice must not pass for silence.
+fn delete_reply_notice(body: Result<String, String>) -> Option<String> {
+    let parsed =
+        body.and_then(|text| serde_json::from_str::<DeleteReply>(&text).map_err(|e| e.to_string()));
+    match parsed {
+        Ok(reply) => reply.notice,
+        Err(e) => Some(format!(
+            "The session was deleted, but the reply could not be read ({e}), so a notice about \
+             its checkout may have been lost."
+        )),
+    }
+}
+
+/// The success body of `DELETE /api/sessions/{id}`: `{}`, or `{"notice":
+/// ...}` for a delete that left something behind. See [`delete_session`].
+#[derive(Deserialize)]
+struct DeleteReply {
+    #[serde(default)]
+    notice: Option<String>,
 }
 
 /// The URL [`delete_session`] sends, split out so the precondition's
@@ -3495,6 +3550,31 @@ mod http_contract_tests;
 
 #[cfg(test)]
 mod tests {
+    /// A successful delete reply yields its notice, `{}` yields none, and an
+    /// unreadable or undecodable reply yields a notice that one may have
+    /// been lost.
+    ///
+    /// Why it matters: a checkout Delete could not archive is released from
+    /// Farhelm's management, and SPEC.md "Fresh GitHub checkouts" forbids
+    /// that outcome being silent. Reading a failed body as "no notice" would
+    /// make a lost notice indistinguishable from a delete with nothing to
+    /// report.
+    #[farhelm_testtrace::test]
+    fn a_delete_reply_that_cannot_be_read_is_not_silent() {
+        assert_eq!(delete_reply_notice(Ok("{}".to_string())), None);
+        assert_eq!(
+            delete_reply_notice(Ok(r#"{"notice":"left /work/bar"}"#.to_string())),
+            Some("left /work/bar".to_string())
+        );
+        for unreadable in [
+            Ok("{\"notice\":".to_string()),
+            Err("connection reset".to_string()),
+        ] {
+            let notice = delete_reply_notice(unreadable).expect("a notice");
+            assert!(notice.contains("may have been lost"), "{notice}");
+        }
+    }
+
     /// Why this matters: the unconfirmed delete's whole safety net is the
     /// precondition reaching the helm; a URL that dropped it would bring
     /// back the silent kill of a row that was stale. Spec: set, the query

@@ -1234,6 +1234,8 @@ pub(crate) fn SessionView(
     let replace_base = base.clone();
     let replace_preferences = preferences;
     let replace_session_id = session.id.clone();
+    // A Replace deletes its source, whose notice the session list shows.
+    let delete_notice = use_context::<crate::list::DeleteNotice>();
     // Takes the lifecycle claim its confirmation handed over; the task owns
     // it and releases it when it ends (or is cancelled with the view).
     let replace = move |claim: OpGuard, allow_yolo: bool| {
@@ -1255,7 +1257,8 @@ pub(crate) fn SessionView(
         spawn(async move {
             let _claim = claim;
             match replace_session(&base, &id, only_if_nothing_alive, allow_yolo).await {
-                Ok(new_session) => {
+                Ok((new_session, notice)) => {
+                    delete_notice.publish(notice);
                     let new_session = crate::list::with_source_host(new_session, &source);
                     crate::list::remember_selection(&base, preferences, &new_session.id);
                     on_replaced.call(new_session);

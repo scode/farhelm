@@ -2819,8 +2819,10 @@ pub(crate) struct DeleteQuery {
 /// adds is the `?only_if_nothing_alive=true` precondition ([`DeleteQuery`]),
 /// which the supervisor checks at the moment of deletion so a client's
 /// stale "nothing is running" cannot turn into an unconfirmed kill.
-/// Same empty-object success body as `stop_session`; an unknown `id` maps
-/// to 404.
+/// Same empty-object success body as `stop_session`, except that a delete
+/// which completed but left something the user must know about answers
+/// `{"notice": "..."}` (today a checkout it could not archive and left in
+/// place; SPEC.md "Fresh GitHub checkouts"). An unknown `id` maps to 404.
 ///
 /// A successful delete FORGETS the session from the helm's own records
 /// before it answers ([`forget_session`]), so the merged list stops showing
@@ -2854,7 +2856,7 @@ pub(crate) async fn delete_session(
         .delete_session_with(&id, query.only_if_nothing_alive)
         .await
     {
-        Ok(()) => {
+        Ok(notice) => {
             if let Err(error) = state.store.clear_seen(&id).await {
                 warn!(
                     session_id = manager::peer_text(&id).as_str(),
@@ -2863,7 +2865,13 @@ pub(crate) async fn delete_session(
                 );
             }
             forget_session(&state, &claim, &id).await;
-            axum::Json(serde_json::json!({})).into_response()
+            match notice {
+                // Passed through as the supervisor wrote it: the UI renders it
+                // as peer text (`peer::PeerLine`), which is where display
+                // escaping belongs, as for every other host-written string.
+                Some(notice) => axum::Json(serde_json::json!({ "notice": notice })).into_response(),
+                None => axum::Json(serde_json::json!({})).into_response(),
+            }
         }
         Err(e) => http_error(e),
     }
@@ -3086,7 +3094,7 @@ pub(crate) async fn do_replace_session(
     with: Option<CreateReq>,
     only_if_nothing_alive: bool,
     allow_yolo_on_sensitive_host: bool,
-) -> anyhow::Result<farhelm_proto::SessionInfo> {
+) -> anyhow::Result<Replaced> {
     // A replace-with body may carry the confirmation itself (it is an
     // ordinary create body); either place counts.
     let allow_yolo_on_sensitive_host = allow_yolo_on_sensitive_host
@@ -3339,7 +3347,7 @@ async fn replace_with_fresh_checkout(
     intent_key: Option<String>,
     req: CreateReq,
     only_if_nothing_alive: bool,
-) -> anyhow::Result<farhelm_proto::SessionInfo> {
+) -> anyhow::Result<Replaced> {
     let client_identity = serde_json::to_string(&(
         "github_replace_request_v1",
         id,
@@ -3391,52 +3399,59 @@ async fn finish_replacement(
     id: &str,
     created: farhelm_proto::SessionInfo,
     only_if_nothing_alive: bool,
-) -> anyhow::Result<farhelm_proto::SessionInfo> {
-    if let Err(delete_error) = client.delete_session_with(id, only_if_nothing_alive).await {
-        // Two shapes of failure here, and they earn different words because
-        // they answer a different question: did the delete happen?
-        //
-        // An EXPLICIT refusal — the supervisor received `DeleteSession` and
-        // answered with its own `ControlMsg::Error` (`SupervisorError`), or
-        // the request never reached the wire at all
-        // (`SupervisorTransportError::NotSent`) — is a DEFINITE answer: the
-        // original was not removed, full stop, and "both sessions still
-        // exist" is simply true.
-        //
-        // Anything else this client can produce from a delete — the
-        // connection dying after the frame was enqueued
-        // (`SentUnanswered`), or an unexpected reply this client's own
-        // wrapper does not recognize — is NOT a definite answer: the
-        // supervisor may have completed the deletion and only the
-        // confirmation was lost. Reporting "both sessions still exist" in
-        // that case would be inventing a fact this side cannot have; the
-        // honest reply says the replacement is real and that the source's
-        // fate must be CHECKED rather than assumed either way.
-        let refusal_is_definite = crate::find_cause::<SupervisorError>(&delete_error).is_some()
-            || matches!(
-                crate::find_cause::<crate::SupervisorTransportError>(&delete_error),
-                Some(crate::SupervisorTransportError::NotSent)
-            );
-        let message = if refusal_is_definite {
-            format!(
-                "created replacement session {} but could not remove the original {id}: \
+) -> anyhow::Result<Replaced> {
+    // A replacement in the same folder keeps its source's checkout, but one
+    // with an overridden folder or a fresh checkout can release the source's
+    // last reference, and that delete's notice must reach the user like any
+    // other Delete's (SPEC.md "Fresh GitHub checkouts").
+    let delete_notice = match client.delete_session_with(id, only_if_nothing_alive).await {
+        Ok(notice) => notice,
+        Err(delete_error) => {
+            // Two shapes of failure here, and they earn different words because
+            // they answer a different question: did the delete happen?
+            //
+            // An EXPLICIT refusal — the supervisor received `DeleteSession` and
+            // answered with its own `ControlMsg::Error` (`SupervisorError`), or
+            // the request never reached the wire at all
+            // (`SupervisorTransportError::NotSent`) — is a DEFINITE answer: the
+            // original was not removed, full stop, and "both sessions still
+            // exist" is simply true.
+            //
+            // Anything else this client can produce from a delete — the
+            // connection dying after the frame was enqueued
+            // (`SentUnanswered`), or an unexpected reply this client's own
+            // wrapper does not recognize — is NOT a definite answer: the
+            // supervisor may have completed the deletion and only the
+            // confirmation was lost. Reporting "both sessions still exist" in
+            // that case would be inventing a fact this side cannot have; the
+            // honest reply says the replacement is real and that the source's
+            // fate must be CHECKED rather than assumed either way.
+            let refusal_is_definite = crate::find_cause::<SupervisorError>(&delete_error).is_some()
+                || matches!(
+                    crate::find_cause::<crate::SupervisorTransportError>(&delete_error),
+                    Some(crate::SupervisorTransportError::NotSent)
+                );
+            let message = if refusal_is_definite {
+                format!(
+                    "created replacement session {} but could not remove the original {id}: \
                  {delete_error:#}; both sessions still exist",
-                created.id
-            )
-        } else {
-            format!(
-                "created replacement session {} but whether the original {id} was removed is \
+                    created.id
+                )
+            } else {
+                format!(
+                    "created replacement session {} but whether the original {id} was removed is \
                  unknown after {delete_error:#}; the replacement exists — check {id} before \
                  deleting it or retrying",
-                created.id
-            )
-        };
-        return Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Internal,
-            message,
-        }));
-    }
+                    created.id
+                )
+            };
+            return Err(anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
+                kind: ErrorKind::Internal,
+                message,
+            }));
+        }
+    };
     // The deleted source's read/unread row goes with it, exactly as in
     // `delete_session` (SPEC_impl.md: deleting a session drops its
     // `session_seen` row explicitly). Best effort: a stray row is harmless
@@ -3449,7 +3464,17 @@ async fn finish_replacement(
         );
     }
     forget_session(state, claim, id).await;
-    Ok(created)
+    Ok(Replaced {
+        session: created,
+        delete_notice,
+    })
+}
+
+/// A finished replace: the new session, and the notice the source's Delete
+/// carried, if any (see [`crate::client::SupervisorClient::delete_session_with`]).
+pub(crate) struct Replaced {
+    pub(crate) session: farhelm_proto::SessionInfo,
+    pub(crate) delete_notice: Option<String>,
 }
 
 /// `POST /api/sessions/{id}/replace` — recreate `id` under a brand-new id on
@@ -3472,12 +3497,37 @@ pub(crate) async fn replace_session(
     )
     .await
     {
-        Ok(session) => match browser_session_ready(&session) {
-            Ok(()) => axum::Json(session).into_response(),
+        Ok(Replaced {
+            session,
+            delete_notice,
+        }) => match browser_session_ready(&session) {
+            Ok(()) => replace_reply(&session, delete_notice).into_response(),
             Err(error) => http_error(error),
         },
         Err(e) => http_error(e),
     }
+}
+
+/// The replace endpoint's success body: the new session's own JSON, plus a
+/// `delete_notice` field only when the source's Delete carried one. Kept
+/// additive so a client that reads the body as a bare session still works;
+/// the notice is the host's text, passed through verbatim like the delete
+/// endpoint's.
+fn replace_reply(
+    session: &farhelm_proto::SessionInfo,
+    delete_notice: Option<String>,
+) -> axum::response::Response {
+    let mut body = match serde_json::to_value(session) {
+        Ok(body) => body,
+        Err(e) => return http_error(anyhow::Error::new(e).context("encoding the replacement")),
+    };
+    if let (Some(notice), Some(fields)) = (delete_notice, body.as_object_mut()) {
+        fields.insert(
+            "delete_notice".to_string(),
+            serde_json::Value::String(notice),
+        );
+    }
+    axum::Json(body).into_response()
 }
 
 /// `POST /api/sessions/{id}/tabs` — open a terminal tab: a plain shell in
