@@ -2392,4 +2392,7 @@
 - Completion criteria: SPEC.md's security section (and `docs/security.md` where it discusses the token prompt) states
   this principle; no UI change. Remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the
   execution change.
-- Execution: `pending`.
+- Execution: `complete`; SPEC.md's web UI trust section and docs/security.md say storing the web token in a password
+  manager is the user's choice, and tie lookalike-prompt autofill to the already accepted port-squatter gap. No code
+  change. PR [#1159](https://github.com/scode/farhelm/pull/1159/changes), jj change `xvnvrxrv`, bookmark
+  `pr/web-token-password-manager`.

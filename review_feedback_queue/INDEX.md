@@ -4,9 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `token-prompt-invites-password-manager.md` — the browser token prompt is a password field, so password managers offer
-  to save and sync the master web token.
-
 ## High priority: material UX degradation
 
 - `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
