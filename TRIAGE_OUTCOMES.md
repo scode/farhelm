@@ -3773,7 +3773,15 @@
   execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the ControlPath is now `<state dir>/%C` (`ssh::control_socket`), 58 bytes on top of the state
+  directory with OpenSSH's temporary suffix instead of 65, so the default state directory keeps connection sharing for
+  usernames up to 22 characters on Linux and 17 on macOS. Where the socket cannot fit (longer macOS usernames, deep
+  custom state directories) ssh runs with `ControlMaster=no` and `ControlPath=none` instead of failing, so every
+  supported username works, some without sharing. `%C` is kept rather than a shorter hash of the destination, because it
+  identifies the resolved host, port and user and so never reuses a master for an alias that now points elsewhere.
+  SPEC_impl.md's transport section says so. Regression test
+  `sharing_is_used_where_the_socket_fits_and_turned_off_where_it_cannot`. jj change `xqtrmqrsorlo`, bookmark
+  `pr/ssh-short-control-socket`, draft PR [#1188](https://github.com/scode/farhelm/pull/1188/changes).
 
 ## relative-install-dir-installs-under-cwd.md
 

@@ -940,9 +940,12 @@ sequences) get debugged at the tmux layer first; the generated config is the kno
 ## Helm ↔ supervisor transport: system ssh + stdio protocol
 
 The helm shells out to the user's `ssh` binary (tokio::process), one ControlMaster per host (`ControlPersist`) so
-interactive latency stays low and reconnects are cheap. The supervisor is reached by executing `farhelm internal stdio`
-on the remote side, which proxies stdio to the supervisor's unix socket. Supervisors listen on that unix socket only —
-no network port, exactly as SPEC.md requires.
+interactive latency stays low and reconnects are cheap. The master's socket is the helm's state directory plus OpenSSH's
+own `%C` (a hash of the resolved host, port and user) and nothing else, so it fits the Unix socket limit for the
+usernames SPEC.md supports on Linux and most of them on macOS; where it cannot fit, ssh runs with connection sharing
+explicitly off (`ControlMaster=no`, `ControlPath=none`) instead of failing. The supervisor is reached by executing
+`farhelm internal stdio` on the remote side, which proxies stdio to the supervisor's unix socket. Supervisors listen on
+that unix socket only — no network port, exactly as SPEC.md requires.
 
 The ssh child's stderr is piped and relayed as bounded, control-escaped tracing events attributed to the host, not
 inherited. Inheriting is defensible for the single-host path a user started by hand; for a registered host it hands a

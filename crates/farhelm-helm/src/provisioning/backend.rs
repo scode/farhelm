@@ -451,10 +451,7 @@ impl SystemBackend {
         remote_command: String,
     ) -> anyhow::Result<tokio::process::Command> {
         let mut command = tokio::process::Command::new("ssh");
-        command.args(crate::ssh::ssh_base_args(
-            destination,
-            &self.control_dir.join("ssh-cm-%C"),
-        )?);
+        command.args(crate::ssh::ssh_base_args(destination, &self.control_dir)?);
         // ssh concatenates its trailing argv and reparses it remotely. Keep
         // the complete `sh -c` invocation in one shell-quoted string so the
         // script cannot absorb words from a destination or path.
