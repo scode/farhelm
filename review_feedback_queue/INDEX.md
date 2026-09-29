@@ -19,8 +19,6 @@ One line per open item. This file must always match the feedback files in this d
   terminal-less processes survive.
 - `event-feed-liveness-postponed-by-revisions.md` — the event feed's liveness check never fires on a busy fleet, so dead
   subscribers hold the 64 seats.
-- `agent-create-replays-asker-as-child.md` — a keyed `agent create` can report the asking session itself as the newly
-  created session.
 - `spawn-replays-asker-as-child.md` — a keyed `farhelm spawn` reusing another session's key can be handed that session's
   child as its own new child.
 - `sink-shutdown-retries-forever-after-delete.md` — deleting a busy session can leave its sink client stuck in an

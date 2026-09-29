@@ -1208,15 +1208,18 @@ allowed through to the same shared code, never the reverse.
 `Created` is a distinct reply tag from `Session` even though the payload is identical, because the tag is the only thing
 separating "what your creating verb produced" from "the row you changed" and the CLI checks it before printing an id. It
 is not a novelty claim: a create or clone carrying an idempotency key the target has already served replays that
-session, which arrives under this same tag. The helm draws the one distinction that matters from it — a clone whose
-result is the asking session or the named source is refused rather than reported, before anything durable is recorded
-for the replayed row. The two creating verbs name their target host by display name, matching `AgentHost::name`.
-Registry IDs join host and session discovery and distinguish duplicate labels; they are not destination selectors. A
-name matching two registered hosts is refused as a `Conflict` naming the collision, never resolved to whichever row the
-listing ordered first: display names are not unique by construction (the local row renders as `this machine`, and an ssh
-destination may be spelled the same), and guessing between them would put a session on a machine nobody chose. A
-registered name carrying a control character can never be typed back at all, since the relay refuses one in `--host`;
-the not-found refusal says so by count, because the fix is a rename and an agent has no rename verb for hosts.
+session, which arrives under this same tag. The relay stores an agent's key on the target scoped to the asking session
+(`agent-<asking session>-<SHA-256 of the key>`), so only the session that made a create can replay it; the fixed length
+also keeps any agent key within the target's intent-key limit. The helm draws the one distinction that matters from it —
+a clone whose result is the asking session or the named source is refused rather than reported, before anything durable
+is recorded for the replayed row. The two creating verbs name their target host by display name, matching
+`AgentHost::name`. Registry IDs join host and session discovery and distinguish duplicate labels; they are not
+destination selectors. A name matching two registered hosts is refused as a `Conflict` naming the collision, never
+resolved to whichever row the listing ordered first: display names are not unique by construction (the local row renders
+as `this machine`, and an ssh destination may be spelled the same), and guessing between them would put a session on a
+machine nobody chose. A registered name carrying a control character can never be typed back at all, since the relay
+refuses one in `--host`; the not-found refusal says so by count, because the fix is a rename and an agent has no rename
+verb for hosts.
 
 The helm resolves an agent's profile name exactly against its one catalog before the target call. Zero or multiple
 matches are `InvalidRequest` refusals that name candidates; one match becomes the invocation, agent kind, resume

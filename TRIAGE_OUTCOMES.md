@@ -3909,7 +3909,14 @@
   item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the helm relay stores an agent create's or clone's intent key on the target as
+  `agent-<asking session>-<SHA-256 of the key>` (`asker_scoped_intent_key` in agent_requests.rs), so a key belongs to
+  the session that asked and another session's identical keyed request creates afresh instead of replaying the first
+  result. The hash keeps the stored key within the target's 512-byte limit. Keys reserved before the change no longer
+  match (accepted in the goal's outline). SPEC_impl.md's agent-verbs section says so. Regression test
+  `agent_intent_keys_are_scoped_to_the_asking_session`; the relay tests now expect the scoped key. jj change
+  `mymmsoqrlrwx`, bookmark `pr/agent-keys-scoped-to-asker`, draft PR
+  [#1191](https://github.com/scode/farhelm/pull/1191/changes).
 
 ## spawn-replays-asker-as-child.md
 
