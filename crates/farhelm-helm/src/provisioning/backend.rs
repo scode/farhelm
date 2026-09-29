@@ -686,6 +686,7 @@ impl SystemBackend {
             temporary,
             mode,
             description,
+            refuse_setup_managed,
         } = install;
         self.cleanup_orphaned_temporaries(target, destination)
             .await?;
@@ -769,13 +770,33 @@ impl SystemBackend {
             } => {
                 async {
                     self.sftp_put(ssh_destination, source, temporary).await?;
+                    // Same first-line test as `units::is_managed`, run in the
+                    // command that renames so no plan can outlive it.
+                    // `head -n 1` for the same reasons the reach check uses
+                    // it: a marker line without a newline still counts, and
+                    // an unreadable destination refuses rather than passes.
+                    let ownership_guard = if refuse_setup_managed {
+                        format!(
+                            "if [ -e {dest} ] || [ -L {dest} ]; then \
+                               first_line=$(head -n 1 -- {dest}) || exit 78; \
+                               if [ \"$first_line\" = {marker} ]; then \
+                                 printf '%s\\n' 'refusing to replace a unit managed by farhelm helm setup' >&2; \
+                                 exit 77; \
+                               fi; \
+                             fi; ",
+                            dest = shell_path(destination)?,
+                            marker = crate::ssh::shell_quote(crate::units::MANAGED_MARKER),
+                        )
+                    } else {
+                        String::new()
+                    };
                     // Keep the checksum input on stdin. GNU coreutils escapes
                     // backslashes and newlines in argument-based output; the
                     // stdin form follows install.sh's sha256_of convention.
                     self.require_shell(
                         target,
                         &format!(
-                            "actual=$({}) || exit; \
+                            "{ownership_guard}actual=$({}) || exit; \
                              [ \"${{actual%% *}}\" = {} ] || {{ \
                                printf '%s\\n' 'uploaded payload digest mismatch' >&2; exit 76; \
                              }}; chmod {mode:o} -- {} && mv -f -- {} {}",
@@ -1212,6 +1233,13 @@ struct InstallDestination<'a> {
     temporary: &'a Path,
     mode: u32,
     description: &'a str,
+    /// Refuse, on a remote host, to replace a destination whose first line is
+    /// `farhelm helm setup`'s managed-by marker. Only the supervisor unit sets
+    /// it. The reach check already refuses such a unit at planning time; this
+    /// covers setup running on the host between planning and confirmation.
+    /// The local branch has no such check because production never installs
+    /// units locally (the panel hands the helm's own machine to setup).
+    refuse_setup_managed: bool,
 }
 
 /// Why a child stream stopped before EOF. The retained prefix is bounded and
@@ -1823,8 +1851,23 @@ impl ProvisioningBackend for SystemBackend {
         // The unit_dir lines below are the shell twin of
         // `crate::units::user_unit_dir_for`, which the local side uses;
         // nothing ties the two, so keep them in step by hand.
-        let script = "if [ -r /etc/os-release ]; then . /etc/os-release; fi; \
-                      printf '%s\\0%s\\0%s\\0' 'farhelm-reach-v1' \"${ID-}\" \"${HOME-}\"; \
+        //
+        // The last field reports whether that directory already holds a
+        // supervisor unit `farhelm helm setup` wrote on the host itself
+        // (first line exactly `units::MANAGED_MARKER`, the same test as
+        // `units::is_managed`). Such a unit belongs to setup there, and ADD
+        // and UPDATE refuse to replace it — see `parse_reach_output`. An
+        // unmarked unit is provisioning's own, or a hand-written one the
+        // user is expected to move aside, and is replaced as before.
+        //
+        // `head -n 1` rather than `read`: `read` fails on a last line with
+        // no newline, and a marker-only file must still count as setup's.
+        // A unit that exists but cannot be read fails the whole check
+        // instead of passing as unmarked, because "could not tell" is not
+        // evidence that provisioning owns it.
+        let script = format!(
+            "if [ -r /etc/os-release ]; then . /etc/os-release; fi; \
+                      printf '%s\\0%s\\0%s\\0' 'farhelm-reach-v1' \"${{ID-}}\" \"${{HOME-}}\"; \
                       uname -m | tr -d '\\n'; printf '\\0'; \
                       if command -v tmux >/dev/null 2>&1; then command -v tmux | tr -d '\\n'; fi; \
                       printf '\\0'; \
@@ -1838,9 +1881,20 @@ impl ProvisioningBackend for SystemBackend {
                           case $xdg in /*) unit_dir=$xdg/systemd/user ;; *) manager=unsupported-xdg ;; esac; \
                         else unit_dir=$HOME/.config/systemd/user; fi; \
                       fi; \
-                      printf '%s\\0%s\\0' \"$manager\" \"$unit_dir\"";
+                      printf '%s\\0%s\\0' \"$manager\" \"$unit_dir\"; \
+                      unit_owner=''; unit_file=\"$unit_dir\"/{unit}; \
+                      if [ -n \"$unit_dir\" ] && {{ [ -e \"$unit_file\" ] || [ -L \"$unit_file\" ]; }}; then \
+                        first_line=$(head -n 1 -- \"$unit_file\") || {{ \
+                          printf '%s\\n' \"cannot read $unit_file to check whether farhelm helm setup manages it\" >&2; \
+                          exit 78; }}; \
+                        if [ \"$first_line\" = {marker} ]; then unit_owner=setup; fi; \
+                      fi; \
+                      printf '%s\\0' \"$unit_owner\"",
+            unit = crate::units::SUPERVISOR_UNIT_NAME,
+            marker = crate::ssh::shell_quote(crate::units::MANAGED_MARKER),
+        );
         let output = self
-            .run_shell(&target.transport, script, COMMAND_TIMEOUT)
+            .run_shell(&target.transport, &script, COMMAND_TIMEOUT)
             .await?;
         if output.code != Some(0) {
             return Err(BackendFailure::new(
@@ -1927,6 +1981,7 @@ impl ProvisioningBackend for SystemBackend {
                         temporary,
                         mode,
                         description: "payload",
+                        refuse_setup_managed: false,
                     },
                 )
                 .await
@@ -1962,6 +2017,7 @@ impl ProvisioningBackend for SystemBackend {
                 temporary,
                 mode,
                 description: "unit content",
+                refuse_setup_managed: true,
             },
         )
         .await
@@ -2238,7 +2294,7 @@ pub(super) fn linger_was_refused(code: Option<i32>, stderr: &str) -> bool {
 /// empty string rather than a rejection.
 pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendFailure> {
     let fields: Vec<&[u8]> = output.split(|byte| *byte == 0).collect();
-    if fields.len() != 9 || fields[0] != REACH_RECORD_MARKER.as_bytes() || !fields[8].is_empty() {
+    if fields.len() != 10 || fields[0] != REACH_RECORD_MARKER.as_bytes() || !fields[9].is_empty() {
         return Err(BackendFailure::new(
             "the provisioning reach check returned malformed output",
             String::from_utf8_lossy(output),
@@ -2308,6 +2364,27 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
             "automatic provisioning cannot use the systemd user unit directory {}; run the supervisor manually with explicit paths.",
             user_unit_dir.display()
         )));
+    }
+    // Setup's unit is refused here, before any plan exists, so ADD and UPDATE
+    // share one refusal: both turn a `Manual` outcome into "not from the
+    // panel". The write itself re-checks the marker (see `install_bytes`),
+    // because a plan is confirmed some time after this inspection.
+    match fields[8] {
+        b"" => {}
+        b"setup" => {
+            return Ok(ReachOutcome::Manual(format!(
+                "{} on this host is managed by farhelm helm setup there, so the hosts panel does not \
+                 replace it. Update Farhelm on that host with its installer and farhelm helm setup, or \
+                 move the unit aside to let the panel provision the host.",
+                crate::units::SUPERVISOR_UNIT_NAME
+            )));
+        }
+        _ => {
+            return Err(BackendFailure::new(
+                "the provisioning reach check returned malformed output",
+                String::from_utf8_lossy(output),
+            ));
+        }
     }
     let tmux_path = bytes_path(fields[4]).map_err(|error| {
         BackendFailure::new("the host reported an unusable tmux path", error.to_string())

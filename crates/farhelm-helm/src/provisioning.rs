@@ -181,6 +181,38 @@ mod tests {
         }
     }
 
+    /// Execute each remote shell command locally under a fixture HOME and a
+    /// PATH that starts with a fixture `bin` directory, so a real reach-check
+    /// script runs against a scratch user-unit directory and a fake
+    /// `systemctl` instead of this machine's own user manager and units.
+    /// Only the child's environment is set; the test process's is untouched.
+    struct FixtureHomeLauncher {
+        home: PathBuf,
+        bin: PathBuf,
+    }
+
+    impl CommandLauncher for FixtureHomeLauncher {
+        fn spawn(
+            &self,
+            command: &mut tokio::process::Command,
+        ) -> std::io::Result<tokio::process::Child> {
+            assert_eq!(command.as_std().get_program().to_string_lossy(), "ssh");
+            let mut child = tokio::process::Command::new("sh");
+            child
+                .arg("-c")
+                .arg(command.as_std().get_args().last().unwrap())
+                .env("HOME", &self.home)
+                .env("PATH", format!("{}:/usr/bin:/bin", self.bin.display()))
+                .env_remove("XDG_CONFIG_HOME")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true);
+            isolate_process_group(&mut child);
+            child.spawn()
+        }
+    }
+
     struct RecordingLauncher {
         programs: Mutex<Vec<String>>,
     }
@@ -2882,7 +2914,7 @@ mod tests {
     fn reach_output_parser_covers_platform_and_tool_boundaries() {
         let supported = |os: &str, arch: &str, tmux_path: &str, tmux: &str, manager: &str| {
             format!(
-                "{REACH_RECORD_MARKER}\0{os}\0/home/test\0{arch}\0{tmux_path}\0{tmux}\0{manager}\0/home/test/.config/systemd/user\0"
+                "{REACH_RECORD_MARKER}\0{os}\0/home/test\0{arch}\0{tmux_path}\0{tmux}\0{manager}\0/home/test/.config/systemd/user\0\0"
             )
         };
         // A non-Ubuntu ID with every real capability present is supported,
@@ -2993,7 +3025,7 @@ mod tests {
             let mut non_utf8_home = format!("{REACH_RECORD_MARKER}\0ubuntu\0/home/").into_bytes();
             non_utf8_home.push(0xff);
             non_utf8_home.extend_from_slice(
-                b"\0x86_64\0/usr/bin/tmux\0tmux 3.4\0usable\0/home/test/.config/systemd/user\0",
+                b"\0x86_64\0/usr/bin/tmux\0tmux 3.4\0usable\0/home/test/.config/systemd/user\0\0",
             );
             assert!(matches!(
                 parse_reach_output(&non_utf8_home).unwrap(),
@@ -3001,6 +3033,174 @@ mod tests {
                     if reason.contains("HOME") && reason.contains("explicit paths")
             ));
         }
+    }
+
+    /// Why this matters: a remote host's supervisor unit may have been
+    /// written by `farhelm helm setup` on that host, and replacing it strips
+    /// setup's marker so setup and uninstall there refuse to manage it. The
+    /// reach check reports that ownership, and the parser turns it into the
+    /// `Manual` outcome ADD and UPDATE both refuse on; any value other than
+    /// empty or `setup` is malformed output, not a silent "not setup's".
+    #[farhelm_testtrace::test]
+    fn reach_output_refuses_a_setup_managed_supervisor_unit() {
+        let with_owner = |owner: &str| {
+            format!(
+                "{REACH_RECORD_MARKER}\0ubuntu\0/home/test\0x86_64\0/usr/bin/tmux\0tmux 3.4\0usable\0/home/test/.config/systemd/user\0{owner}\0"
+            )
+        };
+        assert!(matches!(
+            parse_reach_output(with_owner("").as_bytes()).unwrap(),
+            ReachOutcome::Supported(_)
+        ));
+        assert!(matches!(
+            parse_reach_output(with_owner("setup").as_bytes()).unwrap(),
+            ReachOutcome::Manual(reason)
+                if reason.contains(crate::units::SUPERVISOR_UNIT_NAME)
+                    && reason.contains("farhelm helm setup")
+        ));
+        assert!(parse_reach_output(with_owner("someone-else").as_bytes()).is_err());
+    }
+
+    /// Why this matters: the ownership field is produced by a shell snippet
+    /// that no Rust parser test executes, and two ways of getting it wrong
+    /// both fail open. `read` returns failure at EOF, so a marker line with no
+    /// trailing newline would pass as unmarked; and an unreadable unit would
+    /// pass as unmarked too. This runs the real reach-check script against a
+    /// fixture user-unit directory: absent and unmarked units are supported,
+    /// a marker-only file without a newline is refused as setup's, and a unit
+    /// path that cannot be read fails the check instead of admitting a plan.
+    #[farhelm_testtrace::test]
+    async fn reach_check_script_reports_setup_ownership_and_fails_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let bin = root.path().join("bin");
+        let unit_dir = home.join(".config/systemd/user");
+        tokio::fs::create_dir_all(&unit_dir).await.unwrap();
+        tokio::fs::create_dir_all(&bin).await.unwrap();
+        let systemctl = bin.join("systemctl");
+        tokio::fs::write(&systemctl, "#!/bin/sh\necho PATH=/usr/bin\n")
+            .await
+            .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            tokio::fs::set_permissions(&systemctl, std::fs::Permissions::from_mode(0o755))
+                .await
+                .unwrap();
+        }
+        let backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::new(FixtureHomeLauncher { home, bin }),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let target = ProbeTarget {
+            transport: ProvisioningTarget::Ssh {
+                destination: "scripted.example".to_string(),
+            },
+            probe_farhelm: PathBuf::from("farhelm"),
+            probe_state_dir: None,
+        };
+        let unit = unit_dir.join(crate::units::SUPERVISOR_UNIT_NAME);
+
+        assert!(matches!(
+            backend.inspect(&target).await.unwrap(),
+            ReachOutcome::Supported(_)
+        ));
+        tokio::fs::write(&unit, "[Unit]\n").await.unwrap();
+        assert!(matches!(
+            backend.inspect(&target).await.unwrap(),
+            ReachOutcome::Supported(_)
+        ));
+        tokio::fs::write(&unit, crate::units::MANAGED_MARKER)
+            .await
+            .unwrap();
+        assert!(matches!(
+            backend.inspect(&target).await.unwrap(),
+            ReachOutcome::Manual(reason) if reason.contains("farhelm helm setup")
+        ));
+        tokio::fs::remove_file(&unit).await.unwrap();
+        // A directory at the unit's path exists but cannot be read as a file,
+        // which stands in for any unreadable unit without depending on the
+        // test not running as root.
+        tokio::fs::create_dir(&unit).await.unwrap();
+        let error = backend
+            .inspect(&target)
+            .await
+            .expect_err("an unreadable unit must not pass as unmarked");
+        assert!(
+            error.rendered().contains("cannot read"),
+            "the failure says why: {}",
+            error.rendered()
+        );
+    }
+
+    /// Why this matters: a plan is confirmed some time after the reach check
+    /// that approved it, and `farhelm helm setup` may run on the host in
+    /// between. The remote unit write re-checks setup's marker in the same
+    /// command that renames, so a marked unit found at write time is refused
+    /// and left byte for byte as it was, while an unmarked unit (the
+    /// provisioning-owned case) is still replaced.
+    #[farhelm_testtrace::test]
+    async fn remote_unit_write_refuses_a_setup_managed_destination() {
+        let root = tempfile::tempdir().unwrap();
+        let unit = root.path().join("farhelm-supervisor.service");
+        let temporary = root
+            .path()
+            .join(".farhelm-supervisor.service.farhelm-tmp-run");
+        let backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::new(ScriptedSftpLauncher {
+                temporary: temporary.clone(),
+                bytes: "provisioned unit",
+                exit_status: 0,
+            }),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let target = ProvisioningTarget::Ssh {
+            destination: "scripted.example".to_string(),
+        };
+        let setup_unit = format!("{}\n[Unit]\n", crate::units::MANAGED_MARKER);
+        tokio::fs::write(&unit, &setup_unit).await.unwrap();
+        let error = backend
+            .install_bytes(&target, b"provisioned unit", &unit, &temporary, 0o644)
+            .await
+            .expect_err("a setup-managed unit must not be replaced");
+        assert!(
+            error.rendered().contains("managed by farhelm helm setup"),
+            "the refusal names the owner: {}",
+            error.rendered()
+        );
+        assert_eq!(tokio::fs::read_to_string(&unit).await.unwrap(), setup_unit);
+        assert!(!temporary.exists(), "a refused write cleans its temporary");
+
+        // A marker-only file with no trailing newline is still setup's; a
+        // `read`-based check would have let this one through.
+        tokio::fs::write(&unit, crate::units::MANAGED_MARKER)
+            .await
+            .unwrap();
+        backend
+            .install_bytes(&target, b"provisioned unit", &unit, &temporary, 0o644)
+            .await
+            .expect_err("a marker line without a newline is still setup's");
+        assert_eq!(
+            tokio::fs::read_to_string(&unit).await.unwrap(),
+            crate::units::MANAGED_MARKER
+        );
+
+        tokio::fs::write(&unit, "[Unit]\n# written by provisioning\n")
+            .await
+            .unwrap();
+        backend
+            .install_bytes(&target, b"provisioned unit", &unit, &temporary, 0o644)
+            .await
+            .expect("an unmarked unit is provisioning's to replace");
+        assert_eq!(
+            tokio::fs::read_to_string(&unit).await.unwrap(),
+            "provisioned unit"
+        );
     }
 
     /// A host needing private tmux receives that payload before the unit, and

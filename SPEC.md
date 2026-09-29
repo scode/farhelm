@@ -1490,6 +1490,13 @@ shared directories merely used to hold its executable or service files. If those
 report the obstacle rather than silently changing them. Trust in the helm does not authorize incidental changes to
 unrelated host configuration.
 
+On a host provisioned from the hosts panel, the supervisor unit (`farhelm-supervisor.service`) has one owner. A unit
+without `farhelm helm setup`'s managed-by marker belongs to provisioning, and ADD and UPDATE may replace it. A unit that
+carries the marker belongs to setup on that host: provisioning refuses to touch it, both when planning and at the moment
+of writing, and says setup manages it there, the same hand-off the helm's own machine gets. A hand-written unit under
+that exact name on a host the user asks Farhelm to provision is the user's to move aside first; provisioning does not
+try to tell it apart from its own.
+
 ### Upgrade compatibility and client scale
 
 Viewing and rotating the browser sign-in token through `farhelm helm token show|rotate` on the helm's machine is
