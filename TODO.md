@@ -527,6 +527,14 @@ are large mostly because of their tests.
   session leak that defeats idle-suspend until the leaked sessions are reaped (evidence in the lore entry; worth
   reporting upstream).
 
+- Sandboxed agents with scoped GitLab credentials, especially on the Tensorlake and Fly.io Sprites host kinds above:
+  give an agent a token that reaches only the repositories it works on, minted per sandbox. GitLab rather than GitHub
+  because GitLab lets the token creation be automated, while GitHub's scoped tokens have to be created by hand in a
+  browser.
+
+- Containerize agents on remote hosts or locally on the desktop, with Docker, cgroup-based isolation, or something
+  similar. The cgroup scopes Farhelm already launches into track and reap an agent's processes; they do not isolate it.
+
 - Replace xterm.js with libghostty via WebAssembly, assessed 2026-09-12 in `lore/2026-09-12-libghostty-assessment.md`.
   Native libghostty on macOS is ruled out there: it owns its own PTY and renders into an NSView, neither of which fits a
   WebSocket-fed terminal inside a webview. The WASM route through `coder/ghostty-web` (xterm.js-compatible API over the
