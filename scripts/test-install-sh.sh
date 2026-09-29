@@ -1311,6 +1311,47 @@ check "bundle restore failure: the kept bundle is the old one" \
 check "bundle restore failure: the bundle lock is released" \
   [ ! -e "$HOME_BUNDLELOCK/Applications/.farhelm-app.lock" ]
 
+# An uninstall interrupted at the very end of removing the bundle leaves its
+# retry copy of the bundle record, `.Farhelm.app.uninstall-receipt`, next to
+# the bundle. After a reinstall of another version that copy disagreed with
+# the new bundle's own record, and uninstall refused forever with advice
+# (re-run the installer) that could not clear it. The installer now removes
+# the copy when it is this installation's own record, and leaves any other
+# installation's copy alone.
+HOME_RECEIPT="$WORKDIR/home-receipt"
+INSTALL_RECEIPT="$HOME_RECEIPT/.local/bin"
+mkdir -p "$HOME_RECEIPT"
+run_install "$MAC_TOOLS" "$HOME_RECEIPT" "$INSTALL_RECEIPT" "$BASE/good" 1.2.3
+check "leftover receipt setup: first install exits 0" [ "$RC" -eq 0 ]
+RECEIPT_COPY="$HOME_RECEIPT/Applications/.Farhelm.app.uninstall-receipt"
+cp "$HOME_RECEIPT/Applications/Farhelm.app/Contents/.farhelm-installation" "$RECEIPT_COPY"
+run_install "$MAC_TOOLS" "$HOME_RECEIPT" "$INSTALL_RECEIPT" "$BASE/good-v2" 1.2.4
+check "leftover receipt: the reinstall exits 0" [ "$RC" -eq 0 ]
+check "leftover receipt: this installation's stale copy is removed" [ ! -e "$RECEIPT_COPY" ]
+
+# Another installation's leftover receipt is that installation's only way to
+# finish its uninstall. Installation A is installed, its uninstall is
+# interrupted after the bundle is gone (its receipt copy survives), and then
+# installation B, in another directory, installs: B must refuse the bundle
+# step, leave A's receipt byte for byte, and create no bundle to disagree with.
+HOME_FOREIGNRECEIPT="$WORKDIR/home-foreignreceipt"
+mkdir -p "$HOME_FOREIGNRECEIPT"
+run_install "$MAC_TOOLS" "$HOME_FOREIGNRECEIPT" "$HOME_FOREIGNRECEIPT/a/bin" "$BASE/good" 1.2.3
+check "foreign receipt setup: installation A exits 0" [ "$RC" -eq 0 ]
+FOREIGN_APP="$HOME_FOREIGNRECEIPT/Applications/Farhelm.app"
+FOREIGN_COPY="$HOME_FOREIGNRECEIPT/Applications/.Farhelm.app.uninstall-receipt"
+cp "$FOREIGN_APP/Contents/.farhelm-installation" "$FOREIGN_COPY"
+rm -rf "$FOREIGN_APP"
+FOREIGN_BYTES=$(od -An -tx1 "$FOREIGN_COPY")
+run_install "$MAC_TOOLS" "$HOME_FOREIGNRECEIPT" "$HOME_FOREIGNRECEIPT/b/bin" "$BASE/good-v2" 1.2.4
+check "foreign receipt: installation B refuses the bundle step" [ "$RC" -ne 0 ]
+check "foreign receipt: the refusal names the receipt and how to clear it" \
+  contains "$ERR" "$FOREIGN_COPY was left by an interrupted farhelm uninstall and is not this installation's record"
+check "foreign receipt: B's binaries are still installed" \
+  [ "$("$HOME_FOREIGNRECEIPT/b/bin/farhelm" --version)" = "farhelm 1.2.4" ]
+check "foreign receipt: A's receipt is unchanged" [ "$(od -An -tx1 "$FOREIGN_COPY")" = "$FOREIGN_BYTES" ]
+check "foreign receipt: no bundle was created beside it" [ ! -e "$FOREIGN_APP" ]
+
 # ===========================================================================
 # Scenario: rollback when the FIRST replacement (farhelm itself) fails
 # (F3) -- distinct from the farhelm-desktop case above: this is the move
