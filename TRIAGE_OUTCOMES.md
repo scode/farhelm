@@ -4277,4 +4277,10 @@
 - Decision: the user chose the fix: race the send against the transfer's signal receiver, as the other waits do.
 - Completion criteria: Delete of a session with a transfer blocked on a full queue proceeds promptly; focused regression
   coverage; remove this feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; every message a transfer sends goes through one rule (`reply` and
+  `send_upload_unless_cancelled` in uploads.rs): while the transfer can still be cancelled, a send waits for room but
+  gives way to the cancellation signal; once a cancellation has been taken, its goodbye (abort notice, answers to queued
+  commits, the commit's or the begin's cancellation reply) is queued only if there is room. That covers the per-chunk
+  ack the finding named and the other sends review found with the same stall: `UploadStarted`, cancellation during a
+  chunk write, before staging and at commit, and the success reply after publication. Change `syplqxsvvurm`, bookmark
+  `pr/upload-send-cancellable`, draft PR [#1207](https://github.com/scode/farhelm/pull/1207/changes).

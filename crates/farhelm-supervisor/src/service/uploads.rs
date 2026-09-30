@@ -290,8 +290,67 @@ pub(crate) struct UploadRequest {
 /// Separate from [`send_reply`] also because that helper routes through
 /// [`reply_frame`], which needs a `req_id` and panics for a message that
 /// has none — `UploadAck` and `UploadAborted` correlate by channel.
-async fn send_upload(priority: &mpsc::Sender<Frame>, m: &ControlMsg) {
-    let _ = priority.send(Frame::control(m)).await;
+///
+/// The send gives way to a cancellation: it enqueues `m` unless a signal
+/// arrives first, and returns that signal if it does. The priority queue is
+/// bounded, and a client that stops reading fills it, after which a bare
+/// send waits until the connection's writer-stall timeout tears the
+/// connection down. Every other wait in a transfer observes its signal; a
+/// send that did not left a Delete parked on this
+/// transfer's `finished` for that whole timeout. When the queue is full,
+/// the signal is checked first, as everywhere else in the transfer; the
+/// caller then ends through [`end_cancelled`], whose own messages never
+/// wait for room (see [`reply`]). A message dropped that way may have been
+/// a reply to a request the client is waiting on; a client that is not
+/// reading cannot take it anyway, and its connection's own teardown ends
+/// that wait.
+async fn send_upload_unless_cancelled(
+    priority: &mpsc::Sender<Frame>,
+    m: &ControlMsg,
+    signals: &mut mpsc::Receiver<UploadSignal>,
+) -> Option<UploadSignal> {
+    // Room first: a reply that can be queued is queued, even with a
+    // cancellation pending. Many of these replies answer a request the
+    // client is still waiting on (its begin, its commit), and one dropped
+    // while the queue had room would leave that request unanswered on a
+    // healthy connection. Only a full queue races the signal.
+    match priority.try_send(Frame::control(m)) {
+        Ok(()) | Err(mpsc::error::TrySendError::Closed(_)) => return None,
+        Err(mpsc::error::TrySendError::Full(_)) => {}
+    }
+    tokio::select! {
+        biased;
+        signal = signals.recv() => Some(signal.unwrap_or_else(cancelled_without_a_reason)),
+        _ = priority.send(Frame::control(m)) => None,
+    }
+}
+
+/// Queue a reply a transfer owes its client without letting it stall a
+/// Delete.
+///
+/// The priority queue is bounded, and a client that stops reading fills
+/// it. A Delete signals every transfer of its session and then waits on
+/// each one's `finished`, so a transfer parked on a full queue parks the
+/// Delete too, until the connection's writer-stall timeout. Hence two
+/// modes. While the transfer can still be cancelled (`signals` is `Some`),
+/// the reply waits for room but gives way to a cancellation, which is
+/// returned and the reply dropped. Once a cancellation has already been
+/// taken (`None`), nothing else will interrupt a wait, so the reply is
+/// queued only if there is room: a client that is not reading could not
+/// receive it anyway, and one that is still reading loses only a reply
+/// about a transfer that was cancelled.
+async fn reply(
+    priority: &mpsc::Sender<Frame>,
+    m: &ControlMsg,
+    signals: Option<&mut mpsc::Receiver<UploadSignal>>,
+) -> Option<UploadSignal> {
+    match signals {
+        Some(signals) => send_upload_unless_cancelled(priority, m, signals).await,
+        None => {
+            let _ = priority.try_send(Frame::control(m));
+            None
+        }
+    }
 }
 
 /// Run one attachment upload from `BeginUpload` to its end, then
@@ -370,7 +429,11 @@ async fn upload_transfer(
 
     let mut staged = match stage_upload(sup, request, signals).await {
         Ok(staged) => staged,
-        Err(e) => {
+        Err(failure) => {
+            let (e, cancelled) = match failure {
+                StageFailure::Cancelled(e) => (e, true),
+                StageFailure::Refused(e) => (e, false),
+            };
             // Nothing exists yet, so a refused begin is an ordinary
             // correlated error and the channel simply never carried an
             // upload. It is still part of the transfer trail: a paste that
@@ -383,16 +446,17 @@ async fn upload_transfer(
                 "attachment upload could not be staged"
             );
             let session_gone = e.kind == ErrorKind::NotFound;
-            send_upload(
+            let overtaken = reply(
                 priority,
                 &ControlMsg::Error {
                     req_id: *req_id,
                     message: e.message,
                     kind: e.kind,
                 },
+                (!cancelled).then_some(&mut *signals),
             )
             .await;
-            return session_gone;
+            return session_gone || overtaken.is_some_and(|signal| signal.session_gone);
         }
     };
     info!(
@@ -403,14 +467,18 @@ async fn upload_transfer(
     // contract), so nothing may be sent before the staging above
     // succeeded: a client granted a window against a transfer that does
     // not exist would stream bytes into a channel with no receiver.
-    send_upload(
+    if let Some(signal) = send_upload_unless_cancelled(
         priority,
         &ControlMsg::UploadStarted {
             req_id: *req_id,
             channel,
         },
+        signals,
     )
-    .await;
+    .await
+    {
+        return end_cancelled(sup, priority, request, staged, commands, signal, 0).await;
+    }
 
     let mut received: u64 = 0;
     let mut deadline = tokio::time::Instant::now() + sup.timeouts.upload_progress;
@@ -434,16 +502,16 @@ async fn upload_transfer(
             _ = tokio::time::sleep_until(deadline) => {
                 // The forever-pending upload this timeout exists for: the
                 // connection is fine, the client simply stopped sending.
-                fail_upload(
+                return fail_upload(
                     sup, priority, request, staged, commands,
                     UploadFailure {
                         reason: farhelm_proto::UPLOAD_ABORT_REASON_STALLED.to_string(),
                         kind: ErrorKind::Internal,
                         received,
                     },
+                    Some(signals),
                 )
                 .await;
-                return false;
             }
             command = commands.recv() => command,
         };
@@ -474,7 +542,7 @@ async fn upload_transfer(
                 // exact).
                 let would_be = received.saturating_add(bytes.len() as u64);
                 if would_be > size {
-                    fail_upload(
+                    return fail_upload(
                         sup,
                         priority,
                         request,
@@ -488,9 +556,9 @@ async fn upload_transfer(
                             kind: ErrorKind::InvalidRequest,
                             received,
                         },
+                        Some(signals),
                     )
                     .await;
-                    return false;
                 }
                 let empty = bytes.is_empty();
                 let written = bytes.len() as u64;
@@ -516,7 +584,7 @@ async fn upload_transfer(
                         // policy: ENOSPC is a failed upload with nothing
                         // published, never a truncated file), and so does
                         // a write that outlived its bound.
-                        fail_upload(
+                        return fail_upload(
                             sup,
                             priority,
                             request,
@@ -527,9 +595,9 @@ async fn upload_transfer(
                                 kind: ErrorKind::Internal,
                                 received,
                             },
+                            Some(signals),
                         )
                         .await;
-                        return false;
                     }
                 };
                 received = received.saturating_add(written);
@@ -546,7 +614,18 @@ async fn upload_transfer(
                 // bytes SAFELY WRITTEN — never a count of bytes merely
                 // accepted, and never past the declaration, which the
                 // check above already refused.
-                send_upload(priority, &ControlMsg::UploadAck { channel, received }).await;
+                if let Some(signal) = send_upload_unless_cancelled(
+                    priority,
+                    &ControlMsg::UploadAck { channel, received },
+                    signals,
+                )
+                .await
+                {
+                    return end_cancelled(
+                        sup, priority, request, staged, commands, signal, received,
+                    )
+                    .await;
+                }
             }
             Some(UploadCommand::Commit { req_id }) => {
                 return commit_upload(sup, priority, request, staged, received, req_id, signals)
@@ -601,6 +680,7 @@ async fn end_cancelled(
                 },
                 received,
             },
+            None,
         )
         .await;
         return signal.session_gone;
@@ -621,6 +701,7 @@ async fn end_cancelled(
         commands,
         &format!("this upload was cancelled: {}", signal.reason),
         ErrorKind::InvalidRequest,
+        None,
     )
     .await;
     signal.session_gone
@@ -678,7 +759,8 @@ async fn fail_upload(
     storage: impl Into<UploadStorage>,
     commands: &mut mpsc::Receiver<UploadCommand>,
     failure: UploadFailure,
-) {
+    mut signals: Option<&mut mpsc::Receiver<UploadSignal>>,
+) -> bool {
     if let UploadStorage::Staged(staged) = storage.into() {
         abandon_upload(sup, staged).await;
     }
@@ -692,21 +774,29 @@ async fn fail_upload(
         received_bytes = received, declared_bytes = request.size, reason = %reason,
         "attachment upload aborted"
     );
-    send_upload(
+    let overtaken = reply(
         priority,
         &ControlMsg::UploadAborted {
             channel: request.channel,
             reason: reason.clone(),
         },
+        signals.as_deref_mut(),
     )
     .await;
-    answer_queued_commits(
+    if overtaken.is_some() {
+        signals = None;
+    }
+    let overtaken = overtaken.or(answer_queued_commits(
         priority,
         commands,
         &format!("this upload was aborted before its commit could run: {reason}"),
         kind,
+        signals,
     )
-    .await;
+    .await);
+    // A cancellation that overtook the goodbye still says whether the
+    // session is going away, which the channel's tombstone records.
+    overtaken.is_some_and(|signal| signal.session_gone)
 }
 
 /// Answer every commit still sitting in a dying transfer's queue.
@@ -728,21 +818,29 @@ async fn answer_queued_commits(
     commands: &mut mpsc::Receiver<UploadCommand>,
     message: &str,
     kind: ErrorKind,
-) {
+    mut signals: Option<&mut mpsc::Receiver<UploadSignal>>,
+) -> Option<UploadSignal> {
     commands.close();
+    let mut overtaken = None;
     while let Some(command) = commands.recv().await {
         if let UploadCommand::Commit { req_id } = command {
-            send_upload(
+            let cancelled = reply(
                 priority,
                 &ControlMsg::Error {
                     req_id,
                     message: message.to_string(),
                     kind,
                 },
+                signals.as_deref_mut(),
             )
             .await;
+            if cancelled.is_some() {
+                signals = None;
+                overtaken = cancelled;
+            }
         }
     }
+    overtaken
 }
 
 /// Stage one upload's file: the whole of `BeginUpload`'s side-effecting
@@ -776,16 +874,16 @@ async fn stage_upload(
     sup: &Arc<Supervisor>,
     request: &UploadRequest,
     signals: &mut mpsc::Receiver<UploadSignal>,
-) -> Result<crate::files::StagedStream, RequestError> {
+) -> Result<crate::files::StagedStream, StageFailure> {
     let session_id = &request.session_id;
     // Waiting for the claim is interruptible, and must be: a delete that
     // is already running holds it and waits for THIS transfer to finish,
     // so a plain await here would deadlock the two against each other.
-    let _lifecycle = tokio::select! {
+    let lifecycle = tokio::select! {
         biased;
         signal = signals.recv() => {
             let session_gone = signal.is_some_and(|signal| signal.session_gone);
-            return Err(if session_gone {
+            return Err(StageFailure::Cancelled(if session_gone {
                 RequestError::new(
                     ErrorKind::NotFound,
                     format!(
@@ -798,10 +896,32 @@ async fn stage_upload(
                     ErrorKind::InvalidRequest,
                     "this upload was cancelled before it could start".to_string(),
                 )
-            });
+            }));
         }
         claim = sup.lifecycle_locks.claim(session_id) => claim,
     };
+    stage_claimed(sup, request, lifecycle)
+        .await
+        .map_err(StageFailure::Refused)
+}
+
+/// Why staging produced no file. The two need different replies:
+/// a refusal waits for room like any other reply (and still gives way to a
+/// later cancellation), while a cancellation was already taken, so its
+/// reply must not wait at all (see [`reply`]).
+enum StageFailure {
+    Cancelled(RequestError),
+    Refused(RequestError),
+}
+
+/// [`stage_upload`] once the session's lifecycle claim is held, which it
+/// keeps until the staging file exists.
+async fn stage_claimed(
+    sup: &Arc<Supervisor>,
+    request: &UploadRequest,
+    _lifecycle: super::core::KeyedGuard,
+) -> Result<crate::files::StagedStream, RequestError> {
+    let session_id = &request.session_id;
     if sup.sessions.lock().await.get(session_id).is_none() {
         return Err(RequestError::new(
             ErrorKind::NotFound,
@@ -1003,8 +1123,10 @@ async fn commit_upload(
             );
             // A correlated `Error`, not an `UploadAborted`: the commit is
             // a request with a `req_id` waiting on it, and answering that
-            // is what tells the client its paste failed.
-            send_upload(
+            // is what tells the client its paste failed. Queued only if
+            // there is room, as every cancelled transfer's goodbye is
+            // (see `reply`).
+            reply(
                 priority,
                 &ControlMsg::Error {
                     req_id,
@@ -1023,6 +1145,7 @@ async fn commit_upload(
                         ErrorKind::InvalidRequest
                     },
                 },
+                None,
             )
             .await;
             return signal.session_gone;
@@ -1051,21 +1174,26 @@ async fn commit_upload(
     if let Some(refusal) = refusal {
         let session_gone = refusal.kind == ErrorKind::NotFound;
         abandon_upload(sup, staged).await;
+        // Released before the reply, as on the publication path: a Delete
+        // must take this claim before it can signal this transfer, so a
+        // reply waiting for room under it could never be interrupted.
+        drop(lifecycle);
         warn!(
             session = %session_id, transfer = request.transfer, channel = request.channel,
             received_bytes = received, declared_bytes = request.size,
             reason = %refusal.message, "attachment upload failed at commit"
         );
-        send_upload(
+        let overtaken = reply(
             priority,
             &ControlMsg::Error {
                 req_id,
                 message: refusal.message,
                 kind: refusal.kind,
             },
+            Some(signals),
         )
         .await;
-        return session_gone;
+        return session_gone || overtaken.is_some_and(|signal| signal.session_gone);
     }
 
     // The publication itself is bounded, and the claim is what makes the
@@ -1092,7 +1220,7 @@ async fn commit_upload(
                 received_bytes = received, reason = %signal.reason,
                 "attachment upload was cancelled mid-publication"
             );
-            send_upload(
+            reply(
                 priority,
                 &ControlMsg::Error {
                     req_id,
@@ -1116,6 +1244,7 @@ async fn commit_upload(
                         ErrorKind::InvalidRequest
                     },
                 },
+                None,
             )
             .await;
             return signal.session_gone;
@@ -1135,16 +1264,17 @@ async fn commit_upload(
                 session = %session_id, transfer = request.transfer, channel = request.channel,
                 received_bytes = received, error = %e, "attachment upload commit was not acknowledged"
             );
-            send_upload(
+            return reply(
                 priority,
                 &ControlMsg::Error {
                     req_id,
                     message: e,
                     kind: ErrorKind::Internal,
                 },
+                Some(signals),
             )
-            .await;
-            return false;
+            .await
+            .is_some_and(|signal| signal.session_gone);
         }
     };
     // UTF-8 by construction — `stage_upload` refused a non-UTF-8
@@ -1158,7 +1288,7 @@ async fn commit_upload(
             session = %session_id, transfer = request.transfer,
             "attachment published under a non-UTF-8 path"
         );
-        send_upload(
+        return reply(
             priority,
             &ControlMsg::Error {
                 req_id,
@@ -1169,17 +1299,25 @@ async fn commit_upload(
                 ),
                 kind: ErrorKind::Internal,
             },
+            Some(signals),
         )
-        .await;
-        return false;
+        .await
+        .is_some_and(|signal| signal.session_gone);
     };
     info!(
         session = %session_id, transfer = request.transfer, channel = request.channel,
         bytes = received, name = %request.name, path = %path,
         "attachment upload published"
     );
-    send_upload(priority, &ControlMsg::UploadCommitted { req_id, path }).await;
-    false
+    // Published: a cancellation that overtakes this reply cannot undo that,
+    // it only ends the wait for room so a Delete is not held up by it.
+    reply(
+        priority,
+        &ControlMsg::UploadCommitted { req_id, path },
+        Some(signals),
+    )
+    .await
+    .is_some_and(|signal| signal.session_gone)
 }
 
 /// How many times [`abandon_upload`] retries a removal that failed.
@@ -1392,6 +1530,531 @@ mod tests {
             answered: false,
             admitted: u64::from(channel),
         }
+    }
+
+    /// A send stuck behind a full queue gives way to a cancellation.
+    ///
+    /// Why it matters: this is the one wait inside a streaming transfer that
+    /// used to ignore its signal (the per-chunk ack), and a Delete parked on
+    /// the transfer inherited it until the connection's stall timeout.
+    /// Specified, without any scheduling race: against a full one-slot queue
+    /// the send is pending after a poll; once a signal is queued, the same
+    /// send resolves to that signal, and the queue still holds only what was
+    /// there before.
+    #[farhelm_testtrace::test]
+    async fn a_send_stuck_behind_a_full_queue_yields_to_a_cancellation() {
+        let (priority, queued) = mpsc::channel::<Frame>(1);
+        priority
+            .try_send(Frame::control(&ControlMsg::UploadAck {
+                channel: 1,
+                received: 0,
+            }))
+            .unwrap();
+        let (signals_tx, mut signals) = mpsc::channel(UPLOAD_SIGNAL_QUEUE);
+        let ack = ControlMsg::UploadAck {
+            channel: 1,
+            received: 1,
+        };
+        let mut send = std::pin::pin!(send_upload_unless_cancelled(&priority, &ack, &mut signals));
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(send.as_mut().poll(cx).is_pending()))
+                .await,
+            "fixture premise: the send is waiting for room"
+        );
+
+        signals_tx
+            .send(UploadSignal {
+                reason: "the session was deleted".to_string(),
+                tell_client: true,
+                session_gone: true,
+            })
+            .await
+            .unwrap();
+        let signal = tokio::time::timeout(Duration::from_secs(10), send)
+            .await
+            .expect("the send must give way to the cancellation, not wait for room")
+            .expect("the cancellation must win");
+        assert!(signal.session_gone);
+        assert_eq!(
+            queued.len(),
+            1,
+            "the stuck message must not have been queued"
+        );
+    }
+
+    /// A commit waiting for its session's lifecycle claim ends on a
+    /// cancellation even when its reply cannot be queued.
+    ///
+    /// Why it matters: Delete holds that claim while it waits for the
+    /// transfer to finish. The commit's cancellation reply used to wait for
+    /// room on the priority queue, so with a client that stopped reading,
+    /// Delete sat out the connection's stall timeout. Specified: an empty
+    /// upload whose `UploadStarted` fills a one-slot queue, with its commit
+    /// parked on a claim the test holds, finishes promptly once a deletion
+    /// signal arrives, and nothing more is queued.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_commit_waiting_for_the_claim_ends_on_cancellation_with_a_full_queue() {
+        use super::super::core::tests::{StateDir, dummy_exe, entry_with};
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let mut entry = entry_with(None, crate::store::LastOutcome::Running);
+        entry.info.id = "session-1".to_string();
+        sup.sessions
+            .lock()
+            .await
+            .insert("session-1".to_string(), Arc::new(entry));
+
+        let (priority, queued) = mpsc::channel::<Frame>(1);
+        let (commands_tx, commands) = mpsc::channel(UPLOAD_CHUNK_QUEUE);
+        let (signals_tx, signals) = mpsc::channel(UPLOAD_SIGNAL_QUEUE);
+        let (finished, mut finished_rx) = oneshot::channel();
+        let transfer = tokio::spawn(run_upload(
+            Arc::clone(&sup),
+            priority,
+            UploadRequest {
+                req_id: 1,
+                session_id: "session-1".to_string(),
+                channel: 5,
+                name: "empty.txt".to_string(),
+                size: 0,
+                transfer: 1,
+            },
+            commands,
+            signals,
+            finished,
+            UploadOutcome::live(),
+        ));
+
+        // `UploadStarted` fills the only slot; staging has released the
+        // claim by then, so the test can take it and park the commit.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        while queued.is_empty() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the transfer never started"
+            );
+            // sleep-ok: the transfer stages asynchronously; poll for its first frame inside the deadline.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let claim = sup.lifecycle_locks.claim("session-1").await;
+        commands_tx
+            .send(UploadCommand::Commit { req_id: 2 })
+            .await
+            .unwrap();
+        // Signal only after the transfer took the commit, so the
+        // cancellation reaches the commit's wait for the claim rather than
+        // the streaming loop.
+        while commands_tx.capacity() < UPLOAD_CHUNK_QUEUE {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the transfer never took the commit"
+            );
+            // sleep-ok: the transfer receives the commit asynchronously; poll the queue's capacity inside the deadline.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        signals_tx
+            .send(UploadSignal {
+                reason: "the session was deleted".to_string(),
+                tell_client: true,
+                session_gone: true,
+            })
+            .await
+            .unwrap();
+
+        let ended = tokio::time::timeout(Duration::from_secs(10), &mut finished_rx).await;
+        drop(claim);
+        assert!(
+            ended.is_ok(),
+            "the commit must end on the cancellation, not wait for the queue"
+        );
+        transfer.await.unwrap();
+        assert_eq!(
+            queued.len(),
+            1,
+            "nothing may be queued after the cancellation"
+        );
+    }
+
+    /// A supervisor with one session, for the transfer tests below.
+    async fn upload_fixture() -> (super::super::core::tests::StateDir, Arc<Supervisor>) {
+        use super::super::core::tests::{StateDir, dummy_exe, entry_with};
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let mut entry = entry_with(None, crate::store::LastOutcome::Running);
+        entry.info.id = "session-1".to_string();
+        sup.sessions
+            .lock()
+            .await
+            .insert("session-1".to_string(), Arc::new(entry));
+        (state, sup)
+    }
+
+    /// The deletion signal every test below sends.
+    fn deletion() -> UploadSignal {
+        UploadSignal {
+            reason: "the session was deleted".to_string(),
+            tell_client: true,
+            session_gone: true,
+        }
+    }
+
+    /// A transfer cancelled while it waits to start ends at once even when
+    /// its refusal cannot be queued.
+    ///
+    /// Why it matters: a Delete holds the session's lifecycle claim, which a
+    /// new transfer needs to stage its file, and then waits for that
+    /// transfer to finish. The transfer took the cancellation while waiting
+    /// for the claim and then waited for room to report it, so with a full
+    /// queue the Delete sat out the connection's stall timeout. Specified:
+    /// with the claim held and the one-slot queue already full, a deletion
+    /// signal ends the transfer promptly and nothing is queued.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_transfer_cancelled_before_staging_ends_with_a_full_queue() {
+        let (_state, sup) = upload_fixture().await;
+        let claim = sup.lifecycle_locks.claim("session-1").await;
+        let (priority, queued) = mpsc::channel::<Frame>(1);
+        priority
+            .try_send(Frame::control(&ControlMsg::UploadAck {
+                channel: 9,
+                received: 0,
+            }))
+            .unwrap();
+        let (_commands_tx, commands) = mpsc::channel(UPLOAD_CHUNK_QUEUE);
+        let (signals_tx, signals) = mpsc::channel(UPLOAD_SIGNAL_QUEUE);
+        let (finished, mut finished_rx) = oneshot::channel();
+        let transfer = tokio::spawn(run_upload(
+            Arc::clone(&sup),
+            priority,
+            UploadRequest {
+                req_id: 1,
+                session_id: "session-1".to_string(),
+                channel: 5,
+                name: "file.txt".to_string(),
+                size: 4,
+                transfer: 1,
+            },
+            commands,
+            signals,
+            finished,
+            UploadOutcome::live(),
+        ));
+        signals_tx.send(deletion()).await.unwrap();
+
+        let ended = tokio::time::timeout(Duration::from_secs(10), &mut finished_rx).await;
+        drop(claim);
+        assert!(
+            ended.is_ok(),
+            "the transfer must end on the cancellation, not wait for the queue"
+        );
+        transfer.await.unwrap();
+        assert_eq!(
+            queued.len(),
+            1,
+            "nothing may be queued after the cancellation"
+        );
+    }
+
+    /// A published upload whose success reply is stuck behind a full queue
+    /// still ends on a cancellation, and its file stays published.
+    ///
+    /// Why it matters: publication releases the session's claim, so a Delete
+    /// can start while the reply waits for room, and it then waits for this
+    /// transfer to finish. Specified: an empty upload whose `UploadStarted`
+    /// fills a one-slot queue commits and publishes its file; a deletion
+    /// signal then ends the transfer promptly, nothing more is queued, and
+    /// the published file is still there (a cancellation cannot undo it).
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_published_upload_ends_on_cancellation_while_its_reply_waits() {
+        let (_state, sup) = upload_fixture().await;
+        let (priority, queued) = mpsc::channel::<Frame>(1);
+        let (commands_tx, commands) = mpsc::channel(UPLOAD_CHUNK_QUEUE);
+        let (signals_tx, signals) = mpsc::channel(UPLOAD_SIGNAL_QUEUE);
+        let (finished, mut finished_rx) = oneshot::channel();
+        let transfer = tokio::spawn(run_upload(
+            Arc::clone(&sup),
+            priority,
+            UploadRequest {
+                req_id: 1,
+                session_id: "session-1".to_string(),
+                channel: 5,
+                name: "empty.txt".to_string(),
+                size: 0,
+                transfer: 1,
+            },
+            commands,
+            signals,
+            finished,
+            UploadOutcome::live(),
+        ));
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        while queued.is_empty() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the transfer never started"
+            );
+            // sleep-ok: the transfer stages asynchronously; poll for its first frame inside the deadline.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        commands_tx
+            .send(UploadCommand::Commit { req_id: 2 })
+            .await
+            .unwrap();
+        let published =
+            crate::attachments::session_dir(&sup.state_dir, "session-1").join("empty.txt");
+        while !published.exists() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the upload never published"
+            );
+            // sleep-ok: publication runs on a blocking task; poll for the published file inside the deadline.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        // Publication releases the session's claim before its reply, so
+        // holding the claim proves the transfer is past publishing and on
+        // its success reply, exactly as a Delete finds it.
+        let claim = tokio::time::timeout(
+            Duration::from_secs(10),
+            sup.lifecycle_locks.claim("session-1"),
+        )
+        .await
+        .expect("publication must release the session's claim before replying");
+
+        signals_tx.send(deletion()).await.unwrap();
+        let ended = tokio::time::timeout(Duration::from_secs(10), &mut finished_rx).await;
+        drop(claim);
+        assert!(
+            ended.is_ok(),
+            "the transfer must end on the cancellation, not wait for the queue"
+        );
+        transfer.await.unwrap();
+        assert_eq!(
+            queued.len(),
+            1,
+            "nothing may be queued after the cancellation"
+        );
+        assert!(
+            published.exists(),
+            "a cancellation must not undo a publication"
+        );
+    }
+
+    /// A refused commit gives up the session's claim before its reply, so a
+    /// Delete can take the claim and cancel a reply stuck behind a full
+    /// queue.
+    ///
+    /// Why it matters: Delete takes the session's lifecycle claim before it
+    /// signals the session's transfers. A commit refused for a short upload
+    /// used to reply while still holding that claim, so with a full queue
+    /// the Delete could neither get the claim nor send the signal that would
+    /// end the wait. Specified: a four-byte upload committed with nothing
+    /// sent, its `UploadStarted` filling a one-slot queue, lets the test take
+    /// the claim, and a deletion signal then ends the transfer promptly with
+    /// nothing more queued.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_refused_commit_releases_the_claim_before_its_reply() {
+        let (_state, sup) = upload_fixture().await;
+        let (priority, queued) = mpsc::channel::<Frame>(1);
+        let (commands_tx, commands) = mpsc::channel(UPLOAD_CHUNK_QUEUE);
+        let (signals_tx, signals) = mpsc::channel(UPLOAD_SIGNAL_QUEUE);
+        let (finished, mut finished_rx) = oneshot::channel();
+        let transfer = tokio::spawn(run_upload(
+            Arc::clone(&sup),
+            priority,
+            UploadRequest {
+                req_id: 1,
+                session_id: "session-1".to_string(),
+                channel: 5,
+                name: "short.txt".to_string(),
+                size: 4,
+                transfer: 1,
+            },
+            commands,
+            signals,
+            finished,
+            UploadOutcome::live(),
+        ));
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        while queued.is_empty() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the transfer never started"
+            );
+            // sleep-ok: the transfer stages asynchronously; poll for its first frame inside the deadline.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        // The staged file exists now; the refusal removes it while it still
+        // holds the claim, so its disappearance proves the refusal ran and
+        // that only the reply is left.
+        let staging = crate::attachments::staging_dir(&sup.state_dir, "session-1");
+        let staged_files = || std::fs::read_dir(&staging).map_or(0, |entries| entries.count());
+        assert_eq!(
+            staged_files(),
+            1,
+            "fixture premise: the upload staged a file"
+        );
+        commands_tx
+            .send(UploadCommand::Commit { req_id: 2 })
+            .await
+            .unwrap();
+        while staged_files() != 0 {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the commit never refused the short upload"
+            );
+            // sleep-ok: the refusal runs on the transfer's task; poll for its cleanup inside the deadline.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let claim = tokio::time::timeout(
+            Duration::from_secs(10),
+            sup.lifecycle_locks.claim("session-1"),
+        )
+        .await
+        .expect("a refused commit must not hold the claim while it waits to reply");
+
+        signals_tx.send(deletion()).await.unwrap();
+        let ended = tokio::time::timeout(Duration::from_secs(10), &mut finished_rx).await;
+        drop(claim);
+        assert!(
+            ended.is_ok(),
+            "the transfer must end on the cancellation, not wait for the queue"
+        );
+        transfer.await.unwrap();
+        assert_eq!(
+            queued.len(),
+            1,
+            "nothing may be queued after the cancellation"
+        );
+    }
+
+    /// A reply that has room is sent even with a cancellation pending.
+    ///
+    /// Why it matters: many replies answer a request the client is still
+    /// waiting on, its begin or its commit, and the client does not time
+    /// that wait out. Dropping one while the queue had room would leave the
+    /// request unanswered on a healthy connection. Specified: with room in
+    /// the queue and a signal already waiting, the send queues the message
+    /// and leaves the signal for the transfer's next wait.
+    #[farhelm_testtrace::test]
+    async fn a_reply_with_room_is_sent_despite_a_pending_cancellation() {
+        let (priority, queued) = mpsc::channel::<Frame>(1);
+        let (signals_tx, mut signals) = mpsc::channel(UPLOAD_SIGNAL_QUEUE);
+        signals_tx.send(deletion()).await.unwrap();
+        let committed = ControlMsg::UploadCommitted {
+            req_id: 2,
+            path: "/tmp/x".to_string(),
+        };
+        assert!(
+            send_upload_unless_cancelled(&priority, &committed, &mut signals)
+                .await
+                .is_none()
+        );
+        assert_eq!(queued.len(), 1, "the reply must be queued");
+        assert!(
+            signals.try_recv().is_ok(),
+            "the signal must still be waiting"
+        );
+    }
+
+    /// A cancellation ends a transfer whose acknowledgement is stuck behind
+    /// a full queue, promptly and without sending anything.
+    ///
+    /// Why it matters: the connection's priority queue is bounded, and a
+    /// viewer that stops reading fills it. The per-chunk ack used to be a
+    /// bare send, the one wait in a transfer that ignored its signal, so a
+    /// Delete of that session sat on the transfer's `finished` until the
+    /// connection's writer-stall timeout. Specified: with a one-slot queue
+    /// already holding `UploadStarted` and nobody reading, a chunk's ack
+    /// cannot be sent; a session-deletion signal then ends the transfer
+    /// well within a bound far shorter than that timeout (with no writer
+    /// here, the unfixed transfer never ends at all), and no further frame
+    /// is queued. The signal may land while the chunk is still being
+    /// written rather than at the ack; that path ends through the same
+    /// cancellation, whose goodbye must not wait for room either, so the
+    /// assertion holds for both interleavings.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_cancellation_overtakes_an_ack_stuck_behind_a_full_queue() {
+        use super::super::core::tests::{StateDir, dummy_exe, entry_with};
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let mut entry = entry_with(None, crate::store::LastOutcome::Running);
+        entry.info.id = "session-1".to_string();
+        sup.sessions
+            .lock()
+            .await
+            .insert("session-1".to_string(), Arc::new(entry));
+
+        let (priority, queued) = mpsc::channel::<Frame>(1);
+        let (commands_tx, commands) = mpsc::channel(UPLOAD_CHUNK_QUEUE);
+        let (signals_tx, signals) = mpsc::channel(UPLOAD_SIGNAL_QUEUE);
+        let (finished, mut finished_rx) = oneshot::channel();
+        let transfer = tokio::spawn(run_upload(
+            Arc::clone(&sup),
+            priority,
+            UploadRequest {
+                req_id: 1,
+                session_id: "session-1".to_string(),
+                channel: 5,
+                name: "file.txt".to_string(),
+                size: 4,
+                transfer: 1,
+            },
+            commands,
+            signals,
+            finished,
+            UploadOutcome::live(),
+        ));
+
+        // `UploadStarted` takes the only slot; nothing reads it.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        while queued.is_empty() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the transfer never started"
+            );
+            // sleep-ok: the transfer stages asynchronously; poll for its first frame inside the deadline.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        commands_tx
+            .send(UploadCommand::Chunk(b"ab".to_vec()))
+            .await
+            .unwrap();
+        // Once the transfer has taken the chunk, it is writing it or stuck
+        // on the ack; either way the only free slot is gone.
+        while commands_tx.capacity() < UPLOAD_CHUNK_QUEUE {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the transfer never took the chunk"
+            );
+            // sleep-ok: the transfer receives the chunk asynchronously; poll the queue's capacity inside the deadline.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        signals_tx
+            .send(UploadSignal {
+                reason: "the session was deleted".to_string(),
+                tell_client: true,
+                session_gone: true,
+            })
+            .await
+            .unwrap();
+        let ended = tokio::time::timeout(Duration::from_secs(10), &mut finished_rx).await;
+        assert!(
+            ended.is_ok(),
+            "the transfer must end promptly once cancelled, not wait for the queue"
+        );
+        transfer.await.unwrap();
+        assert_eq!(
+            queued.len(),
+            1,
+            "nothing may be queued after the cancellation"
+        );
     }
 
     /// Tombstones are bounded, and only tombstones are evicted.

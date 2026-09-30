@@ -9,7 +9,6 @@ One line per open item. This file must always match the feedback files in this d
 - `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
   to read.
 - `plain-retry-erases-pending-fresh-window.md` — plain retry downgrades a pending fast reconnect to a slow probe.
-- `send-upload-ignores-cancellation.md` — the transfer's queue send ignores cancellation, stalling deletes.
 - `sftp-overall-deadline-fails-slow-links.md` — sftp transfer's 60 s overall deadline fails slow links
   deterministically.
 - `unvalidated-state-dir-on-probe.md` — probed registration with a bad state-dir path permanently bricks the entry.

@@ -155,7 +155,7 @@ pub(crate) struct ConnectionCtx<'a> {
     /// connection that owns this attachment" from any other.
     pub(crate) tx: &'a mpsc::Sender<Frame>,
     /// This connection's prioritized queue, for the upload family alone —
-    /// see `send_upload`.
+    /// see `uploads::send_upload_unless_cancelled`.
     pub(crate) priority: &'a mpsc::Sender<Frame>,
     pub(crate) input_routes: &'a mut HashMap<u32, InputRoute>,
     pub(crate) upload_routes: &'a mut HashMap<u32, UploadRoute>,
