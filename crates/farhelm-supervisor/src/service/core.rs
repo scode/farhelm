@@ -6068,6 +6068,7 @@ impl Supervisor {
     }
 
     /// Refresh an exact report-only binding while the caller owns the
+    #[warn(clippy::wildcard_enum_match_arm)]
     /// session's shared capture claim.
     pub(super) async fn refresh_reported_capture_claimed(
         &self,
@@ -6084,6 +6085,33 @@ impl Supervisor {
         }
     }
 
+    /// Record whatever this launch's kind needs its admission proof to know
+    /// later, before the process starts.
+    ///
+    /// Only OMP records launch provenance: its proof has to know which
+    /// launcher shape and reporter asset this launch used. Best effort: a
+    /// failure is logged by the kind's own recorder and leaves the session
+    /// runnable without capture.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    async fn record_launch_provenance(
+        &self,
+        kind: AgentKind,
+        id: &str,
+        generation: i64,
+        hooked: bool,
+        argv: &[String],
+    ) {
+        match kind {
+            AgentKind::Omp => self.record_omp_launch(id, generation, hooked, argv).await,
+            AgentKind::Claude
+            | AgentKind::Codex
+            | AgentKind::Goose
+            | AgentKind::Pi
+            | AgentKind::Grok
+            | AgentKind::Generic => {}
+        }
+    }
+
     /// Verify a locator-reporting session's exact file immediately before a
     /// resume can launch.
     ///
@@ -6095,6 +6123,7 @@ impl Supervisor {
     /// by another's rules. A failed check replaces only the exact locator and
     /// generation read by the caller with a non-resumable token. The request
     /// then conflicts, and a refresh exposes `FreshOnly`; a concurrent newer
+    #[warn(clippy::wildcard_enum_match_arm)]
     /// report fails the comparison and remains the durable answer.
     async fn verify_report_only_resume(
         &self,
@@ -12810,20 +12839,8 @@ impl Supervisor {
         // reporter exists to read any marker. A tmux failure below
         // keeps the decided values: the argv was fixed, so an
         // ambiguous survivor runs exactly what the row describes.
-        // Only OMP records launch provenance: its admission proof has to know
-        // which launcher shape and reporter asset this launch used.
-        match snapshot.kind {
-            AgentKind::Omp => {
-                self.record_omp_launch(id, generation, hooked, &spec.argv)
-                    .await
-            }
-            AgentKind::Claude
-            | AgentKind::Codex
-            | AgentKind::Goose
-            | AgentKind::Pi
-            | AgentKind::Grok
-            | AgentKind::Generic => {}
-        }
+        self.record_launch_provenance(snapshot.kind, id, generation, hooked, &spec.argv)
+            .await;
 
         let shell = self.launch_shell().await;
         // The scope wrapper, or nothing at all. Note the asymmetry with the
@@ -13652,6 +13669,7 @@ impl Supervisor {
     /// proven kind. A kind the predicate names but no branch handles is
     /// refused rather than routed anywhere — adding a proof means adding
     /// its branch in the same change that flips the predicate, never
+    #[warn(clippy::wildcard_enum_match_arm)]
     /// inheriting another kind's.
     async fn report_conversation_proven(
         &self,
@@ -13703,6 +13721,7 @@ impl Supervisor {
     /// replacement without that flip, which would otherwise withdraw the
     /// resume offer of every existing Claude session. Preserved, not
     /// re-blessed.
+    #[warn(clippy::wildcard_enum_match_arm)]
     #[allow(clippy::too_many_arguments)]
     async fn report_conversation_legacy(
         &self,

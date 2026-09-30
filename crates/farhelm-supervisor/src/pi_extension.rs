@@ -49,6 +49,7 @@ pub(crate) const OMP_ASSET: VendorAsset = VendorAsset {
 /// payloads, so one vendor's asset can never serve the other.
 ///
 /// Exhaustive so a new kind decides whether it loads one.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub(crate) fn reporter_asset(kind: farhelm_proto::AgentKind) -> Option<VendorAsset> {
     use farhelm_proto::AgentKind;
     match kind {
