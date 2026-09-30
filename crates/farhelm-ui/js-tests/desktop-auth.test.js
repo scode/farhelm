@@ -55,7 +55,6 @@ class AcceptingSocket {
 test("authentication scrubs the retired preference keys and keeps the rest", async () => {
   const ipc = channel([{
     base: "http://127.0.0.1:7433",
-    token: "token",
     persisted: "persisted-device",
   }, { persisted: true }]);
   const browser = platform(async () => ({ ok: true, status: 204 }), AcceptingSocket);
@@ -76,7 +75,6 @@ test("authentication scrubs the retired preference keys and keeps the rest", asy
 test("a storage that refuses removal still reaches ready", async () => {
   const ipc = channel([{
     base: "http://127.0.0.1:7433",
-    token: "token",
     persisted: "persisted-device",
   }, { persisted: true }]);
   const browser = platform(
@@ -98,7 +96,6 @@ test("a WebSocket failure after successful validation never exchanges a token", 
   const requests = [];
   const ipc = channel([{
     base: "http://127.0.0.1:7433",
-    token: "bootstrap-token",
     persisted: "persisted-device",
   }]);
   class FailingSocket {
@@ -120,39 +117,56 @@ test("a WebSocket failure after successful validation never exchanges a token", 
   }]);
 });
 
-// The bootstrap token is a file-backed rotation boundary. One rejected
-// exchange asks Rust to re-read it; a second rejection remains a visible
-// failure rather than becoming an unbounded retry loop.
-test("an explicitly rejected exchange retries once with the re-read token", async () => {
-  const tokens = [];
-  const ipc = channel([
-    { base: "http://127.0.0.1:7433", token: "stale-token", persisted: "" },
-    { token: "current-token" },
-    { persisted: true },
-  ]);
-  class AcceptedSocket {
-    constructor() {
-      queueMicrotask(() => this.onmessage());
+// The web token never reaches the page. A page with no stored secret, or
+// one the helm refuses, asks native to mint a device secret and only ever
+// sees that; it never calls the token exchange itself. Native re-reads a
+// rotated token on its side (auth.rs `mint_webview_secret`).
+test("a page without a usable secret asks native to mint one", async () => {
+  for (const persisted of ["", "refused-device"]) {
+    const requests = [];
+    const ipc = channel([
+      { base: "http://127.0.0.1:7433", persisted },
+      { secret: "new-device" },
+      { persisted: true },
+    ]);
+    class AcceptedSocket {
+      constructor() {
+        queueMicrotask(() => this.onmessage());
+      }
+      close() {}
     }
-    close() {}
+
+    await authenticate(ipc, platform(async (url) => {
+      requests.push(url);
+      return { ok: false, status: 401 };
+    }, AcceptedSocket));
+
+    assert.ok(
+      requests.every((url) => !url.endsWith("/api/auth/token")),
+      `the page must not exchange a token itself: ${requests}`,
+    );
+    assert.deepEqual(ipc.sent, [
+      { need_secret: true },
+      { secret: "new-device" },
+      { ready: true },
+    ]);
   }
+});
 
-  await authenticate(ipc, platform(async (_url, options) => {
-    const token = JSON.parse(options.body).token;
-    tokens.push(token);
-    if (tokens.length === 1) return { ok: false, status: 401 };
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({ device_secret: "new-device" }),
-    };
-  }, AcceptedSocket));
+// A native mint failure (a refused or unreachable helm) reaches the gate as
+// the page's ordinary, visible error.
+test("a native mint failure is reported as the authentication error", async () => {
+  const ipc = channel([
+    { base: "http://127.0.0.1:7433", persisted: "" },
+    { error: "webview device exchange failed with 503 Service Unavailable" },
+  ]);
+  class UnusedSocket {}
 
-  assert.deepEqual(tokens, ["stale-token", "current-token"]);
+  await authenticate(ipc, platform(async () => ({ ok: true, status: 204 }), UnusedSocket));
+
   assert.deepEqual(ipc.sent, [
-    { retry_token: true },
-    { secret: "new-device" },
-    { ready: true },
+    { need_secret: true },
+    { error: "webview device exchange failed with 503 Service Unavailable" },
   ]);
 });
 
@@ -161,7 +175,8 @@ test("an explicitly rejected exchange retries once with the re-read token", asyn
 // a crash or a failed atomic state-file replacement.
 test("a rejected native persistence commit never reaches localStorage", async () => {
   const ipc = channel([
-    { base: "http://127.0.0.1:7433", token: "token", persisted: "" },
+    { base: "http://127.0.0.1:7433", persisted: "" },
+    { secret: "uncommitted-device" },
     { persisted: false },
   ]);
   class AcceptedSocket {
@@ -170,39 +185,16 @@ test("a rejected native persistence commit never reaches localStorage", async ()
     }
     close() {}
   }
-  const browser = platform(async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({ device_secret: "uncommitted-device" }),
-  }), AcceptedSocket);
+  const browser = platform(async () => ({ ok: true, status: 204 }), AcceptedSocket);
 
   await authenticate(ipc, browser);
 
   assert.equal(browser.values.get("farhelm.device-secret"), undefined);
   assert.deepEqual(ipc.sent, [
+    { need_secret: true },
     { secret: "uncommitted-device" },
     { error: "native credential persistence failed" },
   ]);
-});
-
-// A responsive HTTP status with a stalled body is still a stalled exchange.
-// The abort signal covers both fetch and response decoding under one deadline.
-test("a stalled exchange body is aborted by the absolute deadline", async () => {
-  const ipc = channel([
-    { base: "http://127.0.0.1:7433", token: "token", persisted: "" },
-  ]);
-  class UnusedSocket {}
-  const browser = platform(async (_url, options) => ({
-    ok: true,
-    status: 200,
-    json: () => new Promise((_resolve, reject) => {
-      options.signal.addEventListener("abort", () => reject(new Error("exchange aborted")));
-    }),
-  }), UnusedSocket, 10);
-
-  await authenticate(ipc, browser);
-
-  assert.deepEqual(ipc.sent, [{ error: "exchange aborted" }]);
 });
 
 // The saved-credential check runs on nearly every launch and nothing else
@@ -211,7 +203,7 @@ test("a stalled exchange body is aborted by the absolute deadline", async () => 
 // exchange, and the timeout reaches native as an ordinary, visible error.
 test("a validation request that never answers times out as an error", async () => {
   const ipc = channel([
-    { base: "http://127.0.0.1:7433", token: "token", persisted: "persisted-device" },
+    { base: "http://127.0.0.1:7433", persisted: "persisted-device" },
   ]);
   class UnusedSocket {}
   const browser = platform((_url, options) => new Promise((_resolve, reject) => {
@@ -223,3 +215,4 @@ test("a validation request that never answers times out as an error", async () =
 
   assert.deepEqual(ipc.sent, [{ error: "webview device validation timed out" }]);
 });
+

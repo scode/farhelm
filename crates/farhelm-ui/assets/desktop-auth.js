@@ -10,6 +10,12 @@
   // the native side; that preference now lives in the helm and reaches the
   // page through an ordinary authenticated fetch after `ready`, so nothing
   // here touches any key but the device secret.
+  //
+  // The web token (the helm's root credential, which can mint device logins)
+  // never reaches this script. When the stored device secret is missing or
+  // refused, the script asks native for a freshly minted one instead, so a
+  // script injected by content the window showed later has no token to
+  // intercept (SPEC.md "Client hardening").
   async function authenticate(channel, platform) {
     const bootstrap = await channel.recv();
     try {
@@ -76,36 +82,12 @@
         }
       }
       if (!authenticated) {
-        async function exchange(token) {
-          const controller = new platform.AbortController();
-          const deadline = platform.setTimeout(function () {
-            controller.abort();
-          }, platform.exchangeTimeoutMs || 5000);
-          try {
-            const response = await platform.fetch(`${bootstrap.base}/api/auth/token`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ token }),
-              signal: controller.signal,
-            });
-            const body = response.ok ? await response.json() : null;
-            return { response, body };
-          } finally {
-            platform.clearTimeout(deadline);
-          }
+        channel.send({ need_secret: true });
+        const minted = await channel.recv();
+        if (minted.error) {
+          throw new Error(minted.error);
         }
-        let result = await exchange(bootstrap.token);
-        let response = result.response;
-        if (response.status === 401) {
-          channel.send({ retry_token: true });
-          const retry = await channel.recv();
-          result = await exchange(retry.token);
-          response = result.response;
-        }
-        if (!response.ok) {
-          throw new Error(`webview device exchange failed with ${response.status}`);
-        }
-        secret = result.body.device_secret;
+        secret = minted.secret;
         if (!(await accepted(secret))) {
           throw new Error("webview event socket failed after device exchange");
         }

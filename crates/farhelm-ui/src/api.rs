@@ -1357,6 +1357,62 @@ pub(crate) fn device_auth_required(body: &str) -> bool {
         })
 }
 
+/// Mint the desktop webview's device secret from the web token, natively.
+///
+/// `Ok(None)` is the helm refusing the token (it may have been rotated since
+/// it was read); anything else that is not a secret is an `Err`. Done here
+/// rather than in the webview so the web token, the helm's root credential,
+/// never enters the page's JavaScript, where a script injected by content the
+/// window showed could intercept it (SPEC.md "Client hardening"). The page
+/// only ever holds the revocable device secret this returns.
+///
+/// `deadline` bounds the whole exchange, headers and body alike: the
+/// window shows "Starting Farhelm…" until this answers, so a helm that
+/// accepts the request and then stalls must turn into a visible error
+/// promptly (the gate passes [`WEBVIEW_EXCHANGE_TIMEOUT`]), not after the
+/// minute ordinary requests are allowed.
+#[cfg(native_desktop)]
+pub(crate) async fn mint_webview_device_secret(
+    base: &str,
+    token: &str,
+    deadline: tokio::time::Instant,
+) -> Result<Option<String>, String> {
+    #[derive(serde::Deserialize)]
+    struct DeviceExchange {
+        device_secret: String,
+    }
+    let url = format!("{base}/api/auth/token");
+    let exchange = async {
+        let resp = client()
+            .post(&url)
+            .json(&serde_json::json!({ "token": token }))
+            .send()
+            .await
+            .map_err(|error| format!("exchanging the desktop token: {error}"))?;
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            return Err(format!(
+                "webview device exchange failed with {}",
+                resp.status()
+            ));
+        }
+        resp.json::<DeviceExchange>()
+            .await
+            .map(|exchange| Some(exchange.device_secret))
+            .map_err(|error| format!("the helm returned an unreadable device session: {error}"))
+    };
+    tokio::time::timeout_at(deadline, exchange)
+        .await
+        .unwrap_or_else(|_| Err("webview device exchange timed out".to_string()))
+}
+
+/// How long one webview device exchange may take: the bound the page's own
+/// exchange had when it ran there.
+#[cfg(native_desktop)]
+pub(crate) const WEBVIEW_EXCHANGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Exchange a pasted bootstrap token for an origin-scoped device secret.
 ///
 /// This request deliberately does not feed its own 401 back into the global
@@ -4666,5 +4722,107 @@ mod seen_write_tests {
             queue.record("sess-1", Some(2), Box::new(|_| {})),
             "the next write must be able to start a replacement writer"
         );
+    }
+}
+
+#[cfg(all(test, native_desktop))]
+mod webview_mint_tests {
+    use super::mint_webview_device_secret;
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Serve one connection: read the request, then write `response` and
+    /// hold the connection open (so a short body stalls rather than ends).
+    async fn one_response(response: String) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = socket.read(&mut request).await;
+            socket.write_all(response.as_bytes()).await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        (base, server)
+    }
+
+    /// A refused token is `Ok(None)` (the caller re-reads a rotated token
+    /// once), and a granted one returns the device secret.
+    ///
+    /// Why it matters: the gate retries only a refusal; any other failure
+    /// must surface, and a success must hand the page exactly the secret the
+    /// helm minted. Specified: a 401 answer yields `Ok(None)`; a 200 answer
+    /// with a device secret yields it.
+    #[farhelm_testtrace::test]
+    async fn a_refused_token_is_none_and_a_granted_one_is_the_secret() {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let (base, server) =
+            one_response("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n".to_string())
+                .await;
+        assert_eq!(
+            mint_webview_device_secret(&base, "token", deadline).await,
+            Ok(None)
+        );
+        server.abort();
+        let body = r#"{"device_secret":"minted"}"#;
+        let (base, server) = one_response(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ))
+        .await;
+        assert_eq!(
+            mint_webview_device_secret(&base, "token", deadline).await,
+            Ok(Some("minted".to_string()))
+        );
+        server.abort();
+    }
+
+    /// A helm that answers the headers and then stalls the body is cut off
+    /// at the deadline.
+    ///
+    /// Why it matters: the exchange used to run in the page under a
+    /// five-second bound covering the body too; moved to native it must keep
+    /// that, or a stalled helm leaves the window on "Starting Farhelm…" for
+    /// the ordinary request timeout. Specified: with headers promising a body
+    /// that never arrives, written well before the deadline, the call
+    /// returns the timeout error. Real time, not a paused clock, so the
+    /// headers really do arrive first; a bound covering only the request,
+    /// not the body, would hang here until the test harness's own timeout.
+    #[farhelm_testtrace::test]
+    async fn a_stalled_exchange_body_is_cut_off_at_the_deadline() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let (headers_sent, headers_sent_at) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = socket.read(&mut request).await;
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                      Content-Length: 100\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            let _ = headers_sent.send(tokio::time::Instant::now());
+            std::future::pending::<()>().await;
+        });
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+
+        let result = mint_webview_device_secret(&base, "token", deadline).await;
+
+        assert_eq!(result, Err("webview device exchange timed out".to_string()));
+        assert!(
+            !server.is_finished(),
+            "the fixture server must still be holding the stalled body open"
+        );
+        let sent_at = headers_sent_at
+            .await
+            .expect("test premise: the fixture sent the response headers");
+        assert!(
+            sent_at < deadline,
+            "test premise: the headers arrived before the deadline, so the timeout hit the body"
+        );
+        server.abort();
     }
 }

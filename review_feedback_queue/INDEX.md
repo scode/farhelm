@@ -51,8 +51,6 @@ One line per open item. This file must always match the feedback files in this d
   detail line at the same index.
 - `uploads-aborted-silently-on-remount.md` — terminal reconnect or restart remount silently aborts in-flight uploads
   with no message.
-- `desktop-bootstrap-token-always-pushed.md` — the desktop webview receives the master web token on every (re)auth, even
-  when its stored secret is valid.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
