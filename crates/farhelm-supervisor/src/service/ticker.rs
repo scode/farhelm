@@ -30,9 +30,10 @@
 //!
 //! - The TICKER guarantees PROGRESS. Capture advances on a schedule this
 //!   process owns, whether or not anything ever calls `ListSessions`.
-//! - The LIST PATH guarantees FRESHNESS-ON-REPLY. Proto v10 puts no push
-//!   on the supervisor edge, so a drain's reply is the only way a client
-//!   ever learns anything; a reply whose `restart_offer` came from a sweep
+//! - The LIST PATH guarantees FRESHNESS-ON-REPLY. The supervisor edge
+//!   pushes no session data (since proto 33 only a content-free change
+//!   hint, see `super::hints`, which makes a client drain sooner), so a
+//!   drain's reply is the only way a client ever learns what changed; a reply whose `restart_offer` came from a sweep
 //!   that predates the request would describe the world before the write
 //!   the caller is racing, which is exactly what the helm's post-write
 //!   wake exists to avoid.
@@ -1044,6 +1045,10 @@ fn pane_death_wait(
 /// death that was an agent's rather than a tab's finds nothing to close, but
 /// still wakes its live attachment to recover any final output tmux dropped.
 async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
+    // A pane died, which listings show at once: a dead tab drops out of its
+    // session's list before any reap, and a dead agent pane is an exit. That
+    // is the change, whatever the reap below then finds (see `hints`).
+    sup.hint_sessions_changed();
     let _permit = Arc::clone(&sup.sampling_admission)
         .acquire_owned()
         .await
@@ -1152,6 +1157,26 @@ async fn tick(
         suppress_within: sup.seams.ticker_interval,
     })
     .await;
+}
+
+/// Forget `entry`'s last screen after a failed capture, hinting connected
+/// helms if that changes the status it lists.
+///
+/// Forgetting the screen drops a recognized reading back to change counting,
+/// so a session listed as waiting can list as running or idle from here on
+/// with no successful sample to notice the change (see `hints`); repeated
+/// failures would otherwise leave that change to the helm's backstop poll.
+fn forget_tail_hinted(sup: &Supervisor, entry: &SessionEntry) {
+    let status_before = super::status::live_status(entry);
+    entry
+        .run
+        .activity
+        .lock()
+        .expect("activity mutex poisoned")
+        .forget_tail();
+    if super::status::live_status(entry) != status_before {
+        sup.hint_sessions_changed();
+    }
 }
 
 /// Snapshot a BUDGETED slice of the live agent panes into their entries'
@@ -1267,12 +1292,7 @@ async fn sample_pass(
             // evidence of stillness, and decaying a fleet to `Idle` on it
             // would be a wrong answer rather than an absent one.
             for entry in &entries {
-                entry
-                    .run
-                    .activity
-                    .lock()
-                    .expect("activity mutex poisoned")
-                    .forget_tail();
+                forget_tail_hinted(sup, entry);
             }
             return;
         }
@@ -1359,8 +1379,7 @@ async fn sample_pass(
                 // old pane's death from overwriting a fresh launch in RAM.
                 for entry in &entries {
                     if let Some(outcome) = committed.get(&entry.info.id) {
-                        *entry.run.outcome.lock().expect("outcome mutex poisoned") =
-                            outcome.clone();
+                        sup.mirror_committed_outcome(entry, outcome);
                     }
                 }
                 // A sentinel is disposable only after its Error reached
@@ -1457,12 +1476,7 @@ async fn sample_pass(
                 // read, so whatever it last showed is of unknown age from
                 // here on. See `ActivitySample::forget_tail` for why that
                 // must not count as a quiet look.
-                entry
-                    .run
-                    .activity
-                    .lock()
-                    .expect("activity mutex poisoned")
-                    .forget_tail();
+                forget_tail_hinted(sup, entry);
                 continue;
             }
         };
@@ -1488,6 +1502,13 @@ async fn sample_pass(
         } else {
             String::new()
         };
+        // The status this session lists, before and after this sample: a
+        // sample is the only thing that moves a live pane's status (the
+        // three-sample settling into idle included), so comparing across it
+        // is how a status transition is noticed (see `hints`). Screen tails
+        // and comparison counts change every sample and are not compared:
+        // no client sees them.
+        let status_before = super::status::live_status(entry);
         let (observation, report_fallback) = {
             let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
             let observation = activity.observe_screen(reader, &tail, &title);
@@ -1503,6 +1524,9 @@ async fn sample_pass(
                  several samples; its status falls back to change counting (logged once per run; \
                  the agent's UI may have changed, see docs/agent-screen-fixtures.md)"
             );
+        }
+        if super::status::live_status(entry) != status_before {
+            sup.hint_sessions_changed();
         }
         if observation.dates_activity() {
             note_activity(sup, entry).await;
@@ -1554,6 +1578,9 @@ async fn persist_work_started(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, 
             .session
             .last_work_started_at
             .fetch_max(at, std::sync::atomic::Ordering::Relaxed);
+        // The list's stable order reads this; it moves only on a move from
+        // idle or waiting to running (see `hints`).
+        sup.hint_sessions_changed();
         if !sup.may_record() {
             // Like `last_activity_at`, replies still reflect what this
             // process observed. The ownership fence prohibits turning that
@@ -1654,6 +1681,9 @@ async fn note_activity(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>) {
         .session
         .last_activity_at
         .store(advanced, std::sync::atomic::Ordering::Relaxed);
+    // The row's age and the unseen-output marker read this; it moves at
+    // most once a quantum (see `hints`).
+    sup.hint_sessions_changed();
     if !sup.may_record() {
         // A supervisor with no claim on this state directory tracks the
         // value for its own replies but does not write facts about
@@ -1766,6 +1796,9 @@ async fn reap_dead_tabs(
             budget -= 1;
             match sup.close_tab(&entry.info.id, &tab.id).await {
                 Ok(()) => {
+                    // The reap the tick found on its own, with no pane-death
+                    // wakeup ahead of it; see `hints`.
+                    sup.hint_sessions_changed();
                     info!(
                         session = %entry.info.id, tab = %tab.id,
                         "reaped a terminal tab whose shell exited"
@@ -3052,6 +3085,45 @@ mod tests {
             LastOutcome::Running,
             "the list must not durably record an exit nobody observed"
         );
+    }
+
+    /// Spec: a list reply that is the first to record a session's exit
+    /// hints connected helms.
+    ///
+    /// Why: whichever path commits an exit first is the only one that sees
+    /// the change; once a listing has mirrored it, the ticker finds nothing
+    /// to transition and has nothing to hint. A listing from some other
+    /// client (not the helm) can be that first observer, and the helm
+    /// would then learn of the exit only from its backstop poll.
+    #[farhelm_testtrace::test]
+    async fn a_list_that_first_records_an_exit_hints() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let name = "fh-list-exit";
+        let pane = spawn_pane(&sup, name, "exit 3").await;
+        install_durable_running_entry(
+            &sup,
+            "list-exit",
+            Terminal {
+                tmux_name: name.to_string(),
+                pane: pane.clone(),
+            },
+        )
+        .await;
+        wait_for_dead_pane(&sup, &pane).await;
+        let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
+
+        super::super::listing::list_all(&sup).await.expect("list");
+
+        assert_eq!(
+            stored_outcome(&sup, "list-exit").await,
+            LastOutcome::Exited {
+                exit_code: Some(3),
+                annotation: None,
+            },
+            "fixture premise: the listing recorded the exit"
+        );
+        hints.expect_hint("the exit the listing recorded").await;
     }
 
     /// Spec: a list reply still reports a launch sentinel for a session
@@ -4901,6 +4973,47 @@ mod tests {
             .expect("activity mutex")
             .forget_tail();
         assert_eq!(live_status(&entry), SessionStatus::Running);
+    }
+
+    /// Spec: a failed capture that withdraws a recognized wait hints
+    /// connected helms, because the status the session lists changed.
+    ///
+    /// Why: a failed capture never reaches the successful sample's
+    /// before-and-after comparison, and captures that keep failing never
+    /// will, so without its own hint the helm would show `Waiting` until its
+    /// backstop poll.
+    #[farhelm_testtrace::test]
+    async fn a_failed_capture_that_withdraws_a_wait_hints() {
+        let state = StateDir::new();
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
+        let entry = SessionEntry {
+            snapshot: IntegrationSnapshot {
+                kind: AgentKind::Claude,
+                resume_template: None,
+            },
+            ..entry_with(Some(a_terminal()), LastOutcome::Running)
+        };
+        entry
+            .run
+            .activity
+            .lock()
+            .expect("activity mutex")
+            .observe_screen(
+                reader_for(AgentKind::Claude),
+                CLAUDE_APPROVAL_DIALOG,
+                CLAUDE_APPROVAL_DIALOG,
+            );
+        assert_eq!(
+            live_status(&entry),
+            SessionStatus::Waiting,
+            "fixture premise: the session lists as waiting"
+        );
+
+        forget_tail_hinted(&sup, &entry);
+
+        assert_ne!(live_status(&entry), SessionStatus::Waiting);
+        hints.expect_hint("the withdrawn wait").await;
     }
 
     /// A prompt that has since been ANSWERED must not hold its session at

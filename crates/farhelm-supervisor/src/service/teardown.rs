@@ -738,6 +738,9 @@ impl Supervisor {
             }
         };
         self.sessions.lock().await.remove(session_id);
+        // The one removal point every delete reaches, on the task that owns
+        // the delete; the handler's waiter can be abandoned before this.
+        self.hint_sessions_changed();
         self.clear_failed_output_reaps_for_session(session_id);
         // Every former member's process teardown has now completed, and the
         // final membership is durably gone. Unlinking a preparation lock any
@@ -1273,6 +1276,27 @@ mod tests {
             )),
             "the manager-listed older generation must be killed: {observed:?}"
         );
+    }
+
+    /// Spec: a delete hints connected helms from the teardown itself, with no
+    /// request handler involved.
+    ///
+    /// Why: the delete's reply waiter is connection-owned and can be aborted
+    /// (a connection's shutdown timeout does exactly that) while the
+    /// supervisor-owned teardown still finishes. A hint sent by the waiter
+    /// would be lost with it, leaving the removal to the helm's backstop poll.
+    #[farhelm_testtrace::test]
+    async fn a_teardown_hints_without_its_request_waiter() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (_state, sup, entry) = scoped_session(working_scopes(), &id).await;
+        let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
+        assert!(
+            sup.teardown_session(&entry, &id, test_admission(&sup).await)
+                .await
+                .is_ok(),
+            "fixture premise: the teardown succeeds"
+        );
+        hints.expect_hint("the removed session").await;
     }
 
     /// A failed scope kill must block delete without discarding the only row

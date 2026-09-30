@@ -766,6 +766,38 @@ fn is_spoken_for(
         .is_some_and(|ids| ids.contains(conversation))
 }
 
+/// Advance `entry`'s capture state (`state`, its cell, already locked) to
+/// `next`, hinting connected helms when that changes the restart offer the
+/// session lists. Returns what [`CaptureState::advance`] returns.
+///
+/// Every capture-state change outside tests goes through here, so the hint
+/// is marked the moment the change is published rather than when the pass
+/// around it finishes: a pass can be cancelled partway (a listing's
+/// connection going away aborts the capture sweep it runs), and one that
+/// already published a new offer would otherwise leave it unhinted, with
+/// the next pass taking it as its baseline. The offer is compared rather
+/// than the state because most advances (a provisional match, a pending
+/// commit) change nothing a user sees; see `hints`.
+pub(crate) fn advance_capture(
+    sup: &Supervisor,
+    entry: &SessionEntry,
+    state: &mut CaptureState,
+    next: CaptureState,
+) -> bool {
+    let offer = |state: &CaptureState| {
+        entry.snapshot.restart_offer(
+            state.committed_conversation(),
+            state.committed_ownership_version().unwrap_or(0),
+        )
+    };
+    let before = offer(state);
+    let advanced = state.advance(next);
+    if offer(state) != before {
+        sup.hint_sessions_changed();
+    }
+    advanced
+}
+
 /// Reconcile report-only identities with the durable row before serving an offer.
 ///
 /// A startup report can arrive before its in-memory entry is published, while an
@@ -838,10 +870,15 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
         let ownership_version = row.capture_ownership_version;
         let mut state = entry.run.capture.lock().expect("capture mutex poisoned");
         if state.committed_conversation() == before.as_deref() {
-            state.advance(CaptureState::Reported {
-                conversation,
-                ownership_version,
-            });
+            advance_capture(
+                sup,
+                entry,
+                &mut state,
+                CaptureState::Reported {
+                    conversation,
+                    ownership_version,
+                },
+            );
         }
     }
 }
@@ -1008,12 +1045,12 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
                 // and nothing wider.
                 let spoken_for_at_retry = reported_ids(entries);
                 if is_spoken_for(&spoken_for_at_retry, entry, &conversation) {
-                    let dropped = entry
-                        .run
-                        .capture
-                        .lock()
-                        .expect("capture mutex poisoned")
-                        .advance(CaptureState::UncapturedFinal);
+                    let dropped = advance_capture(
+                        sup,
+                        entry,
+                        &mut entry.run.capture.lock().expect("capture mutex poisoned"),
+                        CaptureState::UncapturedFinal,
+                    );
                     if dropped {
                         info!(
                             session = %entry.info.id, conversation = %conversation,
@@ -1251,11 +1288,16 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
                             .capture
                             .lock()
                             .expect("capture mutex poisoned");
-                        state.advance(CaptureState::PendingCommit {
-                            conversation: conversation.clone(),
-                            record: record.clone(),
-                            stamp,
-                        })
+                        advance_capture(
+                            sup,
+                            scan.entry,
+                            &mut state,
+                            CaptureState::PendingCommit {
+                                conversation: conversation.clone(),
+                                record: record.clone(),
+                                stamp,
+                            },
+                        )
                     };
                     if advanced && may_write {
                         commit_capture(sup, scan.entry, conversation, record, stamp).await;
@@ -1285,7 +1327,12 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
                              window settles"
                         );
                     }
-                    state.advance(CaptureState::Provisional { conversation });
+                    advance_capture(
+                        sup,
+                        scan.entry,
+                        &mut state,
+                        CaptureState::Provisional { conversation },
+                    );
                 }
             }
             CaptureVerdict::NotYet => {
@@ -1294,12 +1341,17 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
                     // eligible set here is what keeps a session that never
                     // wrote a record from rescanning its directory on
                     // every poll for the rest of its life.
-                    scan.entry
-                        .run
-                        .capture
-                        .lock()
-                        .expect("capture mutex poisoned")
-                        .advance(CaptureState::UncapturedFinal);
+                    advance_capture(
+                        sup,
+                        scan.entry,
+                        &mut scan
+                            .entry
+                            .run
+                            .capture
+                            .lock()
+                            .expect("capture mutex poisoned"),
+                        CaptureState::UncapturedFinal,
+                    );
                 }
             }
         }
@@ -1506,16 +1558,16 @@ async fn commit_capture(
         session = %entry.info.id, conversation = %committed,
         "captured this session's agent conversation identity"
     );
-    entry
-        .run
-        .capture
-        .lock()
-        .expect("capture mutex poisoned")
-        .advance(CaptureState::Captured {
+    advance_capture(
+        sup,
+        entry,
+        &mut entry.run.capture.lock().expect("capture mutex poisoned"),
+        CaptureState::Captured {
             conversation: committed,
             record,
             stamp,
-        });
+        },
+    );
 }
 
 /// Refuse to claim anything for this session, for the rest of this launch,
@@ -1561,12 +1613,12 @@ async fn declare_ambiguous(
     may_write: bool,
     explain: impl FnOnce(),
 ) {
-    let advanced = entry
-        .run
-        .capture
-        .lock()
-        .expect("capture mutex poisoned")
-        .advance(CaptureState::Ambiguous { durable: false });
+    let advanced = advance_capture(
+        sup,
+        entry,
+        &mut entry.run.capture.lock().expect("capture mutex poisoned"),
+        CaptureState::Ambiguous { durable: false },
+    );
     if !advanced {
         return;
     }
@@ -1594,12 +1646,12 @@ async fn persist_ambiguity(sup: &Supervisor, entry: &Arc<SessionEntry>) {
         .await
     {
         Ok(()) => {
-            entry
-                .run
-                .capture
-                .lock()
-                .expect("capture mutex poisoned")
-                .advance(CaptureState::Ambiguous { durable: true });
+            advance_capture(
+                sup,
+                entry,
+                &mut entry.run.capture.lock().expect("capture mutex poisoned"),
+                CaptureState::Ambiguous { durable: true },
+            );
         }
         Err(e) => warn!(
             session = %entry.info.id, error = %format!("{e:#}"),
@@ -1903,6 +1955,49 @@ mod tests {
         )
         .await
         .expect("supervisor")
+    }
+
+    /// Spec: a capture-state advance that changes the session's restart
+    /// offer marks a change hint before it returns, with no further await.
+    ///
+    /// Why: a capture pass publishes session by session and can be
+    /// cancelled partway (a listing whose connection closes aborts the
+    /// sweep it runs). Marking only when the whole pass finished would lose
+    /// the hint for an offer already published, and the next pass would
+    /// take that offer as its baseline and find nothing to hint.
+    #[farhelm_testtrace::test]
+    async fn an_advance_that_changes_the_restart_offer_hints_at_once() {
+        let state = StateDir::new();
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
+        let mut entry = entry_with(None, crate::store::LastOutcome::Running);
+        entry.snapshot = IntegrationSnapshot {
+            kind: AgentKind::Claude,
+            resume_template: Some(vec![
+                "claude".to_string(),
+                "--resume".to_string(),
+                "{conversation}".to_string(),
+            ]),
+        };
+        let offer_before = super::super::status::session_restart_offer(&entry);
+
+        let advanced = advance_capture(
+            &sup,
+            &entry,
+            &mut entry.run.capture.lock().expect("capture mutex poisoned"),
+            CaptureState::Reported {
+                conversation: "0c3b1f6e-5a1d-4c55-9f7e-2d1f7b0a9e11".to_string(),
+                ownership_version: 1,
+            },
+        );
+
+        assert!(advanced, "fixture premise: the report advances the state");
+        assert_ne!(
+            super::super::status::session_restart_offer(&entry),
+            offer_before,
+            "fixture premise: the report changes the restart offer"
+        );
+        hints.expect_hint("the changed restart offer").await;
     }
 
     fn reported(conversation: &str) -> CaptureState {

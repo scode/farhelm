@@ -977,7 +977,7 @@ async fn session_info_now(
             .with_context(|| format!("recording session {}'s observed outcome", entry.info.id))?;
         let committed = committed.get(&entry.info.id);
         if let Some(outcome) = committed {
-            *entry.run.outcome.lock().expect("outcome mutex poisoned") = outcome.clone();
+            sup.mirror_committed_outcome(entry, outcome);
         }
         // Outcome durability precedes cleanup, whose shared helper also
         // preserves the sentinel's accepted-create evidence. A failed write
@@ -1398,7 +1398,11 @@ async fn handle_stop_session(
         // notified of, unlike delete below.
         match stop_error {
             Some(message) => reply_error(&tx, req_id, ErrorKind::Internal, message).await,
-            None => send_reply(&tx, &ControlMsg::SessionStopped { req_id }).await,
+            None => {
+                // The agent's status changes; see `hints`.
+                sup.hint_sessions_changed();
+                send_reply(&tx, &ControlMsg::SessionStopped { req_id }).await
+            }
         }
     });
     tasks.spawn(async move {

@@ -1016,12 +1016,25 @@ Version 13 adds the one shape on this wire that travels UPWARD as a request: `Co
 `AgentResponse`. Both legs of its journey carry the same pair. An agent inside a session dials its own supervisor's
 socket with the per-session credential — exactly as `farhelm spawn` does — and the supervisor forwards the request to
 the helm, because the session has no route, address, or credential back to the machine the helm runs on. Nothing else
-changed direction: the helm still learns about sessions by drain, so version 10's "no supervisor-edge push channel"
-holds for everything but this. The supervisor picks the helm that holds an attachment to the asking session — well
-defined by the one-attachment-per-session rule, and by construction the helm the user is looking at, which is also the
-rule that stays correct if several helms per supervisor are ever supported. Request ids are per connection on this
-protocol and stay that way: the asking process numbers its own leg, the supervisor numbers the upcall from a counter it
-keeps per helm connection, and the relay holds the mapping for one round trip.
+changed direction then: the helm still learns about sessions by drain, so version 10's "no supervisor-edge push channel"
+held for everything but this (version 33's change hint, below, carries no session data either). The supervisor picks the
+helm that holds an attachment to the asking session — well defined by the one-attachment-per-session rule, and by
+construction the helm the user is looking at, which is also the rule that stays correct if several helms per supervisor
+are ever supported. Request ids are per connection on this protocol and stay that way: the asking process numbers its
+own leg, the supervisor numbers the upcall from a counter it keeps per helm connection, and the relay holds the mapping
+for one round trip.
+
+Version 33 adds a second message in that direction, `ControlMsg::SessionsChanged`: a content-free hint that something a
+user can see about the host's sessions changed. The helm still learns WHAT changed by drain; the hint only moves the
+drain earlier. The supervisor owes a hint whenever a value it would list actually changes (a pane dying, a status
+transition, the activity and work-start stamps advancing, a restart offer changing, and every lifecycle mutation), never
+merely because a listing was served, so hints and the refreshes they cause cannot feed each other. It coalesces owed
+hints into at most one per 200 ms and sends each on every full-authority connection's ordinary writer queue, dropping it
+rather than blocking when that queue is full. The helm refreshes the hinted host at once, and a refresh a hint caused
+always raises a feed event, even when the cache compares equal: a tab opened and exited between two refreshes leaves the
+cache unchanged but a client's optimistic tab behind. The three-second poll stays as the backstop and keeps its
+changed-only rule. A hint stays pending until a refresh that STARTED after it completes; a refresh the helm discarded
+because one of its own seeded writes overtook it is retried at once rather than left to the poll.
 
 The helm's client closes its transport when its final owning handle drops, even with an unanswered upcall. Answer tasks
 hold writer senders of their own, so closing the client's sender alone cannot make a quiet connection reach EOF. The

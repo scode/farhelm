@@ -694,6 +694,16 @@ pub(crate) async fn helm_process(
     state_dir: &std::path::Path,
     ensure_hosts: Option<&std::path::Path>,
 ) -> HelmProcess {
+    helm_process_with_args(state_dir, ensure_hosts, &[]).await
+}
+
+/// [`helm_process`], with `extra` appended to the helm's own arguments: for
+/// the hidden test-only flags, such as `--backstop-refresh-secs`.
+pub(crate) async fn helm_process_with_args(
+    state_dir: &std::path::Path,
+    ensure_hosts: Option<&std::path::Path>,
+    extra: &[&str],
+) -> HelmProcess {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     let mut command = tokio::process::Command::new(farhelm_bin());
@@ -703,6 +713,7 @@ pub(crate) async fn helm_process(
     if let Some(ensure) = ensure_hosts {
         command.arg("--ensure-hosts").arg(ensure);
     }
+    command.args(extra);
     let mut child = command
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -1137,7 +1148,7 @@ pub(crate) async fn wait_for_listing(
         || async { client.list_sessions().await.map(|listing| listing.sessions) },
         secs,
         what,
-        settled,
+        |sessions: &Vec<SessionInfo>| settled(sessions),
     )
     .await
 }
@@ -1145,20 +1156,22 @@ pub(crate) async fn wait_for_listing(
 /// Poll an injectable whole-list request until its reply satisfies `settled`.
 ///
 /// The injected request keeps the timing contract testable without a real
-/// supervisor connection. One timeout covers both a request that never
-/// replies and the sleeps between completed replies; when it expires Tokio
-/// cancels a pending request future. This is a test-helper budget, not a new
-/// production RPC timeout.
-async fn wait_for_listing_with<Request, RequestFuture, Settled>(
+/// supervisor connection, and lets the same budget bound other listings (a
+/// helm's HTTP readers, for one), whatever their reply type. One timeout
+/// covers both a request that never replies and the sleeps between
+/// completed replies; when it expires Tokio cancels a pending request
+/// future. This is a test-helper budget, not a new production RPC timeout.
+pub(crate) async fn wait_for_listing_with<Listing, Request, RequestFuture, Settled>(
     mut request: Request,
     secs: u64,
     what: &str,
     settled: Settled,
-) -> Vec<SessionInfo>
+) -> Listing
 where
+    Listing: std::fmt::Debug,
     Request: FnMut() -> RequestFuture,
-    RequestFuture: std::future::Future<Output = anyhow::Result<Vec<SessionInfo>>>,
-    Settled: Fn(&[SessionInfo]) -> bool,
+    RequestFuture: std::future::Future<Output = anyhow::Result<Listing>>,
+    Settled: Fn(&Listing) -> bool,
 {
     // This remains outside the timed future so a timeout can say whether a
     // request never completed or completed with rows that did not settle.

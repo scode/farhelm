@@ -69,3 +69,4 @@ mod merged_hosts;
 
 mod agent_listing_real_stack;
 mod agent_relay;
+mod change_hints;

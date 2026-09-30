@@ -313,6 +313,18 @@ pub struct HelmArgs {
         value_parser = ReleaseBaseUrlParser
     )]
     pub release_base_url: Option<url::Url>,
+
+    /// TEST ONLY: the seconds between a connected host's backstop session
+    /// polls, in place of `manager::REFRESH_INTERVAL`. Lets an end-to-end
+    /// test push the poll out of reach, so that anything the helm still
+    /// learns about promptly can only have arrived as a supervisor's change
+    /// hint.
+    ///
+    /// Hidden because no production launch passes it: the poll is the
+    /// backstop for every change a hint misses, and a helm that polled
+    /// rarely would show such a change that much later.
+    #[arg(long, hide = true, value_name = "SECS")]
+    pub backstop_refresh_secs: Option<u64>,
 }
 
 /// The one message a rejected `--release-base-url` produces, whatever was
@@ -1623,7 +1635,12 @@ async fn run_with_ready(
     let manager = manager::ConnectionManager::start(
         store.clone(),
         Arc::new(manager::SystemTransport::new(&state_dir)),
-        manager::Cadence::default(),
+        manager::Cadence {
+            refresh: args
+                .backstop_refresh_secs
+                .map_or(manager::REFRESH_INTERVAL, std::time::Duration::from_secs),
+            ..manager::Cadence::default()
+        },
     )
     .await?;
 
@@ -2041,6 +2058,7 @@ mod tests {
             ensure_hosts: None,
             payload_dir: None,
             release_base_url: None,
+            backstop_refresh_secs: None,
         }
     }
 

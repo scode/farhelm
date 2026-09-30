@@ -437,6 +437,7 @@ impl DesktopBootstrap {
                             ensure_hosts: None,
                             payload_dir: None,
                             release_base_url: None,
+                            backstop_refresh_secs: None,
                         },
                         Some(native_clipboard_sink()),
                         ready_tx,
