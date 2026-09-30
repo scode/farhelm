@@ -564,7 +564,7 @@ pub enum SampleRead<'a> {
 /// A seam rather than a fault-injecting tmux wrapper, and it exists for a
 /// property that is otherwise untestable: what a pass does to the retained
 /// screens when it cannot read them. Both failure paths INVALIDATE
-/// sharpening evidence without recording an observation
+/// screen-derived readings without recording an observation
 /// (`ticker::ActivitySample::forget_tail`), and neither can be reached from
 /// a test by arranging real conditions — a pane must be alive in the very
 /// probe that selected it for its capture to be attempted at all, so
@@ -3117,11 +3117,11 @@ fn relaunched_entry(
             // session would trip the wire silently.
             hooked: hook_flag(false),
             hook_warned: hook_flag(false),
-            // Classification is never carried over, whatever `reset_capture` says: the sampled
-            // tail and the unchanged-sample streak beside it both describe a
+            // Classification is never carried over, whatever `reset_capture` says: the stored
+            // reading and the unchanged-sample streak beside it both describe a
             // process that no longer exists. Inheriting them would classify the
             // replacement launch from its predecessor's screen — quiet because
-            // the OLD pane stopped changing, or sharpened `Waiting` from a
+            // the OLD pane stopped changing, or `Waiting` read from a
             // dialog the previous run was showing when it died. Only an already
             // accepted work-start key awaiting persistence survives the reset.
             activity: ActivitySample::replacement(&entry.run.activity),
@@ -17160,7 +17160,7 @@ pub(crate) mod tests {
                 fresh.samples, 0,
                 "the new generation has been seen by nobody"
             );
-            assert_eq!(fresh.tail, None);
+            assert_eq!(fresh.comparison, None);
         }
 
         old.run

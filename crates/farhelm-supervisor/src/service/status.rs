@@ -24,7 +24,8 @@
 //! ENTRY, so "which live status" is answered from what is already in hand —
 //! no clock, no supervisor, no lookup. The absent clock is a deliberate
 //! property rather than an accident of shape;
-//! `QUIET_SAMPLES_BEFORE_IDLE` carries that argument.
+//! `agent_kind::screen_reader::QUIET_SAMPLES_BEFORE_IDLE` carries that
+//! argument.
 //!
 //! Three claims a reader might over-generalize from that, all FALSE, and
 //! the difference matters to anyone reasoning about what may run where:
@@ -66,6 +67,7 @@ use super::launch_artifacts::{
     read_launch_sentinel, sentinel_could_still_apply, wrapper_failure_detail,
 };
 use super::terminals::{Terminal, tabs_from_pane_states};
+use crate::agent_kind::screen_reader::ScreenState;
 use crate::store::{LastOutcome, SessionStore, Transition};
 use crate::tmux::PaneState;
 use anyhow::Context;
@@ -76,32 +78,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use tracing::warn;
-
-/// How many of a session's OWN consecutive samples must show an unchanged
-/// screen before it is reported `Idle` rather than `Running`.
-///
-/// Counted in samples, not seconds, and that is the whole design. The
-/// sampler works through live sessions on a budgeted round robin
-/// (`ticker::SAMPLE_TAIL_BUDGET`), so a session's real sampling period is
-/// `ceil(live / budget) × interval` — unbounded in the number of live
-/// sessions. Any wall-clock window would therefore be crossed by a pane
-/// that changed at EVERY one of its own samples as soon as a host ran
-/// enough sessions, turning "how busy is this host" into "this session is
-/// idle". Counting the session's own observations makes the cadence cancel
-/// out: the question is "how many times have I looked and seen nothing
-/// new", which means the same thing at any population.
-///
-/// Three, for the reasons a shorter count is wrong rather than for a
-/// timing: a screen can legitimately repeat for a sample or two while an
-/// agent is working — between tool calls, on a spinner frame that renders
-/// identically, on output that lands and is overwritten within one sample
-/// gap — and a count of one would flip such a session to `Idle` on every
-/// one of those. Three consecutive silent looks is a pattern rather than a
-/// coincidence. Nothing wants it much larger: at the production cadence
-/// with a small fleet this is a handful of seconds, and an `Idle` that
-/// takes a minute to appear is not the signal the status column exists to
-/// give.
-pub(crate) const QUIET_SAMPLES_BEFORE_IDLE: u64 = 3;
 
 /// The tmux session names this supervisor's sessions answer to: every
 /// session's minted `fh-{id}` name and every name a recorded terminal holds.
@@ -340,37 +316,23 @@ pub(crate) fn session_status(
 }
 
 /// Which of the three live statuses a session with a living pane gets
-/// (PLAN_M6_75.md item 2).
+/// (PLAN_M6_75.md item 2): what the session's screen reader concluded from
+/// its most recent successful sample.
 ///
-/// Three stages, and the order matters:
-///
-/// 1. **The generic baseline** is observed output and nothing else. A
-///    session whose last [`QUIET_SAMPLES_BEFORE_IDLE`] samples all showed
-///    the same screen is `Idle`; anything else live is `Running`. This
-///    works for every agent, including one this build has never heard of,
-///    because "the terminal is producing output" needs no vendor
-///    knowledge — and it is expressed in the session's own samples rather
-///    than in elapsed time, so the sampler's population-dependent cadence
-///    cannot leak into the answer.
-/// 2. **Per-kind sharpening** may then promote that to `Waiting` by
-///    recognizing this agent's own question or approval shape in the
-///    sampled tail (`AgentIntegration::sharpen`). Waiting is not derivable
-///    from screen-change history at all — an agent blocked on an approval
-///    and an agent that has finished both sit at an unchanging screen, so
-///    the generic classifier sees one fact where there are two. That is
-///    precisely why the second stage exists, and why it reads the tail's
-///    CONTENT rather than anything about how the tail moved.
-/// 3. A positive current-work hint may keep an otherwise idle baseline at
-///    `Running`. This is weaker than waiting and cannot cross the live-pane
-///    boundary; capture failure clears it with the screen that proved it.
+/// All per-harness knowledge lives in the readers
+/// (`agent_kind::screen_reader`); this function only maps a stored
+/// [`ScreenState`] onto the wire vocabulary, with one rule of its own: a
+/// reloaded run reports `Unknown` until its first sample that is fresh
+/// evidence, so the helm keeps its cached answer through the gap — except
+/// that a recognized waiting prompt is reported at once, since it names
+/// the interaction the user is asked for.
 ///
 /// ## The pre-first-sample state
 ///
 /// A new launch starts `Running` before sampling: its live pane is evidence
-/// of a newly started agent. A reloaded pane has no such fresh launch
-/// evidence, so it reports `Unknown` while the helm retains the preceding
-/// cached status. A screen change, positive work hint, recognized wait, or
-/// enough unchanged comparisons settles that provisional answer.
+/// of a newly started agent, and the default reading says working. A
+/// reloaded pane has no such fresh launch evidence, so it reports `Unknown`
+/// while the helm retains the preceding cached status.
 ///
 /// ## Bounds this is deliberately allowed to violate cosmetically
 ///
@@ -379,72 +341,19 @@ pub(crate) fn session_status(
 /// provisional instead. Both answers can remain stale while capture fails;
 /// neither changes whether the terminal can be used.
 ///
-/// No clock is read here, and none should be: see
-/// [`QUIET_SAMPLES_BEFORE_IDLE`] for why elapsed time is the wrong unit
-/// under a budgeted round robin. It is also what keeps this function a
-/// pure read of the entry, which the module docs promise.
-///
-/// Runs under the entry's `activity` mutex, which is a leaf lock: held
-/// across no await and alongside no other lock, so a hold can never
-/// participate in a deadlock and is bounded by the work inside it. It is
-/// NOT uncontended — the sampler writes the same cell every tick — which
-/// is exactly why the bound is the property worth stating. The sharpener
-/// is called INSIDE the hold rather than after cloning the tail out: a
-/// tail is up to `SAMPLE_TAIL_BYTES` and this runs once per session per
-/// reply, so cloning it would add a kilobytes-per-row allocation to the
-/// list path to avoid holding a leaf lock for a substring search.
+/// Only called for a live pane ([`session_status`] decides liveness first),
+/// which is what keeps a stale prompt on a dead pane from reading waiting.
+/// No clock is read here, and none should be (see
+/// `screen_reader::QUIET_SAMPLES_BEFORE_IDLE`). Runs under the entry's
+/// `activity` mutex, a leaf lock held across no await and alongside no
+/// other lock, for a field read.
 pub(crate) fn live_status(entry: &SessionEntry) -> SessionStatus {
     let activity = entry.run.activity.lock().expect("activity mutex poisoned");
-    let baseline =
-        if activity.samples >= 2 && activity.unchanged_streak >= QUIET_SAMPLES_BEFORE_IDLE {
-            SessionStatus::Idle
-        } else {
-            SessionStatus::Running
-        };
-    let status = match (entry.snapshot.integration(), activity.tail.as_deref()) {
-        (Some(integration), Some(tail)) => waiting_or_baseline(
-            baseline.clone(),
-            integration.sharpen(baseline.clone(), tail),
-        ),
-        _ => baseline.clone(),
-    };
-    if status == SessionStatus::Waiting {
-        return status;
-    }
-    if activity.startup_provisional {
-        return SessionStatus::Unknown;
-    }
-    if activity.working {
-        SessionStatus::Running
-    } else {
-        baseline
-    }
-}
-
-/// The guard that reduces everything a sharpener can do to the one thing
-/// it is for: `Waiting`, or the baseline unchanged.
-///
-/// Stated as a whitelist rather than as "reject dead statuses", because
-/// the two are not the same rule and the difference is not theoretical. A
-/// sharpener looks at a SCREEN, and a screen is evidence about neither the
-/// process nor its activity: a pane can render "process exited" from a log
-/// file while the agent runs on, and it can look perfectly still while the
-/// agent works. Rejecting only non-live answers would still let a
-/// mistyped match arm turn `Running` into `Idle` on the strength of a
-/// substring — a wrong answer with no reviewer and no compile error behind
-/// it. Passing exactly `Waiting` through leaves tmux's liveness verdict
-/// and the sample-count baseline both untouchable from here.
-///
-/// Enforced at this end as well as at the seam
-/// (`agent_kind`'s `promote_if_waiting`) because the two catch different
-/// mistakes: the seam refuses to promote a baseline it should not, and
-/// this refuses to accept an answer it should not. Neither subsumes the
-/// other, and both are one comparison.
-fn waiting_or_baseline(baseline: SessionStatus, sharpened: SessionStatus) -> SessionStatus {
-    if sharpened == SessionStatus::Waiting {
-        SessionStatus::Waiting
-    } else {
-        baseline
+    match activity.reading.state {
+        ScreenState::Waiting => SessionStatus::Waiting,
+        _ if activity.startup_provisional => SessionStatus::Unknown,
+        ScreenState::Working => SessionStatus::Running,
+        ScreenState::Idle => SessionStatus::Idle,
     }
 }
 
@@ -836,6 +745,7 @@ mod tests {
     use super::super::core::tests::{a_terminal, entry_with};
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
+    use crate::agent_kind::screen_reader::QUIET_SAMPLES_BEFORE_IDLE;
     use crate::service::ticker::ActivitySample;
     use farhelm_proto::AgentKind;
 
@@ -856,9 +766,7 @@ mod tests {
         let entry = entry_with(Some(a_terminal()), LastOutcome::Running);
         {
             let mut activity = entry.run.activity.lock().expect("activity mutex");
-            activity.samples = samples;
-            activity.unchanged_streak = unchanged_streak;
-            activity.tail = tail.map(str::to_string);
+            activity.set_for_test(kind, samples, unchanged_streak, tail);
         }
         SessionEntry {
             snapshot: IntegrationSnapshot {
@@ -911,23 +819,28 @@ mod tests {
             AgentKind::Codex,
             8,
             QUIET_SAMPLES_BEFORE_IDLE,
-            Some("still"),
+            Some("Working (4s • esc to interrupt)\n\n› draft\n\nfooter"),
         );
-        entry.run.activity.lock().expect("activity mutex").working = true;
+        let show = |screen: &str| {
+            entry
+                .run
+                .activity
+                .lock()
+                .expect("activity mutex")
+                .set_for_test(AgentKind::Codex, 8, QUIET_SAMPLES_BEFORE_IDLE, Some(screen));
+        };
         assert_eq!(
             session_status(&entry, &live, &KnownTmuxNames::default()).0,
             SessionStatus::Running
         );
 
-        entry.run.activity.lock().expect("activity mutex").tail =
-            Some("Do you want to run this command?\n❯ 1. Yes\n  2. No".to_string());
+        show("Do you want to run this command?\n❯ 1. Yes\n  2. No");
         assert_eq!(
             session_status(&entry, &live, &KnownTmuxNames::default()).0,
             SessionStatus::Waiting
         );
 
-        entry.run.activity.lock().expect("activity mutex").tail =
-            Some("Working (4s • esc to interrupt)\n\n› draft\n\nfooter".to_string());
+        show("Working (4s • esc to interrupt)\n\n› draft\n\nfooter");
         assert_eq!(
             session_status(&entry, &live, &KnownTmuxNames::default()).0,
             SessionStatus::Running,
@@ -1385,50 +1298,24 @@ mod tests {
         );
     }
 
-    /// Nothing a sharpener returns survives except `Waiting`; every other
-    /// answer leaves the baseline exactly as the sampler computed it.
+    /// A stored waiting reading never outlives the pane it was read from: a
+    /// dead pane reports its exit whatever the last screen showed.
     ///
-    /// Tested against [`waiting_or_baseline`] directly because that is the
-    /// whole mechanism — no implementation in the tree returns anything
-    /// else today, and the point of the guard is that a future one, or a
-    /// mistyped match arm, cannot rewrite a status by looking at a screen.
-    ///
-    /// Exhaustive over the cross product rather than spot-checked. Both
-    /// live baselines against every status the enum has is thirteen cheap
-    /// assertions, and the cheap version of this test (one baseline, one
-    /// dead status) passes with half the rule implemented — including with
-    /// the version that let a sharpener demote `Running` to `Idle`, which
-    /// is a wrong answer with no reviewer behind it.
+    /// Why it matters: the last capture of an agent that exited mid-question
+    /// still shows the question, and reporting a finished session as blocked
+    /// on a human is the one wrong status that sends the user to answer
+    /// nothing. Liveness is decided before any reading is consulted.
     #[farhelm_testtrace::test]
-    fn nothing_but_waiting_survives_a_sharpener() {
-        for baseline in [SessionStatus::Running, SessionStatus::Idle] {
-            for sharpened in [
-                SessionStatus::Running,
-                SessionStatus::Idle,
-                SessionStatus::Waiting,
-                SessionStatus::Exited { exit_code: Some(0) },
-                SessionStatus::Exited { exit_code: None },
-                SessionStatus::Error {
-                    detail: "nope".to_string(),
-                },
-                SessionStatus::Interrupted,
-                SessionStatus::Unknown,
-            ] {
-                let survived = waiting_or_baseline(baseline.clone(), sharpened.clone());
-                let expected = if sharpened == SessionStatus::Waiting {
-                    SessionStatus::Waiting
-                } else {
-                    baseline.clone()
-                };
-                assert_eq!(
-                    survived, expected,
-                    "a {sharpened:?} answer against a {baseline:?} baseline"
-                );
-                assert!(
-                    survived == baseline || survived == SessionStatus::Waiting,
-                    "{survived:?} is neither the baseline nor the one promotion allowed"
-                );
-            }
-        }
+    fn a_dead_pane_is_never_reported_waiting_on_its_last_screen() {
+        let entry = entry_sampled(AgentKind::Claude, 9, 5, Some(CLAUDE_APPROVAL_TAIL));
+        assert_eq!(
+            session_status(&entry, &pane_map(false, None), &KnownTmuxNames::default()).0,
+            SessionStatus::Waiting,
+            "premise: the screen reads waiting while the pane lives"
+        );
+        assert_eq!(
+            session_status(&entry, &pane_map(true, Some(0)), &KnownTmuxNames::default()).0,
+            SessionStatus::Exited { exit_code: Some(0) }
+        );
     }
 }
