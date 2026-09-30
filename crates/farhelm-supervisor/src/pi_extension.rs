@@ -43,6 +43,25 @@ pub(crate) const OMP_ASSET: VendorAsset = VendorAsset {
     source: include_bytes!("../assets/omp-conversation-v1.ts"),
 };
 
+/// The reporter extension a kind's launches load, if it has one: each
+/// locator-reporting kind needs its OWN vendor's artifact, because the
+/// reporters carry different event surfaces and different `vendor`
+/// payloads, so one vendor's asset can never serve the other.
+///
+/// Exhaustive so a new kind decides whether it loads one.
+pub(crate) fn reporter_asset(kind: farhelm_proto::AgentKind) -> Option<VendorAsset> {
+    use farhelm_proto::AgentKind;
+    match kind {
+        AgentKind::Pi => Some(PI_ASSET),
+        AgentKind::Omp => Some(OMP_ASSET),
+        AgentKind::Claude
+        | AgentKind::Codex
+        | AgentKind::Goose
+        | AgentKind::Grok
+        | AgentKind::Generic => None,
+    }
+}
+
 /// Publish one vendor's extension once, or verify the exact safe artifact
 /// already there.
 pub(crate) async fn materialize_asset(

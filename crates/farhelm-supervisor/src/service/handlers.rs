@@ -3425,38 +3425,14 @@ pub(crate) async fn handle_restricted_control(
                     return;
                 }
             }
-            // Codex's transition vocabulary is checked against the RAW
-            // source for the same reason: sanitation exists for log
-            // safety, and a vocabulary decision must not depend on what
-            // it rewrites.
-            if vendor == farhelm_proto::ReportVendor::Codex
-                && !crate::agent_kind::codex::is_foreground_source(&source)
-            {
-                reply_error(
-                    tx,
-                    req_id,
-                    ErrorKind::InvalidRequest,
-                    "Codex reported an unsupported foreground transition".to_string(),
-                )
-                .await;
-                return;
-            }
-            // OMP's subscribed vocabulary likewise: the four event tags
-            // the asset emits, with `session_switch` carrying its opaque
-            // upstream reason. Unknown tags refuse at the doorway, before
-            // the discriminator's second check and long before any
-            // vendor I/O — admission re-checks against the same
-            // allowlist.
-            if vendor == farhelm_proto::ReportVendor::Omp
-                && !crate::agent_kind::omp::is_omp_foreground_source(&source)
-            {
-                reply_error(
-                    tx,
-                    req_id,
-                    ErrorKind::InvalidRequest,
-                    "OMP reported an unsupported foreground transition".to_string(),
-                )
-                .await;
+            // Each vendor's transition vocabulary is checked against the RAW
+            // source: sanitation exists for log safety, and a vocabulary
+            // decision must not depend on what it rewrites. Unknown tags
+            // refuse at the doorway, before the discriminator's second check
+            // and long before any vendor I/O; admission re-checks against the
+            // same allowlist (see `foreground_source_refusal`).
+            if let Some(refusal) = crate::agent_kind::foreground_source_refusal(vendor, &source) {
+                reply_error(tx, req_id, ErrorKind::InvalidRequest, refusal.to_string()).await;
                 return;
             }
             // Bounded and stripped of control characters HERE, at the

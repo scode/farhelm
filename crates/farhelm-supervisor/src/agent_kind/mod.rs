@@ -2327,6 +2327,72 @@ pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
     }
 }
 
+/// Whether this kind's reported binding is re-verified against its exact
+/// vendor evidence when readiness is refreshed (Codex's root record, Grok's
+/// record pair). Other kinds' bindings are taken as reported until a restart
+/// asks.
+pub fn refreshes_reported_capture(kind: AgentKind) -> bool {
+    match kind {
+        AgentKind::Codex | AgentKind::Grok => true,
+        AgentKind::Claude
+        | AgentKind::Goose
+        | AgentKind::Pi
+        | AgentKind::Omp
+        | AgentKind::Generic => false,
+    }
+}
+
+/// Whether a Resume restart of this kind verifies its captured target on
+/// disk (the exact saved file or record pair) before relaunching.
+pub fn verifies_resume_target(kind: AgentKind) -> bool {
+    match kind {
+        AgentKind::Pi | AgentKind::Omp | AgentKind::Grok => true,
+        AgentKind::Claude | AgentKind::Codex | AgentKind::Goose | AgentKind::Generic => false,
+    }
+}
+
+/// The refusal a Resume restart of this kind gets when its offer is not
+/// Resume, for a kind that must never resume without a verified target;
+/// `None` for kinds whose unverified resume is left to the offer alone.
+///
+/// Only Codex: a legacy Codex identity is unattributed, so resuming it could
+/// select another transcript, and the restart refuses outright instead.
+pub fn unverified_resume_refusal(kind: AgentKind) -> Option<&'static str> {
+    match kind {
+        AgentKind::Codex => Some(
+            "this Codex conversation has no verified foreground resume target: its legacy identity is unattributed, \
+             or its exact record is unavailable; nothing was relaunched and no other transcript was selected",
+        ),
+        AgentKind::Claude
+        | AgentKind::Goose
+        | AgentKind::Pi
+        | AgentKind::Omp
+        | AgentKind::Grok
+        | AgentKind::Generic => None,
+    }
+}
+
+/// The doorway refusal for a report whose foreground-transition `source` is
+/// outside its vendor's vocabulary, or `None` when it is inside it (or the
+/// vendor has no such vocabulary).
+///
+/// Codex and OMP report named transitions (OMP's four subscribed event
+/// tags, `session_switch` carrying its opaque upstream reason); admission
+/// re-checks the same allowlists.
+pub fn foreground_source_refusal(
+    vendor: farhelm_proto::ReportVendor,
+    source: &str,
+) -> Option<&'static str> {
+    use farhelm_proto::ReportVendor;
+    match vendor {
+        ReportVendor::Codex => (!codex::is_foreground_source(source))
+            .then_some("Codex reported an unsupported foreground transition"),
+        ReportVendor::Omp => (!omp::is_omp_foreground_source(source))
+            .then_some("OMP reported an unsupported foreground transition"),
+        ReportVendor::Claude | ReportVendor::Goose | ReportVendor::Pi | ReportVendor::Grok => None,
+    }
+}
+
 /// The durable kind a report discriminator must name. The destination
 /// row's kind stays authoritative; this is the comparison the doorway
 /// applies before any vendor I/O.
