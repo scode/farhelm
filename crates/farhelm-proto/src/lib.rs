@@ -175,7 +175,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered profile defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_32` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_33` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -186,7 +186,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 32;
+pub const PROTOCOL_VERSION: u32 = 33;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -3224,6 +3224,27 @@ pub enum ControlMsg {
     /// behavior may key off it (PLAN_M5.md's scope explicitly rules this
     /// out).
     ReplayComplete { channel: u32 },
+    /// Supervisor to client: something a user can see about this host's
+    /// sessions has changed, so a client showing them should list them again
+    /// now rather than on its next poll. Content-free on purpose: the hint
+    /// says only THAT something changed, and the client learns what through
+    /// its ordinary `ListSessions` round trip. Much of a listed row is
+    /// derived as the reply is built (tabs, status, the restart offer), so
+    /// pushing rows or deltas would need a detector and a snapshot for every
+    /// such field, and a missed one would leave a client wrong with nothing
+    /// to correct it; a missed HINT only costs a poll interval.
+    ///
+    /// Sent on every full-authority connection, whatever its hello's `role`
+    /// says (the role is not an authorization input), and ignored by a
+    /// connection that does not show sessions. The supervisor sends one only
+    /// when a user-visible value actually changed, never merely because a
+    /// listing was served, so hints and the refreshes they cause cannot feed
+    /// each other; it coalesces bursts into at most one hint per short gap,
+    /// and drops a hint rather than block when a connection's writer is
+    /// full. Polling stays the backstop for anything a hint misses.
+    ///
+    /// Protocol 33.
+    SessionsChanged,
     /// Set the session's terminal dimensions. Fire-and-forget: no
     /// `req_id`, no reply, and the supervisor ignores it unless `channel`
     /// is the session's live attachment on the sending connection —
@@ -3567,6 +3588,7 @@ impl ControlMsg {
             | ControlMsg::Detach { .. }
             | ControlMsg::Detached { .. }
             | ControlMsg::ReplayComplete { .. }
+            | ControlMsg::SessionsChanged
             | ControlMsg::Resize { .. }
             | ControlMsg::PauseOutput { .. }
             | ControlMsg::ResumeOutput { .. }
@@ -3626,6 +3648,7 @@ impl ControlMsg {
             | ControlMsg::Detach { .. }
             | ControlMsg::Detached { .. }
             | ControlMsg::ReplayComplete { .. }
+            | ControlMsg::SessionsChanged
             | ControlMsg::Resize { .. }
             | ControlMsg::PauseOutput { .. }
             | ControlMsg::ResumeOutput { .. }
@@ -3688,6 +3711,7 @@ impl ControlMsg {
             ControlMsg::Detach { .. } => "Detach",
             ControlMsg::Detached { .. } => "Detached",
             ControlMsg::ReplayComplete { .. } => "ReplayComplete",
+            ControlMsg::SessionsChanged => "SessionsChanged",
             ControlMsg::Resize { .. } => "Resize",
             ControlMsg::PauseOutput { .. } => "PauseOutput",
             ControlMsg::ResumeOutput { .. } => "ResumeOutput",
@@ -4545,8 +4569,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_32() {
-        assert_eq!(PROTOCOL_VERSION, 32);
+    fn protocol_version_is_pinned_at_33() {
+        assert_eq!(PROTOCOL_VERSION, 33);
     }
 
     /// Pins the skew direction the detach-code bump exists to create, in
@@ -4610,7 +4634,7 @@ mod tests {
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
         assert_eq!(skew.peer_protocol, 30);
-        assert_eq!(skew.our_protocol, 32);
+        assert_eq!(skew.our_protocol, 33);
 
         // The reverse direction: a v30 receiver (the refusal rule itself,
         // modeled by its exact-version check) meets a v31 hello and hangs up.
