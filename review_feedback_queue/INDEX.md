@@ -62,8 +62,6 @@ One line per open item. This file must always match the feedback files in this d
 - `probe-reregister-drops-terminals.md` — probing an already-registered healthy host forces a reconnect that drops every
   open terminal on it.
 - `attach-reports-generic-timeout.md` — the attach step spins 30 s on skew/identity states and reports only "timed out".
-- `uninstall-creates-setup-lock-file.md` — uninstall and setup --uninstall create .farhelm-setup.lock (and possibly the
-  unit dir) and never report it.
 - `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
   sidebar keeps deleted/stale rows.
 - `desktop-copy-fallback-never-runs.md` — the native clipboard writer never rejects, so the header copy fallback never
