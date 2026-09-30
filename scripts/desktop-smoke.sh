@@ -187,6 +187,48 @@ curl_auth() {
 TEARDOWN_DONE=""
 SID="" # set once the create-form phase produces a session; read by teardown
 SID_NEWEST="" # second restart fixture; empty during the interaction-only create
+# Set by the answering-supervisor leg, which starts its own supervisor, tmux
+# server and desktop outside the main launch's state directory. Each is
+# cleared once stop_answering has stopped what it names, so a pid is never
+# signalled after it has been reaped (and possibly reused).
+ANSWERING_STATE=""
+ANSWERING_SUPERVISOR_PID=""
+ANSWERING_DESKTOP_PID=""
+# Stops everything the answering-supervisor leg started; the leg calls it on
+# success and teardown calls it on any exit, and a second call does nothing.
+#
+# The supervisor runs in its own process group (the leg starts it under
+# setsid) and the whole group is stopped and waited for, not just the
+# supervisor's pid. A supervisor killed during startup, before it installs its
+# SIGTERM handler, dies at once and leaves its in-flight `tmux start-server`
+# child behind, and that child could create the tmux server after the
+# kill-server below had already run. The tmux server itself daemonizes out of
+# the group, so it is stopped through its socket afterwards; it outlives the
+# supervisor by design (sessions survive a supervisor restart). That has to
+# happen before teardown's `rm -r` of the state directory, which deletes the
+# socket and with it the script's only handle on the server. kill-server is
+# bounded like everything else in teardown, so a wedged server cannot hang it.
+stop_answering() {
+  if [ -n "$ANSWERING_DESKTOP_PID" ]; then
+    kill "$ANSWERING_DESKTOP_PID" 2>/dev/null
+    wait "$ANSWERING_DESKTOP_PID" 2>/dev/null
+    ANSWERING_DESKTOP_PID=""
+  fi
+  if [ -n "$ANSWERING_SUPERVISOR_PID" ]; then
+    kill -TERM -- "-$ANSWERING_SUPERVISOR_PID" 2>/dev/null
+    for _ in $(seq 1 50); do
+      kill -0 -- "-$ANSWERING_SUPERVISOR_PID" 2>/dev/null || break
+      sleep 0.2
+    done
+    kill -KILL -- "-$ANSWERING_SUPERVISOR_PID" 2>/dev/null
+    wait "$ANSWERING_SUPERVISOR_PID" 2>/dev/null
+    ANSWERING_SUPERVISOR_PID=""
+  fi
+  if [ -n "$ANSWERING_STATE" ]; then
+    timeout 10 tmux -S "$ANSWERING_STATE/tmux.sock" kill-server 2>/dev/null
+    ANSWERING_STATE=""
+  fi
+}
 PASS=""
 teardown() {
   [ -n "$TEARDOWN_DONE" ] && return
@@ -209,6 +251,7 @@ teardown() {
     [ -f "$X/$p.pid" ] && kill "$(cat "$X/$p.pid")" 2>/dev/null
   done
   tmux -S "$X/state/tmux.sock" kill-server 2>/dev/null
+  stop_answering
 
   # Last-resort scope cleanup, scoped to THIS run's session id only. A
   # bare `farhelm-*` glob here would stop every farhelm session on the
@@ -1043,7 +1086,8 @@ if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
   ANSWERING_STATE="$X/answering-state"
   mkdir -m 0700 "$ANSWERING_STATE"
   ANSWERING_SUPERVISOR_LOG="$X/answering-supervisor.log"
-  "$BUILT_FARHELM" supervisor run --state-dir "$ANSWERING_STATE" --tmux "$HOST_TMUX" \
+  # setsid gives the supervisor a process group of its own; see stop_answering.
+  setsid "$BUILT_FARHELM" supervisor run --state-dir "$ANSWERING_STATE" --tmux "$HOST_TMUX" \
     >"$ANSWERING_SUPERVISOR_LOG" 2>&1 &
   ANSWERING_SUPERVISOR_PID=$!
   for _ in $(seq 1 30); do
@@ -1100,10 +1144,7 @@ if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
   [ ! -e "$ANSWERING_BAD_TMUX" ] ||
     fail "the bad FARHELM_TMUX candidate must never be invoked when a supervisor already answers"
 
-  kill "$ANSWERING_DESKTOP_PID" 2>/dev/null
-  wait "$ANSWERING_DESKTOP_PID" 2>/dev/null
-  kill "$ANSWERING_SUPERVISOR_PID" 2>/dev/null
-  wait "$ANSWERING_SUPERVISOR_PID" 2>/dev/null
+  stop_answering
 
   echo "== PASS: embedded helm, dual auth, local supervisor, and a tmux-held session survive restart"
   PASS=1
