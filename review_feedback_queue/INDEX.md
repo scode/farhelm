@@ -22,8 +22,6 @@ One line per open item. This file must always match the feedback files in this d
   retarget adopts the old machine's identity.
 - `identity-mismatch-never-becomes-duplicate.md` — a host that reaches another entry's identity offers an adopt that
   always 409s and never shows as duplicate.
-- `no-supervisor-setup-splits-state-dir.md` — setup --no-supervisor leaves setup's own supervisor on the old state dir
-  while the helm is pinned to the new one.
 - `desktop-reauth-remount-loses-action.md` — the desktop credential refresh remounts the app before the retry runs,
   silently losing the action that hit the 401.
 - `desktop-reauth-failure-dead-end.md` — a transient webview re-auth failure after rotation leaves only an error line
