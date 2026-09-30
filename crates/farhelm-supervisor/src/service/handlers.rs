@@ -1376,7 +1376,11 @@ async fn handle_stop_session(
                 None,
                 &session_id,
                 &SweepTarget::AgentOnly,
-                ScopeKillFailure::Warn,
+                // Refuse, as the live-agent path does: survivors of an agent
+                // that already exited sit in its scope as well, and a stop
+                // that cannot confirm the scope gone must say so (SPEC.md
+                // "Lifecycle operations").
+                ScopeKillFailure::Refuse,
             )
             .await
             {
@@ -4922,6 +4926,110 @@ mod tests {
             "and must not have reached the store either"
         );
     }
+    /// Stopping a session whose agent already exited fails when its scope
+    /// cannot be confirmed gone.
+    ///
+    /// Why it matters: a detached descendant can outlive the agent inside its
+    /// cgroup scope, and this path is the one a retried Stop takes once a first
+    /// attempt killed the agent; reporting success here would hide survivors
+    /// the sweep cannot see (SPEC.md "Lifecycle operations"). Specified: with a
+    /// scope manager whose kills never confirm, Stop on an exited, scoped
+    /// session replies with an error, not `SessionStopped`.
+    #[farhelm_testtrace::test]
+    async fn stop_of_an_exited_agent_refuses_an_unconfirmed_scope() {
+        let state = StateDir::new();
+        let session_id = "3e4f5a6b-7c8d-4e9f-a0b1-c2d3e4f5a6b7";
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(crate::scope::ScopeManager::fake_failing_kills(Arc::new(
+                    |_| {},
+                ))),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let exited = LastOutcome::Exited {
+            exit_code: Some(0),
+            annotation: None,
+        };
+        sup.store
+            .insert_session(
+                crate::store::StoredSession {
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    id: session_id.to_string(),
+                    parent: None,
+                    title: "t".to_string(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    launch: None,
+                    tmux_name: format!("fh-{session_id}"),
+                    pane: String::new(),
+                    outcome: exited.clone(),
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: true,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("store fixture");
+        let mut entry = Arc::try_unwrap(fake_entry(session_id, 1_700_000_000))
+            .unwrap_or_else(|_| panic!("the fixture entry has one owner"));
+        entry.scope = Some(crate::scope::unit_name(session_id, 0).expect("a UUID names a scope"));
+        *entry.run.outcome.lock().unwrap() = exited;
+        sup.sessions
+            .lock()
+            .await
+            .insert(session_id.to_string(), Arc::new(entry));
+
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::StopSession {
+                req_id: 52,
+                session_id: session_id.to_string(),
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+
+        let frame = tokio::time::timeout(Duration::from_secs(30), rx.recv())
+            .await
+            .expect("stop replies")
+            .expect("reply frame");
+        let reply: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
+        assert!(
+            matches!(reply, ControlMsg::Error { req_id: 52, .. }),
+            "an unconfirmed scope must fail the stop: {reply:?}"
+        );
+    }
+
     /// Once a stop has quiesced its marked process, cancelling the connection
     /// waiter must not cancel the supervisor-owned sweep. This drives the
     /// same terminal-less, marker-only stop path used for a lost pane and

@@ -3457,7 +3457,14 @@
   change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; Stop (both its live-agent path, `stop_live_agent`, which Restart also uses, and its
+  exited-agent path in the Stop handler, found by the PR review) and Restart's reap of an exited agent's leftovers now
+  use `ScopeKillFailure::Refuse`, so an unconfirmed scope fails the operation as Delete already did. A recorded scope
+  that cannot be checked because the user manager is not usable now also counts as unconfirmed (second PR review).
+  Regression tests `stop_refuses_when_the_scope_cannot_be_confirmed`,
+  `stop_of_an_exited_agent_refuses_an_unconfirmed_scope`, `stop_refuses_when_a_recorded_scope_cannot_be_checked` and
+  `restart_refuses_while_the_prior_scope_is_unconfirmed`. jj change `vwpkzvzlslon`, bookmark
+  `pr/stop-restart-refuse-unconfirmed-scope`, draft PR [#1168](https://github.com/scode/farhelm/pull/1168/changes).
 
 ## tab-close-skips-scope-on-stale-verdict.md
 
