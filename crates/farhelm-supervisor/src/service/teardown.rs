@@ -210,11 +210,12 @@ impl Supervisor {
         };
         // Capture the pane's identity before tab discovery, scope
         // enumeration, and archive work can give the kernel time to recycle
-        // this pid. A failed read intentionally leaves no root for the
-        // marker/scope sweep rather than guessing a replacement process.
-        let root_identity = live_pane
-            .filter(|pane| !pane.dead)
-            .and_then(|pane| capture_process_identity(pane.pid));
+        // this pid. A vanished process leaves no root; an unreadable one
+        // fails the delete rather than sweeping without it.
+        let root_identity = match live_pane.filter(|pane| !pane.dead) {
+            Some(pane) => capture_process_identity(pane.pid).map_err(TeardownError::Sweep)?,
+            None => None,
+        };
         // `WholeSession`: delete is the one lifecycle operation
         // that takes tabs down with the agent (SPEC.md — stop
         // leaves them running), so this

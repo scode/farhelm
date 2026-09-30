@@ -10044,7 +10044,12 @@ impl Supervisor {
         // Capture the pane identity before recording the stop intent. That
         // write and the subsequent sweep may outlive the original process;
         // the start time prevents a recycled pid from becoming the root.
-        let alive_identity = alive_pane.and_then(|pane| capture_process_identity(pane.pid));
+        let alive_identity = match alive_pane.map(|pane| capture_process_identity(pane.pid)) {
+            None => None,
+            Some(identity) => identity.map_err(|error| {
+                RequestError::new(ErrorKind::Internal, format!("not restarting: {error:#}"))
+            })?,
+        };
         // No pane to probe is not proof of no agent. With consent, the
         // else-branch below reaps whatever carries this session's marker;
         // without it, refuse rather than kill an agent nobody agreed to stop.
@@ -12698,7 +12703,7 @@ impl Supervisor {
                 .await
                 .context("reading a terminal tab's pane process before reaping it")?
             {
-                PaneProbe::Owned(state) if !state.dead => capture_process_identity(state.pid),
+                PaneProbe::Owned(state) if !state.dead => capture_process_identity(state.pid)?,
                 PaneProbe::Owned(_) | PaneProbe::Gone => None,
                 // A RECOGNIZED foreign owner gives no root to walk from —
                 // the recorded pane died with a previous tmux server, and

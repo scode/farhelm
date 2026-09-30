@@ -3506,7 +3506,11 @@
   fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `capture_process_identity` and the sweep's `validate_root_identity` now return an error for a
+  pane process that exists but cannot be read (a vanished process stays `None`), and Stop, Restart, Delete and the tab
+  reap fail on it instead of sweeping without the root. Regression test
+  `an_unreadable_pane_process_is_unconfirmed_not_gone`. jj change `mwtmlovlpput`, bookmark
+  `pr/unreadable-root-fails-sweep`, draft PR [#1171](https://github.com/scode/farhelm/pull/1171/changes).
 
 ## missing-checkout-root-blocks-delete.md
 

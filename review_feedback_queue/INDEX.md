@@ -80,8 +80,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- `sweep-drops-unreadable-root-silently.md` — the sweep silently drops a pane root whose identity read fails and can
-  still report success.
 - `event-feed-cap-refusal-invisible.md` — the event feed's subscriber-cap refusal is a pre-upgrade 503 that browsers
   cannot observe.
 - `any-dioxus-webview-passes-origin-guard.md` — any Dioxus or wry app's webview origin passes the helm's origin guard

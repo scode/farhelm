@@ -1225,7 +1225,16 @@ async fn handle_stop_session(
         // Bind the identity at the same liveness boundary as the stop
         // decision. The stop intent and sweep may wait on durable I/O; a
         // bare pid carried through that work could name a replacement.
-        let alive_identity = alive_pane.and_then(|pane| capture_process_identity(pane.pid));
+        let alive_identity = match alive_pane.map(|pane| capture_process_identity(pane.pid)) {
+            None => None,
+            Some(Ok(identity)) => identity,
+            // Unreadable is unconfirmed, never gone: refuse the stop rather
+            // than sweep without its root (see `capture_process_identity`).
+            Some(Err(error)) => {
+                reply_error(&tx, req_id, ErrorKind::Internal, format!("{error:#}")).await;
+                return;
+            }
+        };
 
         // What this stop records, and why the two branches differ.
         //
