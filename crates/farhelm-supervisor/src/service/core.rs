@@ -7772,10 +7772,17 @@ impl Supervisor {
                 !snapshot.publication_started,
                 "preparation was published before allocation identity was recorded"
             ),
-            AllocationState::Allocated => anyhow::ensure!(
-                crate::working_copies::verify_identity(plan)? == IdentityStatus::Matches,
-                "allocated checkout identity no longer matches"
-            ),
+            AllocationState::Allocated => match crate::working_copies::verify_identity(plan)? {
+                IdentityStatus::Matches => {}
+                IdentityStatus::DeviceChangedUnconfirmed => anyhow::bail!(
+                    "the checkout folder's device number changed since it was recorded, as a \
+                     reboot or remount can do on btrfs, NFS or overlayfs, and its filesystem \
+                     records no creation time to confirm it is still the same folder"
+                ),
+                status => {
+                    anyhow::bail!("allocated checkout identity no longer matches ({status:?})")
+                }
+            },
             _ => anyhow::bail!("checkout allocation is not recoverable"),
         }
         let state_path = crate::launch::preparation_state_path(&self.state_dir, &plan.id);

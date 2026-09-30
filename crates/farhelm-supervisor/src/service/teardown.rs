@@ -1016,6 +1016,13 @@ impl Supervisor {
                     "the folder at that path is no longer the one this checkout recorded",
                 ))
             }
+            Ok(crate::working_copies::IdentityStatus::DeviceChangedUnconfirmed) => {
+                Err(ArchiveSkipped::untouched(
+                    "the folder's device number changed since it was recorded, as a reboot or \
+                     remount can do on btrfs, NFS or overlayfs, and its filesystem records no \
+                     creation time to confirm it is still the same folder",
+                ))
+            }
             Ok(status) => Err(ArchiveSkipped::untouched(format!(
                 "its record has no captured identity ({status:?}), so Farhelm cannot tell the \
                  folder is its own"

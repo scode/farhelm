@@ -19,8 +19,6 @@ One line per open item. This file must always match the feedback files in this d
   endless shutdown-retry loop.
 - `input-client-notifications-pile-up.md` — idle input clients never read tmux notifications, so tmux server memory
   grows per open terminal.
-- `unstable-device-number-blocks-delete.md` — the ownership check treats `st_dev` as stable, so a remount can make
-  checkout sessions undeletable and unrestartable.
 - `adopt-checks-current-row-not-dialed.md` — adopt checks the manager's current row, so a stale mismatch after a
   retarget adopts the old machine's identity.
 - `identity-mismatch-never-becomes-duplicate.md` — a host that reaches another entry's identity offers an adopt that
