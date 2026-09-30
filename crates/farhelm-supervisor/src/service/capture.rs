@@ -787,15 +787,10 @@ fn is_spoken_for(
 /// claim-guarded state is mirrored, and a rejection wrote nothing.
 async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEntry>]) {
     for entry in entries {
-        if !matches!(
-            entry.snapshot.kind,
-            farhelm_proto::AgentKind::Claude
-                | farhelm_proto::AgentKind::Goose
-                | farhelm_proto::AgentKind::Codex
-                | farhelm_proto::AgentKind::Pi
-                | farhelm_proto::AgentKind::Omp
-                | farhelm_proto::AgentKind::Grok
-        ) {
+        // Every integrated kind, asked of the integration seam rather than
+        // listed here: a hand-written list silently skipped any kind added
+        // later, leaving its reported identity unmirrored.
+        if crate::agent_kind::integration_for(entry.snapshot.kind).is_none() {
             continue;
         }
         // The shared capture claim, unbounded here: this is a background
