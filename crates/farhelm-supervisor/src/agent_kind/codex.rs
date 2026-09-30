@@ -220,6 +220,78 @@ pub(super) fn parse_record(
     )))
 }
 
+/// Why Codex's hook tail must not be appended to this invocation, if it
+/// must not.
+///
+/// It refuses for two reasons at once (see
+/// [`codex_invocation_configures_hooks`]): a second
+/// `--dangerously-bypass-hook-trust` risks being rejected outright by the
+/// vendor's own argument parser, which would turn an identity improvement
+/// into a FAILED LAUNCH rather than a degraded one, and an invocation
+/// already writing the `hooks.`/`features.hooks` tables owns that
+/// configuration; appending ours after it is a merge nobody asked for, over
+/// a table whose last-writer semantics we do not control. Codex has no
+/// record scan to fall back to, so the cost of being wrong here is a session
+/// with no exact conversation identity (and so no resume offer), not a
+/// broken session.
+pub(crate) fn hook_refusal(argv: &[String]) -> Option<&'static str> {
+    codex_invocation_configures_hooks(argv).then_some("invocation already configures codex hooks")
+}
+
+/// Whether a Codex invocation is already steering Codex's hook
+/// configuration itself — the test behind the
+/// `invocation already configures codex hooks` skip.
+///
+/// True for either of the two shapes farhelm's own tail would collide
+/// with:
+///
+/// - `--dangerously-bypass-hook-trust`, the flag the injected tail leads
+///   with. Whether Codex tolerates the same flag twice is the vendor's
+///   business and unverified here; the downside of guessing wrong is a
+///   launch that fails to start, which is the one outcome injection is
+///   never allowed to cause.
+/// - a `-c` override whose value assigns into `hooks.` or
+///   `features.hooks`, which is precisely the namespace the tail writes.
+///
+/// Both short and long forms count in their separated and joined spellings,
+/// mirroring the two spellings the Claude `--settings` rule (`claude.rs`) accepts for
+/// the same reason: they are one flag to the vendor's parser, so a check that
+/// saw only one spelling would be trivially and silently bypassed by the
+/// other.
+///
+/// Deliberately NOT a general "does this argv touch config" test: an
+/// invocation carrying unrelated `-c` overrides (`-c model=...`) has no
+/// quarrel with the hook tables and stays hooked.
+fn codex_invocation_configures_hooks(argv: &[String]) -> bool {
+    /// The two config prefixes the injected tail assigns into.
+    fn steers_hook_tables(value: &str) -> bool {
+        value.starts_with("hooks.") || value.starts_with("features.hooks")
+    }
+
+    let mut elements = argv.iter().peekable();
+    while let Some(element) = elements.next() {
+        if element == "--dangerously-bypass-hook-trust" {
+            return true;
+        }
+        // The separated spelling PEEKS rather than consuming: the value
+        // element is examined again on the next turn, where it matches
+        // neither arm, which keeps this loop a plain scan rather than a
+        // half-implementation of the vendor's argument grammar.
+        let value = if element == "-c" || element == "--config" {
+            elements.peek().map(|next| next.as_str())
+        } else {
+            element
+                .strip_prefix("-c")
+                .or_else(|| element.strip_prefix("--config="))
+                .filter(|value| !value.is_empty())
+        };
+        if value.is_some_and(steers_hook_tables) {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
