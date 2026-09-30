@@ -21,7 +21,7 @@ use std::fmt::Write as _;
 use std::process::Stdio;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin};
-use tracing::warn;
+use tracing::{debug, warn};
 
 /// The largest number of ` -A <pane>:off` pairs allowed to ride the
 /// attach cutover; the rest follow it as their own commands.
@@ -916,6 +916,69 @@ enum Decision {
     Chatter,
 }
 
+/// The control-mode keywords tmux 3.7c can put at the start of a line, as
+/// the only part of an unclassified line the output-path debug events may
+/// log. Anything else on such a line may be raw command output, which is
+/// terminal contents.
+const CONTROL_KEYWORDS: &[&str] = &[
+    "%begin",
+    "%end",
+    "%error",
+    "%client-detached",
+    "%client-session-changed",
+    "%config-error",
+    "%continue",
+    "%exit",
+    "%extended-output",
+    "%layout-change",
+    "%message",
+    "%output",
+    "%pane-mode-changed",
+    "%paste-buffer-changed",
+    "%paste-buffer-deleted",
+    "%pause",
+    "%session-changed",
+    "%session-renamed",
+    "%session-window-changed",
+    "%sessions-changed",
+    "%subscription-changed",
+    "%unlinked-window-add",
+    "%unlinked-window-close",
+    "%unlinked-window-renamed",
+    "%window-add",
+    "%window-close",
+    "%window-pane-changed",
+    "%window-renamed",
+];
+
+/// A loggable name for an unclassified control line: its keyword when it
+/// is one of [`CONTROL_KEYWORDS`], and a fixed label otherwise, so no byte
+/// of an unrecognized line reaches a log.
+fn control_keyword_label(line: &[u8]) -> &'static str {
+    let first = strip_line_ending(line)
+        .split(|&b| b == b' ')
+        .next()
+        .unwrap_or_default();
+    CONTROL_KEYWORDS
+        .iter()
+        .find(|keyword| keyword.as_bytes() == first)
+        .copied()
+        .unwrap_or("unrecognized")
+}
+
+/// A loggable form of a pane id read from a control line: the id itself
+/// when it has tmux's `%<digits>` shape, and a fixed label otherwise,
+/// since the suffix of a `%pause` line is taken verbatim and could be
+/// anything.
+fn pane_id_label(id: &[u8]) -> &str {
+    if is_pane_id_shaped(id) {
+        // ASCII by the shape check.
+        std::str::from_utf8(id).unwrap_or("malformed")
+    } else {
+        "malformed"
+    }
+}
+
 /// Whether `candidate` has the shape of a tmux pane id (`%` followed by at
 /// least one digit, nothing else).
 ///
@@ -1110,7 +1173,9 @@ impl OutputStream {
             if let Some(deadline) = self.query_strip_deadline
                 && tokio::time::Instant::now() >= deadline
             {
-                return Ok(Some(OutputEvent::Bytes(self.flush_query_strip())));
+                let bytes = self.flush_query_strip();
+                debug!(pane = %self.pane, emitted_len = bytes.len(), "held pane output flushed at deadline");
+                return Ok(Some(OutputEvent::Bytes(bytes)));
             }
             if !self.partial_line_pending {
                 self.line.clear();
@@ -1129,7 +1194,14 @@ impl OutputStream {
                         }
                         Err(_) => {
                             self.partial_line_pending = !self.line.is_empty();
-                            return Ok(Some(OutputEvent::Bytes(self.flush_query_strip())));
+                            let bytes = self.flush_query_strip();
+                            debug!(
+                                pane = %self.pane,
+                                emitted_len = bytes.len(),
+                                partial_line = self.partial_line_pending,
+                                "held pane output flushed at deadline"
+                            );
+                            return Ok(Some(OutputEvent::Bytes(bytes)));
                         }
                     }
                 }
@@ -1199,6 +1271,29 @@ impl OutputStream {
                         } else if !query_strip.has_pending() {
                             *query_strip_deadline = None;
                         }
+                        // The first of the output path's debug checkpoints:
+                        // this notification, the control lines below that
+                        // carry no output for this pane, the deadline
+                        // flushes above, and in `service::connection` the
+                        // forwarder's enqueue, the writer's completion, and
+                        // the terminal-end handoff. They exist so a test
+                        // trace that ends without an expected byte shows
+                        // which hop last saw it. Test traces capture every
+                        // level; production logging filters these out. They
+                        // are how FLAKES.md's
+                        // `non_utf8_terminal_output_survives_live_stream`
+                        // flake was traced to tmux itself: its failing
+                        // traces show no control line of any kind after the
+                        // last delivered notification. Lengths and keywords
+                        // only, never payload bytes, which are the agent's
+                        // terminal contents.
+                        debug!(
+                            pane = %String::from_utf8_lossy(pane),
+                            escaped_len = escaped.len(),
+                            emitted_len = bytes.len(),
+                            held = query_strip.has_pending(),
+                            "pane output notification decoded"
+                        );
                         if bytes.is_empty() {
                             // The decoder may await a wrapper continuation, or
                             // filtering may have consumed a query or retained
@@ -1221,6 +1316,13 @@ impl OutputStream {
                         ControlLine::Payload { pane: other, .. }
                         | ControlLine::Paused { pane: other },
                     ) => {
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!(
+                                pane = %pane,
+                                other = pane_id_label(other),
+                                "control line for another pane"
+                            );
+                        }
                         // Copied only when this pane is new. A pane already
                         // filtered can still be mid-flight for a moment, and
                         // allocating per notification for one we have
@@ -1235,7 +1337,25 @@ impl OutputStream {
                     Some(ControlLine::Exit { reason }) => {
                         Decision::Exit(String::from_utf8_lossy(reason).into_owned())
                     }
-                    None => Decision::Chatter,
+                    None => {
+                        // Output-path checkpoint for everything that carries
+                        // no pane output: command replies, notifications, and
+                        // a `%output` whose payload failed to parse. Such a
+                        // line can also be raw command output (a hook's
+                        // `capture-pane`, say), so nothing read from it is
+                        // logged except a keyword matched against tmux's own
+                        // list and the line's length. Gated so production,
+                        // which filters debug out, does not pay for the match.
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!(
+                                pane = %pane,
+                                keyword = control_keyword_label(line),
+                                len = line.len(),
+                                "control line without pane output"
+                            );
+                        }
+                        Decision::Chatter
+                    }
                 }
             };
             match decision {
@@ -1579,6 +1699,33 @@ mod tests {
             }
         }
         events
+    }
+
+    /// Why this matters: the output-path debug events log something about
+    /// each control line that carries no output for the stream's pane, and
+    /// such a line can be raw command output, which is terminal contents
+    /// (a credential on screen, say). Spec: a line's label is its keyword
+    /// only when that keyword is one of tmux's own, whole-word, and a pane
+    /// id is logged only in its `%<digits>` shape; every other line or id
+    /// comes back as a fixed label with none of its bytes.
+    #[farhelm_testtrace::test]
+    fn debug_labels_never_echo_unrecognized_line_bytes() {
+        assert_eq!(control_keyword_label(b"%begin 1790 12 0\n"), "%begin");
+        assert_eq!(
+            control_keyword_label(b"%client-session-changed /dev/pts/3 $1 x\r\n"),
+            "%client-session-changed"
+        );
+        assert_eq!(control_keyword_label(b"%end\n"), "%end");
+        assert_eq!(
+            control_keyword_label(b"hunter2 is the password\n"),
+            "unrecognized"
+        );
+        assert_eq!(control_keyword_label(b"%beginner\n"), "unrecognized");
+        assert_eq!(control_keyword_label(b""), "unrecognized");
+        assert_eq!(pane_id_label(b"%12"), "%12");
+        assert_eq!(pane_id_label(b"%12 hunter2"), "malformed");
+        assert_eq!(pane_id_label(b"%"), "malformed");
+        assert_eq!(pane_id_label(b"hunter2"), "malformed");
     }
 
     /// `%extended-output` — the dialect `pause-after` switches tmux into,

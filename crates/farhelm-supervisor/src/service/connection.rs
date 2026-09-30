@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot, watch};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Data-frame chunk size for replay. Well under MAX_FRAME_LEN; small
 /// enough that the first screenful renders while the rest streams.
@@ -855,6 +855,16 @@ where
                 break;
             }
             frames_written.fetch_add(1, Ordering::Relaxed);
+            // Output-path checkpoint; see the first one in
+            // `OutputStream::next_output`. Data frames only: control
+            // replies are not what that path loses.
+            if matches!(frame.kind, farhelm_proto::FrameKind::Data) {
+                debug!(
+                    channel = frame.channel,
+                    len = frame.body.len(),
+                    "data frame written to client"
+                );
+            }
         }
     })
 }
@@ -1179,6 +1189,9 @@ impl Forwarder {
         match end {
             ForwarderEnd::Requested | ForwarderEnd::ClientGone => {}
             ForwarderEnd::TerminalEnded => {
+                // Output-path checkpoint; see the first one in
+                // `OutputStream::next_output`.
+                debug!(channel = self.channel, session = %self.session_id, "pane output stream ended; detaching");
                 detach_naturally(
                     &self.sup,
                     AttachmentKey::new(&self.session_id, self.terminal),
@@ -1364,6 +1377,9 @@ impl Forwarder {
                     if result.is_err() {
                         return Err(ForwarderEnd::ClientGone);
                     }
+                    // Output-path checkpoint; see the first one in
+                    // `OutputStream::next_output`.
+                    debug!(channel = self.channel, len = chunk.len(), "terminal output queued for the client");
                 }
                 () = stalled_past_deadline(self.pause_rx.clone(), self.stall_timeout) => {
                     return Err(ForwarderEnd::Stalled);

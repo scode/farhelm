@@ -1281,3 +1281,30 @@ fixed by the PR that adds this entry; the TODO.md entry and its `deflake/known-f
 Class: fixture-premise
 
 Cause: established
+
+## 2026-09-30 — `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), cause located in tmux
+
+`session_lifecycle::non_utf8_terminal_output_survives_live_stream` in `crates/farhelm/tests/e2e/session_lifecycle.rs`
+reproduced on demand with the supervisor's new debug checkpoints on the output path built in: 6 of 40 exact-test
+attempts failed in hunt batch `a8487127-853c-4926-badf-92095a1fcea1` (attempts 11, 13, 18, 20, 24, 25) and 3 of 20 in
+batch `eb55af56-5e52-4315-af60-881fbfbf4a52` (attempts 8, 11, 13), each run under a transient systemd user scope limited
+to `CPUQuota=400%` beside two CPU-bound `yes` processes, the 2026-09-05 shape of two load children on four CPUs. Every
+attempt ran one selected test with the four-slot nextest budget and zero retries, at commit `58652a052dcd` (#1255's head
+before the stack was rebased), with the checkpoint edits uncommitted in the tree, pinned tmux 3.7c (executable SHA256
+`40812d9309ff36ac7aae468a62eb944c4df4fefab0df135814b1dfa0f34ecdf2`), locale `C.UTF-8`, and ambient `FARHELM_*` scrubbed,
+with only the recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. All nine failing traces are the same: the attach replay
+and the READY line are decoded, queued, and written to the client, and then the supervisor's control client receives no
+line of any kind (no `%output`, no command reply, no `%exit`) for the 40-second wait, while tmux's own pane capture
+shows BINARY-MARKER rendered and the pane dead with status 0. Reading tmux 3.7c's source explains it:
+`control_write_output` only queues a pane's new output for each control client and enables the client's write event, the
+pane's EOF then runs `server_destroy_pane`, which frees the pane's input buffer and sets `wp->fd = -1`, and
+`control_write_pending` discards every block still queued for a pane whose `fd` is -1. Output that arrives just before
+the pane's process exits is therefore drawn on the screen but never sent to a control client, and load widens the window
+between the queueing and the write callback. The fake agent prints the marker and exits at once, which lands in that
+window. This is not specific to the test: an agent's last output before it exits can be missing from a live attachment,
+which shows it only when the terminal is next attached and replayed. Disposition: open (TODO.md Deflake, with the fix
+options), still excluded from the deflake sweep; the checkpoints ship so any later occurrence is traced.
+
+Class: substrate
+
+Cause: established
