@@ -284,15 +284,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
-- **Replace refusal row in WebKit.**
-  `Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal` in
-  `e2e/tests/terminal-restart.spec.ts` timed out locating the injected refusal row in full run
-  `bd3fa658-dcf7-4820-8b68-67be5e4b89ed`, then passed unchanged on both engines in focused run
-  `8b2b2c31-7608-4b6d-97b7-b11353f26554`. Cause unknown; inspect listing interception and refresh delivery on
-  recurrence. The 2026-09-29 deflake sweep hit the same WebKit timeout in full browser run
-  `0c787185-c40c-4070-a3fe-a69bc1a44a82`, and the exact-test reruns `452368f2-ce11-42b3-8eb2-43b31854e1de`,
-  `7f8a9e9e-3f24-4fe1-913d-0df3e95bc2ab`, and `0c842a5b-e6aa-46ae-aa44-2147229374af` passed.
-
 - **Browser stack parent-SIGTERM cleanup.** `scripts/test-start-stack-cleanup.sh` left the stack serving, with state and
   processes intact, after killing its spawner with SIGTERM in run `f2355071-3c67-4a7b-ba05-37f853c4a6b3`. The isolated
   repetition `a1b6e9b1-a246-4272-8d7b-89452a3f4c45` passed unchanged. Capture watcher and startup-process state at the

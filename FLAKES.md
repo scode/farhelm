@@ -1256,3 +1256,28 @@ of its file on WebKit and passes when selected alone. The test had an open TODO.
 Class: unknown
 
 Cause: unknown
+
+## 2026-09-30 — Replace refusal row fixed (e2e/tests/terminal-restart.spec.ts)
+
+`Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal`, logged three times above as a
+WebKit timeout that reproduced whenever the whole file ran and passed when the test ran alone, waited for a row that
+only a listing fetch could bring. Its second half installs a second page route that injects a refused interrupted
+session into the session listing, but that session exists nowhere on the helm, so nothing prompts the page to fetch the
+listing again. The retained trace of the 2026-09-29 sweep failure (full browser run
+`0c787185-c40c-4070-a3fe-a69bc1a44a82`) shows the page's last `GET /api/sessions` completing before the route was
+installed and none after it, so the click on the injected row waited out the 60-second test timeout. A pass depended on
+some unrelated refresh happening to follow the route. Before the fix, the whole file on WebKit alone still failed on
+`main` at `1205c0e7` plus #1253's unrelated `terminal.spec.ts` change, run `3ecf40b9-da83-4e0b-a41d-0ba6dc6ab266`. With
+the test reloading the page after installing the route, three whole-file WebKit runs
+(`9b4c601a-a52c-435a-8897-236d24bdeb18`, `c5a87151-3349-4765-a249-c773312ceb58`, `688a1f9a-f36b-49c3-a938-950785749d6f`)
+and one whole-file Chromium run (`63de584c-3411-4d92-8a90-4b03ea346a72`) passed on the same base with the fix applied.
+Every one of these trees was dirty with uncommitted supervisor debug-logging edits that were not built into the binaries
+under test. All ran on an 18-CPU Linux x86_64 host with one browser worker, zero retries, pinned tmux 3.7c (executable
+SHA256 `40812d9309ff36ac7aae468a62eb944c4df4fefab0df135814b1dfa0f34ecdf2`), locale `C.UTF-8`, and ambient `FARHELM_*`
+scrubbed by the recorder, which ran the single-engine runs in generic mode. Why an incidental refresh arrives when the
+test runs alone but not behind the rest of its file was not pursued; the fix removes the dependence on it. Disposition:
+fixed by the PR that adds this entry; the TODO.md entry and its `deflake/known-flakes.txt` line are removed.
+
+Class: fixture-premise
+
+Cause: established
