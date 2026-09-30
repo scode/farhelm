@@ -7224,7 +7224,7 @@ test("resizing the viewport closes an open row menu", async ({ page, request }) 
  * `terminal-multihost.spec.ts` already coordinate lifecycle for — aliasing
  * that real, cross-file fixture from a third place is a bigger risk than a
  * rendering test calls for. The alias mutation itself still goes through
- * the real client code path (the row menu, the shared inline editor,
+ * the real client code path (the row menu, the settings dialog's editor,
  * `api::set_alias`'s real POST) — only the SERVER side is a stand-in,
  * following the same `page.route("**\/api/hosts", ...)` fetch-and-splice
  * pattern `terminal-multihost.spec.ts` already uses for host-row fixtures
@@ -7324,20 +7324,25 @@ test("aliasing a remote host renames it everywhere but the details view", async 
   await expect(hostRow.locator(".host-name")).toHaveText(destination);
 
   await openHostMenu(hostRow);
-  // Alias editing lives in the row's settings panel, not the menu itself.
+  // Alias editing lives in the host's settings dialog, not the menu itself.
+  // The dialog stays open after a save, so it is closed by hand before the
+  // test reaches for anything behind it (the page is inert while it shows).
   await hostRow.locator(".host-settings").click();
-  await hostRow.locator(".host-alias").click();
-  const input = hostRow.locator(".host-destination-input");
+  const dialog = page.locator(".host-settings-dialog");
+  await dialog.locator(".host-alias").click();
+  const input = dialog.locator(".host-destination-input");
   await expect(input).toBeVisible();
   await expect(input).toHaveValue("");
   await input.fill("Build Box");
-  await hostRow.locator(".host-save-destination").click();
+  await dialog.locator(".host-save-destination").click();
 
   // The panel row picks up the rename immediately — `HostsPanel`'s own doc
   // calls this "on_changed", an explicit refetch a mutation asks for rather
   // than waiting out the poll. The create form's selector shares the SAME
   // `hosts` signal, so no separate wait is needed for it to agree.
   await expect(hostRow.locator(".host-name")).toHaveText("Build Box");
+  await dialog.locator(".host-settings-close").click();
+  await expect(dialog).toHaveCount(0);
   await page.locator(".new-session-button").click();
   await expect(page.locator(".create-session-form")).toBeVisible();
   // Anchored, not a bare substring match: an option that showed "Build Box
@@ -7374,13 +7379,14 @@ test("aliasing a remote host renames it everywhere but the details view", async 
   // that repopulated the panel correctly but left the session list or the
   // create form's selector on the stale alias would otherwise pass.
   await openHostMenu(hostRow);
-  // Alias editing lives in the row's settings panel, not the menu itself.
   await hostRow.locator(".host-settings").click();
-  await hostRow.locator(".host-alias").click();
+  await dialog.locator(".host-alias").click();
   await expect(input).toHaveValue("Build Box");
   await input.fill("");
-  await hostRow.locator(".host-save-destination").click();
+  await dialog.locator(".host-save-destination").click();
   await expect(hostRow.locator(".host-name")).toHaveText(destination);
+  await dialog.locator(".host-settings-close").click();
+  await expect(dialog).toHaveCount(0);
   await expect(hostRow.locator(".host-destination-detail")).toHaveCount(0);
 
   await page.locator(".new-session-button").click();
@@ -7452,13 +7458,14 @@ test("aliasing the local host shows it in the host panel", async ({ page, reques
   await expect(hostRow.locator(".host-name")).toHaveText("local (this machine)");
 
   await openHostMenu(hostRow);
-  // Alias editing lives in the row's settings panel, not the menu itself.
+  // Alias editing lives in the host's settings dialog, not the menu itself.
   await hostRow.locator(".host-settings").click();
-  await hostRow.locator(".host-alias").click();
-  const input = hostRow.locator(".host-destination-input");
+  const dialog = page.locator(".host-settings-dialog");
+  await dialog.locator(".host-alias").click();
+  const input = dialog.locator(".host-destination-input");
   await expect(input).toBeVisible();
   await input.fill("My Laptop");
-  await hostRow.locator(".host-save-destination").click();
+  await dialog.locator(".host-save-destination").click();
 
   await expect(hostRow.locator(".host-name")).toHaveText("My Laptop");
   // The local row never shows a destination line, aliased or not — there is

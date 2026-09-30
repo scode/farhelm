@@ -74,6 +74,10 @@ use crate::provisioning::{
 };
 use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
+mod settings_dialog;
+
+use settings_dialog::SettingsField;
+
 /// Name a confirmed local host consistently across the GUI without changing its registry name.
 ///
 /// An alias stays the name the user chose. Callers with only an unconfirmed
@@ -788,17 +792,30 @@ pub(crate) fn HostsPanel(
     // Committed-but-unvalidated replies, kept apart from `errors` because
     // they mean the opposite thing — see this component's docs.
     let mut warnings = use_signal(HashMap::<HostId, String>::new);
-    // Which row is showing the in-page removal confirmation, and which is
-    // showing its destination field. One at a time for both: they replace
-    // the row's controls, so two open at once would be two half-finished
-    // decisions competing for the same space.
+    // Which row is showing the in-page removal confirmation. One at a time:
+    // it replaces the row's controls.
     // Keyed by host; see `ConfirmSlot` for the queued-click races it closes.
     // Only confirmation consumption lives here: the removal claims the page
     // lock afterwards, through `run`, not when the prompt opens.
     let mut confirming_remove: ConfirmSlot<HostId> = use_confirm_slot();
+    // Which field of which host the settings dialog is editing, if any. One
+    // at a time, and only inside the open dialog.
     let mut editing = use_signal(|| None::<(HostId, EditField)>);
-    // The one row whose settings panel is open, if any.
+    // The host whose settings dialog is open, if any. One at a time: the
+    // dialog is modal.
     let mut settings_open = use_signal(|| None::<HostId>);
+    // Per host, which setting the dialog last wrote, so that write's outcome
+    // renders under that setting instead of on the row. `errors` and
+    // `warnings` are per host, not per field, and one of them can be left
+    // over from a retry or an adopt; this is what tells the dialog whether a
+    // host's current line belongs to one of its own settings, and which.
+    // `run` drops a host's entry at the start of every write to that host and
+    // the dialog's writes put it back once theirs has started, so an entry
+    // always names the write that produced that host's current line. Kept
+    // per host so a write to one host never disowns another's line, and kept
+    // across closing and reopening the dialog, so a save refused after the
+    // user closed it shows under its field again when they come back.
+    let mut dialog_write = use_signal(HashMap::<HostId, SettingsField>::new);
     let mut destination_draft = use_signal(String::new);
     let mut adding = use_signal(|| false);
     // The global disclosure is the user's preference: one checkbox for every
@@ -851,9 +868,10 @@ pub(crate) fn HostsPanel(
     // this function with the page still looking idle to anything computed
     // during render.
     //
-    // Returns whether the request was actually STARTED, which only the edit
-    // path acts on: it closes its field on submit, and closing it for a
-    // submit that was refused would throw the draft away with nothing said.
+    // Returns whether the request was actually STARTED, which the settings
+    // dialog's writes act on: only a write that started gets its outcome
+    // attributed to a setting (`dialog_write`). A refused start leaves the
+    // host's existing line, if any, belonging to whatever produced it.
     let mut run = move |host: HostId, request: HostRequest| -> bool {
         if provisioning_busy_hosts.peek().contains(&host) {
             return false;
@@ -864,6 +882,11 @@ pub(crate) fn HostsPanel(
         mutation_busy_hosts.write().insert(host);
         errors.write().remove(&host);
         warnings.write().remove(&host);
+        // Every write starts unattributed; the settings dialog's own writes
+        // claim their outcome right after this returns (see `dialog_write`),
+        // so a retry, adopt, or remove never has its refusal shown under a
+        // setting the user did not touch.
+        dialog_write.write().remove(&host);
         spawn(async move {
             match request.await {
                 Ok(Commit::Confirmed) => on_changed.call(()),
@@ -959,48 +982,112 @@ pub(crate) fn HostsPanel(
         let submission = match resolve_edit_submission(field, &value) {
             Ok(submission) => submission,
             Err(error) => {
+                // The local syntax check's refusal is this field's too.
                 errors.write().insert(host, error);
+                dialog_write
+                    .write()
+                    .insert(host, SettingsField::from(field));
                 return;
             }
         };
         let base = edit_base.clone();
+        // The field closes only once the helm has accepted the change, and
+        // only if it is still the field this submit came from. A refusal
+        // leaves it open with the draft as typed and the helm's reason under
+        // it, so the user can correct the value rather than retype it. A
+        // second submit while this one is out is not a risk: the editor's
+        // controls are disabled for as long as the request holds the page's
+        // operation token.
         let started = run(
             host,
             Box::pin(async move {
-                match submission {
+                let outcome = match submission {
                     EditSubmission::Destination(destination) => {
                         set_host_destination(&base, host, &destination).await
                     }
                     EditSubmission::Alias(alias) => set_alias(&base, host, alias).await,
+                };
+                if outcome.is_ok() && *editing.peek() == Some((host, field)) {
+                    editing.set(None);
                 }
+                outcome
             }),
         );
-        // Closed once the request is actually OUT: its outcome lands in this
-        // row's error line either way, so leaving the field open would only
-        // invite a second submit of the same edit. A submit that was refused
-        // leaves the field exactly as typed instead — closing it would
-        // discard a draft nothing had been done with.
-        if started
-            && editing
-                .peek()
-                .is_some_and(|(editing_host, _)| editing_host == host)
-        {
-            editing.set(None);
+        if started {
+            dialog_write
+                .write()
+                .insert(host, SettingsField::from(field));
         }
     };
 
     // Flip whether YOLO launches are allowed on a host. Runs through the same
     // `run` wrapper as the other registry writes, so it takes the page's
-    // operation token, lands its outcome in the row's error line, and
-    // refreshes the list the checkbox renders from.
+    // operation token, lands its outcome in this host's error line (shown
+    // under the checkbox, see `dialog_write`), and refreshes the list the
+    // checkbox renders from.
     let yolo_base = base.clone();
     let on_yolo_safe = move |(host, yolo_safe): (HostId, bool)| {
         let base = yolo_base.clone();
-        run(
+        let started = run(
             host,
             Box::pin(async move { set_yolo_safe(&base, host, yolo_safe).await }),
         );
+        if started {
+            dialog_write.write().insert(host, SettingsField::YoloSafe);
+        } else {
+            settings_dialog::reset_yolo_checkbox();
+        }
     };
+
+    // ----- The settings dialog's handlers -------------------------------
+    //
+    // The dialog renders from this panel, not from a row, because a host
+    // mutation landing rebuilds the rows (see `HostDestinationForm`'s doc):
+    // a dialog, a half-typed draft, or an editor's focus owned by a row would
+    // be torn down by the very refresh its own save causes.
+
+    // Open one field's editor inside the dialog, prefilled with its current
+    // value. Refused, and nothing changes, while another operation holds the
+    // page's token or this host is provisioning: the editor's save could not
+    // run anyway.
+    let on_edit_start = move |(id, field, value): (HostId, EditField, String)| {
+        if ops.busy_now() || provisioning_busy_hosts.peek().contains(&id) {
+            return;
+        }
+        destination_draft.set(value);
+        editing.set(Some((id, field)));
+    };
+    let on_edit_cancel = move |_: ()| editing.set(None);
+    // Closing the dialog abandons an open field edit with it: the draft is
+    // not a setting until it is saved. Focus goes back to the host row's "⋯"
+    // toggle, the control the dialog was opened from, once the dialog's
+    // isolation has released it (the toggle is inert until then; see
+    // `modal_isolation`).
+    let on_settings_close = move |_: ()| {
+        let Some(id) = *settings_open.peek() else {
+            return;
+        };
+        settings_dialog::return_focus_to_row(id);
+        editing.set(None);
+        settings_open.set(None);
+    };
+    // A host that disappears from the list while its dialog is open (another
+    // client removed it) takes the dialog with it; there is nothing left for
+    // its settings to change. Only a list that was actually read counts: a
+    // failed or pending refresh says nothing about whether the host exists.
+    use_effect(move || {
+        let Some(id) = *settings_open.read() else {
+            return;
+        };
+        let gone = hosts
+            .read()
+            .hosts()
+            .is_some_and(|list| !list.iter().any(|host| host.id == id));
+        if gone {
+            editing.set(None);
+            settings_open.set(None);
+        }
+    });
 
     let read = hosts.read();
     let rendered_hosts = read.hosts().map(|list| {
@@ -1171,18 +1258,26 @@ pub(crate) fn HostsPanel(
                             key: "{host.id}",
                             controls: HostRowControls {
                                 confirming_remove: confirming_remove.current_key() == Some(host.id),
-                                edit_field: editing
-                                    .read()
-                                    .and_then(|(id, field)| (id == host.id).then_some(field)),
-                                settings_open: *settings_open.read() == Some(host.id),
                                 menu_open: *host_menu_open.read() == Some(host.id),
                             },
+                            // While this host's settings dialog is open, its
+                            // error or warning line shows in the dialog:
+                            // under the setting a dialog write changed, or at
+                            // the top when something else (a retry, an adopt)
+                            // produced it. The row, hidden under the
+                            // backdrop, stops showing it meanwhile, so one
+                            // line is never on screen twice; it reappears
+                            // here once the dialog closes.
                             activity: HostRowActivity {
                                 busy: mutation_busy_hosts.read().contains(&host.id)
                                     || provisioning_busy_hosts.read().contains(&host.id)
                                     || busy,
-                                error: errors.read().get(&host.id).cloned(),
-                                warning: warnings.read().get(&host.id).cloned(),
+                                error: (*settings_open.read() != Some(host.id))
+                                    .then(|| errors.read().get(&host.id).cloned())
+                                    .flatten(),
+                                warning: (*settings_open.read() != Some(host.id))
+                                    .then(|| warnings.read().get(&host.id).cloned())
+                                    .flatten(),
                             },
                             details_open: details_open()
                                 || provisioning_auto_details.read().contains(&host.id),
@@ -1224,57 +1319,27 @@ pub(crate) fn HostsPanel(
                                     on_changed,
                                 }
                             },
-                            destination_draft,
                             on_retry: on_retry.clone(),
                             on_adopt: on_adopt.clone(),
-                            on_edit_start: move |(id, field, value): (HostId, EditField, String)| {
-                                if ops.busy_now()
-                                    || provisioning_busy_hosts.peek().contains(&id)
-                                {
-                                    return;
-                                }
-                                // Starting an edit abandons any open removal
-                                // prompt, whichever host it was for.
-                                confirming_remove.clear();
-                                // This is the ONE place that closes the menu
-                                // for an edit — the item's own click in
-                                // `HostRow` only requests the edit, never
-                                // closes anything itself, so there is one
-                                // state change to account for rather than
-                                // two. It has to run only past the guard
-                                // above: an edit refused because a request
-                                // is already in flight must leave the menu
-                                // exactly as it was, not close it out from
-                                // under a click that did nothing.
-                                host_menu_open.set(None);
-                                details_open.set(true);
-                                destination_draft.set(value);
-                                // The editor replaces the settings panel it
-                                // was opened from.
-                                settings_open.set(None);
-                                editing.set(Some((id, field)));
-                            },
-                            on_edit_submit: on_edit_submit.clone(),
-                            on_edit_cancel: move |_| editing.set(None),
                             on_settings_start: move |id: HostId| {
                                 if ops.busy_now()
                                     || provisioning_busy_hosts.peek().contains(&id)
                                 {
                                     return;
                                 }
-                                // Same single-owner menu close as
-                                // `on_edit_start`, past the same guard.
+                                // This is the ONE place that closes the menu
+                                // for the settings item: the item's own
+                                // click in `HostRow` only requests the
+                                // dialog, so there is one state change to
+                                // account for rather than two. It runs only
+                                // past the guard above, so a request refused
+                                // because another operation is in flight
+                                // leaves the menu exactly as it was.
                                 confirming_remove.clear();
                                 editing.set(None);
                                 host_menu_open.set(None);
                                 settings_open.set(Some(id));
                             },
-                            on_settings_close: move |id: HostId| {
-                                if *settings_open.peek() == Some(id) {
-                                    settings_open.set(None);
-                                }
-                            },
-                            on_yolo_safe: on_yolo_safe.clone(),
                             on_remove_start: move |id: HostId| {
                                 if ops.busy_now()
                                     || provisioning_busy_hosts.peek().contains(&id)
@@ -1283,8 +1348,9 @@ pub(crate) fn HostsPanel(
                                 }
                                 editing.set(None);
                                 settings_open.set(None);
-                                // See `on_edit_start` just above: the same
-                                // single-owner close, past the same guard.
+                                // See `on_settings_start` just above: the
+                                // same single-owner close, past the same
+                                // guard.
                                 host_menu_open.set(None);
                                 confirming_remove.open(id, ());
                             },
@@ -1326,6 +1392,35 @@ pub(crate) fn HostsPanel(
                     }
                 }
             }
+            // Looked up in the list this render already read, so the dialog
+            // always shows the host's current settings (a save that lands
+            // re-renders it with the new value) and simply does not render
+            // for a host that is gone; the effect above then closes it.
+            if let Some(host) = settings_open
+                .read()
+                .and_then(|id| read.hosts()?.iter().find(|host| host.id == id).cloned())
+            {
+                settings_dialog::HostSettingsDialog {
+                    busy: mutation_busy_hosts.read().contains(&host.id)
+                        || provisioning_busy_hosts.read().contains(&host.id)
+                        || busy,
+                    editing: editing
+                        .read()
+                        .and_then(|(id, field)| (id == host.id).then_some(field)),
+                    outcome: settings_dialog::field_outcome(
+                        dialog_write.read().get(&host.id).copied(),
+                        errors.read().get(&host.id).cloned(),
+                        warnings.read().get(&host.id).cloned(),
+                    ),
+                    draft: destination_draft,
+                    on_edit_start,
+                    on_edit_submit: on_edit_submit.clone(),
+                    on_edit_cancel,
+                    on_yolo_safe: on_yolo_safe.clone(),
+                    on_close: on_settings_close,
+                    host,
+                }
+            }
         }
     }
 }
@@ -1355,15 +1450,13 @@ pub(crate) fn HostsPanel(
 ///
 /// `Retry` is offered in every phase, like the button it replaces; `Adopt`
 /// only when [`adoptable`] names an identity; provisioning commands mirror
-/// the permanently mounted provisioning component's current offers; and
-/// `Edit`/`Remove` only appear on an ssh row (see `HostRow`'s own doc for why
-/// an unmanageable kind gets neither). `Alias` is offered independent of host
-/// KIND — including the local row, which cannot `Edit` or `Remove` but can
-/// still be given a shorter label (SPEC.md's Topology paragraph: "the local
-/// host can carry one too") — but it IS gated, on whether this helm build
-/// sent an `alias` key at all (`Host.alias`'s own doc on the compatibility
-/// signal). The separator before `Remove` is drawn in the rsx, not modeled
-/// here — see
+/// the permanently mounted provisioning component's current offers;
+/// `Settings` is offered on every host, because whether YOLO launches need a
+/// confirmation is a setting of every host, the local one included (what the
+/// settings dialog offers beyond that, a destination and an alias, it decides
+/// itself); and `Remove` only appears on an ssh row (see `HostRow`'s own doc
+/// for why an unmanageable kind cannot be removed). The separator before
+/// `Remove` is drawn in the rsx, not modeled here — see
 /// `MenuOrder` in `menu_panel` for why a separator is never counted as an
 /// item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1426,12 +1519,12 @@ fn host_menu_order(
         HostMenuAction::Remove => manageable,
         // Every host has settings: the YOLO-launch setting applies to the
         // local row and to a kind this build does not recognize alike. What
-        // else the panel offers (destination, alias) is decided inside it.
+        // else the dialog offers (destination, alias) is decided inside it.
         HostMenuAction::Settings => true,
     })
 }
 
-/// Which host field the shared inline editor is changing. Keeping the
+/// Which host field the settings dialog's text editor is changing. Keeping the
 /// selection with the edit state makes submit, cancel, and error handling
 /// identical while preserving the different API fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1540,21 +1633,6 @@ fn host_row_class(menu_open: bool) -> &'static str {
 struct HostRowControls {
     /// Whether this row is showing the in-place forget-this-host prompt.
     confirming_remove: bool,
-    /// `Some(field)` while this row is showing the shared inline editor
-    /// instead of controls, naming WHICH field it is editing; `None`
-    /// otherwise. One field rather than a separate `editing: bool` plus a
-    /// standalone `edit_field: Option<EditField>` prop (the shape this
-    /// component used to take): the two were always computed from the same
-    /// signal at the same call site, so splitting them apart only invented
-    /// an impossible-but-representable state (`editing: true` with
-    /// `edit_field: None`) that the render had to paper over with a
-    /// `.unwrap_or(EditField::Destination)` fallback nothing could actually
-    /// exercise.
-    edit_field: Option<EditField>,
-    /// Whether this row is showing its settings panel (destination, alias,
-    /// and whether YOLO launches are allowed here). At most one row at a
-    /// time; opening the inline editor from it closes it.
-    settings_open: bool,
     /// Whether this row's "⋯" menu is the (at most one, across sessions AND
     /// hosts) open one.
     menu_open: bool,
@@ -1948,21 +2026,15 @@ fn format_elapsed(seconds: u64) -> String {
 ///
 /// The controls are state-driven rather than uniform, which is the point:
 /// `adopt` appears only where there is an identity to adopt (never on
-/// `identity-unverified` — see [`adoptable`]), and edit/remove appear only
-/// on ssh rows, because the reserved local row has no destination to change
-/// and cannot be removed at all (the helm refuses both with a 409). A row of
-/// an unrecognized KIND is treated as unmanageable for the same reason:
-/// offering a verb the helm would refuse teaches the user something false
-/// about what is possible. `edit alias` is the one exception to the KIND
-/// split specifically: every kind gets it, local row included, because
-/// alias support does not depend on what a row IS the way edit/remove do —
-/// it is gated instead by whether this helm build's reply even carries an
-/// `alias` field at all (`Host.alias`'s outer option; see
-/// [`HostMenuAction`]'s own doc). The helm stays fully authoritative over
-/// each SUBMITTED value regardless — invalid syntax, a display-name
-/// collision, or a host that vanished mid-edit are all still refused, and
-/// this row renders that refusal exactly like it renders a rejected
-/// destination edit (the shared `on_edit_submit` error line).
+/// `identity-unverified` — see [`adoptable`]), and `remove` appears only on
+/// ssh rows, because the reserved local row cannot be removed at all (the
+/// helm refuses with a 409). A row of an unrecognized KIND is treated as
+/// unmanageable for the same reason: offering a verb the helm would refuse
+/// teaches the user something false about what is possible. The same KIND
+/// split decides whether the settings dialog offers a destination to edit;
+/// the alias editor there is gated instead by whether this helm build's
+/// reply carries an `alias` field at all (`Host.alias`'s outer option), and
+/// is offered on every kind, local row included. See `settings_dialog`.
 ///
 /// `retry` is offered in every state, connected included. It costs one
 /// attempt, and the state it is most needed in — `retired`, whose actor is
@@ -2001,18 +2073,16 @@ fn format_elapsed(seconds: u64) -> String {
 /// ## The menu, and what stays outside it
 ///
 /// `retry`/`adopt`, the currently truthful provisioning commands,
-/// `edit destination`, `edit alias`, and `remove` render inside one
-/// "⋯" menu (`.host-row-menu` toggle, `.host-row-menu-panel` panel) built on
-/// the same generic mechanics the session row's menu uses (`menu_panel`) —
-/// see that module's own doc for what is shared and why. The name, phase
-/// status, and muted toggle stay on the row line. Destination editing,
-/// alias editing, and removal confirmation use full-width blocks below it;
-/// while any is open the toggle stays in its trailing gutter but is
-/// disabled, preventing a competing command without making the row jump
-/// horizontally. Destination and alias editing share the same block —
-/// `HostDestinationForm`, generalized over [`EditField`] — because they are
-/// the same shaped interaction (one text field, submit, cancel, an error
-/// line) with different validation and a different API call underneath.
+/// `settings`, and `remove` render inside one "⋯" menu (`.host-row-menu`
+/// toggle, `.host-row-menu-panel` panel) built on the same generic mechanics
+/// the session row's menu uses (`menu_panel`) — see that module's own doc for
+/// what is shared and why. The name, phase status, and muted toggle stay on
+/// the row line. `settings` opens the host settings dialog, which `HostsPanel`
+/// renders (see `settings_dialog`): the destination and alias editors live
+/// there, not in the row. The removal confirmation uses a full-width block
+/// below the line; while it is open the toggle stays in its trailing gutter
+/// but is disabled, preventing a competing command without making the row
+/// jump horizontally.
 ///
 /// Every actionable item closes the menu when chosen. Setup commands
 /// additionally open the global details disclosure before sending their
@@ -2021,10 +2091,10 @@ fn format_elapsed(seconds: u64) -> String {
 /// needs no confirmation and leaves details alone: it reports through this
 /// row's status spot, and only a failure or uncertain outcome opens the row.
 ///
-/// `edit destination` and `remove` disable the toggle and open subordinate
-/// blocks, so closing is a correctness requirement: cancelling either flow
-/// must not silently revive a menu the user never asked to reopen.
-/// `HostsPanel`'s own `on_edit_start`/
+/// `settings` and `remove` both take over from the menu (a modal dialog, a
+/// block that disables the toggle), so closing is a correctness requirement:
+/// cancelling either flow must not silently revive a menu the user never
+/// asked to reopen. `HostsPanel`'s own `on_settings_start`/
 /// `on_remove_start` are where that close happens, past their own busy
 /// guard — the item's click here only REQUESTS the flow, so there is one
 /// state change to account for rather than the item and the panel each
@@ -2038,10 +2108,9 @@ fn HostRow(
     host: Host,
     /// Whether automatic local setup replaces the ordinary remedy slot.
     local_setup: bool,
-    /// Which control surface this row is showing, and which field the
-    /// shared inline editor is on when it is the one showing (grouped
-    /// state — see [`HostRowControls::edit_field`]'s own doc for why the
-    /// two used to be two separate props and no longer are).
+    /// Which control surface this row is showing: its removal prompt and
+    /// its menu (grouped state). Host settings are not among them: they live
+    /// in `HostsPanel`'s dialog, not in the row.
     controls: HostRowControls,
     /// What the management verbs are doing to this row (grouped state).
     activity: HostRowActivity,
@@ -2054,18 +2123,10 @@ fn HostRow(
     provisioning_menu: ProvisioningMenuState,
     /// The feed-driven setup/update surface built by the panel.
     provisioning_section: Element,
-    destination_draft: Signal<String>,
     on_retry: EventHandler<HostId>,
     on_adopt: EventHandler<(HostId, String)>,
-    on_edit_start: EventHandler<(HostId, EditField, String)>,
-    on_edit_submit: EventHandler<(HostId, EditField, String)>,
-    on_edit_cancel: EventHandler<()>,
-    /// Open this row's settings panel (the menu's Settings item).
+    /// Open this host's settings dialog (the menu's Settings item).
     on_settings_start: EventHandler<HostId>,
-    /// Close this row's settings panel.
-    on_settings_close: EventHandler<HostId>,
-    /// Set whether YOLO launches are allowed on this host.
-    on_yolo_safe: EventHandler<(HostId, bool)>,
     on_remove_start: EventHandler<HostId>,
     on_remove_confirm: EventHandler<HostId>,
     on_remove_cancel: EventHandler<HostId>,
@@ -2080,8 +2141,6 @@ fn HostRow(
 ) -> Element {
     let HostRowControls {
         confirming_remove,
-        edit_field,
-        settings_open,
         menu_open,
     } = controls;
     let HostRowActivity {
@@ -2102,13 +2161,6 @@ fn HostRow(
     // present, never registered, never removed. An unrecognized kind is not
     // management surface either — see this component's docs.
     let manageable = host.kind.is_manageable();
-    // The OUTER option on `Host.alias` is the compatibility signal (see its
-    // own doc): a helm old enough to predate the field omits the JSON key
-    // entirely rather than sending `null`, and offering the editor against
-    // one would submit to a route that helm never registered. Distinct from
-    // `manageable`, which gates on host KIND rather than on what this
-    // particular helm build understands.
-    let alias_supported = host.alias.is_some();
     let kind_attribute = match host.kind {
         HostKind::Local => "local",
         HostKind::Ssh => "ssh",
@@ -2123,16 +2175,6 @@ fn HostRow(
     let remedy = state_remedy(&host.state);
     let detail = state_detail(&host.state);
     let shown_name = gui_host_name(&host.name, host.kind.is_this_machine());
-    let edit_start = (
-        id,
-        EditField::Destination,
-        host.destination.clone().unwrap_or_default(),
-    );
-    let alias_edit_start = (
-        id,
-        EditField::Alias,
-        host.alias.clone().flatten().unwrap_or_default(),
-    );
     // This render's menu item list — see `host_menu_order`'s own doc. Read
     // every render, not only while the menu is open, because the `use_effect`
     // below has to notice an item withdrawn (a poll turning `adoptable` off)
@@ -2390,15 +2432,15 @@ fn HostRow(
                         },
                     }
                 }
-                // The line always keeps its three children. Edit and remove
-                // disable the menu rather than replacing its toggle, so the
-                // trailing gutter does not jump while their full-width
-                // blocks render below. `nowrap` remains load-bearing for the
+                // The line always keeps its three children. The removal
+                // prompt disables the menu rather than replacing its toggle,
+                // so the trailing gutter does not jump while its full-width
+                // block renders below. `nowrap` remains load-bearing for the
                 // fixed-position panel (F2/COR-HOST-MENU-OFFSCREEN).
                     button {
                         r#type: "button",
                         class: "btn host-row-menu",
-                        disabled: edit_field.is_some() || confirming_remove,
+                        disabled: confirming_remove,
                         aria_label: host_menu_label(&host.name),
                         aria_expanded: menu_open,
                         aria_haspopup: "menu",
@@ -2438,7 +2480,7 @@ fn HostRow(
                         },
                         "⋯"
                     }
-                    if menu_open && edit_field.is_none() && !confirming_remove {
+                    if menu_open && !confirming_remove {
                         div {
                             class: "host-row-menu-panel",
                             style: menu_panel_placement_style(placement()),
@@ -2684,7 +2726,7 @@ fn HostRow(
                                             if busy {
                                                 return;
                                             }
-                                            // See `edit destination` above:
+                                            // See `settings` above:
                                             // only requests the confirm
                                             // prompt; `on_remove_start`
                                             // closes the menu.
@@ -2744,79 +2786,6 @@ fn HostRow(
                     }
                 }
             }
-            if settings_open {
-                div { class: "host-settings-panel",
-                    if manageable {
-                        div { class: "host-settings-row",
-                            span { class: "host-settings-label", "destination" }
-                            span { class: "host-settings-value peer-value", dir: "ltr",
-                                "{display_peer(host.destination.as_deref().unwrap_or_default())}"
-                            }
-                            button {
-                                r#type: "button",
-                                class: "btn btn-neutral host-edit",
-                                disabled: busy,
-                                onclick: move |_| on_edit_start.call(edit_start.clone()),
-                                "edit destination"
-                            }
-                        }
-                    }
-                    // Gated on whether THIS helm sent an `alias` key at all
-                    // (`Host.alias`'s own doc), not on host kind: aliases work
-                    // for local and ssh rows alike.
-                    if alias_supported {
-                        div { class: "host-settings-row",
-                            span { class: "host-settings-label", "alias" }
-                            span { class: "host-settings-value peer-value", dir: "ltr",
-                                "{display_peer(host.alias.clone().flatten().as_deref().unwrap_or(\"none\"))}"
-                            }
-                            button {
-                                r#type: "button",
-                                class: "btn btn-neutral host-alias",
-                                disabled: busy,
-                                onclick: move |_| on_edit_start.call(alias_edit_start.clone()),
-                                "edit alias"
-                            }
-                        }
-                    }
-                    label { class: "host-settings-row host-yolo-safe",
-                        input {
-                            r#type: "checkbox",
-                            class: "host-yolo-safe-toggle",
-                            checked: host.yolo_safe,
-                            disabled: busy,
-                            onchange: move |event| on_yolo_safe.call((id, event.checked())),
-                        }
-                        span { class: "host-settings-label", "allow YOLO launches on this host" }
-                    }
-                    p { class: "host-settings-help",
-                        if host.yolo_safe {
-                            "YOLO sessions start here without an extra confirmation."
-                        } else {
-                            "This host is sensitive: starting a YOLO session here asks for explicit confirmation first."
-                        }
-                    }
-                    div { class: "host-settings-actions",
-                        button {
-                            r#type: "button",
-                            class: "btn btn-neutral host-settings-close",
-                            onclick: move |_| on_settings_close.call(id),
-                            "close"
-                        }
-                    }
-                }
-            }
-            if let Some(field) = edit_field {
-                HostDestinationForm {
-                    draft: destination_draft,
-                    busy,
-                    alias: field == EditField::Alias,
-                    on_submit: move |destination| {
-                        on_edit_submit.call((id, field, destination));
-                    },
-                    on_cancel: move |_| on_edit_cancel.call(()),
-                }
-            }
             if details_open {
                 if host.alias.clone().flatten().is_some() && let Some(destination) = host.destination.as_deref() {
                     // The one place an alias never hides the real
@@ -2859,10 +2828,10 @@ fn HostRow(
     }
 }
 
-/// The in-place field editor for one host row — despite the name, shared
-/// between the destination edit AND the alias edit (`alias: bool` selects
-/// which), one text field with the same submit/cancel/error shape either
-/// way. Not renamed to something field-neutral because the CSS classes it
+/// The in-place field editor of the host settings dialog — despite the
+/// name, shared between the destination edit AND the alias edit (`alias:
+/// bool` selects which), one text field with the same submit/cancel/error
+/// shape either way. Not renamed to something field-neutral because the CSS classes it
 /// renders (`.host-destination-form`, `.host-destination-input`,
 /// `.host-save-destination`) are load-bearing browser-suite selectors
 /// across several spec files; changing the component's Rust name costs
@@ -2892,10 +2861,11 @@ fn HostRow(
 /// would submit text the user did not type and never asked to see
 /// corrected.
 ///
-/// The draft belongs to the panel for the reason `rename::RenameForm`
-/// records: this form is unmounted by re-renders the user did not cause (a
-/// host mutation landing rebuilds the rows), and a draft owned here would be
-/// silently discarded with it.
+/// The draft belongs to the panel, not to this form: the panel is the one
+/// owner that outlives everything that can come and go around the editor (a
+/// refused save, the dialog closing and reopening, host-list refreshes). It
+/// first moved there for the reason `rename::RenameForm` records, back when
+/// this form lived in a host row that every host mutation rebuilt.
 #[component]
 fn HostDestinationForm(
     mut draft: Signal<String>,
@@ -4199,12 +4169,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn repeated_parent_refreshes_do_not_rerender_an_unchanged_host_row() {
         fn app() -> Element {
-            let destination_draft = use_signal(String::new);
             let on_retry = use_callback(|_: HostId| {});
             let on_adopt = use_callback(|_: (HostId, String)| {});
-            let on_edit_start = use_callback(|_: (HostId, EditField, String)| {});
-            let on_edit_submit = use_callback(|_: (HostId, EditField, String)| {});
-            let on_edit_cancel = use_callback(|_: ()| {});
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
             let on_remove_cancel = use_callback(|_: HostId| {});
@@ -4216,8 +4182,6 @@ mod tests {
                     local_setup: false,
                     controls: HostRowControls {
                         confirming_remove: false,
-                        edit_field: None,
-                        settings_open: false,
                         menu_open: false,
                     },
                     activity: HostRowActivity {
@@ -4229,15 +4193,9 @@ mod tests {
                     update_progress: None,
                     provisioning_menu: ProvisioningMenuState::default(),
                     provisioning_section: dioxus::core::VNode::empty(),
-                    destination_draft,
                     on_retry,
                     on_adopt,
-                    on_edit_start,
-                    on_edit_submit,
-                    on_edit_cancel,
                     on_settings_start: use_callback(|_: HostId| {}),
-                    on_settings_close: use_callback(|_: HostId| {}),
-                    on_yolo_safe: use_callback(|_: (HostId, bool)| {}),
                     on_remove_start,
                     on_remove_confirm,
                     on_remove_cancel,
@@ -4287,12 +4245,8 @@ mod tests {
         }
 
         fn app() -> Element {
-            let destination_draft = use_signal(String::new);
             let on_retry = use_callback(|_: HostId| {});
             let on_adopt = use_callback(|_: (HostId, String)| {});
-            let on_edit_start = use_callback(|_: (HostId, EditField, String)| {});
-            let on_edit_submit = use_callback(|_: (HostId, EditField, String)| {});
-            let on_edit_cancel = use_callback(|_: ()| {});
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
             let on_remove_cancel = use_callback(|_: HostId| {});
@@ -4308,8 +4262,6 @@ mod tests {
                         local_setup: false,
                         controls: HostRowControls {
                             confirming_remove: confirming == id,
-                            edit_field: None,
-                            settings_open: false,
                             menu_open: false,
                         },
                         activity: HostRowActivity {
@@ -4321,15 +4273,9 @@ mod tests {
                         details_open: false,
                         provisioning_menu: ProvisioningMenuState::default(),
                         provisioning_section: dioxus::core::VNode::empty(),
-                        destination_draft,
                         on_retry,
                         on_adopt,
-                        on_edit_start,
-                        on_edit_submit,
-                        on_edit_cancel,
                         on_settings_start: use_callback(|_: HostId| {}),
-                        on_settings_close: use_callback(|_: HostId| {}),
-                        on_yolo_safe: use_callback(|_: (HostId, bool)| {}),
                         on_remove_start,
                         on_remove_confirm,
                         on_remove_cancel,

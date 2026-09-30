@@ -679,10 +679,18 @@ test.describe("multi-host", () => {
     // never destination management.
     await openHostMenu(local);
     await expect(local.locator(".host-remove")).toHaveCount(0);
-    await expect(local.locator(".host-edit")).toHaveCount(0);
     // Settings is offered on the local row too: whether YOLO launches are
-    // allowed is a setting of every host.
+    // allowed is a setting of every host. Its dialog has no destination to
+    // edit, though; that is the one piece of destination management a local
+    // host could otherwise reach.
     await expect(local.locator(".host-settings")).toHaveCount(1);
+    await local.locator(".host-settings").click();
+    const localSettings = page.locator(".host-settings-dialog");
+    await expect(localSettings).toBeVisible();
+    await expect(localSettings.locator(".host-yolo-safe-toggle")).toHaveCount(1);
+    await expect(localSettings.locator('[data-setting="destination"]')).toHaveCount(0);
+    await localSettings.locator(".host-settings-close").click();
+    await expect(localSettings).toHaveCount(0);
 
     const info = stackInfo();
     const remote = hostRowByName(page, info.remote_ssh);
@@ -1208,7 +1216,7 @@ test.describe("multi-host", () => {
   });
 
   // The YOLO-launch setting round-trips through the helm from the host's
-  // settings panel. Every host starts sensitive, so the checkbox starts
+  // settings dialog. Every host starts sensitive, so the checkbox starts
   // clear; the local row is used because it always exists. The setting is
   // restored to sensitive whatever happens, since the stack is shared by the
   // specs that follow.
@@ -1220,7 +1228,10 @@ test.describe("multi-host", () => {
       const row = page.locator('[data-host-kind="local"]');
       await openHostMenu(row);
       await row.locator(".host-settings").click();
-      const toggle = row.locator(".host-yolo-safe-toggle");
+      const dialog = page.locator(".host-settings-dialog");
+      const toggle = dialog.locator(".host-yolo-safe-toggle");
+      const help = dialog.locator(".host-settings-help");
+      await expect(help).toContainText("Farhelm asks you to confirm each YOLO launch on this host.");
       await expect(toggle).not.toBeChecked();
       await toggle.click();
       await expect(toggle).toBeChecked();
@@ -1229,6 +1240,7 @@ test.describe("multi-host", () => {
           (await apiHosts(request)).find((host: any) => host.id === local.id).yolo_safe,
         )
         .toBe(true);
+      await expect(help).toContainText("YOLO sessions start on this host without asking you to confirm.");
       await toggle.click();
       await expect(toggle).not.toBeChecked();
       await expect
@@ -1236,21 +1248,32 @@ test.describe("multi-host", () => {
           (await apiHosts(request)).find((host: any) => host.id === local.id).yolo_safe,
         )
         .toBe(false);
-      await row.locator(".host-settings-close").click();
-      await expect(row.locator(".host-settings-panel")).toHaveCount(0);
+      await dialog.locator(".host-settings-close").click();
+      await expect(dialog).toHaveCount(0);
     } finally {
       await request.post(`/api/hosts/${local.id}/yolo-safe`, { data: { yolo_safe: false } });
     }
   });
 
-  // F11/TEST-EDIT-CLOSE: nothing before this ACTIVATED Edit — every existing
-  // test only checked it was present or disabled. This proves the whole
-  // lifecycle: choosing it closes the "⋯" menu before the row swaps to the
-  // destination field, the existing destination is copied into the draft,
-  // and cancelling returns an ordinary row with no menu revived behind it.
-  test("host-edit-destination-lifecycle: closes the menu, prefills, cancel restores the row", async ({
+  // Settings used to expand inline inside the host's sidebar row, where it
+  // was cramped and the destination was cut off; it is now a modal dialog
+  // (SPEC.md Topology: every host "has a settings dialog in the GUI"). This
+  // pins the dialog's whole keyboard and focus lifecycle, because a modal
+  // that leaks focus lets keystrokes reach whatever is behind it, and one
+  // that drops focus on close strands a keyboard user. Specifies: choosing
+  // Settings closes the "⋯" menu and opens the dialog with focus on its
+  // first control and the page behind it inert; the destination shows in
+  // full; its edit button swaps the value for a prefilled field without
+  // touching the global details toggle; Escape cancels the field edit
+  // (focus back on the edit button, dialog still open); a second Escape
+  // closes the dialog, focus returns to the row's "⋯" toggle, and no menu
+  // is revived behind it.
+  test("host-settings-dialog-lifecycle: opens modal, edits in place, closes back to the toggle", async ({
     page,
   }) => {
+    // Long on purpose: the inline panel ellipsized a destination this long,
+    // and the dialog must show it whole.
+    const destination = "deploy-user@build-host-with-a-long-name.example.internal";
     await page.route("**/api/hosts", async (route) => {
       const response = await route.fetch();
       const body = await response.json();
@@ -1259,8 +1282,8 @@ test.describe("multi-host", () => {
         {
           id: 9011,
           kind: "ssh",
-          destination: "user@editable",
-          name: "user@editable",
+          destination,
+          name: destination,
           identity: "identity-editable",
           remote_farhelm: null,
           remote_state_dir: null,
@@ -1277,35 +1300,188 @@ test.describe("multi-host", () => {
 
     await page.goto("/");
     await expect(page.locator(".host-details-toggle")).not.toBeChecked();
-    const row = hostRowByName(page, "user@editable");
+    const row = hostRowByName(page, destination);
+    const toggle = row.locator(".host-row-menu");
     await openHostMenu(row);
     await row.locator(".host-settings").click();
-    // Choosing Settings closes the menu and opens the row's settings panel;
-    // its edit button then swaps the panel for the destination field.
-    await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
-    await expect(row.locator(".host-settings-panel")).toBeVisible();
-    await row.locator(".host-settings-panel .host-edit").click();
-    await expect(page.locator(".host-details-toggle")).toBeChecked();
 
-    // The panel is gone the instant the row swaps to the destination field,
-    // and no menu came back — nothing here dismisses either by hand.
-    await expect(row.locator(".host-settings-panel")).toHaveCount(0);
+    const dialog = page.locator(".host-settings-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAttribute("role", "dialog");
     await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
-    const input = row.locator(".host-destination-input");
+    const edit = dialog.locator(".host-edit");
+    await expect(edit, "focus moves to the dialog's first control").toBeFocused();
+    await expect(dialog.locator('[data-setting="destination"] .host-settings-value')).toHaveText(destination);
+    // Everything behind the backdrop is inert, so nothing there can take
+    // focus or input while the dialog is up.
+    expect(
+      await toggle.evaluate((node) => node.closest("[inert]") !== null),
+      "the row behind the dialog is inert",
+    ).toBe(true);
+
+    await edit.click();
+    const input = dialog.locator(".host-destination-input");
     await expect(input).toBeVisible();
-    await expect(input).toHaveValue("user@editable");
+    await expect(input).toHaveValue(destination);
+    await expect(input).toBeFocused();
+    await expect(page.locator(".host-details-toggle"), "editing in the dialog leaves the details toggle alone").not.toBeChecked();
 
-    await page.locator(".host-details-toggle").click();
-    await expect(page.locator(".host-details-toggle")).not.toBeChecked();
-    await expect(input).toBeVisible();
-    await expect(input).toHaveValue("user@editable");
+    await page.keyboard.press("Escape");
+    await expect(input).toHaveCount(0);
+    await expect(dialog, "Escape in the field cancels the edit, not the dialog").toBeVisible();
+    await expect(edit).toBeFocused();
 
-    await row.locator(".host-cancel-edit").click();
-
-    // Back to the ordinary row, and no menu revived behind it.
-    await expect(row.locator(".host-destination-input")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(toggle).toBeFocused();
     await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
-    await expect(row.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(
+      await toggle.evaluate((node) => node.closest("[inert]") !== null),
+      "closing the dialog releases the page",
+    ).toBe(false);
+  });
+
+  // A refused save must not throw away what the user typed, and its reason
+  // must show where the user is looking: in the dialog, under the field,
+  // not on the row hidden behind the backdrop. The save is submitted from the
+  // keyboard on purpose: the save disables the field while it is in flight,
+  // which drops focus, and a keyboard user must land back in the field
+  // rather than lose the next key or have Escape close the whole dialog.
+  // Specifies: the helm's refusal of a destination change renders under the
+  // destination with the field still open, holding the draft, and focused
+  // again; Escape then cancels the edit and leaves the dialog open; the row
+  // shows no copy of the refusal while the dialog is open, and shows it once
+  // the dialog closes.
+  test("host-settings-refused-save: keeps the draft and shows the refusal under its field", async ({ page }) => {
+    const refusal = "the destination reaches a different host";
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.hosts = [
+        ...body.hosts.filter((host: any) => host.kind === "local"),
+        {
+          id: 9012,
+          kind: "ssh",
+          destination: "user@refusing",
+          name: "user@refusing",
+          identity: "identity-refusing",
+          remote_farhelm: null,
+          remote_state_dir: null,
+          state: {
+            phase: "connected",
+            identity: "identity-refusing",
+            build_version: "0.1.0",
+            refresh: { status: "ok", sessions: 0 },
+          },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+    // The refusal is held until the test has seen the save in flight, so
+    // the focus loss the refocus exists for is observed, not assumed.
+    let submitted: any;
+    let releaseRefusal!: () => void;
+    const refusalReleased = new Promise<void>((resolve) => (releaseRefusal = resolve));
+    await page.route("**/api/hosts/9012/destination", async (route) => {
+      submitted = JSON.parse(route.request().postData() ?? "null");
+      await refusalReleased;
+      await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: refusal });
+    });
+
+    await page.goto("/");
+    const row = hostRowByName(page, "user@refusing");
+    await openHostMenu(row);
+    await row.locator(".host-settings").click();
+    const dialog = page.locator(".host-settings-dialog");
+    await dialog.locator(".host-edit").click();
+    const input = dialog.locator(".host-destination-input");
+    await input.fill("user@elsewhere");
+    await expect(input).toBeFocused();
+    try {
+      await page.keyboard.press("Enter");
+      await expect.poll(() => submitted, { message: "the save reached the helm" }).toBeTruthy();
+      await expect(input, "the field is disabled while its save is in flight").toBeDisabled();
+      await expect(input, "and has lost focus").not.toBeFocused();
+    } finally {
+      releaseRefusal();
+    }
+
+    const destinationRow = dialog.locator('[data-setting="destination"]');
+    await expect(destinationRow.locator(".host-error")).toContainText(refusal);
+    expect(submitted, "the save reached the helm with the typed draft").toEqual({ ssh: "user@elsewhere" });
+    await expect(input, "a refused save leaves the field open").toBeVisible();
+    await expect(input).toHaveValue("user@elsewhere");
+    await expect(input, "focus is back in the field after the refusal").toBeFocused();
+    await expect(row.locator(".host-error"), "the row does not repeat the refusal behind the dialog").toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+    await expect(input).toHaveCount(0);
+    await expect(dialog, "Escape after a refusal cancels the edit, not the dialog").toBeVisible();
+
+    await dialog.locator(".host-settings-close").click();
+    await expect(dialog).toHaveCount(0);
+    await expect(row.locator(".host-error")).toContainText(refusal);
+  });
+
+  // Clicking the backdrop drops focus out of the dialog (it does not close
+  // it), and the next Escape is then caught by the modal isolation rather
+  // than the dialog's own key handler. That path must do what the dialog's
+  // Escape does: cancel an open field edit, not close the dialog and throw
+  // the draft away. Specifies: with the destination field open, a click on
+  // the backdrop leaves the dialog and the field up; Escape then cancels the
+  // edit and the dialog stays open.
+  test("host-settings-backdrop-escape: Escape after a backdrop click cancels the edit, not the dialog", async ({
+    page,
+  }) => {
+    await page.route("**/api/hosts", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.hosts = [
+        ...body.hosts.filter((host: any) => host.kind === "local"),
+        {
+          id: 9013,
+          kind: "ssh",
+          destination: "user@backdrop",
+          name: "user@backdrop",
+          identity: "identity-backdrop",
+          remote_farhelm: null,
+          remote_state_dir: null,
+          state: {
+            phase: "connected",
+            identity: "identity-backdrop",
+            build_version: "0.1.0",
+            refresh: { status: "ok", sessions: 0 },
+          },
+        },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+
+    await page.goto("/");
+    const row = hostRowByName(page, "user@backdrop");
+    await openHostMenu(row);
+    await row.locator(".host-settings").click();
+    const dialog = page.locator(".host-settings-dialog");
+    await dialog.locator(".host-edit").click();
+    const input = dialog.locator(".host-destination-input");
+    await expect(input).toBeFocused();
+
+    // A corner of the backdrop, well outside the centered card.
+    await page.locator(".host-settings-backdrop").click({ position: { x: 5, y: 5 } });
+    await expect(dialog, "a backdrop click does not close the dialog").toBeVisible();
+    await expect(input).toBeVisible();
+    await expect(input, "the backdrop click took focus out of the field").not.toBeFocused();
+    // Out of the dialog altogether, not merely onto its container: only then
+    // is the Escape below caught by the isolation rather than the dialog.
+    expect(
+      await page.evaluate(() => !document.querySelector(".host-settings-dialog")!.contains(document.activeElement)),
+      "focus is outside the dialog",
+    ).toBe(true);
+
+    await page.keyboard.press("Escape");
+    await expect(input).toHaveCount(0);
+    await expect(dialog, "Escape cancelled the edit and left the dialog open").toBeVisible();
   });
 
   // F14/TEST-BUSY-GUARDS: `aria-disabled`, unlike a native `disabled`
@@ -1478,8 +1654,7 @@ test.describe("multi-host", () => {
       }
 
       // Nothing opened…
-      await expect(target.locator(".host-destination-input")).toHaveCount(0);
-      await expect(target.locator(".host-settings-panel")).toHaveCount(0);
+      await expect(page.locator(".host-settings-dialog")).toHaveCount(0);
       await expect(target.locator(".host-confirm-remove")).toHaveCount(0);
       await expect(target.locator(".host-row-menu-panel")).toBeVisible();
       // …and nothing the menu could have caused reached this host's own

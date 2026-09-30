@@ -624,7 +624,7 @@ pub struct Host {
     pub incarnation: u64,
     /// Whether the user marked this host safe for YOLO launches; `false`
     /// (sensitive) until they do, and for a helm that predates the field.
-    /// The host settings panel shows and flips it.
+    /// The host settings dialog shows and flips it.
     #[serde(default)]
     pub yolo_safe: bool,
 }
