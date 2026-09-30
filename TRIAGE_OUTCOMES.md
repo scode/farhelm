@@ -3554,7 +3554,16 @@
   triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; with `missing-checkout-root-blocks-delete.md` already making any archive failure complete the
+  Delete with a notice, this change handles what that left: `rename_exclusive_into` (working_copies.rs), shared by the
+  archive move and crash recovery, classifies rename errors that report nothing moved (`EINVAL`, `ENOSYS`,
+  `ENOTSUP`/`EOPNOTSUPP`, `EXDEV`, `EACCES`, `EPERM`, `EROFS`) as `WorkingCopyError::RenameRefused`, rolls the journal
+  back to `allocated`, and Delete's notice then says the checkout stays where it is. Other rename errors keep the
+  pending journal, since a network filesystem can complete a rename whose reply is lost. Documented in SPEC_impl.md
+  beside the no-replace rename. Regression tests `a_refused_rename_rolls_the_journal_back_and_leaves_the_checkout`,
+  `an_ambiguous_rename_error_keeps_the_pending_journal`, and
+  `a_refused_archive_rename_leaves_the_checkout_with_a_notice` (a real `EACCES`). jj change `pspqplxuntvv`, bookmark
+  `pr/archive-rename-refusal-rolls-back`, draft PR [#1176](https://github.com/scode/farhelm/pull/1176/changes).
 
 ## checkout-path-too-long-for-archive.md
 
