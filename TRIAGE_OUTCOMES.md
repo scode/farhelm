@@ -3669,7 +3669,13 @@
   is recorded in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `acquire_lock` in scripts/install.sh claims stale-lock recovery with an atomic sidecar
+  `mkdir "$LOCK_DIR.recovering"` before it rolls back a journal or replaces the lock, re-checks that the lock still
+  records the same stale pid, and releases the claim on every path out. A run that cannot take the claim refuses and
+  asks for a retry; a leftover claim from a killed recovery gets the same refusal with remove-by-hand advice, like the
+  pid-less lock. The lock's re-creation got its own failure message. Regression scenario "stale-lock recovery refuses
+  while another run holds the recovery claim" in scripts/test-install-sh.sh. jj change `kslnoqskoymq`, bookmark
+  `pr/installer-recovery-claim`, draft PR [#1183](https://github.com/scode/farhelm/pull/1183/changes).
 
 ## installer-bundle-swap-unlocked.md
 

@@ -1365,6 +1365,49 @@ run_install "$TOOLCHAIN_FULL" "$HOMECRASH" "$INSTALLCRASH" "$BASE/good" 1.2.3
 check "F31: an ordinary run after recovery succeeds" [ "$RC" -eq 0 ]
 
 # ===========================================================================
+# Scenario: stale-lock recovery is exclusive. Two runs started after the same
+# crash used to both replay the journal: the second pass, working from its
+# own earlier read, undid the first pass's restore and deleted the binary.
+# Recovery now takes a sidecar claim (`.farhelm-install.lock.recovering`)
+# first. A run that finds the claim held refuses and changes nothing; once
+# the claim is gone, recovery proceeds as in F31 and releases its claim.
+# ===========================================================================
+echo
+echo "== stale-lock recovery refuses while another run holds the recovery claim =="
+HOMECLAIM="$WORKDIR/homeclaim"
+INSTALLCLAIM="$HOMECLAIM/.local/bin"
+mkdir -p "$INSTALLCLAIM"
+run_install "$TOOLCHAIN_FULL" "$HOMECLAIM" "$INSTALLCLAIM" "$BASE/good" 1.2.3
+check "claim setup: initial install exits 0" [ "$RC" -eq 0 ]
+OLD_CLAIM_CONTENT=$(cat "$INSTALLCLAIM/farhelm")
+cp "$INSTALLCLAIM/farhelm" "$INSTALLCLAIM/.farhelm.old"
+printf '#!/bin/sh\necho "farhelm 9.9.9-mid-swap"\n' >"$INSTALLCLAIM/farhelm"
+chmod 755 "$INSTALLCLAIM/farhelm"
+MID_SWAP_CLAIM_CONTENT=$(cat "$INSTALLCLAIM/farhelm")
+mkdir "$INSTALLCLAIM/.farhelm-install.lock"
+chmod 0700 "$INSTALLCLAIM/.farhelm-install.lock"
+echo 999999 >"$INSTALLCLAIM/.farhelm-install.lock/pid"
+printf 'PARK cli\n' >"$INSTALLCLAIM/.farhelm-install.lock/journal"
+mkdir "$INSTALLCLAIM/.farhelm-install.lock.recovering"
+
+run_install "$TOOLCHAIN_FULL" "$HOMECLAIM" "$INSTALLCLAIM" "$BASE/good" 1.2.3
+check "claim: a run finding the recovery claim held refuses" [ "$RC" -ne 0 ]
+check "claim: the refusal says another run is recovering" \
+  contains "$ERR" "is recovering from an interrupted run"
+check "claim: the refused run leaves the mid-swap binary alone" \
+  [ "$(cat "$INSTALLCLAIM/farhelm")" = "$MID_SWAP_CLAIM_CONTENT" ]
+check "claim: the refused run leaves the backup alone" [ -e "$INSTALLCLAIM/.farhelm.old" ]
+check "claim: the refused run leaves the journal alone" \
+  [ -e "$INSTALLCLAIM/.farhelm-install.lock/journal" ]
+
+rmdir "$INSTALLCLAIM/.farhelm-install.lock.recovering"
+run_install "$TOOLCHAIN_FULL" "$HOMECLAIM" "$INSTALLCLAIM" "$BASE/good" 1.2.3
+check "claim: once the claim is free, recovery restores the previous farhelm" \
+  [ "$(cat "$INSTALLCLAIM/farhelm")" = "$OLD_CLAIM_CONTENT" ]
+check "claim: recovery releases its claim" [ ! -e "$INSTALLCLAIM/.farhelm-install.lock.recovering" ]
+check "claim: recovery removes the stale lock" [ ! -e "$INSTALLCLAIM/.farhelm-install.lock" ]
+
+# ===========================================================================
 # Scenario: a stale lock that names the installer's OWN pid. In containers
 # and other deterministic launch environments sh often gets the same small
 # pid every start, so a SIGKILLed run's lock can name the pid of the next
