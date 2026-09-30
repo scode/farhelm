@@ -76,8 +76,11 @@
 //!    Expect the engine's real filename when it supplies one, or a
 //!    `pasted-<n>.png` name for synthetic image data, and the same insertion.
 //!    This is the SPEC.md acceptance walkthrough's own step, and the one with
-//!    the most engine-specific clipboard behavior behind it. Expand the
-//!    on-screen clipboard-facts dump, then check the other side of
+//!    the most engine-specific clipboard behavior behind it. Read the paste's
+//!    clipboard facts from Web Inspector's console
+//!    (`window.farhelmLastClipboardFacts`, which nothing draws; the desktop
+//!    app offers Web Inspector only in a debug build), then check
+//!    the other side of
 //!    [`classify`]'s naming rule: copy an
 //!    image FILE in the file manager, paste it, and expect its own name to
 //!    survive rather than a generated one. Record what each engine

@@ -59,6 +59,22 @@ import {
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
 
+/**
+ * The last paste's clipboard facts, as the page publishes them for
+ * diagnostics, after proving nothing draws them.
+ *
+ * The facts are evidence for the manual engine checks and for these specs,
+ * never UI: a visible dump used to sit over the terminal's status-line cells
+ * after every paste. So the read goes through the page hook, and the absence
+ * of any on-screen dump is asserted at the same moment.
+ */
+async function lastClipboardFacts(page: Page): Promise<any> {
+  await expect(page.locator(".clipboard-facts"), "clipboard facts are never drawn").toHaveCount(0);
+  const facts = await page.evaluate(() => (window as any).farhelmLastClipboardFacts ?? null);
+  expect(facts, "the paste must have published its clipboard facts").not.toBeNull();
+  return facts;
+}
+
 installTerminalSuiteHooks({ tabSweep: true });
 
 
@@ -973,10 +989,7 @@ test("a clipboard payload of two real files uploads both, each under its own nam
       expect(hostPath).toContain(`/attachments/${id}/`);
       expect(fs.readFileSync(hostPath, "utf8")).toBe(expected);
     }
-    const facts = page.locator(".clipboard-facts");
-    await expect(facts).toBeVisible();
-    await facts.evaluate((details: HTMLDetailsElement) => { details.open = true; });
-    const captured = JSON.parse((await facts.locator("pre").textContent()) || "null");
+    const captured = await lastClipboardFacts(page);
     expect(
       captured.items.map(({ order, kind, type, fileName }: any) => ({
         order,
@@ -1010,7 +1023,7 @@ test("a clipboard payload of two real files uploads both, each under its own nam
 
 // A Mac-only failure can expose a file item while refusing its `File` object.
 // The event remains xterm's business, but its serializable evidence must stay
-// on screen so the manual run can carry the exact item shape into a fixture.
+// readable so the manual run can carry the exact item shape into a fixture.
 test("clipboard facts survive a failed File projection without intercepting paste", async ({
   page,
   request,
@@ -1032,10 +1045,7 @@ test("clipboard facts survive a failed File projection without intercepting past
       "the diagnostic observer must not stop the unsupported paste before xterm sees it",
     ).toBe(true);
 
-    const facts = page.locator(".clipboard-facts");
-    await expect(facts).toBeVisible();
-    await facts.evaluate((details: HTMLDetailsElement) => { details.open = true; });
-    const captured = JSON.parse((await facts.locator("pre").textContent()) || "null");
+    const captured = await lastClipboardFacts(page);
     expect(captured.items).toEqual([{
       order: 0,
       kind: "file",

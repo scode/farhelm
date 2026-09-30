@@ -1696,7 +1696,6 @@
     // otherwise keep a stuck read (and its timer) alive past the island.
     const readers = new Set();
     let errors = [];
-    let clipboardFacts = null;
     let disposed = false;
 
     /**
@@ -1726,20 +1725,9 @@
         line.textContent = message;
         node.appendChild(line);
       }
-      if (clipboardFacts) {
-        const details = document.createElement("details");
-        details.className = "clipboard-facts";
-        const summary = document.createElement("summary");
-        summary.textContent = "clipboard facts";
-        const dump = document.createElement("pre");
-        dump.textContent = JSON.stringify(clipboardFacts, null, 2);
-        details.appendChild(summary);
-        details.appendChild(dump);
-        node.appendChild(details);
-      }
       // Cleared back to the stylesheet's own `display: none` when there is
       // nothing to say, so a finished upload leaves no empty strip behind.
-      node.style.display = lines.length || clipboardFacts ? "block" : "";
+      node.style.display = lines.length ? "block" : "";
     }
 
     function fail(message) {
@@ -2167,16 +2155,20 @@
         : null;
       const payload = payloadFrom("clipboard", ev.clipboardData, facts);
       const flavor = interpret(payload);
-      // Render the event-time evidence before any classification return. A
+      // Publish the event-time evidence before any classification return. A
       // plain-text paste or failed File projection can be the observation
-      // needed to explain why this handler correctly declined the event.
-      clipboardFacts = facts;
-      render();
+      // needed to explain why this handler correctly declined the event, and
+      // an unsupported engine shape is precisely what this diagnostic exists
+      // to capture. It is a hook, never drawn: the last paste's facts, page
+      // wide, for the browser specs and for a manual check to read from the
+      // engine's console (`docs/manual-mac-checklist.md`). A visible dump
+      // used to sit over the terminal's status-line cells after every paste.
+      // Written on every paste, `null` included (no capture helper loaded),
+      // so it never shows an earlier paste's facts as the latest one's.
+      window.farhelmLastClipboardFacts = facts;
       // Text and empty payloads are none of this handler's business:
       // returning without touching the event leaves xterm's own paste
-      // path exactly as it was. File facts remain visible even when the
-      // engine refused to project a File; that unsupported case is precisely
-      // what the diagnostic affordance exists to capture.
+      // path exactly as it was.
       if (flavor !== "file" && flavor !== "image") {
         return;
       }

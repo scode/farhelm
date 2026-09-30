@@ -198,10 +198,18 @@ Close-out result: not run
 - Create a test image with a deliberately non-sensitive name and timestamp, then start `~/.local/bin/farhelm-desktop`,
   open a local or remote terminal, and copy that file in Finder. Do not use an ordinary work or personal file for this
   check.
-- Paste it into the terminal. Expand `clipboard facts` below the terminal and copy the JSON dump here before navigating
-  away. It records item order, kinds, MIME types, `File.name`, and `lastModified`. Before putting the dump in this
-  tracked document, replace the test filename with `<test-file>` and every timestamp with `<timestamp>`; remove any
-  other workstation-specific value rather than committing it.
+- Paste it into the terminal. Before navigating away, evaluate
+  `JSON.stringify(window.farhelmLastClipboardFacts, null, 2)` in Web Inspector's console and copy the result here. The
+  page keeps only the latest paste's facts and never draws them. NOTE: the released app has no Web Inspector; only a
+  debug desktop build offers Inspect Element in its context menu, so run this step with one. Build it the way
+  `scripts/desktop-smoke.sh` does, from `crates/farhelm-ui`: the release web bundle
+  (`dx build --package farhelm-ui --platform web --release`), then the debug app with that bundle's absolute path in
+  `FARHELM_UI_DIST` (`dx build --package farhelm-ui --platform desktop`, no `--release`), and launch the app dx wrote
+  with `FARHELM_DESKTOP_FARHELM` naming a `farhelm` built from the same checkout. A plain `cargo build` of the desktop
+  binary starts but loads none of its assets, so no paste would publish anything. The facts record item order, kinds,
+  MIME types, `File.name`, and `lastModified`. Before putting the dump in this tracked document, replace the test
+  filename with `<test-file>` and every timestamp with `<timestamp>`; remove any other workstation-specific value rather
+  than committing it.
 - Confirm the uploaded path keeps Finder's filename. A genuinely synthetic screenshot may still use `pasted-N.ext`.
 - A real image named `image.<ext>` and modified immediately before the paste is indistinguishable from WKWebView's
   synthetic placeholder under the current heuristic; record that false positive if it occurs.
