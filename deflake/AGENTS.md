@@ -87,8 +87,10 @@ the user, and end.
 **`sweep-finished`.** One run is complete. Report the flakes found (the event lists them) and the PRs made. In repeat
 mode the next sweep is already running; ack and wait. Otherwise ack, and `wait` will return 4: the deflake run is over.
 
-**`prepare-failed`, `daemon-error`, `daemon-died`, `known-flakes-unreadable`, `phase-error`.** These are tooling
-problems, not test results. Read the named log, ack the event, and if `status` says the daemon is still alive run
+**`prepare-failed`, `daemon-error`, `daemon-died`, `known-flakes-unreadable`, `phase-error`, `cleanup-failed`.** These
+are tooling problems, not test results. (`cleanup-failed` means the driver could not delete the sweep tree's build
+outputs when the run ended, for the reason it names; the run's other events stand, and the disk space and that reason
+are what need reporting.) Read the named log, ack the event, and if `status` says the daemon is still alive run
 `deflake/bin/deflake stop`. Then end the deflake run: tell the user what happened, with the log's relevant lines quoted,
 and do not call `wait` again. A `phase-error` is the one exception: the daemon survives it and moves to the next phase,
 so ack it, report it in your final summary, and keep waiting.
@@ -104,6 +106,9 @@ gates that cover each PR's own diff; a record-only PR needs only `dprint check`.
 
 "Stop" from the user means `deflake/bin/deflake stop`, then a final report: sweeps completed, flakes found, PRs made,
 the stack's bookmarks, and anything unacknowledged.
+
+Wherever this file says to run `stop`, give it the harness's largest tool timeout, as for `wait`: after stopping the
+running phase the daemon deletes the sweep tree's build outputs, and `stop` waits up to 540 seconds for that.
 
 ## Keeping known-flakes.txt honest
 

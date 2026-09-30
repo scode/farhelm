@@ -76,6 +76,15 @@ overwrites a failure.
 for the agent to look at, and a hard per-phase timeout eventually ends it and reports the phase as failed. A daemon that
 dies produces an event too. Silence is never the signal that everything is fine; the finished run is its own event.
 
+**The sweep does not keep its build between runs.** One sweep's cargo outputs come to 40+ GB (a copy of each large test
+binary per feature set cargo resolves across the batteries, plus incremental caches), and a persistent tree that is
+never pruned only grows. So the sweep tree's cargo `target/` is deleted when a run ends, and again before a run builds,
+which catches what a killed run left behind. The cost is a cold build per run, minutes against a run of hours. Sweeps
+within one repeat-mode run share a single build. The run is not reported as over until the deletion is done, so a
+following run never races it. The deletion never happens under a build that is still running (a killed daemon's orphaned
+children, say), because a half-deleted tree shared by two builds would show up as fake flakes. A deletion that fails or
+is refused is an event like any other tooling problem.
+
 ## Scope
 
 The sweep is the AGENTS.md finishing-work inventory minus what cannot flake: formatters, clippy, compile-only checks,
