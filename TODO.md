@@ -82,6 +82,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   interruption the test exists for still happens. Found by the review of the PR that moved these tests' markers out of
   `/tmp`; the gap predates that PR.
 
+- **Alarming link hover when the text and target disagree.** Hovering a hyperlink a program printed (OSC 8) shows its
+  host and full target in a small, quiet display (`showLinkTarget` in `crates/farhelm-ui/assets/terminal-links.js`,
+  added in #1158). Keep that display for every such link, but when the underlined text does not match where the link
+  actually goes, make it much more intrusive (big, red, blinking, or something along those lines) so the mismatch is
+  hard to miss before clicking. Details are to be worked out. Two that need deciding: what counts as a match, since a
+  literal string comparison would flag benign cases like the text `http://127.0.0.1:6080` whose target displays as
+  `http://127.0.0.1:6080/` after URL normalization; and how to treat link text that is not a URL at all (a file name,
+  "#123", "click here"), which never matches but is not the lookalike case this is meant to catch. SPEC.md (Terminal
+  experience) currently calls the hover display the whole safeguard, so it changes with this.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
