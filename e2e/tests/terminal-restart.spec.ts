@@ -251,6 +251,14 @@ test("Replace confirms inline, can cancel, selects the fresh session, and surfac
       body: "replacement refused: source is no longer available",
     });
   });
+  // The refused session exists only in this page's listing route, so
+  // nothing on the helm changes to make the page fetch the listing again,
+  // and its row appears only through a fetch made after the route above
+  // was installed. Reload so that fetch happens by construction. Waiting
+  // for an unrelated refresh to come along is what made this test time out
+  // on WebKit whenever it ran behind the rest of its file: the retained
+  // trace shows the page's last listing fetch landing before the route.
+  await page.reload();
   await rowByTitle(page, refusedTitle).locator(".session-row-open").click();
   await page.locator(".replace-from-notice").click();
   await page.locator(".replace-confirm-submit").click();
