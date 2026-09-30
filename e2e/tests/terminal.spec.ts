@@ -2395,7 +2395,30 @@ test("one row's confirming state does not affect another row's controls", async 
     // itself is asserted, not just implied: A's panel must be GONE and
     // its toggle must say so — two independently open menus would pass
     // every other check here.
-    await openRowMenu(rowB);
+    //
+    // B's menu is opened from the keyboard, not the pointer. A pointer
+    // going down outside an open row menu answers that menu's showing
+    // confirmation with cancel (SPEC_impl.md's row-menu dismissal rule),
+    // so a click on B's toggle would end A's prompt for that reason and
+    // never reach what this test pins: every other way A's panel closes,
+    // including another menu taking the one-open slot, leaves A's
+    // confirming phase alone.
+    //
+    // The whole focus-key-check is retried, the way `sidebar.spec.ts`'s
+    // keyboard menu test does it and for the reason it documents there:
+    // this page auto-opens a live `sleep 300` session, whose terminal
+    // reveal can take focus between the focus call and the key, and a key
+    // already delivered to the terminal cannot be recovered by waiting.
+    // ArrowDown rather than Enter because it only ever opens: a retry after
+    // an attempt that did open the menu, just slowly, must not toggle it
+    // shut again.
+    const toggleB = rowB.locator(".session-row-menu");
+    await expect(async () => {
+      await toggleB.focus();
+      await expect(toggleB).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(rowB.locator(".session-row-menu-flyout")).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
     await expect(rowA.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(rowA.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
     await expect(rowB.locator(".confirm-consequence")).toHaveCount(0);
@@ -3549,16 +3572,22 @@ test("an interrupted session shows its badge and deletes without confirming", as
     }),
   );
   let deleteRequests = 0;
+  let deletePrecondition: string | null = null;
   let releaseDelete: () => void = () => {};
   const deleteHeld = new Promise<void>((resolve) => {
     releaseDelete = resolve;
   });
-  await page.route(`**/api/sessions/${session.id}`, async (route) => {
+  // Matched on the path alone: an unconfirmed delete carries
+  // `?only_if_nothing_alive=true`, and a URL glob ending at the id would
+  // let that request through to the real helm, which has never heard of
+  // this synthetic session.
+  await page.route((url) => url.pathname === `/api/sessions/${session.id}`, async (route) => {
     if (route.request().method() !== "DELETE") {
       await route.continue();
       return;
     }
     deleteRequests += 1;
+    deletePrecondition = new URL(route.request().url()).searchParams.get("only_if_nothing_alive");
     await deleteHeld;
     await fulfillAsHelm(route, {
       status: 200,
@@ -3582,6 +3611,9 @@ test("an interrupted session shows its badge and deletes without confirming", as
   await expect(row.locator(".confirm-consequence")).toHaveCount(0);
   await expect(row.locator(".confirm-delete")).toHaveCount(0);
   expect(deleteRequests).toBe(1);
+  // Skipping the prompt is safe only because the supervisor re-checks:
+  // the delete must ask it to refuse if something turns out to be alive.
+  expect(deletePrecondition).toBe("true");
   releaseDelete();
 });
 
@@ -3619,16 +3651,22 @@ test("an error session shows its badge with detail and deletes without confirmin
     }),
   );
   let deleteRequests = 0;
+  let deletePrecondition: string | null = null;
   let releaseDelete: () => void = () => {};
   const deleteHeld = new Promise<void>((resolve) => {
     releaseDelete = resolve;
   });
-  await page.route(`**/api/sessions/${session.id}`, async (route) => {
+  // Matched on the path alone: an unconfirmed delete carries
+  // `?only_if_nothing_alive=true`, and a URL glob ending at the id would
+  // let that request through to the real helm, which has never heard of
+  // this synthetic session.
+  await page.route((url) => url.pathname === `/api/sessions/${session.id}`, async (route) => {
     if (route.request().method() !== "DELETE") {
       await route.continue();
       return;
     }
     deleteRequests += 1;
+    deletePrecondition = new URL(route.request().url()).searchParams.get("only_if_nothing_alive");
     await deleteHeld;
     await fulfillAsHelm(route, {
       status: 200,
@@ -3659,6 +3697,9 @@ test("an error session shows its badge with detail and deletes without confirmin
   await expect(row.locator(".confirm-consequence")).toHaveCount(0);
   await expect(row.locator(".confirm-delete")).toHaveCount(0);
   expect(deleteRequests).toBe(1);
+  // Skipping the prompt is safe only because the supervisor re-checks:
+  // the delete must ask it to refuse if something turns out to be alive.
+  expect(deletePrecondition).toBe("true");
   releaseDelete();
 });
 

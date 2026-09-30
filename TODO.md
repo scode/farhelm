@@ -364,22 +364,6 @@ Deferred work, with its original triggers:
 
 ## Broken tests
 
-- **Row-menu delete click does nothing in three terminal tests.** In `e2e/tests/terminal.spec.ts`,
-  `one row's confirming state does not affect another row's controls`,
-  `an interrupted session shows its badge and deletes without confirming`, and
-  `an error session shows its badge with detail and deletes without confirming` failed on Chromium and WebKit in the
-  2026-09-29 deflake sweep of `main` at `8e82d8b` (full browser run `0c787185-c40c-4070-a3fe-a69bc1a44a82`) and in all
-  three exact-test reruns of each (`b1d4aee0-9022-43a8-af65-d0df56bb4d0b`, `e647dca6-31e0-4626-8610-1432ef8bd005`,
-  `f8dcca76-66da-4e6d-95b9-20ab76885ba5`; `357f74ad-e71c-4570-94e5-b5e0172dcdc3`,
-  `ebc5b9dd-ca17-4283-8e91-582c89d84afd`, `f7cdd6a0-ba35-4b68-a832-f0d773e1af04`;
-  `de523112-3cce-4415-a197-4d60ea418d13`, `597bce34-ca57-4705-8c42-159f420c4352`,
-  `ee328106-40dc-4613-ab8d-04bdd218bc9b`). In all three, clicking the row menu's delete produced nothing: no
-  confirmation prompt for a live session, and no DELETE request for an interrupted or error session, which skips the
-  prompt. The retained page snapshot of the first still shows the row's menu open. The earlier test in the same file
-  that opens the prompt the same way passed. The row-menu and delete changes of 2026-09-28 and 2026-09-29 (#1154, #1172,
-  #1174, #1175, #1193) are the candidates; which one, and whether the tests or the product are wrong, is not
-  established.
-
 ## Code review
 
 The residue of the September 2026 review swarms (700 findings over seven areas, reviewed at `db76f00b`) after the policy
