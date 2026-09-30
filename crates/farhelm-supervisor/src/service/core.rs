@@ -6039,7 +6039,7 @@ impl Supervisor {
         &self,
         row: &mut StoredSession,
     ) -> anyhow::Result<bool> {
-        if !matches!(row.agent_kind, AgentKind::Codex | AgentKind::Grok) {
+        if !crate::agent_kind::refreshes_reported_capture(row.agent_kind) {
             return Ok(true);
         }
         // The claim is taken HERE rather than by the caller: `session_snapshot`
@@ -6063,7 +6063,11 @@ impl Supervisor {
         match row.agent_kind {
             AgentKind::Codex => self.refresh_codex_capture_claimed(row).await,
             AgentKind::Grok => self.refresh_grok_capture_claimed(row).await,
-            _ => Ok(true),
+            AgentKind::Claude
+            | AgentKind::Goose
+            | AgentKind::Pi
+            | AgentKind::Omp
+            | AgentKind::Generic => Ok(true),
         }
     }
 
@@ -6218,33 +6222,43 @@ impl Supervisor {
         session_id: &str,
         snapshot: &SessionSnapshot,
     ) -> anyhow::Result<()> {
-        if snapshot.kind == AgentKind::Grok {
-            let stored = snapshot.captured_conversation.as_deref().ok_or_else(|| {
-                anyhow::anyhow!("a Grok resume offer has no durable conversation locator")
-            })?;
-            let mut locator = crate::agent_kind::grok::GrokLocator::parse(stored)
-                .context("decoding the Grok resume locator")?;
-            locator.verify().await;
-            if locator.resume_id().is_some() {
-                return Ok(());
-            }
-            let replacement = locator.encode()?;
-            self.store
-                .replace_reported_conversation_if_current(
-                    session_id,
-                    snapshot.generation,
-                    Some(stored),
-                    &replacement,
+        match snapshot.kind {
+            AgentKind::Grok => {
+                let stored = snapshot.captured_conversation.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!("a Grok resume offer has no durable conversation locator")
+                })?;
+                let mut locator = crate::agent_kind::grok::GrokLocator::parse(stored)
+                    .context("decoding the Grok resume locator")?;
+                locator.verify().await;
+                if locator.resume_id().is_some() {
+                    return Ok(());
+                }
+                let replacement = locator.encode()?;
+                self.store
+                    .replace_reported_conversation_if_current(
+                        session_id,
+                        snapshot.generation,
+                        Some(stored),
+                        &replacement,
+                    )
+                    .await
+                    .context("invalidating a stale Grok resume locator")?;
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "this session's restart offer changed while the restart was being prepared; its \
+                     exact Grok record pair could not be verified, so nothing was relaunched — \
+                     refresh the session and re-present the offer",
                 )
-                .await
-                .context("invalidating a stale Grok resume locator")?;
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "this session's restart offer changed while the restart was being prepared; its \
-                 exact Grok record pair could not be verified, so nothing was relaunched — \
-                 refresh the session and re-present the offer",
-            )
-            .into());
+                .into());
+            }
+            // Pi and OMP share the typed-locator check below; any other kind
+            // has no locator and is refused there.
+            AgentKind::Pi
+            | AgentKind::Omp
+            | AgentKind::Claude
+            | AgentKind::Codex
+            | AgentKind::Goose
+            | AgentKind::Generic => {}
         }
         let Some(vendor) = crate::agent_kind::locator_vendor(snapshot.kind) else {
             anyhow::bail!(
@@ -9968,14 +9982,10 @@ impl Supervisor {
             .into());
         };
         if mode == RestartMode::Resume
-            && snapshot.kind == AgentKind::Codex
+            && let Some(refusal) = crate::agent_kind::unverified_resume_refusal(snapshot.kind)
             && snapshot.restart_offer != RestartOffer::Resume
         {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "this Codex conversation has no verified foreground resume target: its legacy identity is unattributed, \
-                 or its exact record is unavailable; nothing was relaunched and no other transcript was selected",
-            ).into());
+            return Err(RequestError::new(ErrorKind::Conflict, refusal).into());
         }
         let (argv, restart_with) = if let Some((invocation, launch, resume_template)) = restart_with
         {
@@ -10033,12 +10043,7 @@ impl Supervisor {
                 None,
             )
         };
-        if mode == RestartMode::Resume
-            && matches!(
-                snapshot.kind,
-                AgentKind::Pi | AgentKind::Omp | AgentKind::Grok
-            )
-        {
+        if mode == RestartMode::Resume && crate::agent_kind::verifies_resume_target(snapshot.kind) {
             self.verify_report_only_resume(session_id, &snapshot)
                 .await?;
         }
@@ -12851,15 +12856,8 @@ impl Supervisor {
         // vendor's artifact published; one vendor's asset can never serve
         // the other because the reporters carry different event surfaces
         // and different `vendor` payloads.
-        let vendor_asset = match snapshot.kind {
-            AgentKind::Pi if self.seams.agent_hooks.allows(AgentKind::Pi) => {
-                Some(crate::pi_extension::PI_ASSET)
-            }
-            AgentKind::Omp if self.seams.agent_hooks.allows(AgentKind::Omp) => {
-                Some(crate::pi_extension::OMP_ASSET)
-            }
-            _ => None,
-        };
+        let vendor_asset = crate::pi_extension::reporter_asset(snapshot.kind)
+            .filter(|_| self.seams.agent_hooks.allows(snapshot.kind));
         let vendor_extension = match vendor_asset {
             Some(asset) => {
                 match crate::pi_extension::materialize_asset(&self.state_dir, &asset).await {
@@ -12960,21 +12958,32 @@ impl Supervisor {
         // reporter exists to read any marker. A tmux failure below
         // keeps the decided values: the argv was fixed, so an
         // ambiguous survivor runs exactly what the row describes.
-        if snapshot.kind == AgentKind::Omp {
-            let asset = hooked.then_some(crate::pi_extension::OMP_ASSET.file_name);
-            let program = crate::agent_kind::omp::classify_omp_launch(&spec.argv).column_value();
-            if let Err(error) = self
-                .store
-                .record_omp_launch_provenance(id, generation, asset, program)
-                .await
-            {
-                warn!(
-                    session = %id,
-                    error = %format!("{error:#}"),
-                    "could not record this launch's OMP provenance; \
-                     the session stays runnable without capture"
-                );
+        // Only OMP records launch provenance: its admission proof has to know
+        // which launcher shape and reporter asset this launch used.
+        match snapshot.kind {
+            AgentKind::Omp => {
+                let asset = hooked.then_some(crate::pi_extension::OMP_ASSET.file_name);
+                let program =
+                    crate::agent_kind::omp::classify_omp_launch(&spec.argv).column_value();
+                if let Err(error) = self
+                    .store
+                    .record_omp_launch_provenance(id, generation, asset, program)
+                    .await
+                {
+                    warn!(
+                        session = %id,
+                        error = %format!("{error:#}"),
+                        "could not record this launch's OMP provenance; \
+                         the session stays runnable without capture"
+                    );
+                }
             }
+            AgentKind::Claude
+            | AgentKind::Codex
+            | AgentKind::Goose
+            | AgentKind::Pi
+            | AgentKind::Grok
+            | AgentKind::Generic => {}
         }
 
         let shell = self.launch_shell().await;
@@ -13826,10 +13835,12 @@ impl Supervisor {
                 self.report_omp_conversation(id, report, kind, generation, entry)
                     .await
             }
-            _ => Err(RequestError::new(
-                ErrorKind::Conflict,
-                "no foreground ownership proof is implemented for this session's agent kind",
-            )),
+            AgentKind::Claude | AgentKind::Goose | AgentKind::Pi | AgentKind::Generic => {
+                Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "no foreground ownership proof is implemented for this session's agent kind",
+                ))
+            }
         }
     }
 
@@ -14381,27 +14392,38 @@ impl Supervisor {
                 "the reported conversation identity does not match this session's agent kind",
             ));
         }
-        if kind == AgentKind::Claude {
-            let peer = peer.ok_or_else(|| {
-                RequestError::new(
-                    ErrorKind::Conflict,
-                    "the Claude report has no kernel-attributed local process",
-                )
-            })?;
-            let emitter = self
-                .claude_foreground(&row, peer)
-                .await
-                .inspect_err(|error| {
-                    warn!(
-                        session = %id, generation, source = %source, error = %error,
-                        "refused a Claude conversation report that did not come from this \
-                         session's foreground process"
-                    );
+        // Claude's legacy admission keeps its positional foreground check
+        // (the pane process or its direct child ran the hook); the other
+        // legacy kinds have none, and the proven kinds never reach here.
+        match kind {
+            AgentKind::Claude => {
+                let peer = peer.ok_or_else(|| {
+                    RequestError::new(
+                        ErrorKind::Conflict,
+                        "the Claude report has no kernel-attributed local process",
+                    )
                 })?;
-            info!(
-                session = %id, generation, emitter_pid = emitter.pid,
-                "attributed a Claude foreground conversation report"
-            );
+                let emitter = self
+                    .claude_foreground(&row, peer)
+                    .await
+                    .inspect_err(|error| {
+                        warn!(
+                            session = %id, generation, source = %source, error = %error,
+                            "refused a Claude conversation report that did not come from this \
+                             session's foreground process"
+                        );
+                    })?;
+                info!(
+                    session = %id, generation, emitter_pid = emitter.pid,
+                    "attributed a Claude foreground conversation report"
+                );
+            }
+            AgentKind::Codex
+            | AgentKind::Goose
+            | AgentKind::Pi
+            | AgentKind::Omp
+            | AgentKind::Grok
+            | AgentKind::Generic => {}
         }
         // The injected failure STANDS IN for the store call rather than
         // preceding it, so a test can exercise this function's own failure
