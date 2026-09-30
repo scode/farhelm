@@ -214,22 +214,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `clipboard-name.js`'s `capture()` stays, since the paste naming decision uses it. This addresses
   `review_feedback_queue/clipboard-facts-label-stuck.md`: remove that file and its line in
   `review_feedback_queue/INDEX.md` in the same PR.
-- **Guard against yolo launches on sensitive hosts.** The goal is to stop yolo sessions from being started by accident
-  on a machine where the user does not want them; the maintainer has done this several times. Wanted:
-  - Every host, the local one included, is either "yolo safe" or "sensitive". Every host defaults to sensitive,
-    including existing hosts and the local machine, until the user explicitly marks it yolo safe.
-  - Launching a yolo session on a sensitive host from the GUI shows a very loud warning.
-  - Launches that do not come from the GUI (the `farhelm` command line, agents creating sessions) must pass an explicit
-    override to launch yolo on a sensitive host. The `$farhelm` agent instructions (`farhelm agent instructions`,
-    `crates/farhelm/src/agent_instructions.rs`) must tell agents to get explicit user approval before passing it.
-  - Every host, local and remote, gets a settings dialog. It takes over "edit destination" and "edit alias" (the `Edit`
-    and `Alias` entries in the host row's menu, `HostMenuAction` in `crates/farhelm-ui/src/hosts.rs`, go away) and adds
-    the yolo safe / sensitive toggle.
-
-  Questions for execution: what counts as a yolo launch across harnesses (the built-in `*-yolo` profiles, `perms:yolo`,
-  and Pi, whose only mode is YOLO, so every Pi launch would count), and whether the check lives in the helm so that no
-  client can skip it. Supersedes the warning half of the Maybe later entry on marking hosts "yolo is fine"; that entry
-  keeps only its session-list coloring.
 
 ## Doc todo
 
