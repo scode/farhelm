@@ -111,11 +111,18 @@ export function helmBuild(): string {
  */
 export async function fulfillAsHelm(
   route: { fulfill: (options: Record<string, unknown>) => Promise<void> },
-  options: { status?: number; contentType?: string; body?: string; json?: unknown },
+  options: {
+    status?: number;
+    contentType?: string;
+    body?: string;
+    json?: unknown;
+    /** Extra response headers, such as a refusal's machine-readable marker. */
+    headers?: Record<string, string>;
+  },
 ) {
-  const headers: Record<string, string> = { "x-farhelm-build": HELM_BUILD };
+  const headers: Record<string, string> = { ...options.headers, "x-farhelm-build": HELM_BUILD };
   if (options.contentType) headers["content-type"] = options.contentType;
-  const { contentType, ...rest } = options;
+  const { contentType, headers: _extra, ...rest } = options;
   await route.fulfill({ ...rest, headers });
 }
 

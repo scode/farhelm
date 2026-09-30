@@ -132,20 +132,42 @@ fn focus_restart_with_submit() {
     );
 }
 
+/// Hand focus to the dialog's own cancel button before the YOLO question
+/// goes away.
+///
+/// Dismissing the question unmounts the control that holds focus, and the
+/// same module rule as [`focus_restart_with_submit`] applies: focus must
+/// move to a control that survives, or it drops to the page body while the
+/// modal is still open. Cancel is also where the dialog opened.
+fn focus_restart_with_cancel() {
+    document::eval(
+        "document.querySelector('.restart-with-dialog .restart-with-cancel')?.focus({ preventScroll: true })",
+    );
+}
+
 /// Edit only the launch fields the resumed conversation can change.
 ///
 /// `session` is the opening snapshot and stays the comparison baseline while
 /// this dialog is mounted. The parent rechecks live availability before it
 /// sends a request, and passes a refusal back through `error`.
+///
+/// `yolo_confirmation` is the helm's refusal of a YOLO restart on a host
+/// marked sensitive. It is shown inside the dialog because the dialog is
+/// modal: anything rendered beside it is inert. Confirming resubmits what the
+/// dialog shows NOW, with the override (`on_submit`'s `true`), so the answer
+/// always applies to the settings on screen rather than to a snapshot the
+/// user may have edited since.
 #[component]
 pub(crate) fn RestartWithDialog(
     session: Session,
     busy: bool,
     error: Option<String>,
+    yolo_confirmation: Option<String>,
     stop_first: bool,
     stop_uncertain: bool,
     offer_label: String,
-    on_submit: EventHandler<LaunchSelection>,
+    on_submit: EventHandler<(LaunchSelection, bool)>,
+    on_yolo_cancel: EventHandler<()>,
     on_cancel: EventHandler<()>,
 ) -> Element {
     let Some(baseline) = session.launch.clone() else {
@@ -331,6 +353,26 @@ pub(crate) fn RestartWithDialog(
                 if let Some(message) = error {
                     p { class: "restart-with-error", role: "alert", "{message}" }
                 }
+                if let Some(message) = yolo_confirmation {
+                    crate::yolo_confirm::YoloConfirmation {
+                        message,
+                        busy,
+                        confirm_submits: false,
+                        // Both hand focus to a control that outlives the
+                        // question before the parent unmounts it; see
+                        // `focus_restart_with_cancel`.
+                        on_confirm: move |_| {
+                            if may_submit {
+                                focus_restart_with_submit();
+                                on_submit.call((selection(), true));
+                            }
+                        },
+                        on_cancel: move |_| {
+                            focus_restart_with_cancel();
+                            on_yolo_cancel.call(());
+                        },
+                    }
+                }
                 div { class: "restart-with-footer",
                     if stop_first {
                         p { class: "restart-with-stop-note",
@@ -366,7 +408,7 @@ pub(crate) fn RestartWithDialog(
                         onclick: move |_| {
                             if may_submit {
                                 focus_restart_with_submit();
-                                on_submit.call(selection());
+                                on_submit.call((selection(), false));
                             }
                         },
                         if stop_first { "stop and restart" } else { "restart" }

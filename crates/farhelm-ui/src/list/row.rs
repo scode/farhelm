@@ -397,56 +397,6 @@ fn abbreviate_home(cwd: &str) -> String {
     cwd.to_string()
 }
 
-/// Vendor-recognized executables and the unattended-mode flags worth naming
-/// for each, most consequential first within a program's own list.
-///
-/// Keyed by the program's BASENAME rather than a flat flag table: `--yolo`
-/// belongs to Codex, and matching it against ANY program's argv would badge
-/// `echo --yolo` or a future tool that happens to share a flag spelling with
-/// a vendor it has nothing to do with. A basename absent from this table
-/// earns no marker no matter what its arguments look like — the row does
-/// not guess at a command it does not recognize.
-///
-/// These flags share one property: they change what the agent is ALLOWED to
-/// do without asking, which is the one fact about a command line worth four
-/// characters of a sidebar row. Everything else — model pins, prompts,
-/// working-directory overrides — is argument noise at this size and stays
-/// in the `title` attribute with the rest of the line. Within one program's
-/// list, order is precedence: an invocation carrying two of that vendor's
-/// flags renders the first one listed.
-const INVOCATION_MARKERS: &[(&str, &[(&str, &str)])] = &[
-    (
-        "claude",
-        &[
-            // Claude Code: skips every permission prompt.
-            ("--dangerously-skip-permissions", "skip-perms"),
-        ],
-    ),
-    (
-        "codex",
-        &[
-            // The unabbreviated flag: bypasses approvals AND the sandbox.
-            ("--dangerously-bypass-approvals-and-sandbox", "no-sandbox"),
-            // `--yolo` is Codex's own alias for the flag directly above —
-            // same bypass of approvals AND sandbox, shorter to type. It is
-            // NOT the sandboxed auto mode; see `--full-auto` below for that
-            // one, and do not conflate the two in future edits here.
-            ("--yolo", "yolo"),
-            // Full auto-approval, but SANDBOXED: prompts are skipped, the
-            // sandbox stays enforced. Strictly less permissive than the two
-            // flags above, which is exactly why it earns a marker of its
-            // own rather than collapsing into "yolo".
-            ("--full-auto", "full-auto"),
-        ],
-    ),
-    ("muse", &[("--yolo", "yolo")]),
-    // OpenCode calls its permission-bypass mode `--auto`; it is a YOLO
-    // equivalent, unlike Codex's separately sandboxed `--full-auto`.
-    ("opencode", &[("--auto", "yolo")]),
-    ("agent", &[("--force", "yolo"), ("--yolo", "yolo")]),
-    ("cursor-agent", &[("--force", "yolo"), ("--yolo", "yolo")]),
-];
-
 /// The row's parsed view of a launch command: the program's basename to
 /// show, plus an optional marker for a recognized unattended-mode flag.
 ///
@@ -624,92 +574,20 @@ fn compact_invocation(invocation: &str) -> CompactInvocation {
         _ => program.clone(),
     };
     let harness = known_harness(&basename);
-    let permission = INVOCATION_MARKERS
-        .iter()
-        .find(|(vendor, _)| *vendor == basename)
-        .and_then(|(_, flags)| {
-            let leading_args = invocation_switches(&basename, &argv[1..], flags);
-            flags
-                .iter()
-                .find_map(|(flag, marker)| leading_args.contains(flag).then_some(*marker))
-        });
-    let permission = permission.and_then(|marker| match marker {
-        "yolo" | "no-sandbox" | "skip-perms" => Some(PermissionGlyph::Yolo),
-        "full-auto" => Some(PermissionGlyph::FullAuto),
-        _ => None,
+    // The recognition table is shared with the helm's YOLO-launch guard
+    // (`farhelm_proto::yolo`), so the badge and the refusal agree.
+    let permission = farhelm_proto::yolo::invocation_marker(&argv).map(|marker| {
+        if marker.is_yolo() {
+            PermissionGlyph::Yolo
+        } else {
+            PermissionGlyph::FullAuto
+        }
     });
     CompactInvocation {
         basename,
         harness,
         permission,
     }
-}
-
-/// Recognize only switches whose argv role is unambiguous.
-///
-/// Shell quoting does not distinguish a switch from an option value after
-/// splitting. Skip the values of known options, and stop at unknown syntax
-/// (including subcommands), rather than claiming that a prompt/config value
-/// changes permissions. This deliberately recognizes only a prefix of legacy
-/// commands; structured launch provenance does not need this approximation.
-fn invocation_switches<'a>(
-    vendor: &str,
-    args: &'a [String],
-    markers: &[(&str, &str)],
-) -> Vec<&'a str> {
-    let valued: &[&str] = match vendor {
-        "codex" => &[
-            "-c",
-            "--config",
-            "-m",
-            "--model",
-            "-p",
-            "--profile",
-            "-C",
-            "--cd",
-            "-s",
-            "--sandbox",
-            "-a",
-            "--ask-for-approval",
-            "--add-dir",
-            "--enable",
-            "--disable",
-            "-i",
-            "--image",
-        ],
-        "claude" => &[
-            "--model",
-            "--permission-mode",
-            "--output-format",
-            "--input-format",
-            "--system-prompt",
-            "--append-system-prompt",
-            "--settings",
-        ],
-        "muse" | "opencode" => &["--model", "-m"],
-        "agent" | "cursor-agent" => &["--model"],
-        _ => &[],
-    };
-    let mut switches = Vec::new();
-    let mut args = args.iter();
-    while let Some(arg) = args.next() {
-        if markers.iter().any(|(flag, _)| arg == flag) {
-            switches.push(arg.as_str());
-        } else if valued.contains(&arg.as_str()) {
-            // A marker-looking value remains data, even when quoted.
-            if args.next().is_none_or(|value| value == "--") {
-                break;
-            }
-        } else if arg
-            .split_once('=')
-            .is_some_and(|(key, _)| valued.contains(&key))
-        {
-            continue;
-        } else {
-            break;
-        }
-    }
-    switches
 }
 
 /// A session title as the sidebar shows it: escaped with `display_peer` and

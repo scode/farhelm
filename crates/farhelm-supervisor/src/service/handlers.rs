@@ -476,6 +476,7 @@ async fn resolve_create_selector(
     sup: &Arc<Supervisor>,
     admission: &CreateAdmission,
     selector: CreateSelector,
+    allow_yolo_on_sensitive_host: bool,
 ) -> Result<CreateMode, (ErrorKind, String)> {
     match selector {
         CreateSelector::Bundle(mode) => Ok(mode),
@@ -486,7 +487,8 @@ async fn resolve_create_selector(
                     "profile_name is available only to a session-authenticated spawn".to_string(),
                 ));
             };
-            resolve_restricted_profile(sup, asking_session, name, id).await
+            resolve_restricted_profile(sup, asking_session, name, id, allow_yolo_on_sensitive_host)
+                .await
         }
         CreateSelector::Derived => {
             let CreateAdmission::Spawn { asking_session } = admission else {
@@ -544,11 +546,16 @@ async fn resolve_restricted_profile(
     asking_session: &str,
     name: Option<String>,
     id: Option<String>,
+    allow_yolo_on_sensitive_host: bool,
 ) -> Result<CreateMode, (ErrorKind, String)> {
     match sup
         .relay_agent_request(
             asking_session.to_string(),
-            AgentVerb::ResolveProfile { name, id },
+            AgentVerb::ResolveProfile {
+                name,
+                id,
+                allow_yolo_on_sensitive_host,
+            },
             None,
         )
         .await
@@ -606,6 +613,10 @@ struct CreateRequest {
     cols: u16,
     rows: u16,
     intent_key: Option<String>,
+    /// Forwarded with a spawn's profile lookup: the helm refuses to resolve
+    /// a YOLO profile for a host marked sensitive without it. Only the
+    /// profile-name/id selector uses it.
+    allow_yolo_on_sensitive_host: bool,
     /// Two consumers, and they must see the SAME values: item 6's
     /// fingerprint (a retry differing only in an override is a different
     /// request and is refused as a key reuse) and item 7's snapshot
@@ -642,6 +653,7 @@ async fn handle_create_session(
         cols,
         rows,
         intent_key,
+        allow_yolo_on_sensitive_host,
         agent_kind,
         resume_template,
         source_profile,
@@ -718,7 +730,7 @@ async fn handle_create_session(
     } else if matches!(selector, CreateSelector::Derived) {
         None
     } else {
-        Some(resolve_create_selector(sup, &admission, selector).await)
+        Some(resolve_create_selector(sup, &admission, selector, allow_yolo_on_sensitive_host).await)
     };
     let guards = match sup
         .admit_create(intent_key.as_deref(), restricted_auth)
@@ -732,7 +744,15 @@ async fn handle_create_session(
     };
     let mode = match mode_before_admission {
         Some(mode) => mode,
-        None => resolve_create_selector(sup, &admission, CreateSelector::Derived).await,
+        None => {
+            resolve_create_selector(
+                sup,
+                &admission,
+                CreateSelector::Derived,
+                allow_yolo_on_sensitive_host,
+            )
+            .await
+        }
     };
     // Every refusal from here on releases `guards` before replying:
     // `send_reply` may wait on a full writer queue, and the guards include
@@ -2738,6 +2758,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             cols,
             rows,
             intent_key,
+            allow_yolo_on_sensitive_host,
             agent_kind,
             resume_template,
             source_profile,
@@ -2765,6 +2786,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 cols,
                 rows,
                 intent_key,
+                allow_yolo_on_sensitive_host,
                 agent_kind,
                 resume_template,
                 source_profile,
@@ -3137,6 +3159,7 @@ pub(crate) async fn handle_restricted_control(
             cols,
             rows,
             intent_key,
+            allow_yolo_on_sensitive_host,
             agent_kind,
             resume_template,
             source_profile,
@@ -3233,6 +3256,7 @@ pub(crate) async fn handle_restricted_control(
                     &auth.session_id,
                     profile_name.clone(),
                     profile_id.clone(),
+                    allow_yolo_on_sensitive_host,
                 )
                 .await
                 {
@@ -3287,6 +3311,7 @@ pub(crate) async fn handle_restricted_control(
                 cols,
                 rows,
                 intent_key,
+                allow_yolo_on_sensitive_host,
                 agent_kind,
                 resume_template,
                 source_profile,
@@ -3782,6 +3807,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             invocation,
             title,
             intent_key,
+            allow_yolo_on_sensitive_host: _,
         } => {
             if cwd.is_empty() {
                 return Err("--cwd must not be empty".to_string());
@@ -3813,6 +3839,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             cwd,
             title,
             intent_key,
+            allow_yolo_on_sensitive_host: _,
         } => {
             validate_target(
                 source_session_id,
@@ -4280,6 +4307,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: Some("resolved-key".to_string()),
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: Some(AgentKind::Claude),
                 resume_template: None,
                 source_profile: Some(WireProfileSnapshot {
@@ -4349,6 +4377,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: Some("spawn-copy".to_string()),
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: None,
                 resume_template: None,
                 source_profile: None,
@@ -4409,6 +4438,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: Some("structured-spawn-copy".to_string()),
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: None,
                 resume_template: None,
                 source_profile: None,
@@ -4477,6 +4507,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: None,
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: None,
                 resume_template: None,
                 source_profile: None,
@@ -4550,6 +4581,7 @@ mod tests {
             cols: 80,
             rows: 24,
             intent_key: None,
+            allow_yolo_on_sensitive_host: false,
             agent_kind: None,
             resume_template: None,
             source_profile: None,
@@ -4601,6 +4633,7 @@ mod tests {
                         cols: 80,
                         rows: 24,
                         intent_key: Some("resolve-before-claim".to_string()),
+                        allow_yolo_on_sensitive_host: false,
                         agent_kind: None,
                         resume_template: None,
                         source_profile: None,
@@ -4836,6 +4869,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     intent_key: Some(format!("ambiguous-{req_id}")),
+                    allow_yolo_on_sensitive_host: false,
                     agent_kind,
                     resume_template,
                     launch: None,
@@ -5912,6 +5946,7 @@ mod tests {
                     invocation: Option<&str>,
                     title: Option<&str>,
                     intent_key: Option<&str>| AgentVerb::Create {
+            allow_yolo_on_sensitive_host: false,
             host: host.map(str::to_string),
             cwd: cwd.to_string(),
             profile_name: profile_name.map(str::to_string),
@@ -5932,6 +5967,7 @@ mod tests {
                 cwd: None,
                 title: None,
                 intent_key: None,
+                allow_yolo_on_sensitive_host: false,
             })
             .is_err(),
             "the old implicit source and destination shape must be refused"
@@ -5946,6 +5982,7 @@ mod tests {
             cwd: None,
             title: None,
             intent_key: None,
+            allow_yolo_on_sensitive_host: false,
         });
         assert!(control_host.unwrap_err().contains("control character"));
 
@@ -5959,6 +5996,7 @@ mod tests {
                 cwd: cwd.map(str::to_string),
                 title: None,
                 intent_key: None,
+                allow_yolo_on_sensitive_host: false,
             })
         };
         assert!(
@@ -5977,6 +6015,7 @@ mod tests {
             cwd: None,
             title: None,
             intent_key: None,
+            allow_yolo_on_sensitive_host: false,
         })
         .unwrap_err();
         assert!(
@@ -6133,6 +6172,7 @@ mod tests {
             cwd: Some(half.clone()),
             title: Some(half),
             intent_key: None,
+            allow_yolo_on_sensitive_host: false,
         });
         assert!(
             summed_clone
@@ -6150,6 +6190,7 @@ mod tests {
             cwd: None,
             title: None,
             intent_key: Some("k".repeat(INTENT_KEY_CAP + 1)),
+            allow_yolo_on_sensitive_host: false,
         });
         assert!(
             oversized_key
@@ -6409,6 +6450,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: Some("forged-key".to_string()),
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: None,
                 resume_template: None,
                 launch: None,
@@ -6569,6 +6611,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: Some("checkout-key".to_string()),
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: None,
                 resume_template: None,
                 source_profile: None,
@@ -6691,6 +6734,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: Some("ordinary-checkout-key".to_string()),
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: None,
                 resume_template: None,
                 source_profile: None,
@@ -6793,6 +6837,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: Some("revoked-key".to_string()),
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: None,
                 resume_template: None,
                 launch: None,
@@ -6862,6 +6907,7 @@ mod tests {
             cols: 80,
             rows: 24,
             intent_key: Some("waiting-revoked-key".into()),
+            allow_yolo_on_sensitive_host: false,
             agent_kind: None,
             resume_template: None,
             launch: None,
@@ -7060,6 +7106,7 @@ mod tests {
             cols: 80,
             rows: 24,
             intent_key: Some("mutation-wins-key".into()),
+            allow_yolo_on_sensitive_host: false,
             agent_kind: None,
             resume_template: None,
             launch: None,
@@ -8396,6 +8443,7 @@ mod tests {
             cols: 80,
             rows: 24,
             intent_key: Some("self-replay-key".to_string()),
+            allow_yolo_on_sensitive_host: false,
             agent_kind: None,
             resume_template: None,
             launch: None,
@@ -8463,6 +8511,7 @@ mod tests {
             cols: 80,
             rows: 24,
             intent_key: Some("spawn-key".to_string()),
+            allow_yolo_on_sensitive_host: false,
             agent_kind: None,
             resume_template: None,
             launch: None,
@@ -8804,6 +8853,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: Some("oversized-checkout".into()),
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: None,
                 resume_template: None,
                 github_checkout: Some(checkout),
@@ -8867,6 +8917,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: None,
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: None,
                 resume_template: None,
                 github_checkout: None,
@@ -8956,6 +9007,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     intent_key: Some(key),
+                    allow_yolo_on_sensitive_host: false,
                     agent_kind: None,
                     resume_template: None,
                     github_checkout: None,
@@ -9012,6 +9064,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: Some("k".repeat(INTENT_KEY_CAP)),
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: None,
                 resume_template: None,
                 github_checkout: None,
@@ -9080,6 +9133,7 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     intent_key: Some("key".to_string()),
+                    allow_yolo_on_sensitive_host: false,
                     agent_kind: None,
                     resume_template: Some(template),
                     github_checkout: None,

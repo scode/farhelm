@@ -206,6 +206,9 @@ export interface HostRow {
    * request carried THIS value rather than merely some value. The create is
    * the only guarded request; profile reads and edits carry no precondition. */
   incarnation: number;
+  /** Whether the host is marked safe for YOLO launches; every host starts
+   * sensitive (`false`). Read back by `setLocalYoloSafe` to prove its write. */
+  yolo_safe: boolean;
 }
 
 /**
@@ -259,6 +262,31 @@ export async function localHostId(request: APIRequestContext): Promise<number> {
   const local = (await listHosts(request)).find((host) => host.kind === "local");
   if (!local) throw new Error("the helm reported no local host row");
   return local.id;
+}
+
+/**
+ * Mark the local host safe (or sensitive, the default) for YOLO launches.
+ *
+ * Every host starts sensitive, so a spec that launches a YOLO session for
+ * some other reason (remembered permissions, clone, replace) would otherwise
+ * get the helm's confirmation refusal instead of a session. Such a spec
+ * marks the host safe for its duration and puts it back afterwards: the
+ * suite shares one helm, so a setting left behind would silently change
+ * what every later spec's YOLO launch does.
+ */
+export async function setLocalYoloSafe(request: APIRequestContext, yoloSafe: boolean): Promise<void> {
+  const id = await localHostId(request);
+  await ok(
+    await request.post(`/api/hosts/${id}/yolo-safe`, { data: { yolo_safe: yoloSafe } }),
+    `marking the local host ${yoloSafe ? "safe" : "sensitive"} for YOLO launches`,
+  );
+  // The premise every caller acts on, read back rather than inferred from
+  // the write's status: a spec whose YOLO launch then behaves unexpectedly
+  // should fail here, naming the setting, not later on the launch.
+  const local = (await listHosts(request)).find((host) => host.id === id);
+  if (local?.yolo_safe !== yoloSafe) {
+    throw new Error(`the local host's yolo_safe reads ${local?.yolo_safe}, not ${yoloSafe}, after setting it`);
+  }
 }
 
 /** One page of the session list, with an optional filter query string. */

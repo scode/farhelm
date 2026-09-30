@@ -776,6 +776,7 @@ async fn a_session_cannot_call_the_internal_profile_resolver_directly() {
             AgentVerb::ResolveProfile {
                 name: Some("Secret profile".to_string()),
                 id: None,
+                allow_yolo_on_sensitive_host: false,
             },
         )
         .await,
@@ -840,6 +841,7 @@ async fn a_named_spawn_resolves_and_stores_the_attached_helms_bundle() {
             cols: 80,
             rows: 24,
             intent_key: Some("resolved-spawn".to_string()),
+            allow_yolo_on_sensitive_host: false,
             agent_kind: None,
             resume_template: None,
             launch: None,
@@ -862,6 +864,7 @@ async fn a_named_spawn_resolves_and_stores_the_attached_helms_bundle() {
             AgentVerb::ResolveProfile {
                 name: Some("Scripted agent".to_string()),
                 id: None,
+                allow_yolo_on_sensitive_host: false,
             },
         )],
         "the supervisor must issue the internal resolution under the asking session"
@@ -912,6 +915,7 @@ async fn a_restricted_create_cannot_supply_source_profile() {
             cols: 80,
             rows: 24,
             intent_key: Some("forged-provenance".to_string()),
+            allow_yolo_on_sensitive_host: false,
             agent_kind: None,
             resume_template: None,
             launch: None,

@@ -317,6 +317,8 @@ pub(crate) struct SpawnArgs {
     pub(crate) inherit_agent: bool,
     pub(crate) parent: Option<String>,
     pub(crate) idempotency_key: Option<String>,
+    /// See `farhelm spawn --allow-yolo-on-sensitive-host`.
+    pub(crate) allow_yolo_on_sensitive_host: bool,
 }
 
 /// Create one child under the environment's session authority.
@@ -368,6 +370,7 @@ pub(crate) async fn spawn_session(env: &SessionEnv, args: SpawnArgs) -> anyhow::
         cols: 80,
         rows: 24,
         intent_key: args.idempotency_key,
+        allow_yolo_on_sensitive_host: args.allow_yolo_on_sensitive_host,
         agent_kind: None,
         resume_template: None,
         source_profile: None,
@@ -759,10 +762,12 @@ mod tests {
             invocation: Some("claude".to_string()),
             title: None,
             intent_key: None,
+            allow_yolo_on_sensitive_host: false,
         });
         let resolve = ReplyKind::of_verb(&farhelm_proto::AgentVerb::ResolveProfile {
             name: Some("claude".to_string()),
             id: None,
+            allow_yolo_on_sensitive_host: false,
         });
         assert_ne!(create, resolve);
         assert_eq!(resolve.noun(), "resolved profile");

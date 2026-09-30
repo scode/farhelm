@@ -1932,7 +1932,11 @@ pub(crate) fn ListView(
     // does not do for a client that already has a page open.
     let replace_base = base.clone();
     let replace_refresh = request_listing.clone();
-    let mut do_replace = move |id: String| {
+    // A replace the helm refused as a YOLO launch on a sensitive host: the
+    // source row's id and the helm's refusal, shown as the loud confirmation
+    // above the list until the user confirms or cancels (see `yolo_confirm`).
+    let mut yolo_replace = use_signal(|| None::<(String, String)>);
+    let mut do_replace = move |id: String, allow_yolo: bool| {
         if !begin_row_op(&id) {
             return;
         }
@@ -1955,7 +1959,7 @@ pub(crate) fn ListView(
             crate::status::shows_nothing_alive(&source.status, source.tabs.len())
         });
         spawn(async move {
-            match replace_session(&base, &id, only_if_nothing_alive).await {
+            match replace_session(&base, &id, only_if_nothing_alive, allow_yolo).await {
                 Ok(session) => {
                     let session = match &source {
                         Some(source) => super::with_source_host(session, source),
@@ -1973,7 +1977,13 @@ pub(crate) fn ListView(
                     // that same failure the message already names the new
                     // session's id too (`api::replace_session`'s own doc),
                     // so nothing here needs to remember it separately.
-                    errors.write().insert(id.clone(), format!("replace: {e}"));
+                    if e.yolo_confirmation {
+                        yolo_replace.set(Some((id.clone(), e.text)));
+                    } else {
+                        errors
+                            .write()
+                            .insert(id.clone(), format!("replace: {}", e.text));
+                    }
                 }
             }
             end_row_op(&id);
@@ -2007,6 +2017,8 @@ pub(crate) fn ListView(
             .write()
             .insert(session.id, RowPhase::ConfirmingReplace);
     };
+    // The loud YOLO confirmation's own way back into the same replace.
+    let yolo_do_replace = do_replace.clone();
     let confirm_replace = move |id: String| {
         // Same shared-token refusal as `confirm_delete`, for the same
         // keep-the-prompt reason.
@@ -2014,7 +2026,7 @@ pub(crate) fn ListView(
             return;
         }
         if leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingReplace) {
-            do_replace(id);
+            do_replace(id, false);
         }
     };
     let cancel_replace = move |id: String| {
@@ -3053,6 +3065,21 @@ pub(crate) fn ListView(
                     // be read" under a cut one.
                     if let Some(line) = rows::no_match_line(listing) {
                         div { class: "status filter-empty", "{line}" }
+                    }
+                    if let Some((source, message)) = yolo_replace.read().clone() {
+                        crate::yolo_confirm::YoloConfirmation {
+                            message,
+                            busy: ops.busy(),
+                            confirm_submits: false,
+                            on_confirm: {
+                                let mut do_replace = yolo_do_replace.clone();
+                                move |_| {
+                                    yolo_replace.set(None);
+                                    do_replace(source.clone(), true);
+                                }
+                            },
+                            on_cancel: move |_| yolo_replace.set(None),
+                        }
                     }
                     div { class: "session-list",
                         onpointerenter: {

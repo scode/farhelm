@@ -169,6 +169,81 @@ test("restart with shows fixed context and submits one edited resume", async ({ 
 });
 
 /**
+ * A restart with YOLO settings that the helm refuses for a sensitive host asks
+ * inside the dialog, and confirming resends the dialog's settings with the
+ * override.
+ *
+ * Why: the dialog is modal, so a confirmation rendered beside it would be
+ * inert and the refused restart could never be confirmed. The refusal is
+ * route-mocked with the helm's own header (the helm tests pin the helm's side);
+ * what only a browser shows is where the question appears and what the
+ * confirmed request carries.
+ */
+test("a YOLO restart with refused for a sensitive host is confirmed inside the dialog", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume");
+  const bodies: any[] = [];
+  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+    const body = route.request().postDataJSON();
+    bodies.push(body);
+    if (!body.allow_yolo_on_sensitive_host) {
+      await fulfillAsHelm(route, {
+        status: 409,
+        contentType: "text/plain",
+        headers: { "x-farhelm-yolo-confirmation": "sensitive-host" },
+        body: "this machine is marked sensitive for YOLO launches; confirm with --allow-yolo-on-sensitive-host",
+      });
+      return;
+    }
+    await fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: SESSION_ID,
+        title: TITLE,
+        cwd: "/tmp",
+        invocation: "codex --yolo",
+        launch: { ...BASELINE, permissions: "yolo" },
+        status: { state: "unknown" },
+        restart_offer: "resume",
+        created_at: 0,
+        last_activity_at: 0,
+        tabs: [],
+      }),
+    });
+  });
+
+  const dialog = await openInjectedDialog(page);
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await dialog.locator(".restart-with-submit").click();
+  const confirmation = dialog.locator(".yolo-confirmation");
+  await expect(confirmation, "the question must appear inside the modal dialog").toBeVisible();
+  await expect(confirmation).toContainText("--allow-yolo-on-sensitive-host");
+  expect(bodies).toHaveLength(1);
+
+  // Declining from the keyboard hands focus back to the dialog rather than
+  // dropping it to the page body with the modal still open.
+  await confirmation.locator(".yolo-cancel").focus();
+  await page.keyboard.press("Enter");
+  await expect(confirmation).toHaveCount(0);
+  await expect(dialog.locator(".restart-with-cancel")).toBeFocused();
+  expect(bodies, "declining must not send anything").toHaveLength(1);
+
+  // Asking again and confirming from the keyboard sends the override.
+  await dialog.locator(".restart-with-submit").click();
+  await expect(confirmation).toBeVisible();
+  expect(bodies).toHaveLength(2);
+  await confirmation.locator(".yolo-confirm").focus();
+  await page.keyboard.press("Enter");
+  await expect(dialog).toHaveCount(0);
+  expect(bodies).toHaveLength(3);
+  expect(bodies[2]).toMatchObject({
+    mode: "resume",
+    with: { harness: "codex", permissions: "yolo" },
+    allow_yolo_on_sensitive_host: true,
+  });
+});
+
+/**
  * A legacy session has no structured selection to edit even if it can resume.
  * The inert button must remain visible and explain the missing prerequisite to
  * both a pointer user and assistive technology, while refusing activation.

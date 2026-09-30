@@ -92,6 +92,11 @@ enum Cmd {
         /// Retry key, valid only for the child session's lifetime.
         #[arg(long)]
         idempotency_key: Option<String>,
+        /// Start the child even if its profile is a YOLO launch and this
+        /// host is marked sensitive; without it the helm refuses. Only with
+        /// the user's explicit approval for this launch.
+        #[arg(long)]
+        allow_yolo_on_sensitive_host: bool,
     },
     /// Ask the helm about the fleet, or act on it, from inside a Farhelm
     /// session — `hosts`/`sessions` are read-only questions,
@@ -259,6 +264,11 @@ enum AgentCmd {
         /// Retry key: the same key creates the session only once.
         #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
         idempotency_key: Option<String>,
+        /// Start a YOLO session even though the target host is marked
+        /// sensitive; without it the helm refuses. Only with the user's
+        /// explicit approval for this launch.
+        #[arg(long)]
+        allow_yolo_on_sensitive_host: bool,
     },
     /// Copy an explicitly named session onto any host; prints the new id.
     Clone {
@@ -277,6 +287,11 @@ enum AgentCmd {
         /// Retry key: the same key creates the session only once.
         #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
         idempotency_key: Option<String>,
+        /// Start a YOLO session even though the target host is marked
+        /// sensitive; without it the helm refuses. Only with the user's
+        /// explicit approval for this launch.
+        #[arg(long)]
+        allow_yolo_on_sensitive_host: bool,
     },
     /// Print how to use these verbs, for an agent that was told to.
     Instructions,
@@ -329,6 +344,7 @@ impl AgentCmd {
                 invocation,
                 title,
                 idempotency_key,
+                allow_yolo_on_sensitive_host,
             } => Some(farhelm_proto::AgentVerb::Create {
                 host: Some(host.clone()),
                 cwd: cwd.clone(),
@@ -341,6 +357,7 @@ impl AgentCmd {
                 invocation: invocation.clone(),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
+                allow_yolo_on_sensitive_host: *allow_yolo_on_sensitive_host,
             }),
             AgentCmd::Clone {
                 source_session,
@@ -348,12 +365,14 @@ impl AgentCmd {
                 cwd,
                 title,
                 idempotency_key,
+                allow_yolo_on_sensitive_host,
             } => Some(farhelm_proto::AgentVerb::Clone {
                 source_session_id: Some(source_session.clone()),
                 host: Some(host.clone()),
                 cwd: cwd.clone(),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
+                allow_yolo_on_sensitive_host: *allow_yolo_on_sensitive_host,
             }),
             AgentCmd::Instructions | AgentCmd::Help => None,
         }
@@ -625,6 +644,7 @@ fn main() -> anyhow::Result<()> {
             inherit_agent,
             parent,
             idempotency_key,
+            allow_yolo_on_sensitive_host,
         } => {
             let child = runtime()?.block_on(spawn_session(
                 &SessionEnv::from_env(),
@@ -636,6 +656,7 @@ fn main() -> anyhow::Result<()> {
                     inherit_agent,
                     parent,
                     idempotency_key,
+                    allow_yolo_on_sensitive_host,
                 },
             ))?;
             println!("{child}");

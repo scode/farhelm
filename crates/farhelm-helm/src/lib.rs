@@ -180,6 +180,8 @@ pub mod session_cache;
 /// The session REST surface — the list, the owner-lookup routing behind
 /// every operation on one session, and the handlers themselves.
 mod sessions;
+/// The refusal of a YOLO launch on a sensitive host (see its own docs).
+mod yolo_guard;
 
 /// The ssh argv the remote transport is built out of, and the handshake
 /// failure only that transport can explain.
@@ -1757,6 +1759,9 @@ const BUILD_STAMP_HEADER: &str = farhelm_proto::http::BUILD_STAMP_HEADER;
 /// REST caller keeps the `Internal` it has always produced, since a
 /// browser's retry decision is the user's own.
 fn error_kind(e: &anyhow::Error) -> ErrorKind {
+    if find_cause::<yolo_guard::YoloOnSensitiveHost>(e).is_some() {
+        return ErrorKind::Conflict;
+    }
     if let Some(refusal) = find_cause::<store::HostStoreError>(e) {
         return match refusal {
             store::HostStoreError::HostNotFound(_) => ErrorKind::NotFound,
@@ -1840,8 +1845,10 @@ fn find_cause<T: std::error::Error + Send + Sync + 'static>(e: &anyhow::Error) -
 /// supervisor's message safe to pass through verbatim.
 fn http_error(e: anyhow::Error) -> axum::response::Response {
     let kind = error_kind(&e);
-    let unaccepted =
-        e.downcast_ref::<FreshCreateUnaccepted>().is_some() || kind == ErrorKind::CheckoutConflict;
+    let yolo_refused = find_cause::<yolo_guard::YoloOnSensitiveHost>(&e).is_some();
+    let unaccepted = e.downcast_ref::<FreshCreateUnaccepted>().is_some()
+        || kind == ErrorKind::CheckoutConflict
+        || yolo_refused;
     let status = if error_kind_is_a_supervisor_reply(&e) {
         supervisor_reply_status(kind)
     } else {
@@ -1857,6 +1864,17 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
         response.headers_mut().insert(
             farhelm_proto::http::PRECONDITION_HEADER,
             axum::http::HeaderValue::from_static(farhelm_proto::http::PRECONDITION_INCARNATION),
+        );
+    }
+    // Set only from the helm's own typed refusal, like the precondition
+    // header above: this is what makes the browser ask for an explicit YOLO
+    // confirmation, so a supervisor must not be able to set it.
+    if yolo_refused {
+        response.headers_mut().insert(
+            farhelm_proto::http::YOLO_CONFIRMATION_HEADER,
+            axum::http::HeaderValue::from_static(
+                farhelm_proto::http::YOLO_CONFIRMATION_SENSITIVE_HOST,
+            ),
         );
     }
     if unaccepted {
