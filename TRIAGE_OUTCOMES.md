@@ -4205,7 +4205,10 @@
   the path and continue startup whenever the cleanup fails or cannot decide.
 - Completion criteria: a helm whose old cache cannot be removed or inspected still starts and warns; focused coverage;
   remove this feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `production_payloads_with_key` logs a warning naming the path and continues when
+  `remove_leftover_embedded_payloads` fails, which it only does before deleting anything it could not judge, so the
+  never-delete-when-unsure behavior is unchanged. Change `yvppqqtlwxly`, bookmark `pr/embedded-cleanup-nonfatal`, draft
+  PR [#1204](https://github.com/scode/farhelm/pull/1204/changes).
 
 ## reach-misreads-escaped-xdg-config-home.md
 

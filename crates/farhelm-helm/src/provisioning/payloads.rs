@@ -1143,7 +1143,19 @@ pub(super) fn production_payloads_with_key(
         PayloadSelection::Directory(dir) => Some(dir.as_path()),
         PayloadSelection::Default | PayloadSelection::Release { .. } => None,
     };
-    remove_leftover_embedded_payloads(cwd, helm_state_dir, selected_directory)?;
+    // Housekeeping only: nothing depends on the retired cache being gone, so
+    // a failure to inspect or remove it must not stop the helm, and with it
+    // the web UI and every session, from starting. An error here never
+    // resolves toward deletion: the cleanup returns before removing anything
+    // it could not judge, and the cache is simply left for a later start.
+    if let Err(error) = remove_leftover_embedded_payloads(cwd, helm_state_dir, selected_directory) {
+        warn!(
+            path = %helm_state_dir.join("embedded-payloads").display(),
+            error = %format!("{error:#}"),
+            "could not clean up the retired embedded-payloads cache; leaving it in place and \
+             starting anyway"
+        );
+    }
     // The two selections that never download are answered first; what
     // remains differs only in WHICH base URL to read, so the release source
     // is constructed exactly once and a future change to its constructor has
