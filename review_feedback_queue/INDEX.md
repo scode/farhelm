@@ -70,8 +70,6 @@ One line per open item. This file must always match the feedback files in this d
   edits run during provisioning.
 - `refresh-starved-by-seeds.md` — steady creates/renames through the helm can discard every refresh while the host
   reports healthy.
-- `host-edits-not-cancellation-safe.md` — a client disconnect between a host edit's commit and its reconcile leaves the
-  actor out of sync until restart.
 - `hostnotfound-refresh-keeps-serving.md` — an identity-less actor for a deleted host keeps serving, because its
   refreshes never write the store and so never see the row is gone.
 - `session-detail-drains-full-list.md` — every fleet-revision bump makes each open session view trigger a full

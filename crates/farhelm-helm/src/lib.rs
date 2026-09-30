@@ -1844,6 +1844,27 @@ fn find_cause<T: std::error::Error + Send + Sync + 'static>(e: &anyhow::Error) -
         .or_else(|| e.chain().find_map(|c| c.downcast_ref::<T>()))
 }
 
+/// Run a request's state-changing work on a task the helm owns, and wait for
+/// its result.
+///
+/// axum drops a handler's future when the client goes away, stopping it at
+/// whatever step it had reached; blocking work already handed off (a store
+/// transaction) still finishes, so a handler that commits and then
+/// reconciles running state is left half done, in a state nothing later
+/// repairs (SPEC_impl.md "Who owns an accepted action"). Spawned work runs to
+/// completion whether or not anyone is still waiting; the client only loses
+/// the reply. A panic in the work is re-raised here, as it would have been
+/// inline.
+pub(crate) async fn run_owned<T: Send + 'static>(
+    work: impl std::future::Future<Output = T> + Send + 'static,
+) -> T {
+    match tokio::spawn(work).await {
+        Ok(value) => value,
+        Err(join) if join.is_panic() => std::panic::resume_unwind(join.into_panic()),
+        Err(join) => panic!("a helm-owned request task was cancelled: {join}"),
+    }
+}
+
 /// Render an error as an HTTP response whose body is the error chain in
 /// full and whose status is [`error_kind`]'s classification, mapped onto
 /// the closest HTTP status for each kind (`Unavailable`→503,
@@ -2500,6 +2521,41 @@ mod tests {
                 "the refusal leaked {secret:?} to stderr:\n{stderr}"
             );
         }
+    }
+
+    /// Work handed to `run_owned` finishes even when the request that
+    /// started it is dropped.
+    ///
+    /// Why it matters: axum drops a handler's future when its client goes
+    /// away, and host edits commit a change and then reconcile the running
+    /// connections; stopped in between, the registry and the actors disagree
+    /// until something unrelated repairs them (SPEC_impl.md "Who owns an
+    /// accepted action"). Specified: a waiter dropped while its work is
+    /// blocked does not stop the work, which completes once unblocked.
+    #[farhelm_testtrace::test]
+    async fn owned_work_completes_after_its_waiter_is_dropped() {
+        let release = std::sync::Arc::new(tokio::sync::Notify::new());
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        let work_release = std::sync::Arc::clone(&release);
+        let waiter = tokio::spawn(super::run_owned(async move {
+            let _ = started_tx.send(());
+            work_release.notified().await;
+            let _ = done_tx.send(());
+        }));
+        // The work must already belong to its own task before the waiter
+        // goes away; a scheduler yield does not promise that.
+        tokio::time::timeout(std::time::Duration::from_secs(5), started_rx)
+            .await
+            .expect("test premise: the owned work must start")
+            .expect("test premise: the owned work must start");
+        waiter.abort();
+        let _ = waiter.await;
+        release.notify_one();
+        tokio::time::timeout(std::time::Duration::from_secs(5), done_rx)
+            .await
+            .expect("the owned work must finish after its waiter is gone")
+            .expect("the owned work must run to completion");
     }
 
     /// `http_error`'s downcast must find a [`SupervisorError`] under a
