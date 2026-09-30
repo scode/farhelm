@@ -2851,12 +2851,52 @@
       // firing into a disposed `term` forever.
       let stopCopyOnSelect = null;
       let bannered = false;
+      // A banner held back while this session's delete is in flight, and the
+      // observer waiting for that delete to fail (see `showBanner`). Both
+      // belong to THIS mount: `disposeDeferred` drops them and closes the
+      // hold, so a mount replaced by a reconnect (the same element, a new
+      // island) can never have a stale notice painted over it.
+      let heldBanner = null;
+      let heldBannerWatch = null;
+      let bannerHoldClosed = false;
       function showBanner(text, reclaimable) {
         // Sticky by design: the first banner wins for the life of the
         // socket, so a specific reason (a takeover) is never overwritten
         // by the generic close or error that follows it a moment later.
         // Callers must not need to remember to check the flag.
         if (bannered) return;
+        // A delete of this session is in flight (the view marks the panes
+        // with `data-deleting`): the detach and the closed socket are the
+        // delete working, not a lost connection, and the delete has its own
+        // overlay. They arrive with `DetachCode::Other`, the code a real loss
+        // uses too, so only the view can tell them apart. The banner is held
+        // rather than dropped: a delete that fails clears the mark while this
+        // terminal is still mounted, and the held banner then paints, since
+        // SPEC.md keeps a failed delete's cleanup visible. A delete that
+        // succeeds unmounts the view, and the held banner goes with it.
+        const panes = document.getElementById(spec.el)?.closest(".terminal-panes");
+        if (panes && panes.dataset.deleting === "true") {
+          // A disposed mount holds nothing: its element may already belong
+          // to a replacement, and the row's own delete error covers a
+          // failure from here on.
+          if (bannerHoldClosed) return;
+          // The first notice wins here too, as it does for painted ones: a
+          // takeover's specific reason (and its take-control button) must
+          // not be replaced by the generic close that follows it.
+          if (!heldBanner) heldBanner = { text, reclaimable: !!reclaimable };
+          if (!heldBannerWatch) {
+            heldBannerWatch = new MutationObserver(() => {
+              if (bannerHoldClosed || panes.dataset.deleting === "true" || !heldBanner) return;
+              heldBannerWatch.disconnect();
+              heldBannerWatch = null;
+              const held = heldBanner;
+              heldBanner = null;
+              showBanner(held.text, held.reclaimable);
+            });
+            heldBannerWatch.observe(panes, { attributes: true, attributeFilter: ["data-deleting"] });
+          }
+          return;
+        }
         bannered = true;
         paintBanner(spec.banner, text, !!reclaimable);
       }
@@ -3995,6 +4035,14 @@
           alive = false;
           clearIdleTimer();
           clearHeartbeat();
+          // A held banner and its observer die with the mount; see their
+          // declarations.
+          bannerHoldClosed = true;
+          heldBanner = null;
+          if (heldBannerWatch) {
+            heldBannerWatch.disconnect();
+            heldBannerWatch = null;
+          }
           // The trailing scrolled-refresh timer's own callback checks
           // `alive` first, so a late fire is already a no-op; clearing it
           // here only stops a dead island from holding a pending timer.
@@ -4852,6 +4900,13 @@
         // this line is about to destroy, and a still-armed heartbeat would
         // close a socket this line already closed.
         if (disposeDeferred) disposeDeferred();
+        // A mount that failed before `disposeDeferred` existed closes its
+        // banner hold here instead; see `bannerHoldClosed`.
+        bannerHoldClosed = true;
+        if (heldBannerWatch) {
+          heldBannerWatch.disconnect();
+          heldBannerWatch = null;
+        }
         if (ws) ws.close();
         if (term) term.dispose();
         // The catch-up presentation goes back too, so the pane shows the

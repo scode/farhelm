@@ -131,38 +131,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - Before measuring latency, confirm the desktop app's event feed is healthy. A dead feed (the known macOS webview
     bridge failure) falls back to the UI's own 3 s poll and looks the same. A quick test: rename a session from a
     browser and watch whether the desktop app updates at once.
-- **Make the delete-in-progress indicator prominent.** Deleting a live session takes seconds, most of it the agent
-  handling its own SIGTERM. #1175 added an in-progress state for that wait. It works, but it is too subtle to notice:
-  - on the sidebar row, a 6px pulsing red dot and "stopping…" (or "deleting…" when nothing was alive) in place of the
-    last-activity age, with the row dimmed to 60%;
-  - in the session header, the same dot and word in place of the action buttons.
-
-  The maintainer missed it, even while looking at the session list, and did not realise the feature had shipped. What
-  caught the eye instead was the terminal's full-width red "Detached: …" banner, which only arrives near the end of the
-  delete and was mistaken for the indicator.
-
-  Decided (2026-09-29, with the maintainer):
-  - This entry is about prominence only. Making deletes faster is out of scope.
-  - Only the client that started the delete needs to show it; other connected clients are out of scope. The deleting set
-    is local UI state (`list/view.rs`, `session_view.rs`).
-  - These behaviours from #1175 stay:
-    - the state shows from the moment the delete is committed until the supervisor's reply;
-    - it never claims to stop something that is not running (today's "stopping…" versus "deleting…" rule);
-    - the row stays in the list until the reply;
-    - a refused delete restores the row and header, with the refusal shown.
-  - Everything else about the look may change, including what SPEC.md's Delete bullet currently pins: the dimmed row,
-    the exact words, and the header showing it in place of its actions. Amend SPEC.md in the same PR to match.
-  - The sidebar row and the session header are in scope. Other surfaces, such as an overlay on the terminal pane where
-    the user's eye actually is, may be proposed as options.
-
-  Deliberately left open: the visual design. The maintainer chose to decide it when this is picked up, so start by
-  proposing a few concrete options and get the maintainer's pick before implementing. Raise at the same time whether the
-  late "Detached: …" banner should be suppressed or reworded during a delete, rather than deciding it alone. Two
-  constraints bear on that:
-  - The delete's detach arrives with `DetachCode::Other`, the same code as a lost connection, so `terminal.js` cannot
-    tell them apart unless the Rust view passes its deleting state in.
-  - SPEC.md requires a failed delete's cleanup failure to stay visible, so a suppressed banner must come back, or be
-    replaced by something equivalent, when the delete fails.
 - **Installer refuses its own app bundle after an interrupted replacement.** On macOS, `scripts/install.sh` rebuilds
   `~/Applications/Farhelm.app` by removing the old bundle (`rm -rf`) and moving the staged one into place. An installer
   interrupted during that removal can leave a partial bundle whose ownership record (`Contents/.farhelm-installation`)

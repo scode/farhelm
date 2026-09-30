@@ -1367,6 +1367,86 @@ test("second client takes over; first shows the detach banner", async ({
 // if it wanted to. The banner text is asserted only to be non-empty and
 // to name the session, whatever exact prose this particular arm's error
 // happens to carry.
+// While the session view marks its panes as deleting, a detach notice's
+// banner is held back, and it paints once the mark clears with the terminal
+// still mounted: the failed-delete path.
+//
+// Why: a delete's own detach arrives with the same code as a lost
+// connection, so terminal.js holds every banner while a delete is in flight
+// (the delete has its own overlay). A failed delete must still show the
+// cleanup failure, which SPEC.md requires, so the hold must end in the
+// banner, not in silence. A real delete that fails AFTER detaching cannot be
+// staged from the browser, so this drives the same seam directly: the mark
+// is set by an init script the moment the panes appear, a bogus row's
+// attach produces a real `detached` notice, and the page itself records when
+// that notice has been handled.
+test("a detach banner is held while a delete is in flight and paints if it fails", async ({ page }) => {
+  const bogusId = "00000000-0000-0000-0000-00000000de1e";
+  const title = `held-banner-${Date.now()}`;
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__bannerShownWhileDeleting = false;
+    w.__detachHandled = false;
+    // Record, page-side, that a `detached` notice has been delivered. This
+    // listener is added in the constructor, before terminal.js's own, so a
+    // later poll that sees the flag also sees terminal.js's handling of it.
+    const Native = window.WebSocket;
+    w.WebSocket = class extends Native {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        this.addEventListener("message", (ev: MessageEvent) => {
+          if (typeof ev.data === "string" && ev.data.includes('"detached"')) {
+            // The flag means handled, not merely received: this listener runs
+            // before terminal.js's, so it yields once to let that one finish.
+            // sleep-ok: zero-delay yield ordering this after terminal.js's handler
+            setTimeout(() => { w.__detachHandled = true; }, 0);
+          }
+        });
+      }
+    };
+    new MutationObserver(() => {
+      const panes = document.querySelector(".terminal-panes") as HTMLElement | null;
+      if (panes && !panes.dataset.forcedOnce) {
+        panes.dataset.forcedOnce = "true";
+        panes.dataset.deleting = "true";
+      }
+      const banner = document.getElementById("term-banner");
+      if (panes?.dataset.deleting === "true" && banner && banner.style.display === "block") {
+        w.__bannerShownWhileDeleting = true;
+      }
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "data-deleting"] });
+  });
+  await page.route(SESSION_LISTING, async (route) => {
+    const response = await route.fetch();
+    const listing = await response.json();
+    listing.sessions.push({
+      id: bogusId,
+      title,
+      cwd: "/tmp/held-banner-fixture",
+      invocation: "true",
+      status: { state: "exited", exit_code: null },
+    });
+    listing.total += 1;
+    await route.fulfill({ response, json: listing });
+  });
+
+  await page.goto("/");
+  await rowByTitle(page, title).locator(".session-row-open").click();
+  const banner = page.locator("#term-banner");
+  await expect.poll(() => page.evaluate(() => (window as any).__detachHandled), {
+    message: "the bogus attach's detached notice reached the page",
+    timeout: 10_000,
+  }).toBe(true);
+  expect(await page.locator(".terminal-panes").getAttribute("data-deleting")).toBe("true");
+  await expect(banner, "the banner is held while the delete is in flight").toBeHidden();
+
+  // The delete "fails": the mark clears while the terminal is mounted.
+  await page.locator(".terminal-panes").evaluate((node: HTMLElement) => { node.dataset.deleting = "false"; });
+  await expect(banner).toBeVisible();
+  expect(await banner.textContent()).toMatch(/^Detached: .+/);
+  expect(await page.evaluate(() => (window as any).__bannerShownWhileDeleting)).toBe(false);
+});
+
 test("opening a terminal-less session shows its metadata and the server's own explanation", async ({
   page,
 }) => {

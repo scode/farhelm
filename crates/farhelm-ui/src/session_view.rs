@@ -2381,7 +2381,30 @@ pub(crate) fn SessionView(
                 // recreates its DOM (and with it `#term-banner`, which
                 // long-lived observers in the browser suite hold a reference
                 // to) just because the tab list changed around it.
-                div { class: "terminal-panes",
+                // `data-deleting` is how terminal.js learns a delete of this
+                // session is in flight: the delete's detach and closed
+                // socket look like a lost connection from inside the island
+                // (`DetachCode::Other`), so it holds its banner while this is
+                // set (see `showBanner`). An attribute, not an eval call,
+                // because the eval channel is the one that dies on wry's
+                // WKWebView (MT-5).
+                div {
+                    class: "terminal-panes",
+                    "data-deleting": if header_deleting { "true" } else { "false" },
+                    // The delete in flight, over the terminal where the eye
+                    // is: the row and header say it too, but a user looking
+                    // at the terminal would otherwise see nothing until the
+                    // session disappears. Before the panes in the DOM so the
+                    // fixed agent pane keeps its place; `.terminal-delete-
+                    // overlay`'s z-index is what puts it above them.
+                    if header_deleting {
+                        div { class: "terminal-delete-overlay", role: "status",
+                            span { class: "terminal-delete-overlay-card",
+                                span { class: "delete-spinner", "aria-hidden": "true" }
+                                "{crate::status::delete_progress_label(&shown.status, shown.tabs.len())}"
+                            }
+                        }
+                    }
                     div {
                         class: if active_tab.is_none() { "terminal-pane selected" } else { "terminal-pane" },
                         "data-terminal": "agent",

@@ -1388,6 +1388,12 @@ pub(super) fn SessionRow(
         (class, false) => class.to_string(),
     };
     let delete_progress = crate::status::delete_progress_label(&session.status, session.tabs.len());
+    // Clipped rather than removed while deleting; see the title line below.
+    let title_class: &'static str = if deleting {
+        "session-title visually-hidden"
+    } else {
+        "session-title"
+    };
 
     rsx! {
         div {
@@ -1529,8 +1535,22 @@ pub(super) fn SessionRow(
                             // Titles are peer text (agents may rename any
                             // session), so the row shows them escaped and
                             // direction-isolated, not just in the tooltip.
+                            // A committed delete takes over the title line
+                            // until its reply lands: the one thing worth
+                            // saying about a row on its way out is that it
+                            // is going, and the title line is where the eye
+                            // lands. The title element stays, clipped rather
+                            // than removed: assistive technology still names
+                            // the row by it, and so does everything that
+                            // finds a row by its `.session-title`.
+                            if deleting {
+                                span { class: "delete-progress", role: "status",
+                                    span { class: "delete-spinner", "aria-hidden": "true" }
+                                    "{delete_progress}"
+                                }
+                            }
                             PeerTitle {
-                                class: "session-title",
+                                class: title_class,
                                 title: session.title.clone(),
                                 quoted: false,
                                 tooltip: true,
@@ -1585,15 +1605,7 @@ pub(super) fn SessionRow(
                         // instead of inheriting a status color that would
                         // make "2m" look like a verdict.
                         span { class: "session-activity-column",
-                        // A committed delete takes over the age's slot until
-                        // its reply lands: the one thing worth saying about a
-                        // row that is on its way out is that it is going.
-                        if deleting {
-                            span { class: "delete-progress", role: "status",
-                                span { class: "delete-progress-dot", "aria-hidden": "true" }
-                                "{delete_progress}"
-                            }
-                        } else if let Some(activity) = &activity {
+                        if let Some(activity) = &activity {
                             span {
                                 class: "status-time",
                                 title: "{activity.absolute}",

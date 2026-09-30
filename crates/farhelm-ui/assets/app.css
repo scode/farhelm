@@ -3215,21 +3215,41 @@ samp {
   vertical-align: 1px;
 }
 
-/* A committed delete waiting on the supervisor's reply, on the session's
-   row (in the age's slot) and in its header (in place of the actions). The
-   wait is mostly the agent handling SIGTERM, a few seconds at most, and the
-   point of this is only that the click visibly took. The row dims so it
-   reads as on its way out without looking disabled for some other reason. */
+/* A committed delete waiting on the supervisor's reply: on the session's
+   row (in place of its title line), in its header (in place of the
+   actions), and over its terminal (`.terminal-delete-overlay`). The wait is
+   mostly the agent handling SIGTERM, a few seconds at most. The previous
+   version of this, a small pulsing dot and a dimmed row, went unnoticed
+   even by someone looking at the list, so this one is meant to be seen: a
+   danger tint and edge on the row, a spinner, and words where the eye
+   already is. */
 .session-row.deleting {
-  opacity: 0.6;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--danger);
 }
 .delete-progress {
   align-items: center;
-  color: var(--fg-1);
+  color: var(--danger-strong);
   display: inline-flex;
-  gap: 4px;
+  font-weight: 600;
+  gap: 6px;
+  min-width: 0;
   white-space: nowrap;
 }
+.delete-spinner {
+  animation: farhelm-delete-spin 0.8s linear infinite;
+  border: 2px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-top-color: var(--danger);
+  border-radius: 50%;
+  box-sizing: border-box;
+  display: inline-block;
+  flex: 0 0 12px;
+  height: 12px;
+  width: 12px;
+}
+/* The header keeps the small pulsing dot beside its words: it sits among
+   the header's other controls, and the terminal overlay under it already
+   carries the spinner. */
 .delete-progress-dot {
   animation: farhelm-status-pulse 2s ease-in-out infinite;
   background: var(--danger);
@@ -3237,6 +3257,45 @@ samp {
   display: inline-block;
   flex: 0 0 6px;
   height: 6px;
+}
+@keyframes farhelm-delete-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The delete's overlay on the terminal: a scrim over every pane, with the
+   same spinner and words centered on a card. It takes no pointer events:
+   nothing under it can be used for the few seconds it shows anyway (the
+   delete holds the session's operations), and a click must not be eaten by
+   something on its way out. */
+.terminal-delete-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+  pointer-events: none;
+}
+.terminal-delete-overlay-card {
+  align-items: center;
+  background: var(--bg-2);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  color: var(--danger-strong);
+  display: inline-flex;
+  font-size: 15px;
+  font-weight: 600;
+  gap: 10px;
+  padding: 14px 20px;
+}
+.terminal-delete-overlay-card .delete-spinner {
+  flex-basis: 16px;
+  height: 16px;
+  width: 16px;
 }
 
 /* Declared AFTER the animations above, and the order is load-bearing: both
@@ -3246,7 +3305,8 @@ samp {
    still readable without the pulse, since the words say what is happening. */
 @media (prefers-reduced-motion: reduce) {
   .host-update-dot,
-  .delete-progress-dot {
+  .delete-progress-dot,
+  .delete-spinner {
     animation: none;
   }
 }
