@@ -163,13 +163,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     tell them apart unless the Rust view passes its deleting state in.
   - SPEC.md requires a failed delete's cleanup failure to stay visible, so a suppressed banner must come back, or be
     replaced by something equivalent, when the delete fails.
-- **Checkout preparation test markers leak into /tmp.** The D-suite preparation tests in
-  `crates/farhelm-supervisor/src/launch.rs` (`prep-d1`, `prep-d1h`, `prep-d3*`, `prep-d4*`) write their fake git, hook,
-  and agent records as loose `/tmp/prep-<test>-<pid>.*` files. `fresh_marker` removes only the bare marker path, which
-  the fakes never write, so nothing is ever deleted: each nextest run leaves 10 to 17 files per test, and a PID reused
-  from an earlier run inherits stale stage markers that can mask an out-of-order stage or fail `no_stage_ran`. Derive
-  the markers from `PrepFixture.tmp` instead, as `preparation_scrubs_inherited_authority_and_agent_gets_its_own` already
-  does, so each test gets its own directory that is removed on drop.
 - **Installer refuses its own app bundle after the install directory moves.** Since #1145, `scripts/install.sh` on macOS
   replaces `~/Applications/Farhelm.app` only when the bundle's ownership record names the install directory's current
   physical path. If that path changes between installs (`~/.local/bin` moved and replaced by a symlink to its new
