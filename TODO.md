@@ -630,6 +630,16 @@ are large mostly because of their tests.
   dropping the scroll-freeze workaround and getting Ghostty's own grapheme and SGR handling. First step is a one- or
   two-day spike mounting ghostty-web in the island under WebKit.
 
+- **No network path for the desktop app.** The desktop app's webview talks to its embedded helm the way the browser
+  does, over HTTP and WebSockets on a loopback port, so one UI code path serves both clients. That port can be reached
+  by every process on the machine, including other accounts' (the credential stops them from using it), and the helm's
+  browser defenses need a scheme-level exemption for the webview's `dioxus://` origin, which every Dioxus desktop app
+  shares. Consider moving the desktop client to an in-process transport instead, as Tauri commands or Electron IPC do:
+  with nothing listening, nothing else on the machine can reach the desktop's API, and neither the port nor the origin
+  exemption is needed. The hard part is streaming: wry's custom-scheme handler answers each request with one complete
+  response, so terminal output and the event feed would have to travel over the webview's IPC channel, and the UI's
+  network layer would need a second transport beside HTTP.
+
 ## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
