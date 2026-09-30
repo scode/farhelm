@@ -468,6 +468,134 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     [ "$brio_expected" = "$brio_actual" ]
   }
 
+  # Prints the installation directory the bundle record of the app bundle
+  # at $1 names (its second field, byte for byte), followed by a sentinel
+  # `/` so the caller can keep a path that ends in newlines through command
+  # substitution; see bundle_record_moved_here. Fails unless the record is a
+  # regular, non-symlink file framed exactly as write_bundle_record writes
+  # it: `farhelm-app`, the directory, and four 64-hex-digit SHA-256 digests,
+  # each NUL-terminated, and nothing else.
+  #
+  # The framing is checked on the bytes, not inferred from lines: exactly
+  # six NULs, counted directly, then the fields between them. Only after
+  # that is the directory rebuilt from the NUL-to-newline translation, which
+  # is exact at that point because the magic and the digests contain no
+  # newlines: every line between the first and the last four is part of the
+  # directory, and joining them with newlines restores any the path itself
+  # held. A record this does not accept is not ownership evidence, and the
+  # bundle it sits in is refused.
+  bundle_record_dir() {
+    brd_record="$1/Contents/.farhelm-installation"
+    if [ -L "$brd_record" ] || [ ! -f "$brd_record" ]; then
+      return 1
+    fi
+    brd_nuls=$(tr -cd '\000' <"$brd_record" | tr '\000' x) || return 1
+    [ "$brd_nuls" = xxxxxx ] || return 1
+    # The translated record with a sentinel, so trailing newlines survive:
+    # the record must end in its sixth NUL, now a newline.
+    brd_text=$(tr '\000' '\n' <"$brd_record"; printf '#') || return 1
+    case $brd_text in
+      *"$NEWLINE#") ;;
+      *) return 1 ;;
+    esac
+    # The directory (with its `/` sentinel), then the four digests, one
+    # per line after it.
+    brd_parsed=$(tr '\000' '\n' <"$brd_record" | LC_ALL=C awk '
+      { line[NR] = $0 }
+      END {
+        if (NR < 6 || line[1] != "farhelm-app") exit 1
+        for (i = NR - 3; i <= NR; i++) {
+          if (length(line[i]) != 64 || line[i] !~ /^[0-9a-f]+$/) exit 1
+        }
+        for (i = 2; i <= NR - 4; i++) printf "%s%s", (i > 2 ? "\n" : ""), line[i]
+        printf "/"
+        for (i = NR - 3; i <= NR; i++) printf "\n%s", line[i]
+      }
+    ') || return 1
+    brd_digests=${brd_parsed##*/}
+    brd_dir=${brd_parsed%"$brd_digests"}
+    brd_dir=${brd_dir%/}
+    # The translation above cannot tell a NUL from a newline, so a record
+    # whose NULs sit in the wrong places (a newline where the NUL after the
+    # magic belongs, say) could still parse. What settles it is the bytes:
+    # the record must be exactly what write_bundle_record would write for
+    # the parsed fields.
+    # Split on purpose: four newline-separated hex digests, no glob
+    # characters possible (the awk above admitted only [0-9a-f]).
+    # shellcheck disable=SC2086
+    set -- $brd_digests
+    [ "$#" -eq 4 ] || return 1
+    (umask 077; printf 'farhelm-app\000%s\000%s\000%s\000%s\000%s\000' \
+      "$brd_dir" "$1" "$2" "$3" "$4" >"$STAGING_DIR/bundle-record-reparsed") || return 1
+    brd_expected=$(sha256_of "$STAGING_DIR/bundle-record-reparsed") || return 1
+    brd_actual=$(sha256_of "$brd_record") || return 1
+    [ "$brd_expected" = "$brd_actual" ] || return 1
+    printf '%s/' "$brd_dir"
+  }
+
+  # True iff the app bundle at $1 carries a Farhelm bundle record for an
+  # installation that has since moved to this one, whose canonical directory
+  # is $2: the record's directory now resolves to $2 (the old path became a
+  # symlink to the new location), or it no longer holds a Farhelm
+  # installation at all (no installation record there, or no directory).
+  # A record naming a directory that still holds an installation belongs to
+  # that installation, and is not this one's to replace.
+  #
+  # Without this, moving the install directory (a different
+  # FARHELM_INSTALL_DIR, `~/.local/bin` moved and replaced by a symlink, a
+  # renamed home directory) left every later install refusing its own
+  # bundle, and the app stuck on the old version.
+  bundle_record_moved_here() {
+    brmh_dir=$(bundle_record_dir "$1") || return 1
+    brmh_dir=${brmh_dir%/}
+    # write_bundle_record only ever records an absolute canonical path.
+    case $brmh_dir in
+      /*) ;;
+      *) return 1 ;;
+    esac
+    # Same sentinel trick publish_installation_record uses: command
+    # substitution strips trailing newlines, which a directory name may end
+    # with.
+    brmh_canonical=$(
+      cd -P -- "$brmh_dir" 2>/dev/null || exit 1
+      pwd -P || exit 1
+      printf '__FARHELM_CANONICAL_PATH_END__'
+    ) && {
+      brmh_canonical=${brmh_canonical%__FARHELM_CANONICAL_PATH_END__}
+      brmh_canonical=${brmh_canonical%"$NEWLINE"}
+      [ "$brmh_canonical" = "$2" ] && return 0
+    }
+    path_provably_absent "$brmh_dir/.farhelm-installation"
+  }
+
+  # True iff nothing exists at path $1, established through a directory this
+  # run can search. `test -e` is also false for a path it merely cannot
+  # look up (an unsearchable directory on the way), and that must not read
+  # as "gone": here it would let a bundle recorded for an installation that
+  # is intact but unreadable be replaced. So the nearest ancestor that can
+  # be searched decides: when it is $1's own parent, $1 is absent only if
+  # that parent says so; when it is further up, some component in between
+  # is missing (absent all the way down) or unsearchable (refused).
+  path_provably_absent() {
+    ppa_path=$1
+    while :; do
+      ppa_parent=${ppa_path%/*}
+      [ -n "$ppa_parent" ] || ppa_parent=/
+      if (cd -P -- "$ppa_parent") 2>/dev/null; then
+        [ ! -e "$ppa_path" ] && [ ! -L "$ppa_path" ]
+        return
+      fi
+      # The parent cannot be searched: it is either missing, and then so is
+      # everything below it, or there and locked, and then nothing below it
+      # can be established.
+      if [ -e "$ppa_parent" ] || [ -L "$ppa_parent" ]; then
+        return 1
+      fi
+      [ "$ppa_parent" != / ] || return 1
+      ppa_path=$ppa_parent
+    done
+  }
+
   # True iff every entry of directory $1 is one of the names that follow,
   # and each of those names is present. Hidden names count; a shell glob
   # rather than `ls` for the same reason is_our_lock gives.
@@ -1436,10 +1564,23 @@ EOF
         # as an app, and "rename yours and re-run" is the clearer message.
         # SPEC.md's installation rule (a file is not destroyed because its
         # name matches) is the reason.
+        # A bundle whose record names another directory is also this
+        # installation's when that directory has moved here or no longer
+        # holds an installation (bundle_record_moved_here). When the named
+        # directory still holds one, the refusal names it, so the user can
+        # tell which installation the bundle belongs to.
         if [ -e "$app_path" ]; then
-          if ! bundle_record_is_ours "$app_path" "$pir_canonical" && ! is_legacy_installer_bundle "$app_path"; then
-            printf '%s exists and does not look like a farhelm app bundle; refusing to replace it.\n' "$app_path" >&2
-            printf 'The binaries in %s are installed and usable; remove or rename that bundle and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
+          if ! bundle_record_is_ours "$app_path" "$pir_canonical" \
+            && ! bundle_record_moved_here "$app_path" "$pir_canonical" \
+            && ! is_legacy_installer_bundle "$app_path"; then
+            if other_install_dir=$(bundle_record_dir "$app_path"); then
+              other_install_dir=${other_install_dir%/}
+              printf '%s belongs to the farhelm installation in %s, which is still installed; refusing to replace it.\n' "$app_path" "$other_install_dir" >&2
+              printf 'The binaries in %s are installed and usable; uninstall the other installation, or remove or rename that bundle, and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
+            else
+              printf '%s exists and does not look like a farhelm app bundle; refusing to replace it.\n' "$app_path" >&2
+              printf 'The binaries in %s are installed and usable; remove or rename that bundle and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
+            fi
             exit 1
           fi
         fi

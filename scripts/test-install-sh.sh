@@ -1013,6 +1013,171 @@ run_install "$MAC_TOOLS" "$HOME_OTHERDIR" "$HOME_OTHERDIR/second/bin" "$BASE/goo
 check "other-directory record: install exits 1" [ "$RC" -ne 0 ]
 check "other-directory record: the existing bundle is untouched" \
   [ "$(cat "$HOME_OTHERDIR/Applications/Farhelm.app/Contents/Info.plist")" = "$OTHERDIR_PLIST" ]
+check "other-directory record: the refusal names the installation the bundle belongs to" \
+  contains "$ERR" "belongs to the farhelm installation in $(realpath "$HOME_OTHERDIR/first/bin"), which is still installed"
+
+# An installation that moved takes its bundle with it (TODO: "Installer
+# refuses its own app bundle after the install directory moves"). Why: the
+# record names the directory the bundle was built from, and before this
+# every install after a move refused the bundle as foreign, leaving the app
+# on the old version with only a manual delete to recover. Spec: a record
+# naming a directory that no longer holds a farhelm installation, or that
+# now resolves to this installation's directory, is this installation's.
+
+# Moved by a different FARHELM_INSTALL_DIR, the old directory gone.
+HOME_MOVED="$WORKDIR/home-moved"
+MOVED_APP="$HOME_MOVED/Applications/Farhelm.app"
+mkdir -p "$HOME_MOVED"
+run_install "$MAC_TOOLS" "$HOME_MOVED" "$HOME_MOVED/old/bin" "$BASE/good" 1.2.3
+check "moved install setup: first install exits 0" [ "$RC" -eq 0 ]
+check "moved install premise: the bundle's record names the old directory" \
+  assert_bundle_record "$MOVED_APP" "$HOME_MOVED/old/bin"
+rm -rf "$HOME_MOVED/old"
+check "moved install premise: the old directory is gone" [ ! -e "$HOME_MOVED/old" ]
+run_install "$MAC_TOOLS" "$HOME_MOVED" "$HOME_MOVED/new/bin" "$BASE/good-v2" 1.2.4
+check "moved install: update exits 0" [ "$RC" -eq 0 ]
+check "moved install: bundle rebuilt at the new version" \
+  contains "$(cat "$MOVED_APP/Contents/Info.plist")" "<string>1.2.4</string>"
+check "moved install: the record now names the new directory" \
+  assert_bundle_record "$MOVED_APP" "$HOME_MOVED/new/bin"
+
+# The old directory survives but holds no installation any more (its
+# binaries and record went; the directory itself stayed).
+HOME_EMPTIED="$WORKDIR/home-emptied"
+EMPTIED_APP="$HOME_EMPTIED/Applications/Farhelm.app"
+mkdir -p "$HOME_EMPTIED"
+run_install "$MAC_TOOLS" "$HOME_EMPTIED" "$HOME_EMPTIED/old/bin" "$BASE/good" 1.2.3
+check "emptied old directory setup: first install exits 0" [ "$RC" -eq 0 ]
+check "emptied old directory premise: the bundle's record names the old directory" \
+  assert_bundle_record "$EMPTIED_APP" "$HOME_EMPTIED/old/bin"
+rm -f "$HOME_EMPTIED/old/bin/farhelm" "$HOME_EMPTIED/old/bin/farhelm-desktop" \
+  "$HOME_EMPTIED/old/bin/.farhelm-installation"
+check "emptied old directory premise: the directory itself remains" [ -d "$HOME_EMPTIED/old/bin" ]
+check "emptied old directory premise: it holds no installation record or binaries" \
+  [ ! -e "$HOME_EMPTIED/old/bin/.farhelm-installation" ] && [ -z "$(ls -A "$HOME_EMPTIED/old/bin")" ]
+run_install "$MAC_TOOLS" "$HOME_EMPTIED" "$HOME_EMPTIED/new/bin" "$BASE/good-v2" 1.2.4
+check "emptied old directory: update exits 0" [ "$RC" -eq 0 ]
+check "emptied old directory: the record now names the new directory" \
+  assert_bundle_record "$EMPTIED_APP" "$HOME_EMPTIED/new/bin"
+
+# ~/.local/bin moved elsewhere and replaced by a symlink to its new home:
+# the record's path now resolves to this installation's directory.
+HOME_LINKED="$WORKDIR/home-linked"
+LINKED_APP="$HOME_LINKED/Applications/Farhelm.app"
+mkdir -p "$HOME_LINKED"
+run_install "$MAC_TOOLS" "$HOME_LINKED" "$HOME_LINKED/.local/bin" "$BASE/good" 1.2.3
+check "symlinked install setup: first install exits 0" [ "$RC" -eq 0 ]
+check "symlinked install premise: the bundle's record names the original directory" \
+  assert_bundle_record "$LINKED_APP" "$HOME_LINKED/.local/bin"
+mv "$HOME_LINKED/.local/bin" "$HOME_LINKED/.local/bin-real"
+ln -s bin-real "$HOME_LINKED/.local/bin"
+check "symlinked install premise: the old path is now a symlink" [ -L "$HOME_LINKED/.local/bin" ]
+check "symlinked install premise: it resolves to the moved installation" \
+  [ "$(realpath "$HOME_LINKED/.local/bin")" = "$(realpath "$HOME_LINKED/.local/bin-real")" ] \
+  && [ -f "$HOME_LINKED/.local/bin-real/.farhelm-installation" ]
+run_install "$MAC_TOOLS" "$HOME_LINKED" "$HOME_LINKED/.local/bin" "$BASE/good-v2" 1.2.4
+check "symlinked install: update exits 0" [ "$RC" -eq 0 ]
+check "symlinked install: bundle rebuilt at the new version" \
+  contains "$(cat "$LINKED_APP/Contents/Info.plist")" "<string>1.2.4</string>"
+check "symlinked install: the record names the resolved directory" \
+  assert_bundle_record "$LINKED_APP" "$HOME_LINKED/.local/bin-real"
+
+# A directory name holding newlines, one of them trailing, is a supported
+# install location; moving it must be recognized like any other. The record
+# stores the path byte for byte, so this is the case a line-based reading of
+# the record would get wrong.
+HOME_NLMOVE="$WORKDIR/home-nl-move"
+NLMOVE_APP="$HOME_NLMOVE/Applications/Farhelm.app"
+printf -v NLMOVE_OLD '%s/old\nbin\n' "$HOME_NLMOVE"
+mkdir -p "$HOME_NLMOVE"
+run_install "$MAC_TOOLS" "$HOME_NLMOVE" "$NLMOVE_OLD" "$BASE/good" 1.2.3
+check "newline-named moved install setup: first install exits 0" [ "$RC" -eq 0 ]
+check "newline-named moved install premise: the record names the newline-named directory" \
+  assert_bundle_record "$NLMOVE_APP" "$NLMOVE_OLD"
+# First, with the old installation still in place: the bundle is that
+# installation's and is refused, naming its directory byte for byte. The
+# truncated readings a line-based parse could produce (without the trailing
+# newline, or only the first line) name directories that do not exist, so
+# only an exact reading refuses here.
+NLMOVE_PLIST=$(cat "$NLMOVE_APP/Contents/Info.plist")
+check "newline-named install premise: the truncated readings name no directory" \
+  [ ! -e "${NLMOVE_OLD%$'\n'}" ] && [ ! -e "$HOME_NLMOVE/old" ]
+run_install "$MAC_TOOLS" "$HOME_NLMOVE" "$HOME_NLMOVE/new/bin" "$BASE/good-v2" 1.2.4
+check "newline-named install still in place: install exits 1" [ "$RC" -ne 0 ]
+check "newline-named install still in place: the bundle is untouched" \
+  [ "$(cat "$NLMOVE_APP/Contents/Info.plist")" = "$NLMOVE_PLIST" ]
+check "newline-named install still in place: the refusal names the exact directory" \
+  contains "$ERR" "belongs to the farhelm installation in $NLMOVE_OLD, which is still installed"
+rm -rf "$NLMOVE_OLD"
+check "newline-named moved install premise: the old directory is gone" [ ! -e "$NLMOVE_OLD" ]
+run_install "$MAC_TOOLS" "$HOME_NLMOVE" "$HOME_NLMOVE/new/bin" "$BASE/good-v2" 1.2.4
+check "newline-named moved install: update exits 0" [ "$RC" -eq 0 ]
+check "newline-named moved install: the record now names the new directory" \
+  assert_bundle_record "$NLMOVE_APP" "$HOME_NLMOVE/new/bin"
+
+# An installation that is intact but cannot be looked into (its directory's
+# parent unsearchable) is not an installation that disappeared. Why: `test
+# -e` is false for a path it cannot look up, so reading that as "gone" would
+# replace a bundle whose installation still exists.
+if [ "$(id -u)" -ne 0 ]; then
+  HOME_LOCKED="$WORKDIR/home-locked"
+  LOCKED_APP="$HOME_LOCKED/Applications/Farhelm.app"
+  mkdir -p "$HOME_LOCKED"
+  run_install "$MAC_TOOLS" "$HOME_LOCKED" "$HOME_LOCKED/first/bin" "$BASE/good" 1.2.3
+  check "unsearchable installation setup: first install exits 0" [ "$RC" -eq 0 ]
+  check "unsearchable installation premise: the record names the first directory" \
+    assert_bundle_record "$LOCKED_APP" "$HOME_LOCKED/first/bin"
+  LOCKED_PLIST=$(cat "$LOCKED_APP/Contents/Info.plist")
+  chmod 000 "$HOME_LOCKED/first"
+  check "unsearchable installation premise: its record cannot be looked up" \
+    [ ! -e "$HOME_LOCKED/first/bin/.farhelm-installation" ]
+  run_install "$MAC_TOOLS" "$HOME_LOCKED" "$HOME_LOCKED/second/bin" "$BASE/good-v2" 1.2.4
+  chmod 755 "$HOME_LOCKED/first"
+  check "unsearchable installation premise: the first installation is intact" \
+    [ -f "$HOME_LOCKED/first/bin/.farhelm-installation" ]
+  check "unsearchable installation: install exits 1" [ "$RC" -ne 0 ]
+  check "unsearchable installation: the bundle is untouched" \
+    [ "$(cat "$LOCKED_APP/Contents/Info.plist")" = "$LOCKED_PLIST" ]
+fi
+
+# A record with six NULs in the wrong places: the NUL that belongs after the
+# magic is a newline, and an extra NUL makes up the count. Why: a parse that
+# counts NULs and then reads lines accepts this as naming a vanished
+# directory, and would replace the bundle it sits in.
+HOME_MIXREC="$WORKDIR/home-mixed-record"
+MIXREC_APP="$HOME_MIXREC/Applications/Farhelm.app"
+mkdir -p "$MIXREC_APP/Contents"
+{
+  printf 'farhelm-app\n/nonexistent/old/bin\000\000'
+  for _ in 1 2 3 4; do printf '%064d\000' 0 | tr 0 a; done
+} >"$MIXREC_APP/Contents/.farhelm-installation"
+echo mine >"$MIXREC_APP/Contents/my-file"
+check "mixed-framing record premise: it holds exactly six NULs" \
+  [ "$(tr -cd '\000' <"$MIXREC_APP/Contents/.farhelm-installation" | tr '\000' x)" = xxxxxx ]
+run_install "$MAC_TOOLS" "$HOME_MIXREC" "$HOME_MIXREC/.local/bin" "$BASE/good" 1.2.3
+check "mixed-framing record: install exits 1" [ "$RC" -ne 0 ]
+check "mixed-framing record: the refusal is the foreign-bundle one" \
+  contains "$ERR" "does not look like a farhelm app bundle; refusing to replace it."
+check "mixed-framing record: the bundle's own file is untouched" \
+  [ "$(cat "$MIXREC_APP/Contents/my-file")" = "mine" ]
+
+# A record that is not framed exactly as the installer writes it is not
+# ownership evidence, even when it reads as naming a vanished directory
+# line by line. Why: recognizing a moved installation replaces the bundle
+# wholesale, so a loose parse would let a foreign bundle's look-alike file
+# authorize deleting it.
+HOME_FAKEREC="$WORKDIR/home-fake-record"
+FAKEREC_APP="$HOME_FAKEREC/Applications/Farhelm.app"
+mkdir -p "$FAKEREC_APP/Contents"
+printf 'farhelm-app\n/nonexistent/old/bin\na\nb\nc\nd\n' >"$FAKEREC_APP/Contents/.farhelm-installation"
+echo mine >"$FAKEREC_APP/Contents/my-file"
+check "newline-framed record premise: it names a directory that does not exist" [ ! -e /nonexistent/old/bin ]
+run_install "$MAC_TOOLS" "$HOME_FAKEREC" "$HOME_FAKEREC/.local/bin" "$BASE/good" 1.2.3
+check "newline-framed record: install exits 1" [ "$RC" -ne 0 ]
+check "newline-framed record: the refusal is the foreign-bundle one" \
+  contains "$ERR" "does not look like a farhelm app bundle; refusing to replace it."
+check "newline-framed record: the bundle's own file is untouched" \
+  [ "$(cat "$FAKEREC_APP/Contents/my-file")" = "mine" ]
 
 # ===========================================================================
 # Scenario: rollback when the FIRST replacement (farhelm itself) fails
