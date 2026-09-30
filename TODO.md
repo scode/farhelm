@@ -129,6 +129,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   provisioning lock and write lock inside the owned body. The review-feedback triage that fixed the other host edits
   (`host-edits-not-cancellation-safe`) did not list the alias edit.
 
+- **Host settings as a pop-up dialog.** Choosing Settings from a host row's "⋯" menu currently expands the settings
+  inline inside that row in the sidebar: destination and alias with their edit buttons, the "allow YOLO launches on this
+  host" checkbox with its explanation, and a close button. In the narrow sidebar that is cramped and messy (the
+  destination is cut off, the buttons crowd the values, the text wraps awkwardly). Make it a separate pop-up dialog with
+  a clean, sensible design, built on the app's existing modal dialog styling. The destination and alias editors, which
+  today replace the inline panel when opened from it, would move into the dialog too. Exact layout to be decided when
+  this is picked up.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
