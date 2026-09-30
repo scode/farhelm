@@ -314,7 +314,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   cannot fix by design (a stall persisting across attempts), not a regression from the retry change; the fork to settle
   on recurrence: instrument the supervisor's attach path under the churn burst, extend the readiness budget against the
   retry cycle, or accept the residual. Keep this distinct from the existing single-client stall entry, and do not weaken
-  liveness assertions based on a later passing run.
+  liveness assertions based on a later passing run. Recurred on 2026-09-29 in the deflake sweep (WebKit run
+  `a7cb2f9a-820d-43fe-aa89-02e8a36e5ffd`, reruns `6c0d66ef-a4db-4194-907e-e79def8cb87d` failed,
+  `76017a36-c24e-44a2-a14b-6787ec415fe2` and `957cfe2f-b7eb-4894-9421-f2f9b3a3d15e` passed), both failures with
+  `open=false` rather than the `open=true` residual above.
 
 ### Difficult deflake
 

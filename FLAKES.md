@@ -28,6 +28,24 @@ After the paragraph, add `Class: <class>` and `Cause: <confidence>` as separate 
 `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new entries. Missing historical fields
 are missing evidence, not an implicit cause classification.
 
+## 2026-09-29 — `a tab list past the island cap is listed in full but only partly attached` (e2e/tests/terminal-tabs.spec.ts)
+
+The deflake sweep's full browser battery failed this test in WebKit (`webkit-terminal-tabs`) in run
+`a7cb2f9a-820d-43fe-aa89-02e8a36e5ffd`, and the first of three classification reruns failed the same way in run
+`6c0d66ef-a4db-4194-907e-e79def8cb87d`; the other two reruns, `76017a36-c24e-44a2-a14b-6787ec415fe2` and
+`957cfe2f-b7eb-4894-9421-f2f9b3a3d15e`, passed. Both failures were the 20s agent-readiness budget expiring with
+`mounted=true, open=false, socketMatches=true, revealed=false`: the agent socket never reported open, which is the
+pre-retry shape rather than the `open=true, revealed=false` residual TODO.md recorded after the 2026-09-17 retry fix.
+Linux x86_64, clean tested commit `3c5996cdddaccc72cc1d83f9374e3153c27e1c6d`, selection `browser suite, both engines`
+narrowed by the sweep to this test for the reruns, one browser worker and zero retries, pinned tmux 3.7c executable
+SHA256 `75ede1768324817dc386aee550c8e7ca68e98530af54762fcb9df0b46491b071`, locale `C.UTF-8`, ambient `FARHELM_*`
+scrubbed with only the recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` supplied. Machine
+load during the runs was not recorded. Disposition: open (TODO.md island-cap readiness residual).
+
+Class: readiness
+
+Cause: unknown
+
 ## 2026-09-25 — composer controls inside the initial viewport (e2e/tests/sidebar.spec.ts)
 
 `composer keeps launch and cancel inside the initial viewport at default and narrow width` failed in Chromium during
