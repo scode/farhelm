@@ -144,6 +144,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the host's settings to stop being asked. Exact wording and behavior to be decided when this is picked up. The default
   itself stays as it is: every host starts sensitive.
 
+- **Confirm restart only while the agent is working.** Restart (from the session header or the sidebar) asks "still
+  running — restarting stops the agent and its whole process tree first" whenever the agent is live at all, idle
+  included, and also when its status is unknown. Asked that often, people click through without reading it. Only ask
+  when there is signal that the agent is actively doing work; an idle agent, one waiting for input, or one whose status
+  is unknown restarts without a prompt. Accepted consequence: for harnesses whose activity detection is weak, the user
+  may not get the warning even when the agent is busy. This is not UI-only: SPEC.md (Lifecycle operations, Restart) says
+  a restart of a still-running agent confirms, and the supervisor refuses an unconfirmed restart of a live agent, so
+  both change with it. Replace keeps its confirmation as it is: it discards the conversation, whatever the agent is
+  doing.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
