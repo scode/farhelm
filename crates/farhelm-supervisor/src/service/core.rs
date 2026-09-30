@@ -64,7 +64,10 @@ use crate::store::{
     Claimed, IntentClaim, LastOutcome, ProfileSnapshot, Reservation, ReservationOutcome,
     RetryClaim, SessionStore, Settlement, StoredSession, Transition, now_unix,
 };
-use crate::tmux::{AGENT_WINDOW_OPTION, PaneProbe, PaneState, TAB_WINDOW_OPTION, TmuxDriver};
+use crate::tmux::{
+    AGENT_WINDOW_OPTION, PaneProbe, PaneState, TAB_SCOPED_WINDOW_OPTION, TAB_WINDOW_OPTION,
+    TabScopeMarker, TmuxDriver,
+};
 use anyhow::Context;
 use farhelm_proto::{
     AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, ProfileExistence, RestartMode,
@@ -11968,12 +11971,12 @@ impl Supervisor {
     ) -> Result<TabInfo, RequestError> {
         let tab_id = uuid::Uuid::new_v4().to_string();
         // The scope, decided per OPEN the way an agent's is decided per
-        // launch — and, unlike the agent's, never recorded: a tab has no
-        // durable row to record it in, so `close_tab` re-derives the same
-        // name from the same two ids and lets `exists` settle whether
-        // there is anything there.
+        // launch. A tab has no durable row, so the unit NAME is re-derived
+        // at close from the same two ids, and whether this open selected a
+        // scope at all is recorded on the window itself
+        // (`TAB_SCOPED_WINDOW_OPTION`).
         let unit = crate::scope::tab_unit_name(session_id, &tab_id);
-        let scope_prefix = match unit.as_deref() {
+        let scope_prefix: Vec<String> = match unit.as_deref() {
             Some(unit) => match self.seams.scopes.launch_prefix(unit).await {
                 Some(prefix) => prefix,
                 // Loud for the agent path's reason: the tab still opens
@@ -11992,6 +11995,15 @@ impl Supervisor {
                 }
             },
             None => Vec::new(),
+        };
+        // The selection this open made, in the form close reads it back:
+        // written onto the window below, and handed straight to every
+        // failed-open unwind, which must not depend on the marker having
+        // been written.
+        let tab_scope = if scope_prefix.is_empty() {
+            TabScopeMarker::Unscoped
+        } else {
+            TabScopeMarker::Scoped
         };
         let shell = self.launch_shell().await;
         let env = self.tab_environment(session_id, session_token, &tab_id);
@@ -12055,6 +12067,22 @@ impl Supervisor {
             Some(fault) => fault(TabOpenStage::BeforeMarking),
             None => Ok(()),
         };
+        // The scope answer goes on first, so any window that rediscovery
+        // can see as a tab (it keys on the tab marker) also says whether
+        // close must find a scope for it.
+        let marked = match marked {
+            Ok(()) => {
+                self.tmux
+                    .mark_window(
+                        &terminal.tmux_name,
+                        &terminal.pane,
+                        TAB_SCOPED_WINDOW_OPTION,
+                        TabScopeMarker::option_value(tab_scope == TabScopeMarker::Scoped),
+                    )
+                    .await
+            }
+            Err(e) => Err(e),
+        };
         let marked = match marked {
             Ok(()) => {
                 self.tmux
@@ -12076,6 +12104,7 @@ impl Supervisor {
                     session_id,
                     &terminal,
                     &tab_id,
+                    tab_scope,
                     format!("could not mark the new terminal tab's window: {e:#}"),
                 )
                 .await);
@@ -12137,6 +12166,7 @@ impl Supervisor {
                         session_id,
                         &terminal,
                         &tab_id,
+                        tab_scope,
                         format!(
                             "the terminal tab's shell ({shell}) was already dead when the tab \
                              opened{gone}{detail}"
@@ -12150,6 +12180,7 @@ impl Supervisor {
                         session_id,
                         &terminal,
                         &tab_id,
+                        tab_scope,
                         format!("could not confirm the new terminal tab's shell is running: {e:#}"),
                     )
                     .await);
@@ -12336,14 +12367,36 @@ impl Supervisor {
                 ));
             }
         }
-        self.reap_tab_tree(session_id, terminal, tab_id, TabReapAnchor::PaneIfLive)
+        // Read once, while the window still exists, and used for both reap
+        // passes: the second runs after `kill-window`, when there is no
+        // window left to ask.
+        let tab_scope = self
+            .tmux
+            .tab_scope_marker(&terminal.tmux_name, &terminal.pane, tab_id)
             .await
             .map_err(|e| {
                 RequestError::new(
-                    ErrorKind::Internal,
-                    format!("closing terminal tab {}: {e:#}", truncate_for_error(tab_id)),
+                    error_kind(&e),
+                    format!(
+                        "could not read whether terminal tab {} has its own scope: {e:#}",
+                        truncate_for_error(tab_id)
+                    ),
                 )
             })?;
+        self.reap_tab_tree(
+            session_id,
+            terminal,
+            tab_id,
+            tab_scope,
+            TabReapAnchor::PaneIfLive,
+        )
+        .await
+        .map_err(|e| {
+            RequestError::new(
+                ErrorKind::Internal,
+                format!("closing terminal tab {}: {e:#}", truncate_for_error(tab_id)),
+            )
+        })?;
         self.tmux
             .kill_window(&terminal.tmux_name, &terminal.pane)
             .await
@@ -12362,7 +12415,13 @@ impl Supervisor {
         // tmux about a pane it no longer has would resolve to a SIBLING
         // TAB's pane — see `reap_tab_tree`'s `anchor` docs.
         let survivors = self
-            .reap_tab_tree(session_id, terminal, tab_id, TabReapAnchor::MarkerOnly)
+            .reap_tab_tree(
+                session_id,
+                terminal,
+                tab_id,
+                tab_scope,
+                TabReapAnchor::MarkerOnly,
+            )
             .await;
         // Unconditional, and before reporting either error: the window is
         // already gone, so its viewer must receive the terminal verdict even
@@ -12462,11 +12521,18 @@ impl Supervisor {
         session_id: &str,
         terminal: &Terminal,
         tab_id: &str,
+        tab_scope: TabScopeMarker,
         because: String,
     ) -> RequestError {
         let mut left_behind: Vec<String> = Vec::new();
         if let Err(e) = self
-            .reap_tab_tree(session_id, terminal, tab_id, TabReapAnchor::PaneIfLive)
+            .reap_tab_tree(
+                session_id,
+                terminal,
+                tab_id,
+                tab_scope,
+                TabReapAnchor::PaneIfLive,
+            )
             .await
         {
             left_behind.push(format!("its processes ({e:#})"));
@@ -12604,19 +12670,25 @@ impl Supervisor {
     /// hypothetical: it is the bug this parameter exists to make
     /// unexpressible.
     ///
-    /// The scope unit is DERIVED (see `scope::tab_unit_name`), never
-    /// stored, and it is derived even when this supervisor's own
+    /// The scope unit's NAME is derived (see `scope::tab_unit_name`); whether
+    /// the tab has one is `tab_scope`, the answer its open wrote onto the
+    /// window ([`TAB_SCOPED_WINDOW_OPTION`]). A tab that was scoped has its
+    /// unit handled like a recorded one, even when this supervisor's
     /// availability probe says there is no user manager: the scope may
-    /// predate this supervisor, or the probe may have run while the
-    /// manager was briefly unreachable, and `kill_scope`'s own existence
-    /// check is what settles whether there is anything there. Naming a
-    /// unit that does not exist costs one query; skipping one that does
-    /// costs the containment guarantee.
+    /// predate this supervisor, or the probe may have run while the manager
+    /// was briefly unreachable. It then gets the one re-probe, and a unit
+    /// that still cannot be checked, or is found but not confirmed gone,
+    /// fails the reap. For a tab opened unscoped the name is only a guess
+    /// and is skipped quietly when there is no manager. A window from a
+    /// build that predates the marker is judged by its session's own launch
+    /// instead, the best evidence such a tab left behind, and still gets the
+    /// re-probe when that launch was unscoped (see the body).
     async fn reap_tab_tree(
         &self,
         session_id: &str,
         terminal: &Terminal,
         tab_id: &str,
+        tab_scope: TabScopeMarker,
         anchor: TabReapAnchor,
     ) -> anyhow::Result<()> {
         let root_identity = match anchor {
@@ -12656,11 +12728,41 @@ impl Supervisor {
             },
             TabReapAnchor::MarkerOnly => None,
         };
-        let units = ScopeUnits::derived(
-            crate::scope::tab_unit_name(session_id, tab_id)
-                .into_iter()
-                .collect(),
-        );
+        // Which provenance the tab's scope name gets decides what a negative
+        // "no user manager" verdict does to it. A tab that was opened scoped
+        // gets the scope manager's one re-probe, and if the manager still
+        // cannot be used its unit counts as unconfirmed and fails the reap
+        // (SPEC.md "Lifecycle operations": believing there is no manager
+        // does not excuse skipping a scope the tab may have). A tab opened
+        // unscoped has nothing to find when there is no manager.
+        //
+        // An unmarked window (opened by a build that did not record the
+        // answer) leans on its session's own launch. A scoped session is
+        // durable evidence that the host had a manager when it started, so
+        // its tabs are treated as scoped. Otherwise the tab may still have
+        // been scoped, if the manager's verdict changed between the agent's
+        // launch and the tab's, so its unit still earns the one re-probe;
+        // only if the manager stays unusable after that is it skipped,
+        // since such a tab then looks exactly like one on a host that never
+        // had a manager, where refusing would leave it unclosable.
+        let tab_unit = crate::scope::tab_unit_name(session_id, tab_id);
+        let units = match tab_scope {
+            TabScopeMarker::Scoped => ScopeUnits::recorded(tab_unit),
+            TabScopeMarker::Unscoped => ScopeUnits::derived(tab_unit.into_iter().collect()),
+            TabScopeMarker::Unmarked => {
+                let session_scoped = self
+                    .sessions
+                    .lock()
+                    .await
+                    .get(session_id)
+                    .is_some_and(|entry| entry.scope.is_some());
+                if session_scoped {
+                    ScopeUnits::recorded(tab_unit)
+                } else {
+                    ScopeUnits::possible(tab_unit)
+                }
+            }
+        };
         // `session_id` is carried purely for the log lines inside the
         // sweep; `SweepTarget::Tab` is what actually selects processes
         // here, by the session marker AND this tab's own id.
@@ -12670,7 +12772,10 @@ impl Supervisor {
             root_identity,
             session_id,
             &SweepTarget::Tab(tab_id.to_string()),
-            ScopeKillFailure::Warn,
+            // Refuse, as Stop, Restart and Delete do: a tab whose scope
+            // cannot be confirmed gone may still have survivors, and the
+            // close must say so rather than report the tab removed.
+            ScopeKillFailure::Refuse,
         )
         .await
     }
@@ -15124,6 +15229,296 @@ pub(crate) mod tests {
                 .generation,
             0,
             "nothing was relaunched"
+        );
+    }
+
+    /// Closing a tab retries a stale "no user manager" verdict before giving
+    /// up on the tab's scope, and fails when the scope cannot be confirmed.
+    ///
+    /// Why it matters: a tab's scope is the only thing that catches a tab
+    /// descendant that detached and wiped its environment. Skipping it on a
+    /// cached negative verdict (for example a manager that was briefly
+    /// unreachable when the supervisor started) let such processes survive a
+    /// close with no error, contrary to SPEC.md "Lifecycle operations".
+    /// Specified: after a negative first probe, the tab reap re-probes and,
+    /// the manager now answering, checks the tab's own scope unit; a scope
+    /// that never confirms gone fails the reap.
+    #[farhelm_testtrace::test]
+    async fn tab_reap_reprobes_a_stale_verdict_and_refuses_an_unconfirmed_scope() {
+        let session = "7c9d1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f";
+        let tab = "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091";
+        let unit =
+            crate::scope::tab_unit_name(session, tab).expect("a UUID session names a tab scope");
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink: crate::scope::ScopeOpSink = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |op: &crate::scope::ScopeOp| observed.lock().unwrap().push(op.clone()))
+        };
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(crate::scope::ScopeManager::fake_with_probe_gate(
+                    vec![false, true],
+                    Arc::new(tokio::sync::Semaphore::new(16)),
+                    sink,
+                )),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = session.to_string();
+        entry.scope = Some(crate::scope::unit_name(session, 0).expect("a UUID names a scope"));
+        sup.sessions
+            .lock()
+            .await
+            .insert(session.to_string(), Arc::new(entry));
+        assert!(
+            !sup.seams.scopes.available().await,
+            "test premise: the cached verdict says there is no user manager"
+        );
+
+        // This fake's units never disappear, so once the re-probe has made
+        // the manager available the tab's scope is found, killed and never
+        // confirmed gone.
+        let error = sup
+            .reap_tab_tree(
+                session,
+                &a_terminal(),
+                tab,
+                TabScopeMarker::Scoped,
+                TabReapAnchor::MarkerOnly,
+            )
+            .await
+            .expect_err("a tab scope that cannot be confirmed gone must fail the close");
+        assert!(
+            format!("{error:#}").contains(&unit),
+            "the failure names the tab's unconfirmed scope: {error:#}"
+        );
+        assert!(
+            observed.lock().unwrap().iter().any(|op| matches!(
+                op,
+                crate::scope::ScopeOp::Exists(name) if name == &unit
+            )),
+            "the tab's scope must be checked after the re-probe: {:?}",
+            observed.lock().unwrap()
+        );
+    }
+
+    /// A tab window opened before tabs recorded their scope selection still
+    /// gets the re-probe when its session's own launch was unscoped, and its
+    /// scope is checked once the manager answers.
+    ///
+    /// Why it matters: tabs survive supervisor restarts and upgrades, so a
+    /// window with no scope marker can belong to a scoped tab of a session
+    /// whose agent launched while the manager was unreachable. Deciding from
+    /// the session alone would skip that tab's scope on a stale negative
+    /// verdict, leaving detached descendants alive behind a successful close
+    /// (SPEC.md "Lifecycle operations"). Specified: with an unscoped session,
+    /// an unmarked tab, and a manager that answers only on the re-probe, the
+    /// reap checks the tab's own unit and fails when it never confirms gone.
+    #[farhelm_testtrace::test]
+    async fn an_unmarked_tab_of_an_unscoped_session_still_gets_the_reprobe() {
+        let session = "4d5e6f70-8192-4a3b-9c4d-5e6f70819203";
+        let tab = "5e6f7081-92a3-4b4c-8d5e-6f708192a3b4";
+        let unit =
+            crate::scope::tab_unit_name(session, tab).expect("a UUID session names a tab scope");
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink: crate::scope::ScopeOpSink = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |op: &crate::scope::ScopeOp| observed.lock().unwrap().push(op.clone()))
+        };
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(crate::scope::ScopeManager::fake_reprobing(
+                    false, true, sink,
+                )),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = session.to_string();
+        entry.scope = None;
+        sup.sessions
+            .lock()
+            .await
+            .insert(session.to_string(), Arc::new(entry));
+
+        // This fake's units never disappear, so a checked scope is found,
+        // killed and never confirmed gone.
+        let error = sup
+            .reap_tab_tree(
+                session,
+                &a_terminal(),
+                tab,
+                TabScopeMarker::Unmarked,
+                TabReapAnchor::MarkerOnly,
+            )
+            .await
+            .expect_err("the re-probe finds a manager, so the tab's scope must be settled");
+        assert!(
+            format!("{error:#}").contains(&unit),
+            "the failure names the tab's unconfirmed scope: {error:#}"
+        );
+        assert!(
+            observed.lock().unwrap().iter().any(|op| matches!(
+                op,
+                crate::scope::ScopeOp::Exists(name) if name == &unit
+            )),
+            "the tab's scope must be checked after the re-probe: {:?}",
+            observed.lock().unwrap()
+        );
+    }
+
+    /// With the systemd user manager unusable even after the re-probe, a tab
+    /// reap fails exactly when the tab itself was opened scoped; a window
+    /// without the scope marker is judged by its session's launch.
+    ///
+    /// Why it matters: a scope the tab really had may still hold detached
+    /// descendants, so a manager that no longer answers is no proof it is
+    /// empty (SPEC.md "Lifecycle operations"), while a tab opened without a
+    /// scope has nothing to find and must still close on a manager-less host.
+    /// The agent's and the tab's launches can see different manager verdicts,
+    /// so the session's scope record is not a reliable stand-in for the tab's
+    /// in either direction; it is only the fallback for windows opened before
+    /// tabs recorded their own answer. Specified, for every combination of
+    /// tab marker and session scope: a `Scoped` marker fails the reap, an
+    /// `Unscoped` marker succeeds, and an unmarked window fails only for a
+    /// scoped session (an unscoped session's unmarked tab gets the re-probe,
+    /// covered by `an_unmarked_tab_of_an_unscoped_session_still_gets_the_reprobe`,
+    /// and is skipped when that also says no).
+    #[farhelm_testtrace::test]
+    async fn tab_reap_follows_the_tabs_own_scope_marker() {
+        let tab = "3c4d5e6f-7081-4923-8a4b-5c6d7e8f9012";
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(crate::scope::ScopeManager::fake_reprobing(
+                    false,
+                    false,
+                    Arc::new(|_| {}),
+                )),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let scoped = "8d9e0f1a-2b3c-4d4e-9f50-617283940a1b";
+        let unscoped = "9e0f1a2b-3c4d-4e5f-8061-728394a5b6c7";
+        for (id, scope) in [
+            (scoped, crate::scope::unit_name(scoped, 0)),
+            (unscoped, None),
+        ] {
+            let mut entry = entry_with(None, LastOutcome::Running);
+            entry.info.id = id.to_string();
+            entry.scope = scope;
+            sup.sessions
+                .lock()
+                .await
+                .insert(id.to_string(), Arc::new(entry));
+        }
+
+        for (session, marker, refuses) in [
+            (unscoped, TabScopeMarker::Scoped, true),
+            (scoped, TabScopeMarker::Scoped, true),
+            (scoped, TabScopeMarker::Unscoped, false),
+            (unscoped, TabScopeMarker::Unscoped, false),
+            (scoped, TabScopeMarker::Unmarked, true),
+            (unscoped, TabScopeMarker::Unmarked, false),
+        ] {
+            let result = sup
+                .reap_tab_tree(
+                    session,
+                    &a_terminal(),
+                    tab,
+                    marker,
+                    TabReapAnchor::MarkerOnly,
+                )
+                .await;
+            assert_eq!(
+                result.is_err(),
+                refuses,
+                "session scoped: {}, tab marker {marker:?}: {result:?}",
+                session == scoped
+            );
+        }
+    }
+
+    /// Opening a tab records on its window whether its shell got a scope,
+    /// and the marker reads back only for that exact pane and tab.
+    ///
+    /// Why it matters: close decides whether an unconfirmable scope fails it
+    /// from this marker, so an open that forgot to write it would silently
+    /// fall back to the session inference, and a read that answered for a
+    /// different tab (a vanished pane's target resolves to the session's
+    /// current pane) would apply a sibling's verdict. Specified: after a real
+    /// open, the marker matches whether this host's scope manager is usable,
+    /// and asking with another tab id yields `Unmarked`.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn an_opened_tab_records_whether_it_was_scoped() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let created = sup
+            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
+            .await
+            .expect("agent session");
+        let tab = sup.open_tab(&created.id).await.expect("terminal tab");
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("session entry");
+        let agent = entry.terminal.clone().expect("agent terminal");
+        let tab_pane = sup
+            .tmux
+            .pane_states_with_markers()
+            .await
+            .expect("pane states")
+            .into_iter()
+            .find(|(_, state)| state.tab.as_deref() == Some(tab.id.as_str()))
+            .map(|(pane, _)| pane)
+            .expect("the opened tab's pane");
+
+        let expected = if sup.seams.scopes.available().await {
+            TabScopeMarker::Scoped
+        } else {
+            TabScopeMarker::Unscoped
+        };
+        assert_eq!(
+            sup.tmux
+                .tab_scope_marker(&agent.tmux_name, &tab_pane, &tab.id)
+                .await
+                .expect("read the marker"),
+            expected
+        );
+        assert_eq!(
+            sup.tmux
+                .tab_scope_marker(
+                    &agent.tmux_name,
+                    &tab_pane,
+                    &uuid::Uuid::new_v4().to_string()
+                )
+                .await
+                .expect("read the marker"),
+            TabScopeMarker::Unmarked,
+            "the marker must not answer for a different tab"
         );
     }
 

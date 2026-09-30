@@ -1193,9 +1193,18 @@ pub(crate) fn launch_scope_unit(id: &str, generation: i64, scoped: bool) -> Opti
 /// is absent because it does not prove a unit ever existed. Keeping the two
 /// sets separate prevents a launch-glob result for the current generation
 /// from downgrading the row's stronger evidence.
+///
+/// `possible` sits between them: a unit whose launch may have been scoped,
+/// with nothing recorded either way. It earns the same one re-probe as a
+/// recorded unit, so a stale negative verdict cannot skip it, but if the
+/// manager is still unusable after that it is skipped like a derived name,
+/// because nothing distinguishes it from a launch on a host that never had
+/// a manager. Its one user is a terminal tab opened by a build that did not
+/// yet record its own scope selection.
 #[derive(Default)]
 pub(crate) struct ScopeUnits {
     recorded: Vec<String>,
+    possible: Vec<String>,
     derived: Vec<String>,
 }
 
@@ -1204,15 +1213,24 @@ impl ScopeUnits {
     pub(crate) fn recorded(unit: Option<String>) -> Self {
         Self {
             recorded: unit.into_iter().collect(),
-            derived: Vec::new(),
+            ..Self::default()
+        }
+    }
+
+    /// Start with a unit whose launch may have used it, where nothing
+    /// recorded whether it did (see the type's docs).
+    pub(crate) fn possible(unit: Option<String>) -> Self {
+        Self {
+            possible: unit.into_iter().collect(),
+            ..Self::default()
         }
     }
 
     /// Start with names that a teardown inferred without durable evidence.
     pub(crate) fn derived(derived: Vec<String>) -> Self {
         Self {
-            recorded: Vec::new(),
             derived,
+            ..Self::default()
         }
     }
 
@@ -1301,7 +1319,7 @@ pub(crate) async fn reap_process_tree(
     // number during that gap, the replacement must never seed this sweep.
     let root = validate_root_identity(root_identity, session_id);
 
-    if units.recorded.is_empty() && units.derived.is_empty() {
+    if units.recorded.is_empty() && units.possible.is_empty() && units.derived.is_empty() {
         debug!(
             session = %session_id,
             "no cgroup scope recorded for this teardown; the process-tree sweep is the \
@@ -1321,12 +1339,27 @@ pub(crate) async fn reap_process_tree(
     // the caller's `ScopeKillFailure` policy decides, which for Stop, Restart,
     // Delete and tab close means failing visibly (SPEC.md "Lifecycle
     // operations": believing there is no user manager does not excuse
-    // skipping a scope the launch had). The sweep below still runs.
+    // skipping a scope the launch had). The sweep below still runs. A
+    // `possible` unit also earns the re-probe, but is skipped when it fails.
     let mut scope_errors: Vec<String> = Vec::new();
+    let earns_reprobe = !units.recorded.is_empty() || !units.possible.is_empty();
     let units: Vec<&String> =
-        if scopes.available().await || (!units.recorded.is_empty() && scopes.reprobe().await) {
-            units.recorded.iter().chain(&units.derived).collect()
+        if scopes.available().await || (earns_reprobe && scopes.reprobe().await) {
+            units
+                .recorded
+                .iter()
+                .chain(&units.possible)
+                .chain(&units.derived)
+                .collect()
         } else {
+            if !units.possible.is_empty() {
+                debug!(
+                    session = %session_id, units = ?units.possible,
+                    "this host's systemd user manager is still not usable after a re-probe, and \
+                     nothing recorded whether these launches were scoped, so their scope names \
+                     are skipped; the process-tree sweep is the whole mechanism"
+                );
+            }
             if !units.derived.is_empty() {
                 debug!(
                     session = %session_id,
