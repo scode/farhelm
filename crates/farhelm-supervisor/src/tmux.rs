@@ -3047,6 +3047,17 @@ impl TmuxDriver {
         self.run(&["kill-pane", "-t", pane]).await.map(|_| ())
     }
 
+    /// Type `line` into `pane` and press Enter, the way a user at that
+    /// terminal would start a command. Test-only: production never types
+    /// into a pane on the user's behalf.
+    #[cfg(test)]
+    pub(crate) async fn type_line_for_test(&self, pane: &str, line: &str) -> anyhow::Result<()> {
+        self.run(&["send-keys", "-t", pane, "-l", line]).await?;
+        self.run(&["send-keys", "-t", pane, "Enter"])
+            .await
+            .map(|_| ())
+    }
+
     /// The current size of the window containing `pane`, or `None` when
     /// tmux's answer cannot be parsed.
     ///

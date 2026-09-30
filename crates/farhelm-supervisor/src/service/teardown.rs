@@ -121,6 +121,70 @@ impl ArchiveSkipped {
 }
 
 impl Supervisor {
+    /// The live panes, other than the recorded agent pane, that Delete roots
+    /// its process walk at: every pane under the session's tmux name, which
+    /// is its tabs in ordinary use.
+    ///
+    /// The environment-marker scan finds a tab's processes only through a
+    /// marked process to expand from, normally the tab's own shell. On macOS
+    /// the kernel withholds the environment of platform binaries
+    /// (`/usr/bin/env`, the login shell, `ssh`, `caffeinate`) even from the
+    /// same user, so the shell reads as unmarked, and a pane process that
+    /// replaced itself with a scrubbed environment has the same effect
+    /// anywhere. On a host without a usable systemd user manager there is no
+    /// tab scope to fall back on, so a PPID walk from the tab pane is the one
+    /// thing that reaches the tab's processes, as Close Tab already does for
+    /// a single tab. What a walk cannot reach (a descendant that both
+    /// reparented away and lost its marker) stays the accepted manager-less
+    /// residual of `kill_process_tree`.
+    ///
+    /// A session with no recorded terminal (a restart gap, or a reload that
+    /// has not seen its pane yet) contributes every pane found under its
+    /// durable tmux name, agent pane included, since none is recorded to
+    /// root at. A pane that disappears or changes hands between the listing
+    /// and its probe is skipped; failing to ask tmux or to read a live
+    /// pane's process fails the delete, row retained, like the agent pane's
+    /// own probe.
+    async fn other_pane_roots(
+        &self,
+        entry: &SessionEntry,
+        session_id: &str,
+    ) -> Result<Vec<(u32, u64)>, TeardownError> {
+        let (tmux_name, agent_pane) = match entry.terminal.as_ref() {
+            Some(terminal) => (terminal.tmux_name.clone(), Some(terminal.pane.as_str())),
+            None => match self
+                .store
+                .tmux_name(session_id)
+                .await
+                .map_err(TeardownError::TabRediscovery)?
+            {
+                Some(tmux_name) => (tmux_name, None),
+                None => return Ok(Vec::new()),
+            },
+        };
+        let states = self
+            .tmux
+            .pane_states()
+            .await
+            .map_err(TeardownError::TabRediscovery)?;
+        let mut roots = Vec::new();
+        for (pane, state) in &states {
+            if state.session_name != tmux_name || state.dead || Some(pane.as_str()) == agent_pane {
+                continue;
+            }
+            if let PaneProbe::Owned(process) = self
+                .tmux
+                .pane_process(&tmux_name, pane)
+                .await
+                .map_err(TeardownError::PaneProbe)?
+                && !process.dead
+            {
+                roots.extend(capture_process_identity(process.pid).map_err(TeardownError::Sweep)?);
+            }
+        }
+        Ok(roots)
+    }
+
     /// Tear this session down completely: cancel its transfers, kill
     /// everything it launched, remove its terminal, its files, and its
     /// row.
@@ -258,13 +322,18 @@ impl Supervisor {
             Some(pane) => capture_process_identity(pane.pid).map_err(TeardownError::Sweep)?,
             None => None,
         };
+        // Every other live pane of the session is a root too, captured at
+        // the same boundary for the same recycling reason.
+        let other_roots = self.other_pane_roots(entry, session_id).await?;
         // `WholeSession`: delete is the one lifecycle operation
         // that takes tabs down with the agent (SPEC.md — stop
         // leaves them running), so this
         // sweep deliberately does NOT subtract tab processes. It
-        // needs no per-tab PPID root either: a tab's shell carries
-        // the session marker like everything else the session
-        // launched, and the marker scan finds it wherever it is.
+        // roots its walk at every tab pane as well as the agent's
+        // (`other_pane_roots`): the marker scan reaches a tab's
+        // processes only by expanding from a marked shell, macOS
+        // hides its platform binaries' markers, and on a host
+        // without a user manager no tab scope holds them either.
         // (Rediscovery below only needs the tab's WINDOW, which
         // survives whether or not its shell already exited —
         // `remain-on-exit` keeps a dead pane's window listed — so
@@ -357,7 +426,7 @@ impl Supervisor {
         reap_process_tree(
             &self.seams.scopes,
             units,
-            root_identity,
+            root_identity.into_iter().chain(other_roots),
             session_id,
             &SweepTarget::WholeSession,
             ScopeKillFailure::Refuse,

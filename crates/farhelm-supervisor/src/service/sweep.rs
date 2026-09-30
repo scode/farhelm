@@ -298,7 +298,9 @@ impl SweepTarget {
 /// same-uid parent, so a reparented descendant exec'd into `/bin/sh` (or
 /// any other platform binary) reads as marker-less there no matter what
 /// its environment really holds. The PPID closure still finds such a
-/// process while it remains in the pane's tree; once reparented it is
+/// process while it remains in the pane's tree, which is why Delete roots
+/// its walk at every pane the session has rather than the agent's alone;
+/// once reparented it is
 /// unreachable by this scan on that OS. The recorded follow-up is a
 /// session-id membership channel (tmux panes are session leaders, and a
 /// SID survives fork, exec, and reparenting), deliberately deferred —
@@ -994,7 +996,7 @@ async fn poll_until_gone(
 /// lore/2026-07-27-m2-process-tree-stop.md settled on after simpler cuts
 /// proved insufficient:
 ///
-/// 1. Enumerate (PPID closure from `root_pid` if any, unioned with the
+/// 1. Enumerate (PPID closure from the `roots` if any, unioned with the
 ///    environment-marker scan for `session_id`) and SIGTERM the result;
 ///    the tab processes among them (every one, for a tab's own sweep) get
 ///    SIGHUP as well, because an interactive shell ignores SIGTERM and
@@ -1027,16 +1029,17 @@ async fn poll_until_gone(
 /// and which the closure may expand through; the five-phase escalation
 /// below is identical for all three.
 ///
-/// `root` is the pane process's `(pid, starttime)` as its caller validated
-/// it, and `None` for a dead or absent pane, or a terminal-less
-/// (restart-gap) entry: there is no live pid worth trusting in any of
-/// those cases (a dead pane's remembered pid may already be recycled),
+/// `roots` are pane processes' `(pid, starttime)` pairs as their caller
+/// validated them: usually the one pane the operation is about, every live
+/// pane of the session for Delete. They are empty for a dead or absent
+/// pane, or a terminal-less (restart-gap) entry with no pane found: there
+/// is no live pid worth trusting in any of those cases (a dead pane's remembered pid may already be recycled),
 /// but SPEC.md still assigns reaping any leftover descendants of a PAST
 /// run to the session's next stop or delete — and the environment-marker
 /// scan is the only mechanism that can still find such a survivor once
 /// there is no live pane process to walk ancestry from at all. So this is
 /// called on every stop and delete, not only when the pane looks alive;
-/// `None` simply means the PPID closure has nothing to seed itself with
+/// no roots simply means the PPID closure has nothing to seed itself with
 /// beyond the marker scan's own findings.
 ///
 /// Every signal is starttime-validated (`signal_validated`) — a pid
@@ -1063,11 +1066,11 @@ async fn poll_until_gone(
 /// manager exists, and the backstop everywhere else, so this is still the
 /// function to reason about when asking what stop guarantees at minimum.
 async fn kill_process_tree(
-    root: Option<(u32, u64)>,
+    roots: impl IntoIterator<Item = (u32, u64)>,
     session_id: &str,
     target: &SweepTarget,
 ) -> anyhow::Result<()> {
-    kill_process_tree_with_grace(root, session_id, target, KILL_GRACE).await
+    kill_process_tree_with_grace(roots, session_id, target, KILL_GRACE).await
 }
 
 /// [`kill_process_tree`] with the SIGTERM grace bound as a parameter.
@@ -1078,22 +1081,24 @@ async fn kill_process_tree(
 /// short enough that "the wait ran its full length" does not slow the
 /// suite. Nothing else about the escalation varies with it.
 async fn kill_process_tree_with_grace(
-    root: Option<(u32, u64)>,
+    roots: impl IntoIterator<Item = (u32, u64)>,
     session_id: &str,
     target: &SweepTarget,
     grace: Duration,
 ) -> anyhow::Result<()> {
     let mut errors: Vec<String> = Vec::new();
 
-    // The root enters as a SEED — an identity, not a bare number — so it is
-    // validated exactly like every other carried-forward pid. The identity
-    // was captured by the caller before anything was killed
+    // The roots enter as SEEDS — identities, not bare numbers — so each is
+    // validated exactly like every other carried-forward pid. The identities
+    // were captured by the caller before anything was killed
     // (`reap_process_tree`), which matters now that a cgroup kill and its
     // grace period can run first: a pane pid read before that window and
     // trusted after it could name a completely unrelated process by the
-    // time this walk starts.
+    // time this walk starts. There is usually one root, the pane the
+    // operation is about; Delete passes one per pane its session still has,
+    // and the PPID closure expands from all of them alike.
     let seed = ProcessTree {
-        identities: root.into_iter().collect(),
+        identities: roots.into_iter().collect(),
         parents: HashMap::new(),
         hangup: HashSet::new(),
     };
@@ -1300,24 +1305,30 @@ impl ScopeUnits {
 /// scope error for `scope_kill_failure` to judge, since that scope may still
 /// hold processes; the sweep runs either way.
 ///
-/// `root_identity` is captured by the caller immediately after it observes a
-/// live pane and before any asynchronous teardown work. This function
-/// validates the same pair again before the process walk; a changed or
-/// vanished identity is treated as a missing pane root while marker and scope
+/// `roots` are pane process identities, each captured by the caller
+/// immediately after it observes a live pane and before any asynchronous
+/// teardown work. Most callers pass at most one (an `Option` is an iterator);
+/// Delete passes every live pane of the session, because when a pane's own
+/// process shows no marker (macOS platform binaries hide theirs) and no scope
+/// holds it, a walk from that pane is the only way to reach its descendants. This function validates each pair again before the process walk; a
+/// changed or vanished identity is dropped as a root while marker and scope
 /// discovery continue, but an unreadable one fails the sweep.
 pub(crate) async fn reap_process_tree(
     scopes: &crate::scope::ScopeManager,
     units: ScopeUnits,
-    root_identity: Option<(u32, u64)>,
+    roots: impl IntoIterator<Item = (u32, u64)>,
     session_id: &str,
     target: &SweepTarget,
     scope_kill_failure: ScopeKillFailure,
 ) -> anyhow::Result<()> {
-    // The caller captured this pair at its pane liveness boundary, before
-    // any asynchronous teardown work. Re-read it here before adopting the
+    // The caller captured these pairs at its pane liveness boundary, before
+    // any asynchronous teardown work. Re-read each here before adopting its
     // pane as a PPID root: if the pane exited and the kernel recycled its
     // number during that gap, the replacement must never seed this sweep.
-    let root = validate_root_identity(root_identity, session_id)?;
+    let mut validated = Vec::new();
+    for identity in roots {
+        validated.extend(validate_root_identity(Some(identity), session_id)?);
+    }
 
     if units.recorded.is_empty() && units.possible.is_empty() && units.derived.is_empty() {
         debug!(
@@ -1392,7 +1403,7 @@ pub(crate) async fn reap_process_tree(
     let scope_error = (!scope_errors.is_empty()).then(|| scope_errors.join("; "));
 
     match (
-        kill_process_tree(root, session_id, target).await,
+        kill_process_tree(validated, session_id, target).await,
         scope_error,
     ) {
         (Ok(()), Some(e)) => match scope_kill_failure {
