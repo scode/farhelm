@@ -99,6 +99,15 @@ const SYSTEMCTL_OUTPUT_CAP: usize = 1024 * 1024;
 /// (or a first create) indefinitely.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// How long after a probe that ran out of time the next caller may probe
+/// again. A timeout is not an answer: a busy manager is not an absent one,
+/// so it is not cached as "no manager" for the supervisor's lifetime the way
+/// a definite negative is. The launch that met it runs unscoped, and a later
+/// launch tries again once this has passed. One fixed interval, not a
+/// backoff: the cost it bounds is one probe round trip per interval on the
+/// create path of a host whose manager keeps timing out.
+const TIMED_OUT_REPROBE_INTERVAL: Duration = Duration::from_secs(60);
+
 /// Poll interval while waiting for a unit to appear or disappear.
 const UNIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -277,7 +286,7 @@ enum Mode {
     /// two outcomes (converged, and timed out) are both reachable in a test.
     #[cfg(test)]
     Fake {
-        probe_answers: std::sync::Mutex<std::collections::VecDeque<bool>>,
+        probe_answers: std::sync::Mutex<std::collections::VecDeque<FakeProbe>>,
         available: std::sync::atomic::AtomicBool,
         kills_fail: bool,
         vanishes_after: Option<usize>,
@@ -335,9 +344,12 @@ struct Tools {
 /// every launch. Each LAUNCH still makes and records its own selection from
 /// that verdict, which is what lets one session run under a scope and a
 /// later one (after a restart on a host that lost its manager) honestly
-/// record the fallback. There is one narrow exception: when teardown holds
-/// a unit the durable row says was scoped, a cached negative verdict gets
-/// one re-probe. That evidence proves a manager existed when the launch ran,
+/// record the fallback. A probe that runs out of time is not a verdict at
+/// all: the launch that met it runs unscoped and a later launch, once
+/// [`TIMED_OUT_REPROBE_INTERVAL`] has passed, probes again, because a busy
+/// manager is not an absent one. For a definite negative there is one
+/// narrow exception: when teardown holds a unit the durable row says was
+/// scoped, a cached negative verdict gets one re-probe. That evidence proves a manager existed when the launch ran,
 /// so treating an old transient failure as stronger evidence would discard
 /// the one handle on an environment-scrubbed descendant. A second negative
 /// is final until the next supervisor process.
@@ -365,13 +377,45 @@ pub struct ScopeManager {
 ///
 /// Tools are shared by `Arc` so callers can run `systemctl` without holding
 /// the verdict mutex. `Probing` only coordinates concurrent callers: it does
-/// not make another manager query possible beyond the initial probe and the
-/// one permitted re-probe after a negative result.
+/// not make another manager query possible beyond the initial probe, the
+/// one permitted re-probe after a definite negative, and the rate-limited
+/// re-probes after a probe that ran out of time.
 enum Verdict {
     Unprobed,
     Probing,
     Usable(Option<Arc<Tools>>),
-    Unusable { reprobed: bool },
+    /// A definite "no usable manager" (missing binaries, a refused scope, a
+    /// manager that answered no). Cached; see [`ScopeManager::reprobe`].
+    Unusable {
+        reprobed: bool,
+    },
+    /// The last probe ran out of time: no answer yet. Callers before
+    /// [`TIMED_OUT_REPROBE_INTERVAL`] has passed since `at` run unscoped
+    /// without probing; the first one after it probes again. `reprobed`
+    /// carries the definite-negative history across the timeout: a
+    /// teardown re-probe that timed out has still spent the one re-probe a
+    /// definite negative allows, so the next definite negative is final.
+    TimedOut {
+        at: tokio::time::Instant,
+        reprobed: bool,
+    },
+}
+
+/// What one probe found: a usable manager, a definite absence, or no answer
+/// within the time limits. Only the second is cached as a negative.
+enum ProbeOutcome {
+    Usable(Arc<Tools>),
+    Absent,
+    TimedOut,
+}
+
+/// A scripted probe answer for [`Mode::Fake`].
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FakeProbe {
+    Usable,
+    Absent,
+    TimedOut,
 }
 
 /// Owner of a published `Probing` verdict until the probe's answer replaces
@@ -452,6 +496,18 @@ impl ScopeManager {
     #[cfg(test)]
     pub fn fake(available: bool, sink: ScopeOpSink) -> ScopeManager {
         ScopeManager::fake_with(vec![available], false, None, Vec::new(), sink)
+    }
+
+    /// A fake whose probes answer `answers` in order, including probes that
+    /// run out of time ([`FakeProbe::TimedOut`]); once they are spent, every
+    /// further probe answers "absent".
+    #[cfg(test)]
+    pub(crate) fn fake_probing(answers: Vec<FakeProbe>, sink: ScopeOpSink) -> ScopeManager {
+        let mut manager = ScopeManager::fake_with(Vec::new(), false, None, Vec::new(), sink);
+        if let Mode::Fake { probe_answers, .. } = &mut manager.mode {
+            *probe_answers = std::sync::Mutex::new(answers.into());
+        }
+        manager
     }
 
     /// A fake whose first probe and permitted re-probe answer independently.
@@ -613,7 +669,18 @@ impl ScopeManager {
     ) -> ScopeManager {
         ScopeManager {
             mode: Mode::Fake {
-                probe_answers: std::sync::Mutex::new(probe_answers.into()),
+                probe_answers: std::sync::Mutex::new(
+                    probe_answers
+                        .into_iter()
+                        .map(|usable| {
+                            if usable {
+                                FakeProbe::Usable
+                            } else {
+                                FakeProbe::Absent
+                            }
+                        })
+                        .collect(),
+                ),
                 available: std::sync::atomic::AtomicBool::new(false),
                 kills_fail,
                 vanishes_after,
@@ -629,7 +696,9 @@ impl ScopeManager {
         }
     }
 
-    /// Whether a usable systemd user manager exists, probed at most once.
+    /// Whether a usable systemd user manager exists: probed once and cached,
+    /// except that a probe which ran out of time is retried by the first
+    /// caller after [`TIMED_OUT_REPROBE_INTERVAL`] (see [`Verdict::TimedOut`]).
     ///
     /// "Usable" is deliberately a FUNCTIONAL question about the WHOLE
     /// interface, not a `which systemd-run` question: a container image can
@@ -674,26 +743,42 @@ impl ScopeManager {
             // orders us against the probe owner. `notify_waiters` otherwise
             // has no stored permit and could fire in the gap before await.
             notified.as_mut().enable();
-            let should_probe = {
+            // The verdict this probe replaces, restored if it is cancelled,
+            // or `None` when this caller must not probe.
+            let previous = {
                 let mut verdict = self.verdict.lock().expect("scope verdict mutex poisoned");
-                match &*verdict {
+                let previous = match &*verdict {
                     Verdict::Usable(tools) => return tools.clone(),
                     Verdict::Unusable { reprobed } if !allow_reprobe || *reprobed => return None,
-                    Verdict::Unprobed => {
-                        *verdict = Verdict::Probing;
-                        Some(false)
+                    Verdict::TimedOut { at, .. } if at.elapsed() < TIMED_OUT_REPROBE_INTERVAL => {
+                        return None;
                     }
-                    Verdict::Unusable { .. } => {
-                        *verdict = Verdict::Probing;
-                        Some(true)
-                    }
+                    Verdict::Unprobed => Some(Verdict::Unprobed),
+                    Verdict::Unusable { .. } => Some(Verdict::Unusable { reprobed: false }),
+                    Verdict::TimedOut { at, reprobed } => Some(Verdict::TimedOut {
+                        at: *at,
+                        reprobed: *reprobed,
+                    }),
                     Verdict::Probing => None,
+                };
+                if previous.is_some() {
+                    *verdict = Verdict::Probing;
                 }
+                previous
             };
-            let Some(reprobed) = should_probe else {
+            let Some(previous) = previous else {
                 notified.as_mut().await;
                 notified.set(self.verdict_changed.notified());
                 continue;
+            };
+            // Re-probing a definite negative spends the one re-probe it
+            // allows, and a timeout in between keeps that spent; the first
+            // probe, and a retry after a timeout that followed no negative,
+            // do not spend it.
+            let reprobed = match &previous {
+                Verdict::Unusable { .. } => true,
+                Verdict::TimedOut { reprobed, .. } => *reprobed,
+                Verdict::Unprobed | Verdict::Probing | Verdict::Usable(_) => false,
             };
             // `Probing` is now published, and the probe below can take many
             // seconds. If this future is dropped mid-probe (a caller running on
@@ -702,26 +787,28 @@ impl ScopeManager {
             // stay forever and every later scope operation would park on it.
             let rollback = ProbeRollback {
                 manager: self,
-                previous: Some(if reprobed {
-                    Verdict::Unusable { reprobed: false }
-                } else {
-                    Verdict::Unprobed
-                }),
+                previous: Some(previous),
             };
-            let tools = self.probe().await;
-            let available = tools.is_some();
-            rollback.publish(if available {
-                Verdict::Usable(tools)
-            } else {
-                Verdict::Unusable { reprobed }
-            });
+            let (verdict, tools) = match self.probe().await {
+                ProbeOutcome::Usable(tools) => (Verdict::Usable(Some(tools.clone())), Some(tools)),
+                ProbeOutcome::Absent => (Verdict::Unusable { reprobed }, None),
+                ProbeOutcome::TimedOut => (
+                    Verdict::TimedOut {
+                        at: tokio::time::Instant::now(),
+                        reprobed,
+                    },
+                    None,
+                ),
+            };
+            rollback.publish(verdict);
+            return tools;
         }
     }
 
     /// Probe the mode without retaining the verdict mutex across process I/O.
-    async fn probe(&self) -> Option<Arc<Tools>> {
+    async fn probe(&self) -> ProbeOutcome {
         match &self.mode {
-            Mode::Disabled => None,
+            Mode::Disabled => ProbeOutcome::Absent,
             #[cfg(test)]
             Mode::Fake {
                 probe_answers,
@@ -737,32 +824,46 @@ impl ScopeManager {
                         .expect("the probe gate is never closed")
                         .forget();
                 }
-                let answer = probe_answers.lock().unwrap().pop_front().unwrap_or(false);
-                available.store(answer, std::sync::atomic::Ordering::SeqCst);
-                answer.then(|| {
-                    Arc::new(Tools {
+                let answer = probe_answers
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .unwrap_or(FakeProbe::Absent);
+                available.store(
+                    answer == FakeProbe::Usable,
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+                match answer {
+                    FakeProbe::Usable => ProbeOutcome::Usable(Arc::new(Tools {
                         systemd_run: PathBuf::new(),
                         systemctl: PathBuf::new(),
                         expand_environment_flag: false,
-                    })
-                })
+                    })),
+                    FakeProbe::Absent => ProbeOutcome::Absent,
+                    FakeProbe::TimedOut => ProbeOutcome::TimedOut,
+                }
             }
             Mode::Systemd => {
-                let tools = probe_systemd().await.map(Arc::new);
-                match &tools {
-                    Some(tools) => tracing::info!(
+                let outcome = probe_systemd().await;
+                match &outcome {
+                    ProbeOutcome::Usable(tools) => tracing::info!(
                         systemd_run = %tools.systemd_run.display(),
                         systemctl = %tools.systemctl.display(),
                         expand_environment_flag = tools.expand_environment_flag,
                         "systemd user manager is usable; launches will run in their own \
                          transient scope, with the process-tree sweep as backstop"
                     ),
-                    None => tracing::info!(
+                    ProbeOutcome::Absent => tracing::info!(
                         "no usable systemd user manager; launches will rely on the \
                          process-tree sweep alone (M2 behavior)"
                     ),
+                    ProbeOutcome::TimedOut => tracing::info!(
+                        "the systemd user manager did not answer in time; this launch relies \
+                         on the process-tree sweep alone, and a launch after \
+                         {TIMED_OUT_REPROBE_INTERVAL:?} probes again"
+                    ),
                 }
-                tools
+                outcome
             }
         }
     }
@@ -1083,15 +1184,23 @@ fn resolve_program(name: &str) -> Option<PathBuf> {
 /// rather than a portability claim — POSIX standardizes the name `sh`, not
 /// the path — and a safe one here, because this whole module only ever
 /// matters on a host running a systemd user manager.
-async fn probe_systemd() -> Option<Tools> {
-    let systemd_run = resolve_program("systemd-run")?;
-    let systemctl = resolve_program("systemctl")?;
+///
+/// A probe that runs out of time, overall or on one `systemctl` query, is
+/// [`ProbeOutcome::TimedOut`] rather than a negative: the manager may just
+/// have been busy (`crates/farhelm/tests/e2e/harness.rs` records two probes
+/// of one loaded manager reaching different verdicts).
+async fn probe_systemd() -> ProbeOutcome {
+    let (Some(systemd_run), Some(systemctl)) =
+        (resolve_program("systemd-run"), resolve_program("systemctl"))
+    else {
+        return ProbeOutcome::Absent;
+    };
     match tokio::time::timeout(PROBE_TIMEOUT, probe_round_trip(&systemd_run, &systemctl)).await {
-        Ok(Ok(expand_environment_flag)) => Some(Tools {
+        Ok(Ok(expand_environment_flag)) => ProbeOutcome::Usable(Arc::new(Tools {
             systemd_run,
             systemctl,
             expand_environment_flag,
-        }),
+        })),
         Ok(Err(e)) => {
             // warn!, not debug!: this is production silently losing cgroup
             // containment and falling back to the sweep alone, which is
@@ -1102,12 +1211,17 @@ async fn probe_systemd() -> Option<Tools> {
             // step; a healthy old systemd rejects the flag and then
             // SUCCEEDS unflagged, producing no warning at all), and a
             // bare "error" at something this module did not anticipate.
+            let shape = describe_probe_failure(&e);
             tracing::warn!(
                 error = %format!("{e:#}"),
-                shape = describe_probe_failure(&e),
+                shape,
                 "the systemd user-manager probe failed; selecting the process-tree sweep alone"
             );
-            None
+            if classify_probe_failure(&e) == ProbeFailureShape::Timeout {
+                ProbeOutcome::TimedOut
+            } else {
+                ProbeOutcome::Absent
+            }
         }
         Err(_) => {
             tracing::warn!(
@@ -1115,7 +1229,7 @@ async fn probe_systemd() -> Option<Tools> {
                 "the systemd user-manager probe did not finish within {PROBE_TIMEOUT:?}; \
                  selecting the process-tree sweep alone"
             );
-            None
+            ProbeOutcome::TimedOut
         }
     }
 }
@@ -1302,9 +1416,24 @@ async fn probe_once(
         .with_context(|| format!("running {}", systemd_run.display()))?;
 
     let result = async {
-        wait_for_unit(systemctl, &unit, true)
-            .await
-            .context("the probe scope never became visible to the user manager")?;
+        // `systemd-run --scope` execs the probe shell in place, so while the
+        // scope exists the child is still running. A child that exits first
+        // means the scope could not be started (the manager refused it, or
+        // `systemd-run` failed outright): that is an answer now, not after
+        // the rest of [`PROBE_TIMEOUT`] spent polling for a unit that will
+        // never appear.
+        tokio::select! {
+            visible = wait_for_unit(systemctl, &unit, true) => {
+                visible.context("the probe scope never became visible to the user manager")?;
+            }
+            exited = child.wait() => {
+                let status = exited.with_context(|| format!("waiting for {}", systemd_run.display()))?;
+                anyhow::bail!(
+                    "{} exited ({status}) before the probe scope became visible to the user manager",
+                    systemd_run.display()
+                );
+            }
+        }
         let killed = run_with_timeout(
             tokio::process::Command::new(systemctl)
                 .arg("--user")
@@ -1622,6 +1751,171 @@ mod tests {
         assert!(!scopes.reprobe().await);
         assert!(!scopes.reprobe().await);
         assert_eq!(*ops.lock().unwrap(), vec![ScopeOp::Probe, ScopeOp::Probe]);
+    }
+
+    /// A probe that runs out of time is not an answer: the launch that met
+    /// it runs unscoped, callers within the re-probe interval do not probe
+    /// again, and the first caller after it does, with its answer cached.
+    ///
+    /// Why: a timeout used to be cached as "no manager" for the whole
+    /// supervisor lifetime, so a manager that was merely busy once left
+    /// every later launch without its cgroup scope until a restart. The
+    /// interval is what keeps a manager that keeps timing out from costing
+    /// a probe on every launch.
+    #[farhelm_testtrace::test]
+    async fn a_timed_out_probe_is_retried_after_the_interval_not_cached() {
+        tokio::time::pause();
+        let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let ops = Arc::clone(&ops);
+            Arc::new(move |op: &ScopeOp| ops.lock().unwrap().push(op.clone())) as ScopeOpSink
+        };
+        let scopes = ScopeManager::fake_probing(vec![FakeProbe::TimedOut, FakeProbe::Usable], sink);
+
+        assert!(
+            !scopes.available().await,
+            "the timed-out launch runs unscoped"
+        );
+        tokio::time::advance(TIMED_OUT_REPROBE_INTERVAL / 2).await;
+        assert!(
+            !scopes.available().await,
+            "within the interval, a launch runs unscoped without probing"
+        );
+        assert_eq!(*ops.lock().unwrap(), vec![ScopeOp::Probe]);
+        tokio::time::advance(TIMED_OUT_REPROBE_INTERVAL).await;
+        assert!(
+            scopes.available().await,
+            "the first launch after the interval probes and uses the answer"
+        );
+        assert!(scopes.available().await, "and the answer is cached");
+        assert_eq!(*ops.lock().unwrap(), vec![ScopeOp::Probe, ScopeOp::Probe]);
+    }
+
+    /// A definite negative after a timeout is cached like any first
+    /// negative, and still leaves teardown its one durable-evidence re-probe.
+    ///
+    /// Why: the timeout path must not spend or bypass the definite-negative
+    /// rules. A retried probe that finds no manager is the first real
+    /// answer, not a re-probe.
+    #[farhelm_testtrace::test]
+    async fn a_definite_negative_after_a_timeout_keeps_the_negative_rules() {
+        tokio::time::pause();
+        let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let ops = Arc::clone(&ops);
+            Arc::new(move |op: &ScopeOp| ops.lock().unwrap().push(op.clone())) as ScopeOpSink
+        };
+        let scopes = ScopeManager::fake_probing(
+            vec![FakeProbe::TimedOut, FakeProbe::Absent, FakeProbe::Usable],
+            sink,
+        );
+
+        assert!(!scopes.available().await);
+        tokio::time::advance(TIMED_OUT_REPROBE_INTERVAL).await;
+        assert!(
+            !scopes.available().await,
+            "the retried probe finds no manager"
+        );
+        tokio::time::advance(TIMED_OUT_REPROBE_INTERVAL).await;
+        assert!(
+            !scopes.available().await,
+            "a definite negative is cached, however long ago it was found"
+        );
+        assert!(
+            scopes.reprobe().await,
+            "durable teardown evidence still gets its one re-probe"
+        );
+        assert_eq!(
+            *ops.lock().unwrap(),
+            vec![ScopeOp::Probe, ScopeOp::Probe, ScopeOp::Probe]
+        );
+    }
+
+    /// A `systemd-run` that exits before its scope appears fails the probe at
+    /// once, rather than after the rest of the probe's time limit.
+    ///
+    /// Why: `systemd-run --scope` execs its command in place, so a child
+    /// that exits first means the scope was never started. The probe used
+    /// to poll `systemctl show` for a unit that could not appear until
+    /// [`PROBE_TIMEOUT`] ran out, spending the whole budget and then
+    /// reporting a timeout instead of the refusal it actually got. The fake
+    /// `systemctl` here always answers "not-found", so only the exit race
+    /// can end this probe early.
+    #[farhelm_testtrace::test]
+    async fn a_systemd_run_that_exits_early_fails_the_probe_without_waiting() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = farhelm_teststate::tempdir().expect("scratch dir");
+        let script = |name: &str, body: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write fake");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod fake");
+            path
+        };
+        let systemd_run = script("systemd-run", "echo refused >&2; exit 3");
+        let systemctl = script("systemctl", "echo not-found");
+
+        let started = std::time::Instant::now();
+        let error =
+            tokio::time::timeout(PROBE_TIMEOUT, probe_once(&systemd_run, &systemctl, false))
+                .await
+                .expect("the probe must end on the exit, not run into its time limit")
+                .expect_err("a scope that never started is a failed probe");
+        assert!(
+            format!("{error:#}").contains("before the probe scope became visible"),
+            "the failure must say the scope never started: {error:#}"
+        );
+        assert_eq!(
+            classify_probe_failure(&error),
+            ProbeFailureShape::Error,
+            "an exit is a definite answer, not a timeout"
+        );
+        assert!(
+            started.elapsed() < SYSTEMCTL_TIMEOUT,
+            "the probe must not wait out a query budget: {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// A teardown re-probe that times out still spends the one re-probe a
+    /// definite negative allows: the next definite negative is final.
+    ///
+    /// Why: without carrying that history through the timeout, alternating
+    /// timeouts and negatives would keep reopening the re-probe, turning a
+    /// manager outage into repeated probe round trips during teardown,
+    /// which the one-re-probe rule exists to prevent.
+    #[farhelm_testtrace::test]
+    async fn a_timed_out_reprobe_still_spends_the_negative_reprobe() {
+        tokio::time::pause();
+        let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let ops = Arc::clone(&ops);
+            Arc::new(move |op: &ScopeOp| ops.lock().unwrap().push(op.clone())) as ScopeOpSink
+        };
+        let scopes = ScopeManager::fake_probing(
+            vec![
+                FakeProbe::Absent,
+                FakeProbe::TimedOut,
+                FakeProbe::Absent,
+                FakeProbe::Usable,
+            ],
+            sink,
+        );
+
+        assert!(!scopes.available().await, "a definite negative");
+        assert!(!scopes.reprobe().await, "teardown's re-probe times out");
+        tokio::time::advance(TIMED_OUT_REPROBE_INTERVAL).await;
+        assert!(
+            !scopes.available().await,
+            "the retry finds no manager again"
+        );
+        tokio::time::advance(TIMED_OUT_REPROBE_INTERVAL).await;
+        assert!(!scopes.available().await, "that second negative is final");
+        assert!(!scopes.reprobe().await, "even for teardown evidence");
+        assert_eq!(
+            *ops.lock().unwrap(),
+            vec![ScopeOp::Probe, ScopeOp::Probe, ScopeOp::Probe]
+        );
     }
 
     /// A usable manager never gets a speculative health check. The residual
