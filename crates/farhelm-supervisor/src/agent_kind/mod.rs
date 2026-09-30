@@ -120,6 +120,8 @@ mod capture;
 pub(crate) mod codex;
 pub(crate) mod grok;
 pub(crate) mod omp;
+#[cfg(test)]
+mod screen_fixtures;
 pub use capture::{
     CAPTURE_PUBLICATION_GRACE, CAPTURE_WINDOW_AFTER, CAPTURE_WINDOW_BEFORE, Candidate,
     CaptureVerdict, CaptureWindow, CaptureWindowBounds, RecordCorrelators, RecordStamp,

@@ -1,0 +1,42 @@
+
+ ▐▛███▛█   Claude Code v2.1.285
+▝▜██████▀  Sonnet 5.5 · API Usage Billing
+ ▝▝   ▝▝   /tmp/fhc-xxxxxxxx/claude
+
+
+❯ Use your Bash tool to run exactly this command: sleep 20 && echo capture-done > marker.txt
+
+● Skill(skillette)
+  ⎿  Successfully loaded skill
+
+  Ran 1 shell command
+
+● Skillette is loaded, and the command ran. It wrote marker.txt in /tmp/fhc-xxxxxxxx/claude after the 20-second sleep, with no
+  output.
+
+✻ Cogitated for 26s · done 3:41 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                  tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  user@host:/tmp/fhc-xxxxxxxx/claude Sonnet 5.5 effort:medium [░░░░░░░░░░] 6%
+  ⏸ manual mode on · ← for agents
