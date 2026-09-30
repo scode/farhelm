@@ -21,9 +21,12 @@ Subcommands:
 
 State lives under `$XDG_STATE_HOME/farhelm-deflake` (default
 `~/.local/state/farhelm-deflake`), never in the checkout: `workspaces/<key>/`
-is the persistent worktree the sweep runs in for one checkout (kept so warm
-builds survive across runs), `runs/<uuid>/` holds one sweep's status, phase
-logs, and events, and `daemon.lock` allows one sweep per machine at a time.
+is the persistent worktree the sweep runs in for one checkout (its cargo
+`target/` is deleted when a daemon starts and again when it exits; see
+`Daemon.clean_build_outputs`), `workspaces/<key>.lock` beside it is held by
+every command a run starts (see `Daemon.acquire_use_lock`), `runs/<uuid>/`
+holds one sweep's status, phase logs, and events, and `daemon.lock` allows one
+sweep per machine at a time.
 Test evidence itself is retained by scripts/record-test-run.py in its own root;
 events point at those run directories rather than copying them.
 """
@@ -87,6 +90,96 @@ def find_checkout(start: pathlib.Path) -> pathlib.Path:
         if (candidate / ".jj").is_dir():
             return candidate
     raise SystemExit(f"deflake: {start} is not inside a jj checkout")
+
+
+# Every command the daemon runs goes through this shim while the daemon holds
+# the workspace-use lock (see Daemon.acquire_use_lock). The shim inherits the
+# lock's file descriptor and so keeps the lock held for exactly as long as the
+# command runs, even if the daemon itself is killed outright; the lock is what
+# tells the next run that an earlier run's command is still at work in the
+# tree. It starts the real command with Python's default close_fds, so the
+# descriptor goes no further: a long-lived process the command leaves behind
+# (a daemonized tmux server, an ssh ControlPersist master) never inherits it
+# and cannot hold the lock forever.
+#
+# The shim must never exit before its command does, or it would release the
+# lock under a command still at work. So it catches SIGTERM, SIGINT and SIGHUP
+# with a handler (not SIG_IGN, which the command would inherit across exec)
+# and forwards each to the command instead of dying. A signal that arrives
+# before the command has started is held and sent once it has, so a stop
+# cannot fall into that gap. The shim sits in the command's process group, so
+# a stop's killpg reaches the command directly as well; the command sees that
+# signal twice, which the recorder and cargo both treat as one. Anyone killing
+# the holder `fuser` names on the lock gets the same forwarding. A command
+# killed by a signal is reported the shell's way, 128 + the signal number.
+# The shim runs isolated (-I), so a stray module in the command's working
+# directory or an ambient PYTHONPATH cannot shadow the standard library under
+# it.
+HOLD_SHIM = """
+import signal, subprocess, sys
+child = None
+held = []
+def forward(number, _frame):
+    if child is None:
+        held.append(number)
+    else:
+        child.send_signal(number)
+for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    signal.signal(number, forward)
+child = subprocess.Popen(sys.argv[1:])
+for number in held:
+    child.send_signal(number)
+status = child.wait()
+sys.exit(status if status >= 0 else 128 - status)
+"""
+
+
+def use_lock_path(workspace: pathlib.Path) -> pathlib.Path:
+    """The workspace-use lock: beside the worktree, so neither git nor the cleanup touches it."""
+    return workspace.with_name(workspace.name + ".lock")
+
+
+def held_cargo_locks(target: pathlib.Path) -> list[pathlib.Path]:
+    """Cargo lock files under `target` that a running cargo still holds.
+
+    Cargo takes `flock` locks on `.cargo-lock`, `.cargo-build-lock` and
+    `.cargo-artifact-lock` in each profile directory (`target/debug/`,
+    `target/<triple>/debug/`, the dx profiles) for as long as it builds, and
+    this probes each with a non-blocking exclusive `flock`, released at once.
+    A lock that cannot be taken means a cargo is building in that tree right
+    now. Only the top three levels are searched, which is where profile
+    directories live; the probe never walks deps/ or incremental/.
+
+    This is a backstop behind the workspace-use lock, which is what normally
+    catches a killed daemon's surviving command. It covers the gaps that lock
+    cannot: a surviving command from a driver version that predates it, and
+    the exit-time cleanup, when the daemon holds the use lock itself. On its
+    own it is not enough, because dx keeps writing under `target/dx` after
+    its cargo step has released cargo's locks.
+
+    It is deliberately narrower than "some process is still using the
+    worktree". The sweep's own batteries routinely leave long-lived processes
+    whose working directory is the worktree (a daemonized tmux server from
+    the desktop smoke, an ssh ControlPersist master from the browser suite),
+    and none of them builds. Refusing on those would block every later run.
+    """
+    held = []
+    for pattern in (".cargo*lock", "*/.cargo*lock", "*/*/.cargo*lock"):
+        for lock in sorted(target.glob(pattern)):
+            try:
+                fd = os.open(lock, os.O_RDONLY)
+            except OSError:
+                continue
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except BlockingIOError:
+                held.append(lock)
+            except OSError:
+                continue
+            finally:
+                os.close(fd)
+    return held
 
 
 def checkout_key(checkout: pathlib.Path) -> str:
@@ -557,6 +650,21 @@ class Daemon:
         # deflake run never sets it.
         self.only = only
         self.stop_requested = False
+        self.prepare_cleanup_failed = False
+        self.prepare_cleanup_error: str | None = None
+        # The workspace-use lock's descriptor once prepare() holds it; from
+        # then on every command runs through HOLD_SHIM with it. prepare()
+        # takes it only after creating the worktree or confirming that this
+        # checkout owns it, so holding it is also what licenses the exit-time
+        # cleanup: a worktree that belongs to another checkout holds that
+        # checkout's build, not ours.
+        self.use_lock_fd: int | None = None
+        # Set when an exception forced a command to be SIGKILLed; its
+        # descendants may still be at work, so the exit cleanup is skipped.
+        self.command_escaped = False
+        # A daemon error whose status and event writes failed (a full disk),
+        # held for finish() to record once the deletion has freed space.
+        self.unrecorded_error: str | None = None
         self.child: subprocess.Popen | None = None
         self.path_prefix: list[str] = []
         self.log = (run.path / "daemon.log").open("a", encoding="utf-8")
@@ -564,11 +672,39 @@ class Daemon:
     # -- logging and process helpers ---------------------------------------
 
     def say(self, message: str) -> None:
-        self.log.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {message}\n")
-        self.log.flush()
+        # Best effort: on a full disk the log write fails, and a logging
+        # failure must not abort the cleanup that would free the space. The
+        # RuntimeError is the buffered writer refusing a reentrant call, which
+        # happens when the SIGTERM handler's own say() lands in the middle of
+        # this one.
+        try:
+            self.log.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {message}\n")
+            self.log.flush()
+        except (OSError, RuntimeError):
+            pass
 
     def env(self) -> dict[str, str]:
         env = dict(os.environ)
+        # Every build must land in the worktree's own `target/`, because that
+        # is the directory clean_build_outputs deletes. An inherited override
+        # would put the sweep's 40+ GB into a directory it does not own, where
+        # the sweep would share build outputs with other builds and never
+        # clean them up. Both variables are set outright rather than only
+        # dropping inherited ones, because cargo ranks the environment above
+        # its config files, so this also beats a `build.target-dir` or
+        # `build.build-dir` in any of them. The build directory matters as
+        # much as the target directory: it is where deps/, build/ and
+        # incremental/ go, the bulk of the size. Setting it equal to the
+        # target directory is cargo's own default, and produces the same
+        # layout (checked on cargo 1.98.1). The scripts that read
+        # CARGO_TARGET_DIR (desktop smoke, CentOS) resolve it to the same
+        # directory they would default to, and the one nested cargo in the
+        # tests (the testtrace compile contract) clears its environment and
+        # sets its own.
+        target = str(self.workspace / "target")
+        env["CARGO_TARGET_DIR"] = target
+        env["CARGO_BUILD_BUILD_DIR"] = target
+        env.pop("CARGO_BUILD_TARGET_DIR", None)
         if self.path_prefix:
             env["PATH"] = os.pathsep.join([*self.path_prefix, env.get("PATH", "")])
         return env
@@ -580,17 +716,68 @@ class Daemon:
         group so a stop can reach the whole tree with one signal.
         """
         self.say(f"[{phase_name}] $ {shlex.join(argv)}  (cwd {cwd})")
+        pass_fds: tuple[int, ...] = ()
+        exec_argv = argv
+        if self.use_lock_fd is not None:
+            exec_argv = [sys.executable, "-I", "-c", HOLD_SHIM, *argv]
+            pass_fds = (self.use_lock_fd,)
         with log_path.open("ab") as out:
-            self.child = subprocess.Popen(argv, cwd=cwd, env=self.env(), stdout=out, stderr=subprocess.STDOUT,
-                                          stdin=subprocess.DEVNULL, start_new_session=True)
+            self.child = subprocess.Popen(exec_argv, cwd=cwd, env=self.env(), stdout=out, stderr=subprocess.STDOUT,
+                                          stdin=subprocess.DEVNULL, start_new_session=True, pass_fds=pass_fds)
+            if self.stop_requested:
+                # A stop that landed while Popen was running found no child
+                # to signal; deliver it now rather than let the command run
+                # its course.
+                try:
+                    os.killpg(self.child.pid, signal.SIGTERM)
+                except OSError:
+                    pass
             stalled_flag = threading.Event()
-            watcher = threading.Thread(target=self._watch_stall, args=(log_path, phase_name, stalled_flag), daemon=True)
-            watcher.start()
-            status = self.child.wait()
-            stalled_flag.set()
+            try:
+                watcher = threading.Thread(target=self._watch_stall, args=(log_path, phase_name, stalled_flag),
+                                           daemon=True)
+                watcher.start()
+                status = self.child.wait()
+            except BaseException:
+                self._abandon_child()
+                raise
+            finally:
+                stalled_flag.set()
             self.child = None
         self.say(f"[{phase_name}] exit {status}")
         return status
+
+    def _abandon_child(self) -> None:
+        """Stop the running command after an exception in _run, and wait for it.
+
+        An exception here (a stall watcher thread that cannot start, say)
+        goes straight to finish(), which deletes `target/`. The daemon holds
+        the use lock itself, so that lock cannot protect the tree from the
+        daemon's own command. So the command is stopped the way `stop` would
+        stop it, a SIGTERM to its group that the recorder turns into its own
+        graceful shutdown, and waited for. A command that is still running
+        after that gets SIGKILL, and the run is marked so finish() leaves
+        `target/` alone: a recorder killed that way can leave its own child
+        session running.
+        """
+        child = self.child
+        if child is None:
+            return
+        try:
+            os.killpg(child.pid, signal.SIGTERM)
+        except OSError:
+            pass
+        try:
+            child.wait(timeout=180)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            child.wait()
+            self.command_escaped = True
+            self.say(f"command {child.pid} ignored SIGTERM for 180s and was killed; its descendants may survive")
+        self.child = None
 
     def _watch_stall(self, log_path: pathlib.Path, phase_name: str, done: threading.Event) -> None:
         last_size, last_change, reported = -1, time.time(), False
@@ -629,48 +816,242 @@ class Daemon:
         signal.signal(signal.SIGTERM, self.handle_signal)
         signal.signal(signal.SIGINT, self.handle_signal)
         self.run.pid_file.write_text(f"{os.getpid()}\n")
+        final_status = "failed"
         try:
-            self.run.update_status(status="preparing", sweep=0)
-            if not self.prepare():
-                if self.stop_requested:
-                    # A stop during preparation is the operator's choice, not
-                    # a tooling failure; report it as such.
-                    self.run.update_status(status="stopped", phase=None)
-                    return
-                self.run.update_status(status="failed")
-                self.run.emit("prepare-failed", note="workspace preparation failed; see daemon.log and phases/prepare-*.log",
-                              log=str(self.run.path / "daemon.log"))
-                return
-            sweep = 0
-            while not self.stop_requested:
-                sweep += 1
-                self.run.update_status(sweep=sweep)
-                self.sweep(sweep)
-                if self.stop_requested:
-                    break
-                self.run.emit("sweep-finished", sweep=sweep, repeating=self.repeat,
-                              found=[t.line() for t in self.run.found_flakes()])
-                if not self.repeat:
-                    break
-            self.run.update_status(status="stopped" if self.stop_requested else "finished", phase=None)
+            final_status = self.prepare_and_sweep()
         except Exception as error:  # noqa: BLE001 - the daemon must record, not vanish
             self.say(f"daemon error: {error!r}\n{traceback.format_exc()}")
-            self.run.update_status(status="failed", error=repr(error))
-            self.run.emit("daemon-error", error=repr(error), log=str(self.run.path / "daemon.log"))
-        finally:
             try:
-                self.run.pid_file.unlink()
-            except OSError:
-                pass
+                self.record_daemon_error(repr(error))
+            except OSError as write_error:
+                # Most likely a full disk. finish() still has to run the
+                # deletion that would fix it, and records the error after it.
+                self.say(f"could not record daemon error: {write_error!r}")
+                self.unrecorded_error = repr(error)
+        finally:
+            self.finish(final_status)
+
+    def finish(self, final_status: str) -> None:
+        """Delete the build outputs, then publish the run's final status.
+
+        The final status is written only after the deletion, because `wait`
+        reports the run as over on that status, and an agent that then starts
+        the next run must find the disk already reclaimed rather than race
+        this deletion. (The daemon lock is released later still, at process
+        exit, so a `start` issued in the same instant can be refused; that
+        gap predates the cleanup.)
+
+        No write can abort the deletion: the ones before it and after it are
+        all best effort. A full disk is exactly the state a 40+ GB build can
+        leave behind, and a status or event write that raises ENOSPC must
+        not be able to skip the one step that frees the space. The same does
+        not hold at the next start, whose state writes come before the
+        prepare-time deletion; a disk too full to start a run needs its
+        `target/` deleted by hand.
+
+        For the same reason, a daemon error that could not be recorded when
+        it happened is recorded here, after the deletion has freed space, so
+        the run never ends as a bare "failed" with nothing saying why.
+
+        The exit deletion is skipped when prepare could not take the
+        workspace (take_workspace): it would refuse or fail the same way, and
+        prepare-failed has already reported why.
+        """
+        def best_effort(write: Callable[[], object]) -> None:
+            try:
+                write()
+            except OSError as error:
+                self.say(f"could not record final state: {error!r}")
+
+        # Holding the use lock implies the worktree is ours; without it the
+        # tree may still be in use by an earlier run's command.
+        if self.command_escaped:
+            best_effort(lambda: self.run.emit(
+                "cleanup-failed", error="a command was killed after an internal error and its descendants may still be "
+                "running in the worktree; the build outputs were left in place", log=str(self.run.path / "daemon.log"),
+                note="make sure that run's processes are gone before the next `deflake start`, which deletes them"))
+        elif self.use_lock_fd is not None and not self.prepare_cleanup_failed:
+            # "cleaning" tells `status` why the daemon lingers.
+            best_effort(lambda: self.run.update_status(status="cleaning", phase=None))
+            error = self.clean_build_outputs()
+            if error:
+                best_effort(lambda: self.run.emit(
+                    "cleanup-failed", error=error, log=str(self.run.path / "daemon.log"),
+                    note="the run's own events stand; the next `deflake start` retries the deletion before it builds"))
+        if self.unrecorded_error:
+            best_effort(lambda: self.record_daemon_error(self.unrecorded_error))
+        best_effort(lambda: self.run.update_status(status=final_status, phase=None))
+        try:
+            self.run.pid_file.unlink()
+        except OSError:
+            pass
+
+    def record_daemon_error(self, error: str) -> None:
+        self.run.update_status(error=error)
+        self.run.emit("daemon-error", error=error, log=str(self.run.path / "daemon.log"))
+
+    def prepare_and_sweep(self) -> str:
+        """Prepare the workspace and run the sweeps; returns the run's final status.
+
+        The status is returned rather than written because main() must delete
+        the build outputs before the run is reported as over.
+        """
+        self.run.update_status(status="preparing", sweep=0)
+        if not self.prepare():
+            if self.stop_requested and not self.prepare_cleanup_failed:
+                # A stop during preparation is the operator's choice, not
+                # a tooling failure; report it as such. A failed deletion is
+                # the exception: the in-process deletion runs to its end
+                # despite the stop, so its failure is real, and finish() will
+                # not report it a second time.
+                return "stopped"
+            # A failed deletion carries its reason in the event, since it is
+            # something the agent must relay (a symlink to replace, a build
+            # to kill) rather than a build log to read.
+            details = {"error": self.prepare_cleanup_error} if self.prepare_cleanup_error else {}
+            self.run.emit("prepare-failed", note="workspace preparation failed; see daemon.log and phases/prepare-*.log",
+                          log=str(self.run.path / "daemon.log"), **details)
+            return "failed"
+        sweep = 0
+        while not self.stop_requested:
+            sweep += 1
+            self.run.update_status(sweep=sweep)
+            self.sweep(sweep)
+            if self.stop_requested:
+                break
+            self.run.emit("sweep-finished", sweep=sweep, repeating=self.repeat,
+                          found=[t.line() for t in self.run.found_flakes()])
+            if not self.repeat:
+                break
+        return "stopped" if self.stop_requested else "finished"
+
+    def acquire_use_lock(self) -> str | None:
+        """Take the workspace-use lock for this daemon's lifetime; returns why not, or None.
+
+        A daemon killed outright (SIGKILL, the OOM killer) leaves its running
+        command behind, because every command runs in its own session. That
+        command still holds this lock through HOLD_SHIM, so failing to take
+        it means an earlier run is still building or testing in the tree,
+        and this run must neither delete `target/` under it nor build beside
+        it. The lock is released when this daemon exits, after the exit-time
+        cleanup.
+        """
+        path = use_lock_path(self.workspace)
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        except OSError as error:
+            message = f"cannot open the workspace-use lock {path}: {error!r}"
+            self.say(message)
+            return message
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            os.close(fd)
+            if isinstance(error, BlockingIOError):
+                message = (f"a command from an earlier run is still running in {self.workspace} (it holds {path}), "
+                           f"most likely left behind by a killed daemon; `fuser {path}` names its holder, and a "
+                           f"plain `kill` of that pid stops the command too")
+            else:
+                message = f"cannot lock the workspace-use lock {path}: {error!r}"
+            self.say(message)
+            return message
+        self.use_lock_fd = fd
+        return None
+
+    def clean_build_outputs(self) -> str | None:
+        """Delete the worktree's cargo `target/`; returns an error description, or None.
+
+        This is `cargo clean` for the worktree, and it covers the sweep's
+        build outputs: cargo's debug and per-target trees, the dx web bundle,
+        and the musl and desktop-smoke builds all land under `target/`
+        (env() pins that). The one exception is a test that builds its own
+        temporary project (the testtrace compile contract), which gives that
+        project its own target directory and deletes it itself. That test
+        clears its environment, so a `build.build-dir` in a cargo config file
+        would still send its intermediates elsewhere. One sweep
+        leaves 40+ GB there,
+        mostly one copy of each large test binary per feature set cargo
+        resolves, plus incremental compilation caches, and nothing ever
+        pruned it. The trade is a cold build per run (a few minutes of
+        `cargo build` and `dx build` in prepare, plus the per-phase test
+        builds) against hours of sweep. Repeat mode is unaffected: its sweeps
+        share one daemon, one prepare, and one build.
+
+        It runs twice. At daemon exit it reclaims the space. At prepare it
+        deletes whatever a daemon killed before its own cleanup left behind.
+        A failure there fails preparation, so a new build is never piled on
+        top of an old one that could not be deleted.
+
+        The deletion happens in this process rather than as a `cargo clean`
+        child, because a `deflake stop` during cleanup signals the running
+        child, and the cleanup should finish rather than be cut off halfway.
+        It also avoids depending on the toolchain resolving at whatever
+        commit the worktree is on. A `target` that is a symlink is refused
+        rather than followed, so this never deletes a directory outside the
+        worktree.
+
+        It must never run under a command that is still building. The daemon
+        runs each command in its own session, so a daemon killed outright
+        (SIGKILL, the OOM killer) can leave its command running while the
+        daemon lock dies with the daemon. Deleting `target/` under that
+        command would let the orphan and the next run's build write the same
+        tree at once, and the corrupted build would surface as fake flakes.
+        At prepare the workspace-use lock (acquire_use_lock, taken just
+        before this) is what rules that out. This function adds a backstop of
+        its own, held_cargo_locks, which also covers the exit-time call.
+
+        Everything else in the worktree stays: node_modules (which `npm ci`
+        reinstalls from npm's cache every prepare anyway) and the pinned tmux
+        and nextest under `.ci-tmux*` and `.ci-nextest`, which are small and
+        slower to recreate than they are worth deleting.
+        """
+        target = self.workspace / "target"
+        if target.is_symlink():
+            self.say(f"{target} is a symlink; refusing to delete through it")
+            return f"{target} is a symlink; refusing to delete through it, remove or replace it by hand"
+        if not target.exists():
+            return None
+        held = held_cargo_locks(target)
+        if held:
+            locks = " ".join(str(p.relative_to(target)) for p in held)
+            message = f"a cargo build is still running in {target} (it holds {locks}); not deleting the tree under it"
+            self.say(message)
+            return message
+        self.say(f"deleting build outputs in {target}")
+        started = time.time()
+        try:
+            shutil.rmtree(target)
+        except OSError as error:
+            self.say(f"deleting {target} failed: {error!r}")
+            return f"deleting {target} failed: {error!r}"
+        self.say(f"deleted {target} in {time.time() - started:.0f}s")
+        return None
 
     # -- preparation -------------------------------------------------------
+
+    def take_workspace(self) -> bool:
+        """Lock the owned worktree for this run, then delete what earlier runs left in `target/`.
+
+        Either failing means the tree is not safe to build in (an earlier
+        run's command is still at work, or its outputs could not be deleted),
+        so preparation fails with the reason, and the exit-time cleanup is
+        skipped: it would refuse or fail the same way.
+        """
+        error = self.acquire_use_lock() or self.clean_build_outputs()
+        if error:
+            self.prepare_cleanup_failed = True
+            self.prepare_cleanup_error = error
+            return False
+        return True
 
     def prepare(self) -> bool:
         """Point the workspace at the base commit and build every prerequisite.
 
-        The workspace is persistent across runs so cargo, dx, npm, the pinned
-        tmux, and the pinned nextest stay warm; only the working-copy commit
-        moves. Each step is logged under phases/prepare-<step>.log.
+        The worktree itself is persistent across runs, so the pinned tmux and
+        the pinned nextest stay warm and only the working-copy commit moves.
+        The cargo and dx builds do not: `target/` is deleted here and at
+        daemon exit (see clean_build_outputs), so every run builds cold. Each
+        step is logged under phases/prepare-<step>.log.
         """
         # The sweep tree is a detached git worktree, not a jj workspace. A jj
         # workspace of a colocated repo carries only `.jj` (verified on jj
@@ -694,11 +1075,15 @@ class Daemon:
             if self._run(["git", "worktree", "add", "--detach", str(self.workspace), commit], log,
                          self.checkout, "prepare") != 0:
                 return False
+            if not self.take_workspace():
+                return False
         else:
             owner = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
                                    cwd=self.workspace, capture_output=True, text=True).stdout.strip()
             if pathlib.Path(owner).resolve() != (self.checkout / ".git").resolve():
                 self.say(f"workspace {self.workspace} belongs to another checkout ({owner}); refusing to reuse it")
+                return False
+            if not self.take_workspace():
                 return False
             if self._run(["git", "checkout", "--detach", commit], log, self.workspace, "prepare") != 0:
                 return False
@@ -1072,13 +1457,29 @@ def cmd_stop(_args: argparse.Namespace, checkout: pathlib.Path) -> int:
         print("deflake: daemon is not running")
         return 0
     os.kill(pid, signal.SIGTERM)
-    for _ in range(120):
-        if not run.daemon_alive():
-            print("deflake: daemon stopped")
-            return 0
+    # The daemon first waits out the recorder's cleanup grace, then deletes
+    # the sweep tree's build outputs, which can take a while on a 40+ GB tree
+    # and can be running at prepare as well as at exit. The wait is the same
+    # 540 seconds `wait` uses, so the call still fits under a 600 second tool
+    # timeout. It is not keyed off the "cleaning" status: the prepare-time
+    # deletion runs under "preparing", and on a full disk the status write
+    # may not have landed at all.
+    started = time.time()
+    while run.daemon_alive():
+        elapsed = time.time() - started
+        if elapsed >= DEFAULT_MAX_WAIT:
+            print(f"deflake: daemon still alive after {elapsed:.0f}s; it is waiting for the recorder's cleanup grace "
+                  f"or still deleting the sweep tree's build outputs (its daemon.log says which)", file=sys.stderr)
+            return 1
         time.sleep(1)
-    print("deflake: daemon still alive after 120s; it may be waiting for the recorder's cleanup grace", file=sys.stderr)
-    return 1
+    print("deflake: daemon stopped")
+    # The stop flow ends without another `wait`, so a failed exit cleanup
+    # would otherwise go unseen by an agent that just asked for the stop.
+    for event in run.unacked():
+        if event.get("kind") == "cleanup-failed":
+            print(f"deflake: {format_event(event)}")
+            print(f"ack with: deflake/bin/deflake ack {event['id']}")
+    return 0
 
 
 def main(argv: list[str]) -> int:

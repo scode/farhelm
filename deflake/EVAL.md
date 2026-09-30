@@ -26,12 +26,16 @@ evidence, and a low-power model's confusions are exactly the instruction gaps th
 4. Read its report against the expected outcome. Anything it found ambiguous is an instruction bug; anything the driver
    did that the report describes as unexpected is a driver bug. Fix, re-run `eval-setup.sh` into a fresh directory (the
    old clone carries the old driver), and repeat until a pass is clean.
-5. Clean up: delete the eval directory, the sweep worktree the driver made for it under
-   `~/.local/state/farhelm-deflake/workspaces/<key>` (its `status.json` under `runs/<uuid>/` names the path), the
-   pointer under `current/`, and `/tmp/deflake-eval-flaky-marker`.
+5. Check that the driver deleted the eval worktree's build outputs: `target/` under the sweep worktree (below) must be
+   gone once `wait` has returned 4.
+6. Clean up: delete the eval directory, the sweep worktree the driver made for it under
+   `~/.local/state/farhelm-deflake/workspaces/<key>` (its `status.json` under `runs/<uuid>/` names the path) with the
+   `<key>.lock` beside it, the pointer under `current/`, and `/tmp/deflake-eval-flaky-marker`. Delete the lock file only
+   once the run is over: a process still holding it is a command of that run, and removing the file under it would let
+   the next run build beside that command.
 
-The first pass pays a cold build in the eval worktree, about ten minutes on a warm cache; later passes into a new
-directory pay it again because the worktree is keyed by checkout path. The sweep itself takes a few minutes.
+Every pass pays a cold build in the eval worktree, about ten minutes on a warm cargo registry, because the driver
+deletes the worktree's `target/` at the start and end of every run. The sweep itself takes a few minutes.
 
 ## Delegate prompt
 
@@ -84,4 +88,5 @@ Three events, in this order, then exit 4:
 - `sweep-finished` listing the one flake found.
 
 Zero `wait` calls returning 3 is normal for this profile; the events are queued before the agent's wait limit. A report
-that mentions a `daemon-error`, `phase-error` or `daemon-died` event is a failed pass whatever else happened.
+that mentions a `daemon-error`, `phase-error`, `daemon-died` or `cleanup-failed` event is a failed pass whatever else
+happened.
