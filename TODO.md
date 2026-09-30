@@ -171,18 +171,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   safeguard. The review of the moved-install-directory fix suggested keeping the ownership evidence outside the bundle
   (beside it, as the uninstaller does with `~/Applications/.Farhelm.app.uninstall-receipt`) until the replacement
   completes. Split out of the entry on installs after the install directory moves, which fixed the rest.
-- **A slow systemd user manager silently turns off cgroup scopes.** Assess whether to remove or raise the time limits on
-  the supervisor's user-manager probe (`scope::probe_systemd`: 15 seconds for the whole probe, `PROBE_TIMEOUT`, and 5
-  for each `systemctl` query, `SYSTEMCTL_TIMEOUT`). The probe runs once, at the supervisor's first launch or teardown,
-  and a timeout counts as "no usable manager": the verdict is cached for the supervisor's lifetime, so every later
-  launch runs without its own scope and relies on the process-tree sweep alone. Only a teardown of a session whose row
-  recorded a scoped launch re-probes, once. The fallback is logged as a warning, but nothing tells the user, and a
-  machine whose systemd works but was momentarily busy loses the cgroup protection until the supervisor restarts. The
-  maintainer does not want that trade on a system with a working manager. SPEC_impl.md's teardown section says the
-  manager is "probed once" and that the sweep is the whole mechanism where no manager exists; it does not say a slow one
-  counts as absent. Related: `probe_once` never checks `systemd-run`'s exit status, so a scope that fails to start
-  spends the full 15 seconds before the fallback, and `crates/farhelm/tests/e2e/harness.rs` records two probes of a
-  loaded manager reaching different verdicts (2026-08-03).
 
 ## Doc todo
 

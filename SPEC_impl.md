@@ -1701,19 +1701,23 @@ failure can leave private evidence, but cannot authorize another directory move.
   The sweep sends SIGTERM, allows a short grace, quiesces with SIGSTOP, re-enumerates, sends SIGKILL, and polls for
   confirmed disappearance. PID/start-time revalidation narrows reuse races; it does not make the separate identity read
   and signal syscall atomic or guarantee globally unique start timestamps. `systemd-run --user --scope` cgroup scopes
-  layer on top as the Linux hardening (M3): where a functional systemd user manager exists — probed once by actually
-  running a trivial transient scope and then showing, killing, and confirming the collection of it, not by `which`, and
-  through absolute binary paths so a login shell's `$PATH` cannot substitute what the probe approved — each launch is
-  wrapped in its own generation-named scope (audited on systemd 255: the wrapper execs in place, so the pane's process
-  tree, exit codes, and liveness checks see exactly the unwrapped shape), the per-launch SELECTION is recorded durably
-  as a boolean while the unit name is re-derived from session id plus generation at every use (a stored name would let a
-  tampered row aim a kill at another session's unit), and stop kills through the scope first — SIGTERM, the same grace
-  the sweep gives, SIGKILL, then confirming the unit was actually collected, because `systemctl kill` returning only
-  proves delivery. The sweep ALWAYS runs afterwards as the backstop, and is the whole mechanism where no user manager
-  exists — a missing manager never degrades stop below the sweep's guarantees, and neither does a broken one: the
-  sweep's verdict is the answer, and the scope's troubles are diagnostic. A wrapper that fails runs before the shim can
-  write its exec-failure sentinel, so the supervisor classifies that shape (a launch spec nothing ever consumed, on a
-  dead pane, for a scoped launch) as **error** rather than letting it masquerade as a plain exit.
+  layer on top as the Linux hardening (M3): where a functional systemd user manager exists — probed by actually running
+  a trivial transient scope and then showing, killing, and confirming the collection of it, not by `which`, and through
+  absolute binary paths so a login shell's `$PATH` cannot substitute what the probe approved — each launch is wrapped in
+  its own generation-named scope (audited on systemd 255: the wrapper execs in place, so the pane's process tree, exit
+  codes, and liveness checks see exactly the unwrapped shape), the per-launch SELECTION is recorded durably as a boolean
+  while the unit name is re-derived from session id plus generation at every use (a stored name would let a tampered row
+  aim a kill at another session's unit), and stop kills through the scope first — SIGTERM, the same grace the sweep
+  gives, SIGKILL, then confirming the unit was actually collected, because `systemctl kill` returning only proves
+  delivery. The manager is probed once and the answer cached, with two exceptions. A probe that runs out of time (15
+  seconds overall, 5 per query) is not an answer, since a busy manager is not an absent one: that launch runs without
+  its own scope, and the first launch at least a minute later probes again. A definite negative stays cached, except
+  that teardown holding a unit its durable row says was scoped gets one re-probe. The sweep ALWAYS runs afterwards as
+  the backstop, and is the whole mechanism where no user manager exists — a missing manager never degrades stop below
+  the sweep's guarantees, and neither does a broken one: the sweep's verdict is the answer, and the scope's troubles are
+  diagnostic. A wrapper that fails runs before the shim can write its exec-failure sentinel, so the supervisor
+  classifies that shape (a launch spec nothing ever consumed, on a dead pane, for a scoped launch) as **error** rather
+  than letting it masquerade as a plain exit.
 
   Terminal tabs also receive separate scopes, named from the session and tab IDs. Delete collects those units both from
   tmux-discovered tabs and independently from the systemd manager using the session-specific tab-unit glob. The second
