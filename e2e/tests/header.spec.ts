@@ -488,10 +488,12 @@ test("the header delete confirms in place and deletes through the list", async (
  * its own SIGTERM handling, and the row deliberately stays until then. Without
  * a visible state in between, the click looks ignored. Specifies, with the
  * DELETE reply held open by the test: the row gets its `deleting` state and a
- * "stopping…" label in place of its age, and the open session's header shows
- * the same label in place of its actions. A refused delete (409) clears both
- * and leaves the row with its error and the header with its actions; a delete
- * that goes through removes the row.
+ * "Stopping agent…" label in place of its title, the open session's header
+ * shows the same label in place of its actions, and an overlay over the
+ * terminal says it again. A refused delete (409) clears all three and leaves
+ * the row with its error and the header with its actions; a delete that goes
+ * through removes the row, and its own detach never paints the terminal's
+ * "Detached" banner on the way.
  */
 test("a committed delete shows its progress until the reply lands", async ({ page, request }) => {
   const session = await createSession(request, {
@@ -535,6 +537,7 @@ test("a committed delete shows its progress until the reply lands", async ({ pag
     });
     const rowProgress = target.locator(".delete-progress");
     const headerProgress = page.locator(".header-delete-progress");
+    const overlay = page.locator(".terminal-delete-overlay");
 
     // Refused: progress shows while the reply is held, then gives way to the
     // row's error and the header's actions.
@@ -543,25 +546,51 @@ test("a committed delete shows its progress until the reply lands", async ({ pag
     await target.locator(".confirm-delete").click();
     await expect.poll(() => release !== undefined, { message: "the DELETE reached the route" }).toBe(true);
     await expect(target).toHaveClass(/\bdeleting\b/);
-    await expect(rowProgress).toHaveText("stopping…");
-    await expect(target.locator(".status-time")).toHaveCount(0);
-    await expect(headerProgress).toHaveText("stopping…");
+    await expect(rowProgress).toHaveText("Stopping agent…");
+    await expect(target.locator(".session-title"), "the progress takes the title line's place").toHaveClass(/\bvisually-hidden\b/);
+    await expect(headerProgress).toHaveText("Stopping agent…");
+    await expect(overlay).toHaveText("Stopping agent…");
     await expect(page.locator(".restart-primary")).toBeHidden();
     release!("refuse");
     await expect(target.locator(".action-error")).toContainText("delete: held refusal");
     await expect(target).not.toHaveClass(/\bdeleting\b/);
     await expect(rowProgress).toHaveCount(0);
     await expect(headerProgress).toHaveCount(0);
+    await expect(overlay).toHaveCount(0);
+    await expect(target.locator(".session-title")).not.toHaveClass(/\bvisually-hidden\b/);
     await expect(page.locator(".restart-primary")).toBeVisible();
 
     // Accepted, from the header this time: the same progress, then the row goes.
     await page.locator(".header-delete").click();
     await page.locator(".header-delete-confirm").getByRole("button", { name: "delete", exact: true }).click();
     await expect.poll(() => release !== undefined, { message: "the DELETE reached the route" }).toBe(true);
-    await expect(rowProgress).toHaveText("stopping…");
-    await expect(headerProgress).toHaveText("stopping…");
+    await expect(rowProgress).toHaveText("Stopping agent…");
+    await expect(headerProgress).toHaveText("Stopping agent…");
+    await expect(overlay).toHaveText("Stopping agent…");
+    // From here the real delete tears the terminal down. Whether its detach
+    // reaches this view before the view goes away with the session depends
+    // on the helm's feed and the socket racing, which the browser cannot
+    // order; what holds either way is that nothing paints the banner until
+    // the row is gone. That the banner is held, and painted if the delete
+    // fails, is `terminal.spec.ts`'s "a detach banner is held while a delete
+    // is in flight" test, which drives the detach deterministically.
+    const banner = page.locator("#term-banner");
+    await expect(banner, "premise: the banner exists and is hidden before the delete").toBeHidden();
+    expect(await banner.count(), "premise: the banner element exists to be watched").toBe(1);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__deleteBannerPainted = false;
+      const node = document.getElementById("term-banner")!;
+      new MutationObserver(() => {
+        if (node.style.display === "block") w.__deleteBannerPainted = true;
+      }).observe(node, { attributes: true, attributeFilter: ["style"] });
+    });
     release!("continue");
     await expect(target).toHaveCount(0, { timeout: 20_000 });
+    expect(
+      await page.evaluate(() => (window as any).__deleteBannerPainted),
+      "the delete's own detach must never have painted the terminal's banner",
+    ).toBe(false);
   } finally {
     release?.("continue");
     await page.unrouteAll({ behavior: "ignoreErrors" });
