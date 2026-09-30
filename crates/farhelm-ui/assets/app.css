@@ -3300,12 +3300,34 @@ samp {
   color: var(--fg-1);
   pointer-events: none;
   white-space: nowrap;
+  /* A popup taller than the window stays inside it; the step list is the
+     part that shrinks (see `.host-update-popup-steps`). */
+  max-height: calc(100vh - 16px);
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
-/* The step name is the part the popup exists for, so it is the one line
-   allowed to wrap rather than overflow the popup's own width limit. */
+/* The run's full step list, in the expanded row's `provisioning-steps`
+   style; the margins change, since the popup has its own padding. It is
+   the popup's only part that gives up height when the window is too short
+   for all of it (the count and the clock above it do not), and it is then
+   scrolled by `UpdateProgressPopup` to keep the step in progress in view. */
+.host-update-popup-steps {
+  margin: 2px 0 0;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.host-update-popup > span {
+  flex: none;
+}
+
+/* The step in progress: the one the inline label names, and the only step
+   name allowed to wrap rather than overflow the popup's own width limit. */
 .host-update-popup-step {
   color: var(--warn);
+  font-weight: 600;
   white-space: normal;
   overflow-wrap: anywhere;
 }
