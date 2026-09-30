@@ -176,24 +176,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `c44ac1bf-bcce-49b0-8a44-5d9633c5172f`; investigate the concurrent filesystem premise before changing the
   reconciliation contract.
 
-- Watch the island-cap readiness residual in `e2e/tests/terminal-tabs.spec.ts`:
-  `a tab list past the island cap is listed in full but only partly attached`. Its original first-mount shape — a
-  handshake that stalled, was bannered and closed at 5s, and never retried — was fixed by the maintainer's 2026-09-17
-  decision to retry never-connected first mounts on the ladder (`crates/farhelm-ui/assets/terminal.js`; evidence trail:
-  `lore/2026-09-16-island-cap-never-connected-first-mount.md`), and that fix is visible in post-fix failures: the agent
-  socket now OPENS where the recorded shape had it closed at readiness. What remains surfaced on 2026-09-17 on a loaded
-  machine (another agent's build running): 2 of about 6 WebKit executions failed with `open=true, revealed=false` for
-  the full 20s readiness budget — the handshake completes but the attach/replay behind it starves across ladder
-  attempts, each hidden mount cycling the 5s watchdog until the budget expires; the retained trace was then wiped by
-  later runs, so only the readiness observation is recorded. That is a deeper layer of the same burst pathology a retry
-  cannot fix by design (a stall persisting across attempts), not a regression from the retry change; the fork to settle
-  on recurrence: instrument the supervisor's attach path under the churn burst, extend the readiness budget against the
-  retry cycle, or accept the residual. Keep this distinct from the existing single-client stall entry, and do not weaken
-  liveness assertions based on a later passing run. Recurred on 2026-09-29 in the deflake sweep (WebKit run
-  `a7cb2f9a-820d-43fe-aa89-02e8a36e5ffd`, reruns `6c0d66ef-a4db-4194-907e-e79def8cb87d` failed,
-  `76017a36-c24e-44a2-a14b-6787ec415fe2` and `957cfe2f-b7eb-4894-9421-f2f9b3a3d15e` passed), both failures with
-  `open=false` rather than the `open=true` residual above.
-
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes

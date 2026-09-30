@@ -1144,9 +1144,12 @@ test("a-non-decision-detach-keeps-the-ladder-climbing", async ({ page, request }
     await page.locator(`[data-session-id="${id}"]`).click();
     await waitForSessionRevealed(page, id);
 
-    // Attempts are aimed at a tab id no supervisor has ever heard of, so
-    // each one is REFUSED with the supervisor's own words — a detach
-    // notice that explains itself and is not a decision.
+    // Attempts are aimed at a session id the helm has never heard of, so
+    // each one is REFUSED with the helm's own words — a detach notice that
+    // explains itself and is not a decision. A session rather than a tab:
+    // a tab the supervisor cannot find is a closed tab, which IS a
+    // decision and stops the ladder (see `refused_as_missing_tab` in the
+    // helm's terminal.rs), so it cannot stand in for an outage.
     await page.evaluate(() => {
       const Real = (window as any).WebSocket;
       (window as any).__realWebSocket = Real;
@@ -1157,9 +1160,9 @@ test("a-non-decision-detach-keeps-the-ladder-climbing", async ({ page, request }
         // ladder attaching successfully and prove nothing.
         return new Real(
           String(url).replace(
-            /\/term(\/unowned)?\?/,
+            /\/sessions\/[^/]+\/term(\/unowned)?\?/,
             (_m: string, unowned: string | undefined) =>
-              `/term${unowned ?? ""}?tab=00000000-0000-4000-8000-00000000dead&`,
+              `/sessions/00000000-0000-4000-8000-00000000dead/term${unowned ?? ""}?`,
           ),
           protocols,
         );

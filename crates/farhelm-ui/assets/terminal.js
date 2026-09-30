@@ -152,8 +152,9 @@
 //   as the two clients' takeovers alternated; a stalled client
 //   reconnecting into the same wedge helps nobody; a closed (or reaped)
 //   tab has nothing left to reconnect to. The first two keep the surface
-//   they were given (`decisionDetach`); the closed tab paints NOTHING, per
-//   SPEC.md's silent reap (see DETACH_CODE_TAB_CLOSED).
+//   they were given (`decisionDetach`); a closed tab that had been
+//   attached paints NOTHING, per SPEC.md's silent reap, while a tab refused
+//   as nonexistent keeps its explanation (see DETACH_CODE_TAB_CLOSED).
 // - INFRASTRUCTURE — the helm losing its supervisor, a host that went
 //   away, an attach refused because the host is unreachable — is transport
 //   loss one layer up, and RECOVERS. This is SPEC.md's "comes back
@@ -1076,6 +1077,11 @@
   // client, or the supervisor reaping a tab whose shell exited). Handled
   // SILENTLY: SPEC.md's tab reap promises the tab disappears with no
   // notice, and the strip refresh unmounts this island moments later.
+  // The helm also sends it when it refuses to attach a tab the supervisor
+  // cannot find. That tab is just as gone, so recovery ends, but this view
+  // never showed it working and may keep listing it (a listing that
+  // disagrees with the supervisor), so that case keeps its `Detached:`
+  // banner rather than leaving a blank pane with no explanation.
   //
   // The browser suite's two-client takeover, stall, and reaped-tab tests
   // provoke each through the real stack and remain the end-to-end contract.
@@ -4242,7 +4248,10 @@
               // accident.
               const lost = msg.code === DETACH_CODE_TAKEN_OVER;
               const tabClosed = msg.code === DETACH_CODE_TAB_CLOSED;
-              if (tabClosed) silentDetach = true;
+              // Silent only for an attachment that was working: that is the
+              // reap SPEC.md describes. A refused attach has proved nothing
+              // (see DETACH_CODE_TAB_CLOSED).
+              if (tabClosed && attachProved) silentDetach = true;
               decisionDetach = lost || tabClosed || msg.code === DETACH_CODE_STALLED;
               // Only a decision ends an in-flight recovery. Anything else
               // — a host that went away, the helm losing its supervisor —
@@ -4265,8 +4274,9 @@
               // A closed tab is DISAPPEARING — the strip refresh unmounts
               // this island moments after the notice — and SPEC.md's tab
               // reap promises silence, so it is the one detach that paints
-              // nothing (see DETACH_CODE_TAB_CLOSED).
-              if (!tabClosed) showBanner(`Detached: ${msg.reason}`, lost);
+              // nothing, once its attachment had worked (see
+              // DETACH_CODE_TAB_CLOSED).
+              if (!silentDetach) showBanner(`Detached: ${msg.reason}`, lost);
             }
             return;
           }

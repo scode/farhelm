@@ -997,6 +997,14 @@ holds a stall, and hides a closed tab) and show the reason as text, so reason wo
 helm and `terminal.js` compared English sentences they each kept a copy of, and only the disabled browser suite would
 have noticed a rewording.
 
+The helm also uses `tab_closed` for a tab attach refused as `NotFound`. That refusal describes current state, not a
+passing condition: the supervisor looks the tab up in tmux's live panes, and a session or host that cannot be found has
+taken its tabs with it. Reported as `other`, it sent the browser's reconnect ladder through every attempt for every
+listed tab, rebuilding a terminal each time. The browser stops retrying on it, but paints the reason as a banner rather
+than hiding the pane, because silence is the reap's promise for a tab this view had working. The agent terminal's
+`NotFound` stays `other`: its reason is the supervisor's account of the session, such as a reboot and what restart would
+do.
+
 ### What the helm believes from a supervisor
 
 The helm's trust in an attached supervisor is scoped by effect, not by connection. A supervisor is believed about things
