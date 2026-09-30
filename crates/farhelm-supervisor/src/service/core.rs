@@ -6631,10 +6631,11 @@ impl Supervisor {
             )
             .into());
         }
-        let vendor = match snapshot.kind {
-            AgentKind::Pi => crate::agent_kind::LocatorVendor::Pi,
-            AgentKind::Omp => crate::agent_kind::LocatorVendor::Omp,
-            other => anyhow::bail!("{other:?} sessions have no resume locator to verify"),
+        let Some(vendor) = crate::agent_kind::locator_vendor(snapshot.kind) else {
+            anyhow::bail!(
+                "{:?} sessions have no resume locator to verify",
+                snapshot.kind
+            );
         };
         let stored = snapshot
             .captured_conversation

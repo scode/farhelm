@@ -1520,50 +1520,52 @@ pub enum RestartOffer {
     FallbackTemplate,
 }
 
-/// An agent's integration kind (PLAN_M3.md item 7): the two SPEC.md
-/// requires conversation-identity capture for, plus `Generic` for
-/// everything else — SPEC.md's own phrase for a profile that names no
-/// kind ("profiles without a kind get generic treatment").
-///
-/// This is a genuine three-state override on `CreateSession::agent_kind`,
-/// not two states plus an absent field: `None` means "derive it from
-/// `invocation`'s basename (or fail to)"; `Some(Claude)`/`Some(Codex)`
-/// forces integration on for an invocation basename recognition would
-/// otherwise miss (`env claude`, a wrapper script); `Some(Generic)`
-/// forces integration OFF even when the basename WOULD have matched —
-/// the case absence cannot express, because a caller has no way to tell
-/// "let it derive" apart from "I checked, and it must not integrate"
-/// without a real third value. A user running a personal script also
-/// named `claude` that is not Anthropic's CLI is the motivating case:
-/// without `Generic`, there is no way to stop basename recognition from
-/// misclassifying it and running Claude-Code-specific status heuristics
-/// and identity capture against a process that was never going to
-/// produce Claude Code's on-disk records.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentKind {
-    Claude,
-    Codex,
-    /// Goose reports its durable session identifier through a persisted,
-    /// credential-free MCP extension; Farhelm never searches Goose state.
-    Goose,
-    /// Pi reports a typed locator containing its session id and exact saved
-    /// file; Farhelm verifies that file only when a restart asks to resume.
-    Pi,
-    /// OMP reports a typed locator containing its session id and exact saved
-    /// file, under its own `omp:` prefix; Farhelm verifies that file only when
-    /// a restart asks to resume. The wire vocabulary is shared with Pi's
-    /// locator, but a locator reported for one of these kinds is never
-    /// accepted for the other, and neither may pass as a plain conversation
-    /// id for the id-reporting kinds.
-    Omp,
-    /// Grok's tracked native launch kind. Capture policy is added separately,
-    /// but this identity must survive launch snapshots now.
-    Grok,
-    /// Explicitly non-integrated: no status heuristics beyond the
-    /// generic ones, no conversation-identity capture, regardless of
-    /// what basename recognition would have concluded on its own.
-    Generic,
+crate::enum_with_all! {
+    /// An agent's integration kind (PLAN_M3.md item 7): the two SPEC.md
+    /// requires conversation-identity capture for, plus `Generic` for
+    /// everything else — SPEC.md's own phrase for a profile that names no
+    /// kind ("profiles without a kind get generic treatment").
+    ///
+    /// This is a genuine three-state override on `CreateSession::agent_kind`,
+    /// not two states plus an absent field: `None` means "derive it from
+    /// `invocation`'s basename (or fail to)"; `Some(Claude)`/`Some(Codex)`
+    /// forces integration on for an invocation basename recognition would
+    /// otherwise miss (`env claude`, a wrapper script); `Some(Generic)`
+    /// forces integration OFF even when the basename WOULD have matched —
+    /// the case absence cannot express, because a caller has no way to tell
+    /// "let it derive" apart from "I checked, and it must not integrate"
+    /// without a real third value. A user running a personal script also
+    /// named `claude` that is not Anthropic's CLI is the motivating case:
+    /// without `Generic`, there is no way to stop basename recognition from
+    /// misclassifying it and running Claude-Code-specific status heuristics
+    /// and identity capture against a process that was never going to
+    /// produce Claude Code's on-disk records.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum AgentKind {
+        Claude,
+        Codex,
+        /// Goose reports its durable session identifier through a persisted,
+        /// credential-free MCP extension; Farhelm never searches Goose state.
+        Goose,
+        /// Pi reports a typed locator containing its session id and exact saved
+        /// file; Farhelm verifies that file only when a restart asks to resume.
+        Pi,
+        /// OMP reports a typed locator containing its session id and exact saved
+        /// file, under its own `omp:` prefix; Farhelm verifies that file only when
+        /// a restart asks to resume. The wire vocabulary is shared with Pi's
+        /// locator, but a locator reported for one of these kinds is never
+        /// accepted for the other, and neither may pass as a plain conversation
+        /// id for the id-reporting kinds.
+        Omp,
+        /// Grok's tracked native launch kind. Capture policy is added separately,
+        /// but this identity must survive launch snapshots now.
+        Grok,
+        /// Explicitly non-integrated: no status heuristics beyond the
+        /// generic ones, no conversation-identity capture, regardless of
+        /// what basename recognition would have concluded on its own.
+        Generic,
+    }
 }
 
 impl AgentKind {
