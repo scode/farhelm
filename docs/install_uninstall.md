@@ -157,7 +157,11 @@ reports completed actions and the failure. The CLI is removed last, after the ot
 resolve the problem and rerun the same command. Already-removed files do not by themselves prevent retrying.
 
 An interrupted macOS removal may leave `~/Applications/.Farhelm.app.uninstall-receipt` so the next attempt can recognize
-the remaining directories safely. Leave that file in place for the retry; successful bundle removal clears it. If only
-tidying the final executable-directory ownership record fails after the CLI is gone, uninstall reports the leftover
-record without treating the software removal as failed. Successful uninstall retains user data and does not mean every
-trace of Farhelm has been erased.
+the remaining directories safely. Leave that file in place for the retry; successful bundle removal clears it. If you
+reinstall the same installation instead of retrying, the installer removes the file once it has built a new bundle. A
+file it cannot attribute to the installation being installed, such as one left by another installation's interrupted
+uninstall, makes the installer exit with an error before building the bundle, after the executables are already updated:
+finish that installation's uninstall first, or delete the file if that installation is gone. If only tidying the final
+executable-directory ownership record fails after the CLI is gone, uninstall reports the leftover record without
+treating the software removal as failed. Successful uninstall retains user data and does not mean every trace of Farhelm
+has been erased.

@@ -3714,7 +3714,16 @@
   in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; after rebuilding the bundle, scripts/install.sh removes
+  `~/Applications/.Farhelm.app.uninstall-receipt` when it is a regular file carrying this installation's own record
+  (`record_file_is_ours`, the test `bundle_record_is_ours` already used). Another installation's copy is that
+  installation's only way to finish its uninstall, so the bundle step refuses (under the bundle lock, before building)
+  with advice to finish or clear that uninstall, rather than create a bundle that would leave both installations unable
+  to uninstall. The installer-side option was chosen because it needs no SPEC_impl.md change ("If both receipts survive,
+  they must agree" stays). Regression checks "leftover receipt: ..." and "foreign receipt: ..." (a real installation A's
+  receipt, installation B refused) in scripts/test-install-sh.sh. docs/install_uninstall.md describes both. jj change
+  `xnynxxolwpsw`, bookmark `pr/installer-clears-own-uninstall-receipt`, draft PR
+  [#1185](https://github.com/scode/farhelm/pull/1185/changes).
 
 ## interrupt-before-install-record-publish.md
 

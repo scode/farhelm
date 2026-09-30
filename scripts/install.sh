@@ -456,7 +456,14 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # file and both prefixes are compared by checksum; `${#}` under LC_ALL=C
   # gives the canonical path's length in bytes.
   bundle_record_is_ours() {
-    brio_record="$1/Contents/.farhelm-installation"
+    record_file_is_ours "$1/Contents/.farhelm-installation" "$2"
+  }
+
+  # The test behind bundle_record_is_ours, on a record file at $1 directly.
+  # Also used on the copy of the record an interrupted uninstall leaves next
+  # to the bundle (see the bundle step), which has the same contents.
+  record_file_is_ours() {
+    brio_record=$1
     if [ -L "$brio_record" ] || [ ! -f "$brio_record" ]; then
       return 1
     fi
@@ -1645,6 +1652,22 @@ EOF
         fi
         BUNDLE_LOCK_HELD=1
 
+        # An uninstall interrupted at the very end of removing the bundle
+        # leaves its retry copy of the bundle record beside it, and uninstall
+        # refuses whenever that copy and the bundle's own record disagree.
+        # This installation's own copy is removed once the new bundle is in
+        # place (below). Another installation's copy is that installation's
+        # only way to finish its uninstall, and building a bundle next to it
+        # would leave both installations unable to uninstall, so this run
+        # refuses the bundle step instead and says how to clear it.
+        pending_receipt="$app_parent/.Farhelm.app.uninstall-receipt"
+        if { [ -e "$pending_receipt" ] || [ -L "$pending_receipt" ]; } &&
+          ! record_file_is_ours "$pending_receipt" "$pir_canonical"; then
+          printf '%s was left by an interrupted farhelm uninstall and is not this installation'"'"'s record, and building %s now would leave that uninstall unable to finish; run that installation'"'"'s farhelm uninstall again to finish it (or delete %s if that installation is gone), then re-run this installer\n' "$pending_receipt" "$app_path" "$pending_receipt" >&2
+          printf 'The binaries in %s are installed and usable.\n' "$INSTALL_DIR" >&2
+          exit 1
+        fi
+
         # Replace only a bundle this installer can show it built: one that
         # carries this installation's bundle record, or the recordless shape
         # it built before records existed. Anything else at this name,
@@ -1749,6 +1772,13 @@ PLIST_EOF
         mv "$bundle_stage" "$app_path" || bundle_fail "moving the staged bundle into place"
         rm -rf "$BUNDLE_WORK" || printf 'note: could not delete %s, which held the previous bundle; it is safe to delete\n' "$BUNDLE_WORK" >&2
         BUNDLE_WORK=""
+        # This installation's own leftover receipt (see the check under the
+        # bundle lock above) now describes a bundle that no longer exists,
+        # and would disagree with the new one (a different version's
+        # Info.plist digest, say), so it goes.
+        if record_file_is_ours "$pending_receipt" "$pir_canonical"; then
+          rm -f "$pending_receipt" || printf 'note: could not delete %s, left by an interrupted uninstall; delete it by hand if a later uninstall refuses\n' "$pending_receipt" >&2
+        fi
 
         # Registration is best-effort tidiness: Launch Services discovers
         # ~/Applications on its own, this just shortens the wait. The
