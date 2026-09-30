@@ -5401,7 +5401,7 @@ samp {
 .yolo-confirmation {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   border: 2px solid var(--danger);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
   gap: 6px;
