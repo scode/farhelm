@@ -44,9 +44,7 @@ use super::ticker::{
     start_ticker,
 };
 use super::uploads::UploadHandle;
-use crate::agent_kind::{
-    CaptureWindowBounds, IntegrationSnapshot, RecordStamp, effective_program_index,
-};
+use crate::agent_kind::{CaptureWindowBounds, IntegrationSnapshot, RecordStamp};
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
 use crate::store::DedupScope;
 use crate::store::{
@@ -2493,6 +2491,11 @@ pub(crate) fn hook_flag(raised: bool) -> Arc<std::sync::atomic::AtomicBool> {
 /// function that touches neither. Its only effect beyond its return value
 /// is tracing.
 ///
+/// The kind-specific decisions live with each kind, in its integration's
+/// [`crate::agent_kind::AgentIntegration::inject_hooks`] (`agent_kind/<kind>.rs`);
+/// this function owns the shared early return for un-integrated kinds and
+/// turns each decision's [`crate::agent_kind::HookLog`] into the log line.
+///
 /// Returns the argv to launch and whether it was HOOKED, i.e. whether the
 /// tail was actually appended. The caller carries that bool to the
 /// [`RunCells::hooked`] tripwire; it is deliberately not recoverable
@@ -2532,7 +2535,7 @@ pub(crate) fn hook_flag(raised: bool) -> Arc<std::sync::atomic::AtomicBool> {
 /// while `FARHELM_AGENT_INSTRUCTIONS=off` leaves identity capture entirely
 /// alone.
 fn with_hook_argv_using(
-    mut argv: Vec<String>,
+    argv: Vec<String>,
     snapshot: &IntegrationSnapshot,
     hooks: &crate::agent_kind::AgentHooks,
     instructions: crate::agent_kind::AgentInstructions,
@@ -2543,341 +2546,29 @@ fn with_hook_argv_using(
     let Some(integration) = snapshot.integration() else {
         return (argv, false);
     };
-    let skip = |reason: &'static str| {
-        info!(
+    let policy = crate::agent_kind::HookPolicy {
+        hooks,
+        instructions,
+        exe,
+        vendor_extension,
+    };
+    let injection = integration.inject_hooks(argv, &policy);
+    match injection.log {
+        crate::agent_kind::HookLog::Silent => {}
+        crate::agent_kind::HookLog::Skipped(reason) => info!(
             session = %session,
             kind = ?snapshot.kind,
             reason,
             "conversation hook flags not injected"
-        );
-    };
-    if snapshot.kind == AgentKind::Goose {
-        let Some(shape) = goose_launch_shape(&argv) else {
-            skip("Goose invocation is a utility command or is ambiguous");
-            return (argv, false);
-        };
-        if shape.reporter_collision {
-            skip("Goose invocation already declares farhelm-reporter");
-            return (argv, false);
-        }
-        let enabled = hooks.allows(snapshot.kind) && exe.is_some();
-        if !enabled && !shape.resuming {
-            skip(if exe.is_none() {
-                "farhelm executable path is not utf-8"
-            } else {
-                "disabled by FARHELM_AGENT_HOOKS"
-            });
-            return (argv, false);
-        }
-        let Some(exe) = exe else {
-            skip("farhelm executable path is not utf-8");
-            return (argv, false);
-        };
-        if shape.needs_session_subcommand {
-            let program = effective_program_index(&argv)
-                .expect("a recognized Goose launch has an effective program");
-            argv.insert(program + 1, "session".to_string());
-        }
-        if enabled && !shape.resuming {
-            argv.extend([
-                "--with-extension".to_string(),
-                "farhelm-reporter:sh -c 'exec \"${FARHELM_GOOSE_REPORTER_EXE:-farhelm}\" internal goose-hook'"
-                    .to_string(),
-            ]);
-        }
-        let controls = [
-            format!(
-                "{}={}",
-                crate::launch::GOOSE_REPORTER_ENABLED_ENV_VAR,
-                u8::from(enabled)
-            ),
-            format!(
-                "{}={}",
-                crate::launch::GOOSE_INSTRUCTIONS_ENV_VAR,
-                u8::from(enabled && instructions.announces())
-            ),
-            format!("{}={exe}", crate::launch::GOOSE_REPORTER_EXE_ENV_VAR),
-        ];
-        argv = with_launch_environment(argv, &controls);
-        return (argv, enabled);
+        ),
+        crate::agent_kind::HookLog::Injected => info!(
+            session = %session,
+            kind = ?snapshot.kind,
+            announce = instructions.announces(),
+            "conversation hook flags injected"
+        ),
     }
-    if snapshot.kind == AgentKind::Omp {
-        match crate::agent_kind::omp::omp_injection_decision(&argv) {
-            crate::agent_kind::omp::OmpInjection::Leave(reason) => {
-                skip(reason);
-                return (argv, false);
-            }
-            crate::agent_kind::omp::OmpInjection::Inject { pointer } => {
-                if !hooks.allows(snapshot.kind) {
-                    skip("disabled by FARHELM_AGENT_HOOKS");
-                    return (argv, false);
-                }
-                let (Some(exe), Some(extension)) = (exe, vendor_extension) else {
-                    skip(if exe.is_none() {
-                        "farhelm executable path is not utf-8"
-                    } else {
-                        "OMP extension artifact is unavailable"
-                    });
-                    return (argv, false);
-                };
-                argv.extend(["-e".to_string(), extension.to_string()]);
-                // `pointer` is false when the user's own argv already
-                // carries an `--append-system-prompt`: OMP assigns each
-                // occurrence to one field and the LAST one wins, so a
-                // second occurrence would silently replace the user's
-                // instructions with Farhelm's pointer. The reporter still
-                // rides; only the pointer yields.
-                if instructions.announces() && pointer {
-                    argv.extend([
-                        "--append-system-prompt".to_string(),
-                        crate::agent_kind::INSTRUCTIONS_POINTER.to_string(),
-                    ]);
-                }
-                let controls = [format!("{}={exe}", crate::launch::OMP_REPORTER_EXE_ENV_VAR)];
-                argv = with_launch_environment(argv, &controls);
-                return (argv, true);
-            }
-        }
-    }
-    if snapshot.kind == AgentKind::Pi {
-        if !pi_interactive_invocation(&argv) {
-            skip("Pi invocation is a utility command or is ambiguous");
-            return (argv, false);
-        }
-        if !hooks.allows(snapshot.kind) {
-            skip("disabled by FARHELM_AGENT_HOOKS");
-            return (argv, false);
-        }
-        let (Some(exe), Some(extension)) = (exe, vendor_extension) else {
-            skip(if exe.is_none() {
-                "farhelm executable path is not utf-8"
-            } else {
-                "Pi extension artifact is unavailable"
-            });
-            return (argv, false);
-        };
-        argv.extend(["-e".to_string(), extension.to_string()]);
-        if instructions.announces() {
-            argv.extend([
-                "--append-system-prompt".to_string(),
-                crate::agent_kind::INSTRUCTIONS_POINTER.to_string(),
-            ]);
-        }
-        let controls = [format!("{}={exe}", crate::launch::PI_REPORTER_EXE_ENV_VAR)];
-        argv = with_launch_environment(argv, &controls);
-        return (argv, true);
-    }
-    if !hooks.allows(snapshot.kind) {
-        skip("disabled by FARHELM_AGENT_HOOKS");
-        return (argv, false);
-    }
-    let Some(exe) = exe else {
-        skip("farhelm executable path is not utf-8");
-        return (argv, false);
-    };
-    // Plan D4: both vendors take a trailing positional prompt, and a bare
-    // `--` turns everything after it into that prompt's text. Appending
-    // past one would not configure a hook, it would type our flags at the
-    // agent.
-    if argv.iter().any(|element| element == "--") {
-        skip("invocation contains a bare --");
-        return (argv, false);
-    }
-    // Plan D3: Claude Code honours only the LAST `--settings`, so a second
-    // one appended after the user's would silently discard theirs —
-    // turning an identity improvement into a lost configuration. Only
-    // Claude's injection uses that flag, so only Claude has to yield here;
-    // a Codex invocation carrying `--settings` means something else
-    // entirely (or nothing) and is left alone.
-    if snapshot.kind == AgentKind::Claude
-        && argv
-            .iter()
-            .any(|element| element == "--settings" || element.starts_with("--settings="))
-    {
-        skip("invocation already passes --settings");
-        return (argv, false);
-    }
-    // The Codex counterpart, and it refuses for two reasons at once (see
-    // [`codex_invocation_configures_hooks`]): a second
-    // `--dangerously-bypass-hook-trust` risks being rejected outright by
-    // the vendor's own argument parser, which would turn an identity
-    // improvement into a FAILED LAUNCH rather than a degraded one, and an
-    // invocation already writing the `hooks.`/`features.hooks` tables owns
-    // that configuration — appending ours after it is a merge nobody asked
-    // for, over a table whose last-writer semantics we do not control.
-    // Codex has no record scan to fall back to, so the cost of being wrong
-    // here is a session with no exact conversation identity (and so no
-    // resume offer), not a broken session.
-    if snapshot.kind == AgentKind::Codex && codex_invocation_configures_hooks(&argv) {
-        skip("invocation already configures codex hooks");
-        return (argv, false);
-    }
-    let tail = integration.hook_argv(exe, instructions);
-    // An integration that offers no tail does not use this hook form — the
-    // trait's default `hook_argv` returns exactly this, including for kinds
-    // with a separate exact reporter. Silently, and WITHOUT the line below:
-    // claiming flags were injected when none were would arm the tripwire
-    // against a launch that never had this hook to begin with, and every
-    // reader of that log line would be chasing a vendor bug that does not
-    // exist.
-    if tail.is_empty() {
-        return (argv, false);
-    }
-    argv.extend(tail);
-    info!(
-        session = %session,
-        kind = ?snapshot.kind,
-        announce = instructions.announces(),
-        "conversation hook flags injected"
-    );
-    (argv, true)
-}
-
-#[derive(Clone, Copy)]
-/// Facts needed to inject once on fresh Goose launches and reuse its saved
-/// reporter on resume without overriding a user-supplied reporter of that name.
-struct GooseLaunchShape {
-    resuming: bool,
-    reporter_collision: bool,
-    needs_session_subcommand: bool,
-}
-
-/// Recognize only Goose's interactive command, including the structured
-/// launcher's leading `env NAME=value ...` prefix.
-fn goose_launch_shape(argv: &[String]) -> Option<GooseLaunchShape> {
-    let program = effective_program_index(argv)?;
-    if Path::new(&argv[program]).file_name()?.to_str()? != "goose" {
-        return None;
-    }
-    let args = &argv[program + 1..];
-    if !args.is_empty() && args.first().map(String::as_str) != Some("session") {
-        return None;
-    }
-    let mut resuming = false;
-    let mut reporter_collision = false;
-    let mut index = usize::from(args.first().map(String::as_str) == Some("session"));
-    while index < args.len() {
-        let argument = &args[index];
-        if matches!(
-            argument.as_str(),
-            "--help" | "-h" | "--version" | "-V" | "--"
-        ) {
-            return None;
-        }
-        if matches!(argument.as_str(), "--resume" | "-r" | "--fork" | "--edit") {
-            resuming = true;
-            index += 1;
-            continue;
-        }
-        let takes_value = matches!(
-            argument.as_str(),
-            "--name"
-                | "-n"
-                | "--session-id"
-                | "--id"
-                | "--path"
-                | "--provider"
-                | "--model"
-                | "--system"
-                | "--max-turns"
-                | "--with-extension"
-                | "--with-builtin"
-                | "--with-streamable-http-extension"
-                | "--mode"
-        );
-        if takes_value {
-            let value = args.get(index + 1)?;
-            if argument == "--with-extension" && value.starts_with("farhelm-reporter:") {
-                reporter_collision = true;
-            }
-            index += 2;
-            continue;
-        }
-        if argument.starts_with("--with-extension=")
-            && argument["--with-extension=".len()..].starts_with("farhelm-reporter:")
-        {
-            reporter_collision = true;
-        }
-        if !argument.starts_with('-') {
-            return None;
-        }
-        index += 1;
-    }
-    Some(GooseLaunchShape {
-        resuming,
-        reporter_collision,
-        needs_session_subcommand: args.is_empty(),
-    })
-}
-
-/// Keep Pi's utility commands untouched and treat option values as opaque.
-/// Injection is confined to recognizable interactive command shapes.
-fn pi_interactive_invocation(argv: &[String]) -> bool {
-    let Some(program) = effective_program_index(argv) else {
-        return false;
-    };
-    if Path::new(&argv[program])
-        .file_name()
-        .and_then(|name| name.to_str())
-        != Some("pi")
-    {
-        return false;
-    }
-    let args = &argv[program + 1..];
-    if args.first().is_some_and(|argument| {
-        matches!(
-            argument.as_str(),
-            "install" | "remove" | "uninstall" | "update" | "list" | "config" | "auth"
-        )
-    }) {
-        return false;
-    }
-    let mut index = 0;
-    while index < args.len() {
-        let argument = &args[index];
-        if matches!(
-            argument.as_str(),
-            "--help" | "-h" | "--version" | "-v" | "--list-models" | "--export" | "--"
-        ) {
-            return false;
-        }
-        if matches!(
-            argument.as_str(),
-            "--provider"
-                | "--model"
-                | "--api-key"
-                | "--thinking"
-                | "--append-system-prompt"
-                | "--system-prompt"
-                | "--tools"
-                | "-t"
-                | "--exclude-tools"
-                | "-xt"
-                | "--session-dir"
-                | "--session"
-                | "--session-id"
-                | "--fork"
-                | "--name"
-                | "-n"
-                | "--models"
-                | "--mode"
-                | "-e"
-                | "--extension"
-                | "--skill"
-                | "--prompt-template"
-                | "--theme"
-                | "--use-theme"
-                | "--tui-mode"
-        ) {
-            if index + 1 >= args.len() {
-                return false;
-            }
-            index += 2;
-            continue;
-        }
-        index += 1;
-    }
-    true
+    (injection.argv, injection.hooked)
 }
 
 // OMP's interactive-shape grammar (utility commands, excluded options,
@@ -2885,82 +2576,6 @@ fn pi_interactive_invocation(argv: &[String]) -> bool {
 // `crate::agent_kind::omp`, shared by injection and live runtime
 // verification. It moved there with the OMP proof so the two readers
 // cannot drift.
-
-/// Add launch-local reporter controls without persisting them in vendor metadata.
-fn with_launch_environment(argv: Vec<String>, assignments: &[String]) -> Vec<String> {
-    if argv
-        .first()
-        .and_then(|program| Path::new(program).file_name())
-        .and_then(|name| name.to_str())
-        == Some("env")
-    {
-        let mut wrapped = Vec::with_capacity(argv.len() + assignments.len());
-        wrapped.push(argv[0].clone());
-        wrapped.extend(assignments.iter().cloned());
-        wrapped.extend(argv.into_iter().skip(1));
-        wrapped
-    } else {
-        let mut wrapped = Vec::with_capacity(argv.len() + assignments.len() + 1);
-        wrapped.push("env".to_string());
-        wrapped.extend(assignments.iter().cloned());
-        wrapped.extend(argv);
-        wrapped
-    }
-}
-
-/// Whether a Codex invocation is already steering Codex's hook
-/// configuration itself — the test behind the
-/// `invocation already configures codex hooks` skip.
-///
-/// True for either of the two shapes farhelm's own tail would collide
-/// with:
-///
-/// - `--dangerously-bypass-hook-trust`, the flag the injected tail leads
-///   with. Whether Codex tolerates the same flag twice is the vendor's
-///   business and unverified here; the downside of guessing wrong is a
-///   launch that fails to start, which is the one outcome injection is
-///   never allowed to cause.
-/// - a `-c` override whose value assigns into `hooks.` or
-///   `features.hooks`, which is precisely the namespace the tail writes.
-///
-/// Both short and long forms count in their separated and joined spellings,
-/// mirroring the two spellings the Claude `--settings` rule above accepts for
-/// the same reason: they are one flag to the vendor's parser, so a check that
-/// saw only one spelling would be trivially and silently bypassed by the
-/// other.
-///
-/// Deliberately NOT a general "does this argv touch config" test: an
-/// invocation carrying unrelated `-c` overrides (`-c model=...`) has no
-/// quarrel with the hook tables and stays hooked.
-fn codex_invocation_configures_hooks(argv: &[String]) -> bool {
-    /// The two config prefixes the injected tail assigns into.
-    fn steers_hook_tables(value: &str) -> bool {
-        value.starts_with("hooks.") || value.starts_with("features.hooks")
-    }
-
-    let mut elements = argv.iter().peekable();
-    while let Some(element) = elements.next() {
-        if element == "--dangerously-bypass-hook-trust" {
-            return true;
-        }
-        // The separated spelling PEEKS rather than consuming: the value
-        // element is examined again on the next turn, where it matches
-        // neither arm, which keeps this loop a plain scan rather than a
-        // half-implementation of the vendor's argument grammar.
-        let value = if element == "-c" || element == "--config" {
-            elements.peek().map(|next| next.as_str())
-        } else {
-            element
-                .strip_prefix("-c")
-                .or_else(|| element.strip_prefix("--config="))
-                .filter(|value| !value.is_empty())
-        };
-        if value.is_some_and(steers_hook_tables) {
-            return true;
-        }
-    }
-    false
-}
 
 /// Where one session's hook trace lives: `<state_dir>/hook-log/<id>.log`.
 ///

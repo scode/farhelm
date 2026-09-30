@@ -369,6 +369,50 @@ pub(crate) fn omp_tui_args_decision(args: &[String]) -> OmpInjection {
     }
 }
 
+/// OMP's hook decision (the OMP arm of
+/// [`super::AgentIntegration::inject_hooks`]): the shared shape grammar's
+/// decision first, then the opt-out, then the executable and extension
+/// artifact.
+pub(crate) fn inject_hooks(
+    mut argv: Vec<String>,
+    policy: &super::HookPolicy<'_>,
+) -> super::HookInjection {
+    use super::HookInjection;
+    match omp_injection_decision(&argv) {
+        OmpInjection::Leave(reason) => HookInjection::skipped(argv, reason),
+        OmpInjection::Inject { pointer } => {
+            if !policy.hooks.allows(farhelm_proto::AgentKind::Omp) {
+                return HookInjection::skipped(argv, "disabled by FARHELM_AGENT_HOOKS");
+            }
+            let (Some(exe), Some(extension)) = (policy.exe, policy.vendor_extension) else {
+                return HookInjection::skipped(
+                    argv,
+                    if policy.exe.is_none() {
+                        "farhelm executable path is not utf-8"
+                    } else {
+                        "OMP extension artifact is unavailable"
+                    },
+                );
+            };
+            argv.extend(["-e".to_string(), extension.to_string()]);
+            // `pointer` is false when the user's own argv already carries an
+            // `--append-system-prompt`: OMP assigns each occurrence to one
+            // field and the LAST one wins, so a second occurrence would
+            // silently replace the user's instructions with Farhelm's
+            // pointer. The reporter still rides; only the pointer yields.
+            if policy.instructions.announces() && pointer {
+                argv.extend([
+                    "--append-system-prompt".to_string(),
+                    super::INSTRUCTIONS_POINTER.to_string(),
+                ]);
+            }
+            let controls = [format!("{}={exe}", crate::launch::OMP_REPORTER_EXE_ENV_VAR)];
+            argv = super::with_launch_environment(argv, &controls);
+            HookInjection::hooked_silently(argv)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

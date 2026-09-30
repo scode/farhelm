@@ -116,9 +116,12 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 mod capture;
+pub(crate) mod claude;
 pub(crate) mod codex;
+pub(crate) mod goose;
 pub(crate) mod grok;
 pub(crate) mod omp;
+pub(crate) mod pi;
 #[cfg(test)]
 mod screen_fixtures;
 pub(crate) mod screen_reader;
@@ -445,6 +448,162 @@ pub trait AgentIntegration: Send + Sync {
         let _ = (hook_exe, instructions);
         Vec::new()
     }
+
+    /// This kind's whole launch-time hook decision: whether and how to
+    /// rewrite `argv` so the launch reports its conversation identity, and
+    /// what to log about it.
+    ///
+    /// Pure, like [`AgentIntegration::hook_argv`]: every policy input
+    /// (the `FARHELM_AGENT_HOOKS` verdict, the executable path, the vendor
+    /// extension artifact, the instructions setting) arrives resolved in
+    /// `policy`, and the log line is returned rather than written, so the
+    /// caller (`service::core`'s `with_hook_argv_using`) owns the one place
+    /// that traces it. Each kind keeps its own check order: Goose, Pi, and
+    /// OMP check the invocation's shape before the opt-out, and Goose
+    /// rewrites a resume even with hooks off; Claude, Codex, and Grok share
+    /// [`inject_hook_argv_tail`]. Required so a new kind states its
+    /// decision rather than inheriting another kind's.
+    fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection;
+}
+
+/// The resolved launch-time inputs a hook decision works within (see
+/// [`AgentIntegration::inject_hooks`]).
+pub struct HookPolicy<'a> {
+    /// The `FARHELM_AGENT_HOOKS` setting. Carried whole rather than as a
+    /// precomputed verdict so each kind consults it at the same point in its
+    /// own check order as it always has (Goose, Pi, and OMP only after their
+    /// shape checks).
+    pub hooks: &'a AgentHooks,
+    /// Whether an injected hook should announce the instructions pointer.
+    pub instructions: AgentInstructions,
+    /// The farhelm executable path, or `None` when it is not UTF-8 and so
+    /// cannot be embedded in a vendor's configuration.
+    pub exe: Option<&'a str>,
+    /// The materialized reporter extension for kinds that load one (Pi,
+    /// OMP), or `None` when it is unavailable or the kind has none.
+    pub vendor_extension: Option<&'a str>,
+}
+
+/// What a hook decision asks its caller to log.
+pub enum HookLog {
+    /// Nothing: an un-hookable kind or launch shape that is not worth a
+    /// line on every launch.
+    Silent,
+    /// "conversation hook flags not injected", with this reason: a skip that
+    /// silently degrades identity capture, so the log is its only evidence.
+    Skipped(&'static str),
+    /// "conversation hook flags injected". Only the hook-tail kinds
+    /// (Claude, Codex) have ever logged this.
+    Injected,
+}
+
+/// A hook decision's result: the argv to launch, whether it was HOOKED
+/// (what the caller's tripwire records), and what to log.
+pub struct HookInjection {
+    pub argv: Vec<String>,
+    pub hooked: bool,
+    pub log: HookLog,
+}
+
+impl HookInjection {
+    /// The unchanged argv, not hooked, with a skip reason to log.
+    pub(crate) fn skipped(argv: Vec<String>, reason: &'static str) -> Self {
+        HookInjection {
+            argv,
+            hooked: false,
+            log: HookLog::Skipped(reason),
+        }
+    }
+
+    /// A hooked argv, logged as injected.
+    pub(crate) fn injected(argv: Vec<String>) -> Self {
+        HookInjection {
+            argv,
+            hooked: true,
+            log: HookLog::Injected,
+        }
+    }
+
+    /// A hooked argv with no log line: the reporter-extension kinds (Pi,
+    /// OMP) have never logged their successful injection, only their skips.
+    pub(crate) fn hooked_silently(argv: Vec<String>) -> Self {
+        HookInjection {
+            argv,
+            hooked: true,
+            log: HookLog::Silent,
+        }
+    }
+}
+
+/// The hook decision shared by the kinds whose hook is a tail of argv
+/// elements from [`AgentIntegration::hook_argv`] (Claude, Codex, Grok),
+/// with `vendor_refusal` as the one kind-specific check.
+///
+/// The order is the contract: the opt-out, then the executable path, then a
+/// bare `--`, then the vendor's own refusal, then the tail. A kind whose
+/// tail is empty (Grok, which reports through its own configured
+/// callbacks) returns silently at the end, after any of the earlier skips
+/// has already been logged.
+fn inject_hook_argv_tail(
+    integration: &dyn AgentIntegration,
+    kind: AgentKind,
+    mut argv: Vec<String>,
+    policy: &HookPolicy<'_>,
+    vendor_refusal: fn(&[String]) -> Option<&'static str>,
+) -> HookInjection {
+    if !policy.hooks.allows(kind) {
+        return HookInjection::skipped(argv, "disabled by FARHELM_AGENT_HOOKS");
+    }
+    let Some(exe) = policy.exe else {
+        return HookInjection::skipped(argv, "farhelm executable path is not utf-8");
+    };
+    // Plan D4: both vendors take a trailing positional prompt, and a bare
+    // `--` turns everything after it into that prompt's text. Appending
+    // past one would not configure a hook, it would type our flags at the
+    // agent.
+    if argv.iter().any(|element| element == "--") {
+        return HookInjection::skipped(argv, "invocation contains a bare --");
+    }
+    if let Some(reason) = vendor_refusal(&argv) {
+        return HookInjection::skipped(argv, reason);
+    }
+    let tail = integration.hook_argv(exe, policy.instructions);
+    // An integration that offers no tail does not use this hook form.
+    // Silently, and WITHOUT the injected line: claiming flags were injected
+    // when none were would arm the caller's tripwire against a launch that
+    // never had this hook to begin with, and every reader of that log line
+    // would be chasing a vendor bug that does not exist.
+    if tail.is_empty() {
+        return HookInjection {
+            argv,
+            hooked: false,
+            log: HookLog::Silent,
+        };
+    }
+    argv.extend(tail);
+    HookInjection::injected(argv)
+}
+
+/// Add launch-local reporter controls without persisting them in vendor metadata.
+pub(crate) fn with_launch_environment(argv: Vec<String>, assignments: &[String]) -> Vec<String> {
+    if argv
+        .first()
+        .and_then(|program| Path::new(program).file_name())
+        .and_then(|name| name.to_str())
+        == Some("env")
+    {
+        let mut wrapped = Vec::with_capacity(argv.len() + assignments.len());
+        wrapped.push(argv[0].clone());
+        wrapped.extend(assignments.iter().cloned());
+        wrapped.extend(argv.into_iter().skip(1));
+        wrapped
+    } else {
+        let mut wrapped = Vec::with_capacity(argv.len() + assignments.len() + 1);
+        wrapped.push("env".to_string());
+        wrapped.extend(assignments.iter().cloned());
+        wrapped.extend(argv);
+        wrapped
+    }
 }
 
 /// The command string both integrations embed in their vendor's hook
@@ -565,6 +724,10 @@ pub(crate) fn effective_program_index(argv: &[String]) -> Option<usize> {
 }
 
 impl AgentIntegration for GooseIntegration {
+    fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
+        goose::inject_hooks(argv, policy)
+    }
+
     fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
         None
     }
@@ -600,6 +763,10 @@ impl AgentIntegration for GooseIntegration {
 }
 
 impl AgentIntegration for PiIntegration {
+    fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
+        pi::inject_hooks(argv, policy)
+    }
+
     fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
         None
     }
@@ -654,6 +821,10 @@ impl AgentIntegration for PiIntegration {
 }
 
 impl AgentIntegration for GrokIntegration {
+    fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
+        inject_hook_argv_tail(self, AgentKind::Grok, argv, policy, |_| None)
+    }
+
     fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError> {
         grok_has_ambiguous_resume_shape(&original_argv[1..])
             .then_some(SnapshotError::GrokAmbiguousResumeBoundary)
@@ -1070,6 +1241,10 @@ fn parse_omp_session_header(text: &str) -> anyhow::Result<String> {
 }
 
 impl AgentIntegration for OmpIntegration {
+    fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
+        omp::inject_hooks(argv, policy)
+    }
+
     fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError> {
         omp_has_unconsumed_delimiter(&original_argv[1..])
             .then_some(SnapshotError::OmpAmbiguousResumeBoundary)
@@ -1191,6 +1366,10 @@ fn strip_selectors(
 }
 
 impl AgentIntegration for ClaudeIntegration {
+    fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
+        inject_hook_argv_tail(self, AgentKind::Claude, argv, policy, claude::hook_refusal)
+    }
+
     fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
         None
     }
@@ -1290,6 +1469,10 @@ impl AgentIntegration for ClaudeIntegration {
 }
 
 impl AgentIntegration for CodexIntegration {
+    fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
+        inject_hook_argv_tail(self, AgentKind::Codex, argv, policy, codex::hook_refusal)
+    }
+
     fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
         None
     }
@@ -2659,6 +2842,64 @@ pub fn executable_basename(kind: AgentKind) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec: a successful hook injection is logged as "injected" only for
+    /// the hook-tail kinds (Claude, Codex); the reporter-extension kinds
+    /// (Goose, Pi, OMP) succeed silently, a kind with no tail (Grok) returns
+    /// silently unhooked, and a skip carries its reason.
+    ///
+    /// Why: the log decision moved out of the supervisor's service core into
+    /// each kind's `inject_hooks`, where the argv/hooked characterization
+    /// tests in `service::core` cannot see it. A kind that started logging
+    /// success (as Pi and OMP briefly did during that move) changes the log
+    /// stream operators read without failing any of them.
+    #[test]
+    fn each_kind_logs_its_hook_decision_as_before() {
+        let hooks = AgentHooks::All;
+        let policy = HookPolicy {
+            hooks: &hooks,
+            instructions: AgentInstructions::On,
+            exe: Some("/opt/farhelm"),
+            vendor_extension: Some("/state/extension.js"),
+        };
+        let argv = |program: &str| vec![program.to_string()];
+        let decide = |kind: AgentKind, program: &str| {
+            let injection = integration_for(kind)
+                .expect("integrated kind")
+                .inject_hooks(argv(program), &policy);
+            (injection.hooked, injection.log)
+        };
+        for (kind, program, hooked, logged_injected) in [
+            (AgentKind::Claude, "claude", true, true),
+            (AgentKind::Codex, "codex", true, true),
+            (AgentKind::Goose, "goose", true, false),
+            (AgentKind::Pi, "pi", true, false),
+            (AgentKind::Omp, "omp", true, false),
+            (AgentKind::Grok, "grok", false, false),
+        ] {
+            let (actual_hooked, log) = decide(kind, program);
+            assert_eq!(actual_hooked, hooked, "{kind:?} hooked");
+            match log {
+                HookLog::Injected => assert!(logged_injected, "{kind:?} logged injected"),
+                HookLog::Silent => assert!(!logged_injected, "{kind:?} was silent"),
+                HookLog::Skipped(reason) => panic!("{kind:?} skipped: {reason}"),
+            }
+        }
+
+        let off = AgentHooks::None;
+        let disabled = HookPolicy {
+            hooks: &off,
+            ..policy
+        };
+        let injection = integration_for(AgentKind::Claude)
+            .expect("claude integration")
+            .inject_hooks(argv("claude"), &disabled);
+        assert!(!injection.hooked);
+        assert!(matches!(
+            injection.log,
+            HookLog::Skipped("disabled by FARHELM_AGENT_HOOKS")
+        ));
+    }
 
     /// The positive interrupt hint prevents a still long-running Codex task
     /// from decaying to idle. These fixtures mirror the pinned widget's
