@@ -24,7 +24,6 @@ One line per open item. This file must always match the feedback files in this d
   connections expose the ssh agent and X display to remote agents.
 - `yolo-safe-survives-identity-adoption.md` — a host's "safe for YOLO" mark survives adopting a different machine's
   identity, so YOLO launches there skip the sensitive-host confirmation.
-- `yolo-guard-misses-equivalent-spellings.md` — the sensitive-host YOLO guard misses Cursor's short `-f` flag.
 - `confirmed-nothing-alive-prompt-kills-live-agent.md` — a sidebar delete prompt that drifted to "nothing alive", or the
   header Restart confirm, can kill an agent restarted after the prompt was worded.
 - `replace-with-kills-running-source-unwarned.md` — Replace with kills a running source session with no warning and no
@@ -33,6 +32,14 @@ One line per open item. This file must always match the feedback files in this d
   session's, so Resume appends to the wrong conversation.
 - `claude-resume-template-selector-collision.md` — Claude's derived resume command keeps an original `--continue`,
   `--resume` or `--`, so Resume can open the wrong conversation or start fresh.
+- `yolo-guard-misses-equivalent-spellings.md` — the sensitive-host YOLO guard misses Cursor's short `-f` flag and Pi
+  launches whose program is not named `pi`.
+- `yolo-guard-skips-resume-template.md` — the sensitive-host YOLO guard never classifies a profile's separate resume
+  command, so the first Resume or Restart can skip approvals unconfirmed.
+- `omp-corridor-uncounted-pane-runtime.md` — when the foreground OMP's command line cannot be read, a nested OMP can
+  take over the session's Resume target.
+- `claude-clear-report-dropped-on-claim-timeout.md` — a Claude `/clear` report refused after a 1 s capture-claim wait is
+  never resent, so Resume keeps reopening the cleared conversation.
 
 ## High priority: material UX degradation
 
@@ -60,8 +67,8 @@ One line per open item. This file must always match the feedback files in this d
   page action disabled until reload.
 - `row-menu-drifts-on-row-height-change.md` — an open row menu can float over a different row when a row above gains a
   detail line at the same index.
-- `uploads-aborted-silently-on-remount.md` — terminal reconnect or restart remount silently aborts in-flight uploads
-  with no message.
+- `uploads-aborted-silently-on-remount.md` — terminal reconnect or restart remount silently aborts in-flight uploads and
+  erases finished uploads' landed path or failure message.
 - `pi-reporter-asset-not-renamed.md` — Pi hosts that ran Pi before v0.13.0 permanently lose Resume and the instructions
   pointer for every Pi session after upgrading.
 - `replace-drop-skips-source-delete.md` — switching away or reloading during Replace creates the replacement but never
@@ -112,6 +119,10 @@ One line per open item. This file must always match the feedback files in this d
   in between may read as Idle mid-turn.
 - `claude-spinner-rejects-multiword.md` — the Claude spinner check rejects multi-word text like "Compacting
   conversation…", so compaction may read Idle.
+- `new-tab-mount-displaces-owner-during-recovery.md` — a recovering view mounts a newly appeared tab with a displacing
+  attach and silently takes the session from the device in use.
+- `update-silently-downgrades-newer-hosts.md` — Update and "update all" downgrade hosts that run a newer Farhelm, which
+  can leave the supervisor unable to start.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -179,3 +190,5 @@ One line per open item. This file must always match the feedback files in this d
   row, leaving processes nothing can reach.
 - `provisioning-update-replaces-binary-before-setup-guard.md` — remote UPDATE replaces the farhelm binary before
   checking whether `farhelm helm setup` took the host over.
+- `drop-on-hidden-terminal-navigates-away.md` — a file dropped on a terminal that is catching up or reconnecting can
+  navigate the browser page away.

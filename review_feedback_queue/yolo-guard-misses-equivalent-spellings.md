@@ -42,3 +42,27 @@ Verify: add `"agent -f"` and `"cursor-agent -f"` to the `yolo` list in
 `raw_command_lines_are_classified_by_program_and_leading_flag` (`yolo.rs`). Both fail today.
 
 Fix: add `-f` to the `agent` and `cursor-agent` entries, and audit other vendors' documented short aliases while there.
+
+### Extension at de774a1ee8815ce833da77deac593a55d82f7be3: an explicit Pi agent kind is ignored
+
+Source: gap-filling review pass, 2026-09-30, slice helm-store2. The reviewer proposed dropping this as covered by the
+wrapper-limit sentence now in `yolo-guard-misses-env-prefix.md`; the independent drop checker found it is not an
+arbitrary wrapper and asked for it to be added here instead.
+
+SPEC.md:442-445 makes every Pi launch a YOLO launch ("its structured permission is YOLO, which makes every Pi launch one
+... The helm enforces this, so no client can skip it"). A raw create body can carry an explicit agent kind
+(`crates/farhelm-helm/src/sessions.rs:924`, accepted with a raw invocation at :2344), and so can a user profile, which
+is validated only for size and NUL bytes (`crates/farhelm-proto/src/lib.rs:1255`). The supervisor execs any argv
+regardless of kind. Yet `create_is_yolo` (`crates/farhelm-helm/src/yolo_guard.rs:43-51`, the Raw and ResolvedProfile
+arms at :45 and :50) classifies those launches only through `argv_is_yolo`, which recognizes Pi only by the basename
+`pi` (`crates/farhelm-proto/src/yolo.rs:136,179`).
+
+Trigger: a raw create with agent kind Pi and a program not named `pi` (for example `node …/pi/cli.js`), or a Pi profile
+with such an invocation, including clone and replace of such a session. Consequence: Pi, which has no approval gate,
+starts on a sensitive host without the confirmation and without the YOLO badge. The wrapper-limit resolution suggested
+in `yolo-guard-misses-env-prefix.md` does not fit, because here the helm is told outright that the launch is Pi.
+
+Fix: treat an effective agent kind of Pi as YOLO in `create_is_yolo` and in the clone, replace and restart-with paths.
+
+Not the same as the `env A=b pi` case in `yolo-guard-misses-env-prefix.md`: that one still reaches a program named `pi`;
+here the program has another name and only the declared agent kind says it is Pi.
