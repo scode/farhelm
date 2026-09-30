@@ -2774,7 +2774,17 @@ pub enum ControlMsg {
     /// lore/2026-07-27-m2-process-tree-stop.md for why removing the last
     /// handle on a possibly-running agent is the one outcome that must
     /// never happen silently).
-    SessionDeleted { req_id: u64 },
+    ///
+    /// `notice` is set when the delete completed but left something for the
+    /// user to know about, today a managed checkout it could not archive
+    /// safely and left in place (SPEC.md "Fresh GitHub checkouts": archiving
+    /// never blocks Delete, and the outcome must never be silent). Additive:
+    /// an older receiver ignores it and still sees a successful delete.
+    SessionDeleted {
+        req_id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        notice: Option<String>,
+    },
     /// Relaunch a session's agent (PLAN_M3.md item 9) — the only relaunch
     /// mechanism SPEC.md's lifecycle "restart" names; the resume offered
     /// when opening an interrupted session sends this same message, not a
@@ -4825,13 +4835,38 @@ mod tests {
             delete
         );
 
-        let deleted = ControlMsg::SessionDeleted { req_id: 12 };
+        let deleted = ControlMsg::SessionDeleted {
+            req_id: 12,
+            notice: None,
+        };
         assert_eq!(
             serde_json::to_value(&deleted).unwrap(),
             serde_json::json!({
                 "type": "session_deleted",
                 "req_id": 12,
             })
+        );
+        // The notice is additive: present only when set, and an older
+        // sender's bare reply still decodes, as a delete with no notice.
+        let noticed = ControlMsg::SessionDeleted {
+            req_id: 12,
+            notice: Some("left /work/bar-1 in place".to_string()),
+        };
+        assert_eq!(
+            serde_json::to_value(&noticed).unwrap(),
+            serde_json::json!({
+                "type": "session_deleted",
+                "req_id": 12,
+                "notice": "left /work/bar-1 in place",
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(serde_json::json!({
+                "type": "session_deleted",
+                "req_id": 12,
+            }))
+            .unwrap(),
+            deleted
         );
     }
 
@@ -4854,7 +4889,10 @@ mod tests {
                 session_id: "s1".to_string(),
                 only_if_nothing_alive: false,
             },
-            ControlMsg::SessionDeleted { req_id: 2 },
+            ControlMsg::SessionDeleted {
+                req_id: 2,
+                notice: None,
+            },
         ] {
             let mut wire = Vec::new();
             Frame::control(&msg).encode(&mut wire).unwrap();

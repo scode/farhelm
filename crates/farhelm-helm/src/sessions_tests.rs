@@ -1039,7 +1039,10 @@ async fn delete_session_happy_path_returns_200_with_empty_object_body() {
         };
         assert_eq!(session_id, "sess-1");
         writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -1061,6 +1064,62 @@ async fn delete_session_happy_path_returns_200_with_empty_object_body() {
         .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(value, serde_json::json!({}));
+
+    peer.await.unwrap();
+}
+
+/// A completed delete that left a checkout in place reaches the browser as
+/// a `notice` in the success body.
+///
+/// Why it matters: SPEC.md "Fresh GitHub checkouts" makes archiving never
+/// block Delete, and a checkout left unarchived must never be silent; the
+/// supervisor's notice is the only thing that tells the user where the
+/// folder is. Specified: a scripted `SessionDeleted` with a notice answers
+/// 200 with `{"notice": ...}` carrying that text.
+#[farhelm_testtrace::test]
+async fn delete_session_passes_the_supervisors_notice_to_the_caller() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use tower::ServiceExt;
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, .. } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        writer
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: Some("The checkout at /work/bar-1 was not archived".to_string()),
+            })
+            .await
+            .unwrap();
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let request = axum::http::Request::builder()
+        .method("DELETE")
+        .uri("/api/sessions/sess-1")
+        .header("host", "127.0.0.1:7433")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = harness.router().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        value,
+        serde_json::json!({"notice": "The checkout at /work/bar-1 was not archived"})
+    );
 
     peer.await.unwrap();
 }
@@ -1099,7 +1158,10 @@ async fn delete_session_forwards_the_only_if_nothing_alive_precondition() {
                 panic!("expected DeleteSession, got {request:?}");
             };
             writer
-                .write_control(&ControlMsg::SessionDeleted { req_id })
+                .write_control(&ControlMsg::SessionDeleted {
+                    req_id,
+                    notice: None,
+                })
                 .await
                 .unwrap();
             only_if_nothing_alive
@@ -1186,7 +1248,10 @@ async fn delete_session_drops_the_seen_row() {
         };
         assert_eq!(session_id, "sess-1");
         writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -1564,7 +1629,10 @@ async fn delete_session_succeeds_even_when_clearing_the_seen_row_fails() {
         };
         assert_eq!(session_id, "sess-1");
         writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -1716,7 +1784,10 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
             script.sessions.retain(|s| s.id != "yolo-src")
         });
         writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -1730,6 +1801,12 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     peer.await.unwrap();
+    let reply: serde_json::Value = serde_json::from_str(&body).expect("a JSON reply");
+    assert_eq!(
+        reply.get("delete_notice"),
+        None,
+        "a delete without a notice adds no field: {reply}"
+    );
 
     let (_, preferences) = get_json(&harness, "/api/preferences").await;
     assert_eq!(
@@ -1750,6 +1827,80 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
             .unwrap()
             .is_empty(),
         "a plain Replace must not add the listed row's launch to recent setups"
+    );
+}
+
+/// Spec: when the source's Delete completes with a notice, the Replace reply
+/// carries it as `delete_notice` beside the new session's own fields, and a
+/// Delete with no notice adds no such field.
+///
+/// Why: a Replace whose new session uses a different folder (an override or
+/// a fresh checkout) can release the source's last checkout reference, and
+/// a checkout that could not be archived must never be released silently
+/// (SPEC.md "Fresh GitHub checkouts"). The reply stays a session object so a
+/// client that ignores the field is unaffected.
+#[farhelm_testtrace::test]
+async fn a_replace_reply_carries_the_source_deletes_notice() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame};
+
+    let source = rest_harness::session("noted-src", 1_700_000_000);
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        let created = rest_harness::session("noted-new", 1_700_000_500);
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, .. } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        fleet.edit(local, |script| {
+            script.sessions.retain(|s| s.id != "noted-src")
+        });
+        writer
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: Some("The checkout at /work/bar was not archived".to_string()),
+            })
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/noted-src/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    peer.await.unwrap();
+    let body: serde_json::Value = serde_json::from_str(&body).expect("a JSON reply");
+    assert_eq!(
+        body["id"], "noted-new",
+        "the reply is still the new session"
+    );
+    assert_eq!(
+        body["delete_notice"], "The checkout at /work/bar was not archived",
+        "the source delete's notice reaches the caller verbatim"
     );
 }
 
@@ -1825,7 +1976,10 @@ async fn a_plain_replace_does_not_remember_the_listed_rows_profile() {
             script.sessions.retain(|s| s.id != "profiled-src")
         });
         writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -1950,7 +2104,10 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         // client it is gone.
         fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
         writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -2206,7 +2363,10 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
         assert_eq!(session_id, "sess-1");
         fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
         writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -2319,7 +2479,10 @@ async fn replace_of_a_structured_session_preserves_its_resume_template() {
         assert_eq!(session_id, "sess-1");
         fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
         writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -2429,7 +2592,10 @@ async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invoca
         assert_eq!(session_id, "sess-1");
         fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
         writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -2910,7 +3076,10 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
         // successful delete in this file.
         fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
         writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });
@@ -3049,7 +3218,10 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         assert_eq!(session_id, "sess-1");
         fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
         writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
             .await
             .unwrap();
     });

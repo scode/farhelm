@@ -3016,7 +3016,7 @@ impl SupervisorClient {
     /// surfaced as a plain `anyhow::Error` rather than `SupervisorError`.
     /// Only `Ok` means the session and its state are actually gone.
     pub async fn delete_session(&self, id: &str) -> anyhow::Result<()> {
-        self.delete_session_with(id, false).await
+        self.delete_session_with(id, false).await.map(|_notice| ())
     }
 
     /// [`Self::delete_session`] with the precondition the browser's
@@ -3024,11 +3024,14 @@ impl SupervisorClient {
     /// supervisor refuses with `Conflict` instead of deleting if the agent
     /// or any tab is alive at handling time (see
     /// `ControlMsg::DeleteSession::only_if_nothing_alive`).
+    ///
+    /// `Ok(Some(notice))` is a completed delete that left something the user
+    /// must be told about (`ControlMsg::SessionDeleted::notice`).
     pub async fn delete_session_with(
         &self,
         id: &str,
         only_if_nothing_alive: bool,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<String>> {
         let req_id = self.req_id();
         match self
             .request(
@@ -3041,7 +3044,7 @@ impl SupervisorClient {
             )
             .await?
         {
-            ControlMsg::SessionDeleted { .. } => Ok(()),
+            ControlMsg::SessionDeleted { notice, .. } => Ok(notice),
             other => Err(wrong_reply("DeleteSession", &other)),
         }
     }

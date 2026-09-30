@@ -1522,6 +1522,8 @@ pub(super) fn CreateSessionForm(
         cwd: destination_seed,
     });
     let mut github_attempt = use_signal(|| None::<(IntentBinding, GithubAttempt)>);
+    // A Replace-with deletes its source, whose notice the session list shows.
+    let delete_notice = use_context::<super::DeleteNotice>();
     let mut preview_generation = use_signal(|| 0_u64);
     let mut preview_revision = use_signal(|| 0_u64);
     let mut observed_checkout_revision = use_signal(|| 0_i64);
@@ -3404,7 +3406,11 @@ pub(super) fn CreateSessionForm(
                         // the exact payload available to the next explicit retry.
                         github_attempt.set(Some((bound.clone(), attempt.clone())));
                         match api::submit_fresh_create(&base, bound.replace_source.as_deref(), &attempt.body).await {
-                            Ok(session) => { github_attempt.set(None); Ok(session) }
+                            Ok((session, notice)) => {
+                                github_attempt.set(None);
+                                delete_notice.publish(notice);
+                                Ok(session)
+                            }
                             Err(crate::github_checkout::FreshCreateError::YoloConfirmation(text)) => {
                                 // Refused before anything was dispatched. The
                                 // attempt and its key stay, so the confirmed
@@ -3442,6 +3448,10 @@ pub(super) fn CreateSessionForm(
                                 allow_yolo,
                             )
                             .await
+                            .map(|(session, notice)| {
+                                delete_notice.publish(notice);
+                                session
+                            })
                         }
                         None => {
                             create_session(

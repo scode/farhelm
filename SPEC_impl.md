@@ -1340,7 +1340,9 @@ directory as unavailable afterward.
 Root identity is checked even before accepting an apparently missing source. Common archive entry points refuse
 overlapping active registry paths, including during startup recovery. A refused or failed archive step does not fail
 Delete (SPEC.md, Fresh GitHub checkouts): the session and its checkout registry row are retired, the folder is left in
-place, and the reply carries a notice naming it. After process teardown and committed final retirement, Delete removes
+place (after a failed move, possibly at its journaled archive destination, which the notice then names), and the reply
+carries a notice naming it. A Replace's reply carries its source Delete's notice as well, since a replacement in another
+folder can release the source's last reference. After process teardown and committed final retirement, Delete removes
 the private preparation lock and state files. This cleanup is best effort: a crash or unlink failure can leave private
 evidence, but cannot authorize another directory move.
 

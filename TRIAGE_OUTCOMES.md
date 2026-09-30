@@ -3524,7 +3524,24 @@
   item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the last-reference archive in Delete (`archive_last_reference` in teardown.rs) no longer fails
+  the Delete: any reason the checkout cannot be archived safely (root or folder identity mismatch, overlapping records,
+  a failed or unreconcilable move) leaves the folder where it is (or, after a failed move, possibly at its journaled
+  archive destination, which the notice then names), releases its registry row (`working_copies::release_unarchived`) in
+  Delete's final transaction, and returns a notice. A missing folder whose absence no longer holds at commit time is
+  released the same way instead of rolling the Delete back. The notice travels in `SessionDeleted.notice`, through the
+  helm's delete reply and, for a Replace, its reply's `delete_notice`, to a dismissible line in the session list. The
+  unresolved-plan notice the review also asked for is left to its own queued item,
+  `preserved-plan-diagnostic-log-only.md`. Regression tests
+  `deleting_with_a_replaced_root_releases_the_checkout_untouched`,
+  `archive_parent_sync_failure_completes_delete_with_a_notice`,
+  `recovery_barrier_failure_names_the_rejournaled_destination`,
+  `an_overlap_refusal_of_a_pending_archive_names_its_destination`,
+  `a_missing_checkout_that_reappears_before_commit_is_released_not_fatal`, the updated stranger-at-source test,
+  `delete_session_passes_the_supervisors_notice_to_the_caller` and `a_replace_reply_carries_the_source_deletes_notice`,
+  `a_delete_reply_that_cannot_be_read_is_not_silent` (UI) (helm), and the `SessionDeleted` wire-shape test (proto). jj
+  change `lvpkwsqvksym`, bookmark `pr/delete-completes-despite-archive`, draft PR
+  [#1173](https://github.com/scode/farhelm/pull/1173/changes).
 
 ## noreplace-rename-unsupported-strands-archive.md
 

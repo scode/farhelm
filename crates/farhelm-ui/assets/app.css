@@ -5423,3 +5423,16 @@ samp {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* A completed delete's notice (a checkout left in place) above the session
+   list: the host's text, then a dismiss button on the same line. */
+.delete-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.delete-notice .status {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

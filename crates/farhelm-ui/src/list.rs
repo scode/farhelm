@@ -55,5 +55,6 @@ mod view;
 
 pub(crate) use shared::{OpenDestination, with_source_host};
 pub(crate) use view::{
-    HeaderDeleteRequest, HeaderPrefillRequest, ListView, SharedPreferences, remember_selection,
+    DeleteNotice, HeaderDeleteRequest, HeaderPrefillRequest, ListView, SharedPreferences,
+    remember_selection,
 };
