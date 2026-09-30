@@ -14,6 +14,7 @@ export interface ReplayRecord {
   revealed: boolean;
   revealedInWriteCallback: boolean;
   viewportAtTailOnReveal: boolean | null;
+  stalledIdleRearms: number;
   holdMarker: boolean;
   heldReason: string | null;
   limits: { bufferBytes: number; bufferChunks: number; idleMs: number };

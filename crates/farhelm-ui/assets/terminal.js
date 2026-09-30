@@ -766,6 +766,84 @@
   // exactly the failure SPEC.md requires be reported rather than inferred.
   const REPLAY_IDLE_TIMEOUT_MS = 5000;
 
+  // ## Main-thread stall probe
+  //
+  // The catch-up watchdog (`armIdleTimer`) reads an expired window as
+  // silence, and silence is only evidence when the page was running to
+  // hear it. A main thread held busy queues a socket's `open` and first
+  // frames behind whatever is running, and a window that overlapped the
+  // hold heard nothing whether or not its timer then fires on time. The
+  // case that forced this is a first mount that builds many terminals in
+  // one task: 33 of them took about 8s in WebKit on a loaded machine
+  // (deflake sweep 2026-09-29, FLAKES.md). Every island's window elapsed
+  // inside that task, and when it ended the expiries read CONNECTING on
+  // sockets whose handshakes the helm had already answered.
+  //
+  // A timer's own lateness only exposes the islands whose deadline fell
+  // inside the hold. An island mounted near its end fires on time,
+  // having listened for well under a second, so the evidence has to come
+  // from something that was trying to run the whole time. This probe
+  // ticks every `STALL_PROBE_INTERVAL_MS` while any island has a window
+  // armed. A tick that arrives more than `MAIN_THREAD_STALL_MS` late marks
+  // a stall, and a window that a stall overlapped is not believed.
+  //
+  // One second is far above ordinary timer jitter and above the tasks an
+  // interactive page runs, so a stall of that length means the page could
+  // not have delivered anything the socket sent in the meantime. It does
+  // not catch a page kept busy by a stream of shorter tasks. That shape
+  // exists too (a burst of reconnect attempts, each rebuilding a
+  // terminal), but no single gap in it proves anything was held back.
+  const MAIN_THREAD_STALL_MS = 1000;
+  const STALL_PROBE_INTERVAL_MS = 250;
+
+  // Islands with an idle window armed. The probe runs only while this is
+  // non-empty, so a page with nothing catching up schedules no timers
+  // for it.
+  const stallWatchers = new Set();
+  let stallProbeTimer = null;
+  let stallProbeLastRan = 0;
+  // When the most recent stall ended, on the monotonic clock.
+  let lastStallEndedAt = -Infinity;
+
+  function stallProbeTick() {
+    const now = performance.now();
+    if (now - stallProbeLastRan > STALL_PROBE_INTERVAL_MS + MAIN_THREAD_STALL_MS) {
+      lastStallEndedAt = now;
+    }
+    stallProbeLastRan = now;
+    // Stops itself once nothing is watching, rather than being stopped by
+    // the last watcher to leave: every exit path then stays a plain Set
+    // deletion, and nothing can clear a probe another island still needs.
+    stallProbeTimer =
+      stallWatchers.size > 0 ? setTimeout(stallProbeTick, STALL_PROBE_INTERVAL_MS) : null;
+  }
+
+  function watchStalls(token) {
+    stallWatchers.add(token);
+    if (stallProbeTimer === null) {
+      stallProbeLastRan = performance.now();
+      stallProbeTimer = setTimeout(stallProbeTick, STALL_PROBE_INTERVAL_MS);
+    }
+  }
+
+  function unwatchStalls(token) {
+    stallWatchers.delete(token);
+  }
+
+  /**
+   * Whether the main thread stalled at any point after `since`, including a
+   * stall still under way. The second half matters when an overdue expiry
+   * runs before the equally overdue probe tick: the stall has not been
+   * recorded yet, but the probe's own silence already shows it.
+   */
+  function stalledSince(since) {
+    if (lastStallEndedAt > since) return true;
+    return (
+      stallProbeTimer !== null
+      && performance.now() - stallProbeLastRan > STALL_PROBE_INTERVAL_MS + MAIN_THREAD_STALL_MS
+    );
+  }
+
   // What stands in front of a terminal for the duration of its catch-up.
   // Deliberately plain and unalarming: nothing has gone wrong, and this is
   // the state EVERY reattach passes through. In-page DOM, like every other
@@ -3346,6 +3424,11 @@
             revealed: false,
             revealedInWriteCallback: false,
             viewportAtTailOnReveal: null,
+            // How many watchdog expiries re-armed instead of ending the
+            // phase because the main thread stalled during their window
+            // (see `armIdleTimer`). Lets a test see whether the stall path
+            // ran, rather than only that the outcome came out right.
+            stalledIdleRearms: 0,
             ...replayControls(spec.el),
           },
         };
@@ -3479,6 +3562,14 @@
         let replayChunks = [];
         let replayBytes = 0;
         let idleTimer = null;
+        // When the current idle window was armed, on the monotonic clock,
+        // so an expiry can tell a window the page actually sat through
+        // from one it slept through (see `armIdleTimer`).
+        let idleArmedAt = 0;
+        // This island's identity in `stallWatchers`. Any unique object
+        // would do; a dedicated one keeps the set from holding anything
+        // else alive.
+        const stallToken = {};
         // Whether the reveal may place keyboard focus at all. Cleared on
         // the never-connected path (see `armIdleTimer`): focusing a
         // terminal that cannot carry input is how "typing goes nowhere"
@@ -3596,6 +3687,7 @@
         function clearIdleTimer() {
           if (idleTimer !== null) clearTimeout(idleTimer);
           idleTimer = null;
+          unwatchStalls(stallToken);
         }
 
         // Re-armed on every buffered chunk, so the window measures
@@ -3621,17 +3713,36 @@
         //   and to the banner only when it cannot (see the branch below);
         //   either way an attach abandoned this way must not silently
         //   resurrect if its handshake completes minutes later.
+        //
+        // Neither outcome is drawn from a window the page did not listen
+        // through. If the main thread stalled while it was open (see
+        // "Main-thread stall probe"), the expiry re-arms a full window,
+        // measured from when the page can listen again, and only a window
+        // with no stall in it is believed. The island-cap test's first mount
+        // is the case: the agent's handshake had its 101, but the page had
+        // not delivered `open`, so the expiry read CONNECTING and threw away
+        // a working socket. A page stalled in every window keeps re-arming
+        // rather than concluding; it concludes on the first window it is
+        // awake for.
         function armIdleTimer() {
           if (!catchingUp || !alive) return;
           clearIdleTimer();
+          idleArmedAt = performance.now();
+          watchStalls(stallToken);
           idleTimer = setTimeout(() => {
             idleTimer = null;
+            unwatchStalls(stallToken);
             // `unmount()` clears this timer before disposing anything, so
             // this is the redundant second check the rest of this file's
             // deferred paths also carry: a timer already queued when the
             // clear ran must not banner (or close a socket) on behalf of
             // an island that no longer exists.
             if (!alive) return;
+            if (stalledSince(idleArmedAt)) {
+              testHook.replay.stalledIdleRearms += 1;
+              armIdleTimer();
+              return;
+            }
             const stillConnecting = ws.readyState === WebSocket.CONNECTING;
             // A RECONNECT attempt that produced NOTHING is simply an
             // attempt that failed, and belongs on the ladder rather than
