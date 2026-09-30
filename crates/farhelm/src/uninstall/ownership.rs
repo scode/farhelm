@@ -68,6 +68,14 @@ pub(crate) enum BundleInspection {
     NotApplicable,
     UninspectedWithoutHome,
     Absent,
+    /// A `Farhelm.app` with no installer receipt, internal or pending, at
+    /// this path. Nothing proves Farhelm installed it (installers before
+    /// receipts existed, or a self-built app), so uninstall leaves it in place
+    /// and says so, and still removes the verified flat installation.
+    /// Refusing instead left no documented way forward: the advised
+    /// reinstall does nothing under `FARHELM_NO_APP_BUNDLE` and otherwise
+    /// replaces the user's own app.
+    RetainedWithoutReceipt(PathBuf),
     Recognized(BundlePlan),
 }
 
@@ -481,10 +489,23 @@ fn inspect_bundle_at(
     if !root_exists && pending.is_none() {
         return Ok(BundleInspection::Absent);
     }
+    let contents = root.join("Contents");
+    let metadata = contents.join(FLAT_RECORD);
+    // Read before the layout checks: a receipt-less app is judged by the
+    // missing receipt alone, since a signed or self-built one carries entries
+    // (`Contents/PkgInfo`, `Contents/_CodeSignature`) the installer never
+    // writes and would otherwise be refused for them.
+    let internal = if root_exists {
+        optional_record(&metadata, uid, classifier)?
+    } else {
+        None
+    };
+    if internal.is_none() && pending.is_none() {
+        return Ok(BundleInspection::RetainedWithoutReceipt(root.to_path_buf()));
+    }
     if root_exists {
         reject_unexpected(root, &["Contents"])?;
     }
-    let contents = root.join("Contents");
     let contents_exists = exists_dir(&contents, uid, classifier)?;
     if contents_exists {
         reject_unexpected(
@@ -492,8 +513,6 @@ fn inspect_bundle_at(
             &[".farhelm-installation", "Info.plist", "MacOS", "Resources"],
         )?;
     }
-    let metadata = contents.join(FLAT_RECORD);
-    let internal = optional_record(&metadata, uid, classifier)?;
     if let (Some(internal), Some(pending)) = (&internal, &pending)
         && internal != pending
     {
@@ -505,12 +524,10 @@ fn inspect_bundle_at(
     // Both records may exist if removal stopped immediately after publishing
     // the sibling. Only identical evidence is accepted; a filename alone never
     // authorizes cleanup of an otherwise empty leftover bundle.
-    let fields = internal.as_ref().or(pending.as_ref()).ok_or_else(|| {
-        anyhow!(
-            "ownership receipt {} is missing; rerun the installer to repair it",
-            path_text(&metadata)
-        )
-    })?;
+    let fields = internal
+        .as_ref()
+        .or(pending.as_ref())
+        .expect("a bundle with neither receipt returned early");
     let record_path = if internal.is_some() {
         &metadata
     } else {
@@ -1065,14 +1082,22 @@ pub(crate) mod tests {
             BundleInspection::UninspectedWithoutHome
         ));
     }
-    /// A surviving app without its own receipt is uncertainty, never recursive deletion authority.
+    /// A surviving app without its own receipt is never deletion authority:
+    /// it is retained rather than removed (the refusal it once got left no
+    /// documented way out; see `RetainedWithoutReceipt`), while an app WITH
+    /// a receipt and an entry the installer never writes still refuses.
     #[test]
-    fn missing_or_extra_bundle_metadata_refuses() {
+    fn missing_receipt_retains_and_extra_bundle_entries_refuse() {
         let fixture = Fixture::new();
         fixture.flat(Some(b"desktop"));
         let bundle = fixture.bundle(false);
         fs::remove_file(bundle.join("Contents/.farhelm-installation")).expect("record");
-        assert!(inspect(&fixture.inputs(PlatformArtifacts::Macos)).is_err());
+        assert!(matches!(
+            inspect(&fixture.inputs(PlatformArtifacts::Macos))
+                .expect("plan")
+                .bundle,
+            BundleInspection::RetainedWithoutReceipt(_)
+        ));
         fixture.bundle(false);
         Fixture::write(&bundle.join("Contents/extra"), b"x");
         assert!(

@@ -4165,7 +4165,11 @@
   interrupted runs" forbids leaving a state no documented command recovers from.
 - Completion criteria: uninstall with a receipt-less bundle removes the verified binaries, leaves the bundle, and
   reports that it did; focused coverage; remove this feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `inspect_bundle_at` reads the app's receipts before its layout checks and returns
+  `RetainedWithoutReceipt` when neither the internal nor the pending sibling receipt exists, so a signed or self-built
+  app's extra entries do not refuse it either. The preview and the final report both say the app was kept, and
+  `docs/install_uninstall.md` describes it. A bundle with a receipt keeps every existing check. Change `oxkmovwvvktv`,
+  bookmark `pr/receiptless-bundle-retained`, draft PR [#1203](https://github.com/scode/farhelm/pull/1203/changes).
 
 ## no-supervisor-setup-splits-state-dir.md
 

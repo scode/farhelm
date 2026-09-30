@@ -115,6 +115,13 @@ fn run_with_inputs(
             path_text(&bundle.root)
         )?;
     }
+    if let ownership::BundleInspection::RetainedWithoutReceipt(root) = &plan.bundle {
+        writeln!(
+            preview,
+            "retain app bundle {}: it has no Farhelm installer receipt, so nothing shows this installation made it",
+            path_text(root)
+        )?;
+    }
     if let Some(path) = &plan.flat.desktop {
         writeln!(preview, "remove {}", path_text(path))?;
     }
