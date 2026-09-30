@@ -73,6 +73,10 @@ pub(crate) struct HostView {
     pub(crate) identity: Option<String>,
     pub(crate) remote_farhelm: Option<String>,
     pub(crate) remote_state_dir: Option<String>,
+    /// Whether the user marked this host safe for YOLO launches; `false`
+    /// (sensitive) until they do. A row missing from the registry read
+    /// reports sensitive.
+    pub(crate) yolo_safe: bool,
     pub(crate) state: HostStateView,
     /// Which CONNECTION this host is on — an opaque, monotonic token that
     /// changes whenever the host's client does, including when it goes away
@@ -370,6 +374,7 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                 identity: registry.and_then(|row| row.host_identity.clone()),
                 remote_farhelm: registry.and_then(|row| row.remote_farhelm.clone()),
                 remote_state_dir: registry.and_then(|row| row.remote_state_dir.clone()),
+                yolo_safe: registry.is_some_and(|row| row.yolo_safe),
                 state: (&snapshot.state).into(),
                 incarnation: snapshot.incarnation,
             }
@@ -424,6 +429,49 @@ pub(crate) struct HostSpec {
     pub(crate) remote_farhelm: Option<String>,
     #[serde(default)]
     pub(crate) remote_state_dir: Option<String>,
+}
+
+/// The body of `POST /api/hosts/{id}/yolo-safe`: the new setting, required.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct YoloSafeSpec {
+    pub(crate) yolo_safe: bool,
+}
+
+/// `POST /api/hosts/{id}/yolo-safe` — mark a host safe or sensitive for YOLO
+/// launches, answering with the updated host view.
+///
+/// Any host, the local one included: sensitivity describes the machine, not
+/// how it is registered. Serialized with the host's other registry writes
+/// through the same host write lock as an alias change. No registry
+/// reconcile follows, because the connection actors do not read this flag;
+/// a change bumps the event feed directly instead, so other open clients
+/// re-read the host list.
+pub(crate) async fn set_yolo_safe(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+    axum::Json(spec): axum::Json<YoloSafeSpec>,
+) -> impl IntoResponse {
+    let serialized = state.manager.host_write_lock(host).await;
+    let changed = match state.store.set_yolo_safe(host, spec.yolo_safe).await {
+        Ok(changed) => changed,
+        Err(error) => return http_error(error),
+    };
+    // Every other open client learns of the change through the event feed,
+    // exactly as for an alias change; an unchanged write announces nothing.
+    if changed {
+        state.manager.events().bump();
+    }
+    drop(serialized);
+    tracing::info!(
+        host,
+        yolo_safe = spec.yolo_safe,
+        "host yolo-safe setting changed"
+    );
+    match host_view(&state, host).await {
+        Ok(view) => axum::Json(view).into_response(),
+        Err(error) => http_error(error),
+    }
 }
 
 /// The body of `POST /api/hosts/{id}/alias`.
@@ -1485,6 +1533,51 @@ mod tests {
             after_set,
             "repeating the same alias must not bump again"
         );
+    }
+
+    /// Spec: `POST /api/hosts/{id}/yolo-safe` stores the setting, answers
+    /// with the host view carrying it, bumps the fleet's revision on a real
+    /// change, and stays silent on a repeat of the same value.
+    ///
+    /// Why: the event feed is how every other open client learns to re-read
+    /// the host list; a change that did not bump it would leave another
+    /// window showing a host as sensitive (or safe) after it stopped being so.
+    #[farhelm_testtrace::test]
+    async fn setting_yolo_safe_stores_it_and_bumps_the_revision_only_on_a_real_change() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@yolo-check" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+        assert_eq!(added["yolo_safe"], false, "a new host starts sensitive");
+
+        let events = Arc::clone(harness.manager.events());
+        let before = events.revision();
+        let (status, view, _) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/yolo-safe"),
+            Some(serde_json::json!({ "yolo_safe": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(view["yolo_safe"], true);
+        let after_set = events.revision();
+        assert!(after_set > before, "a real change must bump the revision");
+
+        call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/yolo-safe"),
+            Some(serde_json::json!({ "yolo_safe": true })),
+        )
+        .await;
+        assert_eq!(events.revision(), after_set, "a repeat must not bump again");
     }
 
     /// The local row accepts an alias through the REST route too — the

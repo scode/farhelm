@@ -680,6 +680,9 @@ test.describe("multi-host", () => {
     await openHostMenu(local);
     await expect(local.locator(".host-remove")).toHaveCount(0);
     await expect(local.locator(".host-edit")).toHaveCount(0);
+    // Settings is offered on the local row too: whether YOLO launches are
+    // allowed is a setting of every host.
+    await expect(local.locator(".host-settings")).toHaveCount(1);
 
     const info = stackInfo();
     const remote = hostRowByName(page, info.remote_ssh);
@@ -941,7 +944,7 @@ test.describe("multi-host", () => {
     for (const item of [
       row.locator(".host-retry"),
       row.locator(".provisioning-update"),
-      row.locator(".host-edit"),
+      row.locator(".host-settings"),
       row.locator(".host-remove"),
     ]) {
       await assertFullyPaintedAndHitTestable(page, item);
@@ -1062,7 +1065,7 @@ test.describe("multi-host", () => {
     const retry = row.locator(".host-retry");
     const adopt = row.locator(".host-adopt");
     const update = row.locator(".provisioning-update");
-    const edit = row.locator(".host-edit");
+    const settings = row.locator(".host-settings");
     const remove = row.locator(".host-remove");
     for (const [key, expected] of [
       ["Enter", retry],
@@ -1083,7 +1086,7 @@ test.describe("multi-host", () => {
     await openHostMenu(row);
     const menu = row.locator(".host-row-menu-items");
     await expect(menu).toHaveAttribute("role", "menu");
-    for (const item of [retry, adopt, update, edit, remove]) {
+    for (const item of [retry, adopt, update, settings, remove]) {
       await expect(item).toHaveAttribute("role", "menuitem");
     }
 
@@ -1099,7 +1102,7 @@ test.describe("multi-host", () => {
     await page.keyboard.press("ArrowDown");
     await expect(update).toBeFocused();
     await page.keyboard.press("ArrowDown");
-    await expect(edit).toBeFocused();
+    await expect(settings).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(remove, "the separator is not a stop on the way to remove").toBeFocused();
     // Both wrap boundaries, in the two directions that reach them.
@@ -1136,8 +1139,9 @@ test.describe("multi-host", () => {
    * Automatic setup occupies its canonical slot after Retry in the truthful
    * local setup menu. The three-item fixture pins ordering and both wrap
    * boundaries without fabricating mutually exclusive provisioning offers;
-   * the third item is "edit alias", offered on the local row like any
-   * other (plans/host-aliases.md), which is what the wrap boundaries now
+   * the third item is "settings", offered on the local row like any other
+   * (the alias editor and the YOLO-launch setting live in it), which is
+   * what the wrap boundaries now
    * land on — automatic setup sits between, so its slot is proven by the
    * arrow step from Retry rather than by End.
    */
@@ -1185,10 +1189,10 @@ test.describe("multi-host", () => {
     await expect(row.locator(".provisioning-error")).toContainText("automatic setup needs retry");
     await openHostMenu(row);
     const items = row.getByRole("menuitem");
-    await expect(items).toHaveText(["retry", "set up automatically", "edit alias"]);
+    await expect(items).toHaveText(["retry", "set up automatically", "settings"]);
     const retry = row.locator(".host-retry");
     const automatic = row.locator(".provisioning-auto-setup");
-    const alias = row.locator(".host-alias");
+    const alias = row.locator(".host-settings");
 
     await expect(retry).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -1201,6 +1205,42 @@ test.describe("multi-host", () => {
     await expect(alias).toBeFocused();
     await page.keyboard.press("Home");
     await expect(retry).toBeFocused();
+  });
+
+  // The YOLO-launch setting round-trips through the helm from the host's
+  // settings panel. Every host starts sensitive, so the checkbox starts
+  // clear; the local row is used because it always exists. The setting is
+  // restored to sensitive whatever happens, since the stack is shared by the
+  // specs that follow.
+  test("host-settings-yolo-safe: the toggle is stored by the helm", async ({ page, request }) => {
+    const local = (await apiHosts(request)).find((host: any) => host.kind === "local");
+    expect(local.yolo_safe).toBe(false);
+    try {
+      await page.goto("/");
+      const row = page.locator('[data-host-kind="local"]');
+      await openHostMenu(row);
+      await row.locator(".host-settings").click();
+      const toggle = row.locator(".host-yolo-safe-toggle");
+      await expect(toggle).not.toBeChecked();
+      await toggle.click();
+      await expect(toggle).toBeChecked();
+      await expect
+        .poll(async () =>
+          (await apiHosts(request)).find((host: any) => host.id === local.id).yolo_safe,
+        )
+        .toBe(true);
+      await toggle.click();
+      await expect(toggle).not.toBeChecked();
+      await expect
+        .poll(async () =>
+          (await apiHosts(request)).find((host: any) => host.id === local.id).yolo_safe,
+        )
+        .toBe(false);
+      await row.locator(".host-settings-close").click();
+      await expect(row.locator(".host-settings-panel")).toHaveCount(0);
+    } finally {
+      await request.post(`/api/hosts/${local.id}/yolo-safe`, { data: { yolo_safe: false } });
+    }
   });
 
   // F11/TEST-EDIT-CLOSE: nothing before this ACTIVATED Edit — every existing
@@ -1239,11 +1279,17 @@ test.describe("multi-host", () => {
     await expect(page.locator(".host-details-toggle")).not.toBeChecked();
     const row = hostRowByName(page, "user@editable");
     await openHostMenu(row);
-    await row.locator(".host-edit").click();
+    await row.locator(".host-settings").click();
+    // Choosing Settings closes the menu and opens the row's settings panel;
+    // its edit button then swaps the panel for the destination field.
+    await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
+    await expect(row.locator(".host-settings-panel")).toBeVisible();
+    await row.locator(".host-settings-panel .host-edit").click();
     await expect(page.locator(".host-details-toggle")).toBeChecked();
 
-    // Gone the instant the row swaps to the destination field — nothing
-    // here dismisses it by hand.
+    // The panel is gone the instant the row swaps to the destination field,
+    // and no menu came back — nothing here dismisses either by hand.
+    await expect(row.locator(".host-settings-panel")).toHaveCount(0);
     await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
     const input = row.locator(".host-destination-input");
     await expect(input).toBeVisible();
@@ -1279,7 +1325,7 @@ test.describe("multi-host", () => {
   // mutates nothing and the submission claim waits visibly for the page
   // token — see provisioning.spec.ts "a plan held under a held OpLock").
   // So `rerun` for a failed UPDATE and `update` stay ENABLED here while
-  // `retry`, `adopt`, `edit`, and `remove` go `aria-disabled`. This test
+  // `retry`, `adopt`, `settings`, and `remove` go `aria-disabled`. This test
   // pins both halves: the disabled four refuse forced activation, and the
   // enabled two are reachable without the attribute.
   test("host-menu-busy-guards: aria-disabled items refuse activation but stay reachable", async ({
@@ -1380,11 +1426,11 @@ test.describe("multi-host", () => {
       const adopt = target.locator(".host-adopt");
       const rerun = target.locator(".provisioning-rerun");
       const update = target.locator(".provisioning-update");
-      const edit = target.locator(".host-edit");
+      const settings = target.locator(".host-settings");
       const remove = target.locator(".host-remove");
-      const disabled = [retry, adopt, edit, remove];
+      const disabled = [retry, adopt, settings, remove];
       const enabled = [rerun, update];
-      const items = [retry, adopt, rerun, update, edit, remove];
+      const items = [retry, adopt, rerun, update, settings, remove];
       for (const item of disabled) {
         await expect(item).toHaveAttribute("aria-disabled", "true");
       }
@@ -1433,6 +1479,7 @@ test.describe("multi-host", () => {
 
       // Nothing opened…
       await expect(target.locator(".host-destination-input")).toHaveCount(0);
+      await expect(target.locator(".host-settings-panel")).toHaveCount(0);
       await expect(target.locator(".host-confirm-remove")).toHaveCount(0);
       await expect(target.locator(".host-row-menu-panel")).toBeVisible();
       // …and nothing the menu could have caused reached this host's own

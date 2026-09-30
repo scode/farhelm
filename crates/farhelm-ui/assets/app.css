@@ -2129,6 +2129,45 @@ samp {
   flex-wrap: wrap;
 }
 
+/* The host settings panel (the menu's `settings` item): a column of
+   label/value/action rows below the row's controls, the same full-width
+   block the remove prompt uses so nothing clips at the sidebar's edge. The
+   value takes the slack and ellipsizes, because a destination is user data
+   of unbounded length; the action button never shrinks. */
+.host-settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.host-settings-row {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.host-settings-label {
+  color: var(--fg-1);
+  flex: none;
+}
+.host-settings-value {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.host-settings-row .btn {
+  flex: none;
+}
+.host-settings-help {
+  color: var(--fg-1);
+  margin: 0;
+}
+.host-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+}
+
 /* ===== Rename editor ============================================== */
 
 /* The rename form lives in ListView's modal editor. It is a flex row, where

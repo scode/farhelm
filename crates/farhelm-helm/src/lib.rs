@@ -631,6 +631,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(hosts::set_alias),
         )
         .route(
+            "/api/hosts/{id}/yolo-safe",
+            axum::routing::post(hosts::set_yolo_safe),
+        )
+        .route(
             "/api/hosts/{id}/adopt",
             axum::routing::post(hosts::adopt_host),
         )
@@ -2042,6 +2046,7 @@ mod tests {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
             "ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+            ALTER TABLE hosts DROP COLUMN yolo_safe;
              PRAGMA user_version = 29;",
         )
         .unwrap();

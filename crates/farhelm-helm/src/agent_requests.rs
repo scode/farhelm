@@ -1677,6 +1677,7 @@ mod tests {
             identity: None,
             remote_farhelm: None,
             remote_state_dir: None,
+            yolo_safe: false,
             state,
             incarnation: 1,
         }

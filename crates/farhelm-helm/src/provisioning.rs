@@ -634,6 +634,7 @@ mod tests {
                 remote_state_dir: None,
                 host_identity: None,
                 cache_truncated: false,
+                yolo_safe: false,
             };
             let error = layout(root.path())
                 .plan_for_row(
@@ -688,6 +689,7 @@ mod tests {
             remote_state_dir: None,
             host_identity: None,
             cache_truncated: false,
+            yolo_safe: false,
         };
         let plan = PlanLayout::production(root.path().join("state"))
             .plan_for_row(
@@ -791,6 +793,7 @@ mod tests {
             remote_state_dir: None,
             host_identity: None,
             cache_truncated: false,
+            yolo_safe: false,
         };
         let reach = Reach {
             home: root.path().join("home"),

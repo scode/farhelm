@@ -311,7 +311,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 30;
+const SCHEMA_VERSION: i64 = 31;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -664,6 +664,10 @@ pub struct HostRow {
     /// [`HelmStore::replace_host_sessions`] and nothing else; a failed
     /// refresh leaves it as it was, exactly as it leaves the rows.
     pub cache_truncated: bool,
+    /// Whether the user marked this host safe for YOLO launches. `false`
+    /// (sensitive) for every host until [`HelmStore::set_yolo_safe`] says
+    /// otherwise.
+    pub yolo_safe: bool,
 }
 
 /// One `hosts` row's columns, read positionally by [`HelmStore::list_hosts`]
@@ -681,6 +685,7 @@ type RawHostRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    bool,
     bool,
 );
 
@@ -1785,6 +1790,8 @@ pub struct HelmStore {
 ///   to skip and log.
 /// - 30: `preferences.remembered_workspace_trust`, unset until a user makes
 ///   an explicit choice.
+/// - 31: `hosts.yolo_safe`, 0 for every existing and new row: every host is
+///   sensitive until the user explicitly marks it safe for YOLO launches.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1859,6 +1866,10 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- (`a_migrated_database_matches_a_freshly_created_one`
                  -- compares that text byte for byte).
                  alias            TEXT,
+                 -- Whether the user marked this host safe for YOLO launches
+                 -- (schema version 31); 0, sensitive, until they do. After
+                 -- `alias` for the same reason `alias` is last above.
+                 yolo_safe        INTEGER NOT NULL DEFAULT 0 CHECK (yolo_safe IN (0, 1)),
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -2083,7 +2094,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 30;",
+              PRAGMA user_version = 31;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2866,6 +2877,17 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 30")?;
         version = 30;
+    }
+    if version == 30 {
+        // Every existing host, the local one included, starts sensitive: no
+        // prior schema recorded a user's choice to allow YOLO launches on it.
+        tx.execute_batch(
+            "ALTER TABLE hosts ADD COLUMN yolo_safe INTEGER NOT NULL DEFAULT 0 \
+             CHECK (yolo_safe IN (0, 1)); \
+             PRAGMA user_version = 31;",
+        )
+        .context("migrating helm.db to schema version 31")?;
+        version = 31;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -3739,7 +3761,7 @@ impl HelmStore {
                     let mut stmt = conn
                 .prepare(
                     "SELECT id, kind, destination, alias, remote_farhelm, remote_state_dir, \
-                     host_identity, cache_truncated FROM hosts ORDER BY id ASC",
+                     host_identity, cache_truncated, yolo_safe FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
                     let raw: Vec<RawHostRow> = stmt
@@ -3753,6 +3775,7 @@ impl HelmStore {
                                 r.get(5)?,
                                 r.get(6)?,
                                 r.get(7)?,
+                                r.get(8)?,
                             ))
                         })
                         .context("querying hosts")?
@@ -3769,6 +3792,7 @@ impl HelmStore {
                                 remote_state_dir,
                                 host_identity,
                                 cache_truncated,
+                                yolo_safe,
                             )| {
                                 Ok(HostRow {
                                     id,
@@ -3779,6 +3803,7 @@ impl HelmStore {
                                     remote_state_dir,
                                     host_identity,
                                     cache_truncated,
+                                    yolo_safe,
                                 })
                             },
                         )
@@ -4294,6 +4319,45 @@ impl HelmStore {
     /// every other host's current display name, whether aliased or derived.
     /// A local alias may have hidden its default name while an unaliased SSH
     /// host registered that name; clearing must not make both display it.
+    /// Mark a host safe or sensitive for YOLO launches. Accepts any row, the
+    /// local one included: sensitivity is a property of the machine, not of
+    /// how it is registered. Returns whether anything changed; an unknown id
+    /// is [`HostStoreError::HostNotFound`].
+    pub async fn set_yolo_safe(&self, host: HostId, yolo_safe: bool) -> anyhow::Result<bool> {
+        self.conn
+            .call(
+                "set yolo-safe task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning set yolo-safe transaction")?;
+                    let current: Option<bool> = tx
+                        .query_row(
+                            "SELECT yolo_safe FROM hosts WHERE id = ?1",
+                            rusqlite::params![host],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .context("looking up host before setting yolo-safe")?;
+                    let Some(current) = current else {
+                        return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+                    };
+                    if current == yolo_safe {
+                        tx.commit().context("committing unchanged yolo-safe")?;
+                        return Ok(false);
+                    }
+                    tx.execute(
+                        "UPDATE hosts SET yolo_safe = ?2 WHERE id = ?1",
+                        rusqlite::params![host, yolo_safe],
+                    )
+                    .context("updating yolo-safe")?;
+                    tx.commit().context("committing yolo-safe")?;
+                    Ok(true)
+                },
+            )
+            .await
+    }
+
     pub async fn update_alias(&self, host: HostId, alias: Option<&str>) -> anyhow::Result<bool> {
         let alias = validate_alias(alias).map_err(anyhow::Error::new)?;
         self.conn
@@ -6893,6 +6957,7 @@ mod tests {
                 "ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+                 ALTER TABLE hosts DROP COLUMN yolo_safe;
                  PRAGMA user_version = 27;",
             )
             .unwrap();
@@ -7283,6 +7348,49 @@ mod tests {
                 creation_seq: Some(4),
             }],
             "deduplication uses the supervisor-accepted identity while the composer presents the submitted spelling"
+        );
+    }
+
+    /// Spec: every host, the reserved local row and a newly added ssh row
+    /// alike, starts sensitive (`yolo_safe` false); `set_yolo_safe` flips it
+    /// on either kind, reports whether anything changed, and refuses an
+    /// unknown host.
+    ///
+    /// Why: "sensitive until the user says otherwise" is the whole safety
+    /// property of the YOLO-launch guard. A default that started permissive,
+    /// or a setter that silently ignored the local row, would let YOLO
+    /// sessions start on a machine the user never cleared for them.
+    #[tokio::test]
+    async fn hosts_start_sensitive_and_yolo_safe_is_set_per_host() {
+        let (_dir, store) = fresh_store().await;
+        let ssh = store.add_ssh_host("user@yolo", None, None).await.unwrap();
+        let rows = store.list_hosts().await.unwrap();
+        assert!(rows.iter().all(|row| !row.yolo_safe), "{rows:?}");
+        let local = rows
+            .iter()
+            .find(|row| row.kind.is_reserved_local())
+            .expect("the reserved local row")
+            .id;
+
+        assert!(store.set_yolo_safe(local, true).await.unwrap());
+        assert!(
+            !store.set_yolo_safe(local, true).await.unwrap(),
+            "unchanged"
+        );
+        assert!(store.set_yolo_safe(ssh, true).await.unwrap());
+        assert!(store.set_yolo_safe(ssh, false).await.unwrap());
+        let rows = store.list_hosts().await.unwrap();
+        let flag = |id| rows.iter().find(|row| row.id == id).unwrap().yolo_safe;
+        assert!(flag(local));
+        assert!(!flag(ssh));
+
+        let missing = store.set_yolo_safe(9_999, true).await.unwrap_err();
+        assert!(
+            matches!(
+                missing.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::HostNotFound(9_999))
+            ),
+            "{missing:#}"
         );
     }
 
@@ -9070,6 +9178,7 @@ mod tests {
             conn.execute_batch(
                 "ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+                 ALTER TABLE hosts DROP COLUMN yolo_safe;
                  PRAGMA user_version = 28;",
             )
             .expect("restore schema 28");
@@ -9578,6 +9687,7 @@ mod tests {
                  -- `apply_schema`'s own comment on its fresh-create branch
                  -- warns about.
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+                 ALTER TABLE hosts DROP COLUMN yolo_safe;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
@@ -9692,6 +9802,7 @@ mod tests {
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN compact;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+                 ALTER TABLE hosts DROP COLUMN yolo_safe;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  INSERT INTO preferences (singleton, list_sort, last_selected)
                  VALUES (1, 'title', 'session-before-compact');
@@ -9738,6 +9849,7 @@ mod tests {
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+                ALTER TABLE hosts DROP COLUMN yolo_safe;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  INSERT INTO preferences (singleton, list_sort, last_selected, compact)
                  VALUES (1, 'title', 'session-before-permissions-memory', 1);
@@ -9808,6 +9920,7 @@ mod tests {
                  DROP TABLE session_seen;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
                  ALTER TABLE hosts DROP COLUMN alias;
+                 ALTER TABLE hosts DROP COLUMN yolo_safe;
                  CREATE TABLE remembered_profiles (
                      host_id    INTEGER PRIMARY KEY
                                 REFERENCES hosts (id) ON DELETE CASCADE,
@@ -9885,6 +9998,7 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
                  DROP TABLE session_seen;
                  ALTER TABLE hosts DROP COLUMN alias;
+                 ALTER TABLE hosts DROP COLUMN yolo_safe;
                  -- IF EXISTS: the preferences table only exists one stack
                  -- level up; this fixture runs at both.
                  DROP TABLE IF EXISTS preferences;
@@ -9951,6 +10065,7 @@ mod tests {
                  DROP TABLE session_seen;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
                  ALTER TABLE hosts DROP COLUMN alias;
+                 ALTER TABLE hosts DROP COLUMN yolo_safe;
                  CREATE TABLE remembered_profiles (
                      host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
                      profile_id TEXT NOT NULL,
@@ -10038,6 +10153,7 @@ mod tests {
                 "DROP TABLE session_seen;
                  ALTER TABLE preferences DROP COLUMN compact;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+                 ALTER TABLE hosts DROP COLUMN yolo_safe;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
@@ -11403,6 +11519,7 @@ mod tests {
                 "DROP TABLE session_seen;
                  ALTER TABLE preferences DROP COLUMN compact;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+                 ALTER TABLE hosts DROP COLUMN yolo_safe;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  ALTER TABLE hosts DROP COLUMN alias;
                  DROP TABLE checkout_config_host;

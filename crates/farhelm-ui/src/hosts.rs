@@ -58,6 +58,7 @@ use dioxus::prelude::*;
 use crate::api::{
     Commit, ProbeResponse, ProvisioningOperation, ProvisioningSubmission, adopt_host,
     probe_ssh_host, provision_host, remove_host, retry_host, set_alias, set_host_destination,
+    set_yolo_safe,
 };
 use crate::icons::{LocalHostIcon, RemoteHostIcon};
 use crate::menu_panel::{
@@ -796,6 +797,8 @@ pub(crate) fn HostsPanel(
     // lock afterwards, through `run`, not when the prompt opens.
     let mut confirming_remove: ConfirmSlot<HostId> = use_confirm_slot();
     let mut editing = use_signal(|| None::<(HostId, EditField)>);
+    // The one row whose settings panel is open, if any.
+    let mut settings_open = use_signal(|| None::<HostId>);
     let mut destination_draft = use_signal(String::new);
     let mut adding = use_signal(|| false);
     // The global disclosure is the user's preference: one checkbox for every
@@ -986,6 +989,19 @@ pub(crate) fn HostsPanel(
         }
     };
 
+    // Flip whether YOLO launches are allowed on a host. Runs through the same
+    // `run` wrapper as the other registry writes, so it takes the page's
+    // operation token, lands its outcome in the row's error line, and
+    // refreshes the list the checkbox renders from.
+    let yolo_base = base.clone();
+    let on_yolo_safe = move |(host, yolo_safe): (HostId, bool)| {
+        let base = yolo_base.clone();
+        run(
+            host,
+            Box::pin(async move { set_yolo_safe(&base, host, yolo_safe).await }),
+        );
+    };
+
     let read = hosts.read();
     let rendered_hosts = read.hosts().map(|list| {
         list.iter()
@@ -1158,6 +1174,7 @@ pub(crate) fn HostsPanel(
                                 edit_field: editing
                                     .read()
                                     .and_then(|(id, field)| (id == host.id).then_some(field)),
+                                settings_open: *settings_open.read() == Some(host.id),
                                 menu_open: *host_menu_open.read() == Some(host.id),
                             },
                             activity: HostRowActivity {
@@ -1232,10 +1249,32 @@ pub(crate) fn HostsPanel(
                                 host_menu_open.set(None);
                                 details_open.set(true);
                                 destination_draft.set(value);
+                                // The editor replaces the settings panel it
+                                // was opened from.
+                                settings_open.set(None);
                                 editing.set(Some((id, field)));
                             },
                             on_edit_submit: on_edit_submit.clone(),
                             on_edit_cancel: move |_| editing.set(None),
+                            on_settings_start: move |id: HostId| {
+                                if ops.busy_now()
+                                    || provisioning_busy_hosts.peek().contains(&id)
+                                {
+                                    return;
+                                }
+                                // Same single-owner menu close as
+                                // `on_edit_start`, past the same guard.
+                                confirming_remove.clear();
+                                editing.set(None);
+                                host_menu_open.set(None);
+                                settings_open.set(Some(id));
+                            },
+                            on_settings_close: move |id: HostId| {
+                                if *settings_open.peek() == Some(id) {
+                                    settings_open.set(None);
+                                }
+                            },
+                            on_yolo_safe: on_yolo_safe.clone(),
                             on_remove_start: move |id: HostId| {
                                 if ops.busy_now()
                                     || provisioning_busy_hosts.peek().contains(&id)
@@ -1243,6 +1282,7 @@ pub(crate) fn HostsPanel(
                                     return;
                                 }
                                 editing.set(None);
+                                settings_open.set(None);
                                 // See `on_edit_start` just above: the same
                                 // single-owner close, past the same guard.
                                 host_menu_open.set(None);
@@ -1333,8 +1373,7 @@ enum HostMenuAction {
     Rerun,
     AutomaticSetup,
     Update,
-    Edit,
-    Alias,
+    Settings,
     Remove,
 }
 
@@ -1343,14 +1382,13 @@ enum HostMenuAction {
 /// identical reason: the canonical order lives in one place so the
 /// rendered list and the navigable list cannot disagree about what "the
 /// first item" or "the last item" means.
-const HOST_MENU_ACTIONS: [HostMenuAction; 8] = [
+const HOST_MENU_ACTIONS: [HostMenuAction; 7] = [
     HostMenuAction::Retry,
     HostMenuAction::Adopt,
     HostMenuAction::Rerun,
     HostMenuAction::AutomaticSetup,
     HostMenuAction::Update,
-    HostMenuAction::Edit,
-    HostMenuAction::Alias,
+    HostMenuAction::Settings,
     HostMenuAction::Remove,
 ];
 
@@ -1377,7 +1415,6 @@ type HostMenuWiring = menu_panel::MenuWiring<HostMenuAction, HostId, { HOST_MENU
 fn host_menu_order(
     adoptable: bool,
     manageable: bool,
-    alias_supported: bool,
     provisioning: ProvisioningMenuState,
 ) -> HostMenuOrder {
     HostMenuOrder::pack(HOST_MENU_ACTIONS, |action| match action {
@@ -1386,11 +1423,11 @@ fn host_menu_order(
         HostMenuAction::Rerun => provisioning.rerun.is_some(),
         HostMenuAction::AutomaticSetup => provisioning.automatic_setup,
         HostMenuAction::Update => provisioning.update,
-        HostMenuAction::Edit | HostMenuAction::Remove => manageable,
-        // Unlike Edit/Remove, gated by host KIND, this is gated by whether
-        // THIS HELM sent an `alias` key at all (`Host.alias`'s own doc) —
-        // an older helm has no `/api/hosts/{id}/alias` route to submit to.
-        HostMenuAction::Alias => alias_supported,
+        HostMenuAction::Remove => manageable,
+        // Every host has settings: the YOLO-launch setting applies to the
+        // local row and to a kind this build does not recognize alike. What
+        // else the panel offers (destination, alias) is decided inside it.
+        HostMenuAction::Settings => true,
     })
 }
 
@@ -1514,6 +1551,10 @@ struct HostRowControls {
     /// `.unwrap_or(EditField::Destination)` fallback nothing could actually
     /// exercise.
     edit_field: Option<EditField>,
+    /// Whether this row is showing its settings panel (destination, alias,
+    /// and whether YOLO launches are allowed here). At most one row at a
+    /// time; opening the inline editor from it closes it.
+    settings_open: bool,
     /// Whether this row's "⋯" menu is the (at most one, across sessions AND
     /// hosts) open one.
     menu_open: bool,
@@ -1896,6 +1937,12 @@ fn HostRow(
     on_edit_start: EventHandler<(HostId, EditField, String)>,
     on_edit_submit: EventHandler<(HostId, EditField, String)>,
     on_edit_cancel: EventHandler<()>,
+    /// Open this row's settings panel (the menu's Settings item).
+    on_settings_start: EventHandler<HostId>,
+    /// Close this row's settings panel.
+    on_settings_close: EventHandler<HostId>,
+    /// Set whether YOLO launches are allowed on this host.
+    on_yolo_safe: EventHandler<(HostId, bool)>,
     on_remove_start: EventHandler<HostId>,
     on_remove_confirm: EventHandler<HostId>,
     on_remove_cancel: EventHandler<HostId>,
@@ -1911,6 +1958,7 @@ fn HostRow(
     let HostRowControls {
         confirming_remove,
         edit_field,
+        settings_open,
         menu_open,
     } = controls;
     let HostRowActivity {
@@ -1967,12 +2015,7 @@ fn HostRow(
     // below has to notice an item withdrawn (a poll turning `adoptable` off)
     // even while a menu built against the wider list is still up.
     let adoptable_now = adopt_identity.is_some();
-    let menu_order = host_menu_order(
-        adoptable_now,
-        manageable,
-        alias_supported,
-        provisioning_menu,
-    );
+    let menu_order = host_menu_order(adoptable_now, manageable, provisioning_menu);
     // Setup still refuses behind the page lock, so its items stay disabled
     // while another operation holds it. Update planning mutates nothing and
     // its submission claim retries reactively, so the update item answers
@@ -2087,21 +2130,16 @@ fn HostRow(
     // comparing the stored position against the new list's length: an
     // action withdrawn from the MIDDLE of the list (Adopt, here) shifts
     // every later action's index down, so the slot Adopt vacates is
-    // immediately reoccupied by Edit — a numeric length check never
-    // notices that, and would leave the row believing Edit was focused
+    // immediately reoccupied by Settings — a numeric length check never
+    // notices that, and would leave the row believing Settings was focused
     // while the browser had already dropped focus off the removed Adopt
     // button, stranding arrow keys and Escape. See
     // `menu_panel::reconcile_menu_focus`'s own doc for the general rule
     // this applies.
     use_effect(use_reactive(
-        (
-            &adoptable_now,
-            &manageable,
-            &alias_supported,
-            &provisioning_menu,
-        ),
-        move |(adoptable, manageable, alias_supported, provisioning_menu)| {
-            let order = host_menu_order(adoptable, manageable, alias_supported, provisioning_menu);
+        (&adoptable_now, &manageable, &provisioning_menu),
+        move |(adoptable, manageable, provisioning_menu)| {
+            let order = host_menu_order(adoptable, manageable, provisioning_menu);
             item_handles
                 .write()
                 .retain(|action, _| order.position(*action).is_some());
@@ -2465,75 +2503,30 @@ fn HostRow(
                                         if provisioning_menu.planning { "planning…" } else { "update" }
                                     }
                                 }
-                                if manageable {
-                                    button {
-                                        r#type: "button",
-                                        class: "btn host-row-menu-item host-edit",
-                                        role: "menuitem",
-                                        aria_disabled: if busy { "true" },
-                                        tabindex: if menu_tab_stop == Some(HostMenuAction::Edit) { "0" } else { "-1" },
-                                        onmounted: move |element| {
-                                            remember_menu_item(menu_wiring, HostMenuAction::Edit, element.data())
-                                        },
-                                        onfocusin: move |_| {
-                                            menu_focus.set(menu_order.position(HostMenuAction::Edit));
-                                        },
-                                        onfocusout: move |_| menu_focus.set(None),
-                                        onkeydown: move |evt| {
-                                            handle_menu_key(
-                                                &evt,
-                                                menu_order.position(HostMenuAction::Edit),
-                                                menu_wiring,
-                                                &id,
-                                            );
-                                        },
-                                        onclick: move |_| {
-                                            if busy {
-                                                return;
-                                            }
-                                            // Only REQUESTS the edit —
-                                            // `on_edit_start` (`HostsPanel`)
-                                            // is the one place that closes
-                                            // the menu, once its own busy
-                                            // guard has actually let the
-                                            // request through (see this
-                                            // component's own doc).
-                                            on_edit_start.call(edit_start.clone());
-                                        },
-                                        "edit destination"
-                                    }
-                                }
-                                // Gated on `alias_supported` (host JSON's
-                                // `alias` key, not host KIND — see
-                                // `HostMenuAction`'s own doc), independent of
-                                // `manageable`, so this one button sits
-                                // outside the `manageable` split rather than
-                                // inside either branch: aliases are supported
-                                // for local and ssh rows alike, and a copy
-                                // inside each branch would be two places to
-                                // keep in sync for one item.
-                                if alias_supported {
-                                    button {
-                                        r#type: "button",
-                                        class: "btn host-row-menu-item host-alias",
-                                        role: "menuitem",
-                                        aria_disabled: if busy { "true" },
-                                        tabindex: if menu_tab_stop == Some(HostMenuAction::Alias) { "0" } else { "-1" },
-                                        onmounted: move |element| {
-                                            remember_menu_item(menu_wiring, HostMenuAction::Alias, element.data())
-                                        },
-                                        onfocusin: move |_| menu_focus.set(menu_order.position(HostMenuAction::Alias)),
-                                        onfocusout: move |_| menu_focus.set(None),
-                                        onkeydown: move |evt| {
-                                            handle_menu_key(&evt, menu_order.position(HostMenuAction::Alias), menu_wiring, &id);
-                                        },
-                                        onclick: move |_| {
-                                            if !busy {
-                                                on_edit_start.call(alias_edit_start.clone());
-                                            }
-                                        },
-                                        "edit alias"
-                                    }
+                                button {
+                                    r#type: "button",
+                                    class: "btn host-row-menu-item host-settings",
+                                    role: "menuitem",
+                                    aria_disabled: if busy { "true" },
+                                    tabindex: if menu_tab_stop == Some(HostMenuAction::Settings) { "0" } else { "-1" },
+                                    onmounted: move |element| {
+                                        remember_menu_item(menu_wiring, HostMenuAction::Settings, element.data())
+                                    },
+                                    onfocusin: move |_| menu_focus.set(menu_order.position(HostMenuAction::Settings)),
+                                    onfocusout: move |_| menu_focus.set(None),
+                                    onkeydown: move |evt| {
+                                        handle_menu_key(&evt, menu_order.position(HostMenuAction::Settings), menu_wiring, &id);
+                                    },
+                                    onclick: move |_| {
+                                        // Only REQUESTS the panel; `HostsPanel`'s
+                                        // `on_settings_start` closes the menu once
+                                        // its own busy guard lets it through, as
+                                        // `on_edit_start` does for the editor.
+                                        if !busy {
+                                            on_settings_start.call(id);
+                                        }
+                                    },
+                                    "settings"
                                 }
                                 if manageable {
                                     // The boundary before the destructive
@@ -2624,6 +2617,68 @@ fn HostRow(
                             autofocus: true,
                             onclick: move |_| on_remove_cancel.call(id),
                             "cancel"
+                        }
+                    }
+                }
+            }
+            if settings_open {
+                div { class: "host-settings-panel",
+                    if manageable {
+                        div { class: "host-settings-row",
+                            span { class: "host-settings-label", "destination" }
+                            span { class: "host-settings-value peer-value", dir: "ltr",
+                                "{display_peer(host.destination.as_deref().unwrap_or_default())}"
+                            }
+                            button {
+                                r#type: "button",
+                                class: "btn btn-neutral host-edit",
+                                disabled: busy,
+                                onclick: move |_| on_edit_start.call(edit_start.clone()),
+                                "edit destination"
+                            }
+                        }
+                    }
+                    // Gated on whether THIS helm sent an `alias` key at all
+                    // (`Host.alias`'s own doc), not on host kind: aliases work
+                    // for local and ssh rows alike.
+                    if alias_supported {
+                        div { class: "host-settings-row",
+                            span { class: "host-settings-label", "alias" }
+                            span { class: "host-settings-value peer-value", dir: "ltr",
+                                "{display_peer(host.alias.clone().flatten().as_deref().unwrap_or(\"none\"))}"
+                            }
+                            button {
+                                r#type: "button",
+                                class: "btn btn-neutral host-alias",
+                                disabled: busy,
+                                onclick: move |_| on_edit_start.call(alias_edit_start.clone()),
+                                "edit alias"
+                            }
+                        }
+                    }
+                    label { class: "host-settings-row host-yolo-safe",
+                        input {
+                            r#type: "checkbox",
+                            class: "host-yolo-safe-toggle",
+                            checked: host.yolo_safe,
+                            disabled: busy,
+                            onchange: move |event| on_yolo_safe.call((id, event.checked())),
+                        }
+                        span { class: "host-settings-label", "allow YOLO launches on this host" }
+                    }
+                    p { class: "host-settings-help",
+                        if host.yolo_safe {
+                            "This host is marked safe for YOLO launches."
+                        } else {
+                            "This host is marked sensitive for YOLO launches."
+                        }
+                    }
+                    div { class: "host-settings-actions",
+                        button {
+                            r#type: "button",
+                            class: "btn btn-neutral host-settings-close",
+                            onclick: move |_| on_settings_close.call(id),
+                            "close"
                         }
                     }
                 }
@@ -3111,6 +3166,7 @@ mod tests {
             remote_state_dir: None,
             state,
             incarnation: 1,
+            yolo_safe: false,
         }
     }
 
@@ -3306,81 +3362,56 @@ mod tests {
     /// pins for the session row, applied to the host menu's management and
     /// provisioning commands.
     ///
-    /// With no provisioning offer, an adoptable ssh host has five commands
-    /// and an ordinary ssh host has four (alias joined the count once it
-    /// stopped depending on `manageable` — see below). The reserved local
-    /// row (never `manageable` — see
-    /// [`HostRow`]'s own doc) drops `edit` and `remove` entirely regardless,
-    /// which must move `adopt`'s position rather than leave a gap where
-    /// `edit` would have sat — the same packing `MenuOrder::pack` guarantees
-    /// for the session row.
+    /// Settings is offered on every row, the reserved local row and an
+    /// unmanageable one included, because whether YOLO launches are allowed
+    /// is a setting of every host (the destination and alias editors it
+    /// holds are gated inside the panel instead). Remove stays gated on
+    /// `manageable`, and a dropped item moves later items up rather than
+    /// leaving a gap, the same packing `MenuOrder::pack` guarantees for the
+    /// session row.
     #[farhelm_testtrace::test]
     fn the_host_menu_follows_manageability_and_adoptability() {
-        use HostMenuAction::{Adopt, Alias, AutomaticSetup, Edit, Remove, Rerun, Retry, Update};
+        use HostMenuAction::{Adopt, AutomaticSetup, Remove, Rerun, Retry, Settings, Update};
 
-        // Ssh, adoptable: every item, in the declared order. Every case
-        // below passes `alias_supported: true` — a modern helm — except the
-        // dedicated case at the end of this test, which is the only thing
-        // that argument controls.
-        let ssh_adoptable = host_menu_order(true, true, true, ProvisioningMenuState::default());
-        assert_eq!(ssh_adoptable.len(), 5);
+        // Ssh, adoptable: every non-provisioning item, in declared order.
+        let ssh_adoptable = host_menu_order(true, true, ProvisioningMenuState::default());
+        assert_eq!(ssh_adoptable.len(), 4);
         assert_eq!(ssh_adoptable.get(0), Some(Retry));
         assert_eq!(ssh_adoptable.get(1), Some(Adopt));
-        assert_eq!(ssh_adoptable.get(2), Some(Edit));
-        assert_eq!(ssh_adoptable.get(3), Some(Alias));
-        assert_eq!(ssh_adoptable.get(4), Some(Remove));
-        assert_eq!(ssh_adoptable.last(), Some(Remove));
+        assert_eq!(ssh_adoptable.get(2), Some(Settings));
+        assert_eq!(ssh_adoptable.get(3), Some(Remove));
 
-        // Ssh, not adoptable (the ordinary case: most phases offer no
-        // adopt): `adopt` drops out and `edit`/`alias`/`remove` shift up to
-        // fill the gap rather than leaving one at position 2.
-        let ssh_plain = host_menu_order(false, true, true, ProvisioningMenuState::default());
-        assert_eq!(ssh_plain.len(), 4);
+        // Ssh, not adoptable (the ordinary case): `adopt` drops out and the
+        // rest shift up to fill the gap.
+        let ssh_plain = host_menu_order(false, true, ProvisioningMenuState::default());
+        assert_eq!(ssh_plain.len(), 3);
         assert_eq!(ssh_plain.get(0), Some(Retry));
-        assert_eq!(ssh_plain.get(1), Some(Edit));
-        assert_eq!(ssh_plain.get(2), Some(Alias));
-        assert_eq!(ssh_plain.get(3), Some(Remove));
+        assert_eq!(ssh_plain.get(1), Some(Settings));
+        assert_eq!(ssh_plain.get(2), Some(Remove));
         assert_eq!(ssh_plain.position(Adopt), None);
 
-        // The local row's identity-mismatch menu shape: unmanageable, so
-        // `edit`/`remove` never appear regardless of `adoptable` — but
-        // `alias` does (SPEC.md's Topology paragraph: "the local host can
-        // carry one too"), which is the one item `manageable` does not gate.
-        // This is a real, reachable state — the local row's connection
-        // actor compares its recorded and reported identities exactly like
-        // an ssh row's (`farhelm-helm::manager`), so a local supervisor
-        // restarted behind a changed install lands here too — not a
-        // hypothetical `pack` has to merely tolerate. `host_menu_order`
-        // takes `adoptable` and `manageable` as two independent facts
-        // rather than encoding "local implies never adoptable" itself,
-        // which is what lets this case be exercised directly instead of
-        // only through the ssh fixtures above.
-        let local = host_menu_order(true, false, true, ProvisioningMenuState::default());
+        // The local row's identity-mismatch shape: unmanageable, so no
+        // remove, but settings still (the local host can be marked safe for
+        // YOLO launches and aliased like any other). A real, reachable state:
+        // the local row's actor compares identities exactly like an ssh row's.
+        let local = host_menu_order(true, false, ProvisioningMenuState::default());
         assert_eq!(local.len(), 3);
         assert_eq!(local.get(0), Some(Retry));
         assert_eq!(local.get(1), Some(Adopt));
-        assert_eq!(local.get(2), Some(Alias));
-        assert_eq!(local.position(Edit), None);
+        assert_eq!(local.get(2), Some(Settings));
         assert_eq!(local.position(Remove), None);
 
-        // The ordinary local row: retry and alias, unconditionally.
-        let local_plain = host_menu_order(false, false, true, ProvisioningMenuState::default());
+        // The ordinary local row: retry and settings, unconditionally.
+        let local_plain = host_menu_order(false, false, ProvisioningMenuState::default());
         assert_eq!(local_plain.len(), 2);
         assert_eq!(local_plain.get(0), Some(Retry));
-        assert_eq!(local_plain.get(1), Some(Alias));
-        assert_eq!(local_plain.last(), Some(Alias));
+        assert_eq!(local_plain.last(), Some(Settings));
 
         // A failed remote update offers rerun and update between identity
-        // actions and destination management. Remove remains last, after
-        // the visual destructive separator rendered by the row; alias sits
-        // just ahead of it in the row's markup, OUTSIDE the `manageable`
-        // block edit/remove render inside — its own, unconditional block
-        // between them (`HostRow`'s own doc, "The menu, and what stays
-        // outside it") — which is exactly why it survives independent of
-        // `manageable` below.
+        // actions and host management; remove remains last, after the
+        // row's destructive separator.
         let failed_remote = host_menu_order(
             false,
-            true,
             true,
             ProvisioningMenuState {
                 rerun: Some(ProvisioningOperation::Update),
@@ -3388,16 +3419,15 @@ mod tests {
                 ..ProvisioningMenuState::default()
             },
         );
-        assert_eq!(failed_remote.len(), 6);
+        assert_eq!(failed_remote.len(), 5);
         assert_eq!(failed_remote.get(1), Some(HostMenuAction::Rerun));
         assert_eq!(failed_remote.get(2), Some(HostMenuAction::Update));
-        assert_eq!(failed_remote.get(4), Some(Alias));
+        assert_eq!(failed_remote.get(3), Some(Settings));
         assert_eq!(failed_remote.last(), Some(Remove));
 
         // Structural coverage deliberately enables every conditional action:
         // the canonical array, not the current lifecycle, owns keyboard order.
         let all_actions = host_menu_order(
-            true,
             true,
             true,
             ProvisioningMenuState {
@@ -3407,31 +3437,14 @@ mod tests {
                 planning: false,
             },
         );
-        assert_eq!(all_actions.len(), 8);
+        assert_eq!(all_actions.len(), 7);
         assert_eq!(all_actions.get(0), Some(Retry));
         assert_eq!(all_actions.get(1), Some(Adopt));
         assert_eq!(all_actions.get(2), Some(Rerun));
         assert_eq!(all_actions.get(3), Some(AutomaticSetup));
         assert_eq!(all_actions.get(4), Some(Update));
-        assert_eq!(all_actions.get(5), Some(Edit));
-        assert_eq!(all_actions.get(6), Some(Alias));
-        assert_eq!(all_actions.get(7), Some(Remove));
-
-        // An older helm whose `GET /api/hosts` reply omits the `alias` key
-        // entirely (`Host.alias`'s outer `None`) must never be offered the
-        // editor — it has no `/api/hosts/{id}/alias` route to submit to.
-        // Every other action is unaffected: `alias_supported` is orthogonal
-        // to `manageable` and `adoptable`, exactly like the two are to each
-        // other above.
-        let alias_unsupported =
-            host_menu_order(true, true, false, ProvisioningMenuState::default());
-        assert_eq!(alias_unsupported.len(), 4);
-        assert_eq!(alias_unsupported.get(0), Some(Retry));
-        assert_eq!(alias_unsupported.get(1), Some(Adopt));
-        assert_eq!(alias_unsupported.get(2), Some(Edit));
-        assert_eq!(alias_unsupported.get(3), Some(Remove));
-        assert_eq!(alias_unsupported.position(Alias), None);
-        assert_eq!(alias_unsupported.last(), Some(Remove));
+        assert_eq!(all_actions.get(5), Some(Settings));
+        assert_eq!(all_actions.get(6), Some(Remove));
     }
 
     /// The client-side mirror of the helm's alias validation
@@ -3964,6 +3977,7 @@ mod tests {
                 refresh: RefreshHealth::Ok { sessions: 0 },
             },
             incarnation: 1,
+            yolo_safe: false,
         }
     }
 
@@ -4025,6 +4039,7 @@ mod tests {
                     controls: HostRowControls {
                         confirming_remove: false,
                         edit_field: None,
+                        settings_open: false,
                         menu_open: false,
                     },
                     activity: HostRowActivity {
@@ -4042,6 +4057,9 @@ mod tests {
                     on_edit_start,
                     on_edit_submit,
                     on_edit_cancel,
+                    on_settings_start: use_callback(|_: HostId| {}),
+                    on_settings_close: use_callback(|_: HostId| {}),
+                    on_yolo_safe: use_callback(|_: (HostId, bool)| {}),
                     on_remove_start,
                     on_remove_confirm,
                     on_remove_cancel,
@@ -4113,6 +4131,7 @@ mod tests {
                         controls: HostRowControls {
                             confirming_remove: confirming == id,
                             edit_field: None,
+                            settings_open: false,
                             menu_open: false,
                         },
                         activity: HostRowActivity {
@@ -4130,6 +4149,9 @@ mod tests {
                         on_edit_start,
                         on_edit_submit,
                         on_edit_cancel,
+                        on_settings_start: use_callback(|_: HostId| {}),
+                        on_settings_close: use_callback(|_: HostId| {}),
+                        on_yolo_safe: use_callback(|_: (HostId, bool)| {}),
                         on_remove_start,
                         on_remove_confirm,
                         on_remove_cancel,
