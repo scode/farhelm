@@ -3974,7 +3974,9 @@
   affecting only the development desktop build.
 - Decision: the user chose to ignore unusual Linux window managers.
 - Completion criteria: remove the feedback file and its index entry without code or spec changes.
-- Execution: `pending`.
+- Execution: `complete`; the feedback file and its index entry were removed with no code or spec change. Change
+  `ozxpwnwvoowmzuwlxwmpqkouzrknqmmr`, bookmark `pr/discard-window-maximize-fence`, draft PR
+  [#1208](https://github.com/scode/farhelm/pull/1208/changes).
 
 ## reload-adopts-stale-pane.md
 
