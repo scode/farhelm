@@ -4028,7 +4028,14 @@
 - Completion criteria: a second Restart after an ambiguous relaunch asks before stopping a possibly live agent, opening
   the session no longer targets the stale pane, focused regression coverage, and remove this feedback file and its index
   entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the failed-relaunch recovery in `restart_session` (core.rs) re-publishes the entry with no
+  terminal when the failure is ambiguous and the relaunch had to build a fresh tmux session (`republished_terminal`),
+  instead of the old, gone pane, so the existing terminal-less guard applies; definitive failures and relaunches into
+  the surviving pane keep the prior terminal. The optional recording of the new pane (carrying it in
+  `SpawnFailure::Tmux`) was not needed for the agreed bounded fix. Regression test
+  `an_ambiguous_fresh_relaunch_republishes_no_terminal` (the decision as a pure function; there is no seam to fail tmux
+  after a fresh session in-process). jj change `msnmoyuwrqnq`, bookmark `pr/ambiguous-restart-no-stale-terminal`, draft
+  PR [#1198](https://github.com/scode/farhelm/pull/1198/changes).
 
 ## delete-roots-only-agent-pane.md
 
