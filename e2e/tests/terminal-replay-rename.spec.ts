@@ -267,6 +267,68 @@ async function stuckWebSocketFromNextLoad(page: Page) {
 }
 
 /**
+ * From the page's next navigation onward, hold the main thread busy for
+ * `blockMs` straight after the FIRST terminal socket for `sessionId` is
+ * constructed, and never again.
+ *
+ * This stages the island-cap flake's first-mount shape without its 33
+ * terminals or a loaded machine. The block runs as a microtask, so it
+ * starts only after the mount that constructed the socket has returned.
+ * By then the mount has armed the catch-up watchdog. The helm finishes
+ * the handshake while the page is blocked, and when the block ends the
+ * page holds an overdue watchdog expiry alongside the socket's queued
+ * `open` and first frames. That is the moment the watchdog must not take
+ * for silence.
+ *
+ * Keyed to one session because the page may attach another session
+ * first. On load it opens whichever session it last had selected, which
+ * in a suite that shares a stack can be another test's, and blocking or
+ * counting that socket would test nothing.
+ *
+ * Every terminal socket the page constructs for the session is counted in
+ * `window.__farhelmTermSocketsOpened`, so a test can tell the original
+ * attachment surviving from a reconnect that replaced it: both end in a
+ * revealed terminal.
+ *
+ * A subclass rather than a stand-in (compare `stuckWebSocketFromNextLoad`):
+ * everything after the block has to be a real attachment for the test to
+ * mean anything, and subclassing keeps the static readyState constants
+ * terminal.js reads off the global.
+ */
+async function starveAfterFirstTerminalSocketFromNextLoad(
+  page: Page,
+  sessionId: string,
+  blockMs: number,
+) {
+  await page.addInitScript(
+    ({ sessionId, blockMs }) => {
+      const Real = window.WebSocket;
+      const prefix = `/api/sessions/${sessionId}/term`;
+      let spent = false;
+      class Starving extends Real {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          if (!new URL(String(url)).pathname.startsWith(prefix)) return;
+          (window as any).__farhelmTermSocketsOpened =
+            ((window as any).__farhelmTermSocketsOpened ?? 0) + 1;
+          if (spent) return;
+          spent = true;
+          queueMicrotask(() => {
+            const until = performance.now() + blockMs;
+            while (performance.now() < until) {
+              // A busy wait, deliberately: the point is a main thread that
+              // cannot run tasks, which no timer-based pause produces.
+            }
+          });
+        }
+      }
+      (window as any).WebSocket = Starving;
+    },
+    { sessionId, blockMs },
+  );
+}
+
+/**
  * Trigger two reads of the URLs `matches` accepts and resolve once both have
  * landed in the page.
  *
@@ -1335,6 +1397,69 @@ test("replay-unconnected: without recovery the banner reports it instead of reve
       }),
       "focus must not be placed into a terminal that cannot carry input",
     ).toBe(false);
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
+// The watchdog measures silence, and a page whose main thread is held
+// busy cannot hear any. When the hold outlasts the window, the expiry is
+// overdue by the time the page runs again, and it can run before the
+// socket's queued `open` and first frames. A watchdog that believed that
+// expiry would throw away a socket the helm had already accepted, calling
+// it never-connected, or would reveal an empty catch-up as idle. The
+// island-cap test hit this in WebKit when its first mount built 33
+// terminals in one task (FLAKES.md, 2026-09-29).
+//
+// The contract pinned here: a window the main thread stalled through
+// re-arms instead of ending the phase, and the attachment it would have
+// discarded goes on to reveal normally on its marker, on the one socket it
+// started with. Without the re-arm, both engines failed this test in the
+// run that introduced it: WebKit replaced the socket through the reconnect
+// ladder, and Chromium revealed on the expiry (`idle`) ahead of the marker.
+//
+// Which task an engine runs first once the block ends is its own choice,
+// and in about one WebKit repetition in five the socket's events won, so
+// the re-arm never ran. The outcome is correct either way, so the test
+// asserts the outcome and records whether the re-arm ran as an annotation
+// rather than failing when it did not.
+test("replay-starved: a watchdog expiry that fires late does not end a live catch-up", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  const title = `replay-starved-${Date.now()}`;
+  // A one-second window starved for four, well past the one-second stall
+  // bound in terminal.js.
+  const idleMs = 1_000;
+  const blockMs = 4_000;
+  let id: string | undefined;
+  try {
+    const session = await createTabSession(request, title);
+    id = session.id;
+
+    await starveAfterFirstTerminalSocketFromNextLoad(page, id, blockMs);
+    await page.addInitScript((idleMs) => {
+      (window as any).__farhelmTestReplay = { idleMs };
+    }, idleMs);
+    await page.goto("/");
+    await page.locator(`[data-session-id="${id}"]`).click();
+    await waitForSessionMounted(page, id);
+
+    const replay = await waitForReplayReveal(page, "terminal", 30_000);
+    expect(
+      await page.evaluate(() => (window as any).__farhelmTermSocketsOpened),
+      "the first socket carried the attachment; no reconnect replaced it",
+    ).toBe(1);
+    expect(
+      replay.revealReason,
+      "the socket the helm accepted during the stall reveals on its marker",
+    ).toBe("marker");
+    test.info().annotations.push({
+      type: "stalled-idle-rearms",
+      description: String(replay.stalledIdleRearms),
+    });
+    await expect(page.locator("#term-banner")).toBeHidden();
   } finally {
     if (id) await cleanupSession(request, id);
   }
