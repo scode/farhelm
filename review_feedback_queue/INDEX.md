@@ -45,8 +45,6 @@ One line per open item. This file must always match the feedback files in this d
   its session disappears while paused.
 - `tab-session-token-in-tmux-argv.md` — opening a tab puts the session token on the tmux client's command line, briefly
   visible to other accounts.
-- `pre-mkdir-rollback-leaves-phantom-membership.md` — a pre-mkdir create rollback leaves a phantom membership in another
-  checkout, so it is never archived.
 - `claude-scan-budget-never-settles.md` — Claude record-scan capture can never complete in a large project directory and
   rescans forever.
 - `env-wrapper-hides-command-not-found.md` — Farhelm's own `env` wrapper turns "command not found" for Goose, Pi and OMP

@@ -4015,7 +4015,9 @@
   data loss.
 - Decision: the user chose discard.
 - Completion criteria: remove the feedback file and its index entry without code or spec changes.
-- Execution: `pending`.
+- Execution: `complete`; the feedback file and its index entry were removed with no code or spec change. Change
+  `vynvxnsuyvktmpslyruvmolnytxvuvrp`, bookmark `pr/discard-pre-mkdir-phantom-membership`, draft PR
+  [#1209](https://github.com/scode/farhelm/pull/1209/changes).
 
 ## ambiguous-restart-republishes-old-terminal.md
 
