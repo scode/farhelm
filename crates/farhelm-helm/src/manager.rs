@@ -2115,6 +2115,27 @@ impl ConnectionManager {
         provision_lock.lock_owned().await
     }
 
+    /// [`Self::host_provision_lock`] without waiting: `None` while a
+    /// provisioning run (or another registry edit) holds it.
+    ///
+    /// For removal, which must answer promptly whatever the host is doing
+    /// (SPEC.md "Waiting between operations on one host"): a run can sit in a
+    /// throttled download or a stalled upload for a long time, and the user
+    /// asked for removal to refuse while busy rather than abort the run.
+    pub fn try_host_provision_lock(
+        &self,
+        host: HostId,
+    ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        let provision_lock = {
+            let mut locks = self
+                .provision_locks
+                .lock()
+                .expect("provision lock map mutex poisoned");
+            Arc::clone(locks.entry(host).or_default())
+        };
+        provision_lock.try_lock_owned().ok()
+    }
+
     /// Ask `host` to refresh NOW, without disturbing anything else.
     ///
     /// The narrow sibling of [`Self::retry_now`], and the distinction is the

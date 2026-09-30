@@ -3418,7 +3418,13 @@
   itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; host removal no longer waits for a running setup or update: it tries the host's provisioning
+  lock without waiting (`ConnectionManager::try_host_provision_lock`) and answers 409 "busy" while a run holds it, per
+  the user's decision to refuse rather than abort. No download or ssh deadlines were added, since the ledger decision
+  asks only for a prompt Remove. This finding and its sibling (`release-download-unbounded-under-host-lock.md` /
+  `sftp-upload-unbounded-before-temp-appears.md`) share one change because the same diff fixes both. Regression test
+  `removal_refuses_during_a_run_and_purges_after_it`. jj change `xputysstlkyn`, bookmark
+  `pr/remove-host-refuses-while-busy`, draft PR [#1167](https://github.com/scode/farhelm/pull/1167/changes).
 
 ## sftp-upload-unbounded-before-temp-appears.md
 
@@ -3431,7 +3437,13 @@
   itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; host removal no longer waits for a running setup or update: it tries the host's provisioning
+  lock without waiting (`ConnectionManager::try_host_provision_lock`) and answers 409 "busy" while a run holds it, per
+  the user's decision to refuse rather than abort. No download or ssh deadlines were added, since the ledger decision
+  asks only for a prompt Remove. This finding and its sibling (`release-download-unbounded-under-host-lock.md` /
+  `sftp-upload-unbounded-before-temp-appears.md`) share one change because the same diff fixes both. Regression test
+  `removal_refuses_during_a_run_and_purges_after_it`. jj change `xputysstlkyn`, bookmark
+  `pr/remove-host-refuses-while-busy`, draft PR [#1167](https://github.com/scode/farhelm/pull/1167/changes).
 
 ## restart-relaunches-over-unconfirmed-scope.md
 
