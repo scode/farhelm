@@ -163,12 +163,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     tell them apart unless the Rust view passes its deleting state in.
   - SPEC.md requires a failed delete's cleanup failure to stay visible, so a suppressed banner must come back, or be
     replaced by something equivalent, when the delete fails.
-- **Pi foreground ownership.** Assess whether native or shelled-out Pi children can replace or withdraw the foreground
-  conversation's restart target, then define the smallest admission check that preserves legitimate foreground
-  transitions. This is an assessment task, not a claim that every vendor path has been reproduced.
-- **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the foreground
-  conversation's restart target beyond the checks now landed in #814, and define any remaining smallest admission check.
-  Preserve legitimate foreground transitions and avoid extending the reporter's scope without evidence.
 - **Checkout preparation test markers leak into /tmp.** The D-suite preparation tests in
   `crates/farhelm-supervisor/src/launch.rs` (`prep-d1`, `prep-d1h`, `prep-d3*`, `prep-d4*`) write their fake git, hook,
   and agent records as loose `/tmp/prep-<test>-<pid>.*` files. `fresh_marker` removes only the bare marker path, which
@@ -255,9 +249,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and Pi, whose only mode is YOLO, so every Pi launch would count), and whether the check lives in the helm so that no
   client can skip it. Supersedes the warning half of the Maybe later entry on marking hosts "yolo is fine"; that entry
   keeps only its session-list coloring.
-
-The earlier cross-harness evidence is preserved in
-[the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
 
 ## Doc todo
 
@@ -601,6 +592,16 @@ are large mostly because of their tests.
   preserved at the `goose-capture-complex-2026-09-23` tag for comparison. The research and proposed smaller replacement
   are recorded in [the Goose session-tracking assessment](lore/2026-09-23-goose-session-tracking.md). Revisit only if
   reliable child isolation becomes a product requirement or Goose exposes a direct root/subagent role signal.
+
+- **Pi foreground ownership.** Assess whether native or shelled-out Pi children can replace or withdraw the foreground
+  conversation's restart target, then define the smallest admission check that preserves legitimate foreground
+  transitions. This is an assessment task, not a claim that every vendor path has been reproduced.
+
+- **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the foreground
+  conversation's restart target beyond the checks now landed in #814, and define any remaining smallest admission check.
+  Preserve legitimate foreground transitions and avoid extending the reporter's scope without evidence. The earlier
+  cross-harness evidence for this and the Pi entry is preserved in
+  [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
 
 - Reconsider the first-use configuration experience for `gh:` launches when no working-copy root is configured. The
   first version refuses the launch and points to the CLI command; consider an inline GUI flow on initial use or another
