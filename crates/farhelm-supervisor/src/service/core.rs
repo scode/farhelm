@@ -1692,6 +1692,23 @@ impl KeyedLocks {
         }
     }
 
+    /// [`claim`](Self::claim) without waiting: `None` when the key is held
+    /// right now.
+    ///
+    /// For background paths that must not park behind a lifecycle
+    /// operation, such as the ticker's sample pass, which is serial across
+    /// every session: they skip the work this time and retry on a later
+    /// pass. Anything that must eventually run under the claim uses
+    /// [`claim`](Self::claim).
+    pub(crate) fn try_claim(self: &Arc<Self>, key: &str) -> Option<KeyedGuard> {
+        let held = self.lock_for(key).try_lock_owned().ok()?;
+        Some(KeyedGuard {
+            registry: Arc::clone(self),
+            key: key.to_string(),
+            _held: held,
+        })
+    }
+
     /// [`claim`](Self::claim) with a deadline: `None` when another
     /// capture transaction still holds the key at `deadline`.
     ///
@@ -12182,6 +12199,36 @@ impl Supervisor {
         // teardowns racing over the same window. It is also what makes
         // `Attach`'s own tab revalidation meaningful (see that handler).
         let lifecycle = self.lifecycle_locks.claim(session_id).await;
+        self.close_tab_claimed(lifecycle, session_id, tab_id).await
+    }
+
+    /// [`Self::close_tab`] for the ticker's automatic reap of exited tabs:
+    /// `None`, without closing anything, when another operation holds the
+    /// session's lifecycle claim right now.
+    ///
+    /// The reap runs inside the ticker's serial sample pass, so waiting for
+    /// a Stop, Restart or Delete here would freeze status for every session
+    /// on the host (SPEC.md "Waiting between operations on one host"). A
+    /// busy session's dead tabs stay hidden and are reaped on a later tick.
+    /// A user's explicit close keeps [`Self::close_tab`]'s waiting claim.
+    pub(crate) async fn try_close_tab(
+        self: &Arc<Self>,
+        session_id: &str,
+        tab_id: &str,
+    ) -> Option<Result<(), RequestError>> {
+        let lifecycle = self.lifecycle_locks.try_claim(session_id)?;
+        Some(self.close_tab_claimed(lifecycle, session_id, tab_id).await)
+    }
+
+    /// The close itself, run under a lifecycle claim the caller already
+    /// holds; the guard moves onto the close task and is released when the
+    /// close finishes.
+    async fn close_tab_claimed(
+        self: &Arc<Self>,
+        lifecycle: KeyedGuard,
+        session_id: &str,
+        tab_id: &str,
+    ) -> Result<(), RequestError> {
         let entry = self.sessions.lock().await.get(session_id).cloned();
         let Some(entry) = entry else {
             return Err(RequestError::new(

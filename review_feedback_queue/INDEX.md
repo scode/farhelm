@@ -43,8 +43,6 @@ One line per open item. This file must always match the feedback files in this d
   makes every launch conflict.
 - `ambiguous-restart-republishes-old-terminal.md` — an ambiguous restart failure republishes the pre-restart terminal,
   so a live agent is unopenable and killable without consent.
-- `ticker-waits-on-lifecycle-claim.md` — the ticker waits on a session's lifecycle claim, so one stop/restart/delete
-  freezes status for every session.
 - `idempotency-fingerprint-keeps-raw-cmdline.md` — idempotency fingerprints keep the raw command line (with any keys) in
   the database after Delete.
 - `provisioning-holds-host-cache-lock.md` — a provisioning run holds the host's cache-write lock throughout, freezing

@@ -460,6 +460,18 @@ pub(crate) struct ActivitySample {
     /// this accepted history into a fresh sample without carrying over the
     /// old screen or allowing late observations from an obsolete entry.
     pub(crate) pending_work_started_at: Option<i64>,
+    /// A work start observed while another operation held the session's
+    /// lifecycle claim, not yet checked against the current run.
+    ///
+    /// The sampler never waits for that claim: Stop, Restart and Delete hold
+    /// it for seconds, and the sample pass is serial, so waiting would freeze
+    /// status for every session on the host (SPEC.md "Waiting between
+    /// operations on one host"). The observation is parked here instead and
+    /// completed by a later pass once the claim is free, which then does the
+    /// same current-run check and key reservation an immediate write does.
+    /// Run-scoped on purpose: [`ActivitySample::replacement`] does not carry
+    /// it, so an unverified observation of an old run dies with that run.
+    deferred_work_start: bool,
 }
 
 impl ActivitySample {
@@ -1545,18 +1557,41 @@ async fn sample_pass(
 /// the generation-conditional SQL update, while the activity mutex is held
 /// only for the small pending-key edits on either side of that await.
 async fn persist_work_started(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, new_start: bool) {
-    if !new_start
-        && entry
-            .run
-            .activity
-            .lock()
-            .expect("activity mutex poisoned")
-            .pending_work_started_at
-            .is_none()
-    {
+    let (deferred, pending) = {
+        let activity = entry.run.activity.lock().expect("activity mutex poisoned");
+        (
+            activity.deferred_work_start,
+            activity.pending_work_started_at,
+        )
+    };
+    // A start parked by an earlier pass is completed exactly as if it had
+    // just been observed; see `ActivitySample::deferred_work_start`.
+    let new_start = new_start || deferred;
+    if !new_start && pending.is_none() {
         return;
     }
-    let _lifecycle = sup.lifecycle_locks.claim(&entry.info.id).await;
+    // Never wait here. The claim's holder may be a Stop, Restart or Delete
+    // that runs for seconds, and this runs inside the serial sample pass, so
+    // waiting would stall every other session's status behind it. A busy
+    // claim parks a new start for the next pass; a pending durable retry is
+    // simply tried again then.
+    let Some(_lifecycle) = sup.lifecycle_locks.try_claim(&entry.info.id) else {
+        if new_start {
+            entry
+                .run
+                .activity
+                .lock()
+                .expect("activity mutex poisoned")
+                .deferred_work_start = true;
+        }
+        return;
+    };
+    entry
+        .run
+        .activity
+        .lock()
+        .expect("activity mutex poisoned")
+        .deferred_work_start = false;
     let current = sup.sessions.lock().await.get(&entry.info.id).cloned();
     let is_current_run = current.is_some_and(|current| {
         current.generation == entry.generation
@@ -1793,8 +1828,19 @@ async fn reap_dead_tabs(
                 );
                 return;
             }
+            // Never wait for the session's lifecycle claim here; see
+            // `Supervisor::try_close_tab`. A busy session is skipped without
+            // spending budget, and its dead tabs are reaped on a later tick.
+            let Some(closed) = sup.try_close_tab(&entry.info.id, &tab.id).await else {
+                debug!(
+                    session = %entry.info.id, tab = %tab.id,
+                    "an exited tab's session is busy with another operation; the reap retries \
+                     on a later tick"
+                );
+                continue;
+            };
             budget -= 1;
-            match sup.close_tab(&entry.info.id, &tab.id).await {
+            match closed {
                 Ok(()) => {
                     // The reap the tick found on its own, with no pane-death
                     // wakeup ahead of it; see `hints`.
@@ -2584,6 +2630,57 @@ mod tests {
             tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
         }
         ticker.shutdown().await;
+    }
+
+    /// The automatic reap never waits for a session's lifecycle claim: while
+    /// another operation holds it, the sample pass still completes and the
+    /// dead tab is left for a later tick, which then reaps it.
+    ///
+    /// Why it matters: the reap runs inside the serial sample pass, so a
+    /// waiting close froze status for every session on the host for as long
+    /// as one session's Stop, Restart or Delete ran (SPEC.md "Waiting between
+    /// operations on one host"). Specified: with the claim held elsewhere the
+    /// pass returns within the bound and the tab's pane survives it; once the
+    /// claim is free the next pass removes it.
+    #[farhelm_testtrace::test]
+    async fn dead_tab_reap_skips_a_session_whose_lifecycle_claim_is_busy() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        install_live_session(&sup, "busy-reap", "sleep 600").await;
+        let dead = dead_tab_in(&sup, "fh-busy-reap").await;
+        let holder = sup.lifecycle_locks.claim("busy-reap").await;
+        assert!(
+            sup.lifecycle_locks.claimed_for_test("busy-reap"),
+            "test premise: another operation holds the session's lifecycle claim"
+        );
+
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+        tokio::time::timeout(
+            Duration::from_secs(20),
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop),
+        )
+        .await
+        .expect("the sample pass must not wait for a busy lifecycle claim");
+        assert!(
+            sup.tmux
+                .pane_states()
+                .await
+                .expect("pane states")
+                .contains_key(&dead),
+            "a busy session's dead tab is left for a later tick"
+        );
+
+        drop(holder);
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert!(
+            !sup.tmux
+                .pane_states()
+                .await
+                .expect("pane states")
+                .contains_key(&dead),
+            "once the claim is free the next tick reaps the dead tab"
+        );
     }
 
     /// The per-tick reap budget defers, never drops: a burst of dead tabs
@@ -4314,6 +4411,81 @@ mod tests {
                 .last_work_started_at,
             0
         );
+    }
+
+    /// The sampler never waits for a session's lifecycle claim; a work start
+    /// seen while the claim is busy is parked and completed on a later pass.
+    ///
+    /// Why it matters: the sample pass walks every session serially, and
+    /// Stop, Restart and Delete hold the claim for seconds. Waiting here froze
+    /// status for every session on the host whenever one of them ran (SPEC.md
+    /// "Waiting between operations on one host"). Specified: with the claim
+    /// held elsewhere, the call returns without writing or advancing anything
+    /// and leaves the start deferred; once the claim is free, the ordinary
+    /// retry call records it as a fresh start, durably and in memory.
+    #[farhelm_testtrace::test]
+    async fn busy_lifecycle_claim_defers_the_work_start_instead_of_waiting() {
+        let state = StateDir::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                work_start_clock: Arc::new(|| 9_000),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        let entry = session_with_stale_activity(&sup, "busy", 100).await;
+        entry
+            .session
+            .last_work_started_at
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        let holder = sup.lifecycle_locks.claim("busy").await;
+        assert!(
+            sup.lifecycle_locks.claimed_for_test("busy"),
+            "test premise: another operation holds the session's lifecycle claim"
+        );
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            persist_work_started(&sup, &entry, true),
+        )
+        .await
+        .expect("the sampler must not wait for a busy lifecycle claim");
+
+        {
+            let activity = entry.run.activity.lock().expect("activity mutex");
+            assert!(
+                activity.deferred_work_start,
+                "the start is parked for a later pass"
+            );
+            assert_eq!(activity.pending_work_started_at, None);
+        }
+        assert_eq!(
+            entry.session.last_work_started_at.load(Ordering::Relaxed),
+            0,
+            "nothing is attributed to the run before the current-run check"
+        );
+
+        drop(holder);
+        persist_work_started(&sup, &entry, false).await;
+
+        assert_eq!(
+            entry.session.last_work_started_at.load(Ordering::Relaxed),
+            9_000
+        );
+        assert_eq!(
+            sup.store
+                .session("busy")
+                .await
+                .expect("read row")
+                .expect("row")
+                .last_work_started_at,
+            9_000,
+            "the deferred start is written once the claim is free"
+        );
+        let activity = entry.run.activity.lock().expect("activity mutex");
+        assert!(!activity.deferred_work_start);
+        assert_eq!(activity.pending_work_started_at, None);
     }
 
     /// A supervisor that may not RECORD still dates activity for its own

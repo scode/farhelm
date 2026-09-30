@@ -3347,7 +3347,13 @@
   itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the ticker's work-start write now takes the lifecycle claim with a non-blocking
+  `KeyedLocks::try_claim` and parks a start it cannot write yet (`deferred_work_start`) for the next pass, and the
+  automatic reap of exited tabs uses `Supervisor::try_close_tab`, skipping a busy session until a later tick (found by
+  the PR review), so a Stop, Restart or Delete no longer stalls the serial sample pass. Regression tests
+  `busy_lifecycle_claim_defers_the_work_start_instead_of_waiting` and
+  `dead_tab_reap_skips_a_session_whose_lifecycle_claim_is_busy`. jj change `xvznsnykpluk`, bookmark
+  `pr/ticker-never-waits-on-lifecycle`, draft PR [#1163](https://github.com/scode/farhelm/pull/1163/changes).
 
 ## attachment-discard-under-global-lock.md
 
