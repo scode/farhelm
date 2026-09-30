@@ -1378,19 +1378,29 @@ fn require_command(
 /// Whether this executable is one nobody should point a systemd unit at.
 ///
 /// Two shapes, both of them things an operator does by accident while
-/// trying setup out: a `cargo build` artifact under some `target/`
-/// directory, and a binary that was extracted or copied into the
-/// temporary directory. A unit pointing at either one keeps working right
-/// up until the directory is cleaned, and then fails at boot with nothing
-/// to explain it.
+/// trying setup out: a `cargo build` artifact, and a binary that was
+/// extracted or copied into the temporary directory. A unit pointing at
+/// either one keeps working right up until the directory is cleaned, and
+/// then fails at boot with nothing to explain it.
+///
+/// A build artifact is recognized by Cargo's own layout, `target/debug/`,
+/// `target/release/` or `target/<triple>/{debug,release}/`, not by a
+/// `target` directory alone: that refused ordinary installs such as
+/// `/home/target/.local/bin` or `/opt/target/bin` with no override.
 ///
 /// `temp_dir` is canonicalized alongside the executable because `/tmp` is
 /// a symlink on some systems, and a prefix comparison between a resolved
 /// path and an unresolved one silently never matches.
 fn looks_like_a_build_tree(exe: &Path, temp_dir: &Path) -> bool {
-    if exe
-        .components()
-        .any(|component| component.as_os_str() == OsStr::new("target"))
+    let parts: Vec<&OsStr> = exe.components().map(|part| part.as_os_str()).collect();
+    let target = |part: &OsStr| part == OsStr::new("target");
+    let profile = |part: &OsStr| part == OsStr::new("debug") || part == OsStr::new("release");
+    if parts
+        .windows(2)
+        .any(|window| target(window[0]) && profile(window[1]))
+        || parts
+            .windows(3)
+            .any(|window| target(window[0]) && profile(window[2]))
     {
         return true;
     }
@@ -2057,6 +2067,42 @@ mod tests {
         assert!(output.contains("KillMode=process"), "{output}");
         // The one read-only query is all a dry run issues.
         assert_eq!(units.commands, ["show-environment"]);
+    }
+
+    /// Only Cargo's own output layout counts as a build tree; a directory
+    /// that merely happens to be called `target` does not.
+    ///
+    /// Why it matters: the check used to refuse any path with a `target`
+    /// component, with no override, so a user named `target` or an install
+    /// under `/opt/target/bin` could never run setup. Specified: installs
+    /// under `/home/target/.local/bin`, `/opt/target/bin` and
+    /// `/srv/target/tools/bin` are accepted, while `target/debug/`,
+    /// `target/release/`, a cross build's `target/<triple>/release/`, and a
+    /// test binary under `target/debug/deps/` are still refused.
+    #[farhelm_testtrace::test]
+    fn only_cargos_output_layout_counts_as_a_build_tree() {
+        let temp = Path::new("/nonexistent-temp-dir");
+        for accepted in [
+            "/home/target/.local/bin/farhelm",
+            "/opt/target/bin/farhelm",
+            "/srv/target/tools/bin/farhelm",
+        ] {
+            assert!(
+                !looks_like_a_build_tree(Path::new(accepted), temp),
+                "{accepted}"
+            );
+        }
+        for refused in [
+            "/home/u/farhelm/target/debug/farhelm",
+            "/home/u/farhelm/target/release/farhelm",
+            "/home/u/farhelm/target/x86_64-unknown-linux-musl/release/farhelm",
+            "/home/u/farhelm/target/debug/deps/farhelm-0123456789abcdef",
+        ] {
+            assert!(
+                looks_like_a_build_tree(Path::new(refused), temp),
+                "{refused}"
+            );
+        }
     }
 
     /// The same refusal covers a binary run out of the temporary

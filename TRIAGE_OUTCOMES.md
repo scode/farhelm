@@ -4250,7 +4250,10 @@
 - Completion criteria: installs under paths such as `/home/target/.local/bin` or `/opt/target/bin` are accepted, Cargo
   build outputs are still refused, focused coverage, and this feedback file and its index entry are removed in the
   execution change.
-- Execution: `pending`.
+- Execution: `complete`; `looks_like_a_build_tree` matches a `target` component only when followed by `debug` or
+  `release`, directly or after one target-triple component; the temporary-directory half is unchanged. Change
+  `tllxylyvlvsnmszxyuukulpvrttsztot`, bookmark `pr/setup-cargo-layout-only`, draft PR
+  [#1206](https://github.com/scode/farhelm/pull/1206/changes).
 
 ## tab-session-token-in-tmux-argv.md
 
