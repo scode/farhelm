@@ -102,11 +102,84 @@ impl LaunchHarness {
     /// ([`LaunchSelection::workspace_trust`]). The helm refuses the choice
     /// for any other harness and remembers it only for these, and the browser
     /// offers it only for these.
+    ///
+    /// Exhaustive, like every per-harness capability here, so a new harness
+    /// is a compile error until it answers.
     pub const fn offers_workspace_trust(self) -> bool {
-        matches!(
-            self,
-            LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi
-        )
+        match self {
+            LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi => true,
+            LaunchHarness::Cursor
+            | LaunchHarness::Claude
+            | LaunchHarness::Goose
+            | LaunchHarness::Omp
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Grok => false,
+        }
+    }
+
+    /// Whether this harness offers a model choice
+    /// ([`LaunchSelection::model`]).
+    ///
+    /// A harness without one (Grok, whose CLI model contract this release
+    /// does not carry) takes neither a model nor an effort: the browser hides
+    /// its model control, lists no models for it, clears both fields when the
+    /// user switches to it, and treats a selection carrying either as
+    /// incompatible. The helm validates the final request on its own.
+    pub const fn offers_model(self) -> bool {
+        match self {
+            LaunchHarness::Cursor
+            | LaunchHarness::Codex
+            | LaunchHarness::Claude
+            | LaunchHarness::Muse
+            | LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::Omp
+            | LaunchHarness::OpenCode => true,
+            LaunchHarness::Grok => false,
+        }
+    }
+
+    /// Whether this harness has an effort vocabulary
+    /// ([`LaunchSelection::effort`]), which decides whether the browser shows
+    /// an effort control at all.
+    ///
+    /// Which efforts a harness accepts is release catalog data the helm owns
+    /// and serves; this only says whether there is any such choice, which the
+    /// browser needs before (and regardless of whether) a catalog arrived.
+    pub const fn offers_effort(self) -> bool {
+        match self {
+            LaunchHarness::Codex
+            | LaunchHarness::Claude
+            | LaunchHarness::Muse
+            | LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::Omp => true,
+            LaunchHarness::Cursor | LaunchHarness::OpenCode | LaunchHarness::Grok => false,
+        }
+    }
+
+    /// The one permission mode this harness has, for a harness that has only
+    /// one; `None` for every harness with a real default.
+    ///
+    /// Pi has no tool-approval gate, so its only mode is YOLO (SPEC.md). The
+    /// fact is stated here once; its consumers apply it with deliberately
+    /// different strength. The helm fills it in only when a selection omits
+    /// the permission and still rejects an explicit unsupported one; the
+    /// browser displays and submits it whatever an older stored selection
+    /// said; the composer shows it as the only permission button. This is
+    /// also what makes every Pi launch a YOLO launch.
+    pub const fn sole_permission(self) -> Option<LaunchPermission> {
+        match self {
+            LaunchHarness::Pi => Some(LaunchPermission::Yolo),
+            LaunchHarness::Cursor
+            | LaunchHarness::Codex
+            | LaunchHarness::Claude
+            | LaunchHarness::Muse
+            | LaunchHarness::Goose
+            | LaunchHarness::Omp
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Grok => None,
+        }
     }
 
     /// Whether this harness offers `permission` as an explicit choice
@@ -302,6 +375,38 @@ mod tests {
         let mut extended = LaunchHarness::ALL.to_vec();
         extended.push(LaunchHarness::Codex);
         assert!(!LaunchHarness::is_ordering_of_all(&extended));
+    }
+
+    /// Spec: Grok alone offers no model; Cursor, OpenCode, and Grok offer no
+    /// effort; Pi alone has a sole permission, YOLO (SPEC.md's structured
+    /// launch rules for each harness).
+    ///
+    /// Why: these predicates replaced per-harness checks scattered through
+    /// the browser and the helm, so a slip here changes what the composer
+    /// shows, what it clears on a harness switch, and what the helm fills in,
+    /// all at once. The matrix is spelled out rather than derived so the test
+    /// states the rule independently of the implementation.
+    #[test]
+    fn each_harness_offers_exactly_its_launch_choices() {
+        use LaunchHarness::*;
+        // (harness, offers model, offers effort, sole permission)
+        let expected = [
+            (Cursor, true, false, None),
+            (Codex, true, true, None),
+            (Claude, true, true, None),
+            (Muse, true, true, None),
+            (Goose, true, true, None),
+            (Pi, true, true, Some(LaunchPermission::Yolo)),
+            (Omp, true, true, None),
+            (OpenCode, true, false, None),
+            (Grok, false, false, None),
+        ];
+        assert_eq!(expected.len(), LaunchHarness::ALL.len());
+        for (harness, model, effort, sole) in expected {
+            assert_eq!(harness.offers_model(), model, "{harness:?} model");
+            assert_eq!(harness.offers_effort(), effort, "{harness:?} effort");
+            assert_eq!(harness.sole_permission(), sole, "{harness:?} permission");
+        }
     }
 
     /// Spec: Goose offers every explicit permission, OMP offers YOLO and

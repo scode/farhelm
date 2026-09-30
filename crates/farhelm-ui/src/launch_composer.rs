@@ -70,10 +70,10 @@ pub(crate) const fn normalized_permissions(
     harness: LaunchHarness,
     permissions: Option<LaunchPermission>,
 ) -> Option<LaunchPermission> {
-    match harness {
-        LaunchHarness::Pi => Some(LaunchPermission::Yolo),
+    match harness.sole_permission() {
+        Some(sole) => Some(sole),
         // `Option::filter` is not const, hence the spelled-out match.
-        _ => match permissions {
+        None => match permissions {
             Some(permission) if !harness.offers_permission(permission) => None,
             permissions => permissions,
         },
@@ -136,6 +136,29 @@ pub(crate) const HARNESS_PICKER_ORDER: [LaunchHarness; 9] = [
     LaunchHarness::OpenCode,
 ];
 const _: () = assert!(LaunchHarness::is_ordering_of_all(&HARNESS_PICKER_ORDER));
+
+/// The help line the composer shows under a harness's workspace-trust choice,
+/// where the meaning of true and false needs saying.
+///
+/// Exhaustive so a new harness that offers the choice decides whether it
+/// needs a line; harnesses without the choice never show one.
+pub(crate) const fn workspace_trust_help(harness: LaunchHarness) -> Option<&'static str> {
+    match harness {
+        LaunchHarness::Muse => Some(
+            "Muse false adds no trust flag; YOLO or vendor settings may still trust this workspace.",
+        ),
+        LaunchHarness::Codex => Some(
+            "Codex true trusts this directory for this launch; false runs it as untrusted. Default uses Codex's own setting or prompt.",
+        ),
+        LaunchHarness::Pi
+        | LaunchHarness::Cursor
+        | LaunchHarness::Claude
+        | LaunchHarness::Goose
+        | LaunchHarness::Omp
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Grok => None,
+    }
+}
 
 /// The short name a user sees for a harness. Every spelling of a structured
 /// harness in the composer, a session's menu header, and the restart-with
@@ -296,10 +319,10 @@ pub(crate) fn model_enter_target(
     catalog: &[LaunchCatalogModel],
     harness: Option<LaunchHarness>,
 ) -> ModelEnterTarget {
-    // Grok's CLI model contract is deliberately absent from this release.
-    // Refuse stale keyboard state here as well as hiding the control, because
-    // a harness transition can leave one render's options in an event handler.
-    if harness == Some(LaunchHarness::Grok) {
+    // A harness without a model choice (Grok) hides the control, but stale
+    // keyboard state is refused here too, because a harness transition can
+    // leave one render's options in an event handler.
+    if harness.is_some_and(|harness| !harness.offers_model()) {
         return ModelEnterTarget::Nothing;
     }
     if let Some(index) = active {
@@ -354,22 +377,16 @@ pub(crate) fn model_options(
     query: &str,
     show_all: bool,
 ) -> Vec<ModelOption> {
-    if harness == Some(LaunchHarness::Grok) {
+    if harness.is_some_and(|harness| !harness.offers_model()) {
         return Vec::new();
     }
     let folded_query = query.to_ascii_lowercase();
     let mut options = Vec::new();
     options.push(ModelOption::HarnessDefault);
-    for owner in [
-        LaunchHarness::Codex,
-        LaunchHarness::Claude,
-        LaunchHarness::Muse,
-        LaunchHarness::Cursor,
-        LaunchHarness::Goose,
-        LaunchHarness::Pi,
-        LaunchHarness::Omp,
-        LaunchHarness::OpenCode,
-    ] {
+    for owner in HARNESS_SEARCH_ORDER
+        .into_iter()
+        .filter(|owner| owner.offers_model())
+    {
         if !show_all && harness.is_some_and(|selected| selected != owner) {
             continue;
         }
@@ -1136,7 +1153,8 @@ pub(crate) fn selection_is_compatible(
     selection: &LaunchSelection,
     catalog: &[LaunchCatalogModel],
 ) -> bool {
-    if selection.harness == LaunchHarness::Grok
+    // A harness without a model choice takes neither a model nor an effort.
+    if !selection.harness.offers_model()
         && (selection.model.is_some() || selection.effort.is_some())
     {
         return false;
@@ -1196,7 +1214,7 @@ pub(crate) fn reconcile_harness_selection(
     catalog: &[LaunchCatalogModel],
 ) -> (LaunchSelection, Option<LaunchHarness>) {
     selection.harness = harness;
-    if harness == LaunchHarness::Grok {
+    if !harness.offers_model() {
         // Grok exposes neither field. Clear retained values at the harness
         // boundary so a recent setup or prior selection cannot manufacture a
         // launch shape that the helm must reject later.

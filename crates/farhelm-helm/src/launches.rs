@@ -324,8 +324,8 @@ pub(crate) struct CompiledLaunch {
 /// same selection whichever path accepts it. Pure: no catalog lookup, so a
 /// previously accepted request stays recoverable after catalog changes.
 pub(crate) fn normalize_selection(mut selection: LaunchSelection) -> LaunchSelection {
-    if selection.harness == LaunchHarness::Pi && selection.permissions.is_none() {
-        selection.permissions = Some(LaunchPermission::Yolo);
+    if selection.permissions.is_none() {
+        selection.permissions = selection.harness.sole_permission();
     }
     selection
 }

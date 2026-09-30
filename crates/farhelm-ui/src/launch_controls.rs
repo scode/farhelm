@@ -151,7 +151,7 @@ pub(crate) fn LaunchControls(
     });
 
     rsx! {
-        if harness != Some(LaunchHarness::Grok) {
+        if harness.is_none_or(LaunchHarness::offers_model) {
             div { class: "launch-composer-choice launch-composer-model-choice",
                 span { class: "launch-composer-section-label", "model" }
                 if let Some(parts) = model_change { PeerLine { class: "launch-composer-changed-marker", parts } }
@@ -269,10 +269,10 @@ pub(crate) fn LaunchControls(
                 div { class: "launch-composer-choice-error", "{reason}" }
             }
         }
-        // These harnesses offer no effort vocabulary. Permissions occupies
-        // the pair alone so a blank sibling does not imply a missing setting.
+        // A harness without an effort vocabulary leaves permissions alone in
+        // the pair so a blank sibling does not imply a missing setting.
         div { class: "launch-composer-choice-pair",
-            if !matches!(harness, Some(LaunchHarness::OpenCode | LaunchHarness::Cursor | LaunchHarness::Grok)) {
+            if harness.is_none_or(LaunchHarness::offers_effort) {
                 div { class: "launch-composer-choice launch-composer-effort-choice",
                     span { class: "launch-composer-section-label", "effort" }
                     if let Some(parts) = effort_change { PeerLine { class: "launch-composer-changed-marker", parts } }
@@ -303,7 +303,7 @@ pub(crate) fn LaunchControls(
                 span { class: "launch-composer-section-label", "permissions" }
                 if let Some(parts) = permission_change { PeerLine { class: "launch-composer-changed-marker", parts } }
                 div { class: "launch-composer-segmented",
-                    if harness == Some(LaunchHarness::Pi) {
+                    if harness.and_then(LaunchHarness::sole_permission) == Some(LaunchPermission::Yolo) {
                         // Pi has no tool-approval gate. Its sole mode cannot
                         // expose the unrelated workspace `--approve` flag.
                         button {
@@ -368,11 +368,8 @@ pub(crate) fn LaunchControls(
             div { class: "launch-composer-choice launch-composer-trust-choice",
                 span { class: "launch-composer-section-label", "workspace trust" }
                 if let Some(parts) = trust_change { PeerLine { class: "launch-composer-changed-marker", parts } }
-                if harness == Some(LaunchHarness::Muse) {
-                    p { class: "launch-composer-choice-help", "Muse false adds no trust flag; YOLO or vendor settings may still trust this workspace." }
-                }
-                if harness == Some(LaunchHarness::Codex) {
-                    p { class: "launch-composer-choice-help", "Codex true trusts this directory for this launch; false runs it as untrusted. Default uses Codex's own setting or prompt." }
+                if let Some(help) = harness.and_then(launch_composer::workspace_trust_help) {
+                    p { class: "launch-composer-choice-help", "{help}" }
                 }
                 div { class: "launch-composer-segmented",
                     for (choice, label) in [(None, "default"), (Some(true), "true"), (Some(false), "false")] {
