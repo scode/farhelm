@@ -78,14 +78,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   reap it, with this as the follow-up to make it hard to do by accident. Deliberate access, such as pointing tmux at the
   socket explicitly, stays out of scope.
 
-- **Neutral color for the "Stopping agent…" overlay.** While a deleted session waits for its agent to stop, a card
-  saying "Stopping agent…" (or "Stopping tabs…" / "Deleting…") covers its terminal, drawn in the danger red: red border,
-  red text, red spinner (`.terminal-delete-overlay-card` and `.delete-spinner` in `crates/farhelm-ui/assets/app.css`).
-  Stopping is the expected outcome of a delete the user just confirmed, not an error, so the red reads as if something
-  broke. Make it grey or another neutral color consistent with the rest of the UI. It still needs to be noticeable: the
-  CSS comment above `.session-row.deleting` records that an earlier, subtler indicator went unnoticed. The sidebar row's
-  tint and the header's label use the same red for the same state; whether they follow is open.
-
 - **Accept a leftover uninstall receipt after the install directory moves.** On macOS, an interrupted
   `farhelm uninstall` leaves `~/Applications/.Farhelm.app.uninstall-receipt`, a copy of the bundle's ownership record,
   so a retry can finish. Before building `Farhelm.app`, `scripts/install.sh` checks that receipt with

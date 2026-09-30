@@ -296,19 +296,26 @@ level to lay something out on. `--well` is a third fill of that kind: the inside
 darker than any surface a control can sit on so that a field reads as cut into its panel, and lighter than the ground so
 that a field on a dialog does not read as a hole through to the page. The second is that there is ONE accent, and what
 it may be spent on is a closed list rather than a palette to decorate with: selection, `:focus-visible`, normal primary
-actions, and any PRESSED disclosure control. Action buttons use three deliberate tiers on the shared ghost `.btn` base:
-`.btn-primary` is the normal blue affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is
-reserved for destructive confirmations. Pressed disclosures use `--accent-fill-hover` so an open trigger is distinct
-from a resting primary. The normal-primary entry is scoped per SURFACE, not per screen: the sidebar's resting chrome
-carries exactly one filled control (`new session`), and each dialog or popup that floats over it may supply its own
-affirmative primary. The sidebar's secondary actions and profile-row edit/delete controls use the neutral tier; menu
-items, tabs, composer selections, relays, and other explicit exemptions retain their ghost or purpose-built styling.
-Destructive menu items remain red text, while their confirmation buttons use the danger tier. SPEC.md requires the
-sidebar to mark the selected session's row readably at a glance, so anything joining that list has to be a place where
-the accent means "this is where you are" — the same thing the other entries say — because an accent spread across
-ordinary decoration would leave nothing to make the selection readable. Both constraints have a contrast floor under
-them: the quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on,
-which is what caps how light the selected row's fill may go.
+actions, any PRESSED disclosure control, and the wait after a confirmed delete (the spinner and words on the session's
+row and over its terminal, and the dot and words in its header). That last entry is the maintainer's choice
+(2026-09-30): the wait is the outcome the user just confirmed, so the danger red it used to be read as a failure; grey
+is what an earlier indicator used, and it went unnoticed; and `--info`, the only other blue, already means idle with
+unseen output. It is the one entry that does not mean "this is where you are" (see below), so it is kept narrow enough
+not to compete with selection: it colors only the spinner or dot, the words, and the terminal overlay card's edge, and
+the deleting row takes no tint or edge of its own, which would look exactly like the selection it usually already is.
+Action buttons use three deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the normal blue
+affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is reserved for destructive
+confirmations. Pressed disclosures use `--accent-fill-hover` so an open trigger is distinct from a resting primary. The
+normal-primary entry is scoped per SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled
+control (`new session`), and each dialog or popup that floats over it may supply its own affirmative primary. The
+sidebar's secondary actions and profile-row edit/delete controls use the neutral tier; menu items, tabs, composer
+selections, relays, and other explicit exemptions retain their ghost or purpose-built styling. Destructive menu items
+remain red text, while their confirmation buttons use the danger tier. SPEC.md requires the sidebar to mark the selected
+session's row readably at a glance, so anything else joining that list has to be a place where the accent means "this is
+where you are" — the same thing every entry but the delete wait says — because an accent spread across ordinary
+decoration would leave nothing to make the selection readable. Both constraints have a contrast floor under them: the
+quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on, which is
+what caps how light the selected row's fill may go.
 
 Selection is one construct wherever it appears — the sidebar's selected row, the selected tab, and the launch composer's
 chosen harness, segment, folder, and list option: the accent-tinted `--accent-fill`, an accent bar along one edge, and

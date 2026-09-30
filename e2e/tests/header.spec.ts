@@ -488,9 +488,10 @@ test("the header delete confirms in place and deletes through the list", async (
  * its own SIGTERM handling, and the row deliberately stays until then. Without
  * a visible state in between, the click looks ignored. Specifies, with the
  * DELETE reply held open by the test: the row gets its `deleting` state and a
- * "Stopping agent…" label in place of its title, the open session's header
- * shows the same label in place of its actions, and an overlay over the
- * terminal says it again. A refused delete (409) clears all three and leaves
+ * "Stopping agent…" label in place of its title, and its open button, though
+ * disabled like every row's during the delete, is not dimmed; the open
+ * session's header shows the same label in place of its actions, and an
+ * overlay over the terminal says it again. A refused delete (409) clears all three and leaves
  * the row with its error and the header with its actions; a delete that goes
  * through removes the row, and its own detach never paints the terminal's
  * "Detached" banner on the way.
@@ -548,6 +549,12 @@ test("a committed delete shows its progress until the reply lands", async ({ pag
     await expect(target).toHaveClass(/\bdeleting\b/);
     await expect(rowProgress).toHaveText("Stopping agent…");
     await expect(target.locator(".session-title"), "the progress takes the title line's place").toHaveClass(/\bvisually-hidden\b/);
+    // The delete disables every row's open button, and a disabled one is
+    // drawn at half opacity. The deleting row's is exempt: its progress
+    // words are the row's only marker, and half opacity would leave them
+    // too faint to notice (an earlier, fainter indicator went unnoticed).
+    await expect(target.locator(".session-row-open"), "the open button is disabled during the delete").toBeDisabled();
+    await expect(target.locator(".session-row-open"), "the deleting row is not dimmed").toHaveCSS("opacity", "1");
     await expect(headerProgress).toHaveText("Stopping agent…");
     await expect(overlay).toHaveText("Stopping agent…");
     await expect(page.locator(".restart-primary")).toBeHidden();
