@@ -13,6 +13,28 @@ export default defineConfig({
   redirects: {
     '/': '/docs/',
   },
+  vite: {
+    build: {
+      rolldownOptions: {
+        // Astro marks the module it generates for each MDX page with a
+        // "use astro:head-inject" directive. Vite 8's bundler (Rolldown)
+        // does not know that directive, so it warns once per MDX page that
+        // it may be dropped. Nothing reads the directive after bundling (the
+        // head assets are chosen by module id instead), so the warning is
+        // noise, and it grows with every MDX page added. Only that exact
+        // combination is dropped: any other MODULE_LEVEL_DIRECTIVE warning,
+        // say a misplaced "use client", still reaches the log. Remove this
+        // once Astro stops emitting the directive or Rolldown stops warning
+        // about it.
+        onLog(level, log, handler) {
+          if (log.code === 'MODULE_LEVEL_DIRECTIVE' && log.message?.includes('use astro:head-inject')) {
+            return;
+          }
+          handler(level, log);
+        },
+      },
+    },
+  },
   integrations: [
     starlight({
       title: 'Farhelm',
