@@ -478,7 +478,7 @@ html {
  * face was meant to end (the auth command in `code { }` (auth.rs) and the
  * clipboard/provisioning-plan `pre` blocks are the sites this actually
  * bites). `font-family` only: each element's own `white-space` handling —
- * the clipboard-facts and peer-authored `<pre>` blocks keep whatever wrap
+ * the peer-authored `<pre>` blocks keep whatever wrap
  * behavior their own class rule sets — is untouched by this reset and must
  * stay that way. */
 code,
@@ -5311,17 +5311,6 @@ samp {
 .status.error {
   color: var(--danger);
 }
-.clipboard-facts {
-  margin-top: 0.4rem;
-}
-
-.clipboard-facts pre {
-  max-height: 14rem;
-  overflow: auto;
-  white-space: pre-wrap;
-  user-select: text;
-}
-
 /* The confirmation a YOLO launch on a sensitive host asks for
    (`yolo_confirm`). Deliberately loud: accidental YOLO launches on the wrong
    machine are what it exists to stop, and a prompt that looks like every
