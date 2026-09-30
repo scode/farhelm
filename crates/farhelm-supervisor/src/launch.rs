@@ -2594,6 +2594,17 @@ exec sleep 60
             self.tmp.path().join("bin")
         }
 
+        /// The path the D-suite fakes hang their stage markers and argv
+        /// records off (`marker.git`, `marker.hook.argv`, ...).
+        ///
+        /// Inside the fixture's own temporary directory, so each test gets
+        /// fresh markers and they are removed with the fixture. Loose
+        /// `/tmp/prep-<test>-<pid>.*` files used to leak on every run, and a
+        /// reused PID inherited stale stage markers from an earlier run.
+        fn marker(&self) -> PathBuf {
+            self.tmp.path().join("marker")
+        }
+
         /// Install an executable fixture script in the bin directory.
         fn install_script(&self, name: &str, body: &str) {
             let path = self.bin_dir().join(name);
@@ -2890,16 +2901,17 @@ printf 'AGENT-RAN\n'
     /// assertions. `hook_body` is the `-c` payload the hook shell
     /// receives (may be empty for no hook); with a hook, the
     /// preparation's `shell` names the fixture's fake hook shell.
-    fn build_d1_fixture(hook_body: Option<String>, marker: &Path) -> PrepFixture {
-        let git_marker = marker.with_extension("git");
-        let hook_marker = marker.with_extension("hook");
-        let agent_marker = marker.with_extension("agent");
+    fn build_d1_fixture(hook_body: Option<String>) -> PrepFixture {
         let shell = if hook_body.is_some() {
             "fixture-hook-sh".to_string()
         } else {
             "/bin/sh".to_string()
         };
         let fixture = PrepFixture::new("https://github.com/example/repo.git", hook_body, &shell);
+        let marker = fixture.marker();
+        let git_marker = marker.with_extension("git");
+        let hook_marker = marker.with_extension("hook");
+        let agent_marker = marker.with_extension("agent");
         let git_argv_record = marker.with_extension("git.argv");
         let hook_argv_record = marker.with_extension("hook.argv");
         fixture.install_script(
@@ -2985,16 +2997,16 @@ printf 'AGENT-RAN\n'
     /// child, and hand back everything worth asserting on.
     fn run_d1_style_fixture(
         hook_body: Option<String>,
-        marker: &Path,
     ) -> (PrepFixture, String, String, std::process::ExitStatus) {
-        let fixture = build_d1_fixture(hook_body, marker);
+        let fixture = build_d1_fixture(hook_body);
         let (report, terminal, status) = fixture.run_shim_in_child();
         (fixture, report, terminal, status)
     }
 
     /// Whether NO preparation child ran in this fixture: none of the
     /// three stage markers exists. Used by every refusal test.
-    fn no_stage_ran(_fixture: &PrepFixture, marker: &Path) -> bool {
+    fn no_stage_ran(fixture: &PrepFixture) -> bool {
+        let marker = fixture.marker();
         let git_ran = PathBuf::from(format!(
             "{}.git-ran",
             marker.with_extension("git").display()
@@ -3012,10 +3024,9 @@ printf 'AGENT-RAN\n'
     /// leave the durable state at Ready.
     #[farhelm_testtrace::test]
     fn d1_fake_git_hook_agent_run_in_order_with_exact_argv() {
-        let marker = std::env::temp_dir().join(format!("prep-d1-{}", std::process::id()));
-        let _ = std::fs::remove_file(&marker);
         let (fixture, report, terminal, status) =
-            run_d1_style_fixture(Some("echo hook-body-ran".to_string()), &marker);
+            run_d1_style_fixture(Some("echo hook-body-ran".to_string()));
+        let marker = fixture.marker();
         assert!(
             status.success() && report.is_empty(),
             "the shim must complete the preparation without error: \
@@ -3064,13 +3075,13 @@ printf 'AGENT-RAN\n'
     /// a metacharacter-bearing URL must fail closed at `validate`.
     #[farhelm_testtrace::test]
     fn d1_hostile_url_is_refused_before_any_process_runs() {
-        let marker = std::env::temp_dir().join(format!("prep-d1h-{}", std::process::id()));
-        let _ = std::fs::remove_file(&marker);
-        let fixture = PrepFixture::new(
-            "https://github.com/example/repo.git; touch /tmp/pwned",
-            None,
-            "/bin/sh",
-        );
+        // The recording fakes are installed, not an empty bin directory: the
+        // fake git records its entry unconditionally, so `no_stage_ran`
+        // below could actually see a clone that started before validation
+        // refused the URL.
+        let mut fixture = build_d1_fixture(None);
+        fixture.preparation.clone_url =
+            "https://github.com/example/repo.git; touch /tmp/pwned".to_string();
         let (report, terminal, _status) = fixture.run_shim_in_child();
         assert!(
             !report.is_empty(),
@@ -3086,7 +3097,7 @@ printf 'AGENT-RAN\n'
             "the error must name the refusal reason: {report}"
         );
         // Nothing ran: no state transition, no git, no agent.
-        assert!(no_stage_ran(&fixture, &marker));
+        assert!(no_stage_ran(&fixture));
     }
 
     // ---------------------------------------------------------------------
@@ -3098,22 +3109,13 @@ printf 'AGENT-RAN\n'
     // durable state naming the failed stage.
     // ---------------------------------------------------------------------
 
-    /// A unique per-test marker path (the fixture's argv records and
-    /// wiring files hang off it).
-    fn fresh_marker(name: &str) -> PathBuf {
-        let marker = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
-        let _ = std::fs::remove_file(&marker);
-        marker
-    }
-
     /// D3: with NO `git` anywhere on the child-only PATH, the clone's
     /// spawn itself fails — the shim must record Failed{stage: clone},
     /// leave the ordinary sentinel, print the stage error, and never
     /// exec the agent or run the hook.
     #[farhelm_testtrace::test]
     fn d3_missing_git_binary_fails_closed_at_clone() {
-        let marker = fresh_marker("prep-d3a");
-        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()), &marker);
+        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
         std::fs::remove_file(fixture.bin_dir().join("git")).unwrap();
         let (report, terminal, _status) = fixture.run_shim_in_child();
         assert!(
@@ -3129,7 +3131,7 @@ printf 'AGENT-RAN\n'
             }
             other => panic!("expected Failed at clone, got {other:?}"),
         }
-        assert!(no_stage_ran(&fixture, &marker));
+        assert!(no_stage_ran(&fixture));
         assert!(
             terminal.contains("checkout preparation failed"),
             "the terminal must show the stage error: {terminal}"
@@ -3141,8 +3143,8 @@ printf 'AGENT-RAN\n'
     /// checkout must be retained untouched for inspection.
     #[farhelm_testtrace::test]
     fn d3_git_nonzero_exit_records_failed_clone_and_keeps_the_partial_checkout() {
-        let marker = fresh_marker("prep-d3b");
-        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()), &marker);
+        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
+        let marker = fixture.marker();
         std::fs::write(
             PathBuf::from(format!(
                 "{}.git-fail",
@@ -3179,8 +3181,8 @@ printf 'AGENT-RAN\n'
     /// own text (user content), and the agent must never run.
     #[farhelm_testtrace::test]
     fn d3_hook_nonzero_exit_names_post_clone_without_logging_the_command() {
-        let marker = fresh_marker("prep-d3c");
-        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()), &marker);
+        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
+        let marker = fixture.marker();
         std::fs::write(
             PathBuf::from(format!(
                 "{}.hook-fail",
@@ -3220,8 +3222,7 @@ printf 'AGENT-RAN\n'
     /// destroying the pre-existing NotStarted record, and nothing runs.
     #[farhelm_testtrace::test]
     fn d3_state_write_failure_fails_closed_before_the_clone() {
-        let marker = fresh_marker("prep-d3d");
-        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()), &marker);
+        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
         fixture.write_spec();
         let exe = std::env::current_exe().unwrap();
         let output = std::process::Command::new(&exe)
@@ -3250,7 +3251,7 @@ printf 'AGENT-RAN\n'
         // published (its write failed too).
         assert_eq!(fixture.state().unwrap(), PreparationState::NotStarted);
         assert!(!status_path_for_spec(&fixture.spec_path).exists());
-        assert!(no_stage_ran(&fixture, &marker), "nothing ran");
+        assert!(no_stage_ran(&fixture), "nothing ran");
         assert!(
             output.status.success(),
             "the child must exit cleanly: {report}"
@@ -3263,9 +3264,9 @@ printf 'AGENT-RAN\n'
     /// and the hook's echo proves it did not run again either.
     #[farhelm_testtrace::test]
     fn d3_ready_restart_skips_clone_and_hook() {
-        let marker = fresh_marker("prep-d3e");
         let (fixture, report1, terminal1, _status) =
-            run_d1_style_fixture(Some("echo hook-body-ran".to_string()), &marker);
+            run_d1_style_fixture(Some("echo hook-body-ran".to_string()));
+        let marker = fixture.marker();
         assert!(report1.is_empty(), "first run must succeed: {report1}");
         assert_eq!(fixture.state().unwrap(), PreparationState::Ready);
         let (report2, terminal2, _status) = fixture.run_shim_in_child();
@@ -3293,8 +3294,7 @@ printf 'AGENT-RAN\n'
     /// be REFUSED — no automatic retry, no agent, state preserved.
     #[farhelm_testtrace::test]
     fn d3_clone_started_restart_is_refused_without_rerunning_anything() {
-        let marker = fresh_marker("prep-d3f");
-        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()), &marker);
+        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
         write_preparation_state(
             &fixture.preparation.state_path,
             "wc-1",
@@ -3313,7 +3313,7 @@ printf 'AGENT-RAN\n'
             PreparationState::CloneStarted,
             "the refusal must not overwrite the state evidence"
         );
-        assert!(no_stage_ran(&fixture, &marker));
+        assert!(no_stage_ran(&fixture));
         assert!(terminal.contains("checkout preparation failed"));
     }
 
@@ -3321,8 +3321,7 @@ printf 'AGENT-RAN\n'
     /// recorded stage in the message, state preserved, nothing rerun.
     #[farhelm_testtrace::test]
     fn d3_failed_state_restart_is_refused() {
-        let marker = fresh_marker("prep-d3g");
-        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()), &marker);
+        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
         write_preparation_state(
             &fixture.preparation.state_path,
             "wc-1",
@@ -3346,7 +3345,7 @@ printf 'AGENT-RAN\n'
             },
             "the refusal must not overwrite the state evidence"
         );
-        assert!(no_stage_ran(&fixture, &marker));
+        assert!(no_stage_ran(&fixture));
         assert!(fixture.sentinel_contains("preparation failed at stage restart"));
     }
 
@@ -3355,8 +3354,7 @@ printf 'AGENT-RAN\n'
     /// spawning the terminal, so absence means the evidence is gone.
     #[farhelm_testtrace::test]
     fn d3_absent_state_file_fails_closed() {
-        let marker = fresh_marker("prep-d3h");
-        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()), &marker);
+        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
         std::fs::remove_file(&fixture.preparation.state_path).unwrap();
         let (report, _terminal, _status) = fixture.run_shim_in_child();
         assert!(
@@ -3368,7 +3366,7 @@ printf 'AGENT-RAN\n'
             !fixture.preparation.state_path.exists(),
             "the refusal must not recreate the state file"
         );
-        assert!(no_stage_ran(&fixture, &marker));
+        assert!(no_stage_ran(&fixture));
     }
 
     /// D3 fail-closed contract: a corrupt state file is refused (and
@@ -3376,8 +3374,7 @@ printf 'AGENT-RAN\n'
     /// so corruption means something beneath that promise went wrong.
     #[farhelm_testtrace::test]
     fn d3_corrupt_state_file_fails_closed() {
-        let marker = fresh_marker("prep-d3i");
-        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()), &marker);
+        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
         std::fs::write(&fixture.preparation.state_path, b"{not json").unwrap();
         let (report, _terminal, _status) = fixture.run_shim_in_child();
         assert!(
@@ -3389,7 +3386,7 @@ printf 'AGENT-RAN\n'
             b"{not json",
             "the refusal must preserve the corrupt file as evidence"
         );
-        assert!(no_stage_ran(&fixture, &marker));
+        assert!(no_stage_ran(&fixture));
     }
 
     /// D3 identity check: a launch aimed at a directory that was REPLACED
@@ -3397,8 +3394,7 @@ printf 'AGENT-RAN\n'
     /// before any process runs, and record Failed{stage: cwd-identity}.
     #[farhelm_testtrace::test]
     fn d3_replaced_directory_fails_the_identity_check() {
-        let marker = fresh_marker("prep-d3j");
-        let mut fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()), &marker);
+        let mut fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
         fixture.preparation.directory_device += 1;
         fixture.preparation.directory_inode += 1;
         let (report, _terminal, _status) = fixture.run_shim_in_child();
@@ -3411,7 +3407,7 @@ printf 'AGENT-RAN\n'
             other => panic!("expected Failed at cwd-identity, got {other:?}"),
         }
         assert!(fixture.sentinel_contains("preparation failed at stage cwd-identity"));
-        assert!(no_stage_ran(&fixture, &marker));
+        assert!(no_stage_ran(&fixture));
     }
 
     // ---------------------------------------------------------------------
@@ -3612,8 +3608,9 @@ printf 'AGENT-RAN\n'
     /// The D4 fixture: hook shell wired to park on a fifo until the
     /// parent releases it. Returns (fixture, fifo path, hook record
     /// prefix).
-    fn build_d4_fixture(marker: &Path) -> (PrepFixture, PathBuf) {
-        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()), marker);
+    fn build_d4_fixture() -> (PrepFixture, PathBuf) {
+        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
+        let marker = fixture.marker();
         let fifo = fixture.tmp.path().join("hook-release.fifo");
         let c_fifo = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
         // SAFETY: mkfifo on a fresh path inside the fixture tempdir.
@@ -3635,8 +3632,8 @@ printf 'AGENT-RAN\n'
     /// retained. The hook itself must exit after release (cleanup proof).
     #[farhelm_testtrace::test]
     fn d4_killed_shim_never_repeats_the_hook_or_spawns_the_agent() {
-        let marker = fresh_marker("prep-d4a");
-        let (fixture, fifo) = build_d4_fixture(&marker);
+        let (fixture, fifo) = build_d4_fixture();
+        let marker = fixture.marker();
         let hook_record = marker.with_extension("hook.argv");
         let git_ran = PathBuf::from(format!(
             "{}.git-ran",
@@ -3803,8 +3800,8 @@ printf 'AGENT-RAN\n'
     #[farhelm_testtrace::test]
     #[cfg(target_os = "linux")]
     fn d4_second_concurrent_launch_waits_for_the_lock() {
-        let marker = fresh_marker("prep-d4b");
-        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()), &marker);
+        let fixture = build_d1_fixture(Some("echo hook-body-ran".to_string()));
+        let marker = fixture.marker();
 
         // The TEST process holds the lock (opened and flocked here; the
         // spawned contender must contend through its own open because
@@ -3872,9 +3869,9 @@ printf 'AGENT-RAN\n'
     #[farhelm_testtrace::test]
     #[cfg(target_os = "linux")]
     fn d4_no_preparation_child_inherits_the_flock() {
-        let marker = fresh_marker("prep-d4c");
         let (fixture, report, _terminal, _status) =
-            run_d1_style_fixture(Some("echo hook-body-ran".to_string()), &marker);
+            run_d1_style_fixture(Some("echo hook-body-ran".to_string()));
+        let marker = fixture.marker();
         assert!(report.is_empty(), "the run must succeed: {report}");
         let fds = std::fs::read_to_string(PathBuf::from(format!(
             "{}.fds",
