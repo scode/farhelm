@@ -86,6 +86,49 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   CSS comment above `.session-row.deleting` records that an earlier, subtler indicator went unnoticed. The sidebar row's
   tint and the header's label use the same red for the same state; whether they follow is open.
 
+- **Accept a leftover uninstall receipt after the install directory moves.** On macOS, an interrupted
+  `farhelm uninstall` leaves `~/Applications/.Farhelm.app.uninstall-receipt`, a copy of the bundle's ownership record,
+  so a retry can finish. Before building `Farhelm.app`, `scripts/install.sh` checks that receipt with
+  `record_file_is_ours "$pending_receipt" "$pir_canonical"`, an exact match of the directory the record names against
+  this installation's canonical directory, and refuses the bundle step for any other receipt with "was left by an
+  interrupted farhelm uninstall and is not this installation's record ... (or delete it if that installation is gone)".
+  The bundle's own record gets a wider rule (#1278): `bundle_record_moved_here` also accepts a record naming a directory
+  that now resolves to this one (the old `~/.local/bin` replaced by a symlink, a renamed home) or that provably no
+  longer holds an installation (`path_provably_absent`), with `bundle_record_dir` parsing the record. The receipt check
+  never got that rule, so after such a move an interrupted uninstall's receipt is refused as foreign, and the message
+  points the user at "that installation", which is this one. Fix: give `bundle_record_dir` a variant that takes the
+  record file's path (as `record_file_is_ours` was split out of `bundle_record_is_ours`), accept the receipt when the
+  moved-here rule accepts it, and delete it after the rebuild the same way an exact-match receipt is deleted today.
+  Cover it in `scripts/test-install-sh.sh` next to the existing leftover-receipt cases, and update the leftover-receipt
+  paragraph in `docs/install_uninstall.md`. Low severity: the refusal is over-cautious, never destructive, and deleting
+  the receipt by hand recovers. Found while rebasing the review-feedback stack onto #1278.
+
+- **Decide whether teardown should wait out the systemd probe's timeout backoff.** When the supervisor's probe of the
+  systemd user manager runs out of time, `crates/farhelm-supervisor/src/scope.rs` caches `Verdict::TimedOut` and, for
+  `TIMED_OUT_REPROBE_INTERVAL` (60 s), both `ScopeManager::available()` and `reprobe()` answer false without asking the
+  manager again, even for a caller holding scope evidence (#1279). Stop, Restart, Delete and tab close treat a scope
+  they know the launch had but cannot check as an unconfirmed cleanup (SPEC.md "Lifecycle operations", confirmed
+  2026-09-28): `reap_process_tree` in `service/sweep.rs` turns each recorded unit into "scope ... could not be checked
+  because this host's systemd user manager is not usable now", and `ScopeKillFailure::Refuse` fails the operation. So
+  for up to a minute after a probe timeout, those operations fail on every scoped session and tab, and the ticker's
+  `reap_dead_tabs` fails and warns on each tick for a dead scoped tab, spending that tick's tab-reap budget. A retry
+  after the window works. The question: is that acceptable, or should teardown with durable scope evidence (a unit the
+  session row recorded, a tab window marked as opened in a scope) probe again at once despite the backoff? Re-probing
+  costs up to the probe's 15 s bound per teardown while the manager stays slow, which is what the backoff exists to
+  avoid. Whatever is chosen, record it in SPEC_impl.md's scope paragraph ("The manager is probed once and the answer
+  cached, with two exceptions ...").
+
+- **Run the host alias edit on a helm-owned task.** `set_alias` in `crates/farhelm-helm/src/hosts.rs` commits the new
+  alias (`store.update_alias`) and then calls `manager.sync_registry()`, both on the request's own task. The reconcile
+  is what announces the edit on the event feed (see the "Only the alias is compared" comment in `sync_registry` in
+  `manager.rs`), so a client that disconnects between the two leaves the alias saved while every other open client keeps
+  showing the old one until an unrelated reconcile runs (another host add, edit or removal, or a helm restart). That is
+  the commit-then-follow-up shape SPEC_impl.md "Who owns an accepted action" rules out. Add, retarget, remove, adopt and
+  the YOLO-safe toggle already run their bodies through `crate::run_owned`; give `set_alias` the same shape as
+  `set_destination` (a thin handler calling `crate::run_owned(set_alias_owned(state, host, spec))`), keeping its
+  provisioning lock and write lock inside the owned body. The review-feedback triage that fixed the other host edits
+  (`host-edits-not-cancellation-safe`) did not list the alias edit.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
