@@ -1,5 +1,6 @@
 ---
 kind: breaking
+pr: 1273, 1288
 ---
 
 Starting a YOLO session on a host that is not marked safe for YOLO launches now asks first. In the GUI, a create,
