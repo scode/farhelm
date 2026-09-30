@@ -698,6 +698,50 @@ impl OutputStream {
         &self.pane
     }
 
+    /// The session identity paired with `pane` for liveness observations.
+    /// A pane id alone must not attribute another session's death to this stream.
+    pub(crate) fn session(&self) -> &str {
+        &self.session
+    }
+
+    /// Request this pane's `%pause` boundary without borrowing its reader.
+    ///
+    /// tmux can discard queued control output when a pane dies while keeping
+    /// its rendered history. An external pause enters the existing replay
+    /// recovery at a protocol boundary. Its reply belongs to the independent
+    /// command connection, not the stream's positional replay exchanges.
+    /// The owned future lets the caller retain an in-flight `next_output`;
+    /// cancelling that read and reusing the stream would be unsound.
+    pub(crate) fn request_pause(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + 'static {
+        let driver = self.driver.clone();
+        let target = self.client_target.clone();
+        let pane = self.pane.clone();
+        // Bounded, and killed if dropped: while this runs the forwarder has
+        // stopped polling its output read, and neither the client-stall
+        // deadline (which only runs during a client pause) nor teardown's
+        // cancellation would otherwise stop a stalled tmux client from
+        // pinning the attachment or outliving it.
+        let exchange_timeout = self.exchange_timeout;
+        async move {
+            driver
+                .run_bytes_within(
+                    &[
+                        "refresh-client",
+                        "-t",
+                        &target,
+                        "-A",
+                        &format!("{pane}:pause"),
+                    ],
+                    Some(exchange_timeout),
+                )
+                .await
+                .context("pausing dead pane output for history recovery")?;
+            Ok(())
+        }
+    }
+
     /// Every pane of this stream's session except its own, asked while
     /// output is still off so the answer can be folded into the cutover.
     ///

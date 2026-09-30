@@ -1034,6 +1034,7 @@ mod tests {
                 forwarder_cleanup: cleanup_rx,
                 input,
                 pause,
+                pane_death: super::super::terminals::PaneDeath::new(&tmux_name, &pane).0,
                 sink,
             },
         );

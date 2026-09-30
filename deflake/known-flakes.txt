@@ -9,4 +9,3 @@
 # remove this line in the same PR. See deflake/SPEC.md.
 #
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
-nextest farhelm::e2e session_lifecycle::non_utf8_terminal_output_survives_live_stream  # non-utf8-marker-missing

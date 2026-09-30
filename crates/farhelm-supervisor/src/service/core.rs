@@ -743,6 +743,10 @@ fault_hooks! {
     sink_candidate_wait_gate: SinkLookupGate,
     /// See [`NaturalDetachGate`]. `None` in production.
     natural_detach_gate: NaturalDetachGate,
+    /// Drop live payloads after decoding while leaving replay untouched. Tests
+    /// arm this only after observing live readiness to model tmux's silent EOF
+    /// loss deterministically. The immediate-exit producer remains unchanged.
+    suppress_live_output: Arc<std::sync::atomic::AtomicBool>,
     /// See [`ForwarderCleanupGate`]. `None` in production.
     forwarder_cleanup_gate: ForwarderCleanupGate,
     /// See [`AgentAuthGate`]. `None` in production.
