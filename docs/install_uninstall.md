@@ -36,12 +36,17 @@ preserve user data, but already-running processes need restarting to use the new
 before updating and relaunch it afterward. Follow the installer's restart guidance for services and other processes.
 
 On macOS the installer rebuilds `~/Applications/Farhelm.app` on every run, replacing the whole bundle, but only when it
-can tell the bundle is its own: the bundle's record (see below) names this install directory, or it is the recordless
-bundle releases from early September 2026 built, recognised by its exact layout and bundle identifier. The record alone
-is enough, so a bundle that an interrupted uninstall half emptied is still rebuilt, and edits or extra files inside a
+can tell the bundle is its own: the bundle's record (see below) names this install directory, or it names a directory
+this installation moved from (one that now resolves to this install directory, such as an old `~/.local/bin` replaced by
+a symlink to its new home, or one that no longer holds a Farhelm installation at all), or it is the recordless bundle
+releases from early September 2026 built, recognised by its exact layout and bundle identifier. The record alone is
+enough, so a bundle that an interrupted uninstall half emptied is still rebuilt, and edits or extra files inside a
 bundle whose record matches are not kept. Any other `Farhelm.app`, such as one you built or customised, or one recorded
-for a different install directory, is left untouched and the installer exits with an error after the executables
-themselves are already updated. Rename or remove that bundle and re-run the installer to get the app.
+for a different install directory that still holds an installation (or one the installer cannot look into), is left
+untouched and the installer exits with an error after the executables themselves are already updated; for a bundle
+recorded for another installation, the error names that installation's directory. Rename or remove that bundle, or
+uninstall the other installation, and re-run the installer to get the app. The uninstaller's own check is unchanged: it
+still removes only a bundle recorded for the installation it is uninstalling.
 
 The installer only replaces a `farhelm` (or, on macOS, `farhelm-desktop`) in the install directory when its checksum
 matches the executable-directory record below, meaning it is the file the installer itself last put there. Any other

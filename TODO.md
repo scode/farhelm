@@ -163,16 +163,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     tell them apart unless the Rust view passes its deleting state in.
   - SPEC.md requires a failed delete's cleanup failure to stay visible, so a suppressed banner must come back, or be
     replaced by something equivalent, when the delete fails.
-- **Installer refuses its own app bundle after the install directory moves.** Since #1145, `scripts/install.sh` on macOS
-  replaces `~/Applications/Farhelm.app` only when the bundle's ownership record names the install directory's current
-  physical path. If that path changes between installs (`~/.local/bin` moved and replaced by a symlink to its new
-  location, a different `FARHELM_INSTALL_DIR`, a renamed home directory), every later install updates the binaries and
-  then exits 1 with "does not look like a farhelm app bundle", leaving the app on the old version. The uninstall command
-  refuses the bundle too, so only deleting it by hand recovers. An installer interrupted mid-replacement, after the
-  bundle's record is gone, lands in the same refusal. v0.18.0 replaced such a bundle. Reproduced against a fixture home
-  with a macOS `uname` shim during the v0.19.0-rc.1 installer review, not on a real Mac. Recognize a bundle whose record
-  names a directory that no longer holds a Farhelm installation as this installation moved, and say which directory the
-  record names when refusing.
+- **Installer refuses its own app bundle after an interrupted replacement.** On macOS, `scripts/install.sh` rebuilds
+  `~/Applications/Farhelm.app` by removing the old bundle (`rm -rf`) and moving the staged one into place. An installer
+  interrupted during that removal can leave a partial bundle whose ownership record (`Contents/.farhelm-installation`)
+  is already gone; every later install then refuses it as foreign ("does not look like a farhelm app bundle") and exits
+  1, and only deleting it by hand recovers. Accepting incomplete bundles in general would break the foreign-bundle
+  safeguard. The review of the moved-install-directory fix suggested keeping the ownership evidence outside the bundle
+  (beside it, as the uninstaller does with `~/Applications/.Farhelm.app.uninstall-receipt`) until the replacement
+  completes. Split out of the entry on installs after the install directory moves, which fixed the rest.
 - **A slow systemd user manager silently turns off cgroup scopes.** Assess whether to remove or raise the time limits on
   the supervisor's user-manager probe (`scope::probe_systemd`: 15 seconds for the whole probe, `PROBE_TIMEOUT`, and 5
   for each `systemctl` query, `SYSTEMCTL_TIMEOUT`). The probe runs once, at the supervisor's first launch or teardown,

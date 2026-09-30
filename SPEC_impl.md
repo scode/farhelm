@@ -2494,7 +2494,12 @@ single-instance activation (relaunching activates the running app instead of rac
 It is a derived artifact rebuilt wholesale by every install run — the flat pair stays the source of truth and the only
 state the installer's transaction journal covers — and nothing in the app reads it: asset serving stays the embedded
 tree below, and the sibling contract is satisfied inside `Contents/MacOS/` exactly as it is in `~/.local/bin`.
-`FARHELM_NO_APP_BUNDLE=1` skips it.
+`FARHELM_NO_APP_BUNDLE=1` skips it. An existing `Farhelm.app` is replaced only when its ownership record
+(`Contents/.farhelm-installation`) names this installation's directory, names a directory that now resolves to it or no
+longer holds a Farhelm installation (the installation moved, by a different `FARHELM_INSTALL_DIR`, a directory replaced
+by a symlink, or a renamed home), or when it is the recordless layout the installer built before records existed. A
+record naming a directory that still holds an installation belongs to that installation; the installer refuses it and
+says which directory it names.
 
 The dx-produced bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's
 `asset!()` files were the only thing that needed one. They are served instead from the UI tree compiled into
