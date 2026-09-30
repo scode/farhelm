@@ -2570,7 +2570,11 @@ tree below, and the sibling contract is satisfied inside `Contents/MacOS/` exact
 longer holds a Farhelm installation (the installation moved, by a different `FARHELM_INSTALL_DIR`, a directory replaced
 by a symlink, or a renamed home), or when it is the recordless layout the installer built before records existed. A
 record naming a directory that still holds an installation belongs to that installation; the installer refuses it and
-says which directory it names.
+says which directory it names. Only one run assembles the bundle at a time, whatever install directory it uses: a run
+that finds `~/Applications/.farhelm-app.lock` held, or left by an interrupted run, refuses the bundle step. The new
+bundle is built in a private directory beside the old one and the old one is moved aside rather than deleted in place,
+so an interrupted run leaves the old bundle, the new one, or none under the public name, never a partial bundle whose
+record is gone.
 
 The dx-produced bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's
 `asset!()` files were the only thing that needed one. They are served instead from the UI tree compiled into

@@ -1043,6 +1043,30 @@ EOF
     rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
   }
 
+  # Undo whatever the bundle step (step 7 of main) left half done, then drop
+  # its lock. A private build directory still holding the previous bundle
+  # means the swap did not finish: the previous bundle goes back if the
+  # public name is free, and the directory is deleted only once it no
+  # longer holds it, so a failed restore never deletes the user's app. Safe
+  # to call when the bundle step never ran, and more than once.
+  release_bundle_lock() {
+    if [ -n "${BUNDLE_WORK:-}" ] && [ -d "$BUNDLE_WORK" ]; then
+      if [ -e "$BUNDLE_WORK/previous" ] && [ ! -e "$app_path" ]; then
+        mv "$BUNDLE_WORK/previous" "$app_path" 2>/dev/null || true
+      fi
+      if [ -e "$BUNDLE_WORK/previous" ]; then
+        printf 'the previous %s could not be put back; it is at %s\n' "$app_path" "$BUNDLE_WORK/previous" >&2
+      else
+        rm -rf "$BUNDLE_WORK" 2>/dev/null || true
+      fi
+    fi
+    BUNDLE_WORK=""
+    if [ "${BUNDLE_LOCK_HELD:-0}" -eq 1 ]; then
+      BUNDLE_LOCK_HELD=0
+      rmdir "$BUNDLE_LOCK" 2>/dev/null || true
+    fi
+  }
+
   # The EXIT/INT/TERM/HUP handler. Always removes the ephemeral staging
   # directory. If this process holds the lock, it also checks for an
   # in-progress transaction journal: if one exists, the replacement never
@@ -1064,6 +1088,7 @@ EOF
   # chance to run at all.
   cleanup() {
     rm -rf "$STAGING_DIR" 2>/dev/null || true
+    release_bundle_lock
     if [ "${LOCK_ACQUIRED:-0}" -eq 1 ]; then
       if [ -e "$JOURNAL" ]; then
         if rollback_from_journal; then
@@ -1283,6 +1308,9 @@ EOF
     # settled here rather than at the replacement phase that uses them.
     JOURNAL="$LOCK_DIR/journal"
     LOCK_ACQUIRED=0
+    # Set by the macOS bundle step; see release_bundle_lock.
+    BUNDLE_LOCK_HELD=0
+    BUNDLE_WORK=""
     trap cleanup EXIT
     # Translate the catchable termination signals into a plain `exit`,
     # which runs the EXIT trap above — the same cleanup either way, without
@@ -1549,14 +1577,13 @@ EOF
       printf 'could not publish installer ownership metadata. The binaries in %s are installed and usable; re-run the installer to repair uninstall metadata.\n' "$INSTALL_DIR" >&2
       exit 1
     fi
-    # Stop claiming the lock BEFORE releasing it. Once the slot is free,
-    # another installer can take it and write its own journal there; if this
-    # process still believed it held the lock, its exit handler would roll
-    # back or unlock that installer's live transaction. Clearing the flag
-    # first means a signal arriving in between leaves a stale lock (which the
-    # next run recovers) rather than acting on someone else's.
-    LOCK_ACQUIRED=0
-    remove_owned_lock
+    # The lock stays held through the bundle step below, and is released
+    # only after it. The bundle copies the binaries now in $INSTALL_DIR; with
+    # the slot free, another installer for this directory could commit
+    # different ones between the two copies and leave a bundle holding one
+    # binary from each version under this run's version number, or swap the
+    # bundle at the same time as this run. The journal is already gone, so
+    # an interruption from here on only removes the lock (see cleanup).
 
     # 7. macOS launcher identity: assemble ~/Applications/Farhelm.app around
     # COPIES of the binaries just committed, plus the icon staged from the
@@ -1569,7 +1596,7 @@ EOF
     # transaction above: the journal's vocabulary is exactly the two flat
     # binaries, and the bundle is reconstructible from any committed pair,
     # so every run that gets this far simply rebuilds it wholesale — staged
-    # next to the binaries, then swapped in with rm -rf + mv rather than
+    # next to the binaries, then swapped in by renaming rather than
     # edited in place (in-place modification of an existing .app is what
     # trips macOS's App Management privacy prompt). A failure here exits 1,
     # but the messages say what is still true: the binaries in
@@ -1592,6 +1619,31 @@ EOF
       else
         app_parent="$HOME/Applications"
         app_path="$app_parent/Farhelm.app"
+
+        bundle_fail() {
+          printf 'assembling %s failed at: %s\n' "$app_path" "$1" >&2
+          printf 'The binaries in %s are installed and usable; re-run the installer to retry the bundle.\n' "$INSTALL_DIR" >&2
+          exit 1
+        }
+
+        # The bundle has its own lock, next to it. The install lock only
+        # keeps runs for the same install directory apart, but every install
+        # directory shares this one bundle name: two installs of different
+        # directories could each find the name free and both move a bundle
+        # onto it, and `mv` onto an existing directory nests the second
+        # inside the first. Contention refuses, as does a lock an interrupted
+        # run left behind, which nothing can tell from a live one; the
+        # binaries are already installed either way. The ownership check
+        # below runs under this lock so no other run can change the bundle
+        # between that check and the swap.
+        (umask 022; mkdir -p "$app_parent") || bundle_fail "creating $app_parent"
+        BUNDLE_LOCK="$app_parent/.farhelm-app.lock"
+        if ! (umask 077; mkdir "$BUNDLE_LOCK") 2>/dev/null; then
+          printf 'another farhelm install is assembling %s right now, or one was interrupted while doing so; wait a moment and re-run -- if this persists, remove %s by hand\n' "$app_path" "$BUNDLE_LOCK" >&2
+          printf 'The binaries in %s are installed and usable.\n' "$INSTALL_DIR" >&2
+          exit 1
+        fi
+        BUNDLE_LOCK_HELD=1
 
         # Replace only a bundle this installer can show it built: one that
         # carries this installation's bundle record, or the recordless shape
@@ -1623,13 +1675,15 @@ EOF
           fi
         fi
 
-        bundle_fail() {
-          printf 'assembling %s failed at: %s\n' "$app_path" "$1" >&2
-          printf 'The binaries in %s are installed and usable; re-run the installer to retry the bundle.\n' "$INSTALL_DIR" >&2
-          exit 1
-        }
-
-        bundle_stage="$STAGING_DIR/Farhelm.app"
+        # Built in a private directory beside the bundle, so the final move
+        # is a rename on the same filesystem (the install directory may be on
+        # another one, where `mv` would copy the tree into the public name
+        # and an interruption could leave half a bundle there). The previous
+        # bundle is moved into the same directory before the swap, so the
+        # public name only ever holds the old bundle, nothing, or the new
+        # one, and everything deleted afterwards is this run's own.
+        BUNDLE_WORK=$(mktemp -d "$app_parent/.farhelm-app-build.XXXXXX") || bundle_fail "creating a private build directory in $app_parent"
+        bundle_stage="$BUNDLE_WORK/Farhelm.app"
         (umask 022; mkdir -p "$bundle_stage/Contents/MacOS" "$bundle_stage/Contents/Resources") || bundle_fail "creating the staging layout"
         cp "$INSTALL_DIR/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm-desktop" || bundle_fail "copying farhelm-desktop"
         cp "$INSTALL_DIR/farhelm" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "copying farhelm"
@@ -1685,9 +1739,16 @@ PLIST_EOF
         write_bundle_record "$bundle_stage" "$pir_canonical" "$bundle_cli_sha" "$bundle_desktop_sha" \
           "$bundle_plist_sha" "$bundle_icns_sha" || bundle_fail "writing installer ownership metadata"
 
-        (umask 022; mkdir -p "$app_parent") || bundle_fail "creating $app_parent"
-        rm -rf "$app_path" || bundle_fail "removing the previous bundle (grant your terminal App Management in System Settings > Privacy & Security if this said 'Operation not permitted')"
+        # Swap by renaming, not by deleting in place: interrupting `rm -rf`
+        # on the live name used to leave a half-deleted bundle no later run
+        # or uninstall would accept. If the move in fails, cleanup puts the
+        # previous bundle back.
+        if [ -e "$app_path" ]; then
+          mv "$app_path" "$BUNDLE_WORK/previous" || bundle_fail "moving the previous bundle aside (grant your terminal App Management in System Settings > Privacy & Security if this said 'Operation not permitted')"
+        fi
         mv "$bundle_stage" "$app_path" || bundle_fail "moving the staged bundle into place"
+        rm -rf "$BUNDLE_WORK" || printf 'note: could not delete %s, which held the previous bundle; it is safe to delete\n' "$BUNDLE_WORK" >&2
+        BUNDLE_WORK=""
 
         # Registration is best-effort tidiness: Launch Services discovers
         # ~/Applications on its own, this just shortens the wait. The
@@ -1698,8 +1759,18 @@ PLIST_EOF
           "$LSREGISTER" -f "$app_path" >/dev/null 2>&1 || true
         fi
         BUNDLE_NOTE="Assembled $app_path (Spotlight, Dock, and Cmd-Tab identity)."
+        release_bundle_lock
       fi
     fi
+
+    # Stop claiming the lock BEFORE releasing it. Once the slot is free,
+    # another installer can take it and write its own journal there; if this
+    # process still believed it held the lock, its exit handler would roll
+    # back or unlock that installer's live transaction. Clearing the flag
+    # first means a signal arriving in between leaves a stale lock (which the
+    # next run recovers) rather than acting on someone else's.
+    LOCK_ACQUIRED=0
+    remove_owned_lock
 
     # 8. Report. What happened first (the install summary and bundle
     # note), then the update restart reminder and PATH repair, then the

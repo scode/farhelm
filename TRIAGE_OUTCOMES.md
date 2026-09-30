@@ -3688,7 +3688,20 @@
   this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; scripts/install.sh keeps the install lock through the macOS bundle step, so the bundle copies
+  this run's committed binaries, and the bundle step takes its own lock (`~/Applications/.farhelm-app.lock`, a `mkdir`),
+  because every install directory shares the one bundle name. Contention, or a lock an interrupted run left, refuses the
+  bundle step with remove-by-hand advice (the binaries are installed). Under that lock the ownership check runs, the new
+  bundle is built in a private `mktemp -d` directory beside it (same filesystem, so the final `mv` is a rename), the old
+  bundle is moved into that directory, the new one moved in, and only then the directory deleted; the exit handler puts
+  the old bundle back if the swap did not finish. Regression checks "bundle lock: ..." in scripts/test-install-sh.sh (a
+  `cp` double shows both bundle copies run under the install lock; a held bundle lock refuses and leaves bundle and lock
+  alone; unrelated hidden entries survive; "bundle swap failure" and "bundle restore failure" checks use an `mv` double
+  to show a failed swap puts the old bundle back, and a failed restore keeps it at the named private path).
+  docs/install_uninstall.md describes the one-at-a-time bundle step and the lock's recovery. jj change `pomunpvqnpxs`,
+  bookmark `pr/installer-bundle-under-lock`, draft PR [#1184](https://github.com/scode/farhelm/pull/1184/changes). The
+  swap also resolves two TODO entries (one added to main while this stack was open) that describe the in-place deletion
+  it replaces; both are removed here.
 
 ## leftover-uninstall-receipt-blocks-uninstall.md
 
