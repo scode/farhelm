@@ -921,6 +921,13 @@ pub struct SupervisorClient {
     /// dropped" while the client lives, which is why both halves set the
     /// flag explicitly on their way out rather than relying on that.
     shutdown: watch::Sender<bool>,
+    /// How many `SessionsChanged` hints the supervisor has sent on this
+    /// connection. A counter in a `watch` rather than a queue, because a
+    /// hint carries nothing but its arrival: a reader that missed three
+    /// needs to know only that the count moved, and its ordering against a
+    /// refresh (which hint a refresh STARTED after) is a comparison of
+    /// counts. See [`Self::hints`].
+    hints: watch::Sender<u64>,
 }
 
 impl Drop for SupervisorClient {
@@ -1422,6 +1429,7 @@ impl SupervisorClient {
             agent_spawn_seam: std::sync::Mutex::new(None),
             refusal_undeliverable_logged: AtomicBool::new(false),
             shutdown: connection_done.clone(),
+            hints: watch::channel(0).0,
         });
 
         // A `Weak`, deliberately: the client owns `writer_tx`, so a
@@ -1954,6 +1962,12 @@ impl SupervisorClient {
                         request,
                     } => {
                         self.spawn_agent_answer(*req_id, session_id.clone(), request.clone());
+                    }
+                    // Counted, never acted on here: whoever shows this host's
+                    // sessions decides what a hint means (see `Self::hints`).
+                    // A connection nobody watches for hints just counts them.
+                    ControlMsg::SessionsChanged => {
+                        self.hints.send_modify(|count| *count += 1);
                     }
                     other => warn!(?other, "unexpected control message at helm"),
                 }
@@ -2519,6 +2533,14 @@ impl SupervisorClient {
     pub async fn closed(&self) {
         let mut rx = self.closed.clone();
         let _ = rx.wait_for(|done| *done).await;
+    }
+
+    /// The count of `SessionsChanged` hints this connection has received,
+    /// as a `watch` a host's connection actor waits on alongside its poll
+    /// timer (see `manager.rs`'s `serve`). The value is the hint's number:
+    /// a refresh that starts after the count reached `n` has seen hint `n`.
+    pub fn hints(&self) -> watch::Receiver<u64> {
+        self.hints.subscribe()
     }
 
     /// Create and launch a session on this supervisor.

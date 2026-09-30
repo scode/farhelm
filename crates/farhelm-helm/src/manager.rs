@@ -150,8 +150,13 @@ pub const REPROBE_INTERVAL: Duration = Duration::from_secs(45);
 /// live round trip. Multi-host aggregation moves that round trip off the
 /// request path and behind this cadence, so keeping the number identical
 /// is what stops the visible list from getting *staler* than it is now as
-/// a side effect of gaining hosts. M6.75's push channel is what eventually
-/// retires polling on both sides.
+/// a side effect of gaining hosts.
+///
+/// Since protocol 33 this is the BACKSTOP, not the only path: a supervisor
+/// sends a content-free change hint (`ControlMsg::SessionsChanged`) when
+/// something a user can see changes, and `HostActor::serve` refreshes that
+/// host at once. The poll stays for anything a hint misses (a dropped hint,
+/// a change no hint source covers), which is why it keeps its cadence.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
 /// How long ONE connection attempt — the dial AND the hello it must
@@ -309,6 +314,13 @@ struct RefreshStep {
     /// through [`HostActor::publish_refresh`]'s value comparison instead —
     /// its "cache" IS the published status — so this stays false there.
     cache_changed: bool,
+    /// Whether this refresh's drain was thrown away because a seeded write
+    /// (a create, rename, delete, or another seed; see
+    /// [`ActorHandle::seed_epoch`]) landed while it was in flight. Such a
+    /// refresh answers nothing: a pending change hint it was meant to serve
+    /// is still pending, and `serve` refreshes again at once rather than
+    /// leaving it to the backstop poll.
+    discarded: bool,
 }
 
 /// What a refresh does to the in-memory session list a connected host
@@ -3490,7 +3502,23 @@ impl HostActor {
             live,
         );
         let mut ended = "the peer closed the connection";
+        // Change hints (`ControlMsg::SessionsChanged`): the supervisor saying
+        // something the user can see changed, so poll now. The count is each
+        // hint's number; `answered` is the highest one a refresh that STARTED
+        // after it has completed, and anything above it is pending. A refresh
+        // already in flight when a hint arrives does not answer it: it may
+        // have read the host before the change.
+        let mut hints = client.hints();
+        // Zero, not the current count: the connection's reader runs from the
+        // handshake on, so a hint can arrive before this loop's first
+        // refresh has started, and that refresh must answer it rather than
+        // it counting as answered already. A new connection's count starts
+        // at zero, so this is exactly "nothing answered yet".
+        let mut answered = 0;
         loop {
+            // Marked seen here, so a hint arriving during this refresh shows
+            // up as a change afterwards and gets a refresh of its own.
+            let hints_at_start = *hints.borrow_and_update();
             let step = tokio::select! {
                 _ = next_nudge(nudge) => {
                     ended = "the host was reconfigured or an immediate retry was requested";
@@ -3517,6 +3545,21 @@ impl HostActor {
             }
             let end_connection = step.end_connection;
             let cache_changed = step.cache_changed;
+            let discarded = step.discarded;
+            // This refresh answers every hint it started after, if it
+            // completed with a real listing. Answering one ALWAYS raises a
+            // feed event, even when the cache compared equal: the hint is
+            // the supervisor saying a client may be showing something stale
+            // (a tab opened and exited between two refreshes leaves the cache
+            // unchanged but a client's optimistic tab behind), and a client
+            // re-reads only on an event. The poll's own changed-only rule is
+            // untouched for refreshes no hint asked for.
+            let answers_hint = hints_at_start > answered
+                && !discarded
+                && matches!(step.health, RefreshHealth::Ok { .. });
+            if answers_hint {
+                answered = hints_at_start;
+            }
             self.publish_refresh(
                 HostState::Connected {
                     identity: identity.clone(),
@@ -3537,12 +3580,22 @@ impl HostActor {
             // extra coalesced wake, whereas ordering the cache's bump
             // BEFORE the publish would let a client read the new rows
             // beside the previous refresh's health.
-            if cache_changed {
+            if cache_changed || answers_hint {
                 self.events.bump();
             }
             if let Some(reason) = end_connection {
                 ended = reason;
                 break;
+            }
+            // Refresh again at once, skipping the wait, when a hint is still
+            // unanswered and either arrived during this refresh or this
+            // refresh was thrown away by a seeded write. A FAILED refresh is
+            // left to the wait below, so a failing host cannot spin; the
+            // backstop poll (or the next hint) retries it on the host's
+            // ordinary schedule.
+            let pending = *hints.borrow() > answered;
+            if pending && (discarded || hints.has_changed().unwrap_or(false)) {
+                continue;
             }
             tokio::select! {
                 _ = client.closed() => break,
@@ -3564,6 +3617,15 @@ impl HostActor {
                     ended = "the host was reconfigured or an immediate retry was requested";
                     break;
                 }
+                // A change hint: refresh now instead of at the next poll.
+                _ = async {
+                    if hints.changed().await.is_err() {
+                        // The client owns the sender and outlives this loop,
+                        // so this cannot happen; parked for the same reason
+                        // as the refresh arm above if it ever did.
+                        std::future::pending::<()>().await;
+                    }
+                } => {}
             }
         }
         // Whatever ended this connection, the nudge that may also have
@@ -3669,6 +3731,7 @@ impl HostActor {
                     contested: None,
                     truncated: None,
                     cache_changed: false,
+                    discarded: false,
                 };
             }
             Ok(Ok(drained)) => drained,
@@ -3696,6 +3759,7 @@ impl HostActor {
                     contested: None,
                     truncated: None,
                     cache_changed: false,
+                    discarded: false,
                 };
             }
         };
@@ -3715,6 +3779,7 @@ impl HostActor {
                 contested: None,
                 truncated: None,
                 cache_changed: false,
+                discarded: false,
             };
         }
         let Some(identity) = identity else {
@@ -3738,6 +3803,7 @@ impl HostActor {
                     contested: None,
                     truncated: None,
                     cache_changed: false,
+                    discarded: true,
                 };
             }
             // The durable branch performs this inside its cache transaction.
@@ -3753,6 +3819,7 @@ impl HostActor {
                 contested: Some(Arc::new(Vec::new())),
                 truncated: Some(truncated),
                 cache_changed: false,
+                discarded: false,
             };
         };
         let sessions = entries.len();
@@ -3779,6 +3846,7 @@ impl HostActor {
                 contested: None,
                 truncated: None,
                 cache_changed: false,
+                discarded: true,
             };
         }
         match self
@@ -3809,6 +3877,7 @@ impl HostActor {
                     contested: Some(Arc::new(contested)),
                     truncated: Some(truncated),
                     cache_changed: changed,
+                    discarded: false,
                 }
             }
             Err(error) => {
@@ -3850,6 +3919,7 @@ impl HostActor {
                     contested: None,
                     truncated: None,
                     cache_changed: false,
+                    discarded: false,
                 }
             }
         }
@@ -4630,6 +4700,18 @@ mod tests {
         /// smaller stand-in, since a panic is exactly what an unexpected
         /// bug is.
         panic_on_dial: bool,
+        /// When set, the peer sends `SessionsChanged` each time a test sends
+        /// on this channel: a supervisor's change hint, on demand. Read from
+        /// the dial-time snapshot, since a peer subscribes once.
+        hint_sender: Option<broadcast::Sender<()>>,
+        /// When set, the peer takes one permit before answering each
+        /// `ListSessions` (read from the LIVE script), so a test can hold a
+        /// refresh in flight and act while it is.
+        list_gate: Option<Arc<tokio::sync::Semaphore>>,
+        /// The peer sends one `SessionsChanged` right after the handshake,
+        /// before the helm has asked for anything: a hint that reaches the
+        /// helm while its connection actor is still setting up.
+        hint_after_hello: bool,
     }
 
     impl Default for Script {
@@ -4646,6 +4728,9 @@ mod tests {
                 silent_list: false,
                 close_on_list: false,
                 panic_on_dial: false,
+                hint_sender: None,
+                list_gate: None,
+                hint_after_hello: false,
             }
         }
     }
@@ -4925,9 +5010,31 @@ mod tests {
         if !matches!(reader.read_frame().await, Ok(Some(_))) {
             return;
         }
+        if hello.hint_after_hello
+            && writer
+                .write_control(&ControlMsg::SessionsChanged)
+                .await
+                .is_err()
+        {
+            return;
+        }
+        let mut hint_rx = hello.hint_sender.as_ref().map(broadcast::Sender::subscribe);
         loop {
             let frame = tokio::select! {
                 _ = kill.recv() => return,
+                _ = async {
+                    match hint_rx.as_mut() {
+                        Some(rx) => {
+                            let _ = rx.recv().await;
+                        }
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    if writer.write_control(&ControlMsg::SessionsChanged).await.is_err() {
+                        return;
+                    }
+                    continue;
+                }
                 frame = reader.read_frame() => frame,
             };
             let Ok(Some(frame)) = frame else { return };
@@ -4953,6 +5060,12 @@ mod tests {
                     // helm sees EOF where it expected a reply, as it would
                     // if the supervisor had been killed mid-refresh.
                     return;
+                }
+                if let Some(gate) = &current.list_gate {
+                    gate.acquire()
+                        .await
+                        .expect("the list gate is never closed")
+                        .forget();
                 }
                 if writer
                     .write_control(&list_reply(&current, req_id))
@@ -5934,6 +6047,259 @@ mod tests {
             vec!["live".to_string()],
             "the dead install's cached sessions must be gone, not merged with the new one's"
         );
+    }
+
+    /// A cadence whose only feed events come from what a test does: the
+    /// backstop poll an hour away, and the always-unreachable local row
+    /// giving up after one attempt and not re-probing for an hour, so its
+    /// retry ladder cannot bump the fleet-wide feed a hint test watches.
+    fn quiet_cadence() -> Cadence {
+        Cadence {
+            refresh: Duration::from_secs(3600),
+            connect_backoff: Vec::new(),
+            reprobe: Duration::from_secs(3600),
+            ..Cadence::default()
+        }
+    }
+
+    /// Connect `fixture`'s one scripted remote host and wait for its first
+    /// refresh AND for the local row to have settled into re-probing, then
+    /// return the host and the feed's revision: from here, with
+    /// [`quiet_cadence`], nothing but the test moves the feed.
+    async fn connected_hinting_host(fixture: &Fixture) -> (HostId, u64) {
+        let hosts = fixture.store.list_hosts().await.unwrap();
+        let (local, host) = (hosts[0].id, hosts[1].id);
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.manager.wait_for_state(local, |state| {
+                matches!(state, HostState::Unreachable { .. })
+            }),
+        )
+        .await
+        .expect("fixture premise: the local row settled into re-probing")
+        .expect("actor is running");
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.manager.wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Ok { .. },
+                        ..
+                    }
+                )
+            }),
+        )
+        .await
+        .expect("fixture premise: the host connected and refreshed")
+        .expect("actor is running");
+        fixture.manager.sync_registry().await.unwrap();
+        (host, fixture.manager.events().revision())
+    }
+
+    /// Wait until the feed's revision passes `before`, or fail naming why.
+    async fn wait_for_bump(fixture: &Fixture, before: u64, why: &str) {
+        let mut revisions = fixture.manager.events().subscribe();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            revisions.wait_for(|revision| *revision > before),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("no feed event: {why}"))
+        .expect("the feed outlives the fixture");
+    }
+
+    /// Spec: a change hint makes the helm refresh the host at once, and the
+    /// refresh it causes raises a feed event even though the host's list is
+    /// exactly what the cache already held. The backstop poll is an hour
+    /// away, so only the hint can explain the refresh.
+    ///
+    /// Why: clients re-read only on a feed event, and the poll raises one
+    /// only when the cache changed. A tab opened and exited between two
+    /// refreshes leaves the cache unchanged while a client still shows the
+    /// optimistic tab; if the hint's refresh obeyed the poll's rule, that
+    /// tab would linger until some unrelated change (the bug this exists
+    /// for).
+    #[farhelm_testtrace::test]
+    async fn a_hint_refreshes_at_once_and_always_raises_a_feed_event() {
+        let (hint, _) = broadcast::channel(8);
+        let hint_for_setup = hint.clone();
+        let fixture = fixture(quiet_cadence(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("hinting.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    sessions: vec![session("steady", 100)],
+                    hint_sender: Some(hint_for_setup),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let (host, before) = connected_hinting_host(&fixture).await;
+        let requests_before = fixture.transport.requests(host).len();
+
+        hint.send(()).expect("the peer is subscribed");
+        wait_for_bump(
+            &fixture,
+            before,
+            "a hint-driven refresh of an unchanged host",
+        )
+        .await;
+        assert_eq!(
+            fixture.transport.requests(host).len(),
+            requests_before + 1,
+            "the hint must cause exactly one refresh"
+        );
+    }
+
+    /// Spec: a hint stays pending through a refresh that a seeded write
+    /// threw away, and the helm refreshes again at once, without waiting
+    /// for the backstop poll, then raises the hint's feed event.
+    ///
+    /// Why: a discarded refresh answers nothing, since it read the host
+    /// before the seed. Waiting for the backstop, which may be slow, would
+    /// defeat the hint, and dropping the pending hint would lose it.
+    #[farhelm_testtrace::test]
+    async fn a_pending_hint_survives_a_discarded_refresh() {
+        let (hint, _) = broadcast::channel(8);
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let (hint_for_setup, gate_for_setup) = (hint.clone(), Arc::clone(&gate));
+        let fixture = fixture(quiet_cadence(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("discarding.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    identity: Some("discarding-peer".to_string()),
+                    sessions: vec![session("steady", 100)],
+                    hint_sender: Some(hint_for_setup),
+                    list_gate: Some(gate_for_setup),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        // The first refresh is gated too; let it through.
+        gate.add_permits(1);
+        let (_, before) = connected_hinting_host(&fixture).await;
+        let requests_before = fixture.transport.requests(host).len();
+
+        hint.send(()).expect("the peer is subscribed");
+        // Wait until the hint's refresh is parked at the gate.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while fixture.transport.requests(host).len() == requests_before {
+                // sleep-ok: polling pace behind the request log, which alone decides readiness
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the hint caused a refresh");
+        // A seed lands while that refresh is in flight, so it is discarded.
+        let current = fixture.manager.status(host).expect("connected host");
+        let claim = SessionClaim {
+            host,
+            incarnation: current.incarnation,
+            identity: Some("discarding-peer".to_string()),
+        };
+        fixture
+            .manager
+            .remember_session(&claim, &session("seeded", 200))
+            .await
+            .expect("the seed commits");
+        let seeded_revision = fixture.manager.events().revision();
+        assert!(seeded_revision >= before);
+        // Release the discarded refresh and the retry that must follow it.
+        gate.add_permits(2);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while fixture.transport.requests(host).len() < requests_before + 2 {
+                // sleep-ok: polling pace behind the request log, which alone decides readiness
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("a discarded hint refresh must be retried at once, not left to the hourly poll");
+        wait_for_bump(
+            &fixture,
+            seeded_revision,
+            "the retried refresh answering the hint",
+        )
+        .await;
+    }
+
+    /// Spec: a hint the supervisor sends during the handshake, before the
+    /// connection actor's first refresh has started, is pending for that
+    /// refresh: when a seeded write discards it, the actor refreshes again
+    /// at once rather than leaving the hint to the (hourly) backstop.
+    ///
+    /// Why: the connection's reader runs from the handshake on, so a hint
+    /// can be counted before the actor starts serving. Treating hints
+    /// counted by then as already answered would silently drop exactly the
+    /// hint a freshly (re)connected helm most needs.
+    #[farhelm_testtrace::test]
+    async fn a_hint_sent_during_the_handshake_is_still_pending() {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let gate_for_setup = Arc::clone(&gate);
+        let fixture = fixture(quiet_cadence(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("early-hint.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    identity: Some("early-peer".to_string()),
+                    sessions: vec![session("steady", 100)],
+                    hint_after_hello: true,
+                    list_gate: Some(gate_for_setup),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        // The first refresh has been asked for and is parked at the gate.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while fixture.transport.requests(host).is_empty() {
+                // sleep-ok: polling pace behind the request log, which alone decides readiness
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the first refresh started");
+        let current = fixture.manager.status(host).expect("connected host");
+        assert!(
+            current
+                .client
+                .as_ref()
+                .is_some_and(|client| *client.hints().borrow() == 1),
+            "premise: the handshake-time hint was counted before the first refresh"
+        );
+        let claim = SessionClaim {
+            host,
+            incarnation: current.incarnation,
+            identity: Some("early-peer".to_string()),
+        };
+        fixture
+            .manager
+            .remember_session(&claim, &session("seeded", 200))
+            .await
+            .expect("the seed commits while the first refresh is in flight");
+        gate.add_permits(2);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while fixture.transport.requests(host).len() < 2 {
+                // sleep-ok: polling pace behind the request log, which alone decides readiness
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the discarded first refresh must be retried at once for the pending hint");
     }
 
     /// A delete that already entered its durable write must not clear collision
