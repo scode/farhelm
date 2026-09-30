@@ -32,7 +32,7 @@
 //! exactly the one a failed read hides.
 //!
 //! That is also the sharpest contrast with this subsystem's other half.
-//! Status sharpening is allowed to be wrong because a wrong badge is
+//! Status screen reading is allowed to be wrong because a wrong badge is
 //! cosmetic; nothing here is, because a wrong claim is a conversation
 //! nobody can get back.
 

@@ -36,7 +36,7 @@
 
   ⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claud…
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ Try "fix lint errors"
+❯ Try "create a util logging.py that..."
 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   user@host:/tmp/fhc-xxxxxxxx/claude Sonnet 5.5 effort:medium [░░░░░░░░░░] 0%
   ⏸ manual mode on · ← for agents
