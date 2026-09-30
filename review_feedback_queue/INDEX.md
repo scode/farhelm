@@ -29,8 +29,6 @@ One line per open item. This file must always match the feedback files in this d
   grows per open terminal.
 - `unstable-device-number-blocks-delete.md` — the ownership check treats `st_dev` as stable, so a remount can make
   checkout sessions undeletable and unrestartable.
-- `checkout-name-scan-case-sensitive.md` — the checkout name scan is case-sensitive, so on macOS a case-variant folder
-  makes every launch conflict.
 - `ambiguous-restart-republishes-old-terminal.md` — an ambiguous restart failure republishes the pre-restart terminal,
   so a live agent is unopenable and killable without consent.
 - `idempotency-fingerprint-keeps-raw-cmdline.md` — idempotency fingerprints keep the raw command line (with any keys) in

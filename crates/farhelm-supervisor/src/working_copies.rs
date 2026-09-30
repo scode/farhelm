@@ -978,6 +978,9 @@ pub struct OccupiedScan {
 /// Exhausting it without EOF yields [`WorkingCopyError::IncompleteScan`]
 /// so a preview never proposes a name from an incomplete view. Root-open
 /// and entry-read failures propagate rather than implying a free name.
+///
+/// `basename` must be lowercase, as every candidate is; entry names are
+/// lowercased before comparison and reported lowercased.
 pub fn occupied_related_names(root: &Path, basename: &str, cap: usize) -> Result<OccupiedScan> {
     let entries = fs::read_dir(root)?;
     occupied_related_names_from_entries(entries, basename, cap)
@@ -1014,11 +1017,17 @@ where
                 });
             }
         };
+        // Compared case-insensitively: candidates are always lowercase, and
+        // on a case-insensitive filesystem (macOS's default) an entry `Bar-1`
+        // makes `mkdir bar-1` fail. Read case-sensitively, the scan called
+        // that name free, every preview proposed it again, and every create
+        // failed. On a case-sensitive filesystem this only passes over a few
+        // names that were free.
         let name = entry.file_name();
-        if let Some(name) = name.to_str()
+        if let Some(name) = name.to_str().map(str::to_lowercase)
             && (name == basename || name.starts_with(&basename_prefix))
         {
-            names.insert(name.to_owned());
+            names.insert(name);
         }
     }
     Err(WorkingCopyError::IncompleteScan { scanned: cap })
@@ -2075,6 +2084,39 @@ mod tests {
         let numbered = farhelm_proto::github_checkout::checkout_basename(&repo, None, &occupied)
             .expect("bar-01 does not occupy bar-1");
         assert_eq!(numbered.basename, "bar-1");
+    }
+
+    /// A folder whose name differs from a candidate only in letter case
+    /// occupies that candidate.
+    ///
+    /// Why it matters: on a case-insensitive filesystem, macOS's default,
+    /// `Bar-1` makes `mkdir bar-1` fail. A scan that called `bar-1` free
+    /// made every preview propose it and every create fail, with no way out
+    /// for an unnamed checkout. Specified: with `Bar-1` and `BAR-FIX` in the
+    /// root, the scan reports `bar-1` and `bar-fix` occupied, the unnamed
+    /// candidate moves on to `bar-2`, and the title "fix" is refused as
+    /// occupied.
+    #[test]
+    fn occupied_scan_treats_case_variants_as_occupied() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(dir.path().join("Bar-1")).expect("case-variant numeric");
+        fs::create_dir(dir.path().join("BAR-FIX")).expect("case-variant title");
+        let scan = occupied_related_names(dir.path(), "bar", 8).expect("complete scan");
+        assert!(scan.names.contains("bar-1") && scan.names.contains("bar-fix"));
+        let repo = farhelm_proto::github_checkout::parse_github_repo("acme/bar")
+            .expect("valid repository");
+        let occupied = |name: &str| scan.names.contains(name);
+        assert_eq!(
+            farhelm_proto::github_checkout::checkout_basename(&repo, None, &occupied)
+                .expect("lowest free candidate")
+                .basename,
+            "bar-2"
+        );
+        assert_eq!(
+            farhelm_proto::github_checkout::checkout_basename(&repo, Some("fix"), &occupied)
+                .expect_err("titled case-variant collision"),
+            farhelm_proto::github_checkout::NameError::Occupied
+        );
     }
 
     /// Spec: a fresh checkout can never be named `ARCHIVE_DIR_NAME`, even in

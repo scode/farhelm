@@ -3614,7 +3614,10 @@
   in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the occupancy scan (`occupied_related_names_from_entries` in working_copies.rs) lowercases
+  entry names before comparing them with the always-lowercase candidates, so a case-variant folder occupies its name on
+  every filesystem. Regression test `occupied_scan_treats_case_variants_as_occupied`. jj change `wxpqrpwozwwm`, bookmark
+  `pr/checkout-name-scan-ignores-case`, draft PR [#1179](https://github.com/scode/farhelm/pull/1179/changes).
 
 ## linger-failure-blocks-update-restart.md
 
