@@ -78,8 +78,6 @@ One line per open item. This file must always match the feedback files in this d
   can match a different install after restart.
 - `list-ingress-id-validation-gap.md` — session-list ingress admits empty, control-character and dot-segment ids, and
   the UI's %2E guard does not hold.
-- `cancelled-start-run-leaves-host-busy.md` — dropping the confirm request inside start_run leaves the host busy (409)
-  until the helm restarts.
 - `probe-reregister-drops-terminals.md` — probing an already-registered healthy host forces a reconnect that drops every
   open terminal on it.
 - `attach-reports-generic-timeout.md` — the attach step spins 30 s on skew/identity states and reports only "timed out".

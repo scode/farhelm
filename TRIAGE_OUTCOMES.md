@@ -3918,7 +3918,12 @@
   this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `start_update` (provisioning/service.rs) runs its body through `run_owned`, so marking the host
+  busy, waiting for its provisioning lock and spawning the run that clears the mark happen on a helm-owned task and a
+  dropped request cannot strand the mark. `start_add` already runs its claim-register-start sequence on an owned task
+  (`add-confirm-rewrites-row-before-busy-check.md`). Regression test
+  `a_dropped_update_confirmation_still_runs_and_clears_busy`. jj change `uvrxrrruunyz`, bookmark
+  `pr/update-start-owned-by-helm`, draft PR [#1197](https://github.com/scode/farhelm/pull/1197/changes).
 
 ## agent-create-replays-asker-as-child.md
 
