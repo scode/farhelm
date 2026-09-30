@@ -1000,6 +1000,17 @@ pub struct ConnectionManager {
     /// actors could not reach would need a second path back out to whoever
     /// held it.
     events: Arc<FleetEvents>,
+    /// Per-host lock serializing a provisioning run against edits of that
+    /// host's registry row (retarget, alias, removal); see
+    /// [`Self::host_provision_lock`].
+    ///
+    /// Kept here, keyed by host id, rather than on the host's actor handle:
+    /// an actor is replaced when it is revived or reconciled, including by a
+    /// provisioning run's own re-registration, and a lock that lived on the
+    /// handle would be replaced with it, letting an edit through while the
+    /// run still holds the old one. Entries are never removed; the map is
+    /// bounded by the hosts registered in this process's lifetime.
+    provision_locks: Mutex<HashMap<HostId, Arc<tokio::sync::Mutex<()>>>>,
     /// Serializes [`Self::sync_registry`] end to end — the registry READ
     /// included, which is why it cannot be the actor-map mutex (that one is
     /// std, and is deliberately never held across an await).
@@ -1265,6 +1276,7 @@ impl ConnectionManager {
             events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
+            provision_locks: Mutex::new(HashMap::new()),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         })
     }
@@ -2063,9 +2075,9 @@ impl ConnectionManager {
     ///
     /// Exists for the REGISTRY writes that must not interleave with those
     /// writers: a retarget or a removal takes it so the row cannot move under
-    /// a cache write in flight, and provisioning holds it for its whole
-    /// confirmed run so a retarget cannot move the registry out from under a
-    /// frozen host plan.
+    /// a cache write in flight. Hold it only briefly; a long holder stalls the
+    /// host's session list. Provisioning runs use
+    /// [`Self::host_provision_lock`] instead, which registry edits take first.
     ///
     /// `None` for a host with no actor — nothing can be recording anything
     /// for an id the map does not hold, so there is nothing to serialize
@@ -2080,6 +2092,27 @@ impl ConnectionManager {
             Arc::clone(&map.actors.get(&host)?.cache_lock)
         };
         Some(cache_lock.lock_owned().await)
+    }
+
+    /// Hold this host's provisioning lock: a confirmed install or update
+    /// holds it for its whole run, and retarget, alias and removal take it
+    /// (before [`Self::host_write_lock`]) so the registry cannot move out from
+    /// under a frozen host plan.
+    ///
+    /// Separate from the cache-write lock so a long run never stalls the
+    /// host's session write-backs and refreshes, which take only that one:
+    /// SPEC.md "Waiting between operations on one host" lets registry edits
+    /// wait for an install or update, never the session list. Stable across
+    /// actor replacement; see [`Self::provision_locks`].
+    pub async fn host_provision_lock(&self, host: HostId) -> tokio::sync::OwnedMutexGuard<()> {
+        let provision_lock = {
+            let mut locks = self
+                .provision_locks
+                .lock()
+                .expect("provision lock map mutex poisoned");
+            Arc::clone(locks.entry(host).or_default())
+        };
+        provision_lock.lock_owned().await
     }
 
     /// Ask `host` to refresh NOW, without disturbing anything else.
@@ -6302,6 +6335,56 @@ mod tests {
         .expect("the discarded first refresh must be retried at once for the pending hint");
     }
 
+    /// A host's provisioning lock survives the replacement of its connection
+    /// actor.
+    ///
+    /// Why it matters: actors are replaced when revived or reconciled,
+    /// including by a provisioning run's own re-registration. A lock that
+    /// lived on the actor was replaced with it, so a retarget or removal
+    /// could proceed while the run still held the old lock and moved the
+    /// registry out from under its frozen plan. Specified: with the lock held,
+    /// stopping and respawning the host's actor leaves a second acquisition
+    /// waiting until the holder releases it.
+    #[farhelm_testtrace::test]
+    async fn the_provisioning_lock_survives_actor_replacement() {
+        let fixture = fixture(
+            Cadence {
+                refresh: Duration::from_secs(3600),
+                ..Cadence::default()
+            },
+            |store, transport| async move {
+                let host = store
+                    .add_ssh_host("provisioning-lock.example", None, None)
+                    .await
+                    .unwrap();
+                transport.set_script(host, Script::default());
+            },
+        )
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        let run = fixture.manager.host_provision_lock(host).await;
+        assert!(
+            fixture.manager.stop_actor(host).await,
+            "test premise: the host had an actor"
+        );
+        fixture.manager.sync_registry().await.unwrap();
+        assert!(
+            fixture.manager.status(host).is_some(),
+            "test premise: reconciling respawned the host's actor"
+        );
+
+        let mut second = std::pin::pin!(fixture.manager.host_provision_lock(host));
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(
+            second.as_mut().poll(&mut cx).is_pending(),
+            "a registry edit must still wait for the running provisioning after actor replacement"
+        );
+        drop(run);
+        tokio::time::timeout(Duration::from_secs(10), second)
+            .await
+            .expect("the released provisioning lock is acquired");
+    }
+
     /// A delete that already entered its durable write must not clear collision
     /// evidence published under a newer connection incarnation while it awaited.
     #[farhelm_testtrace::test]
@@ -8929,6 +9012,7 @@ mod tests {
             events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
+            provision_locks: Mutex::new(HashMap::new()),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         };
         let revision = manager.events().revision();

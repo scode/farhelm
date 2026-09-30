@@ -2337,6 +2337,58 @@ mod tests {
         );
     }
 
+    /// An in-flight provisioning run never makes the host's cache writes wait.
+    ///
+    /// Why it matters: the run lasts minutes, and every session write-back and
+    /// refresh commit for the host takes the cache-write lock, so a run that
+    /// held that lock froze the host's session list and hung replies to
+    /// session operations that had already happened (SPEC.md "Waiting between
+    /// operations on one host"). Specified: while a confirmed run is blocked in
+    /// its backend, the host's cache-write lock is available at once.
+    #[farhelm_testtrace::test]
+    async fn a_running_update_leaves_the_cache_write_lock_free() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let host = harness
+            .store
+            .add_ssh_host(
+                "cache-free.example",
+                Some("/opt/farhelm"),
+                Some("/tmp/state"),
+            )
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        backend
+            .block_first
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let service = service(&harness, backend.clone(), root.path());
+        let plan = service.plan_update(host).await.unwrap();
+        service
+            .start_update(
+                host,
+                ProvisionRequest {
+                    probe_id: plan.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        backend.entered.notified().await;
+
+        let cache_write = tokio::time::timeout(
+            Duration::from_secs(10),
+            harness.manager.host_write_lock(host),
+        )
+        .await
+        .expect("cache writes must not wait on a running update")
+        .expect("a registered host has a cache-write lock");
+        drop(cache_write);
+
+        backend.release.notify_one();
+        wait_finished(&service, host).await;
+    }
+
     /// Host removal waits behind an in-flight run's write authority, then
     /// purges retained progress and unconsumed UPDATE confirmations with the
     /// durable row instead of leaving process-local ghosts.
@@ -2384,7 +2436,7 @@ mod tests {
             tokio::time::timeout(Duration::from_millis(50), &mut removal)
                 .await
                 .is_err(),
-            "removal bypassed the in-flight host write authority"
+            "removal bypassed the in-flight provisioning lock"
         );
 
         backend.release.notify_one();

@@ -3384,7 +3384,12 @@
   item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; a per-host provisioning lock (`ConnectionManager::host_provision_lock`, kept in a manager-level
+  map so it survives actor replacement, found by the PR review) is held by a confirmed run instead of the cache-write
+  lock; retarget, alias and removal take it before the cache-write lock, so they still wait for a run while session
+  write-backs and refresh commits no longer do. Regression tests `a_running_update_leaves_the_cache_write_lock_free` (a
+  real blocked run) and `the_provisioning_lock_survives_actor_replacement`. jj change `mzkoqwonkwrz`, bookmark
+  `pr/provisioning-own-host-lock`, draft PR [#1165](https://github.com/scode/farhelm/pull/1165/changes).
 
 ## clipboard-sink-blocks-async-worker.md
 

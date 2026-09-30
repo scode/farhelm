@@ -442,11 +442,15 @@ pub(crate) struct YoloSafeSpec {
 /// launches, answering with the updated host view.
 ///
 /// Any host, the local one included: sensitivity describes the machine, not
-/// how it is registered. Serialized with the host's other registry writes
-/// through the same host write lock as an alias change. No registry
-/// reconcile follows, because the connection actors do not read this flag;
-/// a change bumps the event feed directly instead, so other open clients
-/// re-read the host list.
+/// how it is registered. Serialized with the host's cache writes through the
+/// host write lock, but deliberately not with provisioning: unlike an alias,
+/// retarget or removal, it does not take the host's provisioning lock, since
+/// no provisioning plan reads this flag and a checkbox should not wait out a
+/// minutes-long install or update. The run's own registry writes touch other
+/// columns, so neither loses the other's write. No registry reconcile
+/// follows, because the connection actors do not read this flag; a change
+/// bumps the event feed directly instead, so other open clients re-read the
+/// host list.
 pub(crate) async fn set_yolo_safe(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
@@ -610,9 +614,10 @@ pub(crate) async fn add_host(
 /// connection claim are taken under this host's cache-write lock
 /// (`ConnectionManager::host_write_lock`), the lock the host's own cache
 /// writers hold, so a cache write in flight for the old connection cannot
-/// straddle the move. Provisioning retains the same lock for its whole
-/// confirmed run, so a retarget also cannot move the registry out from under
-/// a frozen host plan. The remembered default profile is NOT touched by a
+/// straddle the move. It first takes the host's provisioning lock
+/// (`ConnectionManager::host_provision_lock`), which a confirmed run holds
+/// throughout, so a retarget also cannot move the registry out from under a
+/// frozen host plan. The remembered default profile is NOT touched by a
 /// retarget — it is a bare id per registry row (SPEC.md, Sessions /
 /// Creation).
 ///
@@ -627,6 +632,7 @@ pub(crate) async fn set_destination(
     // Held across the write AND the reconcile: see this function's docs for
     // the in-flight write it fences out. Dropped before the reply is built,
     // which needs nothing from it.
+    let provisioning = state.manager.host_provision_lock(host).await;
     let serialized = state.manager.host_write_lock(host).await;
     if let Err(e) = state.store.update_ssh_destination(host, &spec.ssh).await {
         return http_error(e);
@@ -658,6 +664,7 @@ pub(crate) async fn set_destination(
     // holding a host's write lock across a read would stall its next refresh
     // commit for no reason.
     drop(serialized);
+    drop(provisioning);
     tracing::info!(host, destination = spec.ssh.as_str(), "host retargeted");
     match host_view(&state, host).await {
         Ok(view) => axum::Json(view).into_response(),
@@ -683,6 +690,7 @@ pub(crate) async fn set_alias(
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<AliasSpec>,
 ) -> impl IntoResponse {
+    let provisioning = state.manager.host_provision_lock(host).await;
     let serialized = state.manager.host_write_lock(host).await;
     if let Err(error) = state.store.update_alias(host, spec.alias.as_deref()).await {
         return http_error(error);
@@ -695,6 +703,7 @@ pub(crate) async fn set_alias(
         )));
     }
     drop(serialized);
+    drop(provisioning);
     match host_view(&state, host).await {
         Ok(view) => axum::Json(view).into_response(),
         Err(error) => http_error(error),
@@ -720,13 +729,15 @@ pub(crate) async fn set_alias(
 /// Same empty-object success body as the session verbs, so a caller never
 /// has to special-case a bodiless response.
 ///
-/// Removal takes the same host write authority as provisioning. Once the
-/// confirmed run releases it, removal deletes the row and purges that host's
-/// retained progress, confirmation ids, and detached-task handle together.
+/// Removal takes the host's provisioning lock and then its cache-write lock.
+/// Once a confirmed run releases the former, removal deletes the row and
+/// purges that host's retained progress, confirmation ids, and detached-task
+/// handle together.
 pub(crate) async fn remove_host(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
 ) -> impl IntoResponse {
+    let provisioning = state.manager.host_provision_lock(host).await;
     let serialized = state.manager.host_write_lock(host).await;
     if let Err(e) = state.store.remove_ssh_host(host).await {
         return http_error(e);
@@ -734,6 +745,7 @@ pub(crate) async fn remove_host(
     state.provisioning.forget_host(host).await;
     let stopped = state.manager.stop_actor(host).await;
     drop(serialized);
+    drop(provisioning);
     tracing::info!(
         host,
         stopped,
