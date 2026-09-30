@@ -3576,7 +3576,14 @@
   triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; with `missing-checkout-root-blocks-delete.md` already keeping any archive failure from blocking
+  Delete, this change stops such checkouts being admitted and handles the ones that exist. The preview and the create
+  recheck refuse a planned checkout path over `working_copies::MAX_ADMITTED_CHECKOUT_PATH` (the platform's `PATH_MAX`
+  less its NUL and the 82 bytes archiving can add), with a message naming the limit, and `ENAMETOOLONG` from the archive
+  rename now counts as a rename that moved nothing (`rename_refused_without_moving`), so an older over-long checkout is
+  rolled back and left in place with a notice rather than stuck mid-archive. SPEC.md "Fresh GitHub checkouts" states the
+  limit. Regression test `a_checkout_path_too_long_to_archive_is_refused_at_preview`. jj change `wxmpukrrnuxt`, bookmark
+  `pr/checkout-path-archive-margin`, draft PR [#1177](https://github.com/scode/farhelm/pull/1177/changes).
 
 ## preserved-plan-diagnostic-log-only.md
 

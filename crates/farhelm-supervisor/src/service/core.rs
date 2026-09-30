@@ -2190,6 +2190,17 @@ fn registry_claimed_basenames(
         .collect()
 }
 
+/// The refusal for a planned checkout path that would be too long to
+/// archive, shared by the preview and the create recheck so both say the
+/// same thing (see `working_copies::MAX_ADMITTED_CHECKOUT_PATH`).
+fn checkout_path_too_long() -> String {
+    format!(
+        "the checkout path would exceed {} bytes, which leaves no room to archive it later; \
+         choose a shorter checkout root or title",
+        crate::working_copies::MAX_ADMITTED_CHECKOUT_PATH
+    )
+}
+
 /// Design C's destination split: which kind of working directory a
 /// validated create is about to use, carrying exactly the facts the
 /// launch needs for each kind and nothing manufactured ahead of time.
@@ -4534,12 +4545,10 @@ impl Supervisor {
             .to_str()
             .expect("validated root and basename are UTF-8")
             .to_string();
-        if cwd.len() > 4096 {
-            return Err(RequestError::new(
-                ErrorKind::InvalidRequest,
-                "checkout preview path exceeds the 4096-byte limit",
-            )
-            .into());
+        if cwd.len() > crate::working_copies::MAX_ADMITTED_CHECKOUT_PATH {
+            return Err(
+                RequestError::new(ErrorKind::InvalidRequest, checkout_path_too_long()).into(),
+            );
         }
         if let Some(message) = fresh_root_constraint_error(&cwd, &rows) {
             return Err(RequestError::new(ErrorKind::InvalidRequest, message).into());
@@ -7333,12 +7342,10 @@ impl Supervisor {
             .to_str()
             .expect("validated root and wire basename are UTF-8")
             .to_string();
-        if planned_cwd.len() > 4096 {
-            return Err(RequestError::new(
-                ErrorKind::InvalidRequest,
-                "checkout path exceeds the 4096-byte limit",
-            )
-            .into());
+        if planned_cwd.len() > crate::working_copies::MAX_ADMITTED_CHECKOUT_PATH {
+            return Err(
+                RequestError::new(ErrorKind::InvalidRequest, checkout_path_too_long()).into(),
+            );
         }
         if preview.cwd != planned_cwd {
             return Err(RequestError::new(
@@ -15524,6 +15531,75 @@ pub(crate) mod tests {
                 .expect("read the marker"),
             TabScopeMarker::Unmarked,
             "the marker must not answer for a different tab"
+        );
+    }
+
+    /// A checkout preview refuses a path too long to archive later, and
+    /// accepts one exactly at the limit.
+    ///
+    /// Why it matters: archiving lengthens a checkout's path by up to 82
+    /// bytes, so a checkout admitted within that margin of the kernel's path
+    /// limit could never be archived, and each Delete of its last session
+    /// would leave it behind. Refusing at the preview tells the user while
+    /// they can still pick a shorter root or title. Specified: with the
+    /// planned path at exactly `MAX_ADMITTED_CHECKOUT_PATH` bytes the preview
+    /// succeeds; one byte longer, it fails naming the limit.
+    #[farhelm_testtrace::test]
+    async fn a_checkout_path_too_long_to_archive_is_refused_at_preview() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let base = tempfile::tempdir().unwrap();
+        let mut deep = base.path().canonicalize().unwrap();
+        let limit = crate::working_copies::MAX_ADMITTED_CHECKOUT_PATH;
+        // The name the preview proposes, learned from a short root so the
+        // arithmetic below does not guess the naming policy.
+        let basename = Supervisor::github_checkout_preview(
+            &sup,
+            "acme/bar",
+            None,
+            Some(deep.to_str().unwrap().into()),
+            Some(1),
+        )
+        .await
+        .expect("a short root previews")
+        .basename;
+        // Build a root whose planned checkout path (`<root>/<name>`) lands
+        // on the limit, from components well under the per-name maximum.
+        let planned_len = |root: &Path| root.to_str().unwrap().len() + 1 + basename.len();
+        while planned_len(&deep) + 1 + 200 < limit - 1 {
+            deep.push("d".repeat(200));
+        }
+        let last = limit - planned_len(&deep) - 1;
+        let at_limit = deep.join("a".repeat(last));
+        let over_limit = deep.join("b".repeat(last + 1));
+        std::fs::create_dir_all(&at_limit).unwrap();
+        std::fs::create_dir_all(&over_limit).unwrap();
+        assert_eq!(planned_len(&at_limit), limit, "test premise");
+
+        let preview = Supervisor::github_checkout_preview(
+            &sup,
+            "acme/bar",
+            None,
+            Some(at_limit.to_str().unwrap().into()),
+            Some(1),
+        )
+        .await
+        .expect("a path at the limit is admitted");
+        assert_eq!(preview.cwd.len(), limit);
+        let error = Supervisor::github_checkout_preview(
+            &sup,
+            "acme/bar",
+            None,
+            Some(over_limit.to_str().unwrap().into()),
+            Some(1),
+        )
+        .await
+        .expect_err("a path over the limit is refused");
+        assert!(
+            error.to_string().contains(&limit.to_string()),
+            "the refusal names the limit: {error:#}"
         );
     }
 

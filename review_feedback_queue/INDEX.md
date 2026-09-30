@@ -88,8 +88,6 @@ One line per open item. This file must always match the feedback files in this d
   checkout, so it is never archived.
 - `preserved-plan-diagnostic-log-only.md` — the "unresolved plan, path preserved" diagnostic goes only to the log; the
   Delete reply is plain success.
-- `checkout-path-too-long-for-archive.md` — admitted checkout paths near PATH_MAX are too long for the archive
-  destination, blocking Delete.
 - `claude-scan-budget-never-settles.md` — Claude record-scan capture can never complete in a large project directory and
   rescans forever.
 - `env-wrapper-hides-command-not-found.md` — Farhelm's own `env` wrapper turns "command not found" for Goose, Pi and OMP

@@ -479,9 +479,11 @@ Before Launch becomes available, the composer shows the exact host and path. Pre
 nothing. An unnamed checkout uses the lowest available positive `repo-N` and that basename as its session title. An
 explicit title keeps its printable display spelling while the path uses `repo-` followed by its lowercase ASCII slug;
 runs outside letters and digits become hyphens. A title already starting with `repo-` does not repeat that prefix. An
-empty slug or a component over 200 bytes is refused. Existing files, directories and symlinks all occupy a name. If
-another create wins the displayed path, Launch reports the conflict and obtains a new preview; it never submits
-automatically or silently chooses another directory. An explicit name remains a conflict rather than gaining a suffix.
+empty slug or a component over 200 bytes is refused, and so is a checkout path too long to archive later (the archive
+location adds up to 82 bytes to it, and the whole must stay within the system's path limit: 4096 bytes on Linux, 1024 on
+macOS). Existing files, directories and symlinks all occupy a name. If another create wins the displayed path, Launch
+reports the conflict and obtains a new preview; it never submits automatically or silently chooses another directory. An
+explicit name remains a conflict rather than gaining a suffix.
 
 Repository input is a GitHub owner/repository pair, not a URL, branch selector or shell fragment. The owner has 1–39
 ASCII letters, digits or hyphens, starts and ends alphanumeric, and has no consecutive hyphens. The repository has 1–100
