@@ -36,7 +36,7 @@ use crate::tabs::{
     sorted_tab_errors, tab_banner_element_id, tab_connecting_element_id, tab_label,
     tab_terminal_element_id, terminal_ws_path, terminal_ws_unowned_path, visible_tabs,
 };
-use crate::{ApiBase, LaunchHarness, LaunchSelection, RestartOffer, Session, SessionStatus};
+use crate::{ApiBase, LaunchSelection, RestartOffer, Session, SessionStatus};
 
 /// The DOM id of the element carrying the restart offer's explanation, which
 /// the restart button names through `aria-describedby`.
@@ -80,12 +80,15 @@ fn restart_with_unavailable(session: &Session) -> Option<String> {
     if session.restart_offer == RestartOffer::Resume {
         return None;
     }
-    match launch.harness {
-        LaunchHarness::Muse | LaunchHarness::Cursor | LaunchHarness::OpenCode => Some(format!(
+    // A harness that runs under the generic integration never has a
+    // conversation to resume, whatever happened in the session.
+    if launch.harness.agent_kind() == farhelm_proto::AgentKind::Generic {
+        Some(format!(
             "{} sessions can't be resumed",
             crate::launch_composer::harness_word(launch.harness)
-        )),
-        _ => Some("no captured conversation to resume".to_string()),
+        ))
+    } else {
+        Some("no captured conversation to resume".to_string())
     }
 }
 
@@ -2641,6 +2644,7 @@ fn copy_warning(what: &str, value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::LaunchHarness;
 
     /// Why this matters: the header's command tooltip is the only full view
     /// of a long command, and its copy button is how people take it to a

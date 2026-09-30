@@ -525,11 +525,7 @@ fn agent_badge(session: &Session) -> AgentBadge {
         // older snapshot MEANS its mandatory YOLO mode, so the row displays
         // that. OMP has a real harness default, so an omitted permission is
         // displayed as absent — the actual selection, never an invented YOLO.
-        let effective_permission = if launch.harness == LaunchHarness::Pi {
-            Some(crate::LaunchPermission::Yolo)
-        } else {
-            launch.permissions
-        };
+        let effective_permission = launch.harness.sole_permission().or(launch.permissions);
         let permission = effective_permission.map(|permission| match permission {
             crate::LaunchPermission::Yolo => PermissionGlyph::Yolo,
             crate::LaunchPermission::Approve => PermissionGlyph::Approve,
