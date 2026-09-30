@@ -25,6 +25,7 @@ import {
   FLOOD_AGENT_COMMAND,
   fulfillAsHelm,
   islandText,
+  reconnectTimingsFromNextLoad,
   runInShell,
   selectTerminal,
   sharedSessionRow,
@@ -1731,6 +1732,14 @@ test("a tab opened after closing another starts with a clean island", async ({
 // never minted, which takes the same attach-refused path a vanished window
 // takes and produces the same relayed explanation. Only the LISTING is
 // synthetic; the attach, the refusal, and the banner are all real.
+//
+// It also stays put. A tab the supervisor cannot find is gone, so the
+// helm reports the refusal as a closed tab and the browser does not retry
+// it: before that, each such tab climbed the full reconnect ladder,
+// rebuilding its terminal on every attempt, and 32 of them at once starved
+// the page in the island-cap test below (FLAKES.md, 2026-09-29). The
+// ladder is shortened to 100ms rungs so a retry, if one were coming,
+// would land well inside the observation window.
 test("a tab the supervisor cannot attach explains itself instead of showing a blank pane", async ({
   page,
   request,
@@ -1759,6 +1768,20 @@ test("a tab the supervisor cannot attach explains itself instead of showing a bl
         body: JSON.stringify(detail),
       });
     });
+    await reconnectTimingsFromNextLoad(page, { delaysMs: [100, 100, 100, 100, 100, 100] });
+    await page.addInitScript((phantom) => {
+      const Real = window.WebSocket;
+      (window as any).__phantomSockets = 0;
+      class Counting extends Real {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          if (new URL(String(url)).searchParams.get("tab") === phantom) {
+            (window as any).__phantomSockets += 1;
+          }
+        }
+      }
+      (window as any).WebSocket = Counting;
+    }, phantom);
 
     await page.goto("/");
     await attachSession(page, id);
@@ -1773,6 +1796,12 @@ test("a tab the supervisor cannot attach explains itself instead of showing a bl
     // Nothing was rendered into it — the explanation is instead of the
     // terminal's content, not on top of it.
     expect((await islandText(page, `terminal-${phantom}`)).trim()).toBe("");
+    // sleep-ok: a deliberate observation window for the ABSENCE of a retry; the 100ms ladder above would have made several attempts within it.
+    await page.waitForTimeout(2_000);
+    expect(
+      await page.evaluate(() => (window as any).__phantomSockets),
+      "a tab the supervisor says does not exist must not be retried",
+    ).toBe(1);
   } finally {
     if (id) await cleanupSession(request, id);
   }
@@ -1980,8 +2009,8 @@ test("a tab list past the island cap is listed in full but only partly attached"
     // The ones past the cap say why they are not attached...
     await expect(page.locator(".terminal-not-mounted")).toHaveCount(EXTRA);
     // ...and no island was ever built for them. (The capped ones do mount
-    // and then fail their attach, since these ids name no real window —
-    // which is the ordinary refusal path, not what this test is about.)
+    // and then fail their attach once, since these ids name no real
+    // window — the ordinary refusal path, not what this test is about.)
     const islands = await mountedIslands(page);
     for (const tabId of phantoms.slice(CAP)) {
       expect(islands).not.toContain(`terminal-${tabId}`);

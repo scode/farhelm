@@ -9,5 +9,3 @@
 # remove this line in the same PR. See deflake/SPEC.md.
 #
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
-
-playwright terminal-tabs.spec.ts a tab list past the island cap is listed in full but only partly attached  # island-cap-readiness-residual

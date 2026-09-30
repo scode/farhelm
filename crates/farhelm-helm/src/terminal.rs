@@ -293,6 +293,32 @@ fn refused_as_taken_over(error: &anyhow::Error) -> bool {
         .is_some_and(|supervised| supervised.kind == ErrorKind::TakenOver)
 }
 
+/// Whether this failure says the TAB being attached does not exist, which
+/// the browser must hear as `tab_closed` rather than as a failed attempt.
+///
+/// Every `NotFound` a tab attach can meet describes current state, not a
+/// passing condition: the supervisor looks the tab up in tmux's live pane
+/// list at attach time (an exited but unreaped tab already counts as
+/// gone), a session with no tmux terminal has no tab windows left either,
+/// and a session or host the helm cannot route has taken its tabs with it.
+/// Transport trouble (a lost supervisor, an unreachable host) arrives as
+/// other kinds and keeps recovering. Reported as `other`, this refusal
+/// sent the browser's reconnect ladder through six attempts per tab, each
+/// rebuilding a terminal, which is what starved the page in the island-cap
+/// test (FLAKES.md, 2026-09-29) and would do the same to a view listing
+/// tabs the supervisor no longer has.
+///
+/// Tab attaches only. The agent terminal's `NotFound` carries the
+/// supervisor's account of what happened to the session (a reboot, a
+/// restart gap, what restart would do), and the browser keeps showing it
+/// rather than hiding the pane.
+fn refused_as_missing_tab(error: &anyhow::Error, q: &TermQuery) -> bool {
+    q.tab.is_some()
+        && error
+            .downcast_ref::<SupervisorError>()
+            .is_some_and(|supervised| supervised.kind == ErrorKind::NotFound)
+}
+
 /// The browser's `{"type":"detached","reason":...,"code":...}` notice.
 ///
 /// `code` is the [`farhelm_proto::DetachCode`] spelling `terminal.js`
@@ -507,6 +533,8 @@ async fn serve_term(
             Err(e) => {
                 let code = if refused_as_taken_over(&e) {
                     farhelm_proto::DetachCode::TakenOver
+                } else if refused_as_missing_tab(&e, &q) {
+                    farhelm_proto::DetachCode::TabClosed
                 } else {
                     farhelm_proto::DetachCode::Other
                 };
@@ -1601,7 +1629,10 @@ mod tests {
     /// (see `resolve_attach_request`'s docs, including for why `?tab=`
     /// gets no local shape check at all); this test is what proves its
     /// `NotFound` reaches the client rather than being swallowed
-    /// somewhere in the WS plumbing this PR adds. Both the notice recv
+    /// somewhere in the WS plumbing this PR adds. The notice's code is
+    /// `tab_closed`, because a tab the supervisor cannot find is gone and
+    /// the browser must stop trying to attach it (see
+    /// `refused_as_missing_tab`). Both the notice recv
     /// AND the close recv are wrapped in a bounded timeout: a regression
     /// that left either one pending must fail this test, not hang it.
     #[farhelm_testtrace::test]
@@ -1661,6 +1692,10 @@ mod tests {
             notice["reason"].as_str().unwrap().contains(SENTINEL),
             "reason must carry the supervisor's own message: {notice}"
         );
+        assert_eq!(
+            notice["code"], "tab_closed",
+            "a tab the supervisor says does not exist is closed, not a failed attempt: {notice}"
+        );
 
         assert!(
             tokio::time::timeout(Duration::from_secs(5), ws.recv())
@@ -1668,6 +1703,87 @@ mod tests {
                 .expect("socket never closed after the failed attach's notice")
                 .is_none(),
             "the socket must close once the failed attach's notice is sent"
+        );
+    }
+
+    /// Attach `path` against a scripted supervisor that refuses with `kind`,
+    /// and return the browser's detach notice.
+    async fn detach_notice_for_refused_attach(
+        path: &str,
+        kind: farhelm_proto::ErrorKind,
+    ) -> serde_json::Value {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::Attach { req_id, .. } = request else {
+                panic!("expected Attach, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::Error {
+                    req_id,
+                    message: "scripted refusal".to_string(),
+                    kind,
+                })
+                .await
+                .unwrap();
+        });
+
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let (mut ws, peer) = tokio::join!(WsTestClient::connect(addr, path), peer);
+        peer.unwrap();
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("no detach notice arrived")
+            .expect("socket closed before sending a notice");
+        assert_eq!(opcode, 1, "the detach notice is a text frame");
+        serde_json::from_slice(&payload).unwrap()
+    }
+
+    /// `tab_closed` is reserved for the one refusal that proves a TAB is
+    /// gone. The same `NotFound` on the agent terminal carries the
+    /// supervisor's account of what happened to the session, which the
+    /// browser must keep showing rather than silently hiding, and a tab
+    /// refused for any other reason, such as a host the helm cannot reach,
+    /// is transport trouble that the browser's reconnect ladder exists to
+    /// ride out. Both stay `other`.
+    ///
+    /// This pins the edges of the mapping that stopped phantom tabs from
+    /// retrying (see `refused_as_missing_tab`): widened to the agent, it
+    /// would hide a rebooted session's explanation; widened past
+    /// `NotFound`, it would end recovery for tabs on a host that is only
+    /// briefly away.
+    #[farhelm_testtrace::test]
+    async fn only_a_missing_tab_is_reported_as_tab_closed() {
+        use farhelm_proto::ErrorKind;
+
+        let agent =
+            detach_notice_for_refused_attach("/api/sessions/sess-1/term", ErrorKind::NotFound)
+                .await;
+        assert_eq!(agent["type"], "detached");
+        assert_eq!(
+            agent["code"], "other",
+            "the agent terminal's NotFound keeps its explanation visible: {agent}"
+        );
+
+        let unreachable = detach_notice_for_refused_attach(
+            "/api/sessions/sess-1/term?tab=some-tab",
+            ErrorKind::Unavailable,
+        )
+        .await;
+        assert_eq!(unreachable["type"], "detached");
+        assert_eq!(
+            unreachable["code"], "other",
+            "a tab refused for transport reasons must stay recoverable: {unreachable}"
         );
     }
 

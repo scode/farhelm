@@ -40,11 +40,16 @@ Linux x86_64, clean tested commit `3c5996cdddaccc72cc1d83f9374e3153c27e1c6d`, se
 narrowed by the sweep to this test for the reruns, one browser worker and zero retries, pinned tmux 3.7c executable
 SHA256 `75ede1768324817dc386aee550c8e7ca68e98530af54762fcb9df0b46491b071`, locale `C.UTF-8`, ambient `FARHELM_*`
 scrubbed with only the recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` supplied. Machine
-load during the runs was not recorded. Disposition: open (TODO.md island-cap readiness residual).
+load during the runs was not recorded. Disposition: fixed by two changes (#1292, #1293). The first mount built all 33
+terminals in one task, which held WebKit's main thread for 8–10s, and each terminal's 5s connect watchdog expired inside
+that hold and discarded sockets the helm had already accepted. The fake tabs' attaches were refused as not found, which
+the browser retried as outages, rebuilding terminals until the page starved. Unfixed, the test failed 4 of 10 WebKit
+repetitions (run `a80c1f02-52f3-4744-92ee-d0e25f92fe58`); with both changes it passed 30 of 30 (runs
+`cd27799e-55e1-4f11-9403-44385a7ea138` and `a945da61-0981-4c41-b27a-92324e9ec46f`) at load averages of 9–21.
 
 Class: readiness
 
-Cause: unknown
+Cause: established
 
 ## 2026-09-25 — composer controls inside the initial viewport (e2e/tests/sidebar.spec.ts)
 
