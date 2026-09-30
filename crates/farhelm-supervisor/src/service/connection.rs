@@ -1101,6 +1101,9 @@ pub(crate) struct Forwarder {
     pub(crate) tx: mpsc::Sender<Frame>,
     pub(crate) stream: OutputStream,
     pub(crate) pause_rx: watch::Receiver<Option<tokio::time::Instant>>,
+    /// A ticker observation stays latched while this task is replaying or
+    /// honoring client flow control, including an exit during initial replay.
+    pub(crate) death_rx: watch::Receiver<bool>,
     pub(crate) stall_timeout: Duration,
     /// Publishes process cleanup independently of the request awaiting this task.
     pub(crate) cleanup: watch::Sender<OutputReapOutcome>,
@@ -1392,6 +1395,12 @@ impl Forwarder {
     /// Pump pane output to the client until the stream, the client, or
     /// the client's patience ends.
     async fn pump(&mut self) -> ForwarderEnd {
+        // There is no reliable byte-loss oracle: tmux 3.7c can silently drop
+        // queued control output at pane EOF. Recover once on every observed
+        // death, even if the live bytes happened to arrive in full.
+        let mut death_requested = false;
+        let pause_request = self.stream.request_pause();
+        tokio::pin!(pause_request);
         loop {
             // Park while the client has asked for silence. Not reading
             // the control client at all IS the flow control: past
@@ -1405,18 +1414,53 @@ impl Forwarder {
                 return end;
             }
 
-            let event = tokio::select! {
-                event = self.stream.next_output() => event,
-                () = stalled_past_deadline(self.pause_rx.clone(), self.stall_timeout) => {
-                    // Abandoning `next_output` mid-read can drop a
-                    // partial line, which is why this is only ever done
-                    // on a path that tears the stream down immediately
-                    // afterwards. See that method's cancel-safety note.
-                    return ForwarderEnd::Stalled;
+            let event = {
+                let next_output = self.stream.next_output();
+                tokio::pin!(next_output);
+                loop {
+                    tokio::select! {
+                        biased;
+                        () = wait_for_pane_death(&mut self.death_rx), if !death_requested => {
+                            death_requested = true;
+                            // Retain the SAME read future across the external
+                            // pause. It may already own a partial control line
+                            // or be writing a foreign-pane filter. Only teardown
+                            // may abandon it, never a recoverable notification.
+                            let request = async {
+                                wait_until_resumed(self.pause_rx.clone()).await;
+                                pause_request.as_mut().await
+                            };
+                            tokio::select! {
+                                result = request => {
+                                    if let Err(error) = result {
+                                        return ForwarderEnd::StreamFailed(format!("{error:#}"));
+                                    }
+                                }
+                                () = stalled_past_deadline(self.pause_rx.clone(), self.stall_timeout) => {
+                                    return ForwarderEnd::Stalled;
+                                }
+                            }
+                        }
+                        event = &mut next_output => break event,
+                        () = stalled_past_deadline(self.pause_rx.clone(), self.stall_timeout) => {
+                            // This is teardown: abandoning the read is safe
+                            // because the stream will never be reused.
+                            return ForwarderEnd::Stalled;
+                        }
+                    }
                 }
             };
             match event {
                 Ok(Some(OutputEvent::Bytes(bytes))) => {
+                    if self
+                        .sup
+                        .seams
+                        .faults
+                        .suppress_live_output()
+                        .is_some_and(|suppress| suppress.load(Ordering::SeqCst))
+                    {
+                        continue;
+                    }
                     if let Err(end) = self.send_bytes(bytes).await {
                         return end;
                     }
@@ -1444,11 +1488,11 @@ impl Forwarder {
     /// panes are both covered for free: the shared snapshot code already
     /// picks the right capture for the pane's current mode.
     ///
-    /// Reached only on the tmux behavior that cuts the stream — the other
-    /// one (tmux throttling the pane instead) never gets here, because
-    /// nothing was dropped and the pump simply keeps reading. See
-    /// `TMUX_PAUSE_AFTER_SECS` for why both exist; this method is
-    /// correctness-critical but not on every run's path.
+    /// Also used after pane death: tmux 3.7c discards pending control output
+    /// at EOF while retaining the rendered cells. An external per-client
+    /// pause gives that recovery the same ordered `%pause` boundary. Death
+    /// during an earlier capture remains latched and gets another capture,
+    /// since the earlier one may predate the final output.
     ///
     /// The client's terminal is reset first because the replay assumes an
     /// empty one — see [`Self::send_replay`]. Within `HISTORY_LIMIT`
@@ -1480,6 +1524,32 @@ impl Forwarder {
             Err(e) => return Err(ForwarderEnd::StreamFailed(format!("{e:#}"))),
         };
         self.send_replay(modes, content, true).await
+    }
+}
+
+/// Await a latched death, including one published before this read started.
+/// Sender closure belongs to teardown; it must not manufacture pane death.
+async fn wait_for_pane_death(death: &mut watch::Receiver<bool>) {
+    loop {
+        if *death.borrow_and_update() {
+            return;
+        }
+        if death.changed().await.is_err() {
+            return std::future::pending().await;
+        }
+    }
+}
+
+/// Defer a recovery request while client flow control forbids progress.
+/// The caller races this wait against the original absolute stall deadline.
+async fn wait_until_resumed(mut pause: watch::Receiver<Option<tokio::time::Instant>>) {
+    loop {
+        if pause.borrow_and_update().is_none() {
+            return;
+        }
+        if pause.changed().await.is_err() {
+            return std::future::pending().await;
+        }
     }
 }
 
@@ -1733,6 +1803,228 @@ mod tests {
     use super::super::core::{CreateInputs, CreateMode};
     use super::*;
     use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus};
+
+    /// A pane's final write must reach the already-live attachment even when
+    /// the control stream loses it at EOF. The fault drops all live bytes after
+    /// a verified live marker; the producer still writes and exits immediately.
+    /// Recovery must replace earlier content with one complete history, even
+    /// when death was published while the client had output paused. Existing
+    /// flow-control tests own the scheduling proof of silence during a pause.
+    /// This models missing delivery deterministically, not tmux's scheduling
+    /// race; the e2e repetition exercises that race without the seam.
+    #[farhelm_testtrace::test]
+    async fn pane_death_recovers_missing_final_output_after_client_resume() {
+        use super::super::core::{SupervisorSeams, SupervisorTimeouts};
+        use super::super::terminals::PaneDeath;
+        use std::sync::atomic::AtomicBool;
+
+        let state = StateDir::new();
+        let suppress = Arc::new(AtomicBool::new(false));
+        let mut seams = SupervisorSeams::default();
+        seams.faults.suppress_live_output = Some(Arc::clone(&suppress));
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            seams,
+        )
+        .await
+        .expect("supervisor");
+        let session = "fh-final-output";
+        let pane = sup.tmux.create_session(session, "/", 80, 24, &[], &[
+            "sh".to_owned(), "-c".to_owned(),
+            "stty -echo; printf 'READY\n'; read first; printf 'LIVE-BEFORE\n'; read second; printf 'FINAL-OUTPUT\n'".to_owned(),
+        ]).await.expect("create input-gated producer");
+        let mut input = sup
+            .tmux
+            .open_input_client(session, &pane)
+            .await
+            .expect("input client");
+        let (modes, prefill, stream) = sup
+            .tmux
+            .open_replay_stream(session, &pane)
+            .await
+            .expect("replay stream");
+        let (death, death_rx) = PaneDeath::new(session, &pane);
+        let (pause, pause_rx) = watch::channel(None);
+        let (shutdown, shutdown_rx) = watch::channel(false);
+        let (cleanup, cleanup_rx) = watch::channel(None);
+        let (tx, mut rx) = mpsc::channel(64);
+        let forwarder = tokio::spawn(
+            Forwarder {
+                sup: Arc::clone(&sup),
+                session_id: "final-output".to_owned(),
+                terminal: TerminalId::Agent,
+                channel: 7,
+                tx: tx.clone(),
+                stream,
+                pause_rx,
+                death_rx,
+                stall_timeout: Duration::from_secs(60),
+                cleanup,
+            }
+            .run(modes, prefill, shutdown_rx),
+        );
+        let key = AttachmentKey::new("final-output", TerminalId::Agent);
+        let attached_input = sup
+            .tmux
+            .open_input_client(session, &pane)
+            .await
+            .expect("attachment input");
+        let sink = sup
+            .ensure_session_sink(session)
+            .await
+            .expect("session sink");
+        sup.attachments.lock().await.insert(
+            key.clone(),
+            ActiveAttach {
+                channel: 7,
+                lease: String::new(),
+                notify: tx,
+                forwarder,
+                forwarder_shutdown: shutdown.clone(),
+                forwarder_cleanup: cleanup_rx,
+                input: attached_input,
+                pause: pause.clone(),
+                pane_death: death,
+                sink,
+            },
+        );
+        let mut transcript = Vec::new();
+        let mut replayed = false;
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while !replayed || !transcript.windows(5).any(|w| w == b"READY") {
+                let frame = rx.recv().await.expect("forwarder remains attached");
+                if frame.channel == 7 {
+                    transcript.extend(frame.body);
+                } else if matches!(
+                    serde_json::from_slice::<ControlMsg>(&frame.body),
+                    Ok(ControlMsg::ReplayComplete { channel: 7 })
+                ) {
+                    replayed = true;
+                }
+                assert!(transcript.len() < 128 * 1024, "bounded fixture output");
+            }
+        })
+        .await
+        .expect("producer readiness and initial replay");
+        assert!(!sup.tmux.pane_states().await.expect("live premise")[&pane].dead);
+        transcript.clear();
+        input.send(b"first\n").await.expect("release first gate");
+        receive_through(&mut rx, &mut transcript, b"LIVE-BEFORE").await;
+        assert!(
+            !transcript.windows(2).any(|w| w == b"\x1bc"),
+            "readiness must arrive live"
+        );
+        assert!(
+            !sup.tmux
+                .pane_states()
+                .await
+                .expect("live premise before exit")[&pane]
+                .dead
+        );
+        suppress.store(true, Ordering::SeqCst);
+        apply_pause_transition(&pause, true);
+        input
+            .send(b"second\n")
+            .await
+            .expect("release immediate write-and-exit");
+        let probe_started = tokio::time::Instant::now();
+        let dead_states = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let states = sup.tmux.pane_states().await.expect("death probe");
+                if states.get(&pane).is_some_and(|state| state.dead) {
+                    break states;
+                }
+                // sleep-ok: bounded polling for the producer's actual tmux dead state, not elapsed-time readiness.
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("producer must exit while attachment is paused");
+        {
+            let held_map = sup.attachments.lock().await;
+            // This synchronous call must return while the map remains held;
+            // a busy attach or teardown cannot hold the ticker hostage.
+            super::super::ticker::publish_pane_deaths(&sup, &dead_states, probe_started);
+            drop(held_map);
+        }
+        super::super::ticker::publish_pane_deaths(&sup, &dead_states, probe_started);
+        // Check the queue's present contents before resuming. This does not
+        // assert that the forwarder has been scheduled since publication;
+        // the recovery below proves the death survives the paused boundary.
+        while let Ok(frame) = rx.try_recv() {
+            if frame.channel == 7 {
+                transcript.extend(frame.body);
+            }
+        }
+        assert!(!transcript.windows(12).any(|w| w == b"FINAL-OUTPUT"));
+        assert!(!transcript.windows(2).any(|w| w == b"\x1bc"));
+        apply_pause_transition(&pause, false);
+        receive_through(&mut rx, &mut transcript, b"FINAL-OUTPUT").await;
+        let reset = transcript
+            .windows(2)
+            .position(|w| w == b"\x1bc")
+            .expect("missing live bytes require a reset");
+        let replay = &transcript[reset + 2..];
+        assert_eq!(
+            replay.windows(11).filter(|w| *w == b"LIVE-BEFORE").count(),
+            1,
+            "reset replay must replace the previously delivered content once"
+        );
+        assert_eq!(
+            replay.windows(12).filter(|w| *w == b"FINAL-OUTPUT").count(),
+            1
+        );
+        shutdown.send_replace(true);
+        let attachment = sup
+            .attachments
+            .lock()
+            .await
+            .remove(&key)
+            .expect("attachment retained after death");
+        tokio::time::timeout(Duration::from_secs(30), attachment.forwarder)
+            .await
+            .expect("orderly shutdown")
+            .expect("forwarder task");
+        while let Ok(frame) = rx.try_recv() {
+            assert_eq!(
+                frame.channel, 7,
+                "death recovery must stay markerless: {frame:?}"
+            );
+            transcript.extend(frame.body);
+        }
+        assert_eq!(
+            transcript.windows(2).filter(|w| *w == b"\x1bc").count(),
+            1,
+            "one death must cause only one reset"
+        );
+    }
+
+    /// Consume this fixture's live channel up to a named output boundary, with
+    /// bounded time and memory so a broken recovery cannot hang or flood a test.
+    async fn receive_through(
+        rx: &mut mpsc::Receiver<Frame>,
+        transcript: &mut Vec<u8>,
+        marker: &[u8],
+    ) {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while !transcript.windows(marker.len()).any(|w| w == marker) {
+                let frame = rx.recv().await.expect("forwarder remains attached");
+                assert_eq!(frame.channel, 7, "unexpected control frame: {frame:?}");
+                transcript.extend(frame.body);
+                assert!(transcript.len() < 128 * 1024, "bounded fixture output");
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "missing {:?}; received {:?}",
+                String::from_utf8_lossy(marker),
+                String::from_utf8_lossy(transcript)
+            )
+        });
+    }
 
     /// The defusal this whole change exists for: an oversized reply must
     /// never reach the writer task, because the writer's fatal-on-any-

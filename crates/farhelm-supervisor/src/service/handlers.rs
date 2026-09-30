@@ -2043,6 +2043,7 @@ async fn handle_attach(
     let (pause_tx, pause_rx) = watch::channel(None);
     let (forwarder_shutdown, shutdown_rx) = watch::channel(false);
     let (forwarder_cleanup, cleanup_rx) = watch::channel(None);
+    let (pane_death, death_rx) = super::terminals::PaneDeath::new(stream.session(), stream.pane());
     let forwarder = Forwarder {
         sup: Arc::clone(sup),
         session_id: session_id.clone(),
@@ -2051,6 +2052,7 @@ async fn handle_attach(
         tx: tx.clone(),
         stream,
         pause_rx,
+        death_rx,
         stall_timeout: sup.timeouts.stall_detach,
         cleanup: forwarder_cleanup,
     };
@@ -2067,6 +2069,7 @@ async fn handle_attach(
             forwarder_cleanup: cleanup_rx,
             input,
             pause: pause_tx,
+            pane_death,
             sink,
         },
     );

@@ -7,8 +7,10 @@
 //! The reap also has an event to ride, so that an exited tab does not wait
 //! up to a whole interval for the next tick: the private tmux server's
 //! `pane-died` hook signals a `wait-for` channel, and the same task wakes on
-//! it and runs a reap-only pass (see [`start_ticker`]). The tick's own reap
-//! stays as the fallback for any death the wakeup misses.
+//! it and publishes pane deaths before reaping (see [`start_ticker`]). Live
+//! attachments use the same observation to recover final output that tmux
+//! may have discarded at EOF. The periodic snapshot remains the fallback for
+//! a missed hook or an attachment registered after the earlier observation.
 //!
 //! Until PLAN_M6_75.md item 1 this supervisor had no internal cadence at
 //! all. Everything periodic rode a request — conversation capture advanced
@@ -1034,13 +1036,13 @@ fn pane_death_wait(
 /// Reap exited tabs now, outside the periodic schedule: the pane-death
 /// wakeup's half of [`start_ticker`].
 ///
-/// Only the reap. Sampling and capture keep their own cadence, which a pane
+/// Death publication and the reap. Sampling and capture keep their own cadence, which a pane
 /// death says nothing about, and running them here would let every agent
 /// exit or tab exit pull the whole tick forward. The permit, the fresh
 /// pane-state read, the budget, and the stop check are the tick's own, so a
 /// wakeup reap behaves exactly like the reap at the start of a tick. A pane
-/// death that was an agent's rather than a tab's finds nothing to close and
-/// costs one `pane_states` read.
+/// death that was an agent's rather than a tab's finds nothing to close, but
+/// still wakes its live attachment to recover any final output tmux dropped.
 async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
     let _permit = Arc::clone(&sup.sampling_admission)
         .acquire_owned()
@@ -1050,6 +1052,7 @@ async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
     if entries.is_empty() {
         return;
     }
+    let probe_started = tokio::time::Instant::now();
     let states = match sup.tmux.pane_states().await {
         Ok(states) => states,
         Err(e) => {
@@ -1060,7 +1063,37 @@ async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
             return;
         }
     };
+    publish_pane_deaths(sup, &states, probe_started);
     reap_dead_tabs(sup, &states, &entries, stop).await;
+}
+
+/// Latch death before tab reaping can discard its pane, without waiting for
+/// an attachment or its consumer. A busy map defers observation to the next
+/// hook or periodic snapshot; acquiring it here could wait behind teardown.
+/// The normal hook is prompt, with the nominal two-second tick as fallback,
+/// but contention, failed probes and client backpressure preclude a hard bound.
+pub(super) fn publish_pane_deaths(
+    sup: &Supervisor,
+    states: &std::collections::HashMap<String, crate::tmux::PaneState>,
+    probe_started: tokio::time::Instant,
+) {
+    let observations: Vec<_> = match sup.attachments.try_lock() {
+        Ok(attachments) => attachments
+            .values()
+            .filter_map(|attachment| attachment.pane_death.observed_in(states, probe_started))
+            .collect(),
+        Err(_) => return,
+    };
+    for observed in observations {
+        observed.send_if_modified(|dead| {
+            if *dead {
+                false
+            } else {
+                *dead = true;
+                true
+            }
+        });
+    }
 }
 
 /// Whether the ticker has been asked to stop.
@@ -1206,6 +1239,7 @@ async fn sample_pass(
         }
         persist_work_started(sup, entry, false).await;
     }
+    let probe_started = tokio::time::Instant::now();
     let states = match injected_sample_fault(sup, SampleRead::PaneStates) {
         Some(fault) => Err(fault),
         None => sup.tmux.pane_states().await,
@@ -1247,6 +1281,7 @@ async fn sample_pass(
     // agent-liveness filtering below: a session whose agent exited can
     // still hold tabs, and the early return on an all-dead fleet would
     // otherwise leave their corpses unreaped forever.
+    publish_pane_deaths(sup, &states, probe_started);
     reap_dead_tabs(sup, &states, &entries, stop).await;
 
     // The ticker has just witnessed the same exit evidence a list request

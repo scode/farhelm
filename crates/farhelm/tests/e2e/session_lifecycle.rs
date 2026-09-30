@@ -620,15 +620,44 @@ async fn reattach_cutover_has_no_missing_or_duplicated_output() {
         .await;
 }
 
-/// Invalid UTF-8 is legitimate terminal output and must cross the live
-/// control-mode stream byte-for-byte. Any conversion through `String`
-/// would replace 0xff while ordinary TUI tests continued to pass.
+/// An immediate exit must deliver either the original binary output or a
+/// reset followed by the pane's final rendered output, without reattaching.
+///
+/// Invalid UTF-8 crosses the live control stream byte-for-byte, but tmux
+/// replaces 0xff with U+FFFD in its grid. When tmux drops the final live
+/// notification at pane exit, history recovery can therefore restore only
+/// that rendered form. Requiring the reset before the replacement prevents
+/// an ordinary lossy live decoder from satisfying the recovery case. The
+/// terminal-tab conformance test separately requires byte-clean live output.
+///
+/// This test starts `serve()` because pane-death observation belongs to its
+/// ticker. The usual duplex harness starts only a connection handler and
+/// cannot exercise recovery triggered by the supervisor's lifecycle.
 #[farhelm_testtrace::test]
 async fn non_utf8_terminal_output_survives_live_stream() {
     let h = harness().await;
+    // The socket handshake, unlike merely seeing the socket file, proves
+    // startup reached the accept loop after starting the ticker. JoinSet
+    // owns the serve task on assertion failures as well as the success path.
+    let mut serving = tokio::task::JoinSet::new();
+    let supervisor = Arc::clone(&h.sup);
+    serving.spawn(async move { supervisor.serve().await });
+    let client = tokio::select! {
+        result = serving.join_next() => panic!("supervisor exited during startup: {result:?}"),
+        client = async {
+            wait_for_supervisor_ready(h.state.path()).await;
+            let stream = farhelm_supervisor::service::connect(h.state.path())
+                .await
+                .expect("connect to serving supervisor");
+            let (reader, writer) = tokio::io::split(stream);
+            tokio::time::timeout(Duration::from_secs(20), SupervisorClient::start(reader, writer))
+                .await
+                .expect("supervisor accepts the socket handshake")
+                .expect("handshake")
+        } => client,
+    };
     let work = farhelm_teststate::tempdir().unwrap();
-    let session = h
-        .client
+    let session = client
         .create_session(
             &work.path().to_string_lossy(),
             &fixture_cmd("fake-agent --script binary"),
@@ -639,8 +668,7 @@ async fn non_utf8_terminal_output_survives_live_stream() {
         .await
         .expect("create");
 
-    let (channel, replay, mut live) = h
-        .client
+    let (channel, replay, mut live) = client
         .attach_live(&session.id, 80, 24)
         .await
         .expect("attach");
@@ -651,20 +679,44 @@ async fn non_utf8_terminal_output_survives_live_stream() {
     let mut readiness = replay;
     wait_for(&mut live, &mut readiness, "FAKE-AGENT READY", 20).await;
     let mut live_bytes = Vec::new();
-    h.client.send_input(channel, b"\n".to_vec()).await;
+    client.send_input(channel, b"\n".to_vec()).await;
     // `send_input` returning proves only that the frame was queued. The
     // supervisor's tmux `send-keys` exchange behind it is allowed 30 s under
     // load, so the marker's budget has to cover that whole exchange plus the
-    // output's trip back. Note the budget bounds the exchange; it does not
-    // resolve the historical load-timeout mechanism, which FLAKES.md
-    // localized to the fixture flushing its reply without the bytes ever
-    // arriving — a recurrence here is the signal to instrument, not to wait
-    // longer.
-    wait_for(&mut live, &mut live_bytes, "BINARY-MARKER", 40).await;
+    // output's trip back. This remains the existing budget: recovery fixes
+    // the missing notification, not the length of time the test waits.
+    wait_until(
+        &mut live,
+        &mut live_bytes,
+        40,
+        "the raw binary byte or reset followed by its rendered final marker",
+        |bytes| {
+            assert!(
+                bytes.len() <= 128 * 1024,
+                "binary fixture output is unbounded"
+            );
+            let reset = bytes.windows(2).position(|pair| pair == b"\x1bc");
+            let before_reset = &bytes[..reset.unwrap_or(bytes.len())];
+            if before_reset.contains(&0xff) {
+                // A later death catch-up is not needed to prove bytes that
+                // already arrived; waiting for it would change this case.
+                return true;
+            }
+            let Some(reset) = reset else {
+                return false;
+            };
+            let rendered = b"\xef\xbf\xbdBINARY-MARKER";
+            bytes[reset + 2..]
+                .windows(rendered.len())
+                .any(|window| window == rendered)
+        },
+    )
+    .await;
     assert!(
-        live_bytes.contains(&0xff),
-        "live output replaced or dropped the invalid byte: {live_bytes:?}"
+        serving.try_join_next().is_none(),
+        "the serving supervisor must remain alive through final output"
     );
+    serving.shutdown().await;
 }
 
 /// Last attach wins (SPEC.md): a second attach visibly detaches the

@@ -1337,6 +1337,10 @@ where
 /// takeover can tell the old client it was detached.
 pub(crate) struct ActiveAttach {
     pub(crate) channel: u32,
+    /// Exact tmux identity and latched death signal for this attachment alone.
+    /// A replacement attachment must get a fresh latch, even on the same pane.
+    pub(crate) pane_death: PaneDeath,
+
     /// The client identity this attachment was made under
     /// (`ControlMsg::Attach::lease`), stored verbatim — including the
     /// empty legacy lease, whose meaning is entirely in
@@ -1411,6 +1415,53 @@ pub(crate) struct ActiveAttach {
     /// sink, and a sink outliving its last viewer would be a control client
     /// attached to a session nobody is watching.
     pub(crate) sink: SessionSinkLease,
+}
+
+/// One attachment's death observation, retained across pauses and replays.
+///
+/// Only a dead snapshot naming both identities may latch this fact. Missing
+/// panes and terminal status classifications cannot prove a death; snapshots
+/// are retried by the ticker so registration racing a hook cannot lose it.
+pub(crate) struct PaneDeath {
+    session: String,
+    pane: String,
+    observed: watch::Sender<bool>,
+    registered_at: tokio::time::Instant,
+}
+
+impl PaneDeath {
+    /// Register a fresh attachment independently of any prior launch's death.
+    pub(crate) fn new(session: &str, pane: &str) -> (Self, watch::Receiver<bool>) {
+        let (observed, rx) = watch::channel(false);
+        (
+            Self {
+                session: session.to_owned(),
+                pane: pane.to_owned(),
+                observed,
+                registered_at: tokio::time::Instant::now(),
+            },
+            rx,
+        )
+    }
+
+    /// Copy the sender only for authoritative death of the attached pane.
+    /// Publication happens after releasing the attachment map, never while a
+    /// forwarder could run against a lock still held by the ticker. A probe
+    /// predating registration is stale: restart can reuse the same pane in
+    /// the same session, and must not inherit its predecessor's death.
+    pub(crate) fn observed_in(
+        &self,
+        states: &HashMap<String, crate::tmux::PaneState>,
+        probe_started: tokio::time::Instant,
+    ) -> Option<watch::Sender<bool>> {
+        if self.registered_at > probe_started {
+            return None;
+        }
+        states
+            .get(&self.pane)
+            .filter(|state| state.dead && state.session_name == self.session)
+            .map(|_| self.observed.clone())
+    }
 }
 
 impl ActiveAttach {
@@ -2304,6 +2355,48 @@ impl Supervisor {
 
 #[cfg(test)]
 mod tests {
+    /// Death is evidence about one exact pane/session pair, not absence or
+    /// a session-wide status. Once published it survives a busy receiver;
+    /// reattaching mints a fresh latch so old death cannot poison a relaunch.
+    #[farhelm_testtrace::test]
+    async fn pane_death_requires_exact_identity_and_latches_for_busy_receivers() {
+        let (death, mut rx) = super::PaneDeath::new("fh-one", "%1");
+        let probe_started = tokio::time::Instant::now();
+        let mut states = std::collections::HashMap::new();
+        assert!(death.observed_in(&states, probe_started).is_none());
+        states.insert(
+            "%1".to_owned(),
+            crate::tmux::PaneState::for_test("fh-other", "%1", "@0").dead_with(Some(0)),
+        );
+        assert!(death.observed_in(&states, probe_started).is_none());
+        states.insert(
+            "%1".to_owned(),
+            crate::tmux::PaneState::for_test("fh-one", "%1", "@0"),
+        );
+        assert!(death.observed_in(&states, probe_started).is_none());
+        states.insert(
+            "%1".to_owned(),
+            crate::tmux::PaneState::for_test("fh-one", "%1", "@0").dead_with(Some(0)),
+        );
+        death
+            .observed_in(&states, probe_started)
+            .expect("matching death")
+            .send_replace(true);
+        rx.changed()
+            .await
+            .expect("death stays pending before receiver waits");
+        assert!(*rx.borrow_and_update());
+        let (replacement, replacement_rx) = super::PaneDeath::new("fh-one", "%1");
+        assert!(
+            replacement.observed_in(&states, probe_started).is_none(),
+            "old snapshot must not reach a replacement"
+        );
+        assert!(
+            !*replacement_rx.borrow(),
+            "replacement owns a fresh observation"
+        );
+    }
+
     use super::super::core::tests::{StateDir, dummy_exe};
     use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::*;

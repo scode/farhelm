@@ -1308,3 +1308,23 @@ options), still excluded from the deflake sweep; the checkpoints ship so any lat
 Class: substrate
 
 Cause: established
+
+## 2026-09-30 — final output recovered after pane exit (crates/farhelm/tests/e2e/session_lifecycle.rs)
+
+The final-output loss recorded for `session_lifecycle::non_utf8_terminal_output_survives_live_stream` is fixed by
+catching an existing attachment up from retained pane history when the supervisor observes pane death. tmux 3.7c can
+discard its queued live bytes at EOF; resetting before replay replaces already-delivered content rather than duplicating
+it. The test still makes its producer write and exit immediately, now runs the serving supervisor's ticker, and accepts
+raw `0xff` before recovery or its rendered replacement after a recovery reset (tmux canonicalizes that byte in history).
+The exact selection `test(=session_lifecycle::non_utf8_terminal_output_survives_live_stream)` passed all 40 attempts in
+hunt batch `994e88a8-adc1-4d75-9701-280ef02fd750` on Linux x86_64 under a transient user scope limited to
+`CPUQuota=400%` beside two CPU-bound load processes, with four nextest slots, zero retries, and a one-hour batch cap.
+Tested commit `36949b4d1f2d6afa445f3b334b1e7570f524df3e` with the fix uncommitted; recorded tmux 3.7c executable SHA256
+`40812d9309ff36ac7aae468a62eb944c4df4fefab0df135814b1dfa0f34ecdf2`, locale `C.UTF-8`, ambient `FARHELM_*` scrubbed, and
+only recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. A separate deterministic supervisor regression suppresses live
+delivery and proves reset plus final history on the same attachment. Disposition: fixed by the PR that adds this entry;
+the TODO.md entry and its `deflake/known-flakes.txt` line are removed.
+
+Class: substrate
+
+Cause: established
