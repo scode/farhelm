@@ -41,8 +41,6 @@ One line per open item. This file must always match the feedback files in this d
   and CORS, not just Farhelm's.
 - `output-client-shutdown-can-retry-forever.md` — the per-terminal output client can get stuck retrying shutdown when
   its session disappears while paused.
-- `tab-session-token-in-tmux-argv.md` — opening a tab puts the session token on the tmux client's command line, briefly
-  visible to other accounts.
 - `claude-scan-budget-never-settles.md` — Claude record-scan capture can never complete in a large project directory and
   rescans forever.
 - `env-wrapper-hides-command-not-found.md` — Farhelm's own `env` wrapper turns "command not found" for Goose, Pi and OMP
