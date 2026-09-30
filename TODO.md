@@ -33,14 +33,54 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Installer refuses its own app bundle after an interrupted replacement.** On macOS, `scripts/install.sh` rebuilds
-  `~/Applications/Farhelm.app` by removing the old bundle (`rm -rf`) and moving the staged one into place. An installer
-  interrupted during that removal can leave a partial bundle whose ownership record (`Contents/.farhelm-installation`)
-  is already gone; every later install then refuses it as foreign ("does not look like a farhelm app bundle") and exits
-  1, and only deleting it by hand recovers. Accepting incomplete bundles in general would break the foreign-bundle
-  safeguard. The review of the moved-install-directory fix suggested keeping the ownership evidence outside the bundle
-  (beside it, as the uninstaller does with `~/Applications/.Farhelm.app.uninstall-receipt`) until the replacement
-  completes. Split out of the entry on installs after the install directory moves, which fixed the rest.
+- **Installer refuses its own app bundle after an interrupted replacement.** On macOS, every install and update of
+  `scripts/install.sh` rebuilds `~/Applications/Farhelm.app` from scratch: it assembles the new bundle in its staging
+  directory, writes the ownership record (`Contents/.farhelm-installation`) into that staged copy, then runs `rm -rf` on
+  the installed bundle and `mv`s the staged one into place. Before that it only replaces a bundle it can show is its
+  own: one whose record names this installation (`bundle_record_is_ours`), one whose record names an installation that
+  moved here or no longer exists (`bundle_record_moved_here`), or the exact recordless layout the installer built before
+  records existed (`is_legacy_installer_bundle`). Anything else is refused with "exists and does not look like a farhelm
+  app bundle; refusing to replace it" and exit 1. The binaries in the install directory are already committed by then;
+  only the bundle step fails.
+
+  The gap is the `rm -rf`. Its deletion order is directory-listing order, so an installer killed partway through it
+  (Ctrl-C, a closed terminal, a crash, power loss) can leave a partial bundle whose record is already gone while other
+  files remain. That bundle has no record and is not the exact legacy layout, so every later install and update refuses
+  it with the misleading message above. It is also a dead end for the uninstaller: `farhelm uninstall` rejects a bundle
+  without a record ("ownership receipt ... is missing; rerun the installer to repair it"), so each tool sends the user
+  to the other. The only recovery is deleting `~/Applications/Farhelm.app` by hand (`FARHELM_NO_APP_BUNDLE=1` only skips
+  the bundle step). The other interruption points are fine: a kill before the `rm -rf` leaves the old bundle intact, a
+  partial bundle that still has its record is accepted because the ownership check does not verify the record's digests,
+  and a kill between `rm -rf` and `mv` leaves no bundle, which the next run builds fresh. Unverified: whether an
+  `rm -rf` that macOS App Management denies partway (the case the installer's error message mentions) can also delete
+  the record first; it exits 1 through the same path if so.
+
+  Accepting incomplete or recordless bundles in general would break the foreign-bundle safeguard (SPEC.md's installation
+  rule: a file is not destroyed because its name matches), so the fix has to keep the ownership evidence alive across
+  the replacement. The review of the moved-install-directory fix suggested doing what the uninstaller already does
+  during removal: publish the record beside the bundle (the uninstaller uses
+  `~/Applications/.Farhelm.app.uninstall-receipt`; see SPEC_impl.md and `docs/install_uninstall.md`) before the
+  `rm -rf`, accept a partial bundle when that sibling record names this installation, and remove the sibling only after
+  the `mv`. Whether the installer should reuse the uninstaller's receipt name and format or use its own is open. Split
+  out of the entry on installs after the install directory moves, which fixed the rest; `scripts/test-install-sh.sh` is
+  where the fixture for the interrupted state would go.
+
+- **Killed-shim checkout-preparation test leaks processes when it fails.** In `crates/farhelm-supervisor/src/launch.rs`,
+  `d4_killed_shim_never_repeats_the_hook_or_spawns_the_agent` starts the preparation shim, whose preparation hook parks
+  on a FIFO (`build_d4_fixture`), checks the hook is running under the shim, that it was called once, and that the
+  durable state is `HookStarted`, then SIGKILLs the shim on purpose, reaps it, and only afterwards writes the release
+  byte to the FIFO. Every one of those checks is an `assert!` that runs while the shim and hook are alive, and the shim
+  is held as a plain `std::process::Child`. If any of them fails (including the 30-second readiness poll), unwinding
+  drops that handle without killing or reaping anything: the shim stays waiting on the hook, and the hook stays blocked
+  reading the FIFO. Deleting the fixture's temporary directory does not unblock it, because the hook opened the FIFO for
+  both reading and writing. A failure after the deliberate kill but before the release byte orphans the hook the same
+  way. The processes then live until someone kills them, which on a shared machine is exactly the stray load that
+  FLAKES.md records tripping other tests' timing budgets. A passing run is unaffected. The existing `ReapedPrepChild`
+  wrapper is not enough on its own: it kills and reaps the shim but not the hook the shim started. The fix needs an
+  unwind-safe owner for both from the moment the shim is spawned, for example starting the shim in its own process group
+  and killing and reaping that group on drop, while keeping the mid-test SIGKILL aimed at the shim alone so the
+  interruption the test exists for still happens. Found by the review of the PR that moved these tests' markers out of
+  `/tmp`; the gap predates that PR.
 
 ## Doc todo
 
