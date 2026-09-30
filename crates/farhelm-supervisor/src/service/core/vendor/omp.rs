@@ -203,7 +203,7 @@ impl Supervisor {
                     .await
             }
         };
-        Self::finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
+        self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
     }
 
     /// Recover the agent pane during publication gaps, then bind the socket peer

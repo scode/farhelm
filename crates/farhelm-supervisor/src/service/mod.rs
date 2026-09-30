@@ -96,6 +96,7 @@ mod capture;
 mod connection;
 mod core;
 mod handlers;
+mod hints;
 mod launch_artifacts;
 mod listing;
 mod status;

@@ -246,7 +246,7 @@ impl Supervisor {
                     .await
             }
         };
-        Self::finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
+        self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
     }
 
     /// Apply Grok's existing corridor after the shared owned-pane lookup.

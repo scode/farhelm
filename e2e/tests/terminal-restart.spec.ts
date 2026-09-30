@@ -62,6 +62,26 @@ installTerminalSuiteHooks();
  * count can show that a decline sent none and a click sent exactly one.
  */
 async function injectInterruptedSession(page: Page, sessionId: string, title: string) {
+  // The replacement a successful Replace answers with. Like the real helm,
+  // the listing reports it from then on: the sidebar re-selects when the
+  // selected session drops out of a listing, and the helm's change hints
+  // mean a listing can be fetched at any moment, so a replacement missing
+  // from it would be deselected by whichever fetch landed first.
+  const replacement = {
+    id: `${sessionId.slice(0, -1)}9`,
+    title: `${title} (replaced)`,
+    cwd: "/tmp",
+    invocation: "claude",
+    status: { state: "unknown" },
+    restart_offer: "resume",
+    created_at: 0,
+    last_activity_at: 0,
+    tabs: [],
+  };
+  const counter = { restartRequests: 0, replaceRequests: 0 };
+  // Set only by the successful Replace reply below. A test that overrides
+  // that route with a refusal never sets it, so no phantom row appears.
+  let replaced = false;
   await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
@@ -78,9 +98,12 @@ async function injectInterruptedSession(page: Page, sessionId: string, title: st
       restart_offer: "resume",
     });
     listing.total += 1;
+    if (replaced) {
+      listing.sessions.push(replacement);
+      listing.total += 1;
+    }
     await route.fulfill({ response, json: listing });
   });
-  const counter = { restartRequests: 0, replaceRequests: 0 };
   // The reply is the shape a real restart returns — the session with the
   // supervisor's deliberate `unknown` for a run it cannot vouch for yet —
   // so the view takes its SUCCESS path (a bare `{}` would fail to decode
@@ -107,22 +130,14 @@ async function injectInterruptedSession(page: Page, sessionId: string, title: st
   });
   await page.route(`**/api/sessions/${sessionId}/replace`, async (route) => {
     counter.replaceRequests++;
+    replaced = true;
     await fulfillAsHelm(route, {
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        // The replacement must have a different identity. Reusing the
-        // source id would let this test pass without proving selection moved.
-        id: `${sessionId.slice(0, -1)}9`,
-        title: `${title} (replaced)`,
-        cwd: "/tmp",
-        invocation: "claude",
-        status: { state: "unknown" },
-        restart_offer: "resume",
-        created_at: 0,
-        last_activity_at: 0,
-        tabs: [],
-      }),
+      // The replacement must have a different identity (see its
+      // definition). Reusing the source id would let this test pass without
+      // proving selection moved.
+      body: JSON.stringify(replacement),
     });
   });
   return counter;

@@ -3899,6 +3899,10 @@ pub struct Supervisor {
     /// this struct's docs state: `helm_link_for_session` releases
     /// `attachments` before taking this, and nothing else takes both.
     pub(crate) helm_links: Mutex<Vec<Arc<super::agent_relay::HelmLink>>>,
+    /// Owed "sessions changed" hints to the connections in `helm_links`;
+    /// see [`super::hints`]. Marking it takes no lock, so it sits outside
+    /// the lock-ordering rules entirely.
+    pub(crate) change_hints: Arc<super::hints::ChangeHints>,
     /// Test-only direct routing for a synthetic helm link; production
     /// routing remains attachment-based so a profile lookup asks the helm
     /// that actually owns the parent session.
@@ -5024,6 +5028,7 @@ impl Supervisor {
             sessions: Mutex::new(sessions),
             attachments: Mutex::new(HashMap::new()),
             helm_links: Mutex::new(Vec::new()),
+            change_hints: Arc::new(super::hints::ChangeHints::default()),
             #[cfg(test)]
             test_helm_links: Mutex::new(HashMap::new()),
             output_reaps: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -6329,6 +6334,10 @@ impl Supervisor {
         // the accept loop below never returns, so the ticker's lifetime is
         // this call's.
         let mut ticker = start_ticker(self);
+        // Beside the ticker and for the same lifetime: turns marks from any
+        // path into "sessions changed" hints (see `hints`). Bound to a name
+        // because dropping the handle stops the task.
+        let _hint_sender = super::hints::start_hint_sender(self);
         let mut accept_backoff = ACCEPT_ERROR_INITIAL_BACKOFF;
         info!(socket = %path.display(), "supervisor listening");
         loop {
@@ -8122,6 +8131,7 @@ impl Supervisor {
                     .await;
                 if removed.is_ok() {
                     self.sessions.lock().await.remove(&reservation.session_id);
+                    self.hint_sessions_changed();
 
                     // The row is now terminal, so no recovery path can consume
                     // the previous attempt's launch evidence. Remove its
@@ -8209,6 +8219,10 @@ impl Supervisor {
                 scope,
             }),
         );
+        // Retained rows are visible (and deletable) from here; the failed
+        // create that published them replies with an error, so nothing else
+        // would hint them.
+        self.hint_sessions_changed();
     }
 
     /// Perform one launch: the durable launching record, the launch spec,
@@ -8545,6 +8559,7 @@ impl Supervisor {
                     // closed at the other end, where the confirmation below
                     // finds its row already gone.
                     self.sessions.lock().await.remove(&id);
+                    self.hint_sessions_changed();
                 }
                 claim
             };
@@ -9520,6 +9535,8 @@ impl Supervisor {
                 scope: launch_scope,
             }),
         );
+        // Marked at publication, not by the create handler: see `hints`.
+        self.hint_sessions_changed();
         // Derived HERE rather than reused from the pre-launch lookup, and
         // the gap is real: a launch is a tmux round trip plus two durable
         // writes, and a profile renamed or deleted while it ran would make
@@ -10229,6 +10246,9 @@ impl Supervisor {
         // publishing an entry whose pane is mid-respawn would be worse
         // than briefly publishing none.
         self.sessions.lock().await.remove(&id);
+        // Usually republished moments later (and hinted again then); marked
+        // here too so a restart that never republishes is not left unhinted.
+        self.hint_sessions_changed();
         // Whatever is attached is attached to the PREVIOUS run: the pane is
         // about to be respawned under it (or replaced outright), so the
         // client is told to reattach rather than left watching a stream
@@ -10297,6 +10317,10 @@ impl Supervisor {
                     info.launch = live_info.launch;
                     info.resume_template = live_info.resume_template;
                 }
+                drop(sessions);
+                // The launch settings changed after `publish_relaunched`'s
+                // own hint may already have gone out.
+                self.hint_sessions_changed();
             }
         }
         match relaunched {
@@ -10415,6 +10439,7 @@ impl Supervisor {
                             reset_capture,
                         ),
                     );
+                    self.hint_sessions_changed();
                 }
                 Err(failure.error)
             }
@@ -11218,6 +11243,10 @@ impl Supervisor {
             .lock()
             .await
             .insert(entry.info.id.clone(), published);
+        // Every relaunch publication goes through here, whichever request
+        // or recovery drove it; see `hints` for why marks sit at
+        // publication rather than in the handlers.
+        self.hint_sessions_changed();
         info
     }
 
@@ -11705,6 +11734,10 @@ impl Supervisor {
                         *slot = Arc::clone(&renamed);
                     }
                 }
+                // The durable title has landed whatever happens to the
+                // caller's reply; on this owned task so an abandoned waiter
+                // cannot lose the hint.
+                sup.hint_sessions_changed();
                 Ok(renamed)
             }
             .await;
@@ -11843,8 +11876,15 @@ impl Supervisor {
         let cwd = entry.info.cwd.clone();
         let task = tokio::spawn(async move {
             let _lifecycle = lifecycle;
-            sup.open_tab_window(&session_id, &session_token, &agent, &cwd)
-                .await
+            let opened = sup
+                .open_tab_window(&session_id, &session_token, &agent, &cwd)
+                .await;
+            // Hinted here on the owned task rather than by the handler that
+            // awaits it: that waiter can be abandoned while this finishes.
+            if opened.is_ok() {
+                sup.hint_sessions_changed();
+            }
+            opened
         });
         match task.await {
             Ok(result) => result,
@@ -12168,13 +12208,19 @@ impl Supervisor {
         let tab_id = tab_id.to_string();
         let task = tokio::spawn(async move {
             let _lifecycle = lifecycle;
-            sup.close_tab_window(
-                &session_id,
-                &terminal,
-                &tab_id,
-                recorded_agent_pane.as_deref(),
-            )
-            .await
+            let closed = sup
+                .close_tab_window(
+                    &session_id,
+                    &terminal,
+                    &tab_id,
+                    recorded_agent_pane.as_deref(),
+                )
+                .await;
+            // On the owned task for the same reason as `open_tab`'s hint.
+            if closed.is_ok() {
+                sup.hint_sessions_changed();
+            }
+            closed
         });
         match task.await {
             Ok(result) => result,
@@ -13273,6 +13319,10 @@ impl Supervisor {
                 scope: launch_scope_unit(&row.id, row.generation, row.launch_scoped),
             }),
         );
+        drop(sessions);
+        // A retained refusal is a new, already-terminal row: no pane will
+        // die and no ticker transition follows, so this is its only hint.
+        self.hint_sessions_changed();
     }
 
     /// The durable NotStarted publication (Design D): the preparation
@@ -13808,7 +13858,7 @@ impl Supervisor {
                     .await
             }
         };
-        Self::finish_reported_admission(
+        self.finish_reported_admission(
             id,
             written,
             &conversation,
@@ -13826,6 +13876,7 @@ impl Supervisor {
     /// is a concurrent relaunch or binding change invalidating the
     /// evidence, not a malfunction.
     fn finish_reported_admission(
+        &self,
         id: &str,
         written: anyhow::Result<bool>,
         conversation: &str,
@@ -13888,10 +13939,15 @@ impl Supervisor {
             // current-generation entry, under the same capture claim —
             // carrying the provenance the write committed so offers read
             // one binding, not two disagreeing halves.
-            state.advance(CaptureState::Reported {
-                conversation: conversation.to_string(),
-                ownership_version,
-            });
+            super::capture::advance_capture(
+                self,
+                &entry,
+                &mut state,
+                CaptureState::Reported {
+                    conversation: conversation.to_string(),
+                    ownership_version,
+                },
+            );
             previous.filter(|was| was != conversation)
         };
         info!(
@@ -13994,7 +14050,7 @@ impl Supervisor {
             .transition(session, entry.generation, transition)
             .await?
         {
-            *entry.run.outcome.lock().expect("outcome mutex poisoned") = committed;
+            self.mirror_committed_outcome(entry, &committed);
         }
         Ok(())
     }
@@ -28770,7 +28826,10 @@ exit 0
     /// session, keeps the registry row and its membership (the last
     /// ownership record after an allocation is never dropped), settles the
     /// intent `Failed`, and a reopen preserves all of it — a same-key
-    /// retry replays the refusal without a second mkdir.
+    /// retry replays the refusal without a second mkdir. The retained row
+    /// is hinted to connected helms: the create itself replies with an
+    /// error, and an already-terminal row with no pane gets no later
+    /// ticker transition that could hint it instead.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_tmux_failure_after_allocation_retains_the_error_session_and_ownership() {
         let state = StateDir::new();
@@ -28811,9 +28870,11 @@ exit 0
             .await
             .expect("supervisor")
         };
+        let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
         let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
             .await
             .expect_err("the tmux failure fails the create");
+        hints.expect_hint("the retained error session").await;
         eprintln!("DEBUG refusal: {refusal:#}");
         assert!(
             format!("{refusal:#}").contains("allocated and is kept for inspection"),

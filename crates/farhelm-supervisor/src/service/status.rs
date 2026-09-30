@@ -371,7 +371,7 @@ pub(crate) fn live_status(entry: &SessionEntry) -> SessionStatus {
 /// starting point rather than an answer. Reads only the COMMITTED identity
 /// ([`super::capture::CaptureState::committed_conversation`]), which keeps
 /// the offer from promising a resume that no stored value could fill.
-fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
+pub(super) fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
     let capture = entry.run.capture.lock().expect("capture mutex poisoned");
     entry.snapshot.restart_offer(
         capture.committed_conversation(),
