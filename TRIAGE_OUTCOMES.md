@@ -3880,7 +3880,12 @@
   principle itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `handle_restart_session` (handlers.rs) now runs `restart_session` on a supervisor-owned
+  `tokio::spawn` holding the admission permit, the way Stop already does, and the connection's task set holds only the
+  reply waiter, so a client disconnect cannot abort the stop-and-sweep phase. Regression test
+  `restart_survives_connection_task_cancellation` (the Stop test's marker-only fixture, driven through
+  `RestartSession`). jj change `qmqxrsxypwmq`, bookmark `pr/restart-owned-by-supervisor`, draft PR
+  [#1195](https://github.com/scode/farhelm/pull/1195/changes).
 
 ## host-edits-not-cancellation-safe.md
 
