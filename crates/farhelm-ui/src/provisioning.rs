@@ -375,12 +375,26 @@ pub(crate) struct UpdateProgressSummary {
     pub(crate) run_id: String,
     /// First executor-ordered `running` step, absent when the view names none.
     pub(crate) current_step: Option<String>,
+    /// Every executor step in the snapshot, in executor order, for the hover
+    /// popup's full list. `current` marks the entry `current_step` names.
+    pub(crate) steps: Vec<UpdateStepLine>,
     /// Steps in a terminal state: completed, skipped, degraded, or failed.
     pub(crate) done: usize,
     /// All executor steps in the snapshot, including pending work.
     pub(crate) total: usize,
     /// Client-local monotonic start; never a helm timestamp or persisted value.
     pub(crate) started_at: Instant,
+}
+
+/// One step of a running update, as the hover popup lists it: the executor's
+/// label and its status string, with the step in progress marked. Step
+/// messages are left out: the popup is a glance at where the run is, and the
+/// expanded row's step list is where diagnostics are read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UpdateStepLine {
+    pub(crate) name: String,
+    pub(crate) status: String,
+    pub(crate) current: bool,
 }
 
 /// One unresolved update diagnostic, kept apart from observed progress.
@@ -467,15 +481,23 @@ fn update_progress_summary(
             )
         })
         .count();
-    let current_step = view
+    let current_index = view.steps.iter().position(|step| step.status == "running");
+    let current_step = current_index.map(|index| view.steps[index].step.clone());
+    let steps = view
         .steps
         .iter()
-        .find(|step| step.status == "running")
-        .map(|step| step.step.clone());
+        .enumerate()
+        .map(|(index, step)| UpdateStepLine {
+            name: step.step.clone(),
+            status: step.status.clone(),
+            current: Some(index) == current_index,
+        })
+        .collect();
 
     Some(UpdateProgressSummary {
         run_id: tracked.run_id.clone(),
         current_step,
+        steps,
         done,
         total: view.steps.len(),
         started_at: tracked.started_at,
@@ -2783,6 +2805,35 @@ mod tests {
         assert_eq!(summary.current_step.as_deref(), Some("upload-farhelm"));
         assert_eq!((summary.done, summary.total), (4, 7));
         assert_eq!(summary.started_at, started_at);
+        // The hover popup's list: every step in executor order, statuses as
+        // supplied, and exactly the step `current_step` names marked current.
+        assert_eq!(
+            summary
+                .steps
+                .iter()
+                .map(|step| step.name.as_str())
+                .collect::<Vec<_>>(),
+            view.steps
+                .iter()
+                .map(|step| step.step.as_str())
+                .collect::<Vec<_>>(),
+        );
+        assert!(
+            summary
+                .steps
+                .iter()
+                .zip(&view.steps)
+                .all(|(line, step)| line.status == step.status)
+        );
+        assert_eq!(
+            summary
+                .steps
+                .iter()
+                .filter(|step| step.current)
+                .map(|step| step.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["upload-farhelm"],
+        );
 
         let mut other_run = view.clone();
         other_run.run_id = Some("run-8".to_string());

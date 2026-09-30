@@ -70,7 +70,7 @@ use crate::ops::{ConfirmSlot, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_identity, display_peer};
 use crate::provisioning::{
     ActionRequest, HostBinding, HostUpdateProgress, PlanConfirmation, ProvisioningMenuState,
-    ProvisioningPanel, ProvisioningTraceShape, UpdateProgressSummary,
+    ProvisioningPanel, ProvisioningTraceShape, UpdateProgressSummary, UpdateStepLine,
 };
 use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
@@ -1640,7 +1640,8 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// ## The hover popup
 ///
 /// Hovering anywhere on the label shows [`UpdateProgressPopup`] with the
-/// count, the untruncated step name, and the clock. It replaces the step
+/// count, the run's whole step list with the untruncated current step
+/// highlighted, and the clock. It replaces the step
 /// span's native `title`, which only covered the step and only appeared
 /// after the browser's own delay, and it must not be clipped by the
 /// sidebar: `.app-sidebar` scrolls and is positioned, so no absolutely
@@ -1671,7 +1672,10 @@ fn UpdateProgressLabel(summary: UpdateProgressSummary) -> Element {
     // that leaves before the rectangle arrives must not have the popup
     // appear behind it.
     let mut hovered = use_signal(|| false);
-    let mut popup_at = use_signal(|| None::<PopupAnchor>);
+    // The label's viewport rectangle and the viewport height, measured on
+    // `pointerenter`; the popup places itself from these and its own
+    // rendered height.
+    let mut popup_origin = use_signal(|| None::<PopupOrigin>);
 
     rsx! {
         span {
@@ -1694,12 +1698,15 @@ fn UpdateProgressLabel(summary: UpdateProgressSummary) -> Element {
                     .await
                     .ok();
                 if *hovered.peek() {
-                    popup_at.set(Some(PopupAnchor::beside(&rect, viewport_height)));
+                    popup_origin.set(Some(PopupOrigin {
+                        label: rect,
+                        viewport_height,
+                    }));
                 }
             },
             onpointerleave: move |_| {
                 hovered.set(false);
-                popup_at.set(None);
+                popup_origin.set(None);
             },
             UpdateProgressDot {}
             span { class: "host-update-count",
@@ -1710,12 +1717,12 @@ fn UpdateProgressLabel(summary: UpdateProgressSummary) -> Element {
                 span { class: "host-update-step", " {step}" }
             }
             span { class: "host-update-elapsed", "aria-hidden": "true", " {elapsed_text}" }
-            if let Some(at) = popup_at() {
+            if let Some(origin) = popup_origin() {
                 UpdateProgressPopup {
-                    at,
+                    origin,
                     done: summary.done,
                     total: summary.total,
-                    step: summary.current_step.clone(),
+                    steps: summary.steps.clone(),
                     elapsed: elapsed_text.clone(),
                 }
             }
@@ -1723,11 +1730,23 @@ fn UpdateProgressLabel(summary: UpdateProgressSummary) -> Element {
     }
 }
 
+/// What [`UpdateProgressPopup`] places itself against: the label's viewport
+/// rectangle and the viewport's height (`None` when it could not be read),
+/// both measured when the pointer entered the label.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PopupOrigin {
+    label: dioxus::html::geometry::PixelsRect,
+    viewport_height: Option<f64>,
+}
+
 /// Where [`UpdateProgressPopup`] is pinned, in viewport pixels.
 ///
 /// The popup hangs below the label unless that would run it off the bottom
-/// of the viewport, in which case it sits above the label instead, anchored
-/// by its bottom edge so its own (unmeasured) height never matters. A
+/// of the viewport, in which case it sits above the label, and when it fits
+/// on neither side it is pinned inside the viewport over the label. The
+/// decision uses the popup's own rendered height, measured once it has
+/// mounted: it lists every step of the run, so its height varies with the
+/// run and with font metrics no estimate here could track. A
 /// fixed-position box escapes the sidebar's clipping but not the viewport's,
 /// and with the native `title` gone this popup is the only place a truncated
 /// step name can be read, so a popup below the fold would hide it outright.
@@ -1737,6 +1756,11 @@ enum PopupAnchor {
     Below { left: f64, top: f64 },
     /// `left`, and `bottom` measured up from the viewport's bottom edge.
     Above { left: f64, bottom: f64 },
+    /// `left`/`top` of a popup that fits neither below nor above the label,
+    /// held inside the viewport instead, covering the label if it must. The
+    /// popup takes no pointer events, so covering the label cannot end the
+    /// hover, and it repeats everything the label says.
+    Pinned { left: f64, top: f64 },
 }
 
 impl PopupAnchor {
@@ -1744,60 +1768,159 @@ impl PopupAnchor {
     /// off the label rather than overlapping it.
     const GAP_PX: f64 = 4.0;
 
-    /// Room the popup needs below the label before it flips above. Not
-    /// measured from the rendered popup: its three lines at the sidebar's
-    /// font size, with padding and border, come to roughly 60px, and the
-    /// extra covers a step name long enough to wrap onto a second line.
-    const RESERVE_PX: f64 = 90.0;
+    /// Closest a pinned popup comes to the viewport's edges.
+    const EDGE_PX: f64 = 8.0;
 
-    /// Left-aligned with the label, below it when it fits and above it
-    /// otherwise. No horizontal clamp: the sidebar is the leftmost column,
-    /// so there is always the main pane's width to the right for the popup
-    /// to spill into. An unknown viewport height keeps the popup below.
-    fn beside(rect: &dioxus::html::geometry::PixelsRect, viewport_height: Option<f64>) -> Self {
+    /// Left-aligned with the label: below it when a popup `reserve` pixels
+    /// tall fits there, above it when it fits there instead, and otherwise
+    /// pinned as low in the viewport as `reserve` allows (never above
+    /// [`Self::EDGE_PX`]). A run's
+    /// full step list can outgrow both sides of a label in a short window,
+    /// and a popup hanging past either edge hides the steps it exists to
+    /// show. No horizontal clamp: the sidebar is the leftmost column, so
+    /// there is always the main pane's width to the right for the popup to
+    /// spill into. An unknown viewport height keeps the popup below.
+    fn beside(
+        rect: &dioxus::html::geometry::PixelsRect,
+        viewport_height: Option<f64>,
+        reserve: f64,
+    ) -> Self {
         let left = rect.min_x();
         let top = rect.max_y() + Self::GAP_PX;
-        match viewport_height {
-            Some(height) if top + Self::RESERVE_PX > height && rect.min_y() > height - top => {
-                Self::Above {
-                    left,
-                    bottom: height - rect.min_y() + Self::GAP_PX,
-                }
+        let Some(height) = viewport_height else {
+            return Self::Below { left, top };
+        };
+        if top + reserve <= height {
+            Self::Below { left, top }
+        } else if reserve <= rect.min_y() - Self::GAP_PX {
+            Self::Above {
+                left,
+                bottom: height - rect.min_y() + Self::GAP_PX,
             }
-            _ => Self::Below { left, top },
+        } else {
+            Self::Pinned {
+                left,
+                top: (height - reserve - Self::EDGE_PX).max(Self::EDGE_PX),
+            }
         }
     }
 
-    /// The inline `left`/`top` or `left`/`bottom` for the popup's style.
+    /// The inline position for the popup's style. Both vertical properties
+    /// are spelled out, the unused one as `auto`: the popup mounts with a
+    /// hidden `top` before it is placed, and a style string that merely
+    /// omits a property leaves the old value on the element, which for an
+    /// `Above` popup would pin both edges and collapse it.
     fn style(self) -> String {
         match self {
-            Self::Below { left, top } => format!("left: {left}px; top: {top}px;"),
-            Self::Above { left, bottom } => format!("left: {left}px; bottom: {bottom}px;"),
+            Self::Below { left, top } | Self::Pinned { left, top } => {
+                format!("left: {left}px; top: {top}px; bottom: auto;")
+            }
+            Self::Above { left, bottom } => {
+                format!("left: {left}px; top: auto; bottom: {bottom}px;")
+            }
         }
     }
 }
 
-/// The complete text of a running update, for the pointer hover on
-/// [`UpdateProgressLabel`]: what the narrow inline label abbreviates or
-/// truncates, spelled out on separate lines.
+/// The complete state of a running update, for the pointer hover on
+/// [`UpdateProgressLabel`]: the count, every step of the run with the one in
+/// progress highlighted, and the clock.
+///
+/// A user who hovers wants the detail the narrow inline label cannot hold,
+/// so this lists the run's whole step list, the same steps and statuses the
+/// expanded row's `provisioning-steps` list shows (and styled with its
+/// classes), minus the step messages. The step in progress carries
+/// `data-current` and its name keeps the `host-update-popup-step` class, the
+/// untruncated copy of the name the inline label may have cut short.
+///
+/// It mounts hidden below the label, measures its own height, and only then
+/// takes the placement [`PopupAnchor::beside`] chooses for that height, so it
+/// never shows in a spot that runs off the viewport. A failed measurement
+/// leaves it hidden rather than placed blind.
+///
+/// The count and the clock come first and never shrink; only the step list
+/// gives up height. In a window too short for the whole list, the list is
+/// scrolled so the step in progress stays in view: the popup takes no
+/// pointer events, so the user cannot scroll it, and the current step is
+/// the one line it must not lose.
 #[component]
 fn UpdateProgressPopup(
-    at: PopupAnchor,
+    origin: PopupOrigin,
     done: usize,
     total: usize,
-    step: Option<String>,
+    steps: Vec<UpdateStepLine>,
     elapsed: String,
 ) -> Element {
+    let mut placed = use_signal(|| None::<PopupAnchor>);
+    // The mounted element, stored the same way the label stores its own;
+    // the effect below measures it once it exists.
+    let mut own = use_signal(|| None::<Rc<MountedData>>);
+    use_effect(move || {
+        let Some(handle) = own() else {
+            return;
+        };
+        spawn(async move {
+            if let Ok(rect) = handle.get_client_rect().await {
+                placed.set(Some(PopupAnchor::beside(
+                    &origin.label,
+                    origin.viewport_height,
+                    rect.height(),
+                )));
+            }
+        });
+    });
+    // Once placed (and so at its final height), bring the current step into
+    // the list's own view. A no-op when the whole list fits.
+    use_effect(move || {
+        if placed().is_some() {
+            document::eval(
+                "const list = document.querySelector('.host-update-popup .host-update-popup-steps');
+                 const step = list && list.querySelector('[data-current]');
+                 if (list && step) {
+                   list.scrollTop = step.offsetTop - list.offsetTop
+                     - Math.max(0, (list.clientHeight - step.offsetHeight) / 2);
+                 }",
+            );
+        }
+    });
+    // `visibility` is spelled out in both states: dropping a style property
+    // from the string does not reliably clear it from the element, so a
+    // placed popup says `visible` rather than merely not saying `hidden`.
+    let style = match placed() {
+        Some(at) => format!("{} visibility: visible;", at.style()),
+        None => format!(
+            "visibility: hidden; left: {}px; top: {}px;",
+            origin.label.min_x(),
+            origin.label.max_y() + PopupAnchor::GAP_PX,
+        ),
+    };
     rsx! {
         span {
             class: "host-update-popup",
             "aria-hidden": "true",
-            style: at.style(),
+            style,
+            onmounted: move |element| own.set(Some(element.data())),
             span { "updating: {done} of {total} steps done" }
-            if let Some(step) = step {
-                span { class: "host-update-popup-step", "{step}" }
+            span { class: "host-update-popup-elapsed", "{elapsed} elapsed" }
+            ol { class: "provisioning-steps host-update-popup-steps",
+                for step in steps {
+                    li {
+                        class: "provisioning-step",
+                        "data-step": "{step.name}",
+                        "data-status": "{step.status}",
+                        "data-current": if step.current { "true" },
+                        span {
+                            class: if step.current {
+                                "provisioning-step-name host-update-popup-step"
+                            } else {
+                                "provisioning-step-name"
+                            },
+                            "{step.name}"
+                        }
+                        span { class: "provisioning-step-status", "{step.status}" }
+                    }
+                }
             }
-            span { "{elapsed} elapsed" }
         }
     }
 }
@@ -3087,43 +3210,98 @@ mod tests {
         )
     }
 
-    /// The update popup is the only place a truncated step name can be read,
-    /// so it must stay inside the viewport. Specifies: below the label when
-    /// the reserve fits; above it, bottom-anchored, when it does not and
-    /// there is more room above; below whenever the viewport height is
-    /// unknown, or when above would be even tighter.
+    /// Every placement's style names both vertical edges, the unused one as
+    /// `auto`.
+    ///
+    /// Why: the popup mounts hidden with a `top` and is then re-styled, and
+    /// a style string that merely omits a property leaves the old value on
+    /// the element. An `Above` popup that kept the mount-time `top` would
+    /// have both edges pinned and collapse between them.
+    #[farhelm_testtrace::test]
+    fn every_popup_placement_names_both_vertical_edges() {
+        assert_eq!(
+            PopupAnchor::Above {
+                left: 1.0,
+                bottom: 2.0
+            }
+            .style(),
+            "left: 1px; top: auto; bottom: 2px;"
+        );
+        for anchor in [
+            PopupAnchor::Below {
+                left: 1.0,
+                top: 2.0,
+            },
+            PopupAnchor::Pinned {
+                left: 1.0,
+                top: 2.0,
+            },
+        ] {
+            assert_eq!(anchor.style(), "left: 1px; top: 2px; bottom: auto;");
+        }
+    }
+
+    /// The update popup is the only place a truncated step name and the
+    /// run's full step list can be read, so it must stay inside the
+    /// viewport. Specifies, for a popup of a given (measured) height: below
+    /// the label when it fits there; above it, bottom-anchored, when it fits
+    /// there instead; pinned inside the viewport, over the label, when it
+    /// fits on neither side; and below whenever the viewport height is
+    /// unknown.
     #[farhelm_testtrace::test]
     fn update_popup_flips_above_only_when_below_would_overflow() {
         assert_eq!(
-            PopupAnchor::beside(&label_rect_at(100.0), Some(800.0)),
+            PopupAnchor::beside(&label_rect_at(100.0), Some(800.0), 90.0),
             PopupAnchor::Below {
                 left: 40.0,
                 top: 120.0
             },
         );
         assert_eq!(
-            PopupAnchor::beside(&label_rect_at(750.0), Some(800.0)),
+            PopupAnchor::beside(&label_rect_at(750.0), Some(800.0), 90.0),
             PopupAnchor::Above {
                 left: 40.0,
                 bottom: 54.0
             },
         );
         assert_eq!(
-            PopupAnchor::beside(&label_rect_at(750.0), None),
+            PopupAnchor::beside(&label_rect_at(750.0), None, 90.0),
             PopupAnchor::Below {
                 left: 40.0,
                 top: 770.0
             },
         );
-        // A 60px viewport with the label at 10px: 34px free below, 10px
-        // above. Neither fits the reserve, and below is the larger side.
+        // A 60px viewport with the label at 10px: 30px free below, 6px
+        // above. Neither fits the reserve, so the popup is pinned inside the
+        // viewport, as high as its edge margin allows, over the label.
         assert_eq!(
-            PopupAnchor::beside(&label_rect_at(10.0), Some(60.0)),
-            PopupAnchor::Below {
+            PopupAnchor::beside(&label_rect_at(10.0), Some(60.0), 90.0),
+            PopupAnchor::Pinned {
                 left: 40.0,
-                top: 30.0
+                top: 8.0
             },
         );
+        // Pinned as low as the reserve allows when the viewport has room for
+        // it, just not on either side of the label.
+        assert_eq!(
+            PopupAnchor::beside(&label_rect_at(100.0), Some(200.0), 150.0),
+            PopupAnchor::Pinned {
+                left: 40.0,
+                top: 42.0
+            },
+        );
+        // Taller popups flip where shorter ones still fit: the label ends
+        // at 516px in an 800px viewport, so after the gap 280px are free
+        // below it.
+        let label = label_rect_at(500.0);
+        assert!(matches!(
+            PopupAnchor::beside(&label, Some(800.0), 280.0),
+            PopupAnchor::Below { .. }
+        ));
+        assert!(matches!(
+            PopupAnchor::beside(&label, Some(800.0), 281.0),
+            PopupAnchor::Above { .. }
+        ));
     }
 
     /// Probe and manual diagnostics cannot carry bidi or invisible controls

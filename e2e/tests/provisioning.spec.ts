@@ -177,6 +177,38 @@ async function startAdd(request: APIRequestContext, destination: string): Promis
   return (await response.json()) as Accepted;
 }
 
+/**
+ * Whether the update popup's current step name, count line, and clock line
+ * are actually readable: every rectangle of each one's text lies inside the
+ * popup's box, inside the step list's box for the step, and inside the
+ * viewport. Measured on the text itself through a DOM `Range`, because the
+ * elements' own `scrollWidth`/`clientWidth` read zero for inline spans and
+ * so cannot tell clipped text from visible text.
+ */
+async function popupTextVisible(popup: Locator): Promise<{ current: boolean; count: boolean; elapsed: boolean }> {
+  return await popup.evaluate((node) => {
+    const within = (inner: DOMRect, outer: DOMRect) =>
+      inner.left >= outer.left - 0.5 && inner.right <= outer.right + 0.5
+      && inner.top >= outer.top - 0.5 && inner.bottom <= outer.bottom + 0.5;
+    const viewport = new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+    const box = node.getBoundingClientRect();
+    const readable = (element: Element | null, clip?: Element | null) => {
+      if (!element) return false;
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const rects = Array.from(range.getClientRects());
+      const clipBox = clip ? clip.getBoundingClientRect() : box;
+      return rects.length > 0
+        && rects.every((rect) => within(rect, box) && within(rect, clipBox) && within(rect, viewport));
+    };
+    return {
+      current: readable(node.querySelector(".host-update-popup-step"), node.querySelector(".host-update-popup-steps")),
+      count: readable(node.firstElementChild),
+      elapsed: readable(node.querySelector(".host-update-popup-elapsed")),
+    };
+  });
+}
+
 async function progress(request: APIRequestContext, host: number): Promise<Progress> {
   const response = await request.get(`/api/hosts/${host}/provisioning`);
   expect(response.ok(), await responseBody(response)).toBe(true);
@@ -1021,18 +1053,33 @@ test("single Update shows inline progress without opening its row", async ({
   await expect(popup).toContainText(/updating: \d+ of \d+ steps done/);
   await expect(popup.locator(".host-update-popup-step")).toHaveText("create-directories");
   await expect(popup).toContainText(/\d+:\d{2} elapsed/);
-  const popupStep = await popup.locator(".host-update-popup-step").evaluate((node) => ({
-    position: getComputedStyle(node.parentElement!).position,
-    clipped: node.scrollWidth > node.clientWidth,
-  }));
-  expect(popupStep).toEqual({ position: "fixed", clipped: false });
+  // Every step of the held run is listed, in executor order with the
+  // statuses the helm reports, and exactly one is marked as in progress:
+  // the held `create-directories`.
+  const held = await progress(request, accepted.host_id);
+  const listed = await popup.locator(".provisioning-step").evaluateAll((items) =>
+    items.map((item) => ({ step: item.getAttribute("data-step"), status: item.getAttribute("data-status") })),
+  );
+  expect(listed, "the popup lists the run's own steps").toEqual(
+    held.steps.map(({ step, status }) => ({ step, status })),
+  );
+  await expect(popup.locator('.provisioning-step[data-current="true"]')).toHaveCount(1);
+  await expect(popup.locator('.provisioning-step[data-current="true"]')).toHaveAttribute("data-step", "create-directories");
+  await expect(popup.locator('.provisioning-step[data-current="true"]')).toHaveAttribute("data-status", "running");
+  expect(await popup.evaluate((node) => getComputedStyle(node).position)).toBe("fixed");
+  expect(await popupTextVisible(popup), "the current step, count, and clock are readable").toEqual({
+    current: true,
+    count: true,
+    elapsed: true,
+  });
   await page.mouse.move(0, 0);
   await expect(popup).toHaveCount(0);
 
   // With the label near the viewport's bottom edge there is no room below it,
-  // so the popup opens above instead: fixed positioning escapes the sidebar's
-  // clipping but not the viewport's, and a popup past the fold would hide the
-  // only full copy of the step name.
+  // so the popup opens above it, or, when the run's step list is too tall for
+  // that too, is pinned inside the viewport over the label: fixed positioning
+  // escapes the sidebar's clipping but not the viewport's, and a popup past
+  // either edge would hide the steps it exists to show.
   const originalViewport = page.viewportSize()!;
   const labelBottom = await row
     .locator(".host-update-running")
@@ -1048,10 +1095,18 @@ test("single Update shows inline progress without opening its row", async ({
     const label = node.parentElement!.getBoundingClientRect();
     return {
       inside: box.top >= 0 && box.bottom <= window.innerHeight,
-      above: box.bottom <= label.top,
+      notBelow: box.top < label.bottom,
     };
   });
-  expect(placement).toEqual({ inside: true, above: true });
+  expect(placement).toEqual({ inside: true, notBelow: true });
+  // However short the window, the list gives up height, not the lines that
+  // matter: the current step (scrolled into the list's view), the count,
+  // and the clock stay readable.
+  expect(await popupTextVisible(popup), "a short window keeps the current step, count, and clock").toEqual({
+    current: true,
+    count: true,
+    elapsed: true,
+  });
   await page.mouse.move(0, 0);
   await expect(popup).toHaveCount(0);
   await page.setViewportSize(originalViewport);
