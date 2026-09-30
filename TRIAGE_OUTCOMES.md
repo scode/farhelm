@@ -2401,3 +2401,1618 @@
   manager is the user's choice, and tie lookalike-prompt autofill to the already accepted port-squatter gap. No code
   change. PR [#1159](https://github.com/scode/farhelm/pull/1159/changes), jj change `xvnvrxrv`, bookmark
   `pr/web-token-password-manager`.
+
+## refresh-publish-races-retarget-in-check-then-act-gap.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## seed-write-validates-handle-outside-publish.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## cancelled-refresh-overwrites-seed.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## identityless-refresh-publishes-outside-lock.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## tab-close-kills-before-detach.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## tab-close-errors-linger.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## token-show-busy-lock-misleading-failure.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## credential-refusal-surfaces-as-broken-pipe.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## spawn-lookup-timeout-message-misleads.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## hook-log-truncation-erases-concurrent-line.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## terminal-query-refused-before-upgrade.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## sha256sums-part-repair-race.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare and the whole
+  consequence is a brief or view-local display glitch, a safe failure that succeeds on retry, or an imprecise or lost
+  diagnostic.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## tmux-kill-runs-unbounded-under-global-lock.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "A hung private tmux server or systemd user manager". The trigger is tmux or the systemd user manager
+  not answering (or a tmux program that hangs), and the consequence stays on the affected host.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## untracked-mutations-leak-on-wedged-tmux.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "A hung private tmux server or systemd user manager". The trigger is tmux or the systemd user manager
+  not answering (or a tmux program that hangs), and the consequence stays on the affected host.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## tmux-run-bytes-unbounded-under-lock.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "A hung private tmux server or systemd user manager". The trigger is tmux or the systemd user manager
+  not answering (or a tmux program that hangs), and the consequence stays on the affected host.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## superseded-reap-watchers-never-exit.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "A hung private tmux server or systemd user manager". The trigger is tmux or the systemd user manager
+  not answering (or a tmux program that hangs), and the consequence stays on the affected host.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## startup-tmux-version-check-unbounded.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "A hung private tmux server or systemd user manager". The trigger is tmux or the systemd user manager
+  not answering (or a tmux program that hangs), and the consequence stays on the affected host.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## delete-serial-scope-kills-under-global-lock.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "A hung private tmux server or systemd user manager". The trigger is tmux or the systemd user manager
+  not answering (or a tmux program that hangs), and the consequence stays on the affected host.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## staging-holds-claim-across-unbounded-io.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Healthy local filesystems". The trigger is a hung or failing filesystem, and
+  the consequence stays on the affected machine.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## refresh-timeout-misses-profile-and-commit-tail.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Healthy local filesystems". The trigger is a hung or failing filesystem, and
+  the consequence stays on the affected machine.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## ticker-retries-unkillable-tab-reaps.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Healthy local filesystems". The trigger is a hung or failing filesystem, and
+  the consequence stays on the affected machine.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## failed-stop-leaves-stale-stop-intent.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Session status and history after a crash or a partly failed operation". The consequence is an
+  inaccurate or imprecise session status or history after a crash, degraded recording, or a partly failed operation,
+  recoverable through ordinary Stop, Restart or Delete.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## stop-terminal-less-records-exit-before-kill.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Session status and history after a crash or a partly failed operation". The consequence is an
+  inaccurate or imprecise session status or history after a crash, degraded recording, or a partly failed operation,
+  recoverable through ordinary Stop, Restart or Delete.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## stop-outcomes-lost-when-degraded.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Session status and history after a crash or a partly failed operation". The consequence is an
+  inaccurate or imprecise session status or history after a crash, degraded recording, or a partly failed operation,
+  recoverable through ordinary Stop, Restart or Delete.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## reused-pane-dead-treated-definitive.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Session status and history after a crash or a partly failed operation". The consequence is an
+  inaccurate or imprecise session status or history after a crash, degraded recording, or a partly failed operation,
+  recoverable through ordinary Stop, Restart or Delete.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## restart-refused-after-stopping-agent.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Session status and history after a crash or a partly failed operation". The consequence is an
+  inaccurate or imprecise session status or history after a crash, degraded recording, or a partly failed operation,
+  recoverable through ordinary Stop, Restart or Delete.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## crash-mid-sweep-leaves-frozen-tree.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Session status and history after a crash or a partly failed operation". The consequence is an
+  inaccurate or imprecise session status or history after a crash, degraded recording, or a partly failed operation,
+  recoverable through ordinary Stop, Restart or Delete.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+- Note (2026-09-29, PR0 review): the finding's consequence also includes the agent or tab processes staying
+  SIGSTOP-frozen until the user stops or deletes again. The user decided to filter this item with the other crash-status
+  findings; the FILTER.md filter's wording was widened in the same change to state that case explicitly.
+
+## reload-false-never-started-error.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Session status and history after a crash or a partly failed operation". The consequence is an
+  inaccurate or imprecise session status or history after a crash, degraded recording, or a partly failed operation,
+  recoverable through ordinary Stop, Restart or Delete.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## grok-double-null-field-refused.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare edge cases in harnesses without first-class support". It concerns Grok only, depends on
+  unconfirmed vendor behavior, and affects only Resume capture or hook diagnostics for those sessions.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## grok-prompt-hooks-exceed-payload-cap.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  FILTER.md filter "Rare edge cases in harnesses without first-class support". It concerns Grok only, depends on
+  unconfirmed vendor behavior, and affects only Resume capture or hook diagnostics for those sessions.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## spawn-holds-global-mutex-waiting-parent.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Waiting between operations on one host". Only session-management operations or
+  host registration edits wait on one another, which that decision accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## delete-holds-directory-lock-whole-teardown.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Waiting between operations on one host". Only session-management operations or
+  host registration edits wait on one another, which that decision accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## alias-edit-waits-on-provisioning.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Waiting between operations on one host". Only session-management operations or
+  host registration edits wait on one another, which that decision accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## agent-created-tmux-windows-never-reaped.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md "Ownership during cleanup and provisioning" (the private tmux server is an implementation detail; direct
+  interaction with it is unsupported). The trigger is a user or a program in a session using the private tmux server
+  directly.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## split-tab-close-reaps-one-pane.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md "Ownership during cleanup and provisioning" (the private tmux server is an implementation detail; direct
+  interaction with it is unsupported). The trigger is a user or a program in a session using the private tmux server
+  directly.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## startup-reap-misnames-terminal-clients.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md "Ownership during cleanup and provisioning" (the private tmux server is an implementation detail; direct
+  interaction with it is unsupported). The trigger is a user or a program in a session using the private tmux server
+  directly.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## pane-states-skips-markers-single-window.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md "Ownership during cleanup and provisioning" (the private tmux server is an implementation detail; direct
+  interaction with it is unsupported). The trigger is a user or a program in a session using the private tmux server
+  directly.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## title-rewrite-erases-sweep-marker.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md "Lifecycle operations" (accepted cleanup limits on hosts without a usable systemd user manager). The survivors
+  described are detached processes whose environment marker cannot be read or has been overwritten, which that section
+  names as accepted limits.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## create-retry-duplicates-agent-without-manager.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md "Lifecycle operations" (accepted cleanup limits on hosts without a usable systemd user manager). The survivors
+  described are detached processes whose environment marker cannot be read or has been overwritten, which that section
+  names as accepted limits.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## probe-misses-install-sh-supervisor.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported host setup". The trigger is a host set up some other way than the
+  helm's own setup (custom paths, install.sh, drop-ins, symlinked destinations) or setup re-applying the settings it
+  manages, which that decision makes best effort or explicitly accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## update-breaks-install-sh-receipt.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported host setup". The trigger is a host set up some other way than the
+  helm's own setup (custom paths, install.sh, drop-ins, symlinked destinations) or setup re-applying the settings it
+  manages, which that decision makes best effort or explicitly accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## provisioning-ignores-unit-drop-ins.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported host setup". The trigger is a host set up some other way than the
+  helm's own setup (custom paths, install.sh, drop-ins, symlinked destinations) or setup re-applying the settings it
+  manages, which that decision makes best effort or explicitly accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## update-reenables-unit-and-linger.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported host setup". The trigger is a host set up some other way than the
+  helm's own setup (custom paths, install.sh, drop-ins, symlinked destinations) or setup re-applying the settings it
+  manages, which that decision makes best effort or explicitly accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## remote-mode-check-reads-symlink-mode.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported host setup". The trigger is a host set up some other way than the
+  helm's own setup (custom paths, install.sh, drop-ins, symlinked destinations) or setup re-applying the settings it
+  manages, which that decision makes best effort or explicitly accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## update-installs-tmux-into-shared-bin.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported host setup". The trigger is a host set up some other way than the
+  helm's own setup (custom paths, install.sh, drop-ins, symlinked destinations) or setup re-applying the settings it
+  manages, which that decision makes best effort or explicitly accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## add-ignores-requested-and-recorded-paths.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported host setup". The trigger is a host set up some other way than the
+  helm's own setup (custom paths, install.sh, drop-ins, symlinked destinations) or setup re-applying the settings it
+  manages, which that decision makes best effort or explicitly accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## tilde-remote-paths-never-expand.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported host setup". The trigger is a host set up some other way than the
+  helm's own setup (custom paths, install.sh, drop-ins, symlinked destinations) or setup re-applying the settings it
+  manages, which that decision makes best effort or explicitly accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## csh-login-shell-breaks-agent-launch.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported user environments". The trigger is an unsupported login shell or tmux
+  program, or the deliberate PATH ordering that SPEC.md's environment contract now names.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## csh-login-shell-breaks-tab-launch.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported user environments". The trigger is an unsupported login shell or tmux
+  program, or the deliberate PATH ordering that SPEC.md's environment contract now names.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## output-client-name-wrong-behind-wrapper.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported user environments". The trigger is an unsupported login shell or tmux
+  program, or the deliberate PATH ordering that SPEC.md's environment contract now names.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## sink-client-name-wrong-behind-wrapper.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported user environments". The trigger is an unsupported login shell or tmux
+  program, or the deliberate PATH ordering that SPEC.md's environment contract now names.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## launch-path-prepends-binary-directory.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Supported user environments". The trigger is an unsupported login shell or tmux
+  program, or the deliberate PATH ordering that SPEC.md's environment contract now names.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## spawn-reply-returns-raw-profile-invocation.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md "Local authority and trust between hosts" (command lines and profiles are not secret from agents or attached
+  hosts under the temporary cross-host exception). The exposure is an agent or attached host obtaining a profile or
+  session command line, which that exception accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## clone-discloses-source-invocation.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md "Local authority and trust between hosts" (command lines and profiles are not secret from agents or attached
+  hosts under the temporary cross-host exception). The exposure is an agent or attached host obtaining a profile or
+  session command line, which that exception accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## replace-leaks-claimed-profile-invocation.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md "Local authority and trust between hosts" (command lines and profiles are not secret from agents or attached
+  hosts under the temporary cross-host exception). The exposure is an agent or attached host obtaining a profile or
+  session command line, which that exception accepts.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## same-site-navigation-passes-origin-guard.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Client hardening" and "Local authority and trust between hosts". The finding is
+  defense in depth for the browser UI against a hypothetical flaw, or against actors the threat model excludes
+  (same-account processes, other local accounts), not a concrete practical attack.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## csp-limits-only-framing.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Client hardening" and "Local authority and trust between hosts". The finding is
+  defense in depth for the browser UI against a hypothetical flaw, or against actors the threat model excludes
+  (same-account processes, other local accounts), not a concrete practical attack.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## unauthenticated-bearer-contends-sqlite.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Client hardening" and "Local authority and trust between hosts". The finding is
+  defense in depth for the browser UI against a hypothetical flaw, or against actors the threat model excludes
+  (same-account processes, other local accounts), not a concrete practical attack.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## e2e-backend-gate-lexical-prefix.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC.md maintainer-confirmed decision "Client hardening" and "Local authority and trust between hosts". The finding is
+  defense in depth for the browser UI against a hypothetical flaw, or against actors the threat model excludes
+  (same-account processes, other local accounts), not a concrete practical attack.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## same-version-cache-generations-never-pruned.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC_impl.md "Leftover files". The leftover files grow only with a rare explicit action or are removed by the next
+  attempt or the next process start.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## failed-download-leaves-part-file.md
+
+- Outcome: `other`.
+- Assessment: not re-verified for correctness; the finding's trigger and consequence, as described, fall entirely under
+  SPEC_impl.md "Leftover files". The leftover files grow only with a rare explicit action or are removed by the next
+  attempt or the next process start.
+- Decision: skipped under the triage rule for findings covered by the specifications or by a review filter. The
+  underlying principle was decided with the user in the 2026-09-28 triage of product questions; this is accepted or
+  filtered behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage, in the same change that records the
+  principle.
+
+## clone-source-missing-from-truncated-list.md
+
+- Outcome: `other`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction. `clone_for_agent` still ignores the listing's `truncated` flag, and a session
+  past the cap usually fails earlier at owner resolution with "no such session". The premise is a host holding more
+  sessions than the listing cap.
+- Decision: skipped under the triage rule for findings covered by the specifications, a review filter, or a Planned TODO
+  item. Basis: SPEC.md's Session list section places a fleet that outgrows the cap outside what the product is built
+  for, with the listing's incomplete-read notice as the whole answer; `sessions.rs` records the same acceptance. This is
+  accepted, filtered or planned behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage on 2026-09-28.
+
+## creates-accepted-while-boot-id-unreadable.md
+
+- Outcome: `other`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction. Creates are still accepted while the boot id is unreadable, and the next normal
+  start marks those rows interrupted. The finding overstates the effect: a live pane still lists as running, and Restart
+  still asks for consent before stopping it. The lasting effect is a wrong recorded ending after the agent exits.
+- Decision: skipped under the triage rule for findings covered by the specifications, a review filter, or a Planned TODO
+  item. Basis: FILTER.md filter "Session status and history after a crash or a partly failed operation": the consequence
+  is an inaccurate recorded outcome after degraded recording, recoverable through ordinary operations. This is accepted,
+  filtered or planned behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage on 2026-09-28.
+
+## create-replay-codex-offer-conflict.md
+
+- Outcome: `other`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction. A create replay racing a conversation report still returns a Codex-worded
+  Conflict, Grok included. The web form keeps the intent key for this refusal, so resubmitting the unchanged form
+  replays the same key; a duplicate needs the user to edit the form.
+- Decision: skipped under the triage rule for findings covered by the specifications, a review filter, or a Planned TODO
+  item. Basis: FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics": a rare race whose
+  consequence is a misleading refusal that succeeds on retry. This is accepted, filtered or planned behavior, not a
+  completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage on 2026-09-28.
+
+## revocation-during-admission-orphans-attachment.md
+
+- Outcome: `other`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction. The helm still drops an in-flight attach after the teardown grace without
+  detaching. The finding's "pinned until something shakes it loose" is wrong: the supervisor always follows `Attached`
+  with replay data and `ReplayComplete` or `Detached` on the same channel, whose arrival removes the entry and sends
+  `Detach`. The orphan lasts about one replay round trip.
+- Decision: skipped under the triage rule for findings covered by the specifications, a review filter, or a Planned TODO
+  item. Basis: FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics": token rotation at the exact
+  moment of an attach, self-correcting within a round trip. SPEC_impl.md's "Who owns an accepted action" still describes
+  the target shape for this code. This is accepted, filtered or planned behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage on 2026-09-28.
+
+## revoked-attach-timeout-leaves-attachment.md
+
+- Outcome: `other`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction. Same root cause, code and self-correction as
+  `revocation-during-admission-orphans-attachment.md`; effectively a duplicate.
+- Decision: skipped under the triage rule for findings covered by the specifications, a review filter, or a Planned TODO
+  item. Basis: FILTER.md filter "Rare, self-correcting glitches and imprecise diagnostics", as for its duplicate. This
+  is accepted, filtered or planned behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage on 2026-09-28.
+
+## second-restart-holds-directory-lock.md
+
+- Outcome: `other`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction. A queued second restart still holds the host-wide directory lock while waiting
+  on the first restart's lifecycle claim, so creates, deletes and restarts on the host wait. Terminal typing freezes
+  only if a create arrives meanwhile, because creates run inline on the connection read loop.
+- Decision: skipped under the triage rule for findings covered by the specifications, a review filter, or a Planned TODO
+  item. Basis: SPEC.md "Waiting between operations on one host" accepts session-management operations waiting on each
+  other; the typing stall is the inline-create path covered by TODO.md's Planned item "Keep session creation off the
+  connection read loop". This is accepted, filtered or planned behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage on 2026-09-28.
+
+## update-ignores-remote-xdg-state-home.md
+
+- Outcome: `other`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction. With no recorded state directory, Update still plans `~/.local/state/farhelm`
+  while a dial without `--state-dir` honours an absolute `XDG_STATE_HOME`. A host installed by the helm's own setup
+  always records its absolute state directory, and a fresh helm re-registering it probes absent and re-plans the same
+  path; the wrong-directory case needs a supervisor started some other way.
+- Decision: skipped under the triage rule for findings covered by the specifications, a review filter, or a Planned TODO
+  item. Basis: SPEC.md "Supported host setup": hosts whose supervisor was started other than by the helm's own setup are
+  best effort. This is accepted, filtered or planned behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage on 2026-09-28.
+
+## ticker-waits-on-lifecycle-claim.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. `persist_work_started` still waits on the session's lifecycle claim
+  inside the sequential sample pass, so one Stop, Restart or Delete stalls status sampling for every session on the
+  host.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Waiting between operations on one host": session status must not wait on session-management operations. The principle
+  itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## attachment-discard-under-global-lock.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. Delete still removes quarantined attachment files, retired preparation
+  state and the hook log while holding the supervisor-wide `attachments` lock.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Waiting between operations on one host": terminal attach, input and resize must not wait on Delete. The principle
+  itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## provisioning-holds-host-cache-lock.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. A provisioning run holds the actor's `cache_lock` for its whole
+  duration, and session write-backs and refresh commits wait on it with no deadline.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Waiting between operations on one host": the session list and replies to operations that already took effect must not
+  wait on an install or update. The principle itself is recorded in the change that carries these triage decisions; this
+  item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## clipboard-sink-blocks-async-worker.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. The desktop clipboard endpoint still calls the blocking native writer,
+  under a `std::sync::Mutex`, directly on an async worker. The blocking cost is unmeasured.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Waiting between operations on one host": terminals and the session list must not wait on clipboard writes. The
+  principle itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## release-download-unbounded-under-host-lock.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. Release downloads still have no overall deadline and run inside the run
+  task that holds the host lock, and Remove waits for that lock.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Waiting between operations on one host": removing a host must respond promptly, if only to refuse. The principle
+  itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## sftp-upload-unbounded-before-temp-appears.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. The sftp upload arms no deadline until the first successful size poll,
+  ssh sets no ConnectTimeout or ServerAlive options, and Remove waits for the host lock.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Waiting between operations on one host": removing a host must respond promptly, if only to refuse. The principle
+  itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## restart-relaunches-over-unconfirmed-scope.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. Stop's `stop_live_agent` and Restart's leftover reap both still pass
+  `ScopeKillFailure::Warn`; only Delete refuses on an unconfirmed scope.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Lifecycle operations" (confirmed 2026-09-28): an operation whose cleanup cannot be confirmed fails visibly; Restart
+  must not relaunch and Stop must report the failure, as Delete already does. The principle itself is recorded in the
+  change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## tab-close-skips-scope-on-stale-verdict.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. `reap_tab_tree` still passes derived scope names that
+  `reap_process_tree` drops on a cached negative manager verdict, contrary to `reap_tab_tree`'s docs; `reprobe` is
+  one-shot per supervisor.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Lifecycle operations": a belief that the host has no usable user manager does not excuse skipping a scope the tab may
+  have. The principle itself is recorded in the change that carries these triage decisions; this item's execution is the
+  code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## sweep-drops-unreadable-root-silently.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present, slightly wider than reported: `validate_root_identity` treats an
+  unreadable root as missing, and `capture_process_identity` maps read errors to `None` without logging.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Lifecycle operations": a process Farhelm tried to reap but could not examine counts as unconfirmed, never as gone.
+  The principle itself is recorded in the change that carries these triage decisions; this item's execution is the code
+  fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## missing-checkout-root-blocks-delete.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. `verified_root` still gates retirement, teardown, pending-archive
+  recovery and restart recovery, with no fallback that retires the row.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md "Fresh
+  GitHub checkouts" (confirmed 2026-09-28): archiving never blocks Delete; Delete completes with a visible notice naming
+  the folder left behind. The principle itself is recorded in the change that carries these triage decisions; this
+  item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## noreplace-rename-unsupported-strands-archive.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. Only EEXIST/ENOTEMPTY are classified; any other rename error propagates
+  after the row is already `archive_pending`, and recovery retries the same rename.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md "Fresh
+  GitHub checkouts": archiving never blocks Delete. The principle itself is recorded in the change that carries these
+  triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## checkout-path-too-long-for-archive.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. Admission accepts paths up to 4096 bytes with no room for the archive
+  suffix, and recovery retries with a longer name.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md "Fresh
+  GitHub checkouts": archiving never blocks Delete. The principle itself is recorded in the change that carries these
+  triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## preserved-plan-diagnostic-log-only.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. The preserved-path diagnostic is still only a `warn!`, and the Delete
+  reply has no field to carry it.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md "Fresh
+  GitHub checkouts": Delete's result tells the user about a folder left behind and names it. The principle itself is
+  recorded in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## checkout-name-scan-case-sensitive.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. The occupancy scan still compares names byte for byte while candidates
+  are lowercase, so a case-variant folder on a case-insensitive filesystem makes every unnamed launch conflict.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: the user
+  confirmed macOS is fully supported; this is a bad footgun on its default filesystem. The principle itself is recorded
+  in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## linger-failure-blocks-update-restart.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. `EnableLinger` precedes the restart and attach steps, and only a narrow
+  permission-refusal shape degrades; other loginctl failures stop the run.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: affects the
+  supported helm-driven setup path (SPEC.md "Supported host setup"); linger is documented as optional. The principle
+  itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## add-confirm-rewrites-row-before-busy-check.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. `start_add` consumes the plan and re-registers the row (rewriting its
+  paths and dropping the connection) before `start_run` checks `busy`.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: affects the
+  supported helm-driven setup path. The principle itself is recorded in the change that carries these triage decisions;
+  this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## installer-stale-lock-recovery-not-exclusive.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. Stale-lock recovery still has no exclusive claim, so two installers can
+  both replay the journal.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Concurrent and interrupted runs": overlapping runs must end correct, and refusing is acceptable. The principle itself
+  is recorded in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## installer-bundle-swap-unlocked.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. The bundle step still runs after the lock is released and swaps with
+  `rm -rf` then `mv`.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Concurrent and interrupted runs". The principle itself is recorded in the change that carries these triage decisions;
+  this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## leftover-uninstall-receipt-blocks-uninstall.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. The sibling receipt survives an interrupted uninstall, the installer
+  never clears it, and uninstall then refuses with advice that does not help.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Concurrent and interrupted runs": no state that no documented command recovers from. The principle itself is recorded
+  in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## interrupt-before-install-record-publish.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. The ownership record is published after the journal is deleted, and the
+  resulting digest refusal gives no repair advice.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Concurrent and interrupted runs": binaries and ownership records must not disagree. The principle itself is recorded
+  in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## setup-partial-unit-write-mismatch.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. Setup still interleaves fallible per-unit steps with unit writes,
+  supervisor unit first, before `daemon-reload`.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Concurrent and interrupted runs": helm and supervisor services must not be left on different state directories. The
+  principle itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## ssh-controlpath-too-long.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. The ControlPath is the state directory plus 65 bytes; with the default
+  state directory the longest working username is 15 characters on Linux and 10 on macOS.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Supported user environments" (confirmed 2026-09-28): usernames up to 20 characters must work with the default state
+  directory locations. The principle itself is recorded in the change that carries these triage decisions; this item's
+  execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## relative-install-dir-installs-under-cwd.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. `FARHELM_INSTALL_DIR` is used as given, with no absolute-path check,
+  and messages echo the relative spelling.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: the user chose
+  to fix it: a stray `~` directory invites a destructive `rm -rf ~`. The principle itself is recorded in the change that
+  carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## idempotency-fingerprint-keeps-raw-cmdline.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. Permanent-scope reservations keep their fingerprint, including the raw
+  invocation and resume template, after Delete.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: decided with
+  the command-line question: command lines are not secret under the temporary exception, but deleting a session must
+  still remove what is stored about it. The principle itself is recorded in the change that carries these triage
+  decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## desktop-bootstrap-token-always-pushed.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. The desktop bootstrap always sends the web token. Verification notes
+  the finding's primary fix is insufficient on its own, because a faked 401 would still trigger the existing token
+  retry; capturing primitives at first load is the part that addresses the scenario.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Client hardening" (confirmed 2026-09-28): the native app is held to a higher bar. The principle itself is recorded in
+  the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## any-dioxus-webview-passes-origin-guard.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. The guard is still a bare `dioxus://`/`wry://` prefix check.
+  Verification notes an exact-origin match would not help, since other Dioxus apps share `dioxus://index.html`; only a
+  Farhelm-specific scheme closes it.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Client hardening": hardening that keeps other software from passing for the native app is wanted. The principle
+  itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## restart-sweep-on-abortable-connection-task.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. `restart_session` runs inside the connection's abortable task set; only
+  the final relaunch moves to a supervisor-owned task, unlike Stop.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC_impl.md
+  "Who owns an accepted action" (confirmed 2026-09-28): fix by moving execution ownership, not by per-step cleanup. The
+  principle itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## host-edits-not-cancellation-safe.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: partly present. Add, retarget, adopt and remove still commit and then converge
+  in later awaits inside the handler. #1104 makes a connected actor whose row is gone retire on its next refresh, which
+  covers part of Remove for hosts with an identity.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC_impl.md
+  "Who owns an accepted action". The principle itself is recorded in the change that carries these triage decisions;
+  this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## cancelled-start-run-leaves-host-busy.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. `start_run` marks the host busy, then awaits inside the request handler
+  before spawning; nothing but the explicit error branch clears `busy`.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC_impl.md
+  "Who owns an accepted action". The principle itself is recorded in the change that carries these triage decisions;
+  this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## agent-create-replays-asker-as-child.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present. Helm-relayed agent creates reach the target with full authority,
+  bypassing the self-replay guard, and the fingerprint has no asker.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Agent-spawned sessions" (confirmed 2026-09-28): idempotency keys are scoped to the asking session, for spawn, agent
+  create and agent clone. The principle itself is recorded in the change that carries these triage decisions; this
+  item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## spawn-replays-asker-as-child.md
+
+- Outcome: `fix code`.
+- Assessment: verified against current main (11c3f7c plus the uncommitted 2026-09-28 principle edits) by code
+  inspection, not runtime reproduction: present as narrowed: the self-replay case is refused, sibling key reuse is not,
+  and the fingerprint has no asker field.
+- Decision: settled by a principle the user decided in the 2026-09-28 triage of product questions. Basis: SPEC.md
+  "Agent-spawned sessions": idempotency keys are scoped to the asking session. The principle itself is recorded in the
+  change that carries these triage decisions; this item's execution is the code fix.
+- Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
+  feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## window-maximize-fence-never-clears.md
+
+- Outcome: `discard`.
+- Assessment: not re-verified; the mechanism depends on a Linux window manager that ignores a maximize request,
+  affecting only the development desktop build.
+- Decision: the user chose to ignore unusual Linux window managers.
+- Completion criteria: remove the feedback file and its index entry without code or spec changes.
+- Execution: `pending`.
+
+## reload-adopts-stale-pane.md
+
+- Outcome: `discard` (already fixed).
+- Assessment: already fixed on main by #917 (5130f10), which makes a `Launching` row with a dead pane list as Unknown
+  and offer no exit transition, on the path reload, the ticker and the listing all share. Verified by code inspection.
+- Decision: skipped; the user's standing rule is that already-fixed findings are removed without settling an outcome.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: `complete`; removed during triage on 2026-09-28.
+
+## reload-stale-pane-records-old-exit.md
+
+- Outcome: `discard` (already fixed).
+- Assessment: already fixed on main by #917 (5130f10); duplicate of `reload-adopts-stale-pane.md`. Verified by code
+  inspection.
+- Decision: skipped; the user's standing rule is that already-fixed findings are removed without settling an outcome.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: `complete`; removed during triage on 2026-09-28.
+
+## failed-plan-does-not-reserve-checkout-name.md
+
+- Outcome: `discard` (already fixed).
+- Assessment: already fixed on main by #1130 (0f9268b), which treats every non-retired registry row's basename, Planned
+  rows included, as taken in both preview and create. Verified by code inspection.
+- Decision: skipped; the user's standing rule is that already-fixed findings are removed without settling an outcome.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: `complete`; removed during triage on 2026-09-28.
+
+## pre-mkdir-rollback-leaves-phantom-membership.md
+
+- Outcome: `discard`.
+- Assessment: partly confirmed by code inspection. `rollback_pre_mkdir_create` still removes only the session's own
+  membership, but the reviewer's sequence is blocked on current main: `validate_retry` refuses when the planned path is
+  occupied, and since #1130 a second create cannot choose the first one's planned name. What remains needs an outside
+  process to create that exact path during a retry window after a crash, and its effect is an unarchived folder, not
+  data loss.
+- Decision: the user chose discard.
+- Completion criteria: remove the feedback file and its index entry without code or spec changes.
+- Execution: `pending`.
+
+## ambiguous-restart-republishes-old-terminal.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on current main by code inspection, not runtime reproduction. The ambiguous-relaunch branch
+  still republishes the pre-restart terminal (`core.rs` around 10897), and the restart path discards #1094's
+  `SpawnFailure::Tmux { created }` flag. A later Restart reads the stale pane as gone, skips the consent guard, and its
+  reap can kill the new agent; opening the session targets a pane that no longer exists. Since #1030,
+  `terminal_less_launch_may_be_live` already guards terminal-less entries.
+- Decision: the user chose the bounded code fix: in the ambiguous branch, publish no terminal (or the new pane when tmux
+  reported creating it) instead of the stale one, so the existing terminal-less consent guard applies.
+- Completion criteria: a second Restart after an ambiguous relaunch asks before stopping a possibly live agent, opening
+  the session no longer targets the stale pane, focused regression coverage, and remove this feedback file and its index
+  entry in the execution change.
+- Execution: `pending`.
+
+## delete-roots-only-agent-pane.md
+
+- Outcome: `fix code`.
+- Assessment: partly confirmed on current main by code inspection. Delete roots its process walk only at the agent pane
+  (`teardown.rs` around 215-217), and the comment claiming the marker scan finds tab processes wherever they are is
+  false on macOS, where platform binaries withhold their environment. Tab processes still in their tab pane's tree
+  therefore survive Delete on hosts without a usable systemd user manager; with one, tab scopes cover them. Hand-split
+  panes are out of scope under SPEC.md's private tmux rule. Sessions with no recorded terminal have no walk root at all.
+- Decision: the user chose the recommended fix with a simplicity gate. Root Delete's process walk at every terminal pane
+  the session still has (agent and tabs, reusing the tab discovery Delete already does and Close Tab's per-pane walk);
+  for a session with no recorded terminal, walk from whatever panes are found under its tmux session name, and accept
+  what that still misses on hosts without a usable user manager. If planning or execution shows this needs significant
+  new machinery or scope, stop, record the blocker, and return it to the user rather than growing the fix.
+- Completion criteria: on a host without a usable user manager, a process still descended from a tab's shell is reaped
+  by Delete; the misleading comment is corrected; focused regression coverage; remove this feedback file and its index
+  entry in the execution change, or narrow it and document the blocker if the simplicity gate is reached.
+- Execution: `pending`.
+
+## unstable-device-number-blocks-delete.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on current main by code inspection, not reproduced; how often device numbers change on real
+  machines is unknown. Checkout identity is the raw `(st_dev, st_ino)` pair compared exactly, and #1046's birth-time
+  check is combined with it rather than replacing it. The Delete half is now covered by SPEC.md's rule that archiving
+  never blocks Delete (implemented with `missing-checkout-root-blocks-delete.md`). The Restart half remains: the session
+  that created the checkout is refused permanently when only the device number changed.
+- Decision: the user chose the bounded fix and asked that the code say clearly why. When the device number differs but
+  the inode number and creation time both match, treat it as the same folder (optionally re-recording the identity).
+  Rationale to document at the comparison: btrfs subvolumes (Fedora's default `/home`), NFS, overlayfs and some
+  device-mapper setups assign device numbers at mount time, so they can change across a reboot or remount while the
+  folder is untouched; these are sensible, supported setups and must not break. Inode plus creation time still detects a
+  folder replaced at the same path, which is what the check exists for. Simplicity gate: where a platform cannot supply
+  a usable creation time, refuse with a clear message instead of building further machinery.
+- Completion criteria: Restart (and archiving) accept a checkout whose device number changed while inode and creation
+  time match, with the rationale above in the code; a replaced folder is still refused; focused regression coverage;
+  remove this feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## checkout-membership-misses-bind-mounts.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by code inspection. Checkout membership compares canonical path text, which resolves symlinks
+  but not bind mounts, so a session reaching a checkout through a bind-mount alias is not counted and the checkout can
+  be archived while it still works there. SPEC.md said only "canonical subdirectories".
+- Decision: the user chose to state in SPEC.md that filesystem aliasing is unsupported: bind mounts and any similar
+  mechanism that makes the same files or folders appear at more than one path, including hard links (a file hard-linked
+  between checkouts is not treated as shared). Farhelm treats each path as the location it names and need not detect
+  aliasing or add complexity to cope with it.
+- Completion criteria: SPEC.md "Supported user environments" carries the rule; no code change; remove this feedback file
+  and its index entry.
+- Execution: `complete`; the SPEC.md rule and the queue removal are in the change that carries these triage decisions.
+
+## update-reports-success-on-hand-started-supervisor.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on current main by code inspection. Update planning accepts any answering supervisor, then
+  enables and restarts `farhelm-supervisor.service`; when the running supervisor is not that unit, the unit crash-loops
+  on the state lock while the attach step (which checks only that a client reconnected, never the version) reports
+  success against the old supervisor.
+- Decision: the user chose a fix only if it is super simple: after reconnecting, compare the build version in the
+  supervisor's hello with the release just installed and report failure on a mismatch. If that turns out not to be
+  trivially simple during planning or execution, abandon it and discard the item instead: all manual management of
+  supervisors and systemd units is best effort and developer-facing only (SPEC.md "Supported host setup").
+- Completion criteria: Update fails visibly when the supervisor it reconnects to is not the build it installed, with
+  focused coverage, and this feedback file and its index entry are removed in the execution change; or, if the gate is
+  hit, the item is removed as discarded with the reason recorded.
+- Execution: `pending`.
+
+## update-identity-none-plan-confirm-disagree.md
+
+- Outcome: `discard`.
+- Assessment: the rule mismatch is confirmed by code inspection: planning accepts a supervisor reporting no identity,
+  confirmation refuses it whenever an identity was recorded, so such a host would loop on "plan again". It is
+  unreachable in the current version: only a supervisor without the state-directory lock can report no identity, such a
+  supervisor never serves, and the production hello always sends the supervisor's own identity.
+- Decision: the user chose discard solely because the path is unreachable in the current version. If a future change
+  lets a serving supervisor report no identity, this mismatch becomes a real bug and the two checks must be made to
+  agree.
+- Completion criteria: remove the feedback file and its index entry without code or spec changes.
+- Execution: `pending`.
+
+## payload-dir-must-be-writable.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on current main by code inspection. On every lookup `DirectoryPayloads::path` creates (or chmods
+  to 0700) a cache subdirectory inside the operator's `--payload-dir`, now named `.farhelm_extract_tmp`, and writes an
+  extracted copy there, so a read-only, root-owned or shared staging directory fails every setup and update.
+- Decision: the user chose the fix with a complexity gate: keep extracted copies under the helm's own state directory
+  and only read from `--payload-dir`. `--payload-dir` is developer-facing, best-effort functionality, so if the change
+  turns out to be big during planning or execution, abandon it and discard the item instead.
+- Completion criteria: a read-only `--payload-dir` works for setup and update, with focused coverage, and this feedback
+  file and its index entry are removed in the execution change; or, if the gate is hit, the item is removed as discarded
+  with the reason recorded.
+- Execution: `pending`.
+
+## receiptless-app-bundle-blocks-uninstall.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on current main by code inspection. On macOS `inspect_bundle_at` always inspects
+  `~/Applications/Farhelm.app` and any error fails the whole uninstall plan, including the independently verified flat
+  binaries. A receipt-less bundle (installers from #310 to #673, or a self-built app) is refused with "rerun the
+  installer", which does nothing under `FARHELM_NO_APP_BUNDLE` and otherwise replaces the user's own app. #1076 improved
+  only the different-installation case.
+- Decision: the user chose the simple fix: when the bundle has no receipt, leave it untouched, say so plainly, and carry
+  on removing the rest. Deleting what Farhelm cannot prove it installed stays excluded. Basis: SPEC.md "Concurrent and
+  interrupted runs" forbids leaving a state no documented command recovers from.
+- Completion criteria: uninstall with a receipt-less bundle removes the verified binaries, leaves the bundle, and
+  reports that it did; focused coverage; remove this feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## no-supervisor-setup-splits-state-dir.md
+
+- Outcome: `discard`.
+- Assessment: confirmed on current main by code inspection. With `--no-supervisor`, setup plans only the helm unit and
+  never reads an existing setup-written supervisor unit, so a rerun with a different state directory or binary moves the
+  helm while that supervisor stays on the old directory, and setup reports success.
+- Decision: the user chose discard. `--no-supervisor` exists for supervisor management setup does not do, which is best
+  effort and developer-facing.
+- Completion criteria: remove the feedback file and its index entry without code or spec changes.
+- Execution: `pending`.
+
+## uninstall-creates-setup-lock-file.md
+
+- Outcome: `discard`.
+- Assessment: confirmed on current main by code inspection. Uninstall takes setup's lock even when it has nothing to
+  remove, creating `.farhelm-setup.lock` (and possibly the unit directory) on a machine never set up; the file is never
+  deleted and not reported. Leaving the lock file in place is deliberate: deleting a path-addressed `flock` file lets a
+  waiter hold a lock on the unlinked file while a newcomer creates and locks a fresh one, so two runs would both hold
+  "the lock". The finding's "unneeded daemon-reload" is also deliberate, so a retry can finish an earlier failed reload.
+- Decision: the user chose discard; the leftover is an empty hidden file and harmless.
+- Completion criteria: remove the feedback file and its index entry without code or spec changes.
+- Execution: `pending`.
+
+## embedded-payload-cleanup-blocks-helm-start.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on current main by code inspection. Failures in the startup removal of the retired
+  `<state>/embedded-payloads` cache (the `remove_dir_all`, the metadata inspection and the `--payload-dir` alias check)
+  return `Err`, which propagates through `production_payloads_with_key`, `ProvisioningService::production` and
+  `AppState::new` and aborts helm startup. Only the "uncertainty never resolves toward deletion" intent is documented.
+- Decision: the user chose the fix: keep the conservative never-delete-when-unsure behavior, but log a warning naming
+  the path and continue startup whenever the cleanup fails or cannot decide.
+- Completion criteria: a helm whose old cache cannot be removed or inspected still starts and warns; focused coverage;
+  remove this feedback file and its index entry in the execution change.
+- Execution: `pending`.
+
+## reach-misreads-escaped-xdg-config-home.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on current main by code inspection; the trigger is documented in systemctl(1) on systemd 255,
+  which prints values with whitespace or shell-special characters as `VARIABLE=$'value'`. Two sites parse that output:
+  the remote reach script (`provisioning/backend.rs` around 1834-1840), which then refuses with a false "relative
+  XDG_CONFIG_HOME" reason, and `manager_unit_dir` in `crates/farhelm/src/setup.rs`, which strips only plain quotes, so
+  local `farhelm helm setup` refuses with a wrong message and `farhelm uninstall` can look in the wrong unit directory
+  and leave units behind.
+- Decision: the user chose to replace parsing of human/shell-oriented output with a structured query at both sites:
+  `busctl --user get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager
+  Environment --json=short`
+  (raw strings, systemd 240 and later), parsed in Rust.
+- Completion criteria: both sites read the manager's environment through the structured query, a config path containing
+  a space resolves correctly for remote setup, local setup and uninstall, focused coverage, and this feedback file and
+  its index entry are removed in the execution change.
+- Execution: `pending`.
+
+## setup-build-tree-heuristic-misfires.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on current main by code inspection. `looks_like_a_build_tree` refuses any executable path with a
+  component named exactly `target`, and treats an empty `TMPDIR` as a prefix of every path; the refusal is a hard
+  `bail!` with no override. The guard exists to stop units pointing at a `cargo build` output or a temp copy that later
+  vanishes.
+- Decision: the user chose to fix only the `target` half: match Cargo's actual layout (`target/debug/`,
+  `target/release/`, `target/<triple>/{debug,release}/`) instead of any `target` component. An empty or otherwise broken
+  `TMPDIR` is unsupported and stays as it is.
+- Completion criteria: installs under paths such as `/home/target/.local/bin` or `/opt/target/bin` are accepted, Cargo
+  build outputs are still refused, focused coverage, and this feedback file and its index entry are removed in the
+  execution change.
+- Execution: `pending`.
+
+## tab-session-token-in-tmux-argv.md
+
+- Outcome: `discard`.
+- Assessment: confirmed on current main by code inspection. `tab_environment` adds `FARHELM_SESSION_TOKEN`, and
+  `new_window` passes it as a `-e NAME=value` argument to a short-lived tmux client, so it is briefly readable by other
+  accounts through the process list. The token only unlocks the supervisor socket, which is 0600 in a 0700 directory, so
+  no working exploit is known; it is a consistency and defense-in-depth gap against the agent launch's 0600 spec file.
+- Decision: the user chose discard.
+- Completion criteria: remove the feedback file and its index entry without code or spec changes.
+- Execution: `pending`.
+
+## send-upload-ignores-cancellation.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on current main by code inspection. `send_upload` is a bare `priority.send(...).await` used for
+  the per-chunk ack and other control frames; with the 32-frame queue full (up to 8 transfers with about 16 acks in
+  flight each, and a viewer that stopped reading) the transfer cannot observe a delete or archive signal, and Delete's
+  wait on `finished` has no bound of its own, so it stalls until the 60 s writer-stall timeout. Every other wait in the
+  transfer already observes the signal.
+- Decision: the user chose the fix: race the send against the transfer's signal receiver, as the other waits do.
+- Completion criteria: Delete of a session with a transfer blocked on a full queue proceeds promptly; focused regression
+  coverage; remove this feedback file and its index entry in the execution change.
+- Execution: `pending`.
