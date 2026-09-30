@@ -42,6 +42,77 @@
 //!    current question or work indicator. Those narrow interpretations
 //!    live here; unfamiliar screen shapes keep the generic behavior.
 //!
+//! ## Where each agent's behavior lives
+//!
+//! Everything Farhelm does differently per agent is answered per kind, in a
+//! small number of predictable places, so that "all the Codex-specific
+//! behavior" is a short list of files and a new kind is a compile error at
+//! every decision it needs. The map, by layer:
+//!
+//! - **Naming the agents.** `farhelm-proto` declares both enums with a
+//!   generated `ALL`: `LaunchHarness` (what the user picked; `launch.rs`) and
+//!   `AgentKind` (the integration that runs; the crate root). Muse, Cursor,
+//!   and OpenCode are harnesses that run as `AgentKind::Generic`.
+//! - **What a launch can choose.** Exhaustive `LaunchHarness` methods in
+//!   `farhelm-proto/src/launch.rs` (`agent_kind`, `offers_model`,
+//!   `offers_effort`, `offers_permission`, `offers_workspace_trust`,
+//!   `sole_permission`). The built-in launch profiles (Claude, Codex, Muse,
+//!   Cursor and their YOLO variants, with their resume templates) are
+//!   `builtin_profiles` in `farhelm-helm/src/store.rs`. The helm's release
+//!   catalog and argv compiler stay in
+//!   `farhelm-helm/src/launches.rs`: exhaustive matches for the program
+//!   name and the model, effort, and YOLO flags, plus harness-specific
+//!   branches (Goose's environment and subcommand, Grok's `--no-leader`,
+//!   OMP's approval mode, the workspace-trust flags) that were deliberately
+//!   left as they are. A new harness gets compile errors for the former and
+//!   has to be checked against the latter by hand.
+//! - **How the browser shows it.** `farhelm-ui/src/launch_composer.rs` holds
+//!   the per-harness vocabulary (labels, display orders checked against
+//!   `LaunchHarness::ALL` at compile time, help text); `list/row.rs` maps
+//!   harnesses to their marks in `icons.rs`. One exception keeps a direct
+//!   comparison: the new-session form's Cursor support notice
+//!   (`list/create_form.rs`), which also recognizes Cursor's built-in
+//!   profiles by id.
+//! - **Pure per-kind decisions in the supervisor.** This module: one
+//!   [`AgentIntegration`] impl per kind (resume template, record parsing,
+//!   hook argv, [`AgentIntegration::inject_hooks`],
+//!   [`AgentIntegration::ambiguous_derived_resume`]), the exhaustive
+//!   per-kind functions below (ownership, locators, resume verification,
+//!   report vocabularies, executable names), and one file per kind
+//!   (`claude.rs`, `codex.rs`, `goose.rs`, `grok.rs`, `omp.rs`, `pi.rs`) for
+//!   that kind's own helpers: argv grammar, record and locator parsing, and
+//!   the vendor-file verification some locators need. Screen readers:
+//!   `screen_reader.rs`.
+//! - **Stateful per-kind behavior in the supervisor** (report admission,
+//!   capture refresh, resume verification, launch provenance):
+//!   `service/core/vendor/<kind>.rs`, dispatched from `service/core.rs` by
+//!   exhaustive matches.
+//! - **Process-tree attribution:** `procs/<kind>.rs`, each kind's corridor.
+//! - **Reporter assets and hook entry points:** `pi_extension.rs` chooses and
+//!   materializes which extension a kind loads; the extensions themselves
+//!   (`assets/pi-conversation-v1.ts`, `assets/omp-conversation-v1.ts`) own
+//!   those agents' event subscriptions, report payloads, and ordering. In
+//!   the `farhelm` crate, `hook.rs` (parsing
+//!   each vendor's hook callback payload) and `goose_hook.rs` (Goose's MCP
+//!   reporter endpoint, which builds Goose's report itself).
+//!
+//! A new per-agent capability follows the same shape: a required
+//! [`AgentIntegration`] method, an exhaustive per-kind function here or on
+//! `LaunchHarness`, or a per-kind file, with call sites asking that named
+//! question. Not `kind == X`, `matches!(kind, X | Y)`, or a `_` arm over
+//! kinds in shared code: each of those silently hands a new kind whatever
+//! the branch does for the kinds it does not name.
+//!
+//! The per-kind decision functions this map points at carry
+//! `#[warn(clippy::wildcard_enum_match_arm)]`, so a `_` arm added to one fails
+//! the Clippy gate: the free functions and `LocatorVendor`'s methods here,
+//! the resume methods on [`IntegrationSnapshot`], the dispatching methods in
+//! `service/core.rs`, `LaunchHarness`'s impl, and the UI's per-harness
+//! vocabulary. Other exhaustive matches over kinds (the helm's argv compiler
+//! and host transport, display names, hook payload parsing) do not carry it
+//! and stay exhaustive by review. Give a new per-kind decision its own small
+//! function with the attribute rather than burying the match in a larger one.
+//!
 //! ## Where the line between this file and `capture` is drawn
 //!
 //! The submodule is not "the second half". The split is by AXIS: `capture`
@@ -249,6 +320,7 @@ pub enum LocatorVendor {
     Omp,
 }
 
+#[warn(clippy::wildcard_enum_match_arm)]
 impl LocatorVendor {
     /// The exact wire prefix this vendor's locators carry. Pi's bytes are
     /// frozen by every database already holding them; OMP's mirror the shape.
@@ -616,6 +688,7 @@ pub(crate) fn with_launch_environment(argv: Vec<String>, assignments: &[String])
 /// nobody chose. Shell-quoted because both vendors run a hook's `command`
 /// through a shell rather than exec'ing it, so an unquoted path containing
 /// a space would be split into arguments neither can find (verified).
+#[warn(clippy::wildcard_enum_match_arm)]
 fn hook_command(
     hook_exe: &str,
     instructions: AgentInstructions,
@@ -649,6 +722,7 @@ fn hook_command(
 /// The integration for a kind, or `None` for [`AgentKind::Generic`] —
 /// which is not an omission but the definition of generic: no record
 /// location, no correlators, and therefore no capture, ever.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration> {
     match kind {
         AgentKind::Claude => Some(&ClaudeIntegration),
@@ -2022,6 +2096,7 @@ pub enum SnapshotError {
 /// This module's stable spelling of a kind for human-facing messages.
 /// Deliberately not the wire serde representation: an error string is not
 /// a protocol surface and must not start depending on one.
+#[warn(clippy::wildcard_enum_match_arm)]
 fn kind_name(kind: AgentKind) -> &'static str {
     match kind {
         AgentKind::Claude => "claude",
@@ -2120,6 +2195,7 @@ impl IntegrationSnapshot {
     /// A template that DOES mention the placeholder with nothing captured
     /// is `FreshOnly`, never `FallbackTemplate`: SPEC.md forbids running a
     /// `{conversation}` invocation unfilled, so offering it would be
+    #[warn(clippy::wildcard_enum_match_arm)]
     /// offering a garbled command line.
     pub fn restart_offer(&self, captured: Option<&str>, ownership_version: i64) -> RestartOffer {
         // Provenance gate: kinds with an implemented ownership proof offer
@@ -2228,6 +2304,7 @@ impl IntegrationSnapshot {
     ///
     /// PLAN_M3.md item 9 is what RUNS this; it exists here so the capture
     /// tests can assert the end-to-end promise ("resume this exact
+    #[warn(clippy::wildcard_enum_match_arm)]
     /// conversation") rather than only the id in isolation.
     pub fn filled_resume_argv(&self, conversation: &str) -> Option<Vec<String>> {
         let replacement = match self.kind {
@@ -2285,6 +2362,7 @@ impl IntegrationSnapshot {
 /// so a later kind needs one deliberate flip rather than scattered match
 /// changes. New framework entry points default to deny; legacy paths are
 /// preserved, not re-blessed, until their kind flips.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
     match kind {
         AgentKind::Codex | AgentKind::Grok | AgentKind::Omp => true,
@@ -2300,6 +2378,7 @@ pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
 /// contract long before the column existed, so they stay resumable. Every
 /// other kind with an implemented proof requires version 1. Exhaustive so a
 /// kind that flips [`ownership_proof_implemented`] answers this too.
+#[warn(clippy::wildcard_enum_match_arm)]
 fn accepts_unversioned_ownership(kind: AgentKind) -> bool {
     match kind {
         AgentKind::Codex => true,
@@ -2315,6 +2394,7 @@ fn accepts_unversioned_ownership(kind: AgentKind) -> bool {
 /// The typed-locator vocabulary a kind's reported identity uses, or `None`
 /// for a kind whose identity is not a typed locator (a plain id, Codex's and
 /// Grok's own locators, or no identity at all).
+#[warn(clippy::wildcard_enum_match_arm)]
 pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
     match kind {
         AgentKind::Pi => Some(LocatorVendor::Pi),
@@ -2331,6 +2411,7 @@ pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
 /// vendor evidence when readiness is refreshed (Codex's root record, Grok's
 /// record pair). Other kinds' bindings are taken as reported until a restart
 /// asks.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub fn refreshes_reported_capture(kind: AgentKind) -> bool {
     match kind {
         AgentKind::Codex | AgentKind::Grok => true,
@@ -2344,6 +2425,7 @@ pub fn refreshes_reported_capture(kind: AgentKind) -> bool {
 
 /// Whether a Resume restart of this kind verifies its captured target on
 /// disk (the exact saved file or record pair) before relaunching.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub fn verifies_resume_target(kind: AgentKind) -> bool {
     match kind {
         AgentKind::Pi | AgentKind::Omp | AgentKind::Grok => true,
@@ -2357,6 +2439,7 @@ pub fn verifies_resume_target(kind: AgentKind) -> bool {
 ///
 /// Only Codex: a legacy Codex identity is unattributed, so resuming it could
 /// select another transcript, and the restart refuses outright instead.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub fn unverified_resume_refusal(kind: AgentKind) -> Option<&'static str> {
     match kind {
         AgentKind::Codex => Some(
@@ -2379,6 +2462,7 @@ pub fn unverified_resume_refusal(kind: AgentKind) -> Option<&'static str> {
 /// Codex and OMP report named transitions (OMP's four subscribed event
 /// tags, `session_switch` carrying its opaque upstream reason); admission
 /// re-checks the same allowlists.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub fn foreground_source_refusal(
     vendor: farhelm_proto::ReportVendor,
     source: &str,
@@ -2396,6 +2480,7 @@ pub fn foreground_source_refusal(
 /// The durable kind a report discriminator must name. The destination
 /// row's kind stays authoritative; this is the comparison the doorway
 /// applies before any vendor I/O.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub fn agent_kind_of_vendor(vendor: farhelm_proto::ReportVendor) -> AgentKind {
     match vendor {
         farhelm_proto::ReportVendor::Claude => AgentKind::Claude,
@@ -2408,6 +2493,7 @@ pub fn agent_kind_of_vendor(vendor: farhelm_proto::ReportVendor) -> AgentKind {
 }
 
 /// Validate a reported identity against the durable kind before any write.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub fn accepts_reported_conversation(kind: AgentKind, value: &str) -> bool {
     match kind {
         AgentKind::Pi => parse_locator(LocatorVendor::Pi, value).is_ok(),
@@ -2893,6 +2979,7 @@ pub fn derive_kind(argv0: &str) -> AgentKind {
 /// Exhaustive so a new kind decides whether an invocation can be recognized
 /// as it; the same names are what the process-tree checks treat as another
 /// integrated agent's runtime.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub fn executable_basename(kind: AgentKind) -> Option<&'static str> {
     match kind {
         AgentKind::Claude => Some("claude"),

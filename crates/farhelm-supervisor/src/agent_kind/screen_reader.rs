@@ -216,6 +216,7 @@ pub(crate) fn generic_reading(counts: SampleCounts) -> Reading {
 /// The reader for one agent kind. Kinds without a dedicated reader get the
 /// generic one, which is also what an explicitly non-integrated session
 /// uses.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub(crate) fn reader_for(kind: AgentKind) -> &'static dyn ScreenReader {
     match kind {
         AgentKind::Claude => &ClaudeReader,

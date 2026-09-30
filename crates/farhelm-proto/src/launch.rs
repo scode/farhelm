@@ -45,6 +45,7 @@ crate::enum_with_all! {
     }
 }
 
+#[warn(clippy::wildcard_enum_match_arm)]
 impl LaunchHarness {
     /// Whether `order` lists every harness exactly once: the check behind a
     /// UI display order that differs from declaration order.

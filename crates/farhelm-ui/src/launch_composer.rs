@@ -142,6 +142,7 @@ const _: () = assert!(LaunchHarness::is_ordering_of_all(&HARNESS_PICKER_ORDER));
 ///
 /// Exhaustive so a new harness that offers the choice decides whether it
 /// needs a line; harnesses without the choice never show one.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub(crate) const fn workspace_trust_help(harness: LaunchHarness) -> Option<&'static str> {
     match harness {
         LaunchHarness::Muse => Some(
@@ -170,6 +171,7 @@ pub(crate) const fn workspace_trust_help(harness: LaunchHarness) -> Option<&'sta
 /// composer used to show "OMP" on its button and "Omp" everywhere it
 /// formatted the enum. The row badge's longer descriptions ("Claude Code")
 /// are a separate vocabulary and do not come from here.
+#[warn(clippy::wildcard_enum_match_arm)]
 pub(crate) const fn harness_label(harness: LaunchHarness) -> &'static str {
     match harness {
         LaunchHarness::Codex => "Codex",

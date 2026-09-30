@@ -484,6 +484,14 @@ Validate each change using the "Finishing work" rules above. Completion means th
 PR exists, not that it has merged. Report the item-to-PR mapping and any blocked items. This workflow never marks PRs
 ready, enables auto-merge, or merges them; publishing or landing requires a separate user request.
 
+# Harness-specific code
+
+Everything Farhelm does differently per agent harness is answered per harness in a few named places, not by comparing
+harnesses at the call site. The module docs of `crates/farhelm-supervisor/src/agent_kind/mod.rs` map them, layer by
+layer, and say where a new per-harness capability goes. Read that map before adding or changing harness-specific
+behavior, add to the places it names, and do not write `kind == X`, `matches!` over specific harnesses, or a `_` arm
+over harnesses in shared code: each of those hands a new harness whatever the branch does for the ones it does not name.
+
 # Harness marks in the sidebar
 
 `docs/harness-marks.md` records where every harness mark in `crates/farhelm-ui/src/icons.rs` comes from, which are

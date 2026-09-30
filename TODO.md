@@ -230,12 +230,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   [`lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md`](lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md):
   per-session cloud sandboxes (Tensorlake, Fly.io Sprites) with scoped credentials are where remote execution is headed.
   That goal is context for naming predicates and resolving ambiguity in this refactor, not scope for it.
-- **Put harness-specific behavior behind per-harness boundaries.** A behavior-preserving refactor so that all of one
-  harness's behavior (everything Codex-specific, say) can be found in a few predictable places per layer, a new harness
-  or per-harness capability is a compile error wherever it needs a decision, and agents stop adding scattered special
-  cases because they could not find the existing ones. The survey, two independent reviews, the maintainer's answers,
-  and the stepped proposal are in
-  [`lore/2026-09-29-harness-boundary-refactor-proposal.md`](lore/2026-09-29-harness-boundary-refactor-proposal.md).
 - **Guard against yolo launches on sensitive hosts.** The goal is to stop yolo sessions from being started by accident
   on a machine where the user does not want them; the maintainer has done this several times. Wanted:
   - Every host, the local one included, is either "yolo safe" or "sensitive". Every host defaults to sensitive,
