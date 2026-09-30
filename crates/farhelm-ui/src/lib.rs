@@ -647,6 +647,63 @@ pub enum HostKind {
     Unrecognized,
 }
 
+/// The decisions the UI makes from a host's kind, each named after what it
+/// decides and answered by an exhaustive match, so a new kind is a compile
+/// error at every one of them rather than silently taking whichever branch
+/// a comparison defaults to.
+#[warn(clippy::wildcard_enum_match_arm)]
+impl HostKind {
+    /// Whether the row offers user management (edit its destination,
+    /// remove it). The local row is never registered or removable, and an
+    /// unrecognized kind gets no verbs this build cannot vouch for.
+    pub(crate) fn is_manageable(self) -> bool {
+        match self {
+            HostKind::Ssh => true,
+            HostKind::Local | HostKind::Unrecognized => false,
+        }
+    }
+
+    /// Whether an Update of this row runs without a confirmation step: only
+    /// a remote ssh update. Local setup and anything unrecognized confirm.
+    pub(crate) fn updates_automatically(self) -> bool {
+        match self {
+            HostKind::Ssh => true,
+            HostKind::Local | HostKind::Unrecognized => false,
+        }
+    }
+
+    /// Whether the row menu offers provisioning actions (Update, Rerun) at
+    /// all. The local row is offered them even though the helm refuses a
+    /// local update and hands off to local setup; only an unrecognized kind
+    /// is offered nothing.
+    pub(crate) fn offers_provisioning_actions(self) -> bool {
+        match self {
+            HostKind::Local | HostKind::Ssh => true,
+            HostKind::Unrecognized => false,
+        }
+    }
+
+    /// Whether this row's supervisor is set up by the local setup flow
+    /// (the hand-off offered when it is not running, and the automatic
+    /// setup retried after an Add), rather than provisioned over ssh.
+    pub(crate) fn sets_up_locally(self) -> bool {
+        match self {
+            HostKind::Local => true,
+            HostKind::Ssh | HostKind::Unrecognized => false,
+        }
+    }
+
+    /// Whether this row is the machine the UI is running against: shown as
+    /// "this machine", marked local in the host picker, and the supervisor
+    /// the desktop app manages.
+    pub(crate) fn is_this_machine(self) -> bool {
+        match self {
+            HostKind::Local => true,
+            HostKind::Ssh | HostKind::Unrecognized => false,
+        }
+    }
+}
+
 /// Mirror of one host's connection state (farhelm-helm's `HostStateView`).
 ///
 /// The `phase` tag's values are the helm's own stable vocabulary — the same

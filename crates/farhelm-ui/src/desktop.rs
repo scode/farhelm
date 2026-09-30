@@ -875,7 +875,7 @@ async fn await_local_supervisor_until(
                 })?
                 .map_err(anyhow::Error::msg)?;
             if hosts.iter().any(|host| {
-                host.kind == crate::HostKind::Local
+                host.kind.is_this_machine()
                     && matches!(host.state, crate::HostPhase::Connected { .. })
             }) {
                 ensure_managed_supervisor_running(supervisor)?;
