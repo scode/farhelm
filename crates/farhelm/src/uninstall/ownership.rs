@@ -412,9 +412,15 @@ fn verify_payload(
         hash.update(&buffer[..read]);
     }
     let actual: [u8; 32] = hash.finalize().into();
+    // The advice matters as much as the refusal. The installer publishes the
+    // record just after committing new binaries, so an install or update
+    // interrupted in between leaves new files beside the old record, and a
+    // bare "does not match" reads like tampering. Re-running the installer
+    // republishes the record for what is installed.
     if &actual != expected {
         bail!(
-            "{} does not match its recorded SHA-256 digest",
+            "{} does not match its recorded SHA-256 digest; if an install or update was interrupted, \
+             rerun the installer to record the files it installed, then run uninstall again",
             path_text(path)
         );
     }
@@ -895,18 +901,24 @@ pub(crate) mod tests {
             .to_string();
         assert!(error.contains("rerun the installer"), "{error}");
     }
-    /// A syntactically valid digest is still not authority over changed bytes.
+    /// A syntactically valid digest is still not authority over changed bytes,
+    /// and the refusal says how an interrupted install is repaired.
+    ///
+    /// The advice is the point for the common cause: an install or update
+    /// interrupted between committing its binaries and publishing their record
+    /// leaves exactly this mismatch, and a refusal without it reads like
+    /// tampering (SPEC.md "Operator prerequisites and failure behavior": a
+    /// refusal says how to handle it).
     #[test]
     fn mismatched_flat_digest_refuses() {
         let fixture = Fixture::new();
         fixture.flat(None);
         Fixture::write(&fixture.install.join(CLI), b"changed");
-        assert!(
-            inspect(&fixture.inputs(PlatformArtifacts::Linux))
-                .unwrap_err()
-                .to_string()
-                .contains("digest")
-        );
+        let error = inspect(&fixture.inputs(PlatformArtifacts::Linux))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("digest"), "{error}");
+        assert!(error.contains("rerun the installer"), "{error}");
     }
     /// Group-writable receipts could be rewritten by another account and therefore grant no authority.
     #[test]

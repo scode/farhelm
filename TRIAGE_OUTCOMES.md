@@ -3736,7 +3736,13 @@
   in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; uninstall's digest-mismatch refusal (`verify_payload` in
+  crates/farhelm/src/uninstall/ownership.rs) now says that an interrupted install or update is repaired by re-running
+  the installer, which republishes the record unconditionally, and then running uninstall again. The installer's commit
+  order was left alone: publishing the record inside the journaled phase would need the journal to undo a record too,
+  and the window is two deletes and two hashes that the advised re-run already repairs. Regression test
+  `mismatched_flat_digest_refuses` now requires the advice. jj change `xmsmttxlslru`, bookmark
+  `pr/uninstall-digest-mismatch-advice`, draft PR [#1186](https://github.com/scode/farhelm/pull/1186/changes).
 
 ## setup-partial-unit-write-mismatch.md
 

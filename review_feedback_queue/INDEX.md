@@ -105,8 +105,6 @@ One line per open item. This file must always match the feedback files in this d
   relative and refused.
 - `uninstall-creates-setup-lock-file.md` — uninstall and setup --uninstall create .farhelm-setup.lock (and possibly the
   unit dir) and never report it.
-- `interrupt-before-install-record-publish.md` — an interrupt between commit and record publish leaves new binaries with
-  the old receipt; uninstall's refusal reads like tampering.
 - `setup-build-tree-heuristic-misfires.md` — setup refuses installed binaries under an empty TMPDIR or any path
   containing a directory named target.
 - `relative-install-dir-installs-under-cwd.md` — a relative or quoted-~ FARHELM_INSTALL_DIR installs under the current
