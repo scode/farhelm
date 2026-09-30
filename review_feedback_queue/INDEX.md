@@ -103,8 +103,6 @@ One line per open item. This file must always match the feedback files in this d
   unit dir) and never report it.
 - `setup-build-tree-heuristic-misfires.md` — setup refuses installed binaries under an empty TMPDIR or any path
   containing a directory named target.
-- `relative-install-dir-installs-under-cwd.md` — a relative or quoted-~ FARHELM_INSTALL_DIR installs under the current
-  directory with misleading messages.
 - `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
   sidebar keeps deleted/stale rows.
 - `desktop-copy-fallback-never-runs.md` — the native clipboard writer never rejects, so the header copy fallback never

@@ -3794,7 +3794,13 @@
   carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; scripts/install.sh refuses a `FARHELM_INSTALL_DIR` that does not start with `/` before creating
+  anything, naming an unexpanded leading `~` explicitly and suggesting `$HOME`. This follows the finding's suggestion to
+  refuse every relative value, so the harness's earlier check that a relative destination under an inherited CDPATH
+  recorded the right directory was retired with that behavior. Regression checks "relative dir: ..." in
+  scripts/test-install-sh.sh, run from a scratch directory. docs/install_uninstall.md says the path must be absolute. jj
+  change `oomkzonynlnn`, bookmark `pr/installer-requires-absolute-dir`, draft PR
+  [#1189](https://github.com/scode/farhelm/pull/1189/changes).
 
 ## idempotency-fingerprint-keeps-raw-cmdline.md
 
