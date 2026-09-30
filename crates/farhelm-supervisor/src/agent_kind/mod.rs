@@ -366,6 +366,18 @@ pub trait AgentIntegration: Send + Sync {
     /// reconstruction.
     fn default_resume_template(&self, original_argv: &[String]) -> Vec<String>;
 
+    /// Why a DERIVED resume template cannot work for this invocation, or
+    /// `None` when it can.
+    ///
+    /// `original_argv` is the whole launch argv, program first; only kinds
+    /// with such a case look past the program. Only consulted when the
+    /// create supplied no explicit template: an override is filled verbatim
+    /// rather than appended to, so the ambiguity this guards against (where
+    /// [`AgentIntegration::default_resume_template`]'s appended selector would
+    /// land) does not arise for it. Required rather than defaulted so a new
+    /// kind decides whether its derived shape has such a case.
+    fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError>;
+
     /// An eligible scan root for this kind and working directory, if scanning
     /// can establish ownership. Claude uses its munged-cwd project directory;
     /// report-only kinds return `None` rather than guessing from nearby files.
@@ -553,6 +565,10 @@ pub(crate) fn effective_program_index(argv: &[String]) -> Option<usize> {
 }
 
 impl AgentIntegration for GooseIntegration {
+    fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
+        None
+    }
+
     fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
         let mut template = strip_goose_selectors(original_argv);
         if effective_program_index(&template).is_some_and(|index| index + 1 == template.len()) {
@@ -584,6 +600,10 @@ impl AgentIntegration for GooseIntegration {
 }
 
 impl AgentIntegration for PiIntegration {
+    fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
+        None
+    }
+
     fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
         let mut template = strip_pi_selectors(original_argv);
         template.extend([
@@ -634,6 +654,11 @@ impl AgentIntegration for PiIntegration {
 }
 
 impl AgentIntegration for GrokIntegration {
+    fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError> {
+        grok_has_ambiguous_resume_shape(&original_argv[1..])
+            .then_some(SnapshotError::GrokAmbiguousResumeBoundary)
+    }
+
     fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
         let mut template = original_argv.to_vec();
         let program = effective_program_index(&template).unwrap_or(0);
@@ -1045,6 +1070,11 @@ fn parse_omp_session_header(text: &str) -> anyhow::Result<String> {
 }
 
 impl AgentIntegration for OmpIntegration {
+    fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError> {
+        omp_has_unconsumed_delimiter(&original_argv[1..])
+            .then_some(SnapshotError::OmpAmbiguousResumeBoundary)
+    }
+
     fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
         let mut template = strip_omp_selectors(original_argv);
         template.extend(["--resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
@@ -1161,6 +1191,10 @@ fn strip_selectors(
 }
 
 impl AgentIntegration for ClaudeIntegration {
+    fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
+        None
+    }
+
     fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
         let mut template = original_argv.to_vec();
         template.extend(["--resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
@@ -1256,6 +1290,10 @@ impl AgentIntegration for ClaudeIntegration {
 }
 
 impl AgentIntegration for CodexIntegration {
+    fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
+        None
+    }
+
     /// `codex resume <id>`, the audited shape — a SUBCOMMAND rather than a
     /// flag, which is exactly why the default template is per-kind
     /// knowledge instead of one shared string with the command swapped in.
@@ -1856,17 +1894,10 @@ impl IntegrationSnapshot {
         // not a delimiter (`omp --system-prompt --` carries a prompt spelled
         // `--`, and appended flags remain options), and an explicit override
         // is filled verbatim rather than appended, so neither refuses here.
-        if kind == AgentKind::Omp
-            && !explicit_override
-            && omp_has_unconsumed_delimiter(&original_argv[1..])
+        if !explicit_override
+            && let Some(error) = integration.and_then(|i| i.ambiguous_derived_resume(original_argv))
         {
-            return Err(SnapshotError::OmpAmbiguousResumeBoundary);
-        }
-        if kind == AgentKind::Grok
-            && !explicit_override
-            && grok_has_ambiguous_resume_shape(&original_argv[1..])
-        {
-            return Err(SnapshotError::GrokAmbiguousResumeBoundary);
+            return Err(error);
         }
         if integration.is_none() && template_has_placeholder(resume_template.as_deref()) {
             return Err(SnapshotError::GenericTemplateHasPlaceholder);
@@ -1922,46 +1953,60 @@ impl IntegrationSnapshot {
         // change when they do.
         if ownership_proof_implemented(self.kind)
             && ownership_version != 1
-            && !(self.kind == AgentKind::Codex && ownership_version == 0)
+            && !(ownership_version == 0 && accepts_unversioned_ownership(self.kind))
         {
             return RestartOffer::FreshOnly;
         }
-        if self.kind == AgentKind::Codex {
-            return match captured.and_then(|value| codex::CodexLocator::parse(value).ok()) {
-                Some(locator)
-                    if locator.resume_id().is_some() && self.resume_template.is_some() =>
-                {
-                    RestartOffer::Resume
+        // Each kind reads its captured identity in its own vocabulary, the
+        // same one `filled_resume_argv` substitutes from, so an offer and the
+        // command it promises cannot disagree.
+        match self.kind {
+            AgentKind::Codex => {
+                match captured.and_then(|value| codex::CodexLocator::parse(value).ok()) {
+                    Some(locator)
+                        if locator.resume_id().is_some() && self.resume_template.is_some() =>
+                    {
+                        RestartOffer::Resume
+                    }
+                    _ => RestartOffer::FreshOnly,
                 }
-                _ => RestartOffer::FreshOnly,
-            };
-        }
-        if self.kind == AgentKind::Grok {
-            return match captured.and_then(|value| grok::GrokLocator::parse(value).ok()) {
-                Some(locator)
-                    if locator.resume_id().is_some()
-                        && locator.selected_at.is_some()
-                        && self.resume_template.is_some() =>
-                {
-                    RestartOffer::Resume
+            }
+            AgentKind::Grok => {
+                match captured.and_then(|value| grok::GrokLocator::parse(value).ok()) {
+                    Some(locator)
+                        if locator.resume_id().is_some()
+                            && locator.selected_at.is_some()
+                            && self.resume_template.is_some() =>
+                    {
+                        RestartOffer::Resume
+                    }
+                    _ => RestartOffer::FreshOnly,
                 }
-                _ => RestartOffer::FreshOnly,
-            };
+            }
+            AgentKind::Pi => self.typed_locator_offer(LocatorVendor::Pi, captured),
+            AgentKind::Omp => self.typed_locator_offer(LocatorVendor::Omp, captured),
+            AgentKind::Claude | AgentKind::Goose | AgentKind::Generic => {
+                self.plain_id_offer(captured)
+            }
         }
-        let locator_vendor = match self.kind {
-            AgentKind::Pi => Some(LocatorVendor::Pi),
-            AgentKind::Omp => Some(LocatorVendor::Omp),
-            _ => None,
-        };
-        if let Some(vendor) = locator_vendor {
-            return match captured
-                .and_then(|value| parse_locator(vendor, value).ok())
-                .and_then(|locator| locator.session_file)
-            {
-                Some(_) if self.resume_template.is_some() => RestartOffer::Resume,
-                _ => RestartOffer::FreshOnly,
-            };
+    }
+
+    /// The offer for a kind whose identity is a typed locator (Pi, OMP):
+    /// Resume only when the locator names its exact saved file.
+    fn typed_locator_offer(&self, vendor: LocatorVendor, captured: Option<&str>) -> RestartOffer {
+        match captured
+            .and_then(|value| parse_locator(vendor, value).ok())
+            .and_then(|locator| locator.session_file)
+        {
+            Some(_) if self.resume_template.is_some() => RestartOffer::Resume,
+            _ => RestartOffer::FreshOnly,
         }
+    }
+
+    /// The offer for a kind whose identity is a plain conversation id
+    /// (Claude, Goose), and for Generic sessions, which never have an
+    /// identity but may carry an explicit fallback template.
+    fn plain_id_offer(&self, captured: Option<&str>) -> RestartOffer {
         // An identity this build would refuse to substitute
         // (`is_plausible_conversation_id` — an option-shaped id being the
         // case that matters) is not something to OFFER a resume for either:
@@ -2021,7 +2066,7 @@ impl IntegrationSnapshot {
                 .ok()?
                 .resume_id()?
                 .to_string(),
-            _ => {
+            AgentKind::Claude | AgentKind::Goose | AgentKind::Generic => {
                 if is_reserved_locator_token(conversation)
                     || !is_plausible_conversation_id(conversation)
                 {
@@ -2062,6 +2107,40 @@ pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
         AgentKind::Codex | AgentKind::Grok | AgentKind::Omp => true,
         AgentKind::Claude | AgentKind::Goose | AgentKind::Pi => false,
         AgentKind::Generic => false,
+    }
+}
+
+/// Whether this kind's exact-resume offers also accept an ownership binding
+/// written before the ownership version column existed (version 0).
+///
+/// Only Codex: its `codex:` tokens were already produced under the two-proof
+/// contract long before the column existed, so they stay resumable. Every
+/// other kind with an implemented proof requires version 1. Exhaustive so a
+/// kind that flips [`ownership_proof_implemented`] answers this too.
+fn accepts_unversioned_ownership(kind: AgentKind) -> bool {
+    match kind {
+        AgentKind::Codex => true,
+        AgentKind::Claude
+        | AgentKind::Goose
+        | AgentKind::Pi
+        | AgentKind::Omp
+        | AgentKind::Grok
+        | AgentKind::Generic => false,
+    }
+}
+
+/// The typed-locator vocabulary a kind's reported identity uses, or `None`
+/// for a kind whose identity is not a typed locator (a plain id, Codex's and
+/// Grok's own locators, or no identity at all).
+pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
+    match kind {
+        AgentKind::Pi => Some(LocatorVendor::Pi),
+        AgentKind::Omp => Some(LocatorVendor::Omp),
+        AgentKind::Claude
+        | AgentKind::Codex
+        | AgentKind::Goose
+        | AgentKind::Grok
+        | AgentKind::Generic => None,
     }
 }
 
@@ -2551,14 +2630,29 @@ pub fn derive_kind(argv0: &str) -> AgentKind {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(argv0);
-    match basename {
-        "claude" => AgentKind::Claude,
-        "codex" => AgentKind::Codex,
-        "goose" => AgentKind::Goose,
-        "pi" => AgentKind::Pi,
-        "omp" => AgentKind::Omp,
-        "grok" => AgentKind::Grok,
-        _ => AgentKind::Generic,
+    AgentKind::ALL
+        .iter()
+        .copied()
+        .find(|kind| executable_basename(*kind) == Some(basename))
+        .unwrap_or(AgentKind::Generic)
+}
+
+/// The executable basename [`derive_kind`] recognizes as this kind, or
+/// `None` for a kind no basename derives (Generic is what everything else
+/// becomes).
+///
+/// Exhaustive so a new kind decides whether an invocation can be recognized
+/// as it; the same names are what the process-tree checks treat as another
+/// integrated agent's runtime.
+pub fn executable_basename(kind: AgentKind) -> Option<&'static str> {
+    match kind {
+        AgentKind::Claude => Some("claude"),
+        AgentKind::Codex => Some("codex"),
+        AgentKind::Goose => Some("goose"),
+        AgentKind::Pi => Some("pi"),
+        AgentKind::Omp => Some("omp"),
+        AgentKind::Grok => Some("grok"),
+        AgentKind::Generic => None,
     }
 }
 
