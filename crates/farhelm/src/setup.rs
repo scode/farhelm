@@ -160,6 +160,16 @@ pub struct UnitCommand {
 /// through a non-zero exit, not a spawn error.
 pub trait UnitManager {
     fn run(&mut self, args: &[&str]) -> anyhow::Result<UnitCommand>;
+
+    /// The user manager's environment as `busctl` JSON (see
+    /// [`farhelm_helm::units::MANAGER_ENVIRONMENT_BUSCTL_ARGS`]), or `None`
+    /// when the user bus cannot answer. Callers then read the
+    /// `show-environment` block they already fetched. The default answers
+    /// `None`, so a scripted manager exercises that fallback unless it opts
+    /// in.
+    fn manager_environment_json(&mut self) -> Option<String> {
+        None
+    }
 }
 
 /// The production [`UnitManager`]: plain `systemctl --user <args>`.
@@ -187,6 +197,23 @@ impl UnitManager for SystemctlUnitManager {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         })
+    }
+
+    /// `busctl --user` with the structured environment query. Any failure,
+    /// including a missing user bus, is `None`: the caller has the
+    /// `show-environment` block to fall back on.
+    fn manager_environment_json(&mut self) -> Option<String> {
+        let output = std::process::Command::new("busctl")
+            .arg("--user")
+            .args(farhelm_helm::units::MANAGER_ENVIRONMENT_BUSCTL_ARGS)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
     }
 }
 
@@ -270,7 +297,9 @@ pub(crate) fn preflight_selected_services(
         .collect::<anyhow::Result<Vec<_>>>()?;
     let manager = units.run(&["show-environment"]);
     let unit_dir = match manager {
-        Ok(manager) if manager.status == 0 => manager_unit_dir(&manager.stdout)?,
+        Ok(manager) if manager.status == 0 => {
+            manager_unit_dir(&manager_environment(units, &manager.stdout))?
+        }
         Ok(manager) => {
             if known_service_file_exists(caller_unit_dir)? {
                 let detail = command_detail(&manager);
@@ -1183,7 +1212,7 @@ fn require_the_managers_unit_directory(
             if detail.is_empty() { "" } else { ": " }
         );
     }
-    let manager_dir = manager_unit_dir(&result.stdout)?;
+    let manager_dir = manager_unit_dir(&manager_environment(units, &result.stdout))?;
     if manager_dir == unit_dir {
         return Ok(());
     }
@@ -1201,8 +1230,25 @@ fn require_the_managers_unit_directory(
     bail!(refusal)
 }
 
-/// The unit directory implied by a `systemctl --user show-environment`
-/// block.
+/// The user manager's environment: `busctl`'s structured answer when the
+/// user bus gives one, else the `show-environment` block already fetched.
+///
+/// `show-environment` alone is not enough: systemd 255 and later print a
+/// value that needs quoting (a config directory with a space, say) as
+/// `NAME=$'…'`, which this used to misread, so setup refused with a wrong
+/// message and uninstall could look in the wrong unit directory.
+fn manager_environment(
+    units: &mut dyn UnitManager,
+    show_environment: &str,
+) -> farhelm_helm::units::ManagerEnvironment {
+    use farhelm_helm::units::ManagerEnvironment;
+    units
+        .manager_environment_json()
+        .and_then(|json| ManagerEnvironment::from_busctl_json(&json).ok())
+        .unwrap_or_else(|| ManagerEnvironment::from_show_environment(show_environment))
+}
+
+/// The unit directory implied by the systemd user manager's environment.
 ///
 /// Derived from the MANAGER's environment and nothing else. That is the
 /// whole point of asking: the caller's `HOME` is not evidence about the
@@ -1214,18 +1260,27 @@ fn require_the_managers_unit_directory(
 ///
 /// A manager that reports neither is a FAILURE, not a default. Guessing
 /// there would produce a confident wrong answer about the one thing this
-/// function exists to establish.
-///
-/// Only the first assignment of each name is read; the block is one
-/// `NAME=VALUE` per line. Systemd quotes a value that needs it, so a
-/// surrounding pair of quotes is stripped — anything more exotic (an
-/// embedded escape) is left alone, which makes the value fail the
-/// absolute-path test and falls through to the next rule. That is the
-/// safe direction: a mismatch refusal rather than a wrong directory.
-fn manager_unit_dir(show_environment: &str) -> anyhow::Result<PathBuf> {
-    let xdg = manager_assignment(show_environment, "XDG_CONFIG_HOME");
-    let home =
-        manager_assignment(show_environment, "HOME").filter(|value| Path::new(value).is_absolute());
+/// function exists to establish. So is an `XDG_CONFIG_HOME` readable only
+/// in `show-environment`'s escaped form: it may well be absolute, and
+/// falling through to `HOME` would name a directory the manager never reads.
+fn manager_unit_dir(
+    environment: &farhelm_helm::units::ManagerEnvironment,
+) -> anyhow::Result<PathBuf> {
+    use farhelm_helm::units::ManagerValue;
+    let xdg = match environment.get("XDG_CONFIG_HOME") {
+        ManagerValue::Value(value) => Some(value),
+        ManagerValue::Absent => None,
+        ManagerValue::Unreadable => anyhow::bail!(
+            "the systemd user manager reports XDG_CONFIG_HOME only in an escaped form, and busctl \
+             could not read it from the user bus, so setup cannot tell which directory it loads \
+             units from; start the user D-Bus session bus (dbus-user-session) or restart the \
+             manager without special characters in XDG_CONFIG_HOME, then rerun"
+        ),
+    };
+    let home = match environment.get("HOME") {
+        ManagerValue::Value(value) if Path::new(&value).is_absolute() => Some(value),
+        _ => None,
+    };
     user_unit_dir_for(
         xdg.as_deref().map(OsStr::new),
         home.as_deref().map(Path::new),
@@ -1237,26 +1292,6 @@ fn manager_unit_dir(show_environment: &str) -> anyhow::Result<PathBuf> {
              usable environment, then rerun"
         )
     })
-}
-
-/// One `NAME=VALUE` assignment out of a `show-environment` block, unquoted
-/// and with empty values treated as absent.
-fn manager_assignment(show_environment: &str, name: &str) -> Option<String> {
-    let prefix = format!("{name}=");
-    let value = show_environment
-        .lines()
-        .find_map(|line| line.strip_prefix(&prefix))?
-        .trim();
-    let unquoted = value
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .or_else(|| {
-            value
-                .strip_prefix('\'')
-                .and_then(|value| value.strip_suffix('\''))
-        })
-        .unwrap_or(value);
-    (!unquoted.is_empty()).then(|| unquoted.to_string())
 }
 
 /// Ask systemd whether one unit is running, before it is replaced.
@@ -3011,6 +3046,45 @@ mod tests {
         assert_eq!(units.commands, ["show-environment"]);
     }
 
+    /// A config directory with a space is read from `busctl`'s structured
+    /// answer, and refused plainly when only `show-environment`'s escaped
+    /// form is available.
+    ///
+    /// Why it matters: systemd 255 prints such a value as `$'…'`; read as
+    /// text it is not absolute, so setup fell through to `HOME` and refused
+    /// with a wrong mismatch message, and uninstall looked for units in the
+    /// wrong directory and could leave them behind. Specified: with busctl
+    /// answering, the directory under the spaced `XDG_CONFIG_HOME` is chosen
+    /// even though `show-environment` escaped it; with busctl unavailable,
+    /// the escaped value is an error naming the escaped form, never a
+    /// silent fall-through to `HOME`.
+    #[farhelm_testtrace::test]
+    fn a_spaced_config_dir_comes_from_busctl_and_an_escaped_one_alone_refuses() {
+        struct Busctl(Option<String>);
+        impl UnitManager for Busctl {
+            fn run(&mut self, _args: &[&str]) -> anyhow::Result<UnitCommand> {
+                unreachable!("only the environment query is asked")
+            }
+            fn manager_environment_json(&mut self) -> Option<String> {
+                self.0.clone()
+            }
+        }
+        let shown = "HOME=/home/manager\nXDG_CONFIG_HOME=$'/srv/my config'\n";
+        let json =
+            r#"{"type":"as","data":["HOME=/home/manager","XDG_CONFIG_HOME=/srv/my config"]}"#;
+
+        let mut answering = Busctl(Some(json.to_string()));
+        assert_eq!(
+            manager_unit_dir(&manager_environment(&mut answering, shown)).unwrap(),
+            PathBuf::from("/srv/my config/systemd/user")
+        );
+
+        let mut silent = Busctl(None);
+        let error = manager_unit_dir(&manager_environment(&mut silent, shown))
+            .expect_err("an escaped value alone must not resolve");
+        assert!(error.to_string().contains("escaped form"), "{error}");
+    }
+
     /// Everything about the manager's directory comes from the manager's
     /// own block, and its quoting has to survive the round trip: systemd
     /// quotes a value when it needs to, and reading the quotes as part of
@@ -3034,7 +3108,14 @@ mod tests {
             // manager's HOME says.
             "HOME=/home/manager\nXDG_CONFIG_HOME=/srv/c\n",
         ] {
-            assert_eq!(manager_unit_dir(block).unwrap(), expected, "{block:?}");
+            assert_eq!(
+                manager_unit_dir(
+                    &farhelm_helm::units::ManagerEnvironment::from_show_environment(block)
+                )
+                .unwrap(),
+                expected,
+                "{block:?}"
+            );
         }
 
         // With no usable XDG_CONFIG_HOME, the manager's OWN home decides.
@@ -3048,7 +3129,10 @@ mod tests {
             "HOME=\"/home/manager\"\n",
         ] {
             assert_eq!(
-                manager_unit_dir(block).unwrap(),
+                manager_unit_dir(
+                    &farhelm_helm::units::ManagerEnvironment::from_show_environment(block)
+                )
+                .unwrap(),
                 PathBuf::from("/home/manager/.config/systemd/user"),
                 "{block:?}"
             );
@@ -3063,7 +3147,10 @@ mod tests {
             "HOME=relative\n",
             "XDG_CONFIG_HOME=\n",
         ] {
-            let error = manager_unit_dir(block).expect_err("{block:?}");
+            let error = manager_unit_dir(
+                &farhelm_helm::units::ManagerEnvironment::from_show_environment(block),
+            )
+            .expect_err("{block:?}");
             assert!(
                 error
                     .to_string()

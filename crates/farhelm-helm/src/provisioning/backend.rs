@@ -462,6 +462,61 @@ impl SystemBackend {
         Ok(command)
     }
 
+    /// Fetch the user manager's `XDG_CONFIG_HOME` from the host and choose
+    /// the unit directory it loads units from (see
+    /// [`manager_unit_dir_from_probe`]).
+    ///
+    /// `show-environment` doubles as the "is there a usable manager" probe
+    /// the reach check always made; `busctl` then supplies the value itself
+    /// when the user bus answers, and `show-environment`'s own line stands in
+    /// when it does not.
+    ///
+    /// Only the `XDG_CONFIG_HOME` line leaves the host. The manager's
+    /// environment can hold credentials and values of any size, and the
+    /// whole block would travel into diagnostics a failure renders for the
+    /// hosts panel, and past the capture limit for host output. `busctl`'s
+    /// pretty JSON puts each array element on a line of its own (a newline
+    /// in a value is escaped), and `show-environment` prints one variable per
+    /// line, so a line filter picks exactly the one entry.
+    async fn manager_unit_dir_choice(
+        &self,
+        target: &ProbeTarget,
+    ) -> Result<ManagerUnitDir, BackendFailure> {
+        let busctl = crate::units::MANAGER_ENVIRONMENT_BUSCTL_ARGS
+            .iter()
+            .map(|arg| {
+                crate::ssh::shell_quote(if *arg == "--json=short" {
+                    "--json=pretty"
+                } else {
+                    arg
+                })
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let script = format!(
+            "if se=$(systemctl --user show-environment 2>/dev/null); then \
+               if bj=$(busctl --user {busctl} 2>/dev/null); then \
+                 printf 'busctl\\0'; \
+                 printf '%s\\n' \"$bj\" | grep '^[[:space:]]*\"XDG_CONFIG_HOME=' | head -n 1; \
+               else \
+                 printf 'show-environment\\0'; \
+                 printf '%s\\n' \"$se\" | grep '^XDG_CONFIG_HOME=' | head -n 1; \
+               fi; \
+               printf '\\0'; \
+             else printf 'unavailable\\0\\0'; fi"
+        );
+        let output = self
+            .run_shell(&target.transport, &script, COMMAND_TIMEOUT)
+            .await?;
+        if output.code != Some(0) {
+            return Err(BackendFailure::new(
+                "reading the systemd user manager's environment failed",
+                output.stderr,
+            ));
+        }
+        manager_unit_dir_from_probe(&output.stdout)
+    }
+
     /// Run one bounded shell script locally or through SSH, retaining output
     /// for structured parsing and escaped diagnostics.
     async fn run_shell(
@@ -1873,9 +1928,27 @@ impl ProvisioningBackend for SystemBackend {
         // XDG_CONFIG_HOME, and writing to the shell's directory would leave
         // a valid-looking unit that this manager never searches.
         //
-        // The unit_dir lines below are the shell twin of
-        // `crate::units::user_unit_dir_for`, which the local side uses;
-        // nothing ties the two, so keep them in step by hand.
+        // The environment is fetched by a first command and read here in
+        // Rust (`manager_unit_dir_choice`), not with `sed` in the script
+        // below: `show-environment` escapes values that need it, so a config
+        // directory with a space came back as `$'…'` and was refused as
+        // relative. The reach script then gets the chosen directory as a
+        // quoted literal, and an empty one means `$HOME/.config/systemd/user`
+        // with the shell's own HOME, as before.
+        let (manager, unit_dir) = match self.manager_unit_dir_choice(target).await? {
+            ManagerUnitDir::Unavailable => ("unavailable", String::new()),
+            ManagerUnitDir::RelativeXdg => ("unsupported-xdg", String::new()),
+            ManagerUnitDir::UnreadableXdg => {
+                return Ok(ReachOutcome::Manual(
+                    "the systemd user manager reports XDG_CONFIG_HOME in an escaped form, and \
+                     busctl could not read it from the user bus, so Farhelm cannot determine its \
+                     unit directory; run the supervisor manually on this host."
+                        .to_string(),
+                ));
+            }
+            ManagerUnitDir::Xdg(dir) => ("usable", dir),
+            ManagerUnitDir::HomeDefault => ("usable", String::new()),
+        };
         //
         // The last field reports whether that directory already holds a
         // supervisor unit `farhelm helm setup` wrote on the host itself
@@ -1898,14 +1971,9 @@ impl ProvisioningBackend for SystemBackend {
                       printf '\\0'; \
                       if command -v tmux >/dev/null 2>&1; then tmux -V | tr -d '\\n'; fi; \
                       printf '\\0'; \
-                      manager=unavailable; unit_dir=''; \
-                      if manager_env=$(systemctl --user show-environment 2>/dev/null); then \
-                        manager=usable; \
-                        xdg=$(printf '%s\\n' \"$manager_env\" | sed -n 's/^XDG_CONFIG_HOME=//p' | head -n 1); \
-                        if [ -n \"$xdg\" ]; then \
-                          case $xdg in /*) unit_dir=$xdg/systemd/user ;; *) manager=unsupported-xdg ;; esac; \
-                        else unit_dir=$HOME/.config/systemd/user; fi; \
-                      fi; \
+                      manager={manager}; unit_dir={unit_dir}; \
+                      if [ \"$manager\" = usable ] && [ -z \"$unit_dir\" ]; then \
+                        unit_dir=$HOME/.config/systemd/user; fi; \
                       printf '%s\\0%s\\0' \"$manager\" \"$unit_dir\"; \
                       unit_owner=''; unit_file=\"$unit_dir\"/{unit}; \
                       if [ -n \"$unit_dir\" ] && {{ [ -e \"$unit_file\" ] || [ -L \"$unit_file\" ]; }}; then \
@@ -1917,6 +1985,8 @@ impl ProvisioningBackend for SystemBackend {
                       printf '%s\\0' \"$unit_owner\"",
             unit = crate::units::SUPERVISOR_UNIT_NAME,
             marker = crate::ssh::shell_quote(crate::units::MANAGED_MARKER),
+            manager = manager,
+            unit_dir = crate::ssh::shell_quote(&unit_dir),
         );
         let output = self
             .run_shell(&target.transport, &script, COMMAND_TIMEOUT)
@@ -2334,6 +2404,69 @@ pub(super) fn linger_was_refused(code: Option<i32>, stderr: &str) -> bool {
     .any(|message| lower.contains(message));
     let loginctl_evidence = lower.contains("loginctl") || lower.contains("linger");
     refusal && loginctl_evidence
+}
+
+/// Where the reach check should look for the host's user units, as decided
+/// from the manager's environment.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ManagerUnitDir {
+    /// No usable user manager answered.
+    Unavailable,
+    /// `XDG_CONFIG_HOME` is set but relative, which the reach check has
+    /// always refused as undeterminable.
+    RelativeXdg,
+    /// `XDG_CONFIG_HOME` could be read only in `show-environment`'s escaped
+    /// form (the user bus was unavailable to `busctl`).
+    UnreadableXdg,
+    /// An absolute `XDG_CONFIG_HOME`; the value is the unit directory.
+    Xdg(String),
+    /// No `XDG_CONFIG_HOME`: the host shell's `$HOME/.config/systemd/user`.
+    HomeDefault,
+}
+
+/// Decode the environment probe's output: a source tag (`busctl`,
+/// `show-environment` or `unavailable`) and that source's `XDG_CONFIG_HOME`
+/// line, if any, each NUL-terminated.
+///
+/// The directory rule is the one the reach script applied in shell before
+/// the environment moved here, kept identical: an absolute
+/// `XDG_CONFIG_HOME` names `…/systemd/user`, a relative one is refused, and
+/// none at all defers to the host shell's HOME.
+///
+/// A malformed record is reported without its contents: however carefully
+/// the host filters, what came back is unvetted host output, and this
+/// diagnostic is shown in the hosts panel.
+pub(super) fn manager_unit_dir_from_probe(output: &[u8]) -> Result<ManagerUnitDir, BackendFailure> {
+    use crate::units::{ManagerEnvironment, ManagerValue};
+    let malformed = |detail: &str| {
+        BackendFailure::new(
+            "reading the systemd user manager's environment returned malformed output",
+            detail.to_string(),
+        )
+    };
+    let fields: Vec<&[u8]> = output.split(|byte| *byte == 0).collect();
+    let [tag, text, rest] = fields.as_slice() else {
+        return Err(malformed("expected a source tag and one value line"));
+    };
+    if !rest.is_empty() {
+        return Err(malformed("unexpected output after the value line"));
+    }
+    let text = std::str::from_utf8(text).map_err(|_| malformed("the value line is not UTF-8"))?;
+    let environment = match *tag {
+        b"unavailable" => return Ok(ManagerUnitDir::Unavailable),
+        b"busctl" => ManagerEnvironment::from_busctl_pretty_lines(text)
+            .map_err(|_| malformed("busctl's value line is not a JSON string"))?,
+        b"show-environment" => ManagerEnvironment::from_show_environment(text),
+        _ => return Err(malformed("unknown source tag")),
+    };
+    Ok(match environment.get("XDG_CONFIG_HOME") {
+        ManagerValue::Absent => ManagerUnitDir::HomeDefault,
+        ManagerValue::Unreadable => ManagerUnitDir::UnreadableXdg,
+        ManagerValue::Value(xdg) if xdg.starts_with('/') => {
+            ManagerUnitDir::Xdg(format!("{xdg}/systemd/user"))
+        }
+        ManagerValue::Value(_) => ManagerUnitDir::RelativeXdg,
+    })
 }
 
 /// Turn the reach probe's NUL-delimited record into a support decision.

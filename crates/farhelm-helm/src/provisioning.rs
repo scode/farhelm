@@ -3392,16 +3392,10 @@ mod tests {
         let unit_dir = home.join(".config/systemd/user");
         tokio::fs::create_dir_all(&unit_dir).await.unwrap();
         tokio::fs::create_dir_all(&bin).await.unwrap();
-        let systemctl = bin.join("systemctl");
-        tokio::fs::write(&systemctl, "#!/bin/sh\necho PATH=/usr/bin\n")
-            .await
-            .unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            tokio::fs::set_permissions(&systemctl, std::fs::Permissions::from_mode(0o755))
-                .await
-                .unwrap();
-        }
+        write_fake_tool(&bin, "systemctl", "echo PATH=/usr/bin").await;
+        // No user bus: the environment comes from `show-environment`, and the
+        // host's real busctl can never answer for this fixture.
+        write_fake_tool(&bin, "busctl", "exit 1").await;
         let backend = SystemBackend {
             control_dir: root.path().to_path_buf(),
             linger: LingerBehavior::Simulated(Ok(())),
@@ -3448,6 +3442,133 @@ mod tests {
             "the failure says why: {}",
             error.rendered()
         );
+    }
+
+    /// Install an executable `name` in `bin` whose body is `script`.
+    async fn write_fake_tool(bin: &Path, name: &str, script: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = bin.join(name);
+        tokio::fs::write(&path, format!("#!/bin/sh\n{script}\n"))
+            .await
+            .unwrap();
+        tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+    }
+
+    /// The reach check finds the user unit directory under an
+    /// `XDG_CONFIG_HOME` whose path contains a space, reading it from
+    /// `busctl`, and refuses clearly when only `show-environment`'s escaped
+    /// form is available.
+    ///
+    /// Why it matters: systemd 255 prints such a value as `$'…'`, and the
+    /// check used to read it with `sed`, so the host was refused with a false
+    /// "relative XDG_CONFIG_HOME" reason, or its units looked for in the
+    /// wrong place. Specified: with busctl answering, a supported host
+    /// reports the spaced unit directory, and a setup-marked unit inside it
+    /// is found and refused as setup's (proof the check looked there); with
+    /// busctl failing, the refusal names the escaped form instead of calling
+    /// the path relative.
+    #[farhelm_testtrace::test]
+    async fn reach_check_reads_a_spaced_config_dir_through_busctl() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let bin = root.path().join("bin");
+        let config = root.path().join("my config");
+        let unit_dir = config.join("systemd/user");
+        tokio::fs::create_dir_all(&home).await.unwrap();
+        tokio::fs::create_dir_all(&unit_dir).await.unwrap();
+        tokio::fs::create_dir_all(&bin).await.unwrap();
+        let config_text = config.to_str().unwrap();
+        write_fake_tool(
+            &bin,
+            "systemctl",
+            &format!("printf '%s\\n' \"XDG_CONFIG_HOME=$'{config_text}'\" PATH=/usr/bin"),
+        )
+        .await;
+        // Pretty JSON as busctl prints it, with an unrelated secret and a
+        // value far past the 64 KiB host-output cap ahead of the one entry
+        // the check needs: only that entry may leave the host.
+        let environment = tempfile::NamedTempFile::new_in(root.path()).unwrap();
+        std::fs::write(
+            environment.path(),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "type": "as",
+                "data": [
+                    "API_TOKEN=sentinel-secret-value",
+                    format!("BIG={}", "x".repeat(70 * 1024)),
+                    format!("XDG_CONFIG_HOME={config_text}"),
+                ],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        write_fake_tool(
+            &bin,
+            "busctl",
+            &format!("cat '{}'", environment.path().display()),
+        )
+        .await;
+        let backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::new(FixtureHomeLauncher {
+                home,
+                bin: bin.clone(),
+            }),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let target = ProbeTarget {
+            transport: ProvisioningTarget::Ssh {
+                destination: "scripted.example".to_string(),
+            },
+            probe_farhelm: PathBuf::from("farhelm"),
+            probe_state_dir: None,
+        };
+
+        let ReachOutcome::Supported(reach) = backend.inspect(&target).await.unwrap() else {
+            panic!("a spaced config directory read through busctl must be supported");
+        };
+        assert_eq!(reach.user_unit_dir, unit_dir);
+        tokio::fs::write(
+            unit_dir.join(crate::units::SUPERVISOR_UNIT_NAME),
+            crate::units::MANAGED_MARKER,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            backend.inspect(&target).await.unwrap(),
+            ReachOutcome::Manual(reason) if reason.contains("farhelm helm setup")
+        ));
+
+        write_fake_tool(&bin, "busctl", "exit 1").await;
+        let ReachOutcome::Manual(reason) = backend.inspect(&target).await.unwrap() else {
+            panic!("an escaped value with no busctl must fall back to manual setup");
+        };
+        assert!(reason.contains("escaped form"), "{reason}");
+    }
+
+    /// A malformed environment record is reported without its contents.
+    ///
+    /// Why it matters: the record is host output drawn from the systemd user
+    /// manager's environment, which can hold credentials, and this failure
+    /// is rendered into the hosts panel. Specified: an unknown source tag
+    /// and an unparsable value line, each carrying a sentinel, fail with a
+    /// diagnostic that does not contain it.
+    #[farhelm_testtrace::test]
+    fn a_malformed_environment_record_does_not_echo_its_contents() {
+        for record in [
+            b"banner sentinel-secret-value\0\0".as_slice(),
+            b"busctl\0API_TOKEN=sentinel-secret-value\0".as_slice(),
+        ] {
+            let error = manager_unit_dir_from_probe(record).expect_err("malformed");
+            assert!(
+                !error.rendered().contains("sentinel-secret-value"),
+                "{}",
+                error.rendered()
+            );
+        }
     }
 
     /// Why this matters: a plan is confirmed some time after the reach check

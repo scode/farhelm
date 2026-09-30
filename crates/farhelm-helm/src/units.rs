@@ -441,9 +441,191 @@ fn render_template(template: &str, values: &[(&str, &str)]) -> String {
     rendered
 }
 
+/// The arguments, after `busctl --user`, that read the systemd user
+/// manager's environment as JSON: `{"type":"as","data":["NAME=VALUE",…]}`.
+///
+/// This is the structured source for where the manager loads units from.
+/// `systemctl --user show-environment` prints the same block for people:
+/// systemd 255 and later print a value with whitespace or shell-special
+/// characters as `NAME=$'…'`, which a line parser misreads, so a config
+/// directory with a space in its path used to be refused as "relative" or
+/// looked up in the wrong place. JSON strings arrive exactly as stored.
+/// `--json` needs systemd 240 or later.
+pub const MANAGER_ENVIRONMENT_BUSCTL_ARGS: [&str; 6] = [
+    "get-property",
+    "org.freedesktop.systemd1",
+    "/org/freedesktop/systemd1",
+    "org.freedesktop.systemd1.Manager",
+    "Environment",
+    "--json=short",
+];
+
+/// One variable of the systemd user manager's environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManagerValue {
+    /// Not set, or set to the empty string (which every reader here treats
+    /// as unset, like the shell's `${VAR:-default}`).
+    Absent,
+    Value(String),
+    /// Present, but only in `show-environment`'s escaped `$'…'` form, which
+    /// this reader does not decode. A caller refuses rather than guess.
+    Unreadable,
+}
+
+/// The systemd user manager's environment, read from `busctl` JSON when the
+/// user bus answers and from `systemctl --user show-environment` otherwise.
+///
+/// Two sources because `busctl --user` needs a D-Bus user bus, which some
+/// minimal hosts lack even though `systemctl --user` reaches the manager
+/// through its private socket; falling back keeps those hosts working for
+/// every ordinary path, and only a value that needed escaping is then
+/// [`ManagerValue::Unreadable`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagerEnvironment {
+    entries: Vec<(String, ManagerValue)>,
+}
+
+impl ManagerEnvironment {
+    /// Parse `busctl --user get-property … Environment --json=short` output.
+    pub fn from_busctl_json(text: &str) -> anyhow::Result<Self> {
+        #[derive(serde::Deserialize)]
+        struct Property {
+            #[serde(rename = "type")]
+            kind: String,
+            data: Vec<String>,
+        }
+        let property: Property = serde_json::from_str(text.trim()).map_err(|error| {
+            anyhow::anyhow!("parsing the manager environment from busctl: {error}")
+        })?;
+        if property.kind != "as" {
+            bail!(
+                "busctl reported the manager environment as type {:?}, not a string array",
+                property.kind
+            );
+        }
+        let entries = property
+            .data
+            .iter()
+            .filter_map(|entry| entry.split_once('='))
+            .map(|(name, value)| (name.to_string(), plain(value)))
+            .collect();
+        Ok(Self { entries })
+    }
+
+    /// Parse lines of `busctl … Environment --json=pretty` output that each
+    /// hold one array element (`"NAME=VALUE",`), such as the ones a remote
+    /// host filters out of the full output. Every non-empty line must be one
+    /// JSON string, optionally followed by the array's comma.
+    pub fn from_busctl_pretty_lines(text: &str) -> anyhow::Result<Self> {
+        let mut entries = Vec::new();
+        for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+            let element: String = serde_json::from_str(line.strip_suffix(',').unwrap_or(line))
+                .map_err(|error| anyhow::anyhow!("parsing a busctl environment line: {error}"))?;
+            if let Some((name, value)) = element.split_once('=') {
+                entries.push((name.to_string(), plain(value)));
+            }
+        }
+        Ok(Self { entries })
+    }
+
+    /// Parse `systemctl --user show-environment` output, the fallback when
+    /// the user bus is unavailable. A value in plain quotes is unquoted; one
+    /// in the `$'…'` form is [`ManagerValue::Unreadable`].
+    pub fn from_show_environment(text: &str) -> Self {
+        let entries = text
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .map(|(name, value)| {
+                let value = value.trim();
+                let parsed = if value.starts_with("$'") {
+                    ManagerValue::Unreadable
+                } else {
+                    plain(
+                        value
+                            .strip_prefix('"')
+                            .and_then(|value| value.strip_suffix('"'))
+                            .or_else(|| {
+                                value
+                                    .strip_prefix('\'')
+                                    .and_then(|value| value.strip_suffix('\''))
+                            })
+                            .unwrap_or(value),
+                    )
+                };
+                (name.to_string(), parsed)
+            })
+            .collect();
+        Self { entries }
+    }
+
+    /// The first assignment of `name`, as the manager applies it.
+    pub fn get(&self, name: &str) -> ManagerValue {
+        self.entries
+            .iter()
+            .find(|(entry, _)| entry == name)
+            .map_or(ManagerValue::Absent, |(_, value)| value.clone())
+    }
+}
+
+/// A raw value, with the empty string read as unset.
+fn plain(value: &str) -> ManagerValue {
+    if value.is_empty() {
+        ManagerValue::Absent
+    } else {
+        ManagerValue::Value(value.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The manager's environment reads the same from `busctl` JSON and from
+    /// the plain `show-environment` lines, and a value `show-environment`
+    /// escapes is reported unreadable instead of misread.
+    ///
+    /// Why it matters: systemd 255 prints a value with a space as
+    /// `NAME=$'…'`, and the old line parser read that as a relative path, so
+    /// a config directory with a space was refused or looked up in the wrong
+    /// place. Specified: JSON yields the exact value, spaces and quotes
+    /// included; the fallback unquotes plain quoted values, marks `$'…'`
+    /// values unreadable, and treats empty and missing names as absent;
+    /// only the first assignment of a name counts.
+    #[test]
+    fn manager_environment_parses_busctl_json_and_the_show_environment_fallback() {
+        let json = r#"{"type":"as","data":["HOME=/home/u","XDG_CONFIG_HOME=/home/u/my config","EMPTY=","XDG_CONFIG_HOME=/second"]}"#;
+        let env = ManagerEnvironment::from_busctl_json(json).unwrap();
+        assert_eq!(
+            env.get("XDG_CONFIG_HOME"),
+            ManagerValue::Value("/home/u/my config".to_string())
+        );
+        assert_eq!(env.get("HOME"), ManagerValue::Value("/home/u".to_string()));
+        assert_eq!(env.get("EMPTY"), ManagerValue::Absent);
+        assert_eq!(env.get("MISSING"), ManagerValue::Absent);
+        assert!(ManagerEnvironment::from_busctl_json(r#"{"type":"s","data":"x"}"#).is_err());
+        let pretty = ManagerEnvironment::from_busctl_pretty_lines(
+            "\t\t\"XDG_CONFIG_HOME=/home/u/my config\",\n\t\t\"LAST=a\\nb\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            pretty.get("XDG_CONFIG_HOME"),
+            ManagerValue::Value("/home/u/my config".to_string())
+        );
+        assert_eq!(pretty.get("LAST"), ManagerValue::Value("a\nb".to_string()));
+        assert!(ManagerEnvironment::from_busctl_pretty_lines("not a string").is_err());
+        assert!(ManagerEnvironment::from_busctl_json("not json").is_err());
+
+        let shown = ManagerEnvironment::from_show_environment(
+            "HOME=/home/u\nXDG_CONFIG_HOME=$'/home/u/my config'\nQUOTED=\"/a\"\nEMPTY=\n",
+        );
+        assert_eq!(
+            shown.get("HOME"),
+            ManagerValue::Value("/home/u".to_string())
+        );
+        assert_eq!(shown.get("XDG_CONFIG_HOME"), ManagerValue::Unreadable);
+        assert_eq!(shown.get("QUOTED"), ManagerValue::Value("/a".to_string()));
+        assert_eq!(shown.get("EMPTY"), ManagerValue::Absent);
+    }
 
     /// The supervisor unit strips exactly the markers the kill sweep claims
     /// processes by.

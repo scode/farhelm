@@ -69,8 +69,6 @@ One line per open item. This file must always match the feedback files in this d
 - `attach-reports-generic-timeout.md` — the attach step spins 30 s on skew/identity states and reports only "timed out".
 - `update-identity-none-plan-confirm-disagree.md` — UPDATE planning accepts a supervisor reporting no identity but
   confirmation always refuses it.
-- `reach-misreads-escaped-xdg-config-home.md` — an escaped XDG_CONFIG_HOME (path with a space) is misclassified as
-  relative and refused.
 - `uninstall-creates-setup-lock-file.md` — uninstall and setup --uninstall create .farhelm-setup.lock (and possibly the
   unit dir) and never report it.
 - `setup-build-tree-heuristic-misfires.md` — setup refuses installed binaries under an empty TMPDIR or any path

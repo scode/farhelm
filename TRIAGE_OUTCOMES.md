@@ -4226,7 +4226,16 @@
 - Completion criteria: both sites read the manager's environment through the structured query, a config path containing
   a space resolves correctly for remote setup, local setup and uninstall, focused coverage, and this feedback file and
   its index entry are removed in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; both sites read the manager's environment through the agreed `busctl` JSON query, parsed by the
+  shared `farhelm_helm::units::ManagerEnvironment`. Remote: the reach check fetches only the manager's `XDG_CONFIG_HOME`
+  entry, filtered on the host from `busctl`'s pretty JSON (one element per line) so no other environment value or size
+  reaches the helm, in a first command and passes the unit directory chosen in Rust to the existing reach script, whose
+  record format is unchanged. Local: `manager_unit_dir` in setup.rs, used by setup and uninstall. Execution added one
+  thing the decision did not name, recorded as a DECISION: `busctl --user` needs a D-Bus user bus, which some minimal
+  hosts lack even though `systemctl --user` works, so when `busctl` cannot answer both sites fall back to the
+  `show-environment` block, parsed in Rust; a value there in the escaped `$'…'` form is refused with a message naming
+  it, and every plain value keeps working as before. Change `qoqxtqrksrlylqlqqzwkptpunnyyqwpk`, bookmark
+  `pr/manager-environment-busctl`, draft PR [#1205](https://github.com/scode/farhelm/pull/1205/changes).
 
 ## setup-build-tree-heuristic-misfires.md
 
