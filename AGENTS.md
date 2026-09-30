@@ -8,6 +8,13 @@ cited by name throughout code comments) are archived under lore/ and are not mai
 This project is either public now, or may become public in the future. No content in this project should contain
 personal information such as personal usernames, hostnames, details about the local environments, etc.
 
+# Talking to the user
+
+Assume the user does not know the codebase. They know Farhelm as a product and its core concepts (the helm, the
+supervisor, sessions, hosts, and so on), but not the file names, functions, types, and other internal names behind them.
+Explain things in those product terms. Do not use an internal name unless it has already come up in the conversation, or
+you introduce it with enough context that it makes sense without opening the code.
+
 # Conventional Commits
 
 All commit messages and PR titles must use Conventional Commit format: `<type>: <short summary>`
