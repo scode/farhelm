@@ -154,6 +154,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   both change with it. Replace keeps its confirmation as it is: it discards the conversation, whatever the agent is
   doing.
 
+- **Name the YOLO host setting after what it does.** One per-host yes/no setting has two names: settings and the specs
+  say "YOLO safe", while the YOLO confirmation, the helm's refusal and the command line say "sensitive". Both read as a
+  judgment about the machine, and neither is what the setting stores, which is whether Farhelm asks before starting a
+  YOLO session there. The settings checkbox label, "allow YOLO launches on this host", is also inaccurate: YOLO launches
+  are allowed on every host, with a confirmation. Agreed wording (2026-09-30): the checkbox becomes "start YOLO sessions
+  here without asking" (off by default); prose says a host "asks before YOLO launches" or allows "YOLO without asking"
+  instead of "sensitive" and "YOLO safe"; the confirmation heading becomes "Confirm YOLO launch"; and
+  `--allow-yolo-on-sensitive-host` becomes `--confirm-yolo`, keeping the old name as a hidden alias so existing scripts
+  and agent instructions keep working. The helm's stored field and the wire field name stay as they are: users never see
+  them. Covers the helm's refusal sentence, the CLI flag and its help, SPEC.md, the docs website, and the GUI text; it
+  needs a changelog entry for the flag. Split out of the pre-release UI work that added the "don't ask again" button to
+  the YOLO confirmation, which may already use some of this wording.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
