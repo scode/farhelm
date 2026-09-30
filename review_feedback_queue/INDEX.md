@@ -86,8 +86,6 @@ One line per open item. This file must always match the feedback files in this d
   visible to other accounts.
 - `pre-mkdir-rollback-leaves-phantom-membership.md` — a pre-mkdir create rollback leaves a phantom membership in another
   checkout, so it is never archived.
-- `preserved-plan-diagnostic-log-only.md` — the "unresolved plan, path preserved" diagnostic goes only to the log; the
-  Delete reply is plain success.
 - `claude-scan-budget-never-settles.md` — Claude record-scan capture can never complete in a large project directory and
   rescans forever.
 - `env-wrapper-hides-command-not-found.md` — Farhelm's own `env` wrapper turns "command not found" for Goose, Pi and OMP
