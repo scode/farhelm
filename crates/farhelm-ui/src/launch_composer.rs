@@ -102,6 +102,41 @@ pub(crate) fn selection_permission_value(selection: &LaunchSelection) -> &'stati
         .unwrap_or("default")
 }
 
+/// The order the composer's search lists harnesses in (the `harness:` results
+/// and the unscoped search's harness rows).
+///
+/// Checked at compile time to name every harness exactly once, so adding a
+/// harness to the enum fails the build here until someone decides where it
+/// belongs. It differs from [`HARNESS_PICKER_ORDER`] only in where Grok sits;
+/// both orders predate this constant and are kept as they were.
+pub(crate) const HARNESS_SEARCH_ORDER: [LaunchHarness; 9] = [
+    LaunchHarness::Codex,
+    LaunchHarness::Claude,
+    LaunchHarness::Muse,
+    LaunchHarness::Cursor,
+    LaunchHarness::Goose,
+    LaunchHarness::Pi,
+    LaunchHarness::Omp,
+    LaunchHarness::OpenCode,
+    LaunchHarness::Grok,
+];
+const _: () = assert!(LaunchHarness::is_ordering_of_all(&HARNESS_SEARCH_ORDER));
+
+/// The order the new-session form's harness buttons appear in. Compile-time
+/// checked the same way as [`HARNESS_SEARCH_ORDER`].
+pub(crate) const HARNESS_PICKER_ORDER: [LaunchHarness; 9] = [
+    LaunchHarness::Codex,
+    LaunchHarness::Claude,
+    LaunchHarness::Muse,
+    LaunchHarness::Cursor,
+    LaunchHarness::Grok,
+    LaunchHarness::Goose,
+    LaunchHarness::Pi,
+    LaunchHarness::Omp,
+    LaunchHarness::OpenCode,
+];
+const _: () = assert!(LaunchHarness::is_ordering_of_all(&HARNESS_PICKER_ORDER));
+
 /// The short name a user sees for a harness. Every spelling of a structured
 /// harness in the composer, a session's menu header, and the restart-with
 /// dialog derives from this, the lowercase words included (see
@@ -666,17 +701,7 @@ pub(crate) fn search_results(
     let mut results = Vec::new();
 
     if matches!(scope, SearchScope::All | SearchScope::Harness) {
-        for harness in [
-            LaunchHarness::Codex,
-            LaunchHarness::Claude,
-            LaunchHarness::Muse,
-            LaunchHarness::Cursor,
-            LaunchHarness::Goose,
-            LaunchHarness::Pi,
-            LaunchHarness::Omp,
-            LaunchHarness::OpenCode,
-            LaunchHarness::Grok,
-        ] {
+        for harness in HARNESS_SEARCH_ORDER {
             if query.is_empty() || harness_word(harness).contains(&folded_query) {
                 results.push(ComposerSearchResult::Harness(harness));
             }

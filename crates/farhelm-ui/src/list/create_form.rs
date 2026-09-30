@@ -4340,17 +4340,7 @@ pub(super) fn CreateSessionForm(
                         div { class: "launch-composer-choice launch-composer-harness-choice",
                             span { class: "launch-composer-section-label", "harness" }
                             div { class: "launch-composer-options",
-                                for harness in [
-                                    LaunchHarness::Codex,
-                                    LaunchHarness::Claude,
-                                    LaunchHarness::Muse,
-                                    LaunchHarness::Cursor,
-                                    LaunchHarness::Grok,
-                                    LaunchHarness::Goose,
-                                    LaunchHarness::Pi,
-                                    LaunchHarness::Omp,
-                                    LaunchHarness::OpenCode,
-                                ] {
+                                for harness in crate::launch_composer::HARNESS_PICKER_ORDER {
                                     button {
                                         r#type: "button",
                                         class: if creation_surface() == CreationSurface::Structured && *structured_harness.read() == Some(harness) { "selected" } else { "" },

@@ -11,39 +11,70 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The command-line harness selected for a structured launch.
-///
-/// This is distinct from [`crate::AgentKind`]. `AgentKind` describes the
-/// supervisor features available after a process starts; this enum preserves
-/// the harness the user selected. In particular, Muse is a first-class launch
-/// choice even though it currently maps to the supervisor's generic runtime
-/// integration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LaunchHarness {
-    /// Cursor launches with the Generic runtime: no conversation tracking or Resume.
-    Cursor,
-    Codex,
-    Claude,
-    Muse,
-    /// Goose's OpenRouter-backed terminal session command.
-    Goose,
-    /// Pi's OpenRouter-backed terminal command.
-    Pi,
-    /// OMP's OpenRouter-backed terminal command — the Pi fork's launch
-    /// surface, compiled beside Pi's with OMP's own approval-mode and
-    /// thinking flags. Like Pi, an OMP launch is a report-only integration:
-    /// the structured choice records intent, while conversation capture and
-    /// resume stay the supervisor's `AgentKind::Omp` behavior.
-    Omp,
-    /// OpenCode's terminal UI, intentionally kept on the generic runtime
-    /// integration because Farhelm does not capture or resume its sessions.
-    OpenCode,
-    /// Grok's native terminal UI. Tracked launches require `--no-leader`.
-    Grok,
+crate::enum_with_all! {
+    /// The command-line harness selected for a structured launch.
+    ///
+    /// This is distinct from [`crate::AgentKind`]. `AgentKind` describes the
+    /// supervisor features available after a process starts; this enum preserves
+    /// the harness the user selected. In particular, Muse is a first-class launch
+    /// choice even though it currently maps to the supervisor's generic runtime
+    /// integration.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum LaunchHarness {
+        /// Cursor launches with the Generic runtime: no conversation tracking or Resume.
+        Cursor,
+        Codex,
+        Claude,
+        Muse,
+        /// Goose's OpenRouter-backed terminal session command.
+        Goose,
+        /// Pi's OpenRouter-backed terminal command.
+        Pi,
+        /// OMP's OpenRouter-backed terminal command — the Pi fork's launch
+        /// surface, compiled beside Pi's with OMP's own approval-mode and
+        /// thinking flags. Like Pi, an OMP launch is a report-only integration:
+        /// the structured choice records intent, while conversation capture and
+        /// resume stay the supervisor's `AgentKind::Omp` behavior.
+        Omp,
+        /// OpenCode's terminal UI, intentionally kept on the generic runtime
+        /// integration because Farhelm does not capture or resume its sessions.
+        OpenCode,
+        /// Grok's native terminal UI. Tracked launches require `--no-leader`.
+        Grok,
+    }
 }
 
 impl LaunchHarness {
+    /// Whether `order` lists every harness exactly once: the check behind a
+    /// UI display order that differs from declaration order.
+    ///
+    /// A `const fn` so a display order can assert it at compile time
+    /// (`const _: () = assert!(LaunchHarness::is_ordering_of_all(&ORDER));`).
+    /// That turns "a new harness is missing from this picker" into a build
+    /// failure at the list that needs a decision about where it goes.
+    pub const fn is_ordering_of_all(order: &[LaunchHarness]) -> bool {
+        if order.len() != Self::ALL.len() {
+            return false;
+        }
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let mut seen = 0;
+            let mut j = 0;
+            while j < order.len() {
+                if order[j] as usize == Self::ALL[i] as usize {
+                    seen += 1;
+                }
+                j += 1;
+            }
+            if seen != 1 {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+
     /// The supervisor integration a structured launch of this harness runs
     /// under.
     ///
@@ -242,6 +273,35 @@ mod tests {
                 "{permission:?}"
             );
         }
+    }
+
+    /// Spec: `LaunchHarness::ALL` lists every harness once, in declaration
+    /// order, and `is_ordering_of_all` accepts exactly the permutations of it.
+    ///
+    /// Why: UI display orders assert `is_ordering_of_all` at compile time as
+    /// their only guard against leaving a new harness out of a picker, so a
+    /// check that accepted a duplicate in place of a missing harness, or a
+    /// short list, would let exactly that drift through.
+    #[test]
+    fn all_harnesses_and_ordering_check() {
+        assert_eq!(
+            LaunchHarness::ALL
+                .iter()
+                .map(|harness| *harness as usize)
+                .collect::<Vec<_>>(),
+            (0..LaunchHarness::ALL.len()).collect::<Vec<_>>()
+        );
+        assert!(LaunchHarness::is_ordering_of_all(LaunchHarness::ALL));
+        let mut reversed = LaunchHarness::ALL.to_vec();
+        reversed.reverse();
+        assert!(LaunchHarness::is_ordering_of_all(&reversed));
+        assert!(!LaunchHarness::is_ordering_of_all(&LaunchHarness::ALL[1..]));
+        let mut duplicated = LaunchHarness::ALL.to_vec();
+        duplicated[0] = duplicated[1];
+        assert!(!LaunchHarness::is_ordering_of_all(&duplicated));
+        let mut extended = LaunchHarness::ALL.to_vec();
+        extended.push(LaunchHarness::Codex);
+        assert!(!LaunchHarness::is_ordering_of_all(&extended));
     }
 
     /// Spec: Goose offers every explicit permission, OMP offers YOLO and

@@ -71,6 +71,36 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Declares a fieldless enum and its `ALL` constant from one list of
+/// variants.
+///
+/// The point is that a variant cannot exist without being in `ALL`. A
+/// hand-maintained array next to an enum can only be checked for order and
+/// density, not for a variant appended after the last entry, and stable Rust
+/// has no variant count to compare against. Generating both from the same
+/// token list makes the omission impossible rather than detectable. Used for
+/// enums whose `ALL` stands in for "every one of these" somewhere a missing
+/// entry would fail silently: the UI's harness picker and search orders are
+/// checked against [`LaunchHarness::ALL`], so a harness missing from it would
+/// pass those checks while being silently unlaunchable.
+///
+/// `ALL` lists the variants in declaration order.
+macro_rules! enum_with_all {
+    ($(#[$enum_meta:meta])* pub enum $name:ident { $($(#[$variant_meta:meta])* $variant:ident,)+ }) => {
+        $(#[$enum_meta])*
+        pub enum $name {
+            $($(#[$variant_meta])* $variant,)+
+        }
+
+        impl $name {
+            /// Every variant, in declaration order. Generated with the enum
+            /// (see `enum_with_all!`), so it cannot drift from it.
+            pub const ALL: &'static [$name] = &[$($name::$variant,)+];
+        }
+    };
+}
+pub(crate) use enum_with_all;
+
 /// Tokens the UI branches on in the helm's HTTP replies (see the module's own
 /// docs).
 pub mod http;
