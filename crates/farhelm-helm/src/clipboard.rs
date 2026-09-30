@@ -90,7 +90,17 @@ pub(crate) async fn post_clipboard(
     if request.text.len() > MAX_TEXT_BYTES {
         return StatusCode::PAYLOAD_TOO_LARGE;
     }
-    if let Err(why) = sink(&request.text) {
+    // On the blocking pool, never on an async worker: the native writer
+    // takes a process-wide mutex and talks to the display server, and a
+    // burst of copies (or a program spamming OSC 52) against a slow
+    // clipboard backend would otherwise park the workers that serve every
+    // terminal and the session list (SPEC.md "Waiting between operations on
+    // one host").
+    let sink = Arc::clone(sink);
+    let written = tokio::task::spawn_blocking(move || sink(&request.text))
+        .await
+        .unwrap_or_else(|join| Err(format!("the clipboard write task failed: {join}")));
+    if let Err(why) = written {
         // The reason string comes from the native clipboard library, not a
         // peer, but it still crosses onto an operator's terminal — same
         // escaping discipline as every other logged string.
@@ -180,6 +190,65 @@ mod tests {
             *written.lock().unwrap(),
             vec!["copied 19 chars".to_string()]
         );
+    }
+
+    /// A slow native clipboard write never occupies an async worker: other
+    /// requests are answered while the write is still blocked.
+    ///
+    /// Why it matters: the desktop sink blocks on a process-wide mutex and
+    /// the display server, and running it on the async worker let a burst of
+    /// copies freeze terminals and the session list (SPEC.md "Waiting between
+    /// operations on one host"). Specified, on the test's single-threaded
+    /// runtime: while one write is blocked inside the sink, a second request
+    /// completes before that write returns.
+    #[farhelm_testtrace::test]
+    async fn a_blocked_native_write_does_not_stall_other_requests() {
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let entered_tx = Mutex::new(entered_tx);
+        let release_rx = Mutex::new(release_rx);
+        let returned = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sink_returned = Arc::clone(&returned);
+        let harness = rest_harness::idle_helm_with_clipboard_sink(Arc::new(move |_: &str| {
+            let _ = entered_tx.lock().unwrap().send(());
+            // Bounded so a regression that blocks the runtime cannot hang
+            // the test forever; the assertion below still fails it.
+            let _ = release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(10));
+            sink_returned.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }))
+        .await;
+        let router = harness.router();
+        let first = tokio::spawn(
+            router
+                .clone()
+                .oneshot(post(serde_json::json!({"text": "slow"}))),
+        );
+        tokio::task::spawn_blocking(move || {
+            entered_rx
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .expect("the first write reaches the sink")
+        })
+        .await
+        .expect("wait for the sink");
+
+        let oversized = "x".repeat(super::MAX_TEXT_BYTES + 1);
+        let second = router
+            .oneshot(post(serde_json::json!({"text": oversized})))
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(
+            !returned.load(std::sync::atomic::Ordering::SeqCst),
+            "the second request must complete while the first write is still blocked"
+        );
+
+        release_tx.send(()).expect("release the blocked write");
+        let first = first.await.expect("first request task").unwrap();
+        assert_eq!(first.status(), StatusCode::NO_CONTENT);
     }
 
     /// A failing native write is still a 204 — SPEC.md's best-effort

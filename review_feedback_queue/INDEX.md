@@ -23,8 +23,6 @@ One line per open item. This file must always match the feedback files in this d
   confirmed empty.
 - `event-feed-liveness-postponed-by-revisions.md` — the event feed's liveness check never fires on a busy fleet, so dead
   subscribers hold the 64 seats.
-- `clipboard-sink-blocks-async-worker.md` — the desktop clipboard endpoint runs blocking clipboard I/O on async workers
-  under a global mutex.
 - `agent-create-replays-asker-as-child.md` — a keyed `agent create` can report the asking session itself as the newly
   created session.
 - `spawn-replays-asker-as-child.md` — a keyed `farhelm spawn` reusing another session's key can be handed that session's

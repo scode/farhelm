@@ -3402,7 +3402,10 @@
   principle itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the desktop clipboard endpoint now runs the native writer on tokio's blocking pool
+  (`spawn_blocking`) instead of an async worker, and `ClipboardSink`'s contract says it may block. Regression test
+  `a_blocked_native_write_does_not_stall_other_requests`. jj change `npzwnsvxouml`, bookmark
+  `pr/clipboard-off-async-worker`, draft PR [#1166](https://github.com/scode/farhelm/pull/1166/changes).
 
 ## release-download-unbounded-under-host-lock.md
 
