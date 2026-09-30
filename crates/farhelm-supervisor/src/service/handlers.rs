@@ -59,6 +59,25 @@ enum CreateAdmission {
     Spawn { asking_session: String },
 }
 
+/// The intent key a spawn is reserved under: the agent's key, scoped to the
+/// session that asked.
+///
+/// Keys are chosen by agents and nothing else in the request records who
+/// asked (`--parent` is optional), so an unscoped key let one session replay
+/// another's spawn: a sibling reusing a key got the first session's child
+/// back as "the new child". Hashing the key gives a fixed length, so the
+/// scoped key stays inside [`INTENT_KEY_CAP`] whatever the agent sent. Keys
+/// reserved before this scoping no longer match; a retry spanning the
+/// upgrade spawns afresh, which bounded session-lifetime keys already allow.
+fn spawn_scoped_intent_key(asking_session: &str, key: &str) -> String {
+    use sha2::Digest as _;
+    let digest: String = sha2::Sha256::digest(key.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("spawn-{asking_session}-{digest}")
+}
+
 impl CreateAdmission {
     fn dedup_scope(&self) -> DedupScope {
         match self {
@@ -721,6 +740,15 @@ async fn handle_create_session(
         reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
+    // A spawn's key belongs to the session that asked (SPEC.md "Agent-spawned
+    // sessions"), before admission locks it, so every use of the key below
+    // (the per-key lock, the reservation) sees the scoped form.
+    let intent_key = match &admission {
+        CreateAdmission::Spawn { asking_session } => {
+            intent_key.map(|key| spawn_scoped_intent_key(asking_session, &key))
+        }
+        CreateAdmission::Interactive => intent_key,
+    };
     // Profile resolution may contact the helm, so it precedes admission.
     // Inheritance reads the parent's durable bundle and must instead wait
     // until its credential and lifecycle are protected by the same guards
@@ -880,14 +908,13 @@ async fn handle_create_session(
     {
         // A session-authenticated create can never newly create the asking
         // session, so a result naming the asker is an idempotency replay of
-        // the create that made it: the key is host-scoped and the fingerprint
-        // does not include the asker, so a child whose bundle was inherited
-        // from its parent reproduces the parent's keyed spawn exactly.
-        // Reporting it as "the child" would send the caller's later stop or
-        // restart at itself. Nothing was created, so refusing has no effect
-        // to undo; `Conflict` says the key is what must change. (Another
-        // session reusing the key is still handed the original child; that
-        // would need the asker in the fingerprint.)
+        // the create that made it. Keys are now reserved scoped to the asker
+        // (`spawn_scoped_intent_key`), so a child re-running its parent's
+        // keyed spawn no longer reaches the parent's reservation at all; this
+        // stays as the backstop, because reporting the caller itself as "the
+        // child" would send its later stop or restart at itself. Nothing was
+        // created, so refusing has no effect to undo; `Conflict` says the key
+        // is what must change.
         Ok(session) if restricted_auth.is_some_and(|auth| auth.session_id == session.id) => {
             reply_error(
                 tx,
@@ -4581,7 +4608,13 @@ mod tests {
         .expect("supervisor");
         let auth = authenticated_parent(&sup, state.path(), "resolve-parent").await;
         let (helm, mut helm_rx) = sup.register_test_helm_link(&auth.session_id).await;
-        let intent = sup.claim_intent_for_test("resolve-before-claim").await;
+        // The spawn's key is reserved scoped to its asker; hold that one.
+        let intent = sup
+            .claim_intent_for_test(&spawn_scoped_intent_key(
+                &auth.session_id,
+                "resolve-before-claim",
+            ))
+            .await;
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         // Each field fits alone; their combined request exceeds the shared cap.
         // An owned, registered helm link makes any attempted lookup observable.
@@ -8535,18 +8568,39 @@ mod tests {
         );
     }
 
-    /// A child that re-runs its parent's keyed spawn is refused rather than
-    /// told it created itself.
+    /// A spawn's intent key is reserved scoped to the asking session.
+    ///
+    /// Why it matters: without the asker in the stored key, a sibling reusing
+    /// another session's key and request replayed that session's child to
+    /// itself as "the new child" (SPEC.md "Agent-spawned sessions" scopes keys
+    /// to the asker). Specified: the same key from two askers gives two
+    /// stored keys, the same asker and key the same one, and a key at the
+    /// 512-byte limit still gives a stored key within it.
+    #[farhelm_testtrace::test]
+    fn spawn_intent_keys_are_scoped_to_the_asking_session() {
+        let a = spawn_scoped_intent_key("session-a", "k");
+        assert_ne!(a, spawn_scoped_intent_key("session-b", "k"));
+        assert_eq!(a, spawn_scoped_intent_key("session-a", "k"));
+        let long = spawn_scoped_intent_key(
+            "7c9d1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+            &"x".repeat(INTENT_KEY_CAP),
+        );
+        assert!(long.len() <= INTENT_KEY_CAP, "{}", long.len());
+    }
+
+    /// A child that re-runs its parent's keyed spawn gets a child of its own,
+    /// never its parent's result.
     ///
     /// Why it matters: an `--inherit-agent` child carries its parent's exact
-    /// launch bundle, and a spawn key is host-scoped with no asker in the
-    /// fingerprint, so the child's identical spawn replays the create that
-    /// made the child. `farhelm spawn` prints the result as the new child's
-    /// id, and an agent that then stops or restarts "its child" would hit
-    /// itself. Spec: the replay is refused with `Conflict` and creates
-    /// nothing.
+    /// launch bundle, so with a host-wide key its identical spawn replayed
+    /// the create that made the child, and `farhelm spawn` printed the child's
+    /// own id as "the new child"; an agent that then stops or restarts "its
+    /// child" would hit itself. Keys are scoped to the asking session (SPEC.md
+    /// "Agent-spawned sessions"), so the child's key is its own. Spec: the
+    /// child's identical keyed spawn creates a new session that is neither
+    /// the child nor its parent.
     #[farhelm_testtrace::test]
-    async fn restricted_create_refuses_a_replay_that_names_the_asker() {
+    async fn a_childs_identical_keyed_spawn_creates_its_own_child() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -8590,24 +8644,21 @@ mod tests {
         };
 
         handle_restricted_control(&sup, spawn(62), &tx, &child_auth, None).await;
-        let replay: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("replay reply").body).expect("decode");
-        assert!(
-            matches!(
-                &replay,
-                ControlMsg::Error {
-                    req_id: 62,
-                    kind: ErrorKind::Conflict,
-                    message,
-                } if message.contains("made the calling session")
-            ),
-            "a replay naming the asker must be refused as a key conflict: {replay:?}"
+        let second: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("second reply").body).expect("decode");
+        let ControlMsg::SessionCreated {
+            session: grandchild,
+            ..
+        } = second
+        else {
+            panic!("the child's own keyed spawn must create a session: {second:?}");
+        };
+        assert_ne!(
+            grandchild.id, child.id,
+            "the child must not be told it created itself"
         );
-        assert_eq!(
-            sup.store.load_all().await.expect("load sessions").len(),
-            2,
-            "the refused replay must not create a session"
-        );
+        assert_ne!(grandchild.id, parent.session_id);
+        assert_eq!(sup.store.load_all().await.expect("load sessions").len(), 3);
     }
 
     /// An admitted spawn receives bounded idempotency, preserves its direct
@@ -8653,7 +8704,7 @@ mod tests {
         assert_eq!(session.parent.as_deref(), Some("parent-session"));
         assert_eq!(
             sup.store
-                .reservation("spawn-key")
+                .reservation(&spawn_scoped_intent_key("parent-session", "spawn-key"))
                 .await
                 .unwrap()
                 .expect("key is durable while the child exists")
@@ -8699,7 +8750,7 @@ mod tests {
         assert_ne!(replacement.id, session.id);
         assert_eq!(
             sup.store
-                .reservation("spawn-key")
+                .reservation(&spawn_scoped_intent_key("parent-session", "spawn-key"))
                 .await
                 .unwrap()
                 .expect("the replacement owns the reused key")
