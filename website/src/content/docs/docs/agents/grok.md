@@ -1,6 +1,8 @@
 ---
 title: Grok
 description: Tracking and resuming the native Grok Build CLI, and the three hooks it needs.
+sidebar:
+  order: 10
 ---
 
 Farhelm can track and resume one top-level conversation in the native Grok Build CLI. Native subagents still work inside
@@ -128,7 +130,7 @@ process attribution.
 After the first prompt, the session's restart offer should change from Fresh to Resume. If it does not, inspect
 `<state dir>/hook-log/<session id>.log`, where `<state dir>` is `$XDG_STATE_HOME/farhelm` or `~/.local/state/farhelm`.
 An `acked` line means the supervisor accepted the callback. `bad-payload`, `refused`, `connect-failed`, and `timeout`
-name the common failure classes; [Agent hook injection](/docs/concepts/agent-hook-injection/) documents the complete log
+name the common failure classes; [Agent hook injection](/docs/agents/agent-hook-injection/) documents the complete log
 format.
 
 No log usually means Grok did not load or run the hook, or the command path is wrong. An `acked` line with a FreshOnly

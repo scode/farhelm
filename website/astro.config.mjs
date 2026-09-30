@@ -29,10 +29,18 @@ export default defineConfig({
         root: { label: 'English', lang: 'en' },
       },
       customCss: ['./src/styles/farhelm.css'],
+      // The sidebar is the documentation's outline, in reading order: a
+      // guided first run, task guides, agents, then the mental model.
+      // Groups autogenerate from their directories and pages order
+      // themselves with `sidebar.order` frontmatter, so adding a page never
+      // means editing this list. Pages not yet written carry a "Stub" badge
+      // (see AGENTS.md next to this file).
       sidebar: [
         { label: 'Overview', slug: 'docs' },
-        { label: 'Concepts', items: [{ autogenerate: { directory: 'docs/concepts' } }] },
-        { label: 'Harnesses', items: [{ autogenerate: { directory: 'docs/harnesses' } }] },
+        { label: 'Get started', items: [{ autogenerate: { directory: 'docs/get-started' } }] },
+        { label: 'Using Farhelm', items: [{ autogenerate: { directory: 'docs/using' } }] },
+        { label: 'Agents', items: [{ autogenerate: { directory: 'docs/agents' } }] },
+        { label: 'How it works', items: [{ autogenerate: { directory: 'docs/how-it-works' } }] },
       ],
     }),
   ],

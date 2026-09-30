@@ -1,6 +1,8 @@
 ---
 title: Codex
 description: Launching, tracking, and resuming Codex conversations, including workspace trust and launcher chains.
+sidebar:
+  order: 10
 ---
 
 Farhelm tracks the foreground Codex conversation and offers Resume when its exact transcript verifies the reported
@@ -50,8 +52,8 @@ Setting a wrapper's integration kind to Codex enables hook injection but does no
 that forward the injected arguments and replace themselves with the next program using `exec`; replaced processes do not
 add ancestry links. A package-manager installation is not automatically supported or refused: the surviving process
 chain decides. Renaming the native Codex executable also prevents attribution. See
-[agent wrappers](/docs/concepts/agent-wrappers/) for argument forwarding and
-[hook injection](/docs/concepts/agent-hook-injection/) for invocation forms that skip injection.
+[agent wrappers](/docs/agents/agent-wrappers/) for argument forwarding and
+[hook injection](/docs/agents/agent-hook-injection/) for invocation forms that skip injection.
 
 A rejected report leaves the saved conversation and Resume offer unchanged. On a new session with no accepted report,
 Resume remains unavailable. Farhelm does not scan for a different Codex conversation to compensate for an unsupported
