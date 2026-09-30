@@ -3755,7 +3755,11 @@
   principle itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `install()` in crates/farhelm/src/setup.rs now runs every fallible pre-write step for both
+  units (the `is-active` query and the restart marker) before writing either, then writes the changed units back to back
+  (`write_units_together`), restoring any unit already written (or removing one that did not exist before) if a later
+  write fails. Regression test `a_failure_on_the_second_unit_leaves_both_units_unwritten`. jj change `xqnwvptyqnls`,
+  bookmark `pr/setup-writes-units-together`, draft PR [#1187](https://github.com/scode/farhelm/pull/1187/changes).
 
 ## ssh-controlpath-too-long.md
 
