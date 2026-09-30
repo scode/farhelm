@@ -44,3 +44,20 @@ with a test that they agree), before looking up vendor rules, in both the guard'
 followed by an option (`env -i …`), which the supervisor's rule deliberately does not interpret, should be treated as
 YOLO or unknown rather than "not YOLO", since this is a guard. Add tests for
 `env A=1 claude --dangerously-skip-permissions`, `/usr/bin/env A=1 codex --yolo`, and `env A=b pi` (Pi is always YOLO).
+
+## Additional detail merged from a second review (de774a1ee8815ce833da77deac593a55d82f7be3)
+
+A separate whole-codebase review found the same gap independently; its item was folded into this one and
+`yolo-guard-misses-codex-option-form.md` when both landed. It adds:
+
+- Reach: every create path that is not a structured launch goes through the same classifier: REST raw `invocation`,
+  user-edited catalog profiles (`profiles.rs` only runs `validate_profile_fields`), `mode_from_source` for clone/replace
+  of a raw or profile-backed source, agent `create --invocation`/`--profile`, and `ResolveProfile` for `farhelm spawn`
+  (`crates/farhelm-helm/src/agent_requests.rs:353`). Structured composer launches are unaffected.
+- The proto docs themselves name `env claude` as a motivating shape (`crates/farhelm-proto/src/lib.rs` ~1536, ~2453), so
+  this is an expected command form, not an exotic one.
+- Arbitrary wrappers (scripts, `sh -c '…'`) stay beyond any argv classifier. One sentence in SPEC_impl.md could record
+  that limit when this is fixed. Shell syntax such as `true; claude …` or `$(…)` cannot produce a YOLO launch, because
+  the launch shim execs argv directly with no shell (`crates/farhelm-supervisor/src/launch.rs` `agent_command`).
+- Related: `yolo-guard-misses-equivalent-spellings.md` (Cursor's short `-f` and an explicit Pi agent kind) shares this
+  classifier and fix site.

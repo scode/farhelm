@@ -22,11 +22,22 @@ One line per open item. This file must always match the feedback files in this d
   drive back-to-back refreshes and fleet-wide re-reads.
 - `ssh-forwarding-inherited.md` — with ForwardAgent/ForwardX11 in the user's ssh config, the helm's always-on
   connections expose the ssh agent and X display to remote agents.
+- `yolo-safe-survives-identity-adoption.md` — a host's "safe for YOLO" mark survives adopting a different machine's
+  identity, so YOLO launches there skip the sensitive-host confirmation.
+- `yolo-guard-misses-equivalent-spellings.md` — the sensitive-host YOLO guard misses Cursor's short `-f` flag.
+- `confirmed-nothing-alive-prompt-kills-live-agent.md` — a sidebar delete prompt that drifted to "nothing alive", or the
+  header Restart confirm, can kill an agent restarted after the prompt was worded.
+- `replace-with-kills-running-source-unwarned.md` — Replace with kills a running source session with no warning and no
+  liveness precondition.
+- `claude-scan-claims-foreign-record.md` — the Claude scan fallback can commit another process's conversation as the
+  session's, so Resume appends to the wrong conversation.
+- `claude-resume-template-selector-collision.md` — Claude's derived resume command keeps an original `--continue`,
+  `--resume` or `--`, so Resume can open the wrong conversation or start fresh.
 
 ## High priority: material UX degradation
 
-- `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
-  to read.
+- `pi-resume-downgrade-on-read-error.md` — Pi and OMP resume checks destroy a valid locator when the session file merely
+  fails to read.
 - `plain-retry-erases-pending-fresh-window.md` — plain retry downgrades a pending fast reconnect to a slow probe.
 - `sftp-overall-deadline-fails-slow-links.md` — sftp transfer's 60 s overall deadline fails slow links
   deterministically.
@@ -156,3 +167,15 @@ One line per open item. This file must always match the feedback files in this d
   the user's own (OMP already yields).
 - `terminal-font-promise-leak.md` — per-mount callbacks on a never-settling font promise retain every terminal instance,
   so overnight reconnect loops grow without bound.
+- `delete-skips-scoped-tab-on-stale-verdict.md` — Delete skips a scoped tab's systemd scope on a stale "no user manager"
+  verdict when the agent launch itself was unscoped.
+- `restart-with-skips-create-validation.md` — restart-with stores argv and resume templates without create's checks, so
+  a bad bundle can stop the supervisor from starting.
+- `ssh-config-remotecommand-blocks-host.md` — a `RemoteCommand` in the user's ssh config makes every connection to that
+  host fail, with a misleading error.
+- `provision-lock-map-grows-per-requested-id.md` — the host provisioning lock map gains a never-freed entry for every
+  host id a request names, registered or not.
+- `create-rollback-orphans-unconfirmed-scope.md` — a failed create whose scope kill is unconfirmed still deletes the
+  row, leaving processes nothing can reach.
+- `provisioning-update-replaces-binary-before-setup-guard.md` — remote UPDATE replaces the farhelm binary before
+  checking whether `farhelm helm setup` took the host over.

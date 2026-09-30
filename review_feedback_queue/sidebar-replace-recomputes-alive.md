@@ -27,3 +27,15 @@ prompt the user answered said nothing was alive. That breaks the same `status.rs
 
 The suggested fix is to store the value captured when the user confirmed the Replace prompt alongside the row's
 confirmation state, and reuse that stored value on the YOLO path instead of recomputing it from the listing.
+
+## Additional detail merged from a second review (de774a1ee8815ce833da77deac593a55d82f7be3)
+
+A separate whole-codebase review found this path independently (as part of
+`confirmed-nothing-alive-prompt-kills-live-agent.md`, which now covers only the sidebar delete prompt and the header
+Restart confirm, with the same capture-from-the-rendered-prompt fix). It adds:
+
+- Since 35b41ff the YOLO confirmation has a second button, "Start, and don't ask again on this host"
+  (`on_confirm_and_stop_asking`), which goes through the same recomputation, so the fix must cover both buttons.
+- A browser verification recipe: mark the host as asking before YOLO launches, Replace an exited YOLO session, restart
+  it through the API while the YOLO question is shown, then confirm; the replace body carries
+  `"only_if_nothing_alive": false`.

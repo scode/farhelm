@@ -43,3 +43,6 @@ The suggested fix is to add `-o ForwardAgent=no -o ForwardX11=no -o ClearAllForw
 branches of `ssh_base_args` (options given with `-o` on the command line override the config file, and
 `ClearAllForwardings` does not affect `ProxyJump`), update SPEC_impl.md to say Farhelm's connections never forward, and
 extend the argv tests in `ssh.rs`.
+
+Related: `ssh-config-remotecommand-blocks-host.md` (from a second review) adds `-o RemoteCommand=none` (and possibly
+`-T`) to the same ssh argument prefix and the same argv-pinning tests; the two fixes are best landed together.
