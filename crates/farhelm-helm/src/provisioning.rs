@@ -4164,6 +4164,43 @@ mod tests {
         assert!(!linger_was_refused(Some(1), "Access denied"));
     }
 
+    /// Any failure of the remote loginctl command degrades the optional
+    /// linger step; only a failure to reach the host stays fatal.
+    ///
+    /// Why it matters: linger runs before an Update restarts the supervisor
+    /// onto its new binary, and a host whose loginctl fails in a way the
+    /// refusal classifier does not recognize (not installed, no system bus)
+    /// failed every Update there, stranding it on the old version with the
+    /// new files already installed. Specified: a recognized refusal, a
+    /// missing loginctl (127) and an unreachable bus (1) are `Degraded`
+    /// with a message that quotes no remote text; ssh's own failure (255)
+    /// and a missing status are errors.
+    #[farhelm_testtrace::test]
+    fn any_remote_linger_failure_degrades_instead_of_failing_the_run() {
+        for (code, stderr) in [
+            (Some(1), "loginctl: Access denied while enabling linger"),
+            (Some(127), "sh: 1: loginctl: not found"),
+            (
+                Some(1),
+                "Failed to connect to bus: No such file or directory",
+            ),
+        ] {
+            match linger_failure_outcome(code, stderr) {
+                Ok(ActionOutcome::Degraded(message)) => {
+                    assert!(message.contains("starts at login"), "{message}");
+                    assert!(!message.contains(stderr), "no remote text: {message}");
+                }
+                other => panic!("{code:?} {stderr}: {other:?}"),
+            }
+        }
+        for code in [Some(255), None] {
+            assert!(
+                linger_failure_outcome(code, "Permission denied (publickey)").is_err(),
+                "{code:?}"
+            );
+        }
+    }
+
     /// Remote absence has a dedicated exit while inspection failures retain
     /// stderr instead of being collapsed into `None`.
     #[farhelm_testtrace::test]

@@ -43,8 +43,6 @@ One line per open item. This file must always match the feedback files in this d
   and can report success while the old build keeps serving.
 - `payload-dir-must-be-writable.md` — --payload-dir writes .extracted/ into the operator's directory, so read-only or
   shared release dirs fail every run.
-- `linger-failure-blocks-update-restart.md` — the optional linger step runs before restart/attach and most loginctl
-  failures are fatal, so UPDATE never restarts.
 - `embedded-payload-cleanup-blocks-helm-start.md` — a failure deleting the retired embedded-payloads cache aborts helm
   startup.
 - `installer-stale-lock-recovery-not-exclusive.md` — two installers recovering the same stale lock can both replay the
