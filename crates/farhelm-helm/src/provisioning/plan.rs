@@ -3,7 +3,7 @@
 
 use super::backend::{BackendFailure, Reach};
 use super::http::ProvisioningRequestError;
-use crate::store::{HostKind, HostRow};
+use crate::store::HostRow;
 use crate::units::{SupervisorUnitInputs, render_supervisor_unit};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -498,7 +498,7 @@ impl PlanLayout {
         run_nonce: &str,
     ) -> anyhow::Result<ProvisioningPlan> {
         let mut layout = self.clone();
-        if row.kind == HostKind::Ssh {
+        if row.kind.has_remote_install() {
             if let Some(farhelm) = &row.remote_farhelm {
                 if !Path::new(farhelm).is_absolute() {
                     return Err(anyhow::Error::new(ProvisioningRequestError::Refused(

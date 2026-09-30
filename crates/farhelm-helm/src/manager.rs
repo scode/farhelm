@@ -3263,12 +3263,14 @@ impl HostActor {
                 // protocol is the "no supervisor over there" shape, and
                 // the M1 annotation is what turns it into advice; reused
                 // rather than re-derived so both paths say the same thing.
-                let error = match (&row.kind, row.destination.as_deref()) {
-                    (HostKind::Ssh, Some(dest)) => crate::ssh::annotate_ssh_handshake_eof(
-                        error,
-                        dest,
-                        row.remote_state_dir.as_deref(),
-                    ),
+                let error = match row.destination.as_deref() {
+                    Some(dest) if row.kind.annotates_ssh_handshake_eof() => {
+                        crate::ssh::annotate_ssh_handshake_eof(
+                            error,
+                            dest,
+                            row.remote_state_dir.as_deref(),
+                        )
+                    }
                     _ => error,
                 };
                 return failure(row, error);
@@ -4148,7 +4150,7 @@ fn failure(row: &HostRow, error: anyhow::Error) -> AttemptOutcome {
     // anyhow's specialized downcast looks INSIDE it for the context value.
     // A `chain().any(|c| c.is::<..>())` compiles, always answers false,
     // and would silently reduce this to the generic transport case.
-    let cause = if row.kind == HostKind::Local
+    let cause = if row.kind.reports_missing_local_supervisor()
         && error.downcast_ref::<LocalSupervisorNotRunning>().is_some()
     {
         UnreachableCause::LocalSupervisorNotRunning
