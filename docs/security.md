@@ -62,7 +62,9 @@ and WebSocket subprotocol carry a credential of their own. The webview's secret 
 `desktop-client.json` (mode 0600) so a relaunch validates it via `GET /api/auth/device` instead of minting another. The
 webview's origin is a custom scheme (`dioxus://`, `wry://`), so its fetches to the loopback helm are cross-origin; CORS
 headers are attached to exactly the five routes it fetches (validate, exchange, upload, client-log, clipboard), echoing
-only those custom-scheme origins.
+only those custom-scheme origins. Every Dioxus desktop app presents the same `dioxus://index.html` origin, and any
+wry-based app can present `wry://`, so content in another such app on the machine passes the Origin check too; SPEC.md
+accepts that for the browser-facing check, and the desktop app's identity rests on its credential, never on its Origin.
 
 Two things sit beside the credential and are worth knowing about because the tradeoff below leans on them. The loopback
 origin guard (`require_loopback_origin`) refuses any request whose `Host` is not this helm's own loopback authority, any
