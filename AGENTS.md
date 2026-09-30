@@ -334,10 +334,16 @@ that already landed is a new PR of its own. The only validation is `dprint check
 the `scode-commit-msg-reviewer` cold read, even where standing instructions say to always use it: for a one-line TODO
 capture it is not worth the wait.
 
-NOTE: This applies ONLY while TODO.md is the only file the session has changed. If anything else has been touched —
-code, specs, other documentation, even an unrelated edit still in the working copy — do not commit or merge anything
-automatically. Say so and ask how to proceed. The implied merge is for pure TODO capture; it is not a way to land other
-work without review.
+Before adding or revising an entry, and before answering any question about what TODO.md currently holds (a "tldr todo"
+included), fetch and rebase the working copy onto the latest main per jjstack: `jj git fetch`, then rebase the
+working-copy change onto `main@origin`. Other sessions land TODO.md changes throughout the day, so a checkout that was
+current when the session started goes stale within it, and an answer read from it can miss entries or list ones that are
+already gone.
+
+NOTE: The implied merge applies ONLY while TODO.md is the only file the session has changed. If anything else has been
+touched — code, specs, other documentation, even an unrelated edit still in the working copy — do not commit or merge
+anything automatically. Say so and ask how to proceed. The implied merge is for pure TODO capture; it is not a way to
+land other work without review.
 
 # Deflake runs
 
