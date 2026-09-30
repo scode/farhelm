@@ -434,13 +434,13 @@ test("accepted ADD registers before execution and releases the page lock while r
     "running",
   );
   await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
-  // `.host-edit` lives inside the row's own "⋯" menu now, and it is
+  // `.host-settings` lives inside the row's own "⋯" menu now, and it is
   // `aria-disabled` there rather than natively `disabled` (see `HostRow`'s
   // own doc — the menu leaves busy items focusable, like the session row's
   // menu) — `toBeDisabled()` honours `aria-disabled="true"` the same way.
   const registeredRow = page.locator(`[data-host-id="${registered.id}"]`);
   await openHostMenu(registeredRow);
-  await expect(registeredRow.locator(".host-edit")).toBeDisabled();
+  await expect(registeredRow.locator(".host-settings")).toBeDisabled();
   await expect(page.locator(`[data-host-id="${registered.id}"] .provisioning-update`)).toHaveCount(
     0,
   );
@@ -1083,10 +1083,10 @@ test("single Update shows inline progress without opening its row", async ({
   // Acceptance releases the page lock while the run continues: unrelated
   // controls stay usable, while this row's own edit waits for its run.
   await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
-  // `.host-edit` lives inside the row's own "⋯" menu now — see the
+  // `.host-settings` lives inside the row's own "⋯" menu now — see the
   // earlier ADD case's comment for why `toBeDisabled()` still applies.
   await openHostMenu(row);
-  await expect(row.locator(".host-edit")).toBeDisabled();
+  await expect(row.locator(".host-settings")).toBeDisabled();
   await page.keyboard.press("Escape");
 
   // Authoritative success hands the status spot back to the ordinary label;
@@ -1380,7 +1380,7 @@ test("a wrong-host UPDATE acceptance warns on its source row and claims nothing"
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   // No run was claimed, so this row's own edit stays usable throughout.
   await openHostMenu(row);
-  await expect(row.locator(".host-edit")).toBeEnabled();
+  await expect(row.locator(".host-settings")).toBeEnabled();
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(1);
 });
@@ -1723,7 +1723,7 @@ test("two provisioning-busy rows reconcile independently", async ({
   await openHostsPanel(page);
   const rowOne = page.locator(`[data-host-id="${one.host_id}"]`);
   const rowTwo = page.locator(`[data-host-id="${two.host_id}"]`);
-  // `.host-edit` lives inside each row's own "⋯" menu now, and only one
+  // `.host-settings` lives inside each row's own "⋯" menu now, and only one
   // row menu is ever open at a time (see `HostsPanel`'s own "one row menu
   // open" doc) — opening the SECOND row's closes the first's, so the two
   // rows are checked one at a time rather than simultaneously. That is a
@@ -1731,17 +1731,17 @@ test("two provisioning-busy rows reconcile independently", async ({
   // each row's own busy state still reconciles independently of the
   // other's, which is what every assertion below still pins.
   await openHostMenu(rowOne);
-  await expect(rowOne.locator(".host-edit")).toBeDisabled();
+  await expect(rowOne.locator(".host-settings")).toBeDisabled();
   await openHostMenu(rowTwo);
-  await expect(rowTwo.locator(".host-edit")).toBeDisabled();
+  await expect(rowTwo.locator(".host-settings")).toBeDisabled();
   await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
 
   await configureBackend({ targets: { [target(second)]: { hold_actions: true } } });
   await waitForProgress(request, one.host_id, "completed");
   await openHostMenu(rowOne);
-  await expect(rowOne.locator(".host-edit")).toBeEnabled();
+  await expect(rowOne.locator(".host-settings")).toBeEnabled();
   await openHostMenu(rowTwo);
-  await expect(rowTwo.locator(".host-edit")).toBeDisabled();
+  await expect(rowTwo.locator(".host-settings")).toBeDisabled();
 });
 
 test("failed ADD rerun probes the registered destination and discovery resolves the run", async ({
@@ -2298,7 +2298,7 @@ test("a stale Completed around submission settles nothing and replays nothing", 
   // plus `decide_request`'s coalesce-behind-ownership case.
   await openHostMenu(row);
   await expect(row.locator(".provisioning-update")).toHaveCount(0);
-  await expect(row.locator(".host-edit")).toBeDisabled();
+  await expect(row.locator(".host-settings")).toBeDisabled();
   await page.keyboard.press("Escape");
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(1);

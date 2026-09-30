@@ -7308,6 +7308,8 @@ test("aliasing a remote host renames it everywhere but the details view", async 
   await expect(hostRow.locator(".host-name")).toHaveText(destination);
 
   await openHostMenu(hostRow);
+  // Alias editing lives in the row's settings panel, not the menu itself.
+  await hostRow.locator(".host-settings").click();
   await hostRow.locator(".host-alias").click();
   const input = hostRow.locator(".host-destination-input");
   await expect(input).toBeVisible();
@@ -7356,6 +7358,8 @@ test("aliasing a remote host renames it everywhere but the details view", async 
   // that repopulated the panel correctly but left the session list or the
   // create form's selector on the stale alias would otherwise pass.
   await openHostMenu(hostRow);
+  // Alias editing lives in the row's settings panel, not the menu itself.
+  await hostRow.locator(".host-settings").click();
   await hostRow.locator(".host-alias").click();
   await expect(input).toHaveValue("Build Box");
   await input.fill("");
@@ -7432,6 +7436,8 @@ test("aliasing the local host shows it in the host panel", async ({ page, reques
   await expect(hostRow.locator(".host-name")).toHaveText("local (this machine)");
 
   await openHostMenu(hostRow);
+  // Alias editing lives in the row's settings panel, not the menu itself.
+  await hostRow.locator(".host-settings").click();
   await hostRow.locator(".host-alias").click();
   const input = hostRow.locator(".host-destination-input");
   await expect(input).toBeVisible();

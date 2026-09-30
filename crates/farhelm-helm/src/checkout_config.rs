@@ -1327,6 +1327,7 @@ mod tests {
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+                 ALTER TABLE hosts DROP COLUMN yolo_safe;
                  PRAGMA user_version = 26;",
             )
             .unwrap();

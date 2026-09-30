@@ -10,6 +10,7 @@
       "name": "host1",
       "remote_farhelm": null,
       "remote_state_dir": null,
+      "yolo_safe": false,
       "state": {
         "build_version": "0.16.0",
         "identity": "identity1",
@@ -31,6 +32,7 @@
       "name": "host2",
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
+      "yolo_safe": false,
       "state": {
         "attempt": 2,
         "last_error": "connection refused",
@@ -47,6 +49,7 @@
       "name": "host3",
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
+      "yolo_safe": false,
       "state": {
         "cause": "transport-failure",
         "last_error": "timed out",
@@ -63,6 +66,7 @@
       "name": "host4",
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
+      "yolo_safe": false,
       "state": {
         "our_build": "0.16.0",
         "our_protocol": 29,
@@ -82,6 +86,7 @@
       "name": "host5",
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
+      "yolo_safe": false,
       "state": {
         "phase": "identity-mismatch",
         "recorded": "old",
@@ -98,6 +103,7 @@
       "name": "host6",
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
+      "yolo_safe": false,
       "state": {
         "phase": "identity-unverified",
         "recorded": "old"
@@ -113,6 +119,7 @@
       "name": "host7",
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
+      "yolo_safe": false,
       "state": {
         "identity": "identity2",
         "phase": "duplicate",
@@ -129,6 +136,7 @@
       "name": "host8",
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
+      "yolo_safe": false,
       "state": {
         "phase": "retired",
         "reason": "removed"
@@ -144,6 +152,7 @@
       "name": "host9",
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
+      "yolo_safe": false,
       "state": {
         "build_version": "0.15.0",
         "identity": null,
@@ -165,6 +174,7 @@
       "name": "host10",
       "remote_farhelm": "~/.local/bin/farhelm",
       "remote_state_dir": "~/.local/state/farhelm",
+      "yolo_safe": false,
       "state": {
         "build_version": "0.16.0",
         "identity": null,

@@ -3120,6 +3120,26 @@ pub(crate) async fn set_alias(
     Ok(commit_of::<Host>(resp, "the hosts list below").await)
 }
 
+/// Mark a host safe or sensitive for YOLO launches
+/// (`POST /api/hosts/{id}/yolo-safe`).
+pub(crate) async fn set_yolo_safe(
+    base: &str,
+    host: HostId,
+    yolo_safe: bool,
+) -> Result<Commit, String> {
+    let url = format!("{base}/api/hosts/{host}/yolo-safe");
+    let resp = send(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({ "yolo_safe": yolo_safe })),
+    )
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(commit_of::<Host>(resp, "the hosts list below").await)
+}
+
 /// Forget a registered host (`DELETE /api/hosts/{id}`).
 ///
 /// SPEC.md's remove-merely-forgets contract: the registry row and the
