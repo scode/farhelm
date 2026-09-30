@@ -1220,7 +1220,7 @@ fn create_target(
             Some(host) => host,
             None => snapshots
                 .iter()
-                .find(|snapshot| snapshot.kind == store::HostKind::Local)
+                .find(|snapshot| snapshot.kind.is_reserved_local())
                 .context(
                     "this helm has no local host row, so a create naming no host has no default \
                      target",

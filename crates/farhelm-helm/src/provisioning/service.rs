@@ -468,7 +468,7 @@ impl ProvisioningService {
                     .list_hosts()
                     .await?
                     .into_iter()
-                    .find(|row| row.kind == HostKind::Local)
+                    .find(|row| row.kind.is_reserved_local())
                     .context("the guaranteed local host row is missing")?;
                 if let Some(identity) = discovered.and_then(|dial| dial.identity) {
                     match self
@@ -611,7 +611,7 @@ impl ProvisioningService {
     /// [`Self::start_update`].
     pub(super) async fn plan_update(&self, host: HostId) -> anyhow::Result<UpdatePlanResponse> {
         let row = self.host_row(host).await?;
-        if row.kind == HostKind::Local {
+        if !row.kind.panel_updates() {
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                 self.local_handoff_reason().await?,
             )));
@@ -677,7 +677,7 @@ impl ProvisioningService {
                     }));
                 }
                 expected_identity = expected_identity.or(host_identity);
-                if row.kind == HostKind::Ssh {
+                if row.kind.has_remote_install() {
                     effective_row.remote_farhelm = Some(path_text(&dial_farhelm)?);
                     effective_row.remote_state_dir =
                         dial_state_dir.as_deref().map(path_text).transpose()?;
@@ -702,7 +702,7 @@ impl ProvisioningService {
                 dial_state_dir,
                 ..
             } => {
-                if row.kind == HostKind::Ssh {
+                if row.kind.has_remote_install() {
                     effective_row.remote_farhelm = Some(path_text(&dial_farhelm)?);
                     effective_row.remote_state_dir =
                         dial_state_dir.as_deref().map(path_text).transpose()?;

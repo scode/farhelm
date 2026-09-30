@@ -512,6 +512,26 @@ fn is_builtin_profile_id(id: &str) -> bool {
 /// not a hypothetical the schema can afford to leave open.
 pub type HostId = i64;
 
+/// The on-disk spelling of each [`HostKind`], the one place it is written:
+/// [`HostKind::column`], [`HostKind::from_column`], and the SQL statements
+/// that name a kind all take it from here.
+///
+/// A macro rather than a `const` because the spelling is spliced into SQL
+/// text with `concat!`, which accepts only literals. A bound parameter would
+/// not do: SQLite matches an `ON CONFLICT (...) WHERE kind = 'local'` target
+/// against the partial unique index's predicate by its text, so the literal
+/// has to stay in the statement. The schema's `CHECK` constraint and index
+/// definitions in [`apply_schema`] keep their literal spellings: they are
+/// the schema, and changing their text is a migration.
+macro_rules! host_kind_sql {
+    (local) => {
+        "local"
+    };
+    (ssh) => {
+        "ssh"
+    };
+}
+
 /// A `hosts` row's kind: the reserved local row, or a registered ssh
 /// destination. See the module docs and [`apply_schema`] for the shape
 /// this constrains in SQL.
@@ -538,19 +558,77 @@ pub enum HostKind {
     Ssh,
 }
 
+#[warn(clippy::wildcard_enum_match_arm)]
 impl HostKind {
-    /// The exact inverse of the on-disk spelling `'local'`/`'ssh'`
-    /// literals write directly (see [`ensure_local_row`] and
-    /// [`HelmStore::add_ssh_host`]'s own SQL). Refuses rather than guesses
+    /// The exact inverse of the on-disk spelling ([`host_kind_sql!`], which
+    /// [`ensure_local_row`] and [`HelmStore::add_ssh_host`]'s own SQL write). Refuses rather than guesses
     /// on anything outside this build's vocabulary — the schema's `CHECK`
     /// constraint binds every writer THIS build controls, but the database
     /// file is still a trust boundary like any other input (a hand edit, a
     /// downgrade), so a corrupt value is reported, not silently coerced.
     fn from_column(text: &str) -> anyhow::Result<HostKind> {
         match text {
-            "local" => Ok(HostKind::Local),
-            "ssh" => Ok(HostKind::Ssh),
+            host_kind_sql!(local) => Ok(HostKind::Local),
+            host_kind_sql!(ssh) => Ok(HostKind::Ssh),
             other => anyhow::bail!("hosts row has unrecognized kind {other:?}"),
+        }
+    }
+
+    /// The on-disk spelling: the exact inverse of [`HostKind::from_column`].
+    pub fn column(self) -> &'static str {
+        match self {
+            HostKind::Local => host_kind_sql!(local),
+            HostKind::Ssh => host_kind_sql!(ssh),
+        }
+    }
+
+    /// Whether this is the reserved row for the helm's own machine: the
+    /// row a create naming no host defaults to, and the one probe
+    /// registration and identity recording address as "local".
+    pub fn is_reserved_local(self) -> bool {
+        match self {
+            HostKind::Local => true,
+            HostKind::Ssh => false,
+        }
+    }
+
+    /// Whether a probe or update records and uses this row's remote install
+    /// coordinates (`remote_farhelm`, `remote_state_dir`). The local row
+    /// has none: its supervisor is this machine's own.
+    pub fn has_remote_install(self) -> bool {
+        match self {
+            HostKind::Local => false,
+            HostKind::Ssh => true,
+        }
+    }
+
+    /// Whether the host panel's Update may plan an in-place update of this
+    /// row. The local row is refused with the local setup hand-off instead:
+    /// its supervisor is installed by the local setup flow, not updated over
+    /// a transport.
+    pub fn panel_updates(self) -> bool {
+        match self {
+            HostKind::Local => false,
+            HostKind::Ssh => true,
+        }
+    }
+
+    /// Whether a transport failure reaching this row's supervisor can mean
+    /// "no supervisor is running on this machine", the case the UI turns
+    /// into the local setup hand-off.
+    pub fn reports_missing_local_supervisor(self) -> bool {
+        match self {
+            HostKind::Local => true,
+            HostKind::Ssh => false,
+        }
+    }
+
+    /// Whether a handshake that closed before any protocol byte arrived is
+    /// explained as "no supervisor over there" through the ssh annotation.
+    pub fn annotates_ssh_handshake_eof(self) -> bool {
+        match self {
+            HostKind::Local => false,
+            HostKind::Ssh => true,
         }
     }
 }
@@ -1411,8 +1489,12 @@ fn alias_collision(
     }
     let unaliased_local: Option<()> = tx
         .query_row(
-            "SELECT 1 FROM hosts \
-             WHERE (?1 IS NULL OR id != ?1) AND kind = 'local' AND alias IS NULL",
+            concat!(
+                "SELECT 1 FROM hosts \
+                 WHERE (?1 IS NULL OR id != ?1) AND kind = '",
+                host_kind_sql!(local),
+                "' AND alias IS NULL"
+            ),
             rusqlite::params![exclude],
             |_| Ok(()),
         )
@@ -2812,8 +2894,13 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
 /// caller ever needing to check for it first.
 fn ensure_local_row(conn: &Connection) -> anyhow::Result<()> {
     conn.execute(
-        "INSERT INTO hosts (kind) VALUES ('local') \
-         ON CONFLICT (kind) WHERE kind = 'local' DO NOTHING",
+        concat!(
+            "INSERT INTO hosts (kind) VALUES ('",
+            host_kind_sql!(local),
+            "') ON CONFLICT (kind) WHERE kind = '",
+            host_kind_sql!(local),
+            "' DO NOTHING"
+        ),
         [],
     )
     .context("minting the reserved local host row")?;
@@ -3779,14 +3866,19 @@ impl HelmStore {
             }
             let inserted = tx
                 .execute(
-                    // 'ssh' hardcoded directly, exactly as ensure_local_row
-                    // hardcodes 'local' — this insert can only ever create
-                    // an ssh row, so there is no second kind for a decode
-                    // step to choose between. See HostKind::from_column's
-                    // own docs for the read-side half of this vocabulary.
-                    "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir) \
-                     VALUES ('ssh', ?1, ?2, ?3) \
-                     ON CONFLICT (destination) WHERE kind = 'ssh' DO NOTHING",
+                    // The ssh spelling fixed in the statement, exactly as
+                    // ensure_local_row fixes the local one: this insert can
+                    // only ever create an ssh row, so there is no second kind
+                    // for a decode step to choose between. See
+                    // `host_kind_sql!` for why it is spliced, not bound.
+                    concat!(
+                        "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir) \
+                         VALUES ('",
+                        host_kind_sql!(ssh),
+                        "', ?1, ?2, ?3) ON CONFLICT (destination) WHERE kind = '",
+                        host_kind_sql!(ssh),
+                        "' DO NOTHING"
+                    ),
                     rusqlite::params![destination, remote_farhelm, remote_state_dir],
                 )
                 .context("inserting ssh host")?;
@@ -3859,8 +3951,12 @@ impl HelmStore {
                         .context("beginning discovered-host registration")?;
                     let existing: Option<(HostId, Option<String>)> = tx
                         .query_row(
-                            "SELECT id, host_identity FROM hosts \
-                     WHERE kind = 'ssh' AND destination = ?1",
+                            concat!(
+                                "SELECT id, host_identity FROM hosts \
+                                 WHERE kind = '",
+                                host_kind_sql!(ssh),
+                                "' AND destination = ?1"
+                            ),
                             rusqlite::params![destination],
                             |row| Ok((row.get(0)?, row.get(1)?)),
                         )
@@ -3922,8 +4018,12 @@ impl HelmStore {
                             return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
                         }
                         tx.execute(
-                    "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, \
-                     host_identity) VALUES ('ssh', ?1, ?2, ?3, ?4)",
+                    concat!(
+                        "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, \
+                         host_identity) VALUES ('",
+                        host_kind_sql!(ssh),
+                        "', ?1, ?2, ?3, ?4)"
+                    ),
                     rusqlite::params![destination, remote_farhelm, remote_state_dir, host_identity],
                 )
                 .context("inserting the discovered ssh host")?;
@@ -4022,7 +4122,11 @@ impl HelmStore {
                         // collision it did not introduce.
                         let already_registered = tx
                             .query_row(
-                                "SELECT 1 FROM hosts WHERE kind = 'ssh' AND destination = ?1",
+                                concat!(
+                                    "SELECT 1 FROM hosts WHERE kind = '",
+                                    host_kind_sql!(ssh),
+                                    "' AND destination = ?1"
+                                ),
                                 rusqlite::params![entry.destination],
                                 |_| Ok(()),
                             )
@@ -4044,9 +4148,14 @@ impl HelmStore {
                         // expected outcome here, not an error to catch.
                         let inserted = tx
                     .execute(
-                        "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir) \
-                         VALUES ('ssh', ?1, ?2, ?3) \
-                         ON CONFLICT (destination) WHERE kind = 'ssh' DO NOTHING",
+                        concat!(
+                            "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir) \
+                             VALUES ('",
+                            host_kind_sql!(ssh),
+                            "', ?1, ?2, ?3) ON CONFLICT (destination) WHERE kind = '",
+                            host_kind_sql!(ssh),
+                            "' DO NOTHING"
+                        ),
                         rusqlite::params![
                             entry.destination,
                             entry.remote_farhelm,
