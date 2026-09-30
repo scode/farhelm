@@ -3649,7 +3649,14 @@
   this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `start_add` (provisioning/service.rs) now claims the run slot (the `busy` set) of an
+  already-registered destination before `register` rewrites its row, refusing with Busy and keeping the plan when a run
+  is in flight; `start_run` takes the claim over instead of claiming again. ADD confirmations are serialized from the
+  lookup to the run's claim (`add_confirmations`), so two confirmations for one destination cannot both find it
+  unclaimed. The claim-register-start sequence runs on a task the service owns, so a dropped request cannot leave the
+  host claimed (SPEC_impl.md "Who owns an accepted action"). Regression test
+  `a_refused_add_leaves_the_busy_host_row_and_its_plan_alone`. jj change `pprtsxvtlnnk`, bookmark
+  `pr/add-claims-busy-host-first`, draft PR [#1182](https://github.com/scode/farhelm/pull/1182/changes).
 
 ## installer-stale-lock-recovery-not-exclusive.md
 

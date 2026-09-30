@@ -109,6 +109,11 @@ pub(crate) struct ProvisioningService {
     local_farhelm: PathBuf,
     pub(super) memory: tokio::sync::Mutex<ProvisioningMemory>,
     run_slots: Arc<tokio::sync::Semaphore>,
+    /// Serializes ADD confirmations from looking up the destination's row
+    /// to the run claiming its host, so two confirmations for the same
+    /// destination cannot both see it unclaimed and the later one rewrite
+    /// the row under the earlier one's run (see [`Self::start_add`]).
+    add_confirmations: Arc<tokio::sync::Mutex<()>>,
     /// Bound fleet-wide transport inspection without serializing unrelated
     /// rows behind the browser's page lock.
     plan_slots: tokio::sync::Semaphore,
@@ -151,6 +156,7 @@ impl ProvisioningService {
                 local_farhelm,
                 memory: tokio::sync::Mutex::new(ProvisioningMemory::default()),
                 run_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
+                add_confirmations: Arc::default(),
                 plan_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PLANS),
                 progress_read_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PROGRESS_READS),
                 #[cfg(test)]
@@ -171,6 +177,7 @@ impl ProvisioningService {
             local_farhelm,
             memory: tokio::sync::Mutex::new(ProvisioningMemory::default()),
             run_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
+            add_confirmations: Arc::default(),
             plan_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PLANS),
             progress_read_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PROGRESS_READS),
             #[cfg(test)]
@@ -196,6 +203,7 @@ impl ProvisioningService {
             local_farhelm,
             memory: tokio::sync::Mutex::new(ProvisioningMemory::default()),
             run_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_RUNS)),
+            add_confirmations: Arc::default(),
             plan_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PLANS),
             progress_read_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PROGRESS_READS),
             fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
@@ -574,22 +582,93 @@ impl ProvisioningService {
     }
 
     /// Consume a confirmed plan exactly once, register first, then start ADD.
+    ///
+    /// Registering rewrites an existing row's dial paths and drops its
+    /// connection, so for a destination that already has a row the run is
+    /// claimed first: a host with a run in flight (an UPDATE restarting its
+    /// supervisor is exactly when a probe mints an ADD plan for it) refuses
+    /// with Busy before anything is rewritten, and the plan is kept for a
+    /// later confirmation. Otherwise the refused request would still have
+    /// repointed the host at paths the running UPDATE never installed, under
+    /// the run that `host_provision_lock` promises a stable row.
+    ///
+    /// Everything from the claim on runs on a task this service owns
+    /// (SPEC_impl.md "Who owns an accepted action"): a claimed host left
+    /// behind by a dropped request would refuse every later run as busy.
     pub(super) async fn start_add(
         self: &Arc<Self>,
         request: ProvisionRequest,
     ) -> anyhow::Result<RunAccepted> {
-        let mut pending = self.consume_plan(&request.probe_id).await?;
+        let pending = self.consume_plan(&request.probe_id).await?;
+        let service = Arc::clone(self);
+        tokio::spawn(async move {
+            service
+                .claim_register_and_start(request.probe_id, pending)
+                .await
+        })
+        .await
+        .context("the add task ended unexpectedly")?
+    }
+
+    /// The body of [`Self::start_add`] after the plan is consumed.
+    async fn claim_register_and_start(
+        self: Arc<Self>,
+        probe_id: String,
+        mut pending: PendingPlan,
+    ) -> anyhow::Result<RunAccepted> {
         let PendingConfirmation::Add { registration, .. } = &pending.confirmation else {
             return Err(anyhow::Error::new(ProvisioningRequestError::UnknownPlan));
         };
-        let host = self
-            .register(registration, Some(&pending.plan), None)
-            .await?;
-        let registered = registration_for_row(&self.host_row(host).await?)?;
+        // Held until the run has claimed its host: another confirmation for
+        // the same destination then finds the host busy instead of racing
+        // this one past the lookup.
+        let _confirming = Arc::clone(&self.add_confirmations).lock_owned().await;
+        let existing = match registration {
+            ProbeRegistration::Ssh { destination, .. } => self
+                .store
+                .list_hosts()
+                .await?
+                .into_iter()
+                // Matched on the destination alone: only a row reached over
+                // SSH has one, and naming a kind here would be the direct
+                // kind comparison `HostKind`'s named questions replace.
+                .find(|row| row.destination.as_deref() == Some(destination))
+                .map(|row| row.id),
+            ProbeRegistration::Local => None,
+        };
+        if let Some(existing) = existing
+            && !self.memory.lock().await.busy.insert(existing)
+        {
+            self.retain_plan(probe_id, pending).await;
+            return Err(anyhow::Error::new(ProvisioningRequestError::Busy(existing)));
+        }
+        let registered = async {
+            let host = self
+                .register(registration, Some(&pending.plan), None)
+                .await?;
+            anyhow::Ok((host, registration_for_row(&self.host_row(host).await?)?))
+        }
+        .await;
+        let (host, registered) = match registered {
+            Ok(registered) => registered,
+            Err(error) => {
+                if let Some(existing) = existing {
+                    self.memory.lock().await.busy.remove(&existing);
+                }
+                return Err(error);
+            }
+        };
         if let PendingConfirmation::Add { registration, .. } = &mut pending.confirmation {
             *registration = registered;
         }
-        self.start_run(host, pending).await
+        let claimed = existing == Some(host);
+        if let Some(existing) = existing.filter(|existing| *existing != host) {
+            // The row found by destination was not the one registration
+            // wrote (a concurrent change of the registry); release that
+            // claim and let the run claim its own host.
+            self.memory.lock().await.busy.remove(&existing);
+        }
+        self.start_run(host, pending, claimed).await
     }
 
     /// Inspect an existing row and retain one exact UPDATE plan without
@@ -782,7 +861,7 @@ impl ProvisioningService {
         ) {
             return Err(anyhow::Error::new(ProvisioningRequestError::UnknownPlan));
         }
-        self.start_run(host, pending).await
+        self.start_run(host, pending, false).await
     }
 
     pub(super) async fn consume_plan(&self, probe_id: &str) -> anyhow::Result<PendingPlan> {
@@ -806,15 +885,19 @@ impl ProvisioningService {
         memory.plans.insert(probe_id, pending);
     }
 
+    /// Start a run for `host`. `claimed` says the caller already put `host`
+    /// in the busy set (ADD claims an existing row before rewriting it; see
+    /// [`Self::start_add`]); otherwise the claim is made here.
     async fn start_run(
         self: &Arc<Self>,
         host: HostId,
         pending: PendingPlan,
+        claimed: bool,
     ) -> anyhow::Result<RunAccepted> {
         let run_id = uuid::Uuid::new_v4().to_string();
         {
             let mut memory = self.memory.lock().await;
-            if !memory.busy.insert(host) {
+            if !claimed && !memory.busy.insert(host) {
                 return Err(anyhow::Error::new(ProvisioningRequestError::Busy(host)));
             }
             memory.runs.insert(

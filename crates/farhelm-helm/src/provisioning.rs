@@ -1916,6 +1916,93 @@ mod tests {
         let _ = wait_finished(&service, accepted.host_id).await;
     }
 
+    /// Confirming an Add for a host whose run is in flight is refused before
+    /// the host's row is touched, and the refused plan stays confirmable.
+    ///
+    /// Why it matters: registering an Add rewrites an existing row's dial
+    /// paths and drops its connection. Doing that before the busy check let a
+    /// refused Add repoint a host in the middle of an Update at paths the
+    /// Update never installed, and threw away the plan, so the user could not
+    /// simply confirm again afterwards. Specified: while the first run is
+    /// blocked, a second Add (probed with a different state directory) is
+    /// refused as in flight, the host row (given paths that differ from the
+    /// plan's, so a rewrite would show) is unchanged, and once the first run
+    /// finishes the same confirmation is accepted.
+    #[farhelm_testtrace::test]
+    async fn a_refused_add_leaves_the_busy_host_row_and_its_plan_alone() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        backend
+            .block_first
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *backend.fail.lock().unwrap() = Some("daemon-reload".to_string());
+        *backend.registration.lock().unwrap() =
+            Some((harness.store.clone(), "user@busy".to_string()));
+        let service = service(&harness, backend.clone(), root.path());
+        let probe = |state_dir: Option<String>| ProbeRequest {
+            target: ProbeDestination::Ssh {
+                destination: "user@busy".to_string(),
+            },
+            remote_farhelm: None,
+            remote_state_dir: state_dir,
+        };
+        let ProbeResponse::Provisionable { probe_id, .. } =
+            service.probe(probe(None)).await.unwrap()
+        else {
+            panic!("expected plan")
+        };
+        let accepted = service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
+        backend.entered.notified().await;
+        let ProbeResponse::Provisionable { probe_id, plan, .. } = service
+            .probe(probe(Some("/elsewhere/state".to_string())))
+            .await
+            .unwrap()
+        else {
+            panic!("expected second plan")
+        };
+        // Give the busy host paths the pending plan would overwrite, so a
+        // registration before the busy check changes the row visibly.
+        harness
+            .store
+            .register_probed_ssh_host(
+                "user@busy",
+                Some("/custom/bin/farhelm"),
+                Some("/custom/state"),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_ne!(
+            plan.state_dir.to_str(),
+            Some("/custom/state"),
+            "test premise: the plan's paths differ from the row's"
+        );
+        let rows_before = harness.store.list_hosts().await.unwrap();
+        let error = service
+            .start_add(ProvisionRequest {
+                probe_id: probe_id.clone(),
+            })
+            .await
+            .expect_err("the in-flight host must refuse another run");
+        assert!(error.to_string().contains("in flight"), "{error:#}");
+        assert_eq!(
+            harness.store.list_hosts().await.unwrap(),
+            rows_before,
+            "a refused Add must not rewrite the busy host's row"
+        );
+        backend.release.notify_one();
+        let _ = wait_finished(&service, accepted.host_id).await;
+        let retried = service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .expect("the refused plan is still confirmable");
+        let _ = wait_finished(&service, retried.host_id).await;
+    }
+
     /// Failure names the exact action and retains control-escaped host stderr;
     /// completed actions are not rolled back.
     #[farhelm_testtrace::test]
