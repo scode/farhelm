@@ -5,7 +5,7 @@
 
 use crate::activity::ActivityStamp;
 use crate::hosts::{gui_host_name, host_incarnation, is_connected, phase_display_label};
-use crate::{Host, HostId, HostKind, Session, SessionStatus};
+use crate::{Host, HostId, Session, SessionStatus};
 
 /// The subset of `Session` `view::ListView`'s `on_delete` actually needs:
 /// the id the API call targets, plus `status` to decide whether this click
@@ -537,7 +537,7 @@ pub(super) fn host_options(hosts: &[Host]) -> Vec<HostOption> {
         .map(|host| HostOption {
             id: host.id,
             name: host.name.clone(),
-            local: host.kind == HostKind::Local,
+            local: host.kind.is_this_machine(),
             // Non-connected hosts are labelled with their phase, so choosing
             // one is an informed choice rather than a surprise refusal.
             phase: (!is_connected(&host.state))
@@ -554,6 +554,7 @@ pub(super) fn host_options(hosts: &[Host]) -> Vec<HostOption> {
 pub(super) mod tests {
     use super::super::row::row_specimen;
     use super::*;
+    use crate::HostKind;
 
     /// Why this matters: Delete used to decide from the agent's status
     /// alone, so one click on a stopped session silently killed the dev

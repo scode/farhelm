@@ -171,7 +171,7 @@ fn decide_request(
 /// `update_allowed`, which also offers Update on local rows the backend's
 /// `plan_update()` refuses.
 fn automatic_update(operation: ProvisioningOperation, binding: &HostBinding) -> bool {
-    operation == ProvisioningOperation::Update && binding.kind == HostKind::Ssh
+    operation == ProvisioningOperation::Update && binding.kind.updates_automatically()
 }
 
 /// Returns the row-menu request only after the provisioning lifecycle consumes it.
@@ -879,7 +879,7 @@ where
                         release_outstanding(&mut outstanding, epoch);
                     }
                     None => {
-                        if plan.binding.kind == HostKind::Local
+                        if plan.binding.kind.sets_up_locally()
                             && plan.operation == ProvisioningOperation::Add
                         {
                             local_auto_retry.set(true);
@@ -1658,7 +1658,7 @@ pub(crate) fn ProvisioningPanel(
         let base = plan_base.clone();
         let host = plan_host.clone();
         let requested_binding = HostBinding::from(&host);
-        let is_local_add = host.kind == HostKind::Local;
+        let is_local_add = host.kind.sets_up_locally();
         let reread = plan_progress.clone();
         spawn(async move {
             let prepared = prepare(&base, &host, ProvisioningOperation::Add).await;
@@ -1878,7 +1878,7 @@ pub(crate) fn ProvisioningPanel(
         }
         // Recheck everything the wait may have invalidated before touching
         // the token: the row, the host kind, and competing runs.
-        if live.binding != *current_binding.peek() || live.binding.kind != HostKind::Ssh {
+        if live.binding != *current_binding.peek() || !live.binding.kind.updates_automatically() {
             intent.set(None);
             return;
         }
@@ -2130,7 +2130,7 @@ pub(crate) fn ProvisioningPanel(
                     .then_some(view.operation)
                     .flatten()
             });
-            let update_allowed = menu_host_kind != HostKind::Unrecognized;
+            let update_allowed = menu_host_kind.offers_provisioning_actions();
             let plan_in_flight = is_planning || has_pending_plan || owned;
             let next = ProvisioningMenuState {
                 rerun: (update_allowed && !plan_in_flight)
@@ -2176,7 +2176,7 @@ pub(crate) fn ProvisioningPanel(
         pending.set(None);
         action_error.set(None);
         action_warning.set(None);
-        if plan.binding.kind == HostKind::Local && plan.operation == ProvisioningOperation::Add {
+        if plan.binding.kind.sets_up_locally() && plan.operation == ProvisioningOperation::Add {
             local_auto_retry.set(false);
         }
         submit_plan(

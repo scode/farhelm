@@ -230,7 +230,7 @@ fn available_remote_updates(
     hosts
         .iter()
         .filter(|host| {
-            host.kind == HostKind::Ssh
+            host.kind.updates_automatically()
                 && !busy_hosts.contains(&host.id)
                 && menus.get(&host.id).is_some_and(|state| state.update)
         })
@@ -991,7 +991,7 @@ pub(crate) fn HostsPanel(
         list.iter()
             .cloned()
             .map(|host| {
-                let local_setup = host.kind == HostKind::Local
+                let local_setup = host.kind.sets_up_locally()
                     && matches!(
                         &host.state,
                         HostPhase::Unreachable { cause, .. }
@@ -1930,7 +1930,7 @@ fn HostRow(
     // The local row is not management surface: SPEC.md has it always
     // present, never registered, never removed. An unrecognized kind is not
     // management surface either — see this component's docs.
-    let manageable = host.kind == HostKind::Ssh;
+    let manageable = host.kind.is_manageable();
     // The OUTER option on `Host.alias` is the compatibility signal (see its
     // own doc): a helm old enough to predate the field omits the JSON key
     // entirely rather than sending `null`, and offering the editor against
@@ -1951,7 +1951,7 @@ fn HostRow(
         .map(|reported| format!("adopt {}", display_identity(reported)));
     let remedy = state_remedy(&host.state);
     let detail = state_detail(&host.state);
-    let shown_name = gui_host_name(&host.name, host.kind == HostKind::Local);
+    let shown_name = gui_host_name(&host.name, host.kind.is_this_machine());
     let edit_start = (
         id,
         EditField::Destination,
