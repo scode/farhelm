@@ -3814,7 +3814,20 @@
   decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; Delete's reservation settlement (`settle_create_reservations_for_delete` in store.rs, used by
+  both delete transactions) replaces each permanent reservation's fingerprint with `sha256:<hex>` of it
+  (`store::tombstone_fingerprint`), plus `;identity=<hex>` of the client identity for a fresh-checkout fingerprint.
+  `resolve_reservation` accepts either the raw fingerprint or its digest, so a retry of the same request still gets the
+  deleted-session answer and a different request under the key is still refused; fresh-checkout reconciliation checks
+  the identity digest the same way and refuses an ordinary create's tombstone. Opening the store digests settled
+  (created or failed) permanent reservations whose session is already gone, except the identity-only refusal record, so
+  sessions deleted before the upgrade are covered too. Fingerprints of live sessions are untouched (recovery needs
+  them). SPEC_impl.md records the digest. Regression tests `a_deleted_sessions_retry_record_keeps_only_a_digest`,
+  `fresh_reconciliation_of_a_deleted_key_still_checks_identity`, and
+  `opening_the_store_digests_deleted_sessions_retry_records`;
+  `populated_v17_upgrade_preserves_sessions_and_literal_key_semantics` now expects the deleted key's digest. jj change
+  `qtvstxnqtlyl`, bookmark `pr/deleted-session-retry-digest`, draft PR
+  [#1190](https://github.com/scode/farhelm/pull/1190/changes).
 
 ## desktop-bootstrap-token-always-pushed.md
 

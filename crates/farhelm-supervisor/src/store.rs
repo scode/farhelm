@@ -2793,6 +2793,9 @@ impl SessionStore {
             // `db::open_private`.
             let conn = crate::db::open_private(&path, "session database")?;
             apply_schema(&conn, may_migrate)?;
+            if may_migrate {
+                digest_deleted_sessions_reservations(&conn)?;
+            }
             Ok(conn)
         })
         .await
@@ -5591,7 +5594,153 @@ fn settle_create_reservations_for_delete(
         rusqlite::params![id],
     )
     .context("settling the deleted interactive session's reservations")?;
+    // The kept tombstone must not keep the request itself: a fingerprint
+    // holds the raw command line and resume template, and Delete removes
+    // what is stored about the session (SPEC.md "Lifecycle operations").
+    // The digest still identifies a retry of the same request (see
+    // `tombstone_fingerprint`).
+    let kept: Vec<(String, String)> = {
+        let mut stmt = tx
+            .prepare(
+                "SELECT intent_key, fingerprint FROM create_reservations \
+                 WHERE session_id = ?1 AND dedup_scope = 'permanent'",
+            )
+            .context("listing the deleted session's retry records")?;
+        stmt.query_map(rusqlite::params![id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .context("reading the deleted session's retry records")?
+            .collect::<std::result::Result<_, _>>()
+            .context("reading the deleted session's retry records")?
+    };
+    for (intent_key, fingerprint) in kept {
+        if is_tombstone_fingerprint(&fingerprint) {
+            continue;
+        }
+        tx.execute(
+            "UPDATE create_reservations SET fingerprint = ?2 WHERE intent_key = ?1",
+            rusqlite::params![intent_key, tombstone_fingerprint(&fingerprint)],
+        )
+        .context("reducing a deleted session's retry record to a digest")?;
+    }
     Ok(())
+}
+
+/// Reduce the kept retry records of sessions deleted before Delete did so
+/// itself (see `settle_create_reservations_for_delete`), so upgrading does
+/// not leave their command lines behind either.
+///
+/// Only settled (`created` or `failed`) permanent reservations whose session
+/// row is gone qualify: a Delete leaves either (a failed fresh checkout can
+/// keep a visible Error session until the user deletes it), and a settled
+/// outcome is answered from the recorded result, never from the request. A
+/// pending one may still need its request to recover an interrupted create.
+/// The identity-only refusal record (`github_checkout_refused_v1`) is left as
+/// it is: it holds no command line, and its reconciliation reads the identity
+/// in it. Runs on every writable open and is a no-op once nothing qualifies.
+fn digest_deleted_sessions_reservations(conn: &Connection) -> anyhow::Result<()> {
+    let stale: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT intent_key, fingerprint FROM create_reservations AS r \
+                 WHERE r.dedup_scope = 'permanent' AND r.state IN ('created', 'failed') \
+                 AND NOT EXISTS (SELECT 1 FROM sessions AS s WHERE s.id = r.session_id)",
+            )
+            .context("listing deleted sessions' retry records")?;
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .context("reading deleted sessions' retry records")?
+            .collect::<std::result::Result<_, _>>()
+            .context("reading deleted sessions' retry records")?
+    };
+    for (intent_key, fingerprint) in stale {
+        if is_tombstone_fingerprint(&fingerprint) || is_identity_only_refusal(&fingerprint) {
+            continue;
+        }
+        conn.execute(
+            "UPDATE create_reservations SET fingerprint = ?2 WHERE intent_key = ?1",
+            rusqlite::params![intent_key, tombstone_fingerprint(&fingerprint)],
+        )
+        .context("reducing a deleted session's retry record to a digest")?;
+    }
+    Ok(())
+}
+
+/// Prefix of a fingerprint Delete has reduced to a digest. Live fingerprints
+/// are JSON (see `service::create_fingerprint`), so they never start with it.
+const TOMBSTONE_PREFIX: &str = "sha256:";
+
+/// The form a create fingerprint takes once its session is deleted: a
+/// SHA-256 digest of the original, which still tells a retry of the same
+/// request (answered with the deleted session's "gone" error) from a key
+/// reused for a different one, without keeping the command line the
+/// original holds.
+///
+/// A fresh-checkout fingerprint also keeps a digest of its client identity
+/// (`;identity=<hex>`): fresh-checkout reconciliation is asked with the
+/// identity alone, not the whole request, and must still refuse a key reused
+/// by a different request (see `service`'s `reconcile_github_checkout`).
+pub(crate) fn tombstone_fingerprint(fingerprint: &str) -> String {
+    let mut tombstone = format!("{TOMBSTONE_PREFIX}{}", sha256_hex(fingerprint));
+    if let Some(identity) = fresh_checkout_identity(fingerprint) {
+        tombstone.push_str(IDENTITY_MARKER);
+        tombstone.push_str(&identity_digest(&identity));
+    }
+    tombstone
+}
+
+/// Separates a fresh-checkout tombstone's identity digest from the rest.
+const IDENTITY_MARKER: &str = ";identity=";
+
+/// The digest a fresh-checkout tombstone keeps of a client identity.
+pub(crate) fn identity_digest(identity: &str) -> String {
+    sha256_hex(identity)
+}
+
+/// The identity digest a tombstone keeps, or `None` for one that did not
+/// come from a fresh-checkout request.
+pub(crate) fn tombstone_identity_digest(tombstone: &str) -> Option<&str> {
+    tombstone
+        .strip_prefix(TOMBSTONE_PREFIX)?
+        .split_once(IDENTITY_MARKER)
+        .map(|(_, identity)| identity)
+}
+
+/// The client identity of a live fresh-checkout fingerprint
+/// (`github_checkout_v3`), read from its JSON without the service's types.
+fn fresh_checkout_identity(fingerprint: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(fingerprint).ok()?;
+    if value.get("kind")?.as_str()? != "github_checkout_v3" {
+        return None;
+    }
+    Some(
+        value
+            .get("checkout")?
+            .get("client_identity")?
+            .as_str()?
+            .to_owned(),
+    )
+}
+
+/// Whether `fingerprint` is the identity-only refusal record, which keeps no
+/// request contents (see [`digest_deleted_sessions_reservations`]).
+fn is_identity_only_refusal(fingerprint: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(fingerprint)
+        .ok()
+        .and_then(|value| value.get("kind")?.as_str().map(str::to_owned))
+        .is_some_and(|kind| kind == "github_checkout_refused_v1")
+}
+
+/// Lowercase hex SHA-256 of `text`.
+fn sha256_hex(text: &str) -> String {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Whether `fingerprint` is a deleted session's digest rather than a live
+/// request (see [`tombstone_fingerprint`]).
+pub(crate) fn is_tombstone_fingerprint(fingerprint: &str) -> bool {
+    fingerprint.starts_with(TOMBSTONE_PREFIX)
 }
 
 #[cfg(test)]
@@ -8636,6 +8785,84 @@ mod tests {
             .await
             .expect_err("an unknown kind must fail the decode");
         assert!(format!("{error:#}").contains("unrecognized agent kind"));
+    }
+
+    /// Opening the store reduces retry records left raw by deletes from
+    /// before Delete did it itself, and nothing else.
+    ///
+    /// Why it matters: without it an upgrade would keep the command lines of
+    /// every session deleted earlier, which Delete is meant to remove.
+    /// Specified: after reopening, settled (created or failed) permanent
+    /// reservations whose session row is gone hold only a digest, a failed
+    /// one keeps its recorded outcome, one whose session still exists keeps
+    /// its fingerprint, and the identity-only refusal record is untouched.
+    #[farhelm_testtrace::test]
+    async fn opening_the_store_digests_deleted_sessions_retry_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("supervisor.db");
+        let store = SessionStore::open(&path, true).await.unwrap();
+        insert_reserved(&store, "kept", "live-key", "{\"invocation\":\"live\"}").await;
+        insert_reserved(&store, "gone", "gone-key", "{\"invocation\":\"SECRET\"}").await;
+        insert_reserved(
+            &store,
+            "failed",
+            "failed-key",
+            "{\"invocation\":\"FAILED-SECRET\"}",
+        )
+        .await;
+        let refused = "{\"kind\":\"github_checkout_refused_v1\",\"client_identity\":\"who\"}";
+        insert_reserved(&store, "refused", "refused-key", refused).await;
+        {
+            let conn = store.conn.lock();
+            conn.execute("UPDATE create_reservations SET state = 'created'", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE create_reservations SET state = 'failed', error_kind = 'internal', \
+                 error_detail = 'kept failure' WHERE intent_key IN ('failed-key', 'refused-key')",
+                [],
+            )
+            .unwrap();
+            conn.execute("DELETE FROM sessions WHERE id <> 'kept'", [])
+                .unwrap();
+        }
+        drop(store);
+
+        let store = SessionStore::open(&path, true).await.unwrap();
+        for (key, secret) in [("gone-key", "SECRET"), ("failed-key", "FAILED-SECRET")] {
+            let reduced = store.reservation(key).await.unwrap().unwrap();
+            assert!(
+                is_tombstone_fingerprint(&reduced.fingerprint),
+                "{key}: {reduced:?}"
+            );
+            assert!(!reduced.fingerprint.contains(secret), "{key}: {reduced:?}");
+        }
+        assert!(matches!(
+            store
+                .reservation("failed-key")
+                .await
+                .unwrap()
+                .unwrap()
+                .outcome,
+            ReservationOutcome::Failed { .. }
+        ));
+        assert_eq!(
+            store
+                .reservation("live-key")
+                .await
+                .unwrap()
+                .unwrap()
+                .fingerprint,
+            "{\"invocation\":\"live\"}"
+        );
+        assert_eq!(
+            store
+                .reservation("refused-key")
+                .await
+                .unwrap()
+                .unwrap()
+                .fingerprint,
+            refused
+        );
     }
 
     /// Seed one reserved launch: a launching session row plus the pending

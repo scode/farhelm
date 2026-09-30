@@ -6678,6 +6678,27 @@ impl Supervisor {
             )
             .into());
         }
+        // Its session was deleted, so only a digest of the request is left
+        // and there is nothing to recover. The identity is still checked
+        // first, as below for a live fingerprint: another request under the
+        // same key must be refused, not told about this one's session.
+        if crate::store::is_tombstone_fingerprint(&reservation.fingerprint) {
+            return match crate::store::tombstone_identity_digest(&reservation.fingerprint) {
+                Some(recorded) if recorded == crate::store::identity_digest(client_identity) => {
+                    self.answer_from(&reservation).await.map(Some)
+                }
+                Some(_) => Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "this intent key belongs to a different create request",
+                )
+                .into()),
+                None => Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "this intent key has no compatible fresh-checkout recovery snapshot",
+                )
+                .into()),
+            };
+        }
         let fingerprint: FreshCreateFingerprint = serde_json::from_str(&reservation.fingerprint)
             .map_err(|_| {
                 RequestError::new(
@@ -7773,7 +7794,12 @@ impl Supervisor {
         reservation: Reservation,
         claim: &IntentClaim,
     ) -> Resolution {
-        if reservation.fingerprint != claim.fingerprint {
+        // A deleted session's reservation keeps only a digest of its
+        // fingerprint (`store::tombstone_fingerprint`); a retry of the same
+        // request still matches it and gets the deleted session's answer.
+        let same_request = reservation.fingerprint == claim.fingerprint
+            || reservation.fingerprint == crate::store::tombstone_fingerprint(&claim.fingerprint);
+        if !same_request {
             return Resolution::Answer(Box::new(Err(RequestError::new(
                 ErrorKind::Conflict,
                 format!(
@@ -21684,6 +21710,95 @@ exit 0
         );
     }
 
+    /// Deleting a session reduces its kept retry record to a digest, and
+    /// that digest still answers a retry of the same request and refuses a
+    /// different one.
+    ///
+    /// Why it matters: an interactive create's reservation outlives its
+    /// session so the key stays spent, but its fingerprint held the raw
+    /// command line (where users sometimes put credentials) forever after
+    /// the session was deleted, while Delete is meant to remove what is
+    /// stored about the session. Specified: after a keyed create whose
+    /// command carries a marker string is deleted, the reservation's
+    /// fingerprint no longer contains the marker; replaying the same
+    /// request reports the session was deleted; the same key with a
+    /// different command is refused as a different request.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_deleted_sessions_retry_record_keeps_only_a_digest() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let invocation = "sleep 300 # SECRET-TOKEN-MARKER";
+        let claim = |invocation: &str| IntentClaim {
+            intent_key: "deleted-key".into(),
+            fingerprint: raw_fingerprint("/tmp", invocation, None, None, None),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let created = sup
+            .create_session_without_overrides(
+                "/tmp",
+                invocation,
+                None,
+                80,
+                24,
+                Some(claim(invocation)),
+            )
+            .await
+            .expect("keyed create");
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("session entry");
+        sup.teardown_session(&entry, &created.id, test_admission(&sup).await)
+            .await
+            .unwrap_or_else(|_| panic!("delete the keyed session"));
+
+        let kept = sup
+            .store
+            .reservation("deleted-key")
+            .await
+            .unwrap()
+            .expect("the key stays spent after delete")
+            .fingerprint;
+        assert!(!kept.contains("SECRET-TOKEN-MARKER"), "{kept}");
+        assert!(crate::store::is_tombstone_fingerprint(&kept), "{kept}");
+
+        let replay = sup
+            .create_session_without_overrides(
+                "/tmp",
+                invocation,
+                None,
+                80,
+                24,
+                Some(claim(invocation)),
+            )
+            .await
+            .expect_err("a replay of a deleted session's create must not relaunch");
+        assert!(
+            format!("{replay:#}").contains("since been deleted"),
+            "{replay:#}"
+        );
+        let reused = sup
+            .create_session_without_overrides(
+                "/tmp",
+                "sleep 1",
+                None,
+                80,
+                24,
+                Some(claim("sleep 1")),
+            )
+            .await
+            .expect_err("a different request under the spent key is refused");
+        assert!(
+            format!("{reused:#}").contains("already used for a different create request"),
+            "{reused:#}"
+        );
+    }
+
     /// [`create_fingerprint`] of a RAW-mode request, spelled as the fields
     /// a caller actually sends.
     ///
@@ -21876,9 +21991,12 @@ exit 0
     const V9_STORED_FINGERPRINT: &str = r#"["/","agent",null,null,null]"#;
 
     /// B2/R1.4: upgrading a populated historical database must preserve all
-    /// old session columns and literal request fingerprints. Successful keys
-    /// still replay their original session, deleted-session keys stay spent,
-    /// and migration invents no checkout origin or membership for either.
+    /// old session columns and the literal request fingerprints of live
+    /// sessions. A deleted session's fingerprint is reduced to its digest on
+    /// open (see `store::tombstone_fingerprint`), yet its key still behaves
+    /// as before: successful keys still replay their original session,
+    /// deleted-session keys stay spent, and migration invents no checkout
+    /// origin or membership for either.
     /// The OMP row is literal historical data: a stale-base release once
     /// migrated this schema successfully, then failed startup decoding `omp`.
     /// Starting a supervisor here guards that boundary beyond schema opening
@@ -22005,12 +22123,25 @@ exit 0
             );
         }
         assert!(store.working_copy_rows().await.unwrap().is_empty());
-        for key in ["old-success", "old-spent"] {
-            assert_eq!(
-                store.reservation(key).await.unwrap().unwrap().fingerprint,
-                V9_STORED_FINGERPRINT
-            );
-        }
+        assert_eq!(
+            store
+                .reservation("old-success")
+                .await
+                .unwrap()
+                .unwrap()
+                .fingerprint,
+            V9_STORED_FINGERPRINT
+        );
+        assert_eq!(
+            store
+                .reservation("old-spent")
+                .await
+                .unwrap()
+                .unwrap()
+                .fingerprint,
+            crate::store::tombstone_fingerprint(V9_STORED_FINGERPRINT),
+            "a deleted session's request is kept only as a digest"
+        );
         drop(store);
 
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -26799,6 +26930,116 @@ exit 0
         }
         assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
         assert!(sup.store.session("never-launched").await.unwrap().is_none());
+    }
+
+    /// A deleted fresh checkout's key still checks the caller's identity on
+    /// reconciliation, and an ordinary create's deleted key is not a fresh
+    /// checkout's.
+    ///
+    /// Why it matters: Delete reduces the kept retry record to a digest
+    /// (`store::tombstone_fingerprint`), and reconciliation is asked with the
+    /// client identity alone, so without an identity digest in the tombstone
+    /// it would tell a different request about this one's session.
+    /// Specified: for a deleted fresh checkout's tombstone, the same identity
+    /// gets the deleted-session answer, another identity gets the key-reuse
+    /// conflict, and an ordinary create's tombstone is refused as having no
+    /// fresh-checkout snapshot.
+    #[farhelm_testtrace::test]
+    async fn fresh_reconciliation_of_a_deleted_key_still_checks_identity() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let checkout = checkout_fixture(root.path());
+        let plain = create_fingerprint(
+            None,
+            None,
+            "/work",
+            &CreateMode::Raw {
+                invocation: "agent".to_string(),
+                agent_kind: None,
+                resume_template: None,
+                source_profile: None,
+                launch: None,
+            },
+            None,
+        );
+        for (key, fingerprint) in [
+            ("deleted-fresh", checkout_fingerprint(&checkout)),
+            ("deleted-plain", plain),
+        ] {
+            sup.store
+                .record_failed_intent(
+                    IntentClaim {
+                        intent_key: key.into(),
+                        fingerprint: fingerprint.clone(),
+                        dedup_scope: DedupScope::Permanent,
+                    },
+                    &format!("{key}-session"),
+                    &format!("{key}-tmux"),
+                    ErrorKind::InvalidRequest,
+                    "placeholder",
+                )
+                .await
+                .unwrap();
+            // The state a Delete leaves: settled as created, session gone,
+            // fingerprint reduced to its tombstone.
+            let conn = sup.store.conn.lock();
+            conn.execute(
+                "UPDATE create_reservations SET state = 'created', error_kind = NULL, \
+                 error_detail = NULL, fingerprint = ?2 WHERE intent_key = ?1",
+                rusqlite::params![key, crate::store::tombstone_fingerprint(&fingerprint)],
+            )
+            .unwrap();
+        }
+        let refusal = |error: anyhow::Error| {
+            let error = error
+                .downcast_ref::<RequestError>()
+                .expect("a request error");
+            (error.kind, error.to_string())
+        };
+        let (_, same) = refusal(
+            sup.reconcile_github_checkout(
+                "deleted-fresh".into(),
+                &checkout.client_identity,
+                80,
+                24,
+                false,
+            )
+            .await
+            .expect_err("a deleted session is not recreated"),
+        );
+        assert!(same.contains("since been deleted"), "{same}");
+        let (kind, other) = refusal(
+            sup.reconcile_github_checkout(
+                "deleted-fresh".into(),
+                "different-request",
+                80,
+                24,
+                false,
+            )
+            .await
+            .expect_err("another identity is refused"),
+        );
+        assert_eq!(kind, ErrorKind::Conflict);
+        assert!(other.contains("different create request"), "{other}");
+        let (kind, plain) = refusal(
+            sup.reconcile_github_checkout(
+                "deleted-plain".into(),
+                &checkout.client_identity,
+                80,
+                24,
+                false,
+            )
+            .await
+            .expect_err("an ordinary create's key is not a fresh checkout's"),
+        );
+        assert_eq!(kind, ErrorKind::Conflict);
+        assert!(
+            plain.contains("no compatible fresh-checkout recovery snapshot"),
+            "{plain}"
+        );
     }
 
     /// A refusal tombstone spends the original request without creating a

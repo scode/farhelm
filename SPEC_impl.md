@@ -1306,8 +1306,12 @@ reports a failed listing rather than a silently shortened one.
 Protocol 24 carries validated checkout destinations separately from existing cwd requests. Only full-authority callers
 can preview, discover or create them; restricted session clients cannot supply helm-owned configuration. Shared proto
 validation constructs the sole HTTPS GitHub URL and validates naming; the supervisor repeats validation at admission.
-Existing request fingerprint encodings remain frozen. Fresh fingerprints include the original client identity and
-resolved configuration, while reconciliation looks up the original request before consulting mutable settings.
+Existing request fingerprint encodings remain frozen. When Delete removes a session, its permanent reservations keep
+only a `sha256:` digest of their fingerprint (and, for a fresh checkout, a digest of its client identity, which
+reconciliation compares): enough to answer a retry of the same request and refuse a different one under the spent key,
+without keeping the command line the fingerprint holds. Opening the store applies the same reduction to reservations of
+sessions deleted before it existed. Fresh fingerprints include the original client identity and resolved configuration,
+while reconciliation looks up the original request before consulting mutable settings.
 
 Reconciliation defaults to lookup: an unknown key has no effect. When the helm must refuse an unknown request, it asks
 the supervisor to settle a permanent identity-bound refusal under intent and directory admission. The supervisor reads
