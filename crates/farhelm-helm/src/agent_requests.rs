@@ -1021,6 +1021,29 @@ fn on_host<T>(result: anyhow::Result<T>, host_name: &str) -> anyhow::Result<T> {
     result.map_err(|error| error.context(format!("on host {host_name:?}")))
 }
 
+/// The intent key an agent's create or clone is stored under on the target:
+/// the agent's own key, scoped to the session that asked.
+///
+/// Keys are chosen by agents, and nothing else in a request records who
+/// asked, so an unscoped key let one session replay another's result: a
+/// child re-running its parent's keyed `farhelm agent create` got the
+/// parent's create back, which is the child itself, printed as "the new
+/// session" (SPEC.md "Agent-spawned sessions": keys are scoped to the asking
+/// session). Hashing the agent's key gives a fixed length, so the scoped key
+/// stays inside the target's intent-key limit whatever the agent sent. Keys
+/// reserved before this scoping no longer match, which only means such a
+/// retry creates afresh.
+fn asker_scoped_intent_key(asking_session: &str, key: Option<String>) -> Option<String> {
+    use sha2::Digest as _;
+    key.map(|key| {
+        let digest: String = sha2::Sha256::digest(key.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        format!("agent-{asking_session}-{digest}")
+    })
+}
+
 /// `create`: one session on an explicitly named host, from exactly one
 /// profile name, profile ID, or raw invocation.
 ///
@@ -1129,7 +1152,7 @@ async fn create_for_agent(
                 title: request.title,
                 cols: crate::sessions::default_cols(),
                 rows: crate::sessions::default_rows(),
-                intent_key: request.intent_key,
+                intent_key: asker_scoped_intent_key(asking_session, request.intent_key),
                 // Agent creates never carry a fresh-checkout payload: the
                 // composer's gh: flow is a user-dialog concern.
                 github_checkout: None,
@@ -1294,7 +1317,7 @@ async fn clone_for_agent(
                 title: Some(request.title.unwrap_or(source.title)),
                 cols: crate::sessions::default_cols(),
                 rows: crate::sessions::default_rows(),
-                intent_key: request.intent_key,
+                intent_key: asker_scoped_intent_key(asking_session, request.intent_key),
                 agent_kind: None,
                 resume_template: None,
                 github_checkout: None,
@@ -1674,6 +1697,35 @@ mod tests {
     use super::*;
     use crate::hosts::{HostStateView, HostView, RefreshView};
     use farhelm_proto::{ProfileExistence, RestartOffer, SessionInfo, SourceProfile};
+
+    /// An agent's intent key reaches the target scoped to the session that
+    /// asked, so two sessions using the same key never share a reservation.
+    ///
+    /// Why it matters: nothing else in a create or clone records who asked,
+    /// so a child re-running its parent's keyed create used to get the
+    /// parent's result back, which is the child itself, reported as the new
+    /// session (SPEC.md "Agent-spawned sessions": keys are scoped to the
+    /// asking session). Specified: the same key from two askers yields two
+    /// different stored keys, the same asker and key always the same one,
+    /// no key stays no key, and a key at the target's 512-byte limit still
+    /// yields a scoped key within it.
+    #[farhelm_testtrace::test]
+    fn agent_intent_keys_are_scoped_to_the_asking_session() {
+        let parent = asker_scoped_intent_key("parent-session", Some("k".into()));
+        let child = asker_scoped_intent_key("child-session", Some("k".into()));
+        assert_ne!(parent, child);
+        assert_eq!(
+            parent,
+            asker_scoped_intent_key("parent-session", Some("k".into()))
+        );
+        assert_eq!(asker_scoped_intent_key("parent-session", None), None);
+        let long = asker_scoped_intent_key(
+            "7c9d1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+            Some("x".repeat(512)),
+        )
+        .unwrap();
+        assert!(long.len() <= 512, "{}", long.len());
+    }
 
     /// The helm's own clone validation refuses an explicitly empty cwd.
     ///
@@ -4131,7 +4183,11 @@ mod tests {
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].invocation.as_deref(), Some("sh -c 'echo hi'"));
         assert_eq!(seen[0].source_profile, None);
-        assert_eq!(seen[0].intent_key.as_deref(), Some("clone-key"));
+        assert_eq!(
+            seen[0].intent_key,
+            asker_scoped_intent_key("asker", Some("clone-key".to_string())),
+            "the target stores the key scoped to the asking session"
+        );
     }
 
     /// A clone refuses a source row whose owner changes after the live read.
@@ -4396,7 +4452,11 @@ mod tests {
                 name: "codex-yolo".to_string(),
             })
         );
-        assert_eq!(seen[0].intent_key.as_deref(), Some("resolved-key"));
+        assert_eq!(
+            seen[0].intent_key,
+            asker_scoped_intent_key("asker", Some("resolved-key".to_string())),
+            "the target stores the key scoped to the asking session"
+        );
     }
 
     /// Profile IDs select one exact catalog row and are never retried as a
@@ -5041,7 +5101,11 @@ mod tests {
         assert_eq!(seen[0].invocation.as_deref(), Some("sh -c 'sleep 1'"));
         assert_eq!(seen[0].source_profile, None);
         assert_eq!(seen[0].profile_name, None);
-        assert_eq!(seen[0].intent_key.as_deref(), Some("raw-key"));
+        assert_eq!(
+            seen[0].intent_key,
+            asker_scoped_intent_key("asker", Some("raw-key".to_string())),
+            "the target stores the key scoped to the asking session"
+        );
     }
 
     /// A create without a selector is refused before target dispatch.
