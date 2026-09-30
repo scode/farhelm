@@ -212,15 +212,17 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    `releasing/changelog.d/` holds only `README.md` at that commit. Then bump the version to `X.Y.Z` in the root
    `Cargo.toml`'s `[workspace.package]` and `packaging/farhelm-desktop/dist.toml`, refresh `Cargo.lock`
    (`cargo metadata` suffices), and commit exactly those three files as `chore: release X.Y.Z`.
-6. Before tagging: the version-parity tests (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`
-   through the recorder), `dist plan --tag vX.Y.Z` naming BOTH packages under the version (a mismatch makes the desktop
-   archive silently vanish), and `python3 releasing/check-changelog.py announce --tag vX.Y.Z`, which must print that
-   dist's announcement matches.
+6. Before tagging: `cargo clean` (see "Build outputs" below), then the version-parity tests
+   (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'` through the recorder),
+   `dist plan --tag vX.Y.Z` naming BOTH packages under the version (a mismatch makes the desktop archive silently
+   vanish), and `python3 releasing/check-changelog.py announce --tag vX.Y.Z`, which must print that dist's announcement
+   matches.
 7. Push the tag `vX.Y.Z` at the bump commit and watch the workflow to completion. Then verify the release: every asset
    present including `SHA256SUMS` and `SHA256SUMS.minisig`, the release NOT marked prerelease, `releases/latest`
    pointing at it, and the release page showing the changelog section above the download tables with the heading text as
    its name.
 8. Hand the maintainer the ordinary install command and remind them to quit the desktop app before updating.
+9. `cargo clean` again (see "Build outputs" below).
 
 A failed tag build publishes nothing; fix on main and cut again with the next patch version, since a tag name is never
 reused. That means another changelog PR before the new branch: retitle the `## vX.Y.Z` section to the new version (a
@@ -271,11 +273,11 @@ With both settled, the process is:
   `[workspace.package]` and `packaging/farhelm-desktop/dist.toml`, and refresh `Cargo.lock` (running `cargo metadata`
   suffices). The release commit is exactly those three files with the message `chore: release X.Y.Z-rc.N` — the shape
   every release commit here has (#304, #311, #314).
-- Before tagging, sanity-check the announce: the version-parity tests
-  (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`, through the recorder) and `dist plan`
-  naming the rc version with BOTH packages under it — a version mismatch makes the desktop archive silently vanish from
-  the release. Also `python3 releasing/check-changelog.py format`: the build gate lints every fragment on every tag, so
-  a malformed fragment anywhere in the stack fails the rc build and costs an `rc.N`.
+- Before tagging, run `cargo clean` (see "Build outputs" below), then sanity-check the announce: the version-parity
+  tests (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`, through the recorder) and
+  `dist plan` naming the rc version with BOTH packages under it — a version mismatch makes the desktop archive silently
+  vanish from the release. Also `python3 releasing/check-changelog.py format`: the build gate lints every fragment on
+  every tag, so a malformed fragment anywhere in the stack fails the rc build and costs an `rc.N`.
 - Give the bump its own PR like any other commit (stacked on the stack tip, or based on main), but do not merge anything
   for the release's sake: push the tag `vX.Y.Z-rc.N` at the bump commit and the workflow runs from the tag. Its build
   gate runs the retained Rust targets, pinned shutdown regression, JS, CentOS, and native desktop checks while excluding
@@ -296,6 +298,7 @@ With both settled, the process is:
   ```
 
   Remind the maintainer to quit the desktop app before updating and relaunch after.
+- Then `cargo clean` again (see "Build outputs" below).
 - A failed tag build publishes nothing; fix on the stack and cut `rc.N+1`. The stale tag stays (tags are never deleted;
   the unsigned-release recovery below is the one exception's procedure, and even it keeps the tag).
 - Close the version-bump PR without merging when its release attempt is permanently abandoned, including when a fix
@@ -317,6 +320,23 @@ and ask when the request does not state them; the RC version default above does 
 and `-rc.N` counters are independent, so `0.3.0-dev.2` and `0.3.0-rc.1` can both exist. The name is the whole
 difference: it tells whoever reads the tag list later that the build was a trial of work in progress, not a claim that
 this is what will ship as `X.Y.Z`.
+
+# Build outputs
+
+Cargo files every workspace crate's build outputs under a hash that includes the package version, and every release
+attempt changes the version. So each attempt's builds land beside the previous attempt's instead of replacing them, and
+nothing ever removes the old ones. A checkout used for releases grew past 100 GB that way in about two weeks: dozens of
+copies of the version-parity test binary with their incremental caches, plus the reproductions of gate failures run
+between attempts. A release attempt therefore starts and ends with `cargo clean` in the checkout it is cut from:
+
+- Right before the version-parity tests, the attempt's first build. This also clears what an earlier attempt left
+  behind, including one whose session ended before its own cleanup. It costs little: the version bump rebuilds every
+  workspace crate regardless, so only the dependencies are rebuilt that would otherwise have been reused.
+- When the attempt is over: the release is published and verified, or the attempt is abandoned. Not while a gate failure
+  is still being reproduced in that checkout, since the reproduction wants its warm build.
+
+`cargo clean` removes the checkout's whole `target/`, including the dx bundle and any earlier development build there.
+The pinned tmux and nextest (`.ci-tmux`, `.ci-nextest`) live outside it and stay.
 
 # The release workflow
 
