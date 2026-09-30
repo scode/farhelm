@@ -6391,7 +6391,10 @@ mod tests {
             );
             original_tmux.insert(arch, tmux_bytes);
         }
-        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let payloads = DirectoryPayloads::new(
+            dir.path().to_path_buf(),
+            dir.path().join(DIRECTORY_PAYLOAD_CACHE),
+        );
         for arch in [PayloadArch::X86_64, PayloadArch::Aarch64] {
             let archive = farhelm_archive_for(arch);
             let extracted_dir = dir.path().join(DIRECTORY_PAYLOAD_CACHE);
@@ -6487,7 +6490,10 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn directory_payloads_missing_file_names_the_expected_path() {
         let dir = tempfile::tempdir().unwrap();
-        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let payloads = DirectoryPayloads::new(
+            dir.path().to_path_buf(),
+            dir.path().join(DIRECTORY_PAYLOAD_CACHE),
+        );
         let error = payloads
             .path(PayloadKind::Farhelm, PayloadArch::X86_64)
             .await
@@ -6511,7 +6517,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let archive = farhelm_archive_for(PayloadArch::X86_64);
         std::fs::create_dir_all(dir.path().join(archive_name(archive))).unwrap();
-        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let payloads = DirectoryPayloads::new(
+            dir.path().to_path_buf(),
+            dir.path().join(DIRECTORY_PAYLOAD_CACHE),
+        );
         let error = payloads
             .path(PayloadKind::Farhelm, PayloadArch::X86_64)
             .await
@@ -6541,7 +6550,10 @@ mod tests {
         let archive = farhelm_archive_for(PayloadArch::X86_64);
         let looped_path = dir.path().join(archive_name(archive));
         std::os::unix::fs::symlink(&looped_path, &looped_path).unwrap();
-        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let payloads = DirectoryPayloads::new(
+            dir.path().to_path_buf(),
+            dir.path().join(DIRECTORY_PAYLOAD_CACHE),
+        );
         let error = payloads
             .path(PayloadKind::Farhelm, PayloadArch::X86_64)
             .await
@@ -6579,7 +6591,10 @@ mod tests {
             "not-farhelm",
             b"nope",
         );
-        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let payloads = DirectoryPayloads::new(
+            dir.path().to_path_buf(),
+            dir.path().join(DIRECTORY_PAYLOAD_CACHE),
+        );
         let error = payloads
             .path(PayloadKind::Farhelm, PayloadArch::X86_64)
             .await
@@ -6614,7 +6629,10 @@ mod tests {
         append_tar_member(&mut builder, "a/farhelm", b"one");
         append_tar_member(&mut builder, "b/farhelm", b"two");
         builder.into_inner().unwrap().finish().unwrap();
-        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let payloads = DirectoryPayloads::new(
+            dir.path().to_path_buf(),
+            dir.path().join(DIRECTORY_PAYLOAD_CACHE),
+        );
         let error = payloads
             .path(PayloadKind::Farhelm, PayloadArch::X86_64)
             .await
@@ -6656,7 +6674,10 @@ mod tests {
                 archive.member,
                 entry_type,
             );
-            let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+            let payloads = DirectoryPayloads::new(
+                dir.path().to_path_buf(),
+                dir.path().join(DIRECTORY_PAYLOAD_CACHE),
+            );
             let error = payloads
                 .path(PayloadKind::Farhelm, PayloadArch::X86_64)
                 .await
@@ -6701,7 +6722,10 @@ mod tests {
         std::fs::write(&sentinel, b"sentinel").unwrap();
         std::fs::set_permissions(&sentinel, std::fs::Permissions::from_mode(0o600)).unwrap();
 
-        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let payloads = DirectoryPayloads::new(
+            dir.path().to_path_buf(),
+            dir.path().join(DIRECTORY_PAYLOAD_CACHE),
+        );
         payloads
             .path(PayloadKind::Farhelm, PayloadArch::X86_64)
             .await
@@ -6749,7 +6773,10 @@ mod tests {
         )
         .unwrap();
 
-        let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
+        let payloads = DirectoryPayloads::new(
+            dir.path().to_path_buf(),
+            dir.path().join(DIRECTORY_PAYLOAD_CACHE),
+        );
         let farhelm_path_one = payloads
             .path(PayloadKind::Farhelm, PayloadArch::X86_64)
             .await
@@ -6958,7 +6985,10 @@ mod tests {
                 archive.member,
                 b"bytes",
             );
-            let payloads = DirectoryPayloads::new(payload_dir.clone());
+            let payloads = DirectoryPayloads::new(
+                payload_dir.clone(),
+                payload_dir.join(DIRECTORY_PAYLOAD_CACHE),
+            );
             // The child still needs its own capture: runtime workers and
             // teardown belong to this re-executed libtest invocation.
             let context = farhelm_testtrace::current_thread_context().expect("test trace context");
@@ -7030,6 +7060,66 @@ mod tests {
              --payload-dir <dir> holding the release files, or install a release build (see \
              README, \"Install\")"
         );
+    }
+
+    /// A `--payload-dir` is only read: payloads come from it even when it is
+    /// read-only, and their materialized copies land in the helm's own state
+    /// directory.
+    ///
+    /// Why it matters: the directory is operator input, staged for air-gapped
+    /// installs and mirrors, and may sit on read-only media, in a root-owned
+    /// or Nix-store path, or in a mirror shared by several users. The helm
+    /// used to create its extraction cache inside it, so every host setup and
+    /// update failed there before touching any host. Specified: through the
+    /// production wiring, a payload lookup against a mode-0555 payload
+    /// directory succeeds, returns a file under the state directory's cache,
+    /// and leaves the payload directory's entries unchanged.
+    #[farhelm_testtrace::test]
+    async fn a_read_only_payload_dir_is_only_read() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let state_dir = tempfile::tempdir().unwrap();
+        let payload_dir = tempfile::tempdir().unwrap();
+        let archive = farhelm_archive_for(PayloadArch::X86_64);
+        write_release_archive(
+            payload_dir.path(),
+            archive.package,
+            archive.target,
+            archive.member,
+            b"bytes",
+        );
+        let before: Vec<_> = std::fs::read_dir(payload_dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        std::fs::set_permissions(payload_dir.path(), std::fs::Permissions::from_mode(0o555))
+            .unwrap();
+
+        let payloads = production_payloads(
+            PayloadSelection::Directory(payload_dir.path().to_path_buf()),
+            state_dir.path(),
+            true,
+            state_dir.path(),
+        )
+        .unwrap();
+        let result = payloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await;
+        let after: Vec<_> = std::fs::read_dir(payload_dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        // Restore write access so the tempdir can clean itself up.
+        std::fs::set_permissions(payload_dir.path(), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+
+        let path = result.expect("a read-only payload directory must still serve payloads");
+        assert_eq!(
+            path.parent(),
+            Some(state_dir.path().join(DIRECTORY_PAYLOAD_CACHE).as_path()),
+            "the materialized copy belongs in the helm's state directory"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"bytes");
+        assert_eq!(before, after, "the payload directory must not change");
     }
 
     /// Spec: `production_payloads` resolves every `PayloadSelection` ×
@@ -7680,7 +7770,10 @@ mod tests {
             archive.member,
             b"race-bytes",
         );
-        let payloads = Arc::new(DirectoryPayloads::new(dir.path().to_path_buf()));
+        let payloads = Arc::new(DirectoryPayloads::new(
+            dir.path().to_path_buf(),
+            dir.path().join(DIRECTORY_PAYLOAD_CACHE),
+        ));
         // The two tasks share a fixture-owned multithread runtime; carrying
         // the context through its drop keeps workers and teardown attributed.
         let context = farhelm_testtrace::current_thread_context().expect("test trace context");
