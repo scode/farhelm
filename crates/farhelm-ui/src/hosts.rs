@@ -2668,9 +2668,9 @@ fn HostRow(
                     }
                     p { class: "host-settings-help",
                         if host.yolo_safe {
-                            "This host is marked safe for YOLO launches."
+                            "YOLO sessions start here without an extra confirmation."
                         } else {
-                            "This host is marked sensitive for YOLO launches."
+                            "This host is sensitive: starting a YOLO session here asks for explicit confirmation first."
                         }
                     }
                     div { class: "host-settings-actions",

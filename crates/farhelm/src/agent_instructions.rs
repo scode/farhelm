@@ -460,10 +460,10 @@ mod tests {
         for expected in [
             "farhelm agent create --cwd <DIR> --host <NAME> [--profile <NAME>] \
              [--profile-id <ID>] [--invocation <CMD>] [--title <TITLE>] \
-             [--idempotency-key <KEY>]  \
+             [--idempotency-key <KEY>] [--allow-yolo-on-sensitive-host]  \
              Create a session on any host; prints its id",
             "farhelm agent clone --source-session <SOURCE_SESSION> --host <NAME> [--cwd <DIR>] \
-             [--title <TITLE>] [--idempotency-key <KEY>]  \
+             [--title <TITLE>] [--idempotency-key <KEY>] [--allow-yolo-on-sensitive-host]  \
              Copy an explicitly named session onto any host; prints the new id",
         ] {
             assert!(

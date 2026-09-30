@@ -229,13 +229,16 @@ pub(crate) enum FreshCreateError {
     Unaccepted(String),
     /// No such proof: a transport failure or an unresolved/previously accepted key.
     Unresolved(String),
+    /// The helm refused a YOLO launch on a host marked sensitive; nothing
+    /// was dispatched, and it will run only with an explicit confirmation.
+    YoloConfirmation(String),
 }
 
 impl FreshCreateError {
     /// Preserve the actionable server text independently of outcome policy.
     pub(crate) fn message(&self) -> &str {
         match self {
-            Self::Unaccepted(text) | Self::Unresolved(text) => text,
+            Self::Unaccepted(text) | Self::Unresolved(text) | Self::YoloConfirmation(text) => text,
         }
     }
 }
@@ -266,7 +269,10 @@ impl GithubAttempt {
     /// The caller may refresh the preview, but must wait for another explicit
     /// submission. Unresolved errors never authorize replacing this request.
     pub(crate) fn may_retire_after(&self, error: &FreshCreateError) -> bool {
-        matches!(error, FreshCreateError::Unaccepted(_))
+        matches!(
+            error,
+            FreshCreateError::Unaccepted(_) | FreshCreateError::YoloConfirmation(_)
+        )
     }
 }
 

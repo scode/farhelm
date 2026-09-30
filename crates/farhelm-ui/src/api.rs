@@ -1625,6 +1625,11 @@ pub(crate) enum CreateAgent<'a> {
 /// `agent` selects between the two creation modes PLAN_M6_75.md item 3 made
 /// mutually exclusive on the wire — see [`CreateAgent`] for why they arrive
 /// here as one argument rather than as two optional ones.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one field of the create body `create_body` builds; bundling them into a \
+              struct would only move the list, and `replace_session_with` mirrors it plus a source id"
+)]
 pub(crate) async fn create_session(
     base: &str,
     cwd: &str,
@@ -1633,17 +1638,14 @@ pub(crate) async fn create_session(
     intent_key: &str,
     host: Option<HostId>,
     expected_incarnation: Option<u64>,
+    allow_yolo: bool,
 ) -> Result<Session, CreateRefusal> {
     let url = format!("{base}/api/sessions");
-    let resp = send(client().post(&url).json(&create_body(
-        cwd,
-        agent,
-        title,
-        intent_key,
-        host,
-        expected_incarnation,
-    )))
-    .await?;
+    let mut body = create_body(cwd, agent, title, intent_key, host, expected_incarnation);
+    if allow_yolo {
+        allow_yolo_on_sensitive_host(&mut body);
+    }
+    let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(CreateRefusal::read("POST", &url, resp).await);
     }
@@ -1662,23 +1664,78 @@ pub(crate) async fn create_session(
 #[derive(Debug)]
 pub(crate) struct CreateRefusal {
     pub(crate) stale: bool,
+    /// The helm refused a YOLO launch on a host marked sensitive and will
+    /// accept it again only with an explicit confirmation
+    /// ([`asks_yolo_confirmation`]). Nothing was created.
+    pub(crate) yolo_confirmation: bool,
     pub(crate) text: String,
 }
 
 impl From<String> for CreateRefusal {
     fn from(text: String) -> Self {
-        CreateRefusal { stale: false, text }
+        CreateRefusal {
+            stale: false,
+            yolo_confirmation: false,
+            text,
+        }
     }
 }
 
 impl CreateRefusal {
     async fn read(method: &str, url: &str, resp: reqwest::Response) -> Self {
         let stale = is_stale_precondition(resp.headers());
+        let yolo_confirmation = asks_yolo_confirmation(resp.headers());
         CreateRefusal {
             stale,
+            yolo_confirmation,
             text: refusal_text(method, url, resp).await,
         }
     }
+}
+
+/// A refused session action (replace, restart), and whether the helm asked
+/// for an explicit YOLO confirmation before it would run it.
+#[derive(Debug, Clone)]
+pub(crate) struct ActionRefusal {
+    pub(crate) yolo_confirmation: bool,
+    pub(crate) text: String,
+}
+
+impl From<String> for ActionRefusal {
+    fn from(text: String) -> Self {
+        ActionRefusal {
+            yolo_confirmation: false,
+            text,
+        }
+    }
+}
+
+impl ActionRefusal {
+    async fn read(method: &str, url: &str, resp: reqwest::Response) -> Self {
+        let yolo_confirmation = asks_yolo_confirmation(resp.headers());
+        ActionRefusal {
+            yolo_confirmation,
+            text: refusal_text(method, url, resp).await,
+        }
+    }
+}
+
+/// Whether a refusal is the helm's own request for an explicit YOLO
+/// confirmation (a YOLO launch on a host marked sensitive).
+///
+/// Read from the header, never from the text: the text can quote a remote
+/// supervisor, and a supervisor must not be able to make this UI offer to
+/// start a YOLO session.
+pub(crate) fn asks_yolo_confirmation(headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get(farhelm_proto::http::YOLO_CONFIRMATION_HEADER)
+        .is_some_and(|value| value == farhelm_proto::http::YOLO_CONFIRMATION_SENSITIVE_HOST)
+}
+
+/// Mark a create, replace, or restart body as the user's explicit
+/// confirmation of a YOLO launch on a host marked sensitive.
+pub(crate) fn allow_yolo_on_sensitive_host(body: &mut serde_json::Value) {
+    body["allow_yolo_on_sensitive_host"] = serde_json::json!(true);
 }
 
 /// Whether a refusal carries the helm's stale-connection precondition.
@@ -1727,14 +1784,19 @@ pub(crate) async fn replace_session_with(
     intent_key: &str,
     host: Option<HostId>,
     expected_incarnation: Option<u64>,
+    allow_yolo: bool,
 ) -> Result<Session, CreateRefusal> {
+    let mut with_body = create_body(cwd, agent, title, intent_key, host, expected_incarnation);
+    if allow_yolo {
+        allow_yolo_on_sensitive_host(&mut with_body);
+    }
     let url = format!(
         "{base}/api/sessions/{}/replace",
         encode_path_segment(source)
     );
     let body = serde_json::json!({
         "intent_key": intent_key,
-        "with": create_body(cwd, agent, title, intent_key, host, expected_incarnation),
+        "with": with_body,
     });
     let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
@@ -1841,6 +1903,11 @@ pub(crate) async fn submit_fresh_create(
         .await
         .map_err(FreshCreateError::Unresolved)?;
     if !resp.status().is_success() {
+        if asks_yolo_confirmation(resp.headers()) {
+            return Err(FreshCreateError::YoloConfirmation(
+                refusal_text("POST", &url, resp).await,
+            ));
+        }
         let unaccepted = resp
             .headers()
             .get(farhelm_proto::http::CREATE_OUTCOME_HEADER)
@@ -2081,14 +2148,20 @@ pub(crate) async fn restart_session(
     mode: &str,
     stop_if_running: bool,
     with: Option<&LaunchSelection>,
-) -> Result<Session, String> {
+    allow_yolo: bool,
+) -> Result<Session, ActionRefusal> {
     let url = format!("{base}/api/sessions/{}/restart", encode_path_segment(id));
-    let body = restart_request_body(mode, stop_if_running, with);
+    let mut body = restart_request_body(mode, stop_if_running, with);
+    if allow_yolo {
+        allow_yolo_on_sensitive_host(&mut body);
+    }
     let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
-        return Err(refusal_text("POST", &url, resp).await);
+        return Err(ActionRefusal::read("POST", &url, resp).await);
     }
-    resp.json::<Session>().await.map_err(|e| e.to_string())
+    resp.json::<Session>()
+        .await
+        .map_err(|e| ActionRefusal::from(e.to_string()))
 }
 
 /// Preserve the absent-versus-present override distinction on the restart wire.
@@ -2439,18 +2512,24 @@ pub(crate) async fn replace_session(
     base: &str,
     id: &str,
     only_if_nothing_alive: bool,
-) -> Result<Session, String> {
+    allow_yolo: bool,
+) -> Result<Session, ActionRefusal> {
     let intent_key = mint_intent_key().await?;
     let url = format!("{base}/api/sessions/{}/replace", encode_path_segment(id));
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "intent_key": intent_key,
         "only_if_nothing_alive": only_if_nothing_alive,
     });
+    if allow_yolo {
+        allow_yolo_on_sensitive_host(&mut body);
+    }
     let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
-        return Err(refusal_text("POST", &url, resp).await);
+        return Err(ActionRefusal::read("POST", &url, resp).await);
     }
-    resp.json::<Session>().await.map_err(|e| e.to_string())
+    resp.json::<Session>()
+        .await
+        .map_err(|e| ActionRefusal::from(e.to_string()))
 }
 
 /// DELETE a session. See `stop_session`'s docs — same error-surfacing
@@ -3838,6 +3917,39 @@ mod tests {
             "ends like the old marker [farhelm:precondition/incarnation]".to_string(),
         );
         assert!(!refusal.stale);
+    }
+
+    /// The YOLO confirmation is offered only when the helm's header says so,
+    /// and the confirmed retry carries the field the helm reads.
+    ///
+    /// The header is the only trigger because the refusal text can quote a
+    /// remote supervisor, and a supervisor must never be able to make the UI
+    /// offer to start a YOLO session. The field name has to match the helm's
+    /// request structs exactly: serde ignores unknown fields, so a misspelled
+    /// confirmation would be silently dropped and refused again forever.
+    #[farhelm_testtrace::test]
+    fn a_yolo_confirmation_is_asked_only_by_the_helm_header() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        assert!(!asks_yolo_confirmation(&headers));
+        headers.insert(
+            farhelm_proto::http::YOLO_CONFIRMATION_HEADER,
+            reqwest::header::HeaderValue::from_static("something-else"),
+        );
+        assert!(!asks_yolo_confirmation(&headers));
+        headers.insert(
+            farhelm_proto::http::YOLO_CONFIRMATION_HEADER,
+            reqwest::header::HeaderValue::from_static(
+                farhelm_proto::http::YOLO_CONFIRMATION_SENSITIVE_HOST,
+            ),
+        );
+        assert!(asks_yolo_confirmation(&headers));
+
+        let mut body = restart_request_body("fresh", false, None);
+        allow_yolo_on_sensitive_host(&mut body);
+        assert_eq!(
+            body["allow_yolo_on_sensitive_host"],
+            serde_json::json!(true)
+        );
     }
 
     /// An edit sends the profile's WHOLE definition, every field present.

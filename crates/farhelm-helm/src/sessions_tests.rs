@@ -283,6 +283,164 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
     peer.await.unwrap();
 }
 
+/// Spec: a YOLO create on a host marked sensitive is refused with a 409
+/// carrying the helm's YOLO-confirmation header and the definitely-unaccepted
+/// create outcome, and nothing reaches the supervisor; the same create with
+/// `allow_yolo_on_sensitive_host` is dispatched; once the host is marked safe
+/// a YOLO create needs no override.
+///
+/// Why: the header is the browser's only cue to show the confirmation (it is
+/// never read from text a supervisor could write), the unaccepted outcome is
+/// what lets the confirmed retry be a new request, and "nothing dispatched"
+/// is the whole point of refusing.
+#[farhelm_testtrace::test]
+async fn a_yolo_create_on_a_sensitive_host_is_refused_until_confirmed() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+    use tower::ServiceExt;
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    // Answers exactly the two creates that should arrive (the confirmed one
+    // and the one on the safe host); a refused create that leaked through
+    // would be answered here instead and fail the ids asserted below.
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        for id in ["sess-confirmed", "sess-safe"] {
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CreateSession {
+                req_id, invocation, ..
+            } = request
+            else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            assert_eq!(invocation.as_deref(), Some("codex --yolo"));
+            writer
+                .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                    req_id,
+                    session: SessionInfo {
+                        agent_kind: farhelm_proto::AgentKind::Codex,
+                        parent: None,
+                        id: id.into(),
+                        title: "codex".into(),
+                        created_at: 1_700_000_000,
+                        last_activity_at: 1_700_000_000,
+                        last_work_started_at: 0,
+                        creation_seq: None,
+                        cwd: "/project".into(),
+                        canonical_cwd: None,
+                        invocation: "codex --yolo".into(),
+                        resume_template: None,
+                        launch: None,
+                        status: farhelm_proto::SessionStatus::Unknown,
+                        annotation: None,
+                        restart_offer: farhelm_proto::RestartOffer::default(),
+                        tabs: Vec::new(),
+                        source_profile: None,
+                        github_repo: None,
+                        working_copy: None,
+                    },
+                }))
+                .await
+                .unwrap();
+        }
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let local = rest_harness::local_id(&harness.store).await;
+    assert!(
+        !host_yolo_safe(&harness.store, local).await,
+        "premise: the local host starts sensitive"
+    );
+    let post = |body: serde_json::Value| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap()
+    };
+
+    let refused = harness
+        .router()
+        .oneshot(post(
+            serde_json::json!({"cwd": "/project", "invocation": "codex --yolo"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), axum::http::StatusCode::CONFLICT);
+    assert_eq!(
+        refused.headers()[farhelm_proto::http::YOLO_CONFIRMATION_HEADER],
+        farhelm_proto::http::YOLO_CONFIRMATION_SENSITIVE_HOST
+    );
+    assert_eq!(
+        refused.headers()[farhelm_proto::http::CREATE_OUTCOME_HEADER],
+        farhelm_proto::http::CREATE_OUTCOME_DEFINITELY_UNACCEPTED
+    );
+
+    let confirmed = harness
+        .router()
+        .oneshot(post(serde_json::json!({
+            "cwd": "/project",
+            "invocation": "codex --yolo",
+            "allow_yolo_on_sensitive_host": true,
+        })))
+        .await
+        .unwrap();
+    assert_eq!(confirmed.status(), axum::http::StatusCode::OK);
+    let body = axum::body::to_bytes(confirmed.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let session: SessionInfo = serde_json::from_slice(&body).unwrap();
+    assert_eq!(session.id, "sess-confirmed");
+
+    allow_yolo_here(&harness.store).await;
+    let safe = harness
+        .router()
+        .oneshot(post(
+            serde_json::json!({"cwd": "/project", "invocation": "codex --yolo"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(safe.status(), axum::http::StatusCode::OK);
+
+    peer.await.unwrap();
+}
+
+/// Mark the harness's local host safe for YOLO launches.
+///
+/// Every host starts sensitive, so a test that launches YOLO for some other
+/// reason would otherwise meet the guard's refusal instead of the behavior it
+/// is about.
+async fn allow_yolo_here(store: &crate::store::HelmStore) {
+    let local = rest_harness::local_id(store).await;
+    store.set_yolo_safe(local, true).await.unwrap();
+    // The premise the caller's launch relies on, read back from the store.
+    assert!(
+        host_yolo_safe(store, local).await,
+        "the local host must read back as safe for YOLO launches"
+    );
+}
+
+/// The stored YOLO setting of one host, read back from the registry so a
+/// guard test can establish its premise independently of the launch whose
+/// behavior it is testing.
+async fn host_yolo_safe(store: &crate::store::HelmStore, host: crate::store::HostId) -> bool {
+    store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == host)
+        .expect("the host row exists")
+        .yolo_safe
+}
+
 /// A structured launch keeps the submitted home-relative spelling for history
 /// search while the session itself carries the supervisor's accepted path and
 /// its separately verified canonical destination. Replaying an intent key is
@@ -359,6 +517,9 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
         }
     });
     let harness = rest_harness::spliced_helm(client_side).await;
+    // YOLO launch on the fixture's sensitive-by-default host; the guard
+    // is not what this test is about (see `yolo_guard`'s own tests).
+    allow_yolo_here(&harness.store).await;
     let app = harness.router();
     let body = serde_json::json!({
         "cwd": "~/work/project",
@@ -507,6 +668,12 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
     });
 
     let harness = rest_harness::spliced_helm(client_side).await;
+
+    // YOLO launch on the fixture's sensitive-by-default host; the guard
+
+    // is not what this test is about (see `yolo_guard`'s own tests).
+
+    allow_yolo_here(&harness.store).await;
 
     let (status, _) = post_text(
         &harness,
@@ -1516,6 +1683,9 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
     source.invocation = "codex --dangerously-bypass-approvals-and-sandbox".to_string();
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
     let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    // YOLO launch on the fixture's sensitive-by-default host; the guard
+    // is not what this test is about (see `yolo_guard`'s own tests).
+    allow_yolo_here(&harness.store).await;
     let fleet = harness.fleet.clone();
     let peer = tokio::spawn(async move {
         let (r, w) = tokio::io::split(peer_side);
@@ -1603,6 +1773,9 @@ async fn a_plain_replace_does_not_remember_the_listed_rows_profile() {
     // only after the harness starts.
     source.invocation = "claude".to_string();
     let (harness, local) = spliced_replace_harness(client_side, Vec::new()).await;
+    // YOLO launch on the fixture's sensitive-by-default host; the guard
+    // is not what this test is about (see `yolo_guard`'s own tests).
+    allow_yolo_here(&harness.store).await;
     let crate::store::ProfileCreation::Created(profile) = harness
         .store
         .create_profile(
@@ -2090,6 +2263,9 @@ async fn replace_of_a_structured_session_preserves_its_resume_template() {
         ..rest_harness::session("sess-1", 1_700_000_000)
     };
     let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    // YOLO launch on the fixture's sensitive-by-default host; the guard
+    // is not what this test is about (see `yolo_guard`'s own tests).
+    allow_yolo_here(&harness.store).await;
     let fleet = harness.fleet.clone();
     let peer = tokio::spawn(async move {
         let (r, w) = tokio::io::split(peer_side);
@@ -3887,6 +4063,9 @@ async fn restart_with_compiles_and_forwards_structured_launch_bundle() {
             .unwrap();
     });
     let harness = rest_harness::spliced_helm(client_side).await;
+    // YOLO launch on the fixture's sensitive-by-default host; the guard
+    // is not what this test is about (see `yolo_guard`'s own tests).
+    allow_yolo_here(&harness.store).await;
     let request = axum::http::Request::builder()
         .method("POST")
         .uri("/api/sessions/sess-1/restart")

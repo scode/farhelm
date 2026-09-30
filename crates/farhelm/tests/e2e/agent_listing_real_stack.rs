@@ -880,6 +880,9 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
             "launch": selection,
             "cols": WIDE_COLS,
             "rows": ROWS,
+            // The fixture's only host starts sensitive, and this parent is a
+            // YOLO launch; the guard itself is not what this test is about.
+            "allow_yolo_on_sensitive_host": true,
         }),
     )
     .await;
@@ -906,6 +909,10 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
             &parent.id,
             "--host",
             "this machine",
+            // Cloning a YOLO parent onto a sensitive host needs the override;
+            // passing it here also proves the flag reaches the helm through
+            // the relay.
+            "--allow-yolo-on-sensitive-host",
         ],
         &parent.id,
         &token,
@@ -953,7 +960,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     let (status, body) = post(
         &client,
         &format!("{}/api/sessions/{child_id}/replace", helm.base),
-        serde_json::json!({}),
+        serde_json::json!({ "allow_yolo_on_sensitive_host": true }),
     )
     .await;
     assert!(status.is_success(), "structured replace failed: {body}");

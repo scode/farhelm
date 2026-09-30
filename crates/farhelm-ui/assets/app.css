@@ -5321,3 +5321,34 @@ samp {
   white-space: pre-wrap;
   user-select: text;
 }
+
+/* The confirmation a YOLO launch on a sensitive host asks for
+   (`yolo_confirm`). Deliberately loud: accidental YOLO launches on the wrong
+   machine are what it exists to stop, and a prompt that looks like every
+   other line of text gets clicked through. A thick danger border and tint,
+   a heading, and the consequence in words before the helm's own sentence. */
+.yolo-confirmation {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border: 2px solid var(--danger);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 10px 12px;
+}
+.yolo-confirmation-heading {
+  color: var(--danger);
+  font-weight: 700;
+  margin: 0;
+  text-transform: uppercase;
+}
+.yolo-confirmation-consequence {
+  font-weight: 600;
+  margin: 0;
+}
+.yolo-confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

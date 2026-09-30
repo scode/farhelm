@@ -419,6 +419,17 @@ Creation guards against accidental double submission (a double-click, a retry af
 yields one session or a clear error, never two silently. Deliberately creating several sessions with identical
 parameters — same directory, same profile — is a sanctioned workflow, not a duplicate to be suppressed.
 
+A YOLO launch on a sensitive host (see the host settings under Topology) needs an explicit confirmation. A launch counts
+as YOLO when its structured permission is YOLO, which makes every Pi launch one, or when its command line carries a flag
+its vendor documents as skipping approval prompts, such as `claude --dangerously-skip-permissions` or `codex --yolo`;
+Codex's sandboxed `--full-auto` does not count. The helm enforces this, so no client can skip it: every create, clone,
+replace, replace with, and restart with that reaches it on a sensitive host without the override is refused before any
+supervisor is contacted, and nothing is started. The GUI answers that refusal with a prominent confirmation naming the
+host and retries with the override only when the user confirms. `farhelm agent create`, `farhelm agent clone`, and
+`farhelm spawn` with a catalog selector take `--allow-yolo-on-sensitive-host` as the override. A plain restart
+relaunches the session's own stored launch and is not asked again, and so does `farhelm spawn --inherit-agent`, which
+reuses the asking session's launch and is answered by its own supervisor with no helm involved.
+
 A session snapshots its profile at creation — launch and resume invocations and integration selection alike. Editing or
 deleting a profile affects future sessions only; existing sessions keep working unchanged.
 

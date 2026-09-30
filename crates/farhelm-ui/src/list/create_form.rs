@@ -1616,6 +1616,19 @@ pub(super) fn CreateSessionForm(
     let mut title_raw_seed = use_signal(|| None::<String>);
     let mut title_edited = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    // A YOLO launch the helm refused because its host is marked sensitive,
+    // and the user's confirmation of one (see `yolo_confirm`). Both are tied
+    // to the intent key the refused request carried, not to "the next
+    // submit": the key is bound to the whole draft (host, folder, launch),
+    // so any edit that changes what would launch retires the key and with it
+    // the confirmation, and a confirmation for host A can never ride along
+    // with a launch on host B. Holding the confirmed key rather than a
+    // one-shot flag also keeps the override on every retry of the SAME
+    // intent: a confirmed create whose reply was lost must replay under its
+    // key with the override, or the helm would refuse the replay and a
+    // second confirmation would mint a new key and a second session.
+    let mut yolo_refusal = use_signal(|| None::<(String, String)>);
+    let mut yolo_confirmed_key = use_signal(|| None::<String>);
     // Ordinary New must never inherit the last-used profile merely because
     // its catalog arrives. This dormant command draft becomes active only
     // when Other is selected; structured mode still requires a harness choice.
@@ -2973,6 +2986,10 @@ pub(super) fn CreateSessionForm(
                 let Some(op_guard) = ops.claim_guard() else {
                     return;
                 };
+                // The confirmation, if any, is matched against the key this
+                // submit ends up using, below; the question itself is
+                // answered either way.
+                yolo_refusal.set(None);
                 // No agent, no create. "Nothing is selected" is a real state
                 // rather than a gap to be filled — a profile that was chosen
                 // and has since been deleted, or a clone whose own agent was
@@ -3353,6 +3370,9 @@ pub(super) fn CreateSessionForm(
                         error.set(Some("the checkout draft changed while preparing the request; review the preview and press launch again".into()));
                         return;
                     }
+                    // Only a confirmation given for THIS key counts; see
+                    // `yolo_confirmed_key`.
+                    let allow_yolo = yolo_confirmed_key.peek().as_deref() == Some(key.as_str());
                     let agent = match &bound.agent {
                         LaunchIntent::Command(invocation) => CreateAgent::Command(invocation),
                         LaunchIntent::Profile(id) => CreateAgent::Profile(id),
@@ -3376,11 +3396,22 @@ pub(super) fn CreateSessionForm(
                                 key.clone(), api::fresh_create_body(agent, &key, bound.host, checkout),
                                 checkout.preview.installation_identity.clone(),
                             ));
+                        let mut attempt = attempt;
+                        if allow_yolo {
+                            api::allow_yolo_on_sensitive_host(&mut attempt.body);
+                        }
                         // Publish before dispatch. A lost response must leave
                         // the exact payload available to the next explicit retry.
                         github_attempt.set(Some((bound.clone(), attempt.clone())));
                         match api::submit_fresh_create(&base, bound.replace_source.as_deref(), &attempt.body).await {
                             Ok(session) => { github_attempt.set(None); Ok(session) }
+                            Err(crate::github_checkout::FreshCreateError::YoloConfirmation(text)) => {
+                                // Refused before anything was dispatched. The
+                                // attempt and its key stay, so the confirmed
+                                // retry is the same request with the override.
+                                github_attempt.set(Some((bound.clone(), attempt)));
+                                Err(api::CreateRefusal { stale: false, yolo_confirmation: true, text })
+                            }
                             Err(failure) => {
                                 let retired = attempt.may_retire_after(&failure);
                                 if retired {
@@ -3408,6 +3439,7 @@ pub(super) fn CreateSessionForm(
                                 &key,
                                 Some(bound.host),
                                 expected_incarnation,
+                                allow_yolo,
                             )
                             .await
                         }
@@ -3420,6 +3452,7 @@ pub(super) fn CreateSessionForm(
                                 &key,
                                 Some(bound.host),
                                 expected_incarnation,
+                                allow_yolo,
                             )
                             .await
                         }
@@ -3464,7 +3497,20 @@ pub(super) fn CreateSessionForm(
                             // would describe a machine the user is not looking
                             // at and may not even be true.
                             if create_target.peek().as_ref() == target_now.as_ref() {
-                                let api::CreateRefusal { stale, text: prose } = e;
+                                let api::CreateRefusal { stale, yolo_confirmation, text: prose } = e;
+                                if yolo_confirmation {
+                                    // The key deliberately survives: this
+                                    // attempt was refused before dispatch, but
+                                    // an EARLIER attempt under the same key may
+                                    // have been accepted with its reply lost,
+                                    // and the confirmed retry must still
+                                    // reconcile with it rather than start a
+                                    // second session. The loud confirmation
+                                    // replaces the ordinary error line.
+                                    yolo_refusal.set(Some((key.clone(), prose)));
+                                    ops.release();
+                                    return;
+                                }
                                 if stale {
                                     // The world moved between preparing this
                                     // create and routing it — the id now
@@ -4833,6 +4879,20 @@ pub(super) fn CreateSessionForm(
                             "{display_peer(&child)}"
                         }
                     }
+                }
+            }
+            // Shown only while the draft still holds the refused request's
+            // key: an edit that changes what would launch retires the key,
+            // and with it a question that no longer describes the draft.
+            if let Some((refused_key, message)) = yolo_refusal.read().clone()
+                && intent_key.read().as_ref().is_some_and(|(key, _)| *key == refused_key)
+            {
+                crate::yolo_confirm::YoloConfirmation {
+                    message,
+                    busy,
+                    confirm_submits: true,
+                    on_confirm: move |_| yolo_confirmed_key.set(Some(refused_key.clone())),
+                    on_cancel: move |_| yolo_refusal.set(None),
                 }
             }
             if let Some(err) = error.read().clone() {

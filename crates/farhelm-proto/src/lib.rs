@@ -108,6 +108,9 @@ pub mod http;
 pub mod io;
 pub mod launch;
 
+/// What counts as a YOLO launch (see the module's own docs).
+pub mod yolo;
+
 /// The one list of characters that must never be shown as themselves when
 /// peer-supplied text reaches a human (see the module's own docs).
 pub mod text;
@@ -172,7 +175,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered profile defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_31` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_32` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -183,7 +186,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 31;
+pub const PROTOCOL_VERSION: u32 = 32;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -1848,6 +1851,13 @@ pub enum AgentVerb {
         name: Option<String>,
         /// Exact opaque id selector. It is never interpreted as a name.
         id: Option<String>,
+        /// The resolution is for a child create that may start a YOLO
+        /// launch on the asking host even if it is marked sensitive; see
+        /// [`ControlMsg::CreateSession`]'s field of the same name. Without
+        /// it the helm refuses to resolve a YOLO profile for a sensitive
+        /// host. Protocol 32.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        allow_yolo_on_sensitive_host: bool,
     },
     /// Create a session on any host in the fleet — SPEC.md's creation verb
     /// reached from inside a session. Answered with [`AgentReply::Created`].
@@ -1879,6 +1889,14 @@ pub enum AgentVerb {
         /// supervisor unchanged: a retry under the same key returns the
         /// session the first attempt made rather than a second one.
         intent_key: Option<String>,
+        /// Start a YOLO launch even though the target host is marked
+        /// sensitive. Without it the helm refuses such a launch; an agent
+        /// passes it only with the user's explicit approval (the agent
+        /// instructions say so). Changes what the helm does, hence protocol
+        /// version 32. Serialized only when true, so a request without the
+        /// override keeps its earlier wire shape.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        allow_yolo_on_sensitive_host: bool,
     },
     /// Create a copy of an explicitly named session on an explicitly named
     /// host — same working directory, title, and agent unless overridden —
@@ -1907,6 +1925,9 @@ pub enum AgentVerb {
         title: Option<String>,
         /// See [`AgentVerb::Create::intent_key`].
         intent_key: Option<String>,
+        /// See [`AgentVerb::Create::allow_yolo_on_sensitive_host`].
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        allow_yolo_on_sensitive_host: bool,
     },
 }
 
@@ -2417,6 +2438,13 @@ pub enum ControlMsg {
         /// an older UI build) that never learned this field exists, so
         /// its mere addition does not newly expose them to anything.
         intent_key: Option<String>,
+        /// For a session creating a child by profile name or id (`farhelm
+        /// spawn`): start it even if the profile is a YOLO launch and this
+        /// host is marked sensitive. Forwarded to the helm with the profile
+        /// lookup, which is where the check happens; ignored for every other
+        /// create, which the helm checks before sending. Protocol 32.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        allow_yolo_on_sensitive_host: bool,
         /// Explicit override of the integrated-agent kind PLAN_M3.md item
         /// 7 would otherwise derive from `invocation`'s first token by
         /// basename recognition. A genuine tri-state via [`AgentKind`]'s
@@ -4440,6 +4468,7 @@ mod tests {
             cols: 80,
             rows: 24,
             intent_key: None,
+            allow_yolo_on_sensitive_host: false,
             agent_kind: None,
             resume_template: None,
             source_profile: None,
@@ -4516,8 +4545,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_31() {
-        assert_eq!(PROTOCOL_VERSION, 31);
+    fn protocol_version_is_pinned_at_32() {
+        assert_eq!(PROTOCOL_VERSION, 32);
     }
 
     /// Pins the skew direction the detach-code bump exists to create, in
@@ -4581,7 +4610,7 @@ mod tests {
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
         assert_eq!(skew.peer_protocol, 30);
-        assert_eq!(skew.our_protocol, 31);
+        assert_eq!(skew.our_protocol, 32);
 
         // The reverse direction: a v30 receiver (the refusal rule itself,
         // modeled by its exact-version check) meets a v31 hello and hangs up.
@@ -5856,6 +5885,7 @@ mod tests {
             cols: 80,
             rows: 24,
             intent_key: Some("intent-abc".to_string()),
+            allow_yolo_on_sensitive_host: false,
             agent_kind: Some(AgentKind::Claude),
             resume_template: Some(vec![
                 "/opt/bin/claude".to_string(),
@@ -5912,6 +5942,7 @@ mod tests {
             cols: 80,
             rows: 24,
             intent_key: Some("intent-abc".to_string()),
+            allow_yolo_on_sensitive_host: false,
             agent_kind: Some(AgentKind::Claude),
             resume_template: None,
             source_profile: Some(ProfileSnapshot {
@@ -5966,6 +5997,7 @@ mod tests {
             cols: 80,
             rows: 24,
             intent_key: Some("spawn-key".to_string()),
+            allow_yolo_on_sensitive_host: false,
             agent_kind: None,
             resume_template: None,
             source_profile: None,
@@ -6015,6 +6047,7 @@ mod tests {
             cols: 80,
             rows: 24,
             intent_key: Some("spawn-copy".to_string()),
+            allow_yolo_on_sensitive_host: false,
             agent_kind: None,
             resume_template: None,
             source_profile: None,
@@ -6072,6 +6105,7 @@ mod tests {
                 cols: 80,
                 rows: 24,
                 intent_key: None,
+                allow_yolo_on_sensitive_host: false,
                 agent_kind: None,
                 resume_template: None,
                 source_profile: None,
@@ -7635,6 +7669,7 @@ mod tests {
             request: AgentVerb::ResolveProfile {
                 name: Some("Claude Code".to_string()),
                 id: None,
+                allow_yolo_on_sensitive_host: false,
             },
         };
         assert_eq!(
@@ -8040,6 +8075,7 @@ mod tests {
                 invocation: None,
                 title: Some("a title".to_string()),
                 intent_key: Some("key-1".to_string()),
+                allow_yolo_on_sensitive_host: false,
             },
         };
         assert_eq!(create.request_req_id(), Some(9));
@@ -8076,6 +8112,7 @@ mod tests {
                 invocation: None,
                 title: None,
                 intent_key: None,
+                allow_yolo_on_sensitive_host: false,
             },
         };
         assert_eq!(
@@ -8106,6 +8143,7 @@ mod tests {
                 cwd: None,
                 title: None,
                 intent_key: None,
+                allow_yolo_on_sensitive_host: false,
             },
         };
         assert_eq!(clone.request_req_id(), Some(11));
