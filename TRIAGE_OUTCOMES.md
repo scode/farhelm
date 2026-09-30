@@ -4114,7 +4114,12 @@
 - Completion criteria: Update fails visibly when the supervisor it reconnects to is not the build it installed, with
   focused coverage, and this feedback file and its index entry are removed in the execution change; or, if the gate is
   hit, the item is removed as discarded with the reason recorded.
-- Execution: `pending`.
+- Execution: `complete` as a discard; the simplicity gate was hit. The version of the build just installed is known only
+  for release payloads: `--payload-dir` payloads are operator-staged, unverified, and carry no version, so comparing the
+  hello's build against the helm's own version would falsely fail an Update from a directory of another release, and a
+  correct comparison needs a version threaded through every payload source. Per the decision, the item is removed
+  without a code change. Change `rqtzywntwlwvzzwzurmtvqsumuopumqv`, bookmark `pr/discard-hand-started-update`, draft PR
+  [#1201](https://github.com/scode/farhelm/pull/1201/changes).
 
 ## update-identity-none-plan-confirm-disagree.md
 

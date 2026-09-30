@@ -23,8 +23,6 @@ One line per open item. This file must always match the feedback files in this d
   retarget adopts the old machine's identity.
 - `identity-mismatch-never-becomes-duplicate.md` — a host that reaches another entry's identity offers an adopt that
   always 409s and never shows as duplicate.
-- `update-reports-success-on-hand-started-supervisor.md` — UPDATE of a hand-started supervisor crash-loops the new unit
-  and can report success while the old build keeps serving.
 - `payload-dir-must-be-writable.md` — --payload-dir writes .extracted/ into the operator's directory, so read-only or
   shared release dirs fail every run.
 - `embedded-payload-cleanup-blocks-helm-start.md` — a failure deleting the retired embedded-payloads cache aborts helm
