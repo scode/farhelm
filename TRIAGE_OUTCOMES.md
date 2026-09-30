@@ -3366,7 +3366,11 @@
   itself is recorded in the change that carries these triage decisions; this item's execution is the code fix.
 - Completion criteria: fix the behavior so it meets the cited rule, with focused regression coverage, and remove this
   feedback file and its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; Delete now sends its detach notices and releases the supervisor-wide `attachments` guard before
+  removing the deleted session's preparation state, quarantined attachment files and hook trace. Regression test
+  `delete_releases_the_attachments_guard_before_removing_files` holds a new test-only fault hook
+  (`deleted_session_cleanup_gate`) at that boundary and checks the guard is free. jj change `yppzuyowtwpp`, bookmark
+  `pr/delete-cleanup-outside-attachments-lock`, draft PR [#1164](https://github.com/scode/farhelm/pull/1164/changes).
 
 ## provisioning-holds-host-cache-lock.md
 

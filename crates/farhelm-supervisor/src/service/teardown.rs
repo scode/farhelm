@@ -322,9 +322,11 @@ impl Supervisor {
         .await
         .map_err(TeardownError::Sweep)?;
 
-        // Everything from here on is fast (one tmux round trip, a
-        // few fail-closed removals, one sqlite
-        // write) and runs under `attachments`, mirroring the Attach
+        // Everything from here to the row's removal is fast (one tmux
+        // round trip, a few fail-closed removals, one sqlite write) and
+        // runs under `attachments`; the slow removal of the deleted
+        // session's files waits until after the guard is released. The
+        // guarded part mirrors the Attach
         // handler's takeover for the same reason: a concurrent Attach
         // must not be able to install itself mid-teardown. This is
         // also the one path that acquires BOTH locks at once — `map
@@ -742,6 +744,26 @@ impl Supervisor {
         // the delete; the handler's waiter can be abandoned before this.
         self.hint_sessions_changed();
         self.clear_failed_output_reaps_for_session(session_id);
+        for (channel, notify) in &notify_detach {
+            notify_detached(
+                notify,
+                *channel,
+                "session deleted".to_string(),
+                farhelm_proto::DetachCode::Other,
+            );
+        }
+        drop(attachments);
+
+        // Everything below removes on-disk state that now belongs to nothing,
+        // and runs AFTER `attachments` is released. It is unbounded (a
+        // session's uploaded files can be large and many), and that guard
+        // serializes attach, input, resize and output flow control for every
+        // session on the host, which must never wait on a Delete (SPEC.md
+        // "Waiting between operations on one host"). Nothing here can race an
+        // `Attach`: the row and the map entry are already gone.
+        if let Some(gate) = self.seams.faults.deleted_session_cleanup_gate() {
+            gate().await;
+        }
         // Every former member's process teardown has now completed, and the
         // final membership is durably gone. Unlinking a preparation lock any
         // earlier could split a live shim's flock across two different inodes.
@@ -777,15 +799,6 @@ impl Supervisor {
             );
         }
 
-        for (channel, notify) in &notify_detach {
-            notify_detached(
-                notify,
-                *channel,
-                "session deleted".to_string(),
-                farhelm_proto::DetachCode::Other,
-            );
-        }
-        drop(attachments);
         Ok(())
     }
 
@@ -902,16 +915,30 @@ mod tests {
         scopes: crate::scope::ScopeManager,
         id: &str,
     ) -> (StateDir, Arc<Supervisor>, Arc<SessionEntry>) {
+        scoped_session_with(
+            SupervisorSeams {
+                scopes: Arc::new(scopes),
+                ..SupervisorSeams::default()
+            },
+            id,
+        )
+        .await
+    }
+
+    /// [`scoped_session`] with every seam chosen by the caller, for tests
+    /// that also install a fault hook. `seams.scopes` must be set: the
+    /// seeded entry names a launch scope.
+    async fn scoped_session_with(
+        seams: SupervisorSeams,
+        id: &str,
+    ) -> (StateDir, Arc<Supervisor>, Arc<SessionEntry>) {
         let state = StateDir::new();
         let unit = crate::scope::unit_name(id, 0).expect("a UUID id must name a scope unit");
         let sup = Supervisor::new_with_seams(
             state.path(),
             dummy_exe(),
             SupervisorTimeouts::default(),
-            SupervisorSeams {
-                scopes: Arc::new(scopes),
-                ..SupervisorSeams::default()
-            },
+            seams,
         )
         .await
         .expect("supervisor");
@@ -966,6 +993,107 @@ mod tests {
     /// politely does.
     fn working_scopes() -> crate::scope::ScopeManager {
         crate::scope::ScopeManager::fake_vanishing_after_signal("SIGTERM", Arc::new(|_| {}))
+    }
+
+    /// Delete removes the deleted session's files (uploaded attachments,
+    /// preparation state, hook trace) only after releasing the supervisor-wide
+    /// `attachments` guard.
+    ///
+    /// Why it matters: that guard serializes attach, input, resize and output
+    /// flow control for every session on the host, and the file removal is
+    /// unbounded, so doing it under the guard froze every other session's
+    /// terminal for as long as a large deletion took (SPEC.md "Waiting between
+    /// operations on one host"). Specified: when Delete reaches its file
+    /// cleanup the guard is already free, and the Delete then completes.
+    #[farhelm_testtrace::test]
+    async fn delete_releases_the_attachments_guard_before_removing_files() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (reached_tx, reached_rx) = oneshot::channel::<()>();
+        let (release_tx, release_rx) = oneshot::channel::<()>();
+        let reached = Arc::new(std::sync::Mutex::new(Some(reached_tx)));
+        let release = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+        let gate: super::super::core::DeletedSessionCleanupGate = Arc::new(move || {
+            let reached = Arc::clone(&reached);
+            let release = Arc::clone(&release);
+            Box::pin(async move {
+                if let Some(tx) = reached.lock().expect("gate mutex").take() {
+                    let _ = tx.send(());
+                }
+                if let Some(rx) = release.lock().await.take() {
+                    let _ = rx.await;
+                }
+            })
+        });
+        let mut seams = SupervisorSeams {
+            scopes: Arc::new(working_scopes()),
+            ..SupervisorSeams::default()
+        };
+        seams.faults.deleted_session_cleanup_gate = Some(gate);
+        let (state, sup, entry) = scoped_session_with(seams, &id).await;
+        // Files the cleanup must remove, so the test can tell cleanup that
+        // ran before the guard's release from cleanup that runs after it.
+        let upload = crate::attachments::session_dir(state.path(), &id).join("upload.bin");
+        std::fs::create_dir_all(upload.parent().expect("upload has a parent"))
+            .expect("create the session's attachment directory");
+        std::fs::write(&upload, b"uploaded").expect("seed an uploaded file");
+        let hook_log = crate::service::core::hook_log_path(state.path(), &id);
+        std::fs::create_dir_all(hook_log.parent().expect("hook log has a parent"))
+            .expect("create the hook-log directory");
+        std::fs::write(&hook_log, b"hook").expect("seed a hook trace");
+        let quarantine = crate::attachments::attachments_root(state.path()).join(".quarantine");
+        let quarantined_uploads = || -> Vec<std::path::PathBuf> {
+            std::fs::read_dir(&quarantine)
+                .map(|entries| {
+                    entries
+                        .filter_map(Result::ok)
+                        .filter(|entry| entry.file_name().to_string_lossy().starts_with(&id))
+                        .map(|entry| entry.path().join("upload.bin"))
+                        .filter(|path| path.exists())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        let delete = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            let id = id.clone();
+            async move {
+                let admission = test_admission(&sup).await;
+                sup.teardown_session(&entry, &id, admission).await
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(30), reached_rx)
+            .await
+            .expect("delete must reach its post-commit file cleanup")
+            .expect("the cleanup gate reports arrival");
+        assert!(
+            sup.attachments.try_lock().is_ok(),
+            "delete must not hold the supervisor-wide attachments guard while removing files"
+        );
+        assert!(
+            sup.store.session(&id).await.expect("read row").is_none(),
+            "test premise: the row is already gone when file cleanup starts"
+        );
+        assert_eq!(
+            quarantined_uploads().len(),
+            1,
+            "the uploaded file is still waiting in quarantine when the guard is already free"
+        );
+        assert!(
+            hook_log.exists(),
+            "the hook trace is still present when the guard is already free"
+        );
+
+        release_tx.send(()).expect("release the cleanup gate");
+        assert!(
+            delete.await.expect("delete task").is_ok(),
+            "the delete completes once its file cleanup runs"
+        );
+        assert!(
+            quarantined_uploads().is_empty(),
+            "the cleanup removes the quarantined upload"
+        );
+        assert!(!hook_log.exists(), "the cleanup removes the hook trace");
     }
 
     /// A failed forwarder join must still kill the session's tmux server, but
