@@ -109,11 +109,11 @@ impl HostTransport for SystemTransport {
                         "an ssh registry row has no destination; the schema's CHECK constraint \
                          should have made this impossible",
                     )?;
-                    let control_path = self.state_dir.join("ssh-cm-%C");
+
                     let mut cmd = tokio::process::Command::new("ssh");
                     cmd.args(crate::ssh::ssh_stdio_args(
                         dest,
-                        &control_path,
+                        &self.state_dir,
                         host.remote_farhelm.as_deref().unwrap_or("farhelm"),
                         host.remote_state_dir.as_deref(),
                     )?);

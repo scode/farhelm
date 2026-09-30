@@ -62,8 +62,26 @@ use farhelm_proto::io::ClosedBeforeHello;
 /// never meets this requirement at all.
 pub(crate) fn ssh_base_args(
     dest: &str,
-    control_path: &std::path::Path,
+    control_dir: &std::path::Path,
 ) -> anyhow::Result<Vec<String>> {
+    let Some(control_path) = control_socket(control_dir) else {
+        // Too long to bind: connection sharing is an optimization, so ssh
+        // runs without it rather than failing every connection. Both
+        // options are needed: `ControlMaster=no` only stops ssh creating a
+        // master, and without `ControlPath=none` it would still use (or
+        // trip over) a ControlPath from the user's own ssh config.
+        return Ok(vec![
+            "-o".to_string(),
+            "BatchMode=yes".to_string(),
+            "-o".to_string(),
+            "ControlMaster=no".to_string(),
+            "-o".to_string(),
+            "ControlPath=none".to_string(),
+            "--".to_string(),
+            dest.to_string(),
+        ]);
+    };
+    let control_path = control_path.as_path();
     // This is the last point a local filesystem path is still a `Path`
     // before it is embedded in text handed to ssh. The alternative,
     // `Path::to_string_lossy`, does not fail on a non-UTF-8 path — it
@@ -120,11 +138,11 @@ pub(crate) fn ssh_base_args(
 /// [`ssh_base_args`]' business, not this function's.
 pub(crate) fn ssh_stdio_args(
     dest: &str,
-    control_path: &std::path::Path,
+    control_dir: &std::path::Path,
     remote_farhelm: &str,
     remote_state_dir: Option<&str>,
 ) -> anyhow::Result<Vec<String>> {
-    let mut args = ssh_base_args(dest, control_path)?;
+    let mut args = ssh_base_args(dest, control_dir)?;
     args.extend([
         shell_quote(remote_farhelm),
         "internal".to_string(),
@@ -142,12 +160,54 @@ pub(crate) fn ssh_stdio_args(
 /// [`farhelm_proto::text::shell_quote`] for why this never leaves a word bare.
 pub(crate) use farhelm_proto::text::shell_quote;
 
+/// The longest Unix socket path OpenSSH can bind: `sun_path` less its
+/// terminating NUL (108 bytes on Linux, 104 on macOS).
+#[cfg(target_os = "macos")]
+const MAX_SOCKET_PATH: usize = 103;
+#[cfg(not(target_os = "macos"))]
+const MAX_SOCKET_PATH: usize = 107;
+
+/// What OpenSSH appends while it becomes a connection master: it binds
+/// `<ControlPath>.<16 random characters>` first and renames it into place.
+const MASTER_TEMP_SUFFIX: usize = 17;
+
+/// The connection-sharing socket inside `control_dir`, as a ControlPath
+/// still holding OpenSSH's `%C` token, or `None` when its expansion would be
+/// too long for OpenSSH to bind.
+///
+/// `%C` is kept because it is a hash of the resolved connection (local
+/// host, remote host, port, user), so a master is only ever reused for the
+/// same resolved target; a name derived from the destination string alone
+/// would let an ssh-config alias that now points elsewhere reuse a master
+/// to the old host. The name is nothing but `%C`, because OpenSSH treats a
+/// socket path over the limit as fatal: the old `ssh-cm-%C` made every ssh
+/// host fail for usernames over 15 characters on Linux or 10 on macOS with
+/// the default state directory. The bare name fits the default state
+/// directory for usernames up to 22 characters on Linux and 17 on macOS;
+/// longer ones, which SPEC.md "Supported user environments" still requires
+/// to work, run without connection sharing (see [`ssh_base_args`]).
+pub(crate) fn control_socket(control_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    control_socket_within(control_dir, MAX_SOCKET_PATH)
+}
+
+/// [`control_socket`] against an explicit socket-path limit, so both
+/// platforms' limits can be tested on either.
+fn control_socket_within(
+    control_dir: &std::path::Path,
+    max_socket_path: usize,
+) -> Option<std::path::PathBuf> {
+    // What `%C` expands to: 40 hex digits of a SHA-1.
+    const EXPANDED_TOKEN: usize = 40;
+    let expanded = control_dir.as_os_str().len() + 1 + EXPANDED_TOKEN;
+    (expanded + MASTER_TEMP_SUFFIX <= max_socket_path).then(|| control_dir.join("%C"))
+}
+
 /// Encode a ControlPath for OpenSSH's config-value parser.
 ///
 /// This is not shell quoting: `-o` values use ssh_config tokenization,
 /// then expand percent tokens. Quotes and backslashes need config
 /// escapes, while user-supplied `%` must become `%%`; only the final `%C`
-/// added by Farhelm remains an expansion token. Takes `&str` rather than
+/// added by Farhelm (see [`control_socket`]) remains an expansion token. Takes `&str` rather than
 /// `&Path`: the UTF-8 check belongs to the caller (`ssh_base_args`), the
 /// one actual boundary where a local `Path` becomes ssh-config text — this
 /// function is a pure string encoder with nothing left to reject.
@@ -231,15 +291,10 @@ mod tests {
     /// `--ssh` connection from that state dir dies at startup.
     #[farhelm_testtrace::test]
     fn ssh_args_quote_a_control_path_containing_spaces() {
-        let args = super::ssh_stdio_args(
-            "user@host",
-            std::path::Path::new("/home/u/my state/ssh-cm-%C"),
-            "farhelm",
-            None,
-        )
-        .unwrap();
+        let dir = std::path::Path::new("/home/u/my state");
+        let args = super::ssh_stdio_args("user@host", dir, "farhelm", None).unwrap();
         assert!(
-            args.contains(&"ControlPath=\"/home/u/my state/ssh-cm-%C\"".to_string()),
+            args.contains(&"ControlPath=\"/home/u/my state/%C\"".to_string()),
             "ControlPath must be quoted for ssh's own parser: {args:?}"
         );
     }
@@ -250,16 +305,62 @@ mod tests {
     /// config-tokenization layer; shell quoting would not protect them.
     #[farhelm_testtrace::test]
     fn ssh_args_escape_control_path_config_syntax() {
-        let args = super::ssh_stdio_args(
-            "user@host",
-            std::path::Path::new("/home/u/%d/\"quoted\"/back\\slash/ssh-cm-%C"),
-            "farhelm",
-            None,
-        )
-        .unwrap();
-        assert!(args.contains(
-            &"ControlPath=\"/home/u/%%d/\\\"quoted\\\"/back\\\\slash/ssh-cm-%C\"".to_string()
-        ));
+        let dir = std::path::Path::new("/home/u/%d/\"quoted\"/back\\slash");
+        let args = super::ssh_stdio_args("user@host", dir, "farhelm", None).unwrap();
+        assert!(
+            args.contains(
+                &"ControlPath=\"/home/u/%%d/\\\"quoted\\\"/back\\\\slash/%C\"".to_string()
+            ),
+            "{args:?}"
+        );
+    }
+
+    /// Connection sharing is used whenever OpenSSH could bind its socket,
+    /// and a state directory too deep for that gets plain connections with
+    /// sharing explicitly off.
+    ///
+    /// Why it matters: OpenSSH treats an over-long ControlPath as fatal, and
+    /// the old `<state>/ssh-cm-%C` (the state directory plus 65 bytes once
+    /// OpenSSH adds its temporary suffix) failed every ssh host for
+    /// usernames over 15 characters on Linux and 10 on macOS, while SPEC.md
+    /// "Supported user environments" requires 20. The fallback must set
+    /// `ControlPath=none` too, or a ControlPath from the user's own ssh
+    /// config would still be used. Specified, per platform limit: the
+    /// default state directory of a 20-character Linux username and a
+    /// 17-character macOS one get a `%C` socket; a 20-character macOS one
+    /// gets none; and the argv for a directory with no socket carries
+    /// `ControlMaster=no` and `ControlPath=none`.
+    #[farhelm_testtrace::test]
+    fn sharing_is_used_where_the_socket_fits_and_turned_off_where_it_cannot() {
+        let default_dir = |home: &str, user_len: usize| {
+            std::path::PathBuf::from(format!(
+                "{home}/{}/.local/state/farhelm",
+                "u".repeat(user_len)
+            ))
+        };
+        let linux = default_dir("/home", 20);
+        assert_eq!(
+            super::control_socket_within(&linux, 107),
+            Some(linux.join("%C"))
+        );
+        let mac_17 = default_dir("/Users", 17);
+        assert_eq!(
+            super::control_socket_within(&mac_17, 103),
+            Some(mac_17.join("%C"))
+        );
+        assert_eq!(
+            super::control_socket_within(&default_dir("/Users", 20), 103),
+            None
+        );
+
+        let deep = std::path::PathBuf::from(format!("/{}", "d".repeat(199)));
+        let args = super::ssh_base_args("user@host", &deep).unwrap();
+        assert!(args.contains(&"ControlMaster=no".to_string()), "{args:?}");
+        assert!(args.contains(&"ControlPath=none".to_string()), "{args:?}");
+        assert!(
+            !args.iter().any(|arg| arg == "ControlPersist=60"),
+            "{args:?}"
+        );
     }
 
     /// The remote argv, as ssh will hand it to the remote login shell:
@@ -288,7 +389,7 @@ mod tests {
         let hostile = "-oProxyCommand=touch /tmp/pwned";
         let args = super::ssh_stdio_args(
             hostile,
-            std::path::Path::new("/state/ssh-cm-%C"),
+            std::path::Path::new("/state"),
             "farhelm",
             Some("/remote/state"),
         )
@@ -324,7 +425,7 @@ mod tests {
     fn ssh_args_quote_the_remote_executable_for_the_remote_shell() {
         let args = super::ssh_stdio_args(
             "user@host",
-            std::path::Path::new("/state/ssh-cm-%C"),
+            std::path::Path::new("/state"),
             "/opt/far helm's/{a,b}/$bin",
             None,
         )
@@ -349,7 +450,7 @@ mod tests {
     fn ssh_args_quote_the_remote_state_dir_for_the_remote_shell() {
         let args = super::ssh_stdio_args(
             "user@host",
-            std::path::Path::new("/state/ssh-cm-%C"),
+            std::path::Path::new("/state"),
             "farhelm",
             Some("/home/u/my state/farhelm"),
         )
@@ -384,7 +485,7 @@ mod tests {
         use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
 
-        let non_utf8 = std::path::Path::new(OsStr::from_bytes(b"/home/u/\xffstate/ssh-cm-%C"));
+        let non_utf8 = std::path::Path::new(OsStr::from_bytes(b"/home/u/\xffstate"));
         let err = super::ssh_stdio_args("user@host", non_utf8, "farhelm", None).unwrap_err();
         let rendered = format!("{err:#}");
         assert!(
