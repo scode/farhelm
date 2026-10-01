@@ -193,6 +193,10 @@ background `sleep 3600` run with a background timeout longer than the sleep, who
 The point is that a user can leave one agent monitoring and add plans from other sessions whenever they like, without
 coordinating with it.
 
+"Check for plans", or similar, said to a monitoring agent (typically by interrupting it while it sleeps) means: do not
+wait for the next wake-up. Stop the pending sleep, drain now, and then resume the loop with a fresh one-hour sleep, so
+only one wake-up is ever pending.
+
 ## Reports: "show the plan reports"
 
 When a plan closes (complete or blocked), its final report goes to the user in chat exactly as a goal's final report
