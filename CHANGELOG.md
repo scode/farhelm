@@ -2,6 +2,28 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.21.0 - 2026-10-01
+
+### 💥 Breaking
+
+- This release *requires* you to update your remote hosts. (#1325)
+
+### 🚀 Added
+
+- Hovering a link a program printed in the terminal now warns you when the link's text is a web address that does not match where the link actually goes: the usual small display of the destination turns into a large red warning that shows the text next to the real destination. Text that is not a web address, such as a file name or "click here", keeps the usual display, and a difference of only a trailing slash does not count. A long web address that wraps onto a second line can show the warning even when it is honest, because only the hovered line's part of the text is compared. (#1326)
+
+### 🔄 Changed
+
+- Restart and Restart with now ask for confirmation only while the agent is working. An agent that is idle, waiting for your input, or whose status is unknown is stopped and restarted on the first click. Before, Restart asked whenever the agent was running at all, which made the question easy to click through without reading. For agents other than Claude Code and Codex, and for custom commands, Farhelm can only guess whether the agent is working from changes on its screen, so such an agent may be restarted without asking while it is busy but its screen is still. Replace still always asks. `farhelm agent restart` follows the same rule: it needs `--stop-if-running` only for an agent that is working. (#1325)
+- The host setting that lets YOLO sessions start without asking, called "allow YOLO launches on this host" in v0.20.1, now reads "start YOLO sessions here without asking", and the refusal message and the documentation use the same wording. It is still off by default, so Farhelm asks before each YOLO launch on a host until you turn it on. The matching command-line option of `farhelm agent create`, `farhelm agent clone`, and `farhelm spawn` is now `--confirm-yolo`; the old `--allow-yolo-on-sensitive-host` still works, so existing scripts keep working, but it no longer appears in the help. (#1323)
+
+### 🔧 Fixed
+
+- Renaming a host in its settings now always finishes even if the browser disconnects or the page reloads partway, as adding, changing, removing, and adopting a host already did. Before, the new name could be saved but not shown: every window kept showing the old name until some other change to a host. (#1319)
+- tmux commands typed in a session or terminal tab, such as `tmux new-window` or `tmux split-window`, now reach your own tmux, or report that none is running, as they would in a fresh SSH login. Before, they reached the tmux Farhelm runs every session inside, which is hidden from you, and nothing Farhelm did (Stop, Restart, Delete, closing the tab) cleaned up what they started there. If your shell's startup files start or attach to tmux when they are not already inside one, that now also happens in a new terminal tab, and in shells an agent starts for its own work, as it would in a terminal outside tmux. Sessions and tabs that are already open keep the old behavior until you restart or reopen them. (#1327)
+- On macOS, re-running the installer after an interrupted `farhelm uninstall` no longer refuses to rebuild `~/Applications/Farhelm.app` when the install folder has moved since, for example to a different `FARHELM_INSTALL_DIR`, a `~/.local/bin` replaced by a link, or a renamed home folder. It used to mistake the interrupted uninstall's leftovers for another installation's and tell you to finish "that installation's" uninstall, which was this one. `farhelm uninstall` itself still refuses to run after such a move until you re-run the installer from the new folder. (#1329)
+- `farhelm uninstall` now stops without removing anything, and says why, while an install or update of the same installation is running, while `farhelm helm setup` is changing Farhelm's services, when what it was about to remove changed after you confirmed, or, on macOS, while the Farhelm desktop app or another Farhelm helm or supervisor using the same data folder is running. Before, it could delete files an update had just installed, or remove a service that setup was rewriting. An install or update started while uninstall runs is now refused instead. Stopping your sessions before uninstalling is still up to you. (#1330)
+
 ## v0.20.1 - 2026-09-30
 
 ### 💥 Breaking
