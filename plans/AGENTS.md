@@ -184,7 +184,7 @@ stack while the plan ran. Reconcile as in step 1 before continuing.
 ## Draining: "drain the plans"
 
 Execute the next plan, then the next, until a round finds nothing eligible. Finish by reporting what was built, with PR
-links, and which plans are blocked on what.
+links, and which plans are blocked on what, writing every open question and blocking question as Reports requires.
 
 "Drain the plans and keep monitoring" adds a loop around that: when a drain finishes, wait until there may be new work,
 drain again, and keep going until the user says stop. The point is that a user can leave one agent monitoring and add
@@ -234,6 +234,20 @@ ever runs.
 When a plan closes (complete or blocked), its final report goes to the user in chat exactly as a goal's final report
 normally would, and a verbatim copy goes to `farhelm-plan-<slug>-report.md`, replacing any earlier copy. That copy is
 what lets the user review a stack of finished plans later, after the chat that produced them has scrolled away or ended.
+
+Every decision a report records and every question it puts to the user must be one the user can take a position on
+straight away, without asking what it means. Write each one for a reader who has not looked at the code, does not
+remember what a PR number stands for, and does not remember the review finding or triage decision behind it. In product
+terms, per root AGENTS.md "Talking to the user", state:
+
+- the feature or operation involved and the original problem: what went wrong for a user, under what trigger, and what
+  they saw or lost;
+- what the user decided about it during triage, if anything;
+- what the plan did, and what execution found that the decision did not anticipate;
+- the question itself, the realistic options with their tradeoffs, and a recommendation.
+
+A PR number may follow as a pointer, never in place of that context. This applies to the drain's closing report too
+(Draining), which restates any open questions it carries over from the plan reports in the same way.
 
 "Show the plan reports", "show me the final reports", or similar means: print the report of every plan in the plans log
 that still has an open PR on GitHub, without writing the plans log. Order them by where each plan's lowest open PR sits
