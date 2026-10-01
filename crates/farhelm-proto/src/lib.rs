@@ -175,7 +175,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered profile defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_33` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_34` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -186,7 +186,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 33;
+pub const PROTOCOL_VERSION: u32 = 34;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -565,9 +565,12 @@ impl Frame {
 /// - **Wrong is cosmetic, always.** SPEC.md fixes this: the waiting/idle
 ///   boundary is heuristic by contract, and nothing about interaction may
 ///   ever wait on a status. Typing into a mis-classified session works
-///   untouched. Consumers may render a status and may filter by one; none
-///   may gate a lifecycle decision on the difference between these three.
-///   The one question anybody is entitled to branch on is live-versus-
+///   untouched. Consumers may render a status and may filter by one; the
+///   only lifecycle decision allowed to depend on the difference between
+///   these three is whether Restart asks before stopping a live agent
+///   (asked only for `Running`; SPEC.md, Lifecycle operations), where a
+///   wrong reading costs at most a skipped or extra confirmation. Otherwise
+///   the one question anybody is entitled to branch on is live-versus-
 ///   ended, which is what every consumer's own liveness predicate answers.
 /// - **Replacement, not addition.** `Alive` is gone from the wire, so this
 ///   is a removal alongside three new tagged variants — the two cases
@@ -712,10 +715,11 @@ pub enum SessionStatus {
 }
 
 impl SessionStatus {
-    /// Whether the agent behind this session is still there — the ONE
-    /// question a consumer of this enum is entitled to branch behavior on
-    /// (see the type's own docs: the live statuses differ cosmetically, and
-    /// nothing about interaction may wait on which one it is).
+    /// Whether the agent behind this session is still there — the question
+    /// a consumer of this enum branches behavior on (see the type's own
+    /// docs: the live statuses differ cosmetically, nothing about
+    /// interaction may wait on which one it is, and the one exception is
+    /// whether Restart asks first).
     ///
     /// Exists because `PROTOCOL_VERSION` 10 turned "is this session live"
     /// from an equality against a single variant into a three-way question,
@@ -1478,21 +1482,17 @@ pub struct Profile {
 /// next to the round trip it buys back universally.
 ///
 /// The other half of item 9's "know before asking" requirement — whether
-/// to SHOW a confirm-stop dialog because the agent looks still running —
-/// needed no new field here either: it is exactly "is `status` one of the
-/// live variants", already answerable from this struct (as of
-/// `PROTOCOL_VERSION` 10 that is a three-variant question rather than an
-/// equality against `Alive` — see [`SessionStatus`]'s live split, and note
-/// that a consumer asking it by equality against ONE live variant is
-/// exactly the silent wrong answer that split introduced). That is
-/// deliberately
+/// to SHOW a confirm-stop dialog because the agent looks busy — needed no
+/// new field here either: since protocol 34 it is exactly "is `status`
+/// [`SessionStatus::Running`]" (the agent is working), already answerable
+/// from this struct. That is deliberately
 /// only ever a UI-flow HINT, never an authorization, precisely because
 /// this same `SessionInfo` can go stale between being cached and a
 /// `RestartSession` actually being sent: the AUTHORIZATION to stop a
-/// session that turns out to be live at handling time is a separate,
+/// session that turns out to be working at handling time is a separate,
 /// explicit field on the request itself
 /// (`ControlMsg::RestartSession::stop_if_running`) that the supervisor
-/// checks against liveness it rechecks at that moment — see that field's
+/// checks against the liveness and activity it reads at that moment — see that field's
 /// docs for why deriving consent from a client-cached status would be a
 /// TOCTOU bug, not just a redundant one.
 ///
@@ -1840,8 +1840,10 @@ pub enum AgentVerb {
         /// The restart behavior the caller chose from discovery. The target
         /// revalidates it rather than trusting a cached offer.
         mode: RestartMode,
-        /// Permission to stop a target found live at handling time. False
-        /// is a refusal for a live target, not a request to wait or retry.
+        /// Permission to stop a target found working at handling time. False
+        /// is a refusal for a working target, not a request to wait or
+        /// retry; a live target that is idle, waiting, or unknown is
+        /// stopped without it (protocol 34).
         stop_if_running: bool,
     },
     /// Resolve a spawn-only profile name against the helm catalog. The
@@ -2795,19 +2797,23 @@ pub enum ControlMsg {
     /// sent.
     ///
     /// Deciding whether to SHOW a confirm-stop dialog is client-side UI
-    /// flow, derived from whether `status` is one of [`SessionStatus`]'s
-    /// live variants on whatever `SessionInfo` the client last saw (a
-    /// three-way question since version 10's live split, never an equality
-    /// against a single variant). But that derivation is only a
+    /// flow, derived from whether `status` is [`SessionStatus::Running`]
+    /// (the agent is working) on whatever `SessionInfo` the client last
+    /// saw. Since protocol 34 that is also the only status the supervisor
+    /// demands consent for: a live agent reading idle, waiting, or unknown
+    /// is stopped without it (SPEC.md, Lifecycle operations). The bump is
+    /// what keeps a client that no longer asks for idle agents from
+    /// meeting an older supervisor that would refuse it with no way to
+    /// consent. But that derivation is only a
     /// hint, not an authorization: it can be stale by the time this
     /// message actually arrives (another client's action, or the agent
     /// exiting or relaunching in the interim), so `stop_if_running`
     /// carries the user's actual consent onto the wire, and the handler
-    /// rechecks REAL liveness before honoring it — see that field's own
-    /// docs for the full rationale. A client only sets it after the user
-    /// has confirmed; the field is what lets the supervisor tell "the
-    /// user agreed to stop a live agent" apart from "the client
-    /// forgot to ask."
+    /// rechecks liveness and the agent's activity before deciding whether
+    /// it is needed — see that field's own docs for the full rationale. A
+    /// client only sets it after the user has confirmed; the field is what
+    /// lets the supervisor tell "the user agreed to stop a working agent"
+    /// apart from "the client forgot to ask."
     ///
     /// ## Offer/mode staleness contract
     ///
@@ -2831,28 +2837,30 @@ pub enum ControlMsg {
     /// agent when this request carries consent, reaps the prior run's
     /// descendants, relaunches into the session's own terminal when it
     /// survived, and replies `SessionRestarted`. Every refusal it can
-    /// make — a stale mode, a live agent without consent, a vanished or
+    /// make — a stale mode, a working agent without consent, a vanished or
     /// repointed working directory — leaves the session untouched.
     RestartSession {
         req_id: u64,
         session_id: String,
         mode: RestartMode,
-        /// Explicit consent to stop a still-running agent before
-        /// relaunching (`#[serde(default)]` false — the safe direction:
-        /// an old-shaped or naive request never kills a live process by
-        /// accident). SPEC.md requires restart on a running agent to
-        /// confirm before it stops it, and that confirmation has to be
+        /// Explicit consent to stop a working agent before relaunching
+        /// (`#[serde(default)]` false — the safe direction: an old-shaped
+        /// or naive request never kills a working process by accident).
+        /// SPEC.md requires restart on a working agent to confirm before it
+        /// stops it, and that confirmation has to be
         /// something the SUPERVISOR checks, not something the client
         /// merely promises: a client's `SessionInfo.status` is a
         /// snapshot from its last list or its own cached copy, and the
         /// agent can transition between "the user was shown a confirm
         /// dialog" and "the request actually arrives" (another client's
         /// action, the agent exiting or being launched in the interim).
-        /// The handler (PLAN_M3.md item 9, not this PR) atomically
-        /// rechecks REAL liveness at handling time and rejects with
-        /// `Conflict` if the session is live and this flag is false —
-        /// client-derived status is a UI hint that decides whether to
-        /// SHOW a confirm dialog, never the authorization to skip it.
+        /// The handler rechecks liveness and reads the agent's activity at
+        /// handling time and rejects with `Conflict` if the agent is live,
+        /// reads working, and this flag is false; an idle, waiting, or
+        /// unknown agent, or a row with no terminal to probe, is stopped
+        /// without it (protocol 34). Client-derived status is a UI hint
+        /// that decides whether to SHOW a confirm dialog, never the
+        /// authorization to skip it.
         #[serde(default)]
         stop_if_running: bool,
         /// Compiled structured launch overrides for restart-with. Invocation
@@ -4579,8 +4587,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_33() {
-        assert_eq!(PROTOCOL_VERSION, 33);
+    fn protocol_version_is_pinned_at_34() {
+        assert_eq!(PROTOCOL_VERSION, 34);
     }
 
     /// Pins the skew direction the detach-code bump exists to create, in
@@ -4644,7 +4652,7 @@ mod tests {
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
         assert_eq!(skew.peer_protocol, 30);
-        assert_eq!(skew.our_protocol, 33);
+        assert_eq!(skew.our_protocol, 34);
 
         // The reverse direction: a v30 receiver (the refusal rule itself,
         // modeled by its exact-version check) meets a v31 hello and hangs up.

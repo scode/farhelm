@@ -490,16 +490,19 @@ async fn restarting_a_live_session_stops_its_tree_and_reuses_the_terminal() {
 }
 
 /// The other half of the confirm contract: without `stop_if_running`, a
-/// restart against an agent the supervisor finds ALIVE is refused with
-/// `Conflict` and kills nothing at all.
+/// restart against an agent the supervisor finds WORKING is refused with
+/// `Conflict` and kills nothing at all. This harness runs no activity
+/// sampler, so a freshly launched agent reads working for the whole test;
+/// the idle and waiting cases, which restart without consent, are covered
+/// by the supervisor's own unit test, where the reading can be set.
 ///
 /// This is the TOCTOU guard, not a redundancy: a client's cached status can
-/// say "exited" while the agent is running (another client relaunched it,
-/// or the status was simply stale), and the flag is what tells the
-/// supervisor "the user was actually asked". So the assertion that matters
+/// say "idle" or "exited" while the agent is working (another client
+/// relaunched it, or the status was simply stale), and the flag is what
+/// tells the supervisor "the user was actually asked". So the assertion that matters
 /// is the process still being alive afterwards, not just the error.
 #[farhelm_testtrace::test]
-async fn restarting_a_live_session_without_consent_is_refused_and_kills_nothing() {
+async fn restarting_a_working_session_without_consent_is_refused_and_kills_nothing() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
     let session = h
@@ -529,13 +532,13 @@ async fn restarting_a_live_session_without_consent_is_refused_and_kills_nothing(
         .client
         .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
         .await
-        .expect_err("a live agent may not be restarted without consent to stop it");
+        .expect_err("a working agent may not be restarted without consent to stop it");
     let err = err
         .downcast_ref::<SupervisorError>()
         .expect("a refusal carries the supervisor's own classification");
     assert_eq!(err.kind, ErrorKind::Conflict);
     assert!(
-        err.message.contains("still running"),
+        err.message.contains("is working"),
         "the refusal must say why, so a client can ask the user: {}",
         err.message
     );

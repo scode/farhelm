@@ -2211,9 +2211,10 @@ pub(crate) async fn fetch_session(base: &str, id: &str) -> Result<Option<Session
 /// 409, which is the staleness case the caller handles by refreshing the
 /// session rather than retrying (see `session_view::SessionView`).
 ///
-/// `stop_if_running` carries the user's explicit consent to stop a live
-/// agent first; the caller only sets it after the inline confirmation, and
-/// the supervisor rechecks real liveness before honoring it. Same
+/// `stop_if_running` carries the user's explicit consent to stop a working
+/// agent first; Restart sets it only after its inline confirmation, Restart
+/// with when the agent read working at submit, and the supervisor rechecks
+/// liveness and the agent's status before honoring its absence. Same
 /// error-surfacing shape as `stop_session` above, including the
 /// body-read-failure context.
 ///

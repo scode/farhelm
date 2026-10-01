@@ -108,9 +108,11 @@ fn render(agent: &Command) -> String {
          Restart requires --mode matching the discovered offer. The restart_offer field of\n\
          sessions --json spells it resume, fallback_template, or fresh_only; the table and\n\
          --mode spell the same three resume, fallback-template, and fresh. Prefer resume;\n\
-         never downgrade after a refusal. Use --stop-if-running only with deliberate\n\
-         permission to stop the target. Restart uses its stored configuration; you cannot\n\
-         supply another command. Self-restart can lose its acknowledgement.\n\
+         never downgrade after a refusal. Restart stops an idle, waiting, or unknown-status\n\
+         target's agent without asking; a working one is refused unless you pass\n\
+         --stop-if-running. Use --stop-if-running only with deliberate permission to stop\n\
+         the target. Restart uses its stored configuration; you cannot supply another\n\
+         command. Self-restart can lose its acknowledgement.\n\
          \n\
          Create requires a host, cwd, and exactly one profile name, profile id, or invocation.\n\
          Clone requires an exact source session id and destination host; cwd, title, and the\n\

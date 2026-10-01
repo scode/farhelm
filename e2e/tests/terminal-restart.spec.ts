@@ -11,7 +11,7 @@
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { hideSeenState, localHostId, openRowMenu, SESSION_LISTING } from "./helpers/fleet";
-import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
+import { cleanupSession, fillCreateForm, restartIdleAgent, termText, waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
   FAKE_AGENT_INVOCATION,
@@ -522,9 +522,9 @@ test("restart from the interrupted surface sends the resume request exactly once
   expect(counter.restartRequests).toBe(1);
 });
 
-// A live agent is the one case SPEC.md requires a confirmation for
-// ("Restart on a session whose agent is still running confirms, stops the
-// agent, then relaunches"), and the confirmation is in-page for the same
+// A working agent is the one case SPEC.md requires a confirmation for
+// ("Restart on a session whose agent is working (its status reads working)
+// confirms, stops the agent, then relaunches"), and the confirmation is in-page for the same
 // reason delete's is: wry ships no native JS dialogs on macOS's WKWebView,
 // where a `window.confirm()` would silently do nothing at all.
 //
@@ -631,7 +631,7 @@ test("restart-keeps-a-badge-on-screen-throughout", async ({ page, request }) => 
   }
 });
 
-test("restarting a live session confirms first, and only then sends the request with consent", async ({
+test("restarting a working agent confirms first, and only then sends the request with consent", async ({
   page,
   request,
 }) => {
@@ -664,6 +664,12 @@ test("restarting a live session confirms first, and only then sends the request 
     await page.keyboard.type("spam 60");
     await page.keyboard.press("Enter");
     await waitForTermText(page, "spam-line-60");
+    // Restart asks only while the agent is working, and a quiet fixture
+    // agent reads idle after a few samples; `busy` keeps its screen
+    // changing for the rest of the test so the status stays working.
+    await page.keyboard.type("busy");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "busy-tick-");
 
     // Wait until the view's own status-derived decision says this click
     // will confirm rather than restart outright (`data-confirms`, set from
@@ -732,6 +738,49 @@ test("restarting a live session confirms first, and only then sends the request 
   }
 });
 
+// The other half of Restart's confirmation rule (SPEC.md, Lifecycle
+// operations): an agent that reads idle restarts on the first click, with no
+// prompt and without `stop_if_running`, and the supervisor accepts that
+// because its own reading agrees. Asking on every live agent is what the rule
+// removed: a prompt shown that often gets clicked through unread. The
+// supervisor's reply is the oracle that the unconfirmed request was accepted
+// rather than refused as touching a working agent.
+test("restarting an idle agent restarts at once, without asking", async ({ page, request }) => {
+  const title = `restart-idle-${Date.now()}`;
+  const bodies: any[] = [];
+  await page.route("**/api/sessions/*/restart", async (route) => {
+    bodies.push(route.request().postDataJSON());
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
+    await waitForTermText(page, "FAKE-AGENT READY");
+
+    const replied = page.waitForResponse((response) =>
+      response.url().endsWith("/restart") && response.request().method() === "POST"
+    );
+    await restartIdleAgent(page);
+    const reply = await replied;
+    expect(reply.ok(), `the unconfirmed restart of an idle agent: ${await reply.text()}`).toBe(true);
+    await expect(page.locator(".restart-confirm")).toHaveCount(0);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].stop_if_running).toBe(false);
+  } finally {
+    const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+    if (id) {
+      await cleanupSession(request, id);
+    }
+  }
+});
+
 // SPEC.md: "Restart reuses the session's terminal when it still exists —
 // whatever scrollback the terminal itself retained is still there" — and,
 // in the same paragraph, restart "does NOT preserve the previous run's
@@ -786,12 +835,7 @@ test("a restarted session's terminal still shows the previous run's scrollback a
     await page.keyboard.press("Enter");
     await waitForTermText(page, "echo:GRID-ONLY-MARKER");
 
-    const restartButton = page.locator(".restart-primary");
-    await expect(restartButton).toHaveAttribute("data-confirms", "true", {
-      timeout: 15_000,
-    });
-    await restartButton.click();
-    await page.locator(".restart-confirm").click();
+    await restartIdleAgent(page, { afterInput: true });
 
     // Three facts at once, and in order: the prior run's typed marker came
     // back out of retained scrollback, the new run's banner is BELOW it,
@@ -869,12 +913,7 @@ test("a restart whose response is lost still recovers the terminal", async ({
     await page.keyboard.press("Enter");
     await waitForTermText(page, "spam-line-60");
 
-    const restartButton = page.locator(".restart-primary");
-    await expect(restartButton).toHaveAttribute("data-confirms", "true", {
-      timeout: 15_000,
-    });
-    await restartButton.click();
-    await page.locator(".restart-confirm").click();
+    await restartIdleAgent(page, { afterInput: true });
 
     // The failure is surfaced rather than swallowed — the user is owed
     // that much when their action's outcome is genuinely unknown to the
@@ -993,12 +1032,7 @@ test("a restarted session's banner clears once the new attachment is live", asyn
 
     await page.evaluate(() => (window as any).__armBannerLog());
 
-    const restartButton = page.locator(".restart-primary");
-    await expect(restartButton).toHaveAttribute("data-confirms", "true", {
-      timeout: 15_000,
-    });
-    await restartButton.click();
-    await page.locator(".restart-confirm").click();
+    await restartIdleAgent(page, { afterInput: true });
 
     // The banner's appearance is read from the observer's recorded
     // history (see the doc comment above for why a locator poll cannot

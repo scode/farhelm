@@ -494,10 +494,11 @@ fn replace_consequence_for_agent(status: &SessionStatus) -> &'static str {
 /// restart does not keep. A host reboot (`Interrupted`) and a launch that
 /// never started (`Error`) leave nothing behind.
 ///
-/// The prompt opens for `Unknown` on purpose (a reloaded live pane can read
-/// as `Unknown` until its sampler catches up, and an unconfirmed restart of
-/// a live agent is refused), so saying "still running" there would state as
-/// fact what the UI does not know, right before a process-tree kill.
+/// The prompt opens only while the agent reads working (`Running`); the
+/// other arms are reached when the status changes while the prompt is
+/// open. `Unknown` keeps its own hedged wording for that case, since saying
+/// "still running" there would state as fact what the UI does not know,
+/// right before a process-tree kill.
 pub(crate) fn restart_consequence(status: &SessionStatus) -> &'static str {
     match status {
         SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
@@ -860,9 +861,10 @@ mod tests {
 
     /// The restart prompt claims a running agent only for a live status.
     ///
-    /// Why it matters: the header asks before restarting an `Unknown`
-    /// session too, and its fixed "still running" sentence stated as fact
-    /// what the UI did not know, right before a process-tree kill. Spec:
+    /// Why it matters: the prompt can stay open while the status changes
+    /// (to `Unknown`, say), and a fixed "still running" sentence would then
+    /// state as fact what the UI did not know, right before a process-tree
+    /// kill. Spec:
     /// live statuses say the agent is stopped first; `Unknown` admits it may
     /// be running; ended statuses (a prompt left open across a status change)
     /// never claim a running agent, and only `Interrupted` and `Error`, which

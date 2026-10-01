@@ -2717,7 +2717,7 @@ fn same_launch_entry(
 /// terminal. An ambiguous failure of a relaunch that had to build a fresh
 /// tmux session may have left a live agent in a NEW pane this code never
 /// learned, while the prior pane is gone: naming it would make opening the
-/// session target nothing, and make a later Restart read the stale pane as
+/// session target nothing, and make a later Delete read the stale pane as
 /// gone and skip its "still running" confirmation, reaping the new agent
 /// unasked. No terminal instead puts the entry under the existing
 /// terminal-less guard (`terminal_less_launch_may_be_live`) until a reload
@@ -4341,25 +4341,21 @@ pub(crate) fn unknown_pane_owner_refusal(pane: &str, owner: &str, expected: &str
     )
 }
 
-/// Whether a restart must treat an entry with no recorded terminal as a
-/// possibly-live agent that needs the user's stop consent.
+/// Whether an entry with no recorded terminal may still have a live agent,
+/// which an unconfirmed delete must not kill.
 ///
 /// Only an unconfirmed launch qualifies. A `Launching` row without a terminal
 /// is chiefly an ambiguous create: tmux reported an error, but the session (and
 /// the agent in it) may exist anyway, and nothing recorded a pane to probe.
-/// Restarting that row without consent would run the marker-keyed reap over a
-/// possibly-live agent, killing it and its unsaved work unasked. The UI reports
-/// this state as `Unknown` and already asks before restarting it
-/// (`restart_needs_confirmation` in the UI crate), so demanding consent here
-/// changes nothing for it; it closes the path for the agent CLI and any other
-/// client that skips the prompt.
+/// Deleting that row unasked could kill the agent and its unsaved work, so
+/// delete treats it as alive. Restart used to demand consent for it too; it
+/// no longer does, because the row reads unknown and an unknown-status agent
+/// restarts without asking (SPEC.md, Lifecycle operations).
 ///
-/// Every other terminal-less row keeps the no-consent restart. The common way
-/// to lose a terminal is a reboot or a tmux server that died under a restarted
+/// Every other terminal-less row is not alive. The common way to lose a
+/// terminal is a reboot or a tmux server that died under a restarted
 /// supervisor: reload publishes those rows as `Interrupted` or `Exited` with no
-/// terminal, nothing of theirs is running, and SPEC.md's restart flow for an
-/// ended session asks nothing. Demanding consent for all terminal-less rows
-/// would wedge exactly that flow.
+/// terminal, and nothing of theirs is running.
 fn terminal_less_launch_may_be_live(entry: &SessionEntry) -> bool {
     entry.terminal.is_none()
         && matches!(
@@ -9800,15 +9796,16 @@ impl Supervisor {
     ///   RESOLVED path is then what the relaunch is aimed at, rather than
     ///   the session's own spelling of it — otherwise the same link could
     ///   simply be repointed again between this check and the tmux call.
-    /// - **A still-running agent without explicit consent.** Liveness is
-    ///   RE-probed through the pane here; the client's `status` is only ever
-    ///   a hint about whether to show a confirm dialog, never the
-    ///   authorization to skip it (see `stop_if_running`'s wire docs). A
-    ///   launch never confirmed is treated as possibly-alive for exactly this
-    ///   reason: the pane, not the reported status, is what answers, and
-    ///   when there is no terminal to ask, consent is required anyway
-    ///   ([`terminal_less_launch_may_be_live`] says which rows that covers
-    ///   and why a rebooted or tmux-orphaned row is not one of them).
+    /// - **A working agent without explicit consent.** Liveness is
+    ///   RE-probed through the pane here and the activity reading taken
+    ///   now; the client's `status` is only ever a hint about whether to
+    ///   show a confirm dialog, never the authorization to skip it (see
+    ///   `stop_if_running`'s wire docs). Only a live agent reading working
+    ///   needs consent (SPEC.md, Lifecycle operations). A run not yet
+    ///   sampled reads working, so a restart right after a launch asks:
+    ///   an agent that has just started is usually busy starting. A row
+    ///   with no terminal to probe, including an ambiguous create, reads
+    ///   unknown and restarts without consent.
     ///
     /// ## What it does, in order
     ///
@@ -10114,25 +10111,29 @@ impl Supervisor {
                 RequestError::new(ErrorKind::Internal, format!("not restarting: {error:#}"))
             })?,
         };
-        // No pane to probe is not proof of no agent. With consent, the
-        // else-branch below reaps whatever carries this session's marker;
-        // without it, refuse rather than kill an agent nobody agreed to stop.
-        if alive_pane.is_none() && !stop_if_running && terminal_less_launch_may_be_live(&entry) {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "this session's launch was never confirmed and it has no known terminal, so its \
-                 agent may still be running; restarting it stops the agent and its whole process \
-                 tree first, so confirm stopping it and send the restart again with that consent",
-            )
-            .into());
-        }
+        // No pane to probe is not proof of no agent: an ambiguous create
+        // (`terminal_less_launch_may_be_live`) may have left one running.
+        // Restart no longer asks about it, though. Its status reads unknown,
+        // and an unknown-status agent restarts without consent (SPEC.md,
+        // Lifecycle operations), so the else-branch below reaps whatever
+        // carries this session's marker either way. Delete still treats
+        // that row as possibly alive; see `still_alive_for_delete`.
         if alive_pane.is_some() {
-            if !stop_if_running {
+            // Consent is asked for only while the agent is working (SPEC.md,
+            // Lifecycle operations): an idle agent, one waiting for input,
+            // or one whose status is unknown restarts without it. Asking on
+            // every live agent taught people to click through the prompt.
+            // The reading is this supervisor's own, taken now, so a client
+            // whose cached status said idle while the agent started working
+            // is refused here and can ask the user then. Harnesses with weak
+            // activity detection may restart a busy agent unasked; that is
+            // the accepted cost of not asking every time.
+            if !stop_if_running && super::status::live_status(&entry) == SessionStatus::Running {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
-                    "this session's agent is still running; restarting it stops the agent and \
-                     its whole process tree first, so confirm stopping it and send the restart \
-                     again with that consent",
+                    "this session's agent is working; restarting it stops the agent and its \
+                     whole process tree first, so confirm stopping it and send the restart again \
+                     with that consent",
                 )
                 .into());
             }
@@ -11491,10 +11492,11 @@ impl Supervisor {
     /// What of this session is still alive right now, phrased as the reason
     /// an unconfirmed delete refuses, or `None` when nothing is.
     ///
-    /// Serves `ControlMsg::DeleteSession::only_if_nothing_alive`, and uses
-    /// the same notion of a live agent a restart without consent refuses on:
-    /// a live pane owned by this session, or a launch not yet confirmed that
-    /// has no terminal to probe. Any open terminal tab counts too, because a
+    /// Serves `ControlMsg::DeleteSession::only_if_nothing_alive`. A live
+    /// agent here is a live pane owned by this session, or a launch not yet
+    /// confirmed that has no terminal to probe; unlike Restart, which asks
+    /// only about a working agent, an unconfirmed delete refuses on any of
+    /// them. Any open terminal tab counts too, because a
     /// delete closes tabs and whatever runs in them. Every "cannot tell"
     /// answers alive (a pane held by an unrecognized tmux session) or fails
     /// (a tmux query error): the question exists to avoid killing something
@@ -15091,14 +15093,15 @@ pub(crate) mod tests {
         assert!(error.to_string().contains("invocation and launch together"));
     }
 
-    /// Which terminal-less rows a restart treats as possibly live.
+    /// Which terminal-less rows an unconfirmed delete treats as possibly
+    /// live (`still_alive_for_delete`; Restart no longer consults this).
     ///
-    /// Only an unconfirmed launch demands consent. A rebooted (`Interrupted`)
-    /// or tmux-orphaned (`Exited`) row also reloads with no terminal, and the
-    /// UI restarts those without asking; if this predicate widened to them,
-    /// the ordinary post-reboot restart would come back "still running". A
-    /// row that still has a terminal is never answered here: its pane is
-    /// probed instead.
+    /// Only an unconfirmed launch qualifies. A rebooted (`Interrupted`) or
+    /// tmux-orphaned (`Exited`) row also reloads with no terminal, and
+    /// nothing of it is running; if this predicate widened to them, an
+    /// ordinary post-reboot delete would come back "still running". A row
+    /// that still has a terminal is never answered here: its pane is probed
+    /// instead.
     #[farhelm_testtrace::test]
     fn only_an_unconfirmed_terminal_less_launch_may_be_live() {
         assert!(terminal_less_launch_may_be_live(&entry_with(
@@ -15119,7 +15122,7 @@ pub(crate) mod tests {
         ] {
             assert!(
                 !terminal_less_launch_may_be_live(&entry_with(None, settled.clone())),
-                "{settled:?} without a terminal must keep the no-consent restart"
+                "{settled:?} without a terminal must not count as possibly live"
             );
         }
         let terminal = Terminal {
@@ -15132,17 +15135,18 @@ pub(crate) mod tests {
         )));
     }
 
-    /// An ambiguous create must not be restarted over a possibly-live agent
-    /// without consent.
+    /// An ambiguous create restarts without consent.
     ///
-    /// When tmux errors on create but the session may exist anyway, the row is
-    /// left `Launching` with no terminal. Before this refusal, restart found no
-    /// pane to probe, read that as "not running", and ran the marker-keyed
-    /// reap, which kills a live agent carrying this session's marker. The
-    /// refusal must come back as the same `Conflict` a live pane gets, before
-    /// any reap runs, so the agent CLI's `--stop-if-running` contract holds.
+    /// When tmux errors on create but the session may exist anyway, the row
+    /// is left `Launching` with no terminal and reads unknown. Restart used
+    /// to demand stop consent for that row, and once the GUI stopped asking
+    /// for unknown-status agents that made it impossible to restart from the
+    /// GUI at all: every click was refused, with no way to consent. Specified
+    /// (SPEC.md, Lifecycle operations): an unknown-status agent restarts
+    /// without consent, and this row is one, so the unconfirmed restart
+    /// succeeds and records a terminal.
     #[farhelm_testtrace::test]
-    async fn restart_refuses_an_unconfirmed_terminal_less_launch_without_consent() {
+    async fn an_ambiguous_create_restarts_without_consent() {
         let state = StateDir::new();
         let cwd = tempfile::tempdir().expect("session cwd");
         let canonical = std::fs::canonicalize(cwd.path())
@@ -15192,19 +15196,30 @@ pub(crate) mod tests {
         entry.info.id = id.to_string();
         entry.info.cwd = canonical.clone();
         entry.canonical_cwd = Some(canonical);
+        // Such a row lists as unknown (`status::session_status`'s
+        // `(Launching, no terminal)` arm), which is why Restart asks nothing.
+        assert!(
+            terminal_less_launch_may_be_live(&entry),
+            "fixture premise: an unconfirmed launch with no terminal"
+        );
         sup.sessions
             .lock()
             .await
             .insert(id.to_string(), Arc::new(entry));
 
-        let error = sup
-            .restart_session(id, RestartMode::Fresh, false, None, None, None)
+        sup.restart_session(id, RestartMode::Fresh, false, None, None, None)
             .await
-            .expect_err("an unconfirmed launch with no terminal needs stop consent");
-        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+            .expect("an unknown-status row restarts without stop consent");
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(id)
+            .cloned()
+            .expect("session entry");
         assert!(
-            error.to_string().contains("may still be running"),
-            "the refusal must say why consent is needed: {error:#}"
+            entry.terminal.is_some(),
+            "the relaunch records the terminal the ambiguous create never did"
         );
     }
 
@@ -17127,6 +17142,97 @@ pub(crate) mod tests {
             alive.as_deref(),
             Some("this session has 1 terminal tab open")
         );
+    }
+
+    /// Restart without consent is refused only while the agent is working.
+    ///
+    /// Why: asking on every live agent taught people to click through the
+    /// confirmation, so the GUI now asks only when the status reads working,
+    /// and the supervisor must apply the same rule from its own reading or
+    /// an idle agent's unconfirmed restart would still be refused (SPEC.md,
+    /// Lifecycle operations). Specified: with the agent working, an
+    /// unconfirmed restart is a `Conflict` and the agent keeps running; with
+    /// the same agent idle or waiting, the unconfirmed restart stops it and
+    /// relaunches. The reading is set directly because this fixture runs no
+    /// activity sampler: a new launch reads working until sampled, which is
+    /// also the premise asserted first.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn unconfirmed_restart_is_refused_only_while_the_agent_is_working() {
+        use crate::agent_kind::screen_reader::ScreenState;
+        for quiet in [ScreenState::Idle, ScreenState::Waiting] {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .expect("supervisor");
+            let created = sup
+                .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
+                .await
+                .expect("agent session");
+            let entry = sup
+                .sessions
+                .lock()
+                .await
+                .get(&created.id)
+                .cloned()
+                .expect("session entry");
+            let agent = entry.terminal.clone().expect("agent terminal");
+            let live_pid = || async {
+                match sup
+                    .tmux
+                    .pane_process(&agent.tmux_name, &agent.pane)
+                    .await
+                    .expect("agent process probe")
+                {
+                    PaneProbe::Owned(process) if !process.dead => Some(process.pid),
+                    _ => None,
+                }
+            };
+            let before = live_pid()
+                .await
+                .expect("fixture premise: the agent is alive");
+            assert_eq!(
+                crate::service::status::live_status(&entry),
+                SessionStatus::Running,
+                "fixture premise: an unsampled new launch reads working"
+            );
+
+            let error = sup
+                .restart_session(&created.id, RestartMode::Fresh, false, None, None, None)
+                .await
+                .expect_err("a working agent needs stop consent");
+            assert_eq!(error_kind(&error), ErrorKind::Conflict);
+            assert!(format!("{error:#}").contains("is working"), "{error:#}");
+            assert_eq!(
+                live_pid().await,
+                Some(before),
+                "a refused restart leaves the working agent running"
+            );
+
+            entry
+                .run
+                .activity
+                .lock()
+                .expect("activity mutex")
+                .reading
+                .state = quiet;
+            assert_ne!(
+                crate::service::status::live_status(&entry),
+                SessionStatus::Running,
+                "fixture premise: the agent no longer reads working"
+            );
+            sup.restart_session(&created.id, RestartMode::Fresh, false, None, None, None)
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("an agent reading {quiet:?} restarts without consent: {error:#}")
+                });
+            let after = live_pid()
+                .await
+                .unwrap_or_else(|| panic!("the {quiet:?} agent's relaunch is alive"));
+            assert_ne!(
+                after, before,
+                "the {quiet:?} agent was stopped and relaunched"
+            );
+        }
     }
 
     /// A dead agent pane must be replaced inside its surviving tmux session.

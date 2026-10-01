@@ -2655,7 +2655,7 @@ pub(crate) struct RestartReq {
 ///
 /// The restart fields pass through unchanged, including the refusals that
 /// carry this endpoint's real contract: a `mode` that no longer matches the
-/// session's offer and a live agent without `stop_if_running` both come back
+/// session's offer and a working agent without `stop_if_running` both come back
 /// as 409s through `http_error`, and a vanished working directory as a 400
 /// naming the directory. Before that call the helm snapshots its profile
 /// identity index, so enriching a successful reply is infallible after the

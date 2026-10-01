@@ -2888,10 +2888,11 @@ impl SupervisorClient {
     /// `ControlMsg::RestartSession`'s staleness contract).
     ///
     /// `stop_if_running` carries the user's explicit consent to stop a
-    /// still-running agent first. Without it, a restart against an agent
-    /// the supervisor finds alive is refused with the same `Conflict`
-    /// shape, which is what keeps a stale client-side "it looked exited"
-    /// from silently killing a live process.
+    /// working agent first. Without it, a restart against an agent the
+    /// supervisor finds working is refused with the same `Conflict` shape,
+    /// which is what keeps a stale client-side "it looked idle" from
+    /// silently killing an agent in the middle of its work; an idle,
+    /// waiting, or unknown agent is stopped without it (protocol 34).
     pub async fn restart_session(
         &self,
         id: &str,
