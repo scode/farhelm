@@ -1,8 +1,8 @@
 # plans/ rules
 
 This directory holds one plan per unit of planned work, plus an index. A plan is a goal file written by the
-`scode-build-goal` skill for one TODO.md entry, so executing a plan means running it the way `/goal` would. `INDEX.md`
-is the authoritative order in which plans are executed.
+`scode-build-goal` skill, for one TODO.md entry or for a batch of triaged review feedback outcomes, so executing a plan
+means running it the way `/goal` would. `INDEX.md` is the authoritative order in which plans are executed.
 
 NOTE: A plan is not a design document or a spec. It is the instructions for an unattended run that builds the work as a
 linear stack of PRs. SPEC.md and SPEC_impl.md stay authoritative over anything a plan says.
@@ -17,14 +17,21 @@ linear stack of PRs. SPEC.md and SPEC_impl.md stay authoritative over anything a
   number or a date. The directory is dedicated to this project, so the slug has no project prefix. Every `.md` file here
   other than `AGENTS.md`, `CLAUDE.md`, and `INDEX.md` is a plan.
 
-Every pending plan corresponds to a TODO.md entry, and that entry references its plan with a trailing
-``Plan: `plans/<slug>.md`.`` sentence. Having a plan does not move an entry between TODO.md buckets; in particular it
-has nothing to do with the `Planned` bucket, which means something else (see TODO.md's own header).
+Every pending plan has a source that references it, so nobody plans or executes the same work twice:
 
-The plan's final PR marks its `INDEX.md` line `[executed]` and removes the TODO entry, in the same PR. It does not
-delete the plan file: the agent executing the plan still reads that file as its goal while the final PR is reviewed and
-fixed, and after a crash or compaction. An `[executed]` line on main therefore means the plan's work has landed.
-Executed plans stay until the user asks to delete them (see Cleanup).
+- A TODO plan corresponds to a TODO.md entry, and that entry references its plan with a trailing
+  ``Plan: `plans/<slug>.md`.`` sentence.
+- A triage plan corresponds to a batch of decided entries in root `TRIAGE_OUTCOMES.md`, and each of those entries'
+  Execution field reads `` planned in `plans/<slug>.md` `` until its own PR records the execution.
+
+Having a plan does not move an entry between TODO.md buckets; in particular it has nothing to do with the `Planned`
+bucket, which means something else (see TODO.md's own header).
+
+The plan's final PR marks its `INDEX.md` line `[executed]`. For a TODO plan, the same PR removes the TODO entry; for a
+triage plan, the final outcome's own PR carries the marker, since triage execution allows no separate bookkeeping PR. It
+does not delete the plan file: the agent executing the plan still reads that file as its goal while the final PR is
+reviewed and fixed, and after a crash or compaction. An `[executed]` line on main therefore means the plan's work has
+landed. Executed plans stay until the user asks to delete them (see Cleanup).
 
 ### Files outside the repository
 
@@ -70,7 +77,7 @@ these overrides on top of the skill's own rules:
   plan builds. PRs already in the plan stack, from earlier plans or from an earlier run of this plan that blocked, are
   the base and are not rewritten.
 - The done criterion adds that the plan's final PR marks its `INDEX.md` line `[executed]` and removes the TODO entries
-  it covers. The plan file itself stays.
+  it covers (for a triage plan, see Planning triage outcomes below). The plan file itself stays.
 - If the plan depends on another plan being built first, the goal file says which, and so does its `INDEX.md` line.
 
 New plans go at the end of `INDEX.md` unless the user places them elsewhere.
@@ -80,6 +87,27 @@ latest `main@origin` and never on top of a plan stack: the plan files, their `IN
 references, all together. Validate with `dprint check` on the changed files. Ask the user to approve, and merge per
 `jjstack` once they do. A plan that only lives in a working copy does not exist as far as an executor is concerned,
 because executors only read plans from main.
+
+## Planning triage outcomes: "use the planning system to schedule these"
+
+Executing triage outcomes normally does not involve `plans/` at all: "execute triage outcomes", or turning them into a
+goal with `scode-build-goal` directly, follows root AGENTS.md (Execute triage outcomes) and the skill as usual. This
+section applies only when the user explicitly asks for the planning system, for example "use the planning system to
+schedule these for execution".
+
+Such a request makes one plan for the whole batch the user names ("these" after a triage session means the outcomes
+decided in it; ask if it is unclear which). The plan's goal is to execute exactly those outcomes per root AGENTS.md's
+Execute triage outcomes, which still means one PR per outcome in a single stack; the goal names each outcome by its
+`TRIAGE_OUTCOMES.md` heading. Only outcomes whose Execution is `pending` can be scheduled; skip and report the rest.
+
+Plan it as in the TODO flow above, with the same `scode-build-goal` overrides, except:
+
+- The decisions are already recorded in `TRIAGE_OUTCOMES.md`, so the up-front questions cover only what the ledger
+  leaves open for unattended execution, not the outcomes themselves.
+- The done criterion: every scheduled outcome's PR exists per Execute triage outcomes, and the last of those PRs also
+  marks the plan's `INDEX.md` line `[executed]`. There are no TODO entries to remove.
+- The planning PR carries the plan file, its `INDEX.md` line, and the `` planned in `plans/<slug>.md` `` Execution
+  update for each scheduled outcome, in place of TODO references.
 
 ## Executing: "execute the next plan"
 
@@ -187,5 +215,5 @@ work has landed, so nothing else needs checking. Pending plans are never touched
 
 ## Help: "plan help"
 
-"Plan help", "help on plans", or similar means: summarize the planning, execute-next, drain, drain-and-monitor,
-show-reports, and cleanup flows in no more than one to three lines each, then stop. Change nothing.
+"Plan help", "help on plans", or similar means: summarize the planning, triage-scheduling, execute-next, drain,
+drain-and-monitor, show-reports, and cleanup flows in no more than one to three lines each, then stop. Change nothing.
