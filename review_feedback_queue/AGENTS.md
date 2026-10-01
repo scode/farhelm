@@ -21,11 +21,12 @@ Lifecycle), so recording one only to have triage verify and delete it costs a hu
 move that work to recording time.
 
 - Covered: do not record a finding that is fully covered by behavior SPEC.md or SPEC_impl.md explicitly accepts, by an
-  item in TODO.md's `Planned` bucket, by an item already in this queue, or by a decision already recorded for the same
-  finding in root `TRIAGE_OUTCOMES.md`. Apply the test triage applies: the trigger, the consequence, and the scope must
-  all match. Sharing a subsystem or a keyword is not enough. When only part of a finding is covered, record the
-  remainder and name what covers the rest. When a new finding adds substance to an existing queue item, extend that item
-  rather than dropping the finding or writing a duplicate.
+  item in TODO.md's `Planned` bucket, by a known bug root `BUGS.md` records as one we have decided to live with, by an
+  item already in this queue, or by a decision already recorded for the same finding in root `TRIAGE_OUTCOMES.md`. Apply
+  the test triage applies: the trigger, the consequence, and the scope must all match. Sharing a subsystem or a keyword
+  is not enough. When only part of a finding is covered, record the remainder and name what covers the rest. When a new
+  finding adds substance to an existing queue item, extend that item rather than dropping the finding or writing a
+  duplicate.
 - Filtered: do not record a finding from an automated review of committed code that fully matches a filter in
   `FILTER.md`. The filters never apply to findings about a change still under review, or to a problem a person reported
   or asked to have fixed.
@@ -37,11 +38,12 @@ tell them what covers it and let them decide.
 NOTE: A finding whose consequence would put it in the `highest` bucket (security, or loss of user data, credentials,
 processes, or other user-owned work; the root `AGENTS.md` defines the buckets) is never dropped on one agent's judgment.
 Before dropping it for any of the reasons above, give an independent reviewer with fresh context, one that neither
-produced the finding nor proposed the drop, the finding, the proposed basis for dropping it, and the spec, TODO, queue,
-ledger, or filter text that basis relies on. Drop the finding only when that reviewer agrees the drop is justified. If
-the reviewer disagrees, or its verdict is ambiguous, record the finding. The same applies when it is unclear whether a
-finding belongs in the `highest` bucket: treat it as if it does. A wrongly dropped security or data-loss finding is gone
-without anyone having looked at it, while a wrongly recorded one costs a few minutes of triage.
+produced the finding nor proposed the drop, the finding, the proposed basis for dropping it, and the spec, TODO,
+`BUGS.md`, queue, ledger, or filter text that basis relies on. Drop the finding only when that reviewer agrees the drop
+is justified. If the reviewer disagrees, or its verdict is ambiguous, record the finding. The same applies when it is
+unclear whether a finding belongs in the `highest` bucket: treat it as if it does. A wrongly dropped security or
+data-loss finding is gone without anyone having looked at it, while a wrongly recorded one costs a few minutes of
+triage.
 
 ## Running an agent review that feeds this queue
 
@@ -65,8 +67,8 @@ Tell each reviewer:
   - the findings, each with the template's fields plus a suggested bucket, a confidence (confirmed, or likely with the
     unverified premise named), `proposed_drop` and `possible_cover`;
   - every candidate considered and not reported, with the reason (refuted, with file and line; or covered, naming the
-    exact spec section, `Planned` item, queue file, ledger heading or filter) and whether it could be in the `highest`
-    bucket;
+    exact spec section, `Planned` item, `BUGS.md` entry, queue file, ledger heading or filter) and whether it could be
+    in the `highest` bucket;
   - the exact files and line ranges read, and what in scope went unread.
 
   A covered candidate that could be in the `highest` bucket is reported as a finding with `proposed_drop` filled in, not
@@ -76,8 +78,8 @@ Then, when collecting the replies:
 
 - Send every proposed drop of a finding that could be in the `highest` bucket to the independent reviewer the NOTE above
   describes, including drops that appear only in the list of unreported candidates or in passing prose. In the audited
-  run most reviewers mentioned such drops only in passing. "Too rare" or "by design" with no spec, TODO, queue, ledger
-  or filter citation is not coverage.
+  run most reviewers mentioned such drops only in passing. "Too rare" or "by design" with no spec, TODO, `BUGS.md`,
+  queue, ledger or filter citation is not coverage.
 - Compare each reviewer's stated coverage with its scope, and tell the user which parts went unread rather than
   presenting a quiet area as clean.
 - When writing a finding into a feedback file, keep the reviewer's confidence, suggested bucket, possible cover and
@@ -124,7 +126,7 @@ at this time", not that the feedback is wrong; its execution removes the file an
 change. The outcome ledger lives outside this directory and is not a feedback file to add to `INDEX.md`.
 
 Exception: when triage verifies that a finding is fully covered by an accepted specification rule, an existing `Planned`
-item in TODO.md, or a filter in `FILTER.md`, record the basis in the ledger and remove the feedback file and index entry
-immediately. These items must not remain in the queue to be skipped repeatedly. Completing this queue cleanup does not
-mean the planned implementation is complete. A filter match likewise says nothing about whether the behavior is
-acceptable in code; it only means the finding is not worth triage.
+item in TODO.md, a known bug recorded in root `BUGS.md`, or a filter in `FILTER.md`, record the basis in the ledger and
+remove the feedback file and index entry immediately. These items must not remain in the queue to be skipped repeatedly.
+Completing this queue cleanup does not mean the planned implementation is complete. A filter match likewise says nothing
+about whether the behavior is acceptable in code; it only means the finding is not worth triage.
