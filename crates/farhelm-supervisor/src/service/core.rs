@@ -10346,10 +10346,16 @@ impl Supervisor {
         // because the window is a couple of tmux round trips long, and
         // publishing an entry whose pane is mid-respawn would be worse
         // than briefly publishing none.
+        //
+        // Deliberately NOT hinted. A hint makes the helm list this host at
+        // once, and a listing inside this window is exactly the one that
+        // omits the session: a client that has it open then sees it vanish
+        // and deselects it, and the republication moments later does not
+        // bring the selection back. Every way out of the window hints
+        // instead: the republication (`publish_relaunched`), the restore
+        // after a failure, and the no-restore branch below for a session
+        // deleted meanwhile.
         self.sessions.lock().await.remove(&id);
-        // Usually republished moments later (and hinted again then); marked
-        // here too so a restart that never republishes is not left unhinted.
-        self.hint_sessions_changed();
         // Whatever is attached is attached to the PREVIOUS run: the pane is
         // about to be respawned under it (or replaced outright), so the
         // client is told to reattach rather than left watching a stream
@@ -10542,8 +10548,11 @@ impl Supervisor {
                             reset_capture,
                         ),
                     );
-                    self.hint_sessions_changed();
                 }
+                // Hinted either way: a restored entry is a change from the
+                // window above, and so is a session that stays off the map
+                // because a delete removed it meanwhile.
+                self.hint_sessions_changed();
                 Err(failure.error)
             }
         }
