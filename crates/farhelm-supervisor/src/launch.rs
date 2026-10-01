@@ -114,6 +114,22 @@ pub const TAB_ID_ENV_VAR: &str = "FARHELM_TAB_ID";
 /// launch of the opposite kind and misfile it.
 pub const AGENT_ID_ENV_VAR: &str = "FARHELM_AGENT_ID";
 
+/// The variables tmux sets in every pane it runs, naming its own server
+/// and the pane. Farhelm removes both from agents and terminal tabs.
+///
+/// Every agent and tab runs inside Farhelm's private tmux server, so with
+/// these left in place a plain `tmux new-window` or `tmux split-window`,
+/// typed by the user or run by an agent, lands in that hidden server, where
+/// Stop, Restart, Delete and tab close never clean it up (SPEC.md,
+/// "Ownership during cleanup and provisioning", which declares that use
+/// unsupported). Removing them makes tmux behave as it would in an SSH
+/// login: it reaches the user's own server, or says none is running.
+/// Nothing Farhelm runs inside a pane needs them: every Farhelm tmux call
+/// names its socket explicitly, and in-pane helpers find the supervisor
+/// through `FARHELM_SUPERVISOR_SOCK`. Deliberately reaching the private
+/// server by its socket stays possible and stays unsupported.
+pub const PRIVATE_TMUX_ENV_VARS: [&str; 2] = ["TMUX", "TMUX_PANE"];
+
 /// What the shim needs to launch the agent: written as JSON by the
 /// supervisor, read by `farhelm internal launch` inside the session. A
 /// file (not argv) so the invocation never fights shell quoting twice.
@@ -651,11 +667,22 @@ pub fn window_command(
 /// INNERMOST — after any scope prefix, immediately before the shell —
 /// guarantees the shell and everything under it start without an ambient
 /// agent marker from an outer farhelm, whatever the wrapper above did.
+///
+/// The same `env` removes [`PRIVATE_TMUX_ENV_VARS`], which tmux sets in
+/// the pane. For a tab that has to happen before the user's shell starts,
+/// so its startup files run without them too: a tab then behaves like a
+/// fresh SSH login, and an rc snippet that starts or attaches tmux when
+/// `TMUX` is unset fires here exactly as it would there (accepted when
+/// this was decided, 2026-09-30).
 pub fn tab_window_command(shell: &str, scope_prefix: Vec<String>) -> Vec<String> {
     let mut argv = scope_prefix;
     argv.push("env".to_string());
     argv.push("-u".to_string());
     argv.push(AGENT_ID_ENV_VAR.to_string());
+    for name in PRIVATE_TMUX_ENV_VARS {
+        argv.push("-u".to_string());
+        argv.push(name.to_string());
+    }
     argv.push(shell.to_string());
     argv.push("-l".to_string());
     argv.push("-i".to_string());
@@ -889,7 +916,7 @@ pub fn exec_launch_spec_with_seam(
     // variables the login shell already sourced rather than replacing
     // them — SPEC.md's environment contract is otherwise untouched.
     //
-    // The one thing deliberately REMOVED is the opposite kind's marker
+    // Among the things deliberately REMOVED is the opposite kind's marker
     // (see [`AGENT_ID_ENV_VAR`]): a supervisor running inside somebody's
     // farhelm tab passes that tab's `FARHELM_TAB_ID` down through its own
     // tmux server, and an inner agent still wearing it would be filed as a
@@ -927,7 +954,10 @@ fn agent_command(spec: &LaunchSpec) -> std::process::Command {
 /// itself), the truecolor capability, and the removal of the opposite
 /// kind's markers (the same scrub [`AGENT_ID_ENV_VAR`]'s docs describe
 /// for the exec below the shim — a git clone inside an agent's tab must
-/// not inherit that tab's `FARHELM_TAB_ID` either).
+/// not inherit that tab's `FARHELM_TAB_ID` either), and the removal of the
+/// private tmux server's `TMUX`/`TMUX_PANE` ([`PRIVATE_TMUX_ENV_VARS`]),
+/// here rather than earlier so the login shell's startup files still ran
+/// with them.
 ///
 /// The bearer spawn credential ([`SESSION_TOKEN_ENV_VAR`]) and the
 /// supervisor socket deliberately stay OUT of git and hook children
@@ -968,6 +998,13 @@ fn launch_child_command(
         // in-support consumer is the OMP asset itself, which reads it from
         // the agent command's environment, installed separately.
         .env_remove(OMP_REPORTER_EXE_ENV_VAR);
+    // Removed here, after the user's shell startup files have run in the
+    // login shell that execs this shim, rather than before: an rc snippet
+    // such as `[ -z "$TMUX" ] && exec tmux` would otherwise replace the
+    // agent launch itself. See `PRIVATE_TMUX_ENV_VARS`.
+    for name in PRIVATE_TMUX_ENV_VARS {
+        command.env_remove(name);
+    }
     command
 }
 
@@ -2246,7 +2283,18 @@ mod tests {
     fn tab_window_command_is_a_bare_login_interactive_shell() {
         assert_eq!(
             tab_window_command("/bin/zsh", Vec::new()),
-            vec!["env", "-u", AGENT_ID_ENV_VAR, "/bin/zsh", "-l", "-i"]
+            vec![
+                "env",
+                "-u",
+                AGENT_ID_ENV_VAR,
+                "-u",
+                "TMUX",
+                "-u",
+                "TMUX_PANE",
+                "/bin/zsh",
+                "-l",
+                "-i"
+            ]
         );
     }
 
@@ -2274,6 +2322,10 @@ mod tests {
                 "env",
                 "-u",
                 AGENT_ID_ENV_VAR,
+                "-u",
+                "TMUX",
+                "-u",
+                "TMUX_PANE",
                 "/bin/bash",
                 "-l",
                 "-i"
@@ -3074,6 +3126,52 @@ printf 'AGENT-RAN\n'
             ),
         );
         fixture
+    }
+
+    /// Nothing the shim starts sees the private tmux server's `TMUX` or
+    /// `TMUX_PANE`.
+    ///
+    /// Why: with them, a `tmux new-window` typed by an agent (or by a hook)
+    /// lands in Farhelm's hidden tmux server, where Stop, Restart, Delete and
+    /// tab close never clean it up (`PRIVATE_TMUX_ENV_VARS`). Specified: when
+    /// the shim itself inherits both, as it does inside a pane, the clone,
+    /// the preparation hook and the agent all run with both unset.
+    #[farhelm_testtrace::test]
+    fn shim_children_run_without_the_private_tmux_variables() {
+        use std::ffi::OsStr;
+
+        let fixture = PrepFixture::new(
+            "https://github.com/example/repo.git",
+            Some("fixture hook".to_string()),
+            "fixture-hook-sh",
+        );
+        for (program, stage) in [
+            ("git", "git"),
+            ("fixture-hook-sh", "hook"),
+            ("fake-agent", "agent"),
+        ] {
+            fixture.install_script(program, &format!(
+                "#!/bin/sh\nprintf '%s\\n%s\\n' \"${{TMUX-unset}}\" \"${{TMUX_PANE-unset}}\" > '{}'\n",
+                fixture.tmp.path().join(stage).display(),
+            ));
+        }
+        let (report, terminal, status) = fixture.run_shim_in_child_with(
+            None,
+            &[
+                ("TMUX", OsStr::new("/tmp/private-tmux.sock,123,0")),
+                ("TMUX_PANE", OsStr::new("%7")),
+            ],
+            &[],
+        );
+        assert!(status.success(), "{report}: {terminal}");
+        assert_eq!(fixture.state().unwrap(), PreparationState::Ready);
+        for stage in ["git", "hook", "agent"] {
+            assert_eq!(
+                std::fs::read_to_string(fixture.tmp.path().join(stage)).unwrap(),
+                "unset\nunset\n",
+                "{stage} must run without the private tmux variables",
+            );
+        }
     }
 
     /// A supervisor nested inside another session must not pass that

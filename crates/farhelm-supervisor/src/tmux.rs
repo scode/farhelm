@@ -159,8 +159,10 @@ pub(crate) fn retain_pane_tail(transcript: &str, max_bytes: usize) -> String {
 /// Windows are the substrate for terminal tabs, and tabs are deliberately
 /// not durable metadata — SPEC.md says a reboot erases them
 /// and nothing recreates them — so the marker on the window IS the record.
-/// It has to be a marker rather than a position: a pane's own processes
-/// inherit `TMUX` and can create windows on this private server, so a
+/// It has to be a marker rather than a position: anything that reaches this
+/// private server (a pane process that still holds `TMUX`, from a launch
+/// before Farhelm removed it or from the agent login shell's startup files,
+/// or a program pointed at the socket) can create windows on it, so a
 /// "windows 1 and up" scan would adopt strangers with the wrong working
 /// directory and the wrong teardown semantics.
 ///
@@ -1615,7 +1617,7 @@ pub struct PaneState {
     /// `None` covers three cases the caller does not need to tell apart,
     /// because all three mean "not one of our tabs": the agent's own
     /// window, a window someone conjured behind the supervisor's back
-    /// (pane processes inherit `TMUX`), and a window whose marker holds
+    /// (anything that reaches the private server can), and a window whose marker holds
     /// something this supervisor would never have minted.
     ///
     /// SYNTAX is all this establishes, and the distinction matters: tmux
@@ -2728,8 +2730,9 @@ impl TmuxDriver {
     /// tolerates — would make tmux resolve the name to any other session
     /// whose name extends it and destroy that one instead, reporting
     /// success. Generated `fh-<id>` names cannot prefix each other, but
-    /// the private server is not Farhelm's alone: anything running in a
-    /// pane inherits `TMUX` and can create or rename sessions on it.
+    /// the private server is not Farhelm's alone: anything that reaches it
+    /// (a pane process still holding `TMUX`, or a program pointed at the
+    /// socket) can create or rename sessions on it.
     /// The tolerated diagnostics are matched against tmux's raw stderr
     /// through [`TmuxDriver::refusal`], never the rendered error, because the
     /// rendered chain embeds the target name and a session named after

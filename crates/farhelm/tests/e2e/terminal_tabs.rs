@@ -942,11 +942,11 @@ async fn closing_a_tab_kills_an_environment_scrubbed_double_fork_through_its_sco
 /// conjured behind the supervisor's back is never reported as one
 /// (PLAN_M4.md acceptance 2 and 4).
 ///
-/// The unmarked window is not a hypothetical: a pane's own processes
-/// inherit `TMUX` and can create windows on the private server, which is
-/// exactly why rediscovery is marker-based rather than positional. Here it
-/// is created directly against the same socket, which is the same thing
-/// from the supervisor's point of view.
+/// The unmarked window is not a hypothetical: anything that reaches the
+/// private server (a program pointed at its socket; panes no longer inherit
+/// `TMUX`) can create windows on it, which is exactly why rediscovery is
+/// marker-based rather than positional. Here it is created directly against
+/// the same socket, which is that case exactly.
 ///
 /// Both tabs are checked, in order, because ordering is the one thing
 /// `SessionInfo::tabs` promises beyond identity — and a rediscovery that

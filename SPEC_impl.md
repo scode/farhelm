@@ -753,8 +753,15 @@ Farhelm session; window 0 is the agent terminal in practice, additional windows 
 identified by position: the supervisor stamps each window it creates with a tmux user option — the agent's window with
 the session id, a tab's window with a minted tab id that is also that tab's whole record. The agent terminal is
 identified by its durable pane record first, with the marker as the recovery aid for a session whose record is empty;
-tabs have no durable record at all and are rediscovered from their markers alone, because a pane's own processes inherit
-`TMUX` and can conjure windows a positional scan would adopt. The user's own tmux usage and config are untouched.
+tabs have no durable record at all and are rediscovered from their markers alone, because anything that reaches the
+private server can conjure windows a positional scan would adopt: a program pointed at its socket, a process the agent
+login shell's startup files started before the launch removed `TMUX`, or a session or tab launched by a version that did
+not remove it yet. Agents and tabs no longer inherit `TMUX`/`TMUX_PANE` (removed by the launch shim for agents, after
+the login shell's startup files, and by the tab command's innermost `env -u` for tabs; see `PRIVATE_TMUX_ENV_VARS` in
+launch.rs). That was checked statically against Claude Code 2.1.286 and Codex 0.159.3, not by running them: both wrap
+clipboard and similar escapes in tmux passthrough when `TMUX` is set, and the supervisor unwraps passthrough itself, so
+either form reaches xterm.js; Claude Code also keeps truecolor without `TMUX` instead of dropping to 256 colors (the
+private tmux advertises RGB) and stops showing its tmux scroll hint. The user's own tmux usage and config are untouched.
 
 The private server is an implementation detail. Direct interaction with it, by the user or by a program running in a
 session, is unsupported (SPEC.md, "Ownership during cleanup and provisioning"): Farhelm handles its own objects going

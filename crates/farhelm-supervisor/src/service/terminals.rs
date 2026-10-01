@@ -178,9 +178,9 @@ pub(crate) struct DiscoveredTab {
 ///
 /// - **Session name must match.** The map is server-wide.
 /// - **The window must carry a tab marker at all.** A window a pane
-///   process conjured on our private server carries none — pane processes
-///   inherit `TMUX`, which is why a positional "windows 1 and up" scan was
-///   never an option.
+///   process conjured on our private server carries none — anything that
+///   reaches the server can conjure one, which is why a positional
+///   "windows 1 and up" scan was never an option.
 /// - **The marker must be complete and minted-shaped**, validated where it
 ///   is read (`tmux/control_codec.rs`) rather than here.
 /// - **The recorded agent window is never a tab**, whatever else is written

@@ -1646,11 +1646,16 @@ misbehaving host is the remedy; the refusal clears on the next refresh after it 
 
 Confirmed 2026-09-28: Farhelm's private tmux server is an implementation detail, not an interface, and the product
 should keep it out of the user's way as far as practical. Interacting with it directly is unsupported, whether the user
-does it by hand or a program running in a session does it (for example `tmux new-window` or `tmux split-window` run from
-a session's terminal, which inherits `TMUX`). Windows, panes, processes and configuration changes made that way are
-outside every Farhelm guarantee, including cleanup on Stop, Restart, Delete and tab close. Do not add code or complexity
-to detect, track, clean up after, or recover from them. Farhelm's own operations must still handle their own objects
-going missing without crashing, and the helm and GUI must still handle the resulting remote failures safely.
+does it by hand or a program running in a session does it (for example by pointing tmux at its socket). Farhelm keeps
+the accidental path out of reach: agents and terminal tabs run without the `TMUX` and `TMUX_PANE` variables tmux sets in
+its panes, so a plain `tmux new-window` or `tmux split-window` typed in a session behaves as it would over SSH, reaching
+the user's own tmux server or none, not the private one. A tab's shell starts without them, so a startup file that
+launches tmux when `TMUX` is unset does so in a tab as it would in an SSH login. Shells an agent starts for its own work
+also run without them, as they would if the agent ran in a terminal outside tmux. Windows, panes, processes and
+configuration changes made through the private server anyway are outside every Farhelm guarantee, including cleanup on
+Stop, Restart, Delete and tab close. Do not add code or complexity to detect, track, clean up after, or recover from
+them. Farhelm's own operations must still handle their own objects going missing without crashing, and the helm and GUI
+must still handle the resulting remote failures safely.
 
 Session teardown covers ordinary agent descendants, including background servers. Detached services started by shell
 initialization before the agent launches are outside that guarantee, and so, on hosts without a usable systemd user

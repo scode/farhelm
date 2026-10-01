@@ -38,19 +38,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   startup, or session creation; the earlier carve-out that assumed these never overlap was dropped on 2026-09-28. Share
   the relevant locks and revalidate removal targets under them, or refuse, so none of these can race uninstall's checks
   and deletion. Prefer the simplest mechanism that gives a correct result.
-- **Keep sessions from stumbling into the private tmux.** SPEC.md now says the private tmux server is an implementation
-  detail and that interacting with it directly is unsupported ("Ownership during cleanup and provisioning"). But every
-  agent terminal and tab inherits `TMUX` pointing at that server, so a plain `tmux new-window` or `tmux split-window`,
-  typed by the user or run by an agent (for example to start a dev server in its own window), lands in Farhelm's tmux
-  instead of failing or reaching the user's own tmux. Whatever it starts there escapes Stop, Restart, Delete and tab
-  close. Find out how to make that accidental path unlikely without adding real complexity: unsetting `TMUX` (and
-  `TMUX_PANE`) in the agent and tab environments is the obvious candidate, but check what it breaks in Farhelm's own
-  launch and tab paths, and whether running tmux then silently starts or attaches to the user's own default server,
-  which may be just as confusing. This came up in review-feedback triage on 2026-09-28, from findings that agent-opened
-  tmux windows and hand-split tab panes escape cleanup; the decision was to declare that use unsupported rather than
-  reap it, with this as the follow-up to make it hard to do by accident. Deliberate access, such as pointing tmux at the
-  socket explicitly, stays out of scope.
-
 - **Accept a leftover uninstall receipt after the install directory moves.** On macOS, an interrupted
   `farhelm uninstall` leaves `~/Applications/.Farhelm.app.uninstall-receipt`, a copy of the bundle's ownership record,
   so a retry can finish. Before building `Farhelm.app`, `scripts/install.sh` checks that receipt with

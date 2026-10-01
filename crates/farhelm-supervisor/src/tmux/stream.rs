@@ -1419,8 +1419,8 @@ impl OutputStream {
                         // from what the tests later report.
                         // Debug-formatted, and that is a security choice
                         // rather than a style one: tmux names the SESSION
-                        // in several of its exit reasons, a pane inherits
-                        // `$TMUX` and can rename its own session to
+                        // in several of its exit reasons, a pane process
+                        // still holding `$TMUX` can rename its session to
                         // anything at all — control characters included —
                         // so this string is pane-influenced text arriving
                         // at a log an operator reads in a terminal.
