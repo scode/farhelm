@@ -4474,7 +4474,8 @@
   a multi-word spinner line such as `✻ Compacting conversation… (…)` is unverified; no captured screen contains it.
 - Decision: not a clear, definite gap, so it is discarded for now, as for `claude-spinner-window-too-short.md`.
 - Completion criteria: remove this feedback file and its index entry, with no code or spec change.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `xzmwpqzsursz`, bookmark `triage-1001/10-discard-spinner-multiword`, PR
+  https://github.com/scode/farhelm/pull/1366.
 
 ## pi-reporter-asset-not-renamed.md
 
