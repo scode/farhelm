@@ -33,23 +33,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Killed-shim checkout-preparation test leaks processes when it fails.** In `crates/farhelm-supervisor/src/launch.rs`,
-  `d4_killed_shim_never_repeats_the_hook_or_spawns_the_agent` starts the preparation shim, whose preparation hook parks
-  on a FIFO (`build_d4_fixture`), checks the hook is running under the shim, that it was called once, and that the
-  durable state is `HookStarted`, then SIGKILLs the shim on purpose, reaps it, and only afterwards writes the release
-  byte to the FIFO. Every one of those checks is an `assert!` that runs while the shim and hook are alive, and the shim
-  is held as a plain `std::process::Child`. If any of them fails (including the 30-second readiness poll), unwinding
-  drops that handle without killing or reaping anything: the shim stays waiting on the hook, and the hook stays blocked
-  reading the FIFO. Deleting the fixture's temporary directory does not unblock it, because the hook opened the FIFO for
-  both reading and writing. A failure after the deliberate kill but before the release byte orphans the hook the same
-  way. The processes then live until someone kills them, which on a shared machine is exactly the stray load that
-  FLAKES.md records tripping other tests' timing budgets. A passing run is unaffected. The existing `ReapedPrepChild`
-  wrapper is not enough on its own: it kills and reaps the shim but not the hook the shim started. The fix needs an
-  unwind-safe owner for both from the moment the shim is spawned, for example starting the shim in its own process group
-  and killing and reaping that group on drop, while keeping the mid-test SIGKILL aimed at the shim alone so the
-  interruption the test exists for still happens. Found by the review of the PR that moved these tests' markers out of
-  `/tmp`; the gap predates that PR.
-
 - **Alarming link hover when the text and target disagree.** Hovering a hyperlink a program printed (OSC 8) shows its
   host and full target in a small, quiet display (`showLinkTarget` in `crates/farhelm-ui/assets/terminal-links.js`,
   added in #1158). Keep that display for every such link, but when the underlined text does not match where the link
