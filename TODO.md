@@ -78,16 +78,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   paragraph in `docs/install_uninstall.md`. Low severity: the refusal is over-cautious, never destructive, and deleting
   the receipt by hand recovers. Found while rebasing the review-feedback stack onto #1278.
 
-- **Confirm restart only while the agent is working.** Restart (from the session header or the sidebar) asks "still
-  running — restarting stops the agent and its whole process tree first" whenever the agent is live at all, idle
-  included, and also when its status is unknown. Asked that often, people click through without reading it. Only ask
-  when there is signal that the agent is actively doing work; an idle agent, one waiting for input, or one whose status
-  is unknown restarts without a prompt. Accepted consequence: for harnesses whose activity detection is weak, the user
-  may not get the warning even when the agent is busy. This is not UI-only: SPEC.md (Lifecycle operations, Restart) says
-  a restart of a still-running agent confirms, and the supervisor refuses an unconfirmed restart of a live agent, so
-  both change with it. Replace keeps its confirmation as it is: it discards the conversation, whatever the agent is
-  doing.
-
 - **"Replace with" a gh: checkout refused because the checkout path exists.** Using "replace with" to switch a session
   to a `gh:` fresh checkout was refused with an error saying to pick a different session name because the git checkout
   path already exists. Not yet investigated: it may fail like that every time, or something subtler about that session's

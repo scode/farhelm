@@ -2530,10 +2530,10 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   mutation. Success prints one plain confirmation line on stdout (`renamed <id> to "<title>"`, `stopped <id>`,
   `restarted <id>`), its dynamic cells run through the same escaping the listing tables use, so a scripted caller gets
   exactly one line rather than a table with one row. Restart forwards the mode and consent unchanged to the owning
-  supervisor, which rechecks both current offer and liveness; the CLI never infers consent from discovery. An explicit
-  self-stop or self-restart may terminate the CLI before its line is printed because it belongs to the process tree
-  being ended. Self restart prints its interruption/outcome-unknown warning before dispatch and treats a lost reply as
-  unknown rather than success.
+  supervisor, which rechecks both current offer and whether the agent is working; the CLI never infers consent from
+  discovery. An explicit self-stop or self-restart may terminate the CLI before its line is printed because it belongs
+  to the process tree being ended. Self restart prints its interruption/outcome-unknown warning before dispatch and
+  treats a lost reply as unknown rather than success.
 - `farhelm agent create --host <name> --cwd <dir> (--profile <name> | --profile-id <id> | --invocation <cmd>) [--title ...]
   [--idempotency-key ...]`
   and `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...]

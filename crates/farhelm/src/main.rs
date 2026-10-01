@@ -220,8 +220,10 @@ enum AgentCmd {
         /// Restart behavior selected from the session's OFFER column.
         #[arg(long, value_enum)]
         mode: AgentRestartMode,
-        /// Permit stopping the target only if it is still running when the
-        /// owning supervisor handles this request.
+        /// Permit stopping the target's agent if it is working when the
+        /// owning supervisor handles this request; without it, a working
+        /// agent is refused, while an idle, waiting, or unknown-status one
+        /// is stopped and restarted anyway.
         #[arg(long)]
         stop_if_running: bool,
     },

@@ -101,12 +101,17 @@ fn restart_with_reason(session: &Session) -> Option<String> {
     }
 }
 
-/// Ask for consent when the agent may still be running. `Unknown` can be a
-/// reloaded live pane whose status sampler has not caught up; sending an
-/// unconfirmed restart then is refused by the supervisor with no way for
-/// the user to approve the stop from this button.
+/// Ask for consent only while the agent is working (SPEC.md, Lifecycle
+/// operations). Asking whenever the agent was alive, idle included, taught
+/// people to click through the prompt without reading it. An idle agent,
+/// one waiting for input, and one whose status is unknown restart without
+/// asking, and the supervisor applies the same rule from its own reading.
+/// If the agent started working after this status was shown, the
+/// supervisor refuses the unconfirmed restart; that refusal is shown like
+/// any other restart error, and the next click asks, because the session
+/// then reads as working.
 fn restart_needs_confirmation(status: &SessionStatus) -> bool {
-    status.is_live() || *status == SessionStatus::Unknown
+    *status == SessionStatus::Running
 }
 
 /// One session: a single header row (status, identity, age, copyable fields,
@@ -439,9 +444,11 @@ pub(crate) fn SessionView(
     // Per view on purpose: another client's restart reaches this one
     // through the listing like any other change. Per MOUNT as well, so
     // leaving and reopening the session inside that window shows the band
-    // again; a click there sends a plain restart the supervisor refuses
-    // against a live agent (its own pane recheck), so the cost is one
-    // refused request, not a second relaunch.
+    // again; a click there sends a plain restart, which the supervisor
+    // refuses only while the new run still reads working (its own pane and
+    // activity recheck). Once that run reads idle the click relaunches it
+    // again, which the restart rule allows (an idle agent restarts without
+    // asking; SPEC.md, Lifecycle operations).
     let mut relaunched = use_signal(|| false);
     // Whether a restart is in flight (disables the control and guards
     // re-entry, mirroring `ListView`'s `pending`), and whether the inline
@@ -615,7 +622,7 @@ pub(crate) fn SessionView(
     // deliberately — see the supervisor's create docs) and the restart
     // affordance reads `status`, but that status is only ever a UI HINT —
     // the supervisor rechecks real liveness and refuses a restart that
-    // would kill an agent without consent — so one fetch was enough. Tabs
+    // would kill a working agent without consent — so one fetch was enough. Tabs
     // change that, and only that: the tab list has no server-side recheck
     // standing behind it, and SPEC.md's changes-appear-automatically rule
     // means a tab opened or closed from another client has to show up
@@ -1218,8 +1225,9 @@ pub(crate) fn SessionView(
             // lands would freeze the affordance on exactly the helm where a
             // user most wants to try again. What that costs is a second
             // restart acting on a `current` that predates the refresh — and
-            // that is the safe direction, because the status it still holds
-            // is the pre-restart one, which confirms.
+            // that is still safe: the pre-restart status confirms if it read
+            // working, and if it did not, the supervisor refuses the
+            // unconfirmed restart while the new run still reads working.
             restarting.set(false);
             if with.is_none() || outcome.is_ok() {
                 lifecycle.release();
@@ -1908,9 +1916,9 @@ pub(crate) fn SessionView(
                                     return;
                                 }
                                 if confirms_restart {
-                                    // A live or unclassified agent may need
-                                    // to be stopped, so the click obtains
-                                    // consent before sending that request.
+                                    // A working agent would be stopped, so
+                                    // the click obtains consent before
+                                    // sending that request.
                                     confirming.set(true);
                                 } else {
                                     fresh_restart(false, None, false, None);
@@ -1954,11 +1962,12 @@ pub(crate) fn SessionView(
                                             return;
                                         }
                                         confirming.set(false);
-                                        // The only place `stop_if_running` is
-                                        // ever true: it carries THIS click's
-                                        // consent onto the wire, which the
-                                        // supervisor then checks against
-                                        // liveness it rechecks itself.
+                                        // Carries THIS click's consent onto
+                                        // the wire (Restart with sends it
+                                        // too, when the agent read working at
+                                        // submit), which the supervisor
+                                        // checks against the liveness and
+                                        // activity it reads itself.
                                         confirm_restart(true, None, false, None);
                                     },
                                     "confirm restart"
@@ -2145,7 +2154,6 @@ pub(crate) fn SessionView(
                     yolo_confirmation: restart_yolo(),
                     yolo_error: restart_yolo_error(),
                     stop_first: restart_needs_confirmation(&shown.status),
-                    stop_uncertain: shown.status == SessionStatus::Unknown,
                     offer_label: restart_button_label(shown.restart_offer).to_string(),
                     on_cancel: move |_| {
                         if restarting() { return; }
@@ -2865,16 +2873,24 @@ mod tests {
         );
     }
 
-    /// An uncached startup row has no badge yet, but its live pane may
-    /// still need stopping. Restart must offer consent for that uncertain
-    /// state while ended sessions keep the direct restart path.
+    /// Restart asks for confirmation only while the agent is working.
+    ///
+    /// Why: a confirmation shown for every live agent, idle ones included,
+    /// gets clicked through unread; asking only when there is signal of
+    /// work keeps it meaningful (SPEC.md, Lifecycle operations). Specified:
+    /// working asks; waiting, idle, unknown, and ended statuses restart
+    /// directly.
     #[farhelm_testtrace::test]
-    fn an_unclassified_restart_requires_confirmation() {
-        assert!(restart_needs_confirmation(&SessionStatus::Unknown));
+    fn restart_asks_only_while_the_agent_is_working() {
         assert!(restart_needs_confirmation(&SessionStatus::Running));
-        assert!(!restart_needs_confirmation(&SessionStatus::Exited {
-            exit_code: Some(0),
-        }));
+        for status in [
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+            SessionStatus::Unknown,
+            SessionStatus::Exited { exit_code: Some(0) },
+        ] {
+            assert!(!restart_needs_confirmation(&status), "{status:?}");
+        }
     }
 
     /// A session fixture for the terminal-surface decisions below: live and

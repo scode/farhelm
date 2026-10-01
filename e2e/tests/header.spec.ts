@@ -50,13 +50,20 @@ test(
       await row(page, session.id).locator(".session-row-open").click();
       await waitForSessionRevealed(page, session.id);
       await waitForTermText(page, "FAKE-AGENT READY");
+      // Restart opens its confirmation (measured below) only while the
+      // agent is working, and a quiet fixture agent reads idle after a few
+      // samples; `busy` keeps its screen changing so it stays working.
+      await page.locator("#terminal").click();
+      await page.keyboard.type("busy");
+      await page.keyboard.press("Enter");
+      await waitForTermText(page, "busy-tick-");
 
       const restartButton = page.locator(".restart-primary");
-      // Restart is reachable the moment the agent is classified
-      // live — the same signal the restart-confirmation tests wait on —
-      // which is also the point at which a badge is guaranteed to exist
-      // (a live status is always classified, so `status_badge` never
-      // suppresses it the way `Unknown` does).
+      // Restart confirms once the agent is classified working — the same
+      // signal the restart-confirmation tests wait on — which is also the
+      // point at which a badge is guaranteed to exist (a live status is
+      // always classified, so `status_badge` never suppresses it the way
+      // `Unknown` does).
       await expect(restartButton).toHaveAttribute("data-confirms", "true", {
         timeout: 15_000,
       });
@@ -417,7 +424,9 @@ test("the header delete confirms in place and deletes through the list", async (
     await row(page, live.id).locator(".session-row-open").click();
     await waitForSessionRevealed(page, live.id);
     await waitForTermText(page, "FAKE-AGENT READY");
-    await expect(page.locator(".restart-primary")).toHaveAttribute("data-confirms", "true", {
+    // Classified live (any live status), the point at which the header's
+    // delete knows there is an agent to warn about.
+    await expect(page.locator(".titlebar .status-badge")).toHaveClass(/\b(running|waiting|idle)\b/, {
       timeout: 15_000,
     });
 
@@ -533,7 +542,9 @@ test("a committed delete shows its progress until the reply lands", async ({ pag
     await target.locator(".session-row-open").click();
     await waitForSessionRevealed(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
-    await expect(page.locator(".restart-primary")).toHaveAttribute("data-confirms", "true", {
+    // Classified live (any live status), the point at which the header's
+    // delete knows there is an agent to warn about.
+    await expect(page.locator(".titlebar .status-badge")).toHaveClass(/\b(running|waiting|idle)\b/, {
       timeout: 15_000,
     });
     const rowProgress = target.locator(".delete-progress");

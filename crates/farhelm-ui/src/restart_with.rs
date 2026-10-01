@@ -167,7 +167,6 @@ pub(crate) fn RestartWithDialog(
     yolo_confirmation: Option<crate::yolo_confirm::YoloAsk>,
     yolo_error: Option<String>,
     stop_first: bool,
-    stop_uncertain: bool,
     offer_label: String,
     on_submit: EventHandler<(LaunchSelection, bool, bool)>,
     on_yolo_cancel: EventHandler<()>,
@@ -394,11 +393,7 @@ pub(crate) fn RestartWithDialog(
                 div { class: "restart-with-footer",
                     if stop_first {
                         p { class: "restart-with-stop-note",
-                            if stop_uncertain {
-                                "agent may be running; it is stopped first"
-                            } else {
-                                "agent is running; it is stopped first"
-                            }
+                            "agent is working; it is stopped first"
                         }
                     }
                     button {

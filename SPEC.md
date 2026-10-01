@@ -561,26 +561,32 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
 - **Restart** relaunches the agent in the same working directory, resuming the session's own conversation where
   supported (see Durability for the exact promise). This is the only relaunch mechanism: the resume offered when opening
   an interrupted session is this same operation, not a separate feature. There is no fresh-restart variant in v1 — for a
-  clean conversation, create a new session in the same directory. Restart on a session whose agent is still running
-  confirms, stops the agent, then relaunches. Restart reuses the session's terminal when it still exists — whatever
-  scrollback the terminal itself retained is still there — and creates a fresh one when the terminal no longer exists,
-  such as after a reboot. Restart does NOT preserve the previous run's last visible screen: the pane is blank until the
-  new agent draws, and a full-screen program's final frame (which was never in scrollback to begin with) is gone. Losing
-  it is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched terminal ahead of
-  the new process — a frame with no process behind it looks live, accepts typing, and is overwritten when the real
-  program draws, which is worse than blank. Restart touches the agent terminal only; terminal tabs are unaffected.
-  Restart may carry changed structured launch settings for a structured session with a resumable captured conversation;
-  the harness, host, and working directory remain fixed. Legacy profile and raw-command sessions do not support this
-  override because they have no stored structured selection. If a harness rejects a changed model or other setting while
-  resuming, that is an ordinary launch failure; restart again with settings the harness accepts. The general split
-  between launch-only and resume-safe arguments remains deferred.
+  clean conversation, create a new session in the same directory. Restart on a session whose agent is working (its
+  status reads working) confirms, stops the agent, then relaunches; a live agent that is idle, waiting for input, or
+  whose status is unknown is stopped and relaunched without asking, because a prompt shown on every live agent gets
+  clicked through unread. Harnesses with weak activity detection may therefore restart a busy agent unasked; that cost
+  is accepted. The supervisor applies the same rule from its own reading at the moment of the restart, so an agent that
+  started working after the user clicked is refused rather than stopped unconfirmed, and the next attempt asks. Replace
+  keeps its confirmation whatever the agent is doing. Restart reuses the session's terminal when it still exists —
+  whatever scrollback the terminal itself retained is still there — and creates a fresh one when the terminal no longer
+  exists, such as after a reboot. Restart does NOT preserve the previous run's last visible screen: the pane is blank
+  until the new agent draws, and a full-screen program's final frame (which was never in scrollback to begin with) is
+  gone. Losing it is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched
+  terminal ahead of the new process — a frame with no process behind it looks live, accepts typing, and is overwritten
+  when the real program draws, which is worse than blank. Restart touches the agent terminal only; terminal tabs are
+  unaffected. Restart may carry changed structured launch settings for a structured session with a resumable captured
+  conversation; the harness, host, and working directory remain fixed. Legacy profile and raw-command sessions do not
+  support this override because they have no stored structured selection. If a harness rejects a changed model or other
+  setting while resuming, that is an ordinary launch failure; restart again with settings the harness accepts. The
+  general split between launch-only and resume-safe arguments remains deferred.
 - **Restart with** opens a dialog for changing the model, effort, permissions, or workspace trust before resuming the
   session's own conversation. The harness, host, and folder stay fixed; Replace with can change the harness or folder,
   and Clone can change the host. The dialog shows the current settings and marks edited fields, and its primary action
-  is inactive until a setting changes. A running agent is stopped first with the user's confirmation on that action. A
-  refusal leaves the dialog and its edits visible with the reason. This action is available only for a session launched
-  from structured settings with a current resume offer. Its header button remains visible but greyed out otherwise, with
-  a hover tooltip and accessible description explaining why.
+  is inactive until a setting changes. A working agent is stopped first with the user's confirmation on that action; a
+  live agent in any other status is stopped first without it, as for Restart. A refusal leaves the dialog and its edits
+  visible with the reason. This action is available only for a session launched from structured settings with a current
+  resume offer. Its header button remains visible but greyed out otherwise, with a hover tooltip and accessible
+  description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, working directory,
   title, and agent — the fresh-conversation counterpart to restart's resumed one. The source session is untouched:
   cloning starts a brand-new, independent create through the same form and the same confirmation described under
@@ -778,8 +784,8 @@ distinct status. Host unreachability is per-host connection state, not a session
 After a supervisor restart, a live pane keeps its last cached status while the supervisor gathers new screen evidence.
 The first new screen alone does not turn an idle or waiting session into running. A witnessed exit, launch error,
 changed screen, recognized wait, or enough unchanged samples replaces the old answer as soon as observed. A session with
-no cached status remains unclassified during that gap. An unclassified session still asks for confirmation before
-Restart, since its pane may be live.
+no cached status remains unclassified during that gap. An unclassified session restarts without asking, like any agent
+that does not read working (see Lifecycle operations), even though its pane may be live.
 
 An interrupted session stays interrupted until the user acts: opening it and declining resume leaves it interrupted;
 restart or delete are the ways out.
@@ -835,11 +841,13 @@ something — and answer from that, so an idle agent's own redraws read idle. A 
 (a menu the user opened) leaves the previous status in place, and a screen they do not recognize at all falls back to
 the generic reader. Their rules are held to real screens captured from the vendors' current releases; see
 `docs/agent-screen-fixtures.md`. A reader never creates lifecycle state. Wrong status must be cosmetic only — status
-detection must never gate or delay interaction with the terminal. Farhelm-supplied integration must not make vendor
-configuration a condition of launching an agent. Grok is the explicit opt-in exception for conversation capture: users
-install its three documented hook entries themselves, while an unconfigured Grok still launches normally and remains
-fresh-only. OMP and Grok both use generic activity only. Their approval prompts show the generic running/idle
-classification, never waiting — a settled scope decision, not a reader waiting to be written.
+detection must never gate or delay interaction with the terminal. Its one effect on behavior is whether Restart and
+Restart with ask before stopping a live agent (see Lifecycle operations), where a wrong reading costs at most a skipped
+or an extra confirmation. Farhelm-supplied integration must not make vendor configuration a condition of launching an
+agent. Grok is the explicit opt-in exception for conversation capture: users install its three documented hook entries
+themselves, while an unconfigured Grok still launches normally and remains fresh-only. OMP and Grok both use generic
+activity only. Their approval prompts show the generic running/idle classification, never waiting — a settled scope
+decision, not a reader waiting to be written.
 
 Notifications (desktop or otherwise) are explicitly out of v1. The status column is the whole story.
 
@@ -1241,13 +1249,13 @@ any session named by id, including the asking session when the caller deliberate
 applying its ordinary rules to the operation exactly as it would for a client request. Rename also requires the title
 the caller observed; the owning supervisor compares and changes it atomically, so a stale agent cannot overwrite a
 concurrent rename. Restart requires an explicit `--session` target, one mode selected from that session's discovery
-offer (`resume`, `fallback-template`, or `fresh`), and an explicit `--stop-if-running` consent when the target is live.
-The owning supervisor revalidates both the offer and liveness at handling time: a stale mode is refused rather than
-changed into another mode, and Fresh never discards an available resumable conversation. An explicit self restart warns
-before dispatch that it can interrupt the invoking CLI, lose its acknowledgement, and leave resumed task continuation
-unconfirmed; it never prints an unobserved completion as success. There is no `farhelm agent replace`: an agent
-replacing its own session would be killing itself mid-request, which is a design question this version leaves open
-rather than answers by accident.
+offer (`resume`, `fallback-template`, or `fresh`), and an explicit `--stop-if-running` consent when the target is
+working (an idle, waiting, or unknown target is stopped without it, as in the GUI). The owning supervisor revalidates
+both the offer and the target's status at handling time: a stale mode is refused rather than changed into another mode,
+and Fresh never discards an available resumable conversation. An explicit self restart warns before dispatch that it can
+interrupt the invoking CLI, lose its acknowledgement, and leave resumed task continuation unconfirmed; it never prints
+an unobserved completion as success. There is no `farhelm agent replace`: an agent replacing its own session would be
+killing itself mid-request, which is a design question this version leaves open rather than answers by accident.
 
 The verbs also CREATE, and this is where reaching the helm buys something no supervisor-local design could offer.
 `farhelm agent create` makes a session on an explicitly named host, and `farhelm agent clone` copies an explicitly named

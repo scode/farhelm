@@ -6,6 +6,37 @@ import { waitForSessionReady } from "./terminal-readiness";
 import { recordPage } from "./timeline";
 
 /**
+ * Restart the open session from its header while its agent reads idle, so
+ * the click restarts directly instead of opening the confirmation.
+ *
+ * Restart asks for confirmation only while the agent is working (SPEC.md,
+ * Lifecycle operations). The fixture agents these specs launch go quiet
+ * after printing, and the activity sampler reads a quiet screen as idle only
+ * after several samples, so a spec that restarts as a step toward something
+ * else waits for that reading first: clicking earlier can still find the
+ * agent reading working and open the prompt instead. The badge is the
+ * oracle rather than `data-confirms` alone, because the create reply's
+ * `Unknown` placeholder also leaves `data-confirms` false. Pass
+ * `afterInput` when the spec typed into the agent just before; see the
+ * option's comment below.
+ */
+export async function restartIdleAgent(page: Page, options: { afterInput?: boolean } = {}): Promise<void> {
+  const badge = page.locator(".titlebar .status-badge");
+  if (options.afterInput) {
+    // A spec that has just typed into the agent may still see the idle
+    // reading from BEFORE that input, while the supervisor has already
+    // sampled the echo and reads working; restarting then is refused as
+    // unconfirmed. The changed screen reads working for several samples,
+    // so wait for that reading first, then for the idle one after it.
+    await expect(badge).toHaveClass(/\brunning\b/, { timeout: 30_000 });
+  }
+  await expect(badge).toHaveClass(/\bidle\b/, { timeout: 30_000 });
+  const restartButton = page.locator(".restart-primary");
+  await expect(restartButton).toHaveAttribute("data-confirms", "false");
+  await restartButton.click();
+}
+
+/**
  * Read the complete terminal buffer, including scrollback rather than only
  * the rows xterm currently renders in the DOM.
  *

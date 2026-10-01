@@ -1442,7 +1442,8 @@ fn fresh_conversation_id() -> String {
 /// Prompt-and-echo with color, bracketed paste, and test control commands.
 ///
 /// Ordinary lines come back as `echo:<line>`; `spam`, `size`, and `quit`
-/// exercise scrollback, real PTY geometry, and clean exit respectively.
+/// exercise scrollback, real PTY geometry, and clean exit respectively;
+/// `busy` keeps the screen changing so the session reads as working.
 /// Bracketed paste stays enabled so reattach tests can assert the mode
 /// survives replay (the audited silent-loss case in SPEC_impl.md).
 ///
@@ -1497,6 +1498,33 @@ fn basic() -> anyhow::Result<()> {
                 "size:{}\r",
                 String::from_utf8_lossy(&size.stdout).trim()
             )?;
+            write!(out, "> ")?;
+            out.flush()?;
+            continue;
+        }
+        // `busy` makes the agent look like it is working, for tests of
+        // behavior that depends on the activity status (Restart asks for
+        // confirmation only then; SPEC.md, Lifecycle operations). A static
+        // screen reads idle after a few samples, so something has to keep
+        // redrawing. That something is a child shell rather than a thread:
+        // this loop holds the stdout lock for its lifetime. It rewrites a
+        // counter in the top-left corner and restores the cursor, so the
+        // screen changes without scrolling anything the test reads; it runs
+        // until this agent exits or its process tree is stopped, which
+        // Restart does. The counter sits on row 1, and the activity sampler
+        // compares only the tail of the screen text, so on a very dense,
+        // wide screen row 1 could fall outside that tail; the specs that use
+        // this keep the screen sparse.
+        if trimmed == "busy" {
+            std::process::Command::new("sh")
+                .args([
+                    "-c",
+                    // `\033` then `7` and `8`: save and restore the cursor.
+                    r#"i=0; while kill -0 "$PPID" 2>/dev/null; do i=$((i+1)); printf '\0337\033[1;1Hbusy-tick-%s\0338' "$i"; sleep 0.2; done"#,
+                ])
+                .stdin(std::process::Stdio::null())
+                .spawn()?;
+            writeln!(out, "busy-started\r")?;
             write!(out, "> ")?;
             out.flush()?;
             continue;

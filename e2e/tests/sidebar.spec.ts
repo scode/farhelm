@@ -64,7 +64,7 @@ import {
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { attachFocusTrace, installFocusTrace } from "./helpers/focus-trace";
 import { stackScratchDir } from "./helpers/scratch";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { attachSession, restartIdleAgent, waitForTermText } from "./helpers/term";
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
@@ -1375,16 +1375,11 @@ test("an unanswered view operation disables row selection until it completes", a
     await expect(page.locator(".titlebar .title")).toContainText(a.title);
 
     // Wait for the view's status-derived decision to settle on "this
-    // click will confirm" (the view opens on the create reply's Unknown
-    // placeholder — same discipline as terminal-restart.spec.ts's tests),
-    // then click through the confirmation; the POST is now held open by
-    // the route.
-    const restartButton = page.locator(".restart-primary");
-    await expect(restartButton).toHaveAttribute("data-confirms", "true", {
-      timeout: 15_000,
-    });
-    await restartButton.click();
-    await page.locator(".restart-confirm").click();
+    // click restarts directly" (the view opens on the create reply's
+    // Unknown placeholder, and the quiet agent reads idle only after a few
+    // samples — see `restartIdleAgent`); the POST is now held open by the
+    // route.
+    await restartIdleAgent(page);
 
     // While held: B's open control is disabled — the gate made visible —
     // and the pane still belongs to A.

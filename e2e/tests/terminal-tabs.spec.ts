@@ -16,7 +16,7 @@ import { expect, newObservedContext, test } from "./helpers/evidence";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import { stubFeed } from "./helpers/fleet";
-import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, restartIdleAgent, termText, waitForTermText } from "./helpers/term";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
 import {
@@ -855,12 +855,7 @@ test("restarting the agent rebuilds only the agent island; a tab keeps its socke
       (window as any).__agentWs = islands["terminal"].ws;
     }, `terminal-${tabId}`);
 
-    const restartButton = page.locator(".restart-primary");
-    await expect(restartButton).toHaveAttribute("data-confirms", "true", {
-      timeout: 20_000,
-    });
-    await restartButton.click();
-    await page.locator(".restart-confirm").click();
+    await restartIdleAgent(page);
 
     // The agent's socket really was replaced (otherwise "the tab's was
     // not" would be a claim about a restart that never remounted
