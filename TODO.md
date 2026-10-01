@@ -109,6 +109,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Possibly other events too; which ones, and the sound, volume, and any setting to turn it off, are to be decided when
   this is picked up.
 
+- **Easy font size changes.** Let the user make the font larger or smaller with keyboard shortcuts, plus buttons for the
+  same. Which shortcuts, where the buttons go, whether it covers the terminal, the rest of the UI, or both, and whether
+  the size is remembered, are to be decided when this is picked up.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
