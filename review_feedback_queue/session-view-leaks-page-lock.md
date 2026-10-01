@@ -48,3 +48,34 @@ screen explains why. Only a page reload recovers.
 The suggested fix is to hold an `OpGuard` in component state while a prompt is open and move it into the spawned task
 when the user confirms, with a `use_drop` release as a backstop. The interrupted card's prompt should also either render
 outside the branch that can disappear or be cleared when the card stops rendering.
+
+## Additional site found at ff6b96c9c58bdbe9698cb8e9cbb08885c18abfc3
+
+The "Restart with" dialog, added after this item was reviewed, has the same leak and needs to be part of the same fix.
+
+Found by pre-pr-review-swarm run `20261001-0226-ff6b96c-5e95` (whole-repo audit, correctness and security reviewers
+only) as `F12 / COR-RESTARTWITH-LOCK`, tagged **definite**. Anchor and title:
+`crates/farhelm-ui/src/session_view.rs:2003` — "Restart with" holds the page lock while its dialog is open and strands
+it if the session view unmounts.
+
+This is another case of the page-wide operation lock being released by hand (see F10/F11). That lock blocks nearly every
+action in the app while it is held. The session header's "Restart with" button (the dialog that restarts a session with
+a different model or effort) takes the lock with a bare claim the moment the dialog opens
+(`crates/farhelm-ui/src/session_view.rs:2003`). It keeps holding it for as long as the dialog is open, including after a
+failed attempt that leaves the dialog up. Only two places give the lock back: the dialog's Cancel handler (around line
+2156), and the end of the restart task after a success (around line 1223). On a failure, the release is deliberately
+skipped so that the dialog stays in charge.
+
+If the session view goes away while the dialog is open, the dialog and its Cancel button go with it, and the lock stays
+held until the page is reloaded. Several ordinary events cause that. Another client might delete the session. The
+session might be deselected during a restart, which is the race described in F8: the supervisor briefly drops the
+restarting session from its listings, so the browser thinks it was deleted and deselects it. Or a 401 might swap the
+page for the token prompt. In every case the whole page goes dead with no explanation.
+
+This is a new site of a problem the review feedback queue already tracks
+(`review_feedback_queue/session-view-leaks-page-lock.md`). That item was reviewed before "Restart with" existed and
+names only the header's Restart and Replace and the interrupted card's buttons. A fix scoped to the sites it lists would
+miss this one. The recommendation is to fold it into that item's fix. Hold a self-releasing guard next to the dialog's
+open state, move it into the restart task on submit, and hand it back when a failure keeps the dialog open.
+Alternatively, add an unmount hook (`use_drop`) as a backstop that releases the lock if the view disappears while the
+dialog holds it.

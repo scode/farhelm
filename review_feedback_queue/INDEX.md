@@ -4,6 +4,25 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
+- `yolo-guard-misses-env-prefix.md` — a command wrapped in `env NAME=value` starts a YOLO agent on a sensitive host with
+  no confirmation and no badge.
+- `yolo-guard-fails-open-without-row.md` — the sensitive-host YOLO guard lets a launch through if the host's registry
+  row disappears mid-request.
+- `sighup-skips-orderly-shutdown.md` — SIGHUP (closing the terminal that started the desktop app or a hand-run
+  supervisor) skips the orderly tmux shutdown.
+- `header-replace-recomputes-alive.md` — header Replace recomputes "nothing is alive" after the YOLO confirmation, so it
+  can kill an agent or shell restarted meanwhile.
+- `sidebar-replace-recomputes-alive.md` — sidebar Replace recomputes "nothing is alive" after the YOLO confirmation, so
+  it can kill an agent or shell restarted meanwhile.
+- `yolo-guard-misses-codex-option-form.md` — `codex -a never -s danger-full-access` is not treated as YOLO, so it runs
+  on a sensitive host with no confirmation or badge.
+- `merged-list-crowded-by-one-host.md` — a remote host reporting 500 future-dated or top-sorting sessions pushes every
+  other host's sessions out of the merged list.
+- `sessions-changed-hint-unthrottled.md` — the helm does not rate-limit "sessions changed" hints, so a hostile host can
+  drive back-to-back refreshes and fleet-wide re-reads.
+- `ssh-forwarding-inherited.md` — with ForwardAgent/ForwardX11 in the user's ssh config, the helm's always-on
+  connections expose the ssh agent and X display to remote agents.
+
 ## High priority: material UX degradation
 
 - `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
@@ -32,6 +51,56 @@ One line per open item. This file must always match the feedback files in this d
   detail line at the same index.
 - `uploads-aborted-silently-on-remount.md` — terminal reconnect or restart remount silently aborts in-flight uploads
   with no message.
+- `pi-reporter-asset-not-renamed.md` — Pi hosts that ran Pi before v0.13.0 permanently lose Resume and the instructions
+  pointer for every Pi session after upgrading.
+- `replace-drop-skips-source-delete.md` — switching away or reloading during Replace creates the replacement but never
+  deletes the original, with no error.
+- `checkout-preview-blocks-read-loop.md` — typing a GitHub repo in the create dialog can freeze typing in every terminal
+  on that host while the checkout folder is scanned.
+- `repo-search-blocking-scan.md` — repository search scans the checkout folder with blocking calls its timeout cannot
+  interrupt, so a slow share can stall the whole supervisor.
+- `delete-holds-attachments-lock-through-archive.md` — Delete keeps the host-wide terminal lock through checkout
+  archiving and database fsyncs, so typing everywhere on the host pauses.
+- `restart-can-still-deselect-session.md` — restarting a session can still empty the main pane or jump to another
+  session; #1310 removed only one trigger.
+- `create-dialog-empty-catalog-refuses.md` — when the model catalog fails to load or is still loading,
+  clone/replace-with/recent setups are refused as "no longer supported".
+- `hosts-panel-leaks-page-lock.md` — a re-login during a host action (retry, adopt, forget, retarget, alias, YOLO
+  setting) leaves every page action disabled until reload.
+- `profile-popup-leaks-page-lock.md` — a re-login while saving or deleting a profile leaves every page action disabled
+  until reload.
+- `codex-last-option-reads-idle.md` — a Codex trust dialog with the last option highlighted reads as Idle instead of
+  Waiting.
+- `codex-working-backstop-never-matches.md` — the screen-text backup for Codex's "Working" line never matches Codex
+  0.159.0, so a busy session can read Idle.
+- `restart-cwd-lossy-non-utf8.md` — restart/retry of a session whose folder resolves to a non-UTF-8 path starts the
+  agent in $HOME and reports success.
+- `non-utf8-farhelm-path-breaks-launch.md` — a farhelm binary or state directory at a non-UTF-8 path makes every launch
+  fail, while the log claims only degraded mode.
+- `stop-terminalless-records-plain-exit.md` — Stop on an ambiguous, terminal-less launch records a plain exit before
+  sweeping, losing the stop note and later Restart's consent check.
+- `probe-drops-add-busy-claim.md` — a probe during a rerun of a failed ADD can drop the busy claim, letting a second
+  install run back to back.
+- `retarget-race-republishes-old-client.md` — a refresh finishing during a retarget can republish the old connection,
+  possibly routing an operation to the old machine.
+- `probe-register-not-helm-owned.md` — a probe interrupted mid-registration leaves a host that is registered but
+  invisible, never dialed, and blocks re-adding it.
+- `desktop-start-fails-on-skewed-supervisor.md` — a hand-started supervisor on another protocol version makes the
+  desktop app fail at startup with a misleading timeout.
+- `terminal-tombstone-never-buried.md` — a terminal's frozen post-takeover screen is never cleared when it leaves the
+  view, leaving a blank pane and leaking memory.
+- `checkout-retry-raw-device-check.md` — a create retried after a reboot or remount that renumbered the device is
+  refused as "folder replaced" and never retried.
+- `seen-toggle-report-panics-after-unmount.md` — the manual read/unread toggle's completion handler panics if the
+  session list unmounted (desktop re-auth, browser 401).
+- `takeover-latch-misses-attaching-tabs.md` — a tab still attaching when another window takes over evicts the winner, so
+  the two windows displace each other.
+- `claude-last-option-reads-idle.md` — a Claude multiple-choice question with the last option highlighted is mistaken
+  for the input box and reads Idle.
+- `claude-spinner-window-too-short.md` — the Claude spinner is searched only 6 lines above the input box, so a task list
+  in between may read as Idle mid-turn.
+- `claude-spinner-rejects-multiword.md` — the Claude spinner check rejects multi-word text like "Compacting
+  conversation…", so compaction may read Idle.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -62,3 +131,28 @@ One line per open item. This file must always match the feedback files in this d
   sidebar keeps deleted/stale rows.
 - `desktop-copy-fallback-never-runs.md` — the native clipboard writer never rejects, so the header copy fallback never
   runs and failures show "copied".
+- `dropped-create-skips-bookkeeping.md` — reloading during a create starts the agent but never records launch history or
+  the remembered default profile.
+- `agent-create-aborted-on-retire.md` — an agent's create/clone aborted by its host's reconnect still creates the
+  session but skips launch history and gets no answer.
+- `stop-restart-panic-no-reply.md` — a panicking stop or restart task sends no reply, leaving the UI or `farhelm agent`
+  waiting until the connection drops.
+- `claude-capture-warns-forever.md` — an exited Claude session whose transcript was deleted logs a WARN every capture
+  pass, indefinitely and across restarts.
+- `tab-reap-budget-starved-by-failures.md` — failed tab closes spend the per-tick reap budget, so a few persistent
+  failures stop exited tabs from being reaped host-wide.
+- `profile-body-accepts-unknown-fields.md` — a profile create/update with a misspelled or stray field is accepted and
+  silently clears the stored resume template.
+- `folder-picker-skips-symlinks.md` — the create dialog's folder picker never lists symlinked folders, and one
+  unreadable entry fails the whole listing.
+- `tilde-in-remote-path-fields.md` — `~` in the remote farhelm or remote state dir fields is not expanded, giving a
+  false "not installed" or a folder named `~`.
+- `escape-token-clamp-too-short.md` — the 64-character host label clamp can cut a `<U+E00xx>` escape token in half.
+- `partial-release-download-left-behind.md` — a release download that fails mid-stream (including on a full disk) leaves
+  its `.part` file in helm state.
+- `tmux-build-script-bash32.md` — build-private-tmux.sh's macOS branch aborts under bash 3.2 because of empty arrays
+  under `set -u`.
+- `pi-pointer-overrides-user-prompt.md` — Pi injection always adds `--append-system-prompt`, which may silently replace
+  the user's own (OMP already yields).
+- `terminal-font-promise-leak.md` — per-mount callbacks on a never-settling font promise retain every terminal instance,
+  so overnight reconnect loops grow without bound.
