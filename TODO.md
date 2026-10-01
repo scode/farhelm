@@ -615,6 +615,9 @@ are large mostly because of their tests.
   "Learn more…" style links in various places in the GUI that point at the relevant documentation page. Which places get
   one is to be decided when this is picked up.
 
+- **In-app intro guide.** Build an introductory guide into the app itself, so a new user can learn Farhelm's core
+  concepts and first steps without leaving it. Form and content are to be decided when this is picked up.
+
 ## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
