@@ -78,21 +78,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   paragraph in `docs/install_uninstall.md`. Low severity: the refusal is over-cautious, never destructive, and deleting
   the receipt by hand recovers. Found while rebasing the review-feedback stack onto #1278.
 
-- **Decide whether teardown should wait out the systemd probe's timeout backoff.** When the supervisor's probe of the
-  systemd user manager runs out of time, `crates/farhelm-supervisor/src/scope.rs` caches `Verdict::TimedOut` and, for
-  `TIMED_OUT_REPROBE_INTERVAL` (60 s), both `ScopeManager::available()` and `reprobe()` answer false without asking the
-  manager again, even for a caller holding scope evidence (#1279). Stop, Restart, Delete and tab close treat a scope
-  they know the launch had but cannot check as an unconfirmed cleanup (SPEC.md "Lifecycle operations", confirmed
-  2026-09-28): `reap_process_tree` in `service/sweep.rs` turns each recorded unit into "scope ... could not be checked
-  because this host's systemd user manager is not usable now", and `ScopeKillFailure::Refuse` fails the operation. So
-  for up to a minute after a probe timeout, those operations fail on every scoped session and tab, and the ticker's
-  `reap_dead_tabs` fails and warns on each tick for a dead scoped tab, spending that tick's tab-reap budget. A retry
-  after the window works. The question: is that acceptable, or should teardown with durable scope evidence (a unit the
-  session row recorded, a tab window marked as opened in a scope) probe again at once despite the backoff? Re-probing
-  costs up to the probe's 15 s bound per teardown while the manager stays slow, which is what the backoff exists to
-  avoid. Whatever is chosen, record it in SPEC_impl.md's scope paragraph ("The manager is probed once and the answer
-  cached, with two exceptions ...").
-
 - **Confirm restart only while the agent is working.** Restart (from the session header or the sidebar) asks "still
   running — restarting stops the agent and its whole process tree first" whenever the agent is live at all, idle
   included, and also when its status is unknown. Asked that often, people click through without reading it. Only ask
