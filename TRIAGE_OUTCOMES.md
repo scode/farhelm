@@ -4588,7 +4588,7 @@
   condition holds per the assessment. The separate wrong-machine race after a retarget is
   `retarget-race-republishes-old-client.md`, triaged on its own.
 - Completion criteria: remove this feedback file and its index entry, with no code or spec change.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-feed-sink-identity.md`.
 
 ## unvalidated-state-dir-on-probe.md
 
@@ -4619,7 +4619,7 @@
   `awaiting_liveness` is true, or keep a separate liveness deadline), so a vanished subscriber is dropped within the
   documented bound; extend the existing keepalive test to cover revisions arriving while a Ping is unanswered. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-feed-sink-identity.md`.
 
 ## sink-shutdown-retries-forever-after-delete.md
 
@@ -4645,7 +4645,7 @@
   `delete-holds-attachments-lock-through-archive.md` lands there). Add a regression test that a delete racing a busy
   sink leaves no sink in a perpetual retry. If a restart path that kills and recreates a session under the same name
   turns out to exist, give it the same ordering. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-feed-sink-identity.md`.
 
 ## input-client-notifications-pile-up.md
 
@@ -4665,7 +4665,7 @@
   in brief, how sure we are (the reviewer's measurements; not reproduced in triage), and why it is not being fixed
   (bounded in practice, reset by any keystroke or reattach, and a fix would complicate the keystroke path). Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-feed-sink-identity.md`.
 
 ## adopt-checks-current-row-not-dialed.md
 
@@ -4690,7 +4690,7 @@
   credentials, processes or other user-owned work; connecting to, sending an operation to, or acting on the wrong
   machine or session; a wrong state that persists with no ordinary way back; and any security or trust-boundary
   consequence. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-feed-sink-identity.md`.
 
 ## identity-mismatch-never-becomes-duplicate.md
 
@@ -4721,4 +4721,4 @@
   and tell the user to remove it or change this entry's destination, then press Retry. Add tests for both triggers
   (retarget onto another entry's machine; re-added reinstalled host with the old entry still pointing at it) and for
   Retry clearing the freeze after the other entry is removed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-feed-sink-identity.md`.
