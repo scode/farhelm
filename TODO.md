@@ -144,6 +144,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   needs a changelog entry for the flag. Split out of the pre-release UI work that added the "don't ask again" button to
   the YOLO confirmation, which may already use some of this wording.
 
+- **"Replace with" a gh: checkout refused because the checkout path exists.** Using "replace with" to switch a session
+  to a `gh:` fresh checkout was refused with an error saying to pick a different session name because the git checkout
+  path already exists. Not yet investigated: it may fail like that every time, or something subtler about that session's
+  state may have triggered it. Reproduce first, then fix whichever it turns out to be.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
