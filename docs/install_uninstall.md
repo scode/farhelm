@@ -99,9 +99,10 @@ checks** described below; they concern files, not running processes.
 
 Before removing the software, stop local sessions and their additional terminals, quit the desktop app, and stop
 manually started Farhelm processes. **This is your responsibility: uninstall does not detect live sessions or refuse
-because they are running.** Sessions can survive their supervisor, so quitting the app or supervisor alone is not
-enough. Stop any custom services yourself. Farhelm automatically stops its recognized setup-owned Linux services during
-uninstall.
+because they are running.** On macOS it does refuse while the desktop app (or another Farhelm supervisor or helm using
+the default state directory) holds its state-directory lock. Sessions can survive their supervisor, so quitting the app
+or supervisor alone is not enough. Stop any custom services yourself. Farhelm automatically stops its recognized
+setup-owned Linux services during uninstall.
 
 Preview the operation without changing files or stopping services:
 
@@ -146,9 +147,13 @@ and their data, separately installed dependencies such as tmux, unrelated files,
 `~/.local/bin` and `~/Applications` are preserved. There is no purge option. Uninstalling a helm does not remove remote
 installations or stop sessions on remote hosts.
 
-These protections assume you keep installation, updates, setup and Farhelm startup stopped until uninstall finishes. The
-command does not inspect running processes or prove that sessions have stopped, and it does not protect against
-concurrent changes to the installation.
+Uninstall also refuses, with nothing removed, when an install, update or setup of this installation holds its lock, and
+when what it is about to remove changed after you confirmed; an install or update started while uninstall is running
+refuses in turn, and so does a setup when Farhelm's services are set up. If you interrupt an uninstall after confirming
+(Ctrl-C, a closed terminal), it can leave `.farhelm-install.lock` in the install directory, and the retry then refuses
+and names it: once nothing is running, remove it as the message says, or re-run the installer, which clears it. On macOS
+it can also leave `~/Applications/.farhelm-app.lock`, which only removing it by hand clears. The command does not
+inspect running processes or prove that sessions have stopped.
 
 ## Refusals and interrupted removal
 
