@@ -1351,3 +1351,25 @@ the TODO.md entry and its `deflake/known-flakes.txt` line are removed.
 Class: substrate
 
 Cause: established
+
+## 2026-09-30 — `service::core::tests::an_ambiguous_planned_checkout_never_adopts_a_foreign_directory` (crates/farhelm-supervisor/src/service/core.rs)
+
+The v0.20.0 release gate's workspace nextest step failed this one test on the hosted x86_64 Linux runner (GitHub Actions
+run `36811756125`, recorder run `80893b36-8051-45bd-97f4-9ed8e8b451fb`, clean tested commit
+`e0b9992760ed27896d90b9c6826ce2959ecead3e`, selection `workspace except farhelm and farhelm-desktop`, four nextest slots
+across binaries with zero retries, pinned tmux 3.7c with executable SHA256
+`0838fd84ec24dfb4c70e250f7a8db71e3c2a2095847ef8335aee8871c925c07a`, locale `C.UTF-8`, no ambient `FARHELM_*`, only
+recorder-owned `FARHELM_TEST_TRACE_DIR` supplied); the other 2605 tests passed. It panicked after 15.17 s at "Delete
+retires the committed refusal without a restart". The retained trace shows the supervisor's systemd user-manager probe
+starting about 130 ms into the test and reporting at 15.13 s that it did not finish within its 15 s bound, after which
+teardown found no usable user manager and took the sweep-only path, and Delete returned an error. The same code (the
+gate's source differs from v0.20.0-rc.4 only in the version, changelog and TODO.md) passed the rc.4 gate on the same
+runner type, and the exact test passed all 20 attempts of local hunt batch `dda5c41c-7b4e-4b78-af86-23bc4999924a` on
+Linux x86_64 at commit `e0b9992760ed27896d90b9c6826ce2959ecead3e`, where the user manager answers in milliseconds. This
+is the class of the 2026-09-29 entries above, a test exercising the host's real user manager on a runner where it can
+stay silent for the full probe bound; why Delete then fails on the sweep-only path is not established. Disposition:
+open, recorded as a TODO.md Near term entry; v0.20.0 was abandoned and re-cut as v0.20.1.
+
+Class: budget
+
+Cause: hypothesis
