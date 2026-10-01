@@ -43,6 +43,47 @@ the reviewer disagrees, or its verdict is ambiguous, record the finding. The sam
 finding belongs in the `highest` bucket: treat it as if it does. A wrongly dropped security or data-loss finding is gone
 without anyone having looked at it, while a wrongly recorded one costs a few minutes of triage.
 
+## Running an agent review that feeds this queue
+
+These rules apply to any agent review whose findings are meant for this queue, whatever its scope or size. They come
+from auditing the transcripts of a whole-codebase review swarm (2026-09-30): the reviewers mostly did sound work, but
+coverage and results went missing in mechanical ways that none of them reported.
+
+Tell each reviewer:
+
+- Read code in chunks of at most about 400 lines per command. A larger tool output is replaced by a short preview and
+  saved to a file, and a reviewer that takes the preview for the content has not read the code. In the audited run one
+  reviewer called a module's schema migrations clean without ever having seen them. If a result says the output was
+  saved to a file, open that file before relying on it.
+- Create, modify or delete nothing in the checkout, helper scripts included; scratch goes in the agent scratch space the
+  root `AGENTS.md` describes. One audit agent left a stray script in the repository root.
+- Return findings in the final reply rather than in a report file. Harnesses commonly refuse report files written by
+  subagents.
+- Do not spawn nested helper agents. In the audited run, helpers' caveats and dropped candidates were not carried
+  forward by the reviewers that spawned them.
+- End the reply with three parts:
+  - the findings, each with the template's fields plus a suggested bucket, a confidence (confirmed, or likely with the
+    unverified premise named), `proposed_drop` and `possible_cover`;
+  - every candidate considered and not reported, with the reason (refuted, with file and line; or covered, naming the
+    exact spec section, `Planned` item, queue file, ledger heading or filter) and whether it could be in the `highest`
+    bucket;
+  - the exact files and line ranges read, and what in scope went unread.
+
+  A covered candidate that could be in the `highest` bucket is reported as a finding with `proposed_drop` filled in, not
+  only listed, so the check in the NOTE above can see it.
+
+Then, when collecting the replies:
+
+- Send every proposed drop of a finding that could be in the `highest` bucket to the independent reviewer the NOTE above
+  describes, including drops that appear only in the list of unreported candidates or in passing prose. In the audited
+  run most reviewers mentioned such drops only in passing. "Too rare" or "by design" with no spec, TODO, queue, ledger
+  or filter citation is not coverage.
+- Compare each reviewer's stated coverage with its scope, and tell the user which parts went unread rather than
+  presenting a quiet area as clean.
+- When writing a finding into a feedback file, keep the reviewer's confidence, suggested bucket, possible cover and
+  caveats alongside the TLDR and details. Triage needs them to judge coverage, and in the audited run they were lost in
+  transcription.
+
 ## What goes in a feedback file
 
 Every file has three things:
