@@ -4644,7 +4644,9 @@
   `awaiting_liveness` is true, or keep a separate liveness deadline), so a vanished subscriber is dropped within the
   documented bound; extend the existing keepalive test to cover revisions arriving while a Ping is unanswered. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/triage-feed-sink-identity.md`.
+- Execution: complete: change `zqknrkwkyrtu`, bookmark `triage-1001b/02-event-feed-liveness`, PR
+  https://github.com/scode/farhelm/pull/1375. A write no longer restarts the idle window at all, before or after the
+  Ping (review finding: resetting only while no Ping was outstanding still kept a busy fleet from ever pinging).
 
 ## sink-shutdown-retries-forever-after-delete.md
 
