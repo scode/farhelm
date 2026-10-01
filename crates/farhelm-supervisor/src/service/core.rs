@@ -14110,6 +14110,7 @@ impl Supervisor {
     /// changes neither durable nor in-memory capture: the `Ok(false)` arm
     /// is a concurrent relaunch or binding change invalidating the
     /// evidence, not a malfunction.
+    #[allow(clippy::too_many_arguments)]
     fn finish_reported_admission(
         &self,
         id: &str,
