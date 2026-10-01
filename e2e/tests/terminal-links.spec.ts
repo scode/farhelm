@@ -936,6 +936,63 @@ test("dragging from inside a URL into surrounding text selects without opening",
   }
 });
 
+// SPEC.md, Terminal experience: the loud warning is reserved for link text
+// that is itself a web address naming another place. Text that names the
+// same place (here differing only by the trailing slash the parser adds to
+// a bare origin) and text that is not a URL at all ("click here") keep the
+// quiet display; flagging either would teach people to ignore the warning.
+// All three links share one row and the hover display's class is the
+// oracle, read after each hover has shown that link's own target; the third
+// link is a mismatch, the positive control for the other two.
+test("an OSC 8 link whose text matches its target, or is not a URL, hovers quietly", async ({
+  page,
+  request,
+}) => {
+  const stamp = Date.now();
+  // Never contacted: only the hover display reads it.
+  const origin = "http://127.0.0.1:6080";
+  const words = `https://words.example/${stamp}`;
+  const loud = `https://loud.example/${stamp}`;
+  const claimed = `https://claimed.example/${stamp}`;
+  const invocation =
+    `sh -c 'read _gate; printf "QUIET-${stamp} \\033]8;;${origin}/\\007${origin}\\033]8;;\\007 and \\033]8;;${words}\\007click here\\033]8;;\\007 but \\033]8;;${loud}\\007${claimed}\\033]8;;\\007\\n"; sleep 300'`;
+  const session = await createSession(request, {
+    title: `osc-quiet-${stamp}`,
+    cwd: "/tmp",
+    invocation,
+  });
+  try {
+    await page.goto("/");
+    await attachSession(page, session.id);
+    await assertLinkWiring(page);
+    await page.locator("#terminal").click();
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, `QUIET-${stamp}`);
+
+    const targetDisplay = page.locator(".terminal-link-target");
+    await hoverLink(page, `QUIET-${stamp}`, origin);
+    await expect(targetDisplay.locator(".terminal-link-target-url")).toHaveText(`${origin}/`);
+    await expect(targetDisplay).not.toHaveClass(/\bterminal-link-target-mismatch\b/);
+    await page.mouse.move(1, 1);
+    await expect(targetDisplay).toBeHidden();
+
+    await hoverLink(page, `QUIET-${stamp}`, "click here");
+    await expect(targetDisplay.locator(".terminal-link-target-url")).toHaveText(words);
+    await expect(targetDisplay).not.toHaveClass(/\bterminal-link-target-mismatch\b/);
+    await page.mouse.move(1, 1);
+    await expect(targetDisplay).toBeHidden();
+
+    // Positive control on the same row: a link whose text is a different
+    // URL does turn loud, so the two quiet results above come from the
+    // comparison and not from the hover never receiving the link's text.
+    await hoverLink(page, `QUIET-${stamp}`, claimed);
+    await expect(targetDisplay.locator(".terminal-link-target-url")).toHaveText(loud);
+    await expect(targetDisplay).toHaveClass(/\bterminal-link-target-mismatch\b/);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
 test("an OSC 8 span wins over its https display text, beside a working bare URL", async ({
   page,
   request,
@@ -955,7 +1012,7 @@ test("an OSC 8 span wins over its https display text, beside a working bare URL"
   const target = `https://target.example/${stamp}`;
   const bare = `https://bare.example/${stamp}`;
   const invocation =
-    `sh -c 'read _gate; printf "OSC-${stamp} \\033]8;;${target}\\007${display}\\033]8;;\\007 ${bare}\\n"; sleep 300'`;
+    `sh -c 'read _gate; printf "OSC-${stamp} (\\033]8;;${target}\\007${display}\\033]8;;\\007) ${bare}\\n"; sleep 300'`;
   const session = await createSession(request, {
     title: `osc-precedence-${stamp}`,
     cwd: "/tmp",
@@ -972,13 +1029,22 @@ test("an OSC 8 span wins over its https display text, beside a working bare URL"
 
     // Hovering the OSC span shows where it really goes (its TARGET, not its
     // https-looking display text), with the target's host emphasized, and
-    // the display goes away when the pointer leaves. The click below still
-    // opens directly, with no dialog.
+    // the display goes away when the pointer leaves. Because the display
+    // text is itself a URL naming another place, the display is the loud
+    // mismatch warning, showing the text beside the target. The click below
+    // still opens directly, with no dialog.
     const targetDisplay = page.locator(".terminal-link-target");
     await hoverLink(page, display, display);
     await expect(targetDisplay).toBeVisible();
     await expect(targetDisplay.locator(".terminal-link-target-url")).toHaveText(target);
     await expect(targetDisplay.locator("strong")).toHaveText("target.example");
+    await expect(targetDisplay).toHaveClass(/\bterminal-link-target-mismatch\b/);
+    await expect(targetDisplay.locator(".terminal-link-target-warning")).toHaveText(
+      "link text does not match where it goes",
+    );
+    // The parentheses printed right against the link make an over-read of
+    // even one cell on either side show up here.
+    await expect(targetDisplay.locator(".terminal-link-target-text")).toHaveText(`text says: ${display}`);
     const box = await targetDisplay.boundingBox();
     const viewport = page.viewportSize();
     expect(box && viewport && box.x >= 0 && box.x + box.width <= viewport.width).toBe(true);

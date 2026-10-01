@@ -29,6 +29,9 @@ const {
   linkTargetParts,
   shortenedTarget,
   displayedTarget,
+  linkTextMismatch,
+  linkRowText,
+  visibleFormatCharacters,
 } = require("../assets/terminal-links.js");
 
 const SHIPPED_SOURCE = fs.readFileSync(
@@ -223,4 +226,115 @@ test("displayedTarget keeps empty query and fragment delimiters", () => {
   assert.equal(displayedTarget("https://example.com/path?#"), "https://example.com/path?#");
   assert.equal(displayedTarget("https://ex\u0430mple.com/"), "https://xn--exmple-4nf.com/");
   assert.equal(displayedTarget("not a url"), "not a url");
+});
+
+// Why this matters: the loud hover warning exists to catch a link whose
+// underlined text is a web address while the link goes somewhere else; if
+// it fired on ordinary link text or on trailing-slash differences, people
+// would learn to ignore it. Spec: only URL-like text (a scheme, `www.`, or a
+// dotted host followed by `/`) is judged; it matches when the parsed URLs
+// are equal ignoring one trailing slash, with scheme-less text borrowing the
+// target's scheme; a prefix of the target, a different path, and URL-like
+// text that does not parse all mismatch; file names and plain words never
+// do.
+test("linkTextMismatch flags only URL-like text that names another place", () => {
+  // Matches, including the trailing-slash and normalization cases.
+  assert.equal(linkTextMismatch("http://127.0.0.1:6080", "http://127.0.0.1:6080/"), false);
+  assert.equal(linkTextMismatch("https://example.com/docs", "https://example.com/docs/"), false);
+  assert.equal(linkTextMismatch("HTTPS://Example.COM/x", "https://example.com/x"), false);
+  assert.equal(linkTextMismatch("example.com/x", "https://example.com/x"), false);
+  assert.equal(linkTextMismatch("www.example.com", "https://www.example.com/"), false);
+  assert.equal(linkTextMismatch("  https://example.com/x  ", "https://example.com/x"), false);
+  // Mismatches.
+  assert.equal(linkTextMismatch("https://github.com", "https://evil.example/"), true);
+  assert.equal(linkTextMismatch("https://good.example", "https://good.example.evil.test/"), true);
+  assert.equal(linkTextMismatch("https://example.com/a", "https://example.com/b"), true);
+  assert.equal(linkTextMismatch("docs.rs/foo", "https://evil.example/foo"), true);
+  assert.equal(linkTextMismatch("http://example.com/x", "https://example.com/x"), true);
+  assert.equal(linkTextMismatch("https://exa mple.com/", "https://example.com/"), true);
+  // Lookalike schemes and invisible leading characters claim an address but
+  // do not parse as one, so they warn rather than slipping past the gate.
+  assert.equal(linkTextMismatch("htt\u0440s://github.com/login", "https://evil.example/login"), true);
+  assert.equal(linkTextMismatch("\u2800https://github.com/login", "https://evil.example/login"), true);
+  assert.equal(linkTextMismatch("\u3164https://github.com/login", "https://evil.example/login"), true);
+  // Lookalike separators and blank-drawing letters are read through for the
+  // decision to judge, then strict parsing warns.
+  for (const text of [
+    "https\u02D0//github.com/login",
+    "https\uFF1A//github.com/login",
+    "https:\u2215\u2215github.com",
+    "github\u3002com/login",
+    "github.com\u2215login",
+    "\u3164 https://github.com/login",
+    "\uFFA0 https://github.com/login",
+  ]) {
+    assert.equal(linkTextMismatch(text, "https://evil.example/login"), true, text);
+  }
+  // Percent-escape case alone is not a different place.
+  assert.equal(linkTextMismatch("https://example.com/%c3%bc", "https://example.com/%C3%BC"), false);
+  // The trailing-slash allowance covers the path only.
+  assert.equal(linkTextMismatch("https://example.com/?next=/", "https://example.com/?next="), true);
+  assert.equal(linkTextMismatch("https://example.com/a#/", "https://example.com/a#"), true);
+  // Not URL-like: never judged, whatever the target.
+  for (const text of [
+    "click here",
+    "#123",
+    "main.rs",
+    "setup.py",
+    "src/main.rs",
+    "src/main.rs:12",
+    "./foo.d/x",
+    "changelog.d/x.md",
+    "v1.2/CHANGELOG.md",
+    "1.2.3/",
+    "",
+    null,
+    undefined,
+  ]) {
+    assert.equal(linkTextMismatch(text, "https://evil.example/"), false, String(text));
+  }
+});
+
+// Why this matters: the comparison is only as good as the text it is given.
+// Spec: the hovered row's cells from the range's start to its end column
+// (1-based, inclusive) are returned; a range that runs past the row is cut at
+// the row's end (the provider builds one link per row); no range, or a row
+// that no longer exists, gives null so the caller keeps the quiet display.
+test("linkRowText reads the underlined cells of the hovered row", () => {
+  const rows = ["0123 https://example.com/x tail"];
+  const term = {
+    buffer: {
+      active: {
+        getLine(y) {
+          const text = rows[y];
+          if (text === undefined) return undefined;
+          return {
+            length: text.length,
+            translateToString(_trimRight, start, end) {
+              return text.slice(start, end);
+            },
+          };
+        },
+      },
+    },
+  };
+  const range = { start: { x: 6, y: 1 }, end: { x: 26, y: 1 } };
+  assert.equal(linkRowText(term, range), "https://example.com/x");
+  // Guard only: the vendored provider never reports a range spanning rows.
+  assert.equal(linkRowText(term, { start: { x: 6, y: 1 }, end: { x: 3, y: 2 } }), "https://example.com/x tail");
+  assert.equal(linkRowText(term, undefined), null);
+  assert.equal(linkRowText(term, { start: { x: 1, y: 9 }, end: { x: 4, y: 9 } }), null);
+});
+
+// Why this matters: the warning asks the user to compare the link's text
+// with its target, and the display is HTML, where a right-to-left override
+// or other format character the terminal stored but did not apply would
+// reorder or hide part of the text being compared. Spec: every Unicode
+// format character (general category Cf) becomes a visible <U+XXXX> escape;
+// everything else is left as it is.
+test("visibleFormatCharacters makes bidi controls and zero-width characters visible", () => {
+  assert.equal(visibleFormatCharacters("https://a.example/"), "https://a.example/");
+  assert.equal(visibleFormatCharacters("abc\u202Edef"), "abc<U+202E>def");
+  assert.equal(visibleFormatCharacters("a\u200Bb\u2066c"), "a<U+200B>b<U+2066>c");
+  assert.equal(visibleFormatCharacters("b\u00fccher.de"), "b\u00fccher.de");
 });

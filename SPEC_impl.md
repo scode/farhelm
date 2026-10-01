@@ -721,6 +721,27 @@ native write succeeded or not). A browser tab keeps the web API path and inherit
 engines treat loopback HTTP as a secure context and work; Safari does not, and stays silently refused. OSC 52 reads are
 refused identically on every surface — the native route is write-only by construction, not by policy that could drift.
 
+An OSC 8 link's hover compares the link's underlined text with its target (`linkTextMismatch` in
+`assets/terminal-links.js`) to decide whether the display is the quiet one or the loud mismatch warning. The text is
+what xterm's OSC 8 link provider reports for the hovered ROW only: the provider builds one link per buffer row, its
+public buffer API does not say which cells belong to a link, and agent TUIs wrap with cursor movement rather than
+letting the terminal wrap, so a continuation row is not even marked as one. An honest URL-shaped link whose text wraps
+onto another row is therefore judged on a fragment and gets the loud warning anyway. That false alarm is deliberate,
+decided 2026-09-30: joining rows would need xterm's private internals, and the row-only comparison never lets a URL-like
+fragment count as a match, since a fragment can never equal the full target. Do not "fix" the false alarm by trusting
+partial text or by treating a prefix of the target as a match. The comparison is not complete against a hostile program,
+and the reason must not be overstated: a fragment that is not URL-like on its own (`https:/` on one row,
+`/github.com/login` on the next) is not judged at all, so a program that chooses its own line breaks can keep every row
+of a lookalike quiet. The quiet display still names the real host, which is the safeguard the warning adds to. Within
+one row, the URL-like gate is deliberately generous, and strict parsing then decides: it accepts any scheme spelling,
+looks past leading non-ASCII characters that are not letters or digits and past the Hangul fillers (letters that draw as
+blanks), and reads lookalike colons, slashes and dots as their ASCII originals. So a lookalike scheme (`httрs` with a
+Cyrillic letter), invisible leading characters, or a `ː` posing as `:` warn rather than pass. Only the start of the text
+is examined: link text that is prose containing an address is not judged. A dotted host counts only when its last label
+is two or more letters, which keeps version and directory text such as `v1.2/` or `changelog.d/` quiet, at the cost of
+not judging scheme-less IP text. The warning shows the link's text with Unicode format characters (bidi controls,
+zero-width characters) as visible escapes, because the terminal stores them unapplied and HTML would apply them.
+
 ## Terminal substrate: private tmux server
 
 Each supervisor runs a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down

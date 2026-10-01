@@ -940,8 +940,15 @@ whatever the agent renders is what you see. There is no composer, no message abs
   below, not a lapse in it.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind. A hyperlink a
   program emits (OSC 8) can underline text that differs from where it goes, so hovering it shows the exact target first,
-  with its host emphasized; the hover display is the whole safeguard. Plain URLs printed as text need no such display,
-  because what is shown is what opens.
+  with its host emphasized. When the underlined text is itself a web address (it has a scheme, starts with `www.`, or is
+  a dotted host ending in a name of two or more letters followed by `/`) and names a different place, ignoring only a
+  trailing slash, the display becomes a prominent warning that shows the text beside the real target. Link text that is
+  not a web address, such as a file name or "click here", keeps the ordinary display. Only the part of a link on the
+  hovered line is compared, so a long web address that wraps onto another line gets the warning even when it is honest;
+  that false alarm is accepted (see SPEC_impl.md). The warning is an aid, not a guarantee: a program that chooses its
+  own line breaks can split a lookalike so that no single line looks like a web address, and the ordinary display, which
+  always names the real host, is what remains. The hover display is the whole safeguard. Plain URLs printed as text need
+  no such display, because what is shown is what opens.
 
 ## Attachments
 

@@ -33,16 +33,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Alarming link hover when the text and target disagree.** Hovering a hyperlink a program printed (OSC 8) shows its
-  host and full target in a small, quiet display (`showLinkTarget` in `crates/farhelm-ui/assets/terminal-links.js`,
-  added in #1158). Keep that display for every such link, but when the underlined text does not match where the link
-  actually goes, make it much more intrusive (big, red, blinking, or something along those lines) so the mismatch is
-  hard to miss before clicking. A difference only in a trailing slash does not count as a mismatch (the text
-  `http://127.0.0.1:6080` whose target displays as `http://127.0.0.1:6080/` after URL normalization, or `/docs` versus
-  `/docs/`): it is very common and almost never matters, and flagging it would teach people to ignore the warning. Other
-  details are to be worked out, including how to treat link text that is not a URL at all (a file name, "#123", "click
-  here"), which never matches but is not the lookalike case this is meant to catch. SPEC.md (Terminal experience)
-  currently calls the hover display the whole safeguard, so it changes with this.
 - **Coordinate uninstall with installation, setup, and runtime startup.** SPEC.md's "Concurrent and interrupted runs"
   now requires a correct outcome (refusing is fine) when uninstall overlaps installation, updates, setup, desktop
   startup, or session creation; the earlier carve-out that assumed these never overlap was dropped on 2026-09-28. Share

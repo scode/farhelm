@@ -3115,12 +3115,17 @@
             },
             // An OSC 8 link's underlined text can differ from where it goes,
             // so hovering shows the exact target (SPEC.md, Terminal
-            // experience). Activation above stays a direct open: the hover
-            // display is the whole safeguard, never a confirmation.
+            // experience), and turns into a loud warning when the text is
+            // itself a URL naming somewhere else. Activation above stays a
+            // direct open: the hover display is the whole safeguard, never
+            // a confirmation. xterm passes the link's range on the hovered
+            // row as the third argument; the underlined text is read from
+            // it (see `linkRowText` for what that means for wrapped links).
             // The display is placed inside this terminal's own element, so
             // it goes away with the terminal (see `showLinkTarget`).
-            hover(event, uri) {
-              window.farhelmTerminalLinks.showLinkTarget(event, uri, term.element);
+            hover(event, uri, range) {
+              const links = window.farhelmTerminalLinks;
+              links.showLinkTarget(event, uri, term.element, links.linkRowText(term, range));
             },
             leave() {
               window.farhelmTerminalLinks.hideLinkTarget(term.element);

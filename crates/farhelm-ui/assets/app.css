@@ -975,6 +975,31 @@ samp {
   pointer-events: none;
 }
 .terminal-link-target strong { color: var(--fg-bright); }
+/* The loud form of the same display, used when the link's underlined text
+   is itself a URL that names somewhere else (terminal-links.js,
+   `linkTextMismatch`). Larger and danger-filled so the mismatch is hard to
+   miss before a click. It does not blink: the sheet's animations honor
+   `prefers-reduced-motion`, and a warning that has to be read should hold
+   still. */
+.terminal-link-target.terminal-link-target-mismatch {
+  padding: 8px 10px;
+  background: var(--danger-bg);
+  color: var(--fg-bright);
+  border: 2px solid var(--danger-strong);
+  font-size: 14px;
+}
+/* The link's own text, as the program sent it: forced left to right so
+   right-to-left letters inside it cannot reorder it away from the order the
+   terminal draws it in, which is the order the user is comparing. */
+.terminal-link-target-text {
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
+.terminal-link-target-warning {
+  margin-bottom: 4px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
 
 /* The hidden-characters warning after a header copy. It hangs below the
    titlebar (its positioning anchor) instead of living inside the copy
