@@ -80,8 +80,6 @@ One line per open item. This file must always match the feedback files in this d
   detail line at the same index.
 - `uploads-aborted-silently-on-remount.md` — terminal reconnect or restart remount silently aborts in-flight uploads and
   erases finished uploads' landed path or failure message.
-- `pi-reporter-asset-not-renamed.md` — Pi hosts that ran Pi before v0.13.0 permanently lose Resume and the instructions
-  pointer for every Pi session after upgrading.
 - `replace-drop-skips-source-delete.md` — switching away or reloading during Replace creates the replacement but never
   deletes the original, with no error.
 - `checkout-preview-blocks-read-loop.md` — typing a GitHub repo in the create dialog can freeze typing in every terminal

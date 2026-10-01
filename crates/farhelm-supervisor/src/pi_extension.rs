@@ -22,9 +22,16 @@ pub(crate) struct VendorAsset {
 
 /// Pi's conversation reporter, loaded with `-e` and pointed at the reporter
 /// through `FARHELM_PI_REPORTER_EXE`.
+///
+/// `v2` because the bytes changed after `v1` had shipped (#811, first in
+/// v0.13.0) and [`materialize_asset`] refuses a published file whose bytes
+/// differ: every host that had already published `v1` went on launching Pi
+/// without the extension. A new name publishes beside the old file instead.
+/// `published_assets_are_pinned_to_their_names` below keeps that from
+/// happening again.
 pub(crate) const PI_ASSET: VendorAsset = VendorAsset {
     directory: "pi",
-    file_name: "farhelm-conversation-v1.ts",
+    file_name: "farhelm-conversation-v2.ts",
     source: include_bytes!("../assets/pi-conversation-v1.ts"),
 };
 
@@ -32,7 +39,7 @@ pub(crate) const PI_ASSET: VendorAsset = VendorAsset {
 /// through `FARHELM_OMP_REPORTER_EXE`. Same publication contract as Pi's;
 /// the assets are never shared because the vendors' event surfaces differ.
 ///
-/// The file name is versioned past Pi's shared `v1`: the gated asset must
+/// The file name is versioned past OMP's own gateless `v1`: the gated asset must
 /// materialize beside — never over — the gateless `v1` bytes an old launch
 /// may still be running, so post-upgrade launches capture immediately
 /// while old launches fail closed by launch provenance instead of by
@@ -136,7 +143,7 @@ mod tests {
         let state = farhelm_teststate::tempdir().expect("state directory");
         let path = state
             .path()
-            .join("integrations/pi/farhelm-conversation-v1.ts");
+            .join("integrations/pi/farhelm-conversation-v2.ts");
         crate::ensure_private_dir(path.parent().unwrap())
             .await
             .expect("artifact directory");
@@ -226,5 +233,60 @@ mod tests {
             std::fs::read(&gated).expect("gated artifact bytes"),
             OMP_ASSET.source
         );
+    }
+
+    /// Every published asset's bytes are pinned to its file name: changing
+    /// an asset's source without giving it a new name fails here.
+    ///
+    /// Why it matters: a host keeps the file it published, and
+    /// [`materialize_asset`] refuses one whose bytes differ, so an asset
+    /// changed under its old name stops loading on every host that published
+    /// the old bytes, silently, with no conversation capture and no Resume.
+    /// That happened to Pi's `v1`. Spec: a change to an asset's bytes comes
+    /// with a new `file_name` and a new row here, never a new hash under an
+    /// old name.
+    #[farhelm_testtrace::test]
+    fn published_assets_are_pinned_to_their_names() {
+        use sha2::{Digest as _, Sha256};
+        let pinned = [
+            (
+                "pi",
+                "farhelm-conversation-v2.ts",
+                "a1d4f427a8e418b1b548671aafa4ae3aad8a6fb49793a12015c3aae118afc045",
+            ),
+            (
+                "omp",
+                "farhelm-conversation-v2.ts",
+                "bfa0a909db4e488c85c12db0418e4e7ca6f953b56e5344a9bd1f474f49e52a12",
+            ),
+        ];
+        // Every asset a launch can load, from the per-kind map a new
+        // harness's asset is added to, so a new asset cannot skip this test.
+        let assets: Vec<VendorAsset> = farhelm_proto::AgentKind::ALL
+            .iter()
+            .copied()
+            .filter_map(reporter_asset)
+            .collect();
+        assert_eq!(
+            assets.len(),
+            pinned.len(),
+            "every published asset needs a pinned row"
+        );
+        for asset in &assets {
+            let (_, file_name, sha256) = pinned
+                .iter()
+                .find(|row| row.0 == asset.directory)
+                .unwrap_or_else(|| panic!("no pinned row for the {} asset", asset.directory));
+            let actual: String = Sha256::digest(asset.source)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            assert_eq!(
+                (asset.file_name, actual.as_str()),
+                (*file_name, *sha256),
+                "the {} asset's bytes changed under a published name; publish them under a new file name",
+                asset.directory
+            );
+        }
     }
 }

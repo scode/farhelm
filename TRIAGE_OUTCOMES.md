@@ -4492,7 +4492,8 @@
   update any spec or doc text naming the Pi file, and add a test that ties each published asset's bytes to its file name
   (a pinned hash or a content-derived name), so a content change without a rename fails. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `nxkzooykszmp`, bookmark `triage-1001/11-pi-asset-v2`, PR
+  https://github.com/scode/farhelm/pull/1367.
 
 ## checkout-preview-blocks-read-loop.md
 
