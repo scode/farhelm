@@ -29724,6 +29724,18 @@ exit 0
     /// leave the plan retired only by an explicit Delete (the teardown
     /// slice's contract — asserted here as the state that teardown will
     /// consume).
+    ///
+    /// Both supervisors run with a disabled scope manager, not the default
+    /// real one. With the real one, the first supervisor's create probes
+    /// the host's systemd user manager and, when it answers, records on the
+    /// row that the launch is scoped before the simulated crash. The reopened
+    /// supervisor gets a fresh manager and probes again at Delete, and
+    /// when that probe runs out its 15-second budget, the recorded scope
+    /// cannot be checked, which is an unconfirmed cleanup Delete must refuse
+    /// (SPEC.md "Lifecycle operations"). That failed the v0.20.0 release
+    /// gate on the hosted runner, which has a user manager (FLAKES.md,
+    /// 2026-09-30). Nothing here is about cgroup scopes, so the fixture
+    /// keeps the host's systemd out of the refusal-and-Delete contract.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn an_ambiguous_planned_checkout_never_adopts_a_foreign_directory() {
         let state = StateDir::new();
@@ -29754,6 +29766,7 @@ exit 0
                         })),
                         ..FaultHooks::default()
                     },
+                    scopes: Arc::new(crate::scope::ScopeManager::disabled()),
                     ..SupervisorSeams::default()
                 },
             )
@@ -29769,7 +29782,17 @@ exit 0
         // planned path — the ambiguity is now real: the registry row
         // recorded no identity, so nothing can prove whose directory this
         // is.
-        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(crate::scope::ScopeManager::disabled()),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
         let row = sup
             .store
             .load_all()
@@ -29779,6 +29802,10 @@ exit 0
             .next()
             .expect("the interrupted attempt's launching row survives the reopen");
         assert_eq!(row.pane, "", "nothing was ever launched");
+        assert!(
+            !row.launch_scoped,
+            "with scopes disabled the row carries no scope evidence for Delete to refuse on"
+        );
         let planted = root.join("bar-1");
         std::fs::create_dir_all(&planted).expect("plant the foreign directory");
         std::fs::write(planted.join("foreign-marker"), b"not ours").expect("marker");
