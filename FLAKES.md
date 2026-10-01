@@ -1438,3 +1438,37 @@ Class: substrate
 
 Cause: established — the test depended on the host's systemd user manager answering twice, and the second probe ran out
 its 15-second bound.
+
+## 2026-10-01 — `InstalledUninstall.test_confirmation` and `test_fresh_preview_and_remove` (scripts/test-uninstall.py)
+
+The v0.21.0 release gate's macOS installed-uninstall step failed these two tests on the hosted macOS 15 arm64 runner
+(image `20260828.587`, Darwin 24.6.0, 3 CPUs; GitHub Actions run `36870068282`, job `110395516935`, recorder run
+`effd9cb4-3ec4-4998-89ee-4454ce9bf790`, clean tested commit `2e8aa753964559e8ce5583cac3f09fcad259c006`, selection
+`macOS installed uninstall acceptance`, one fixture at a time, no tmux, locale `en_US.UTF-8`, no ambient `FARHELM_*`,
+only recorder-owned `FARHELM_TEST_TRACE_DIR` supplied); the other seven tests passed and one skipped as Linux-only. Both
+failures are the harness's 30-second timeout on a `farhelm uninstall` child (the debug build the step installs), in one
+case answering a terminal prompt and in the other with `--yes`. In the prompted case the killed child's captured stdout
+runs through the complete removal report and ends with "Farhelm uninstalled. User data was retained.", so uninstall had
+finished its work and written its last output before the 30 seconds ran out; what did not happen in time is the child
+exiting (or its pipes closing). Nothing in uninstall runs after that final write: its locks are released before the
+report and it starts no other process. The two failures came about a minute apart and the run was slower throughout:
+`test_confirmation` took 81 s and `test_fresh_preview_and_remove` 46 s, against 65 s and 37 s when both passed in the
+v0.21.0-rc.1 gate (run `36827033494`) on the same runner type that morning, with the same shipped code (the gate's
+source differs from rc.1 only in the version, the changelog, and docs and test-script commits outside this step). So
+even a passing run spends a large share of the budget, but how much of it is the uninstall child itself is unavailable.
+The uninstall code and this script last changed in #1330 (2026-09-30), which added the install, app, setup and runtime
+locks. No earlier entry names this script. No reproduction was attempted; the hosted failure artifact expires
+2026-12-30. Disposition: open; v0.21.0 was re-cut as v0.21.1.
+
+```
+FAIL: test_confirmation (__main__.InstalledUninstall.test_confirmation)
+AssertionError: confirmation child timed out: b'... Remove this installation? [y/N] removed ... Farhelm uninstalled. User data was retained.\n' b''
+ERROR: test_fresh_preview_and_remove (__main__.InstalledUninstall.test_fresh_preview_and_remove)
+subprocess.TimeoutExpired: Command '['<fixture-home>/.local/bin/farhelm', 'uninstall', '--yes']' timed out after 30 seconds
+```
+
+Class: unknown
+
+Cause: unknown — either the macOS runner is slow enough that an uninstall which normally finishes inside the budget does
+not, or `farhelm uninstall` intermittently stalls on exit after removing its own executable; nothing seen so far
+separates the two.

@@ -33,6 +33,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Deflake: macOS uninstall acceptance timeouts.** The v0.21.0 release gate failed two tests in
+  `scripts/test-uninstall.py` (`test_confirmation`, `test_fresh_preview_and_remove`) when a `farhelm uninstall` child
+  had printed its complete removal report but had not exited when the 30-second timeout ran out; rc.1 passed the same
+  code hours earlier (FLAKES.md, 2026-10-01). First step: time the uninstall child alone on a macOS runner, repeated, to
+  tell a slow runner from a stall on exit. A stall would be a product bug, not a test fix.
+
 - **Uninstall after a move when the installer skipped the app.** On macOS, after the install directory moves
   (`~/.local/bin` replaced by a symlink, a renamed home, a different `FARHELM_INSTALL_DIR`), `farhelm uninstall` refuses
   until the installer is re-run from the new directory: the install directory's own ownership record, and the app's
