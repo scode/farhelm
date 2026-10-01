@@ -4420,7 +4420,8 @@
   not substitute for it). Accept a numbered option above the `›` row as evidence of a menu, or require every row from
   `›` down to be an option or a known footer. Add a fixture-derived test with the last option highlighted. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `vwtnvmzuzoks`, bookmark `triage-1001/06-codex-last-option`, PR
+  https://github.com/scode/farhelm/pull/1362.
 
 ## codex-working-backstop-never-matches.md
 

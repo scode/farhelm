@@ -94,8 +94,6 @@ One line per open item. This file must always match the feedback files in this d
   session; #1310 removed only one trigger.
 - `create-dialog-empty-catalog-refuses.md` — when the model catalog fails to load or is still loading,
   clone/replace-with/recent setups are refused as "no longer supported".
-- `codex-last-option-reads-idle.md` — a Codex trust dialog with the last option highlighted reads as Idle instead of
-  Waiting.
 - `codex-working-backstop-never-matches.md` — the screen-text backup for Codex's "Working" line never matches Codex
   0.159.0, so a busy session can read Idle.
 - `restart-cwd-lossy-non-utf8.md` — restart/retry of a session whose folder resolves to a non-UTF-8 path starts the
