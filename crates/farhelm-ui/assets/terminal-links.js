@@ -183,6 +183,170 @@
     return `${text.slice(0, keep)} …[${omitted} characters]… ${text.slice(-keep)}`;
   }
 
+  // Underlined text that claims to be a web address: a scheme followed by
+  // `://`, a `www.` prefix, or a dotted host whose last label is two or more
+  // letters followed by a slash (`docs.rs/foo`). Deliberately not "anything
+  // shaped like a domain": file names such as `main.rs`, `setup.py` or
+  // `notes.md` are valid domain names under real country-code TLDs, and
+  // agents print exactly that kind of link text, so a looser test would put
+  // the loud warning on ordinary file links. The letters-only last label
+  // keeps `v1.2/CHANGELOG.md`, `changelog.d/x.md` and `1.2.3/` quiet too; the
+  // cost is that scheme-less IP text such as `127.0.0.1:6080/x` is not
+  // judged (with a scheme it is).
+  //
+  // This test only decides whether the text CLAIMS to be an address;
+  // whether the claim holds is decided by strict parsing afterwards, which
+  // fails (and so warns) on anything that is not really one. So the test is
+  // generous where a forger would be creative: its scheme part accepts any
+  // characters (a Cyrillic `httрs`), it looks past leading non-ASCII
+  // characters that are not letters or digits and past the Hangul fillers,
+  // which count as letters but draw as blanks (a Braille blank, U+3164), and
+  // it reads lookalike separators as their ASCII originals (`ː` for `:`,
+  // `∕` for `/`, `。` for `.`; see `GATE_LOOKALIKES`). An ASCII-only test
+  // let all of these through quietly. Only the start of the text is
+  // examined: link text that is prose containing an address
+  // ("Visit https://...") is not judged, and the quiet display, which names
+  // the real host, is what remains for it.
+  const URL_LIKE_TEXT = /^(?:[^\s/:]+:\/\/|www\.|[^\s/]+\.\p{L}{2,}(?::\d+)?\/)/iu;
+  const LEADING_BLANKS = /^(?:[^\p{L}\p{N}\x00-\x7F]|[\u115F\u1160\u3164\uFFA0]|\s)+/u;
+  const GATE_LOOKALIKES = new Map([
+    ...['\u02D0', '\u02F8', '\u2236', '\uA789', '\uFF1A', '\uFE13', '\uFE55'].map((c) => [c, ':']),
+    ...['\u2215', '\u2044', '\u29F8', '\uFF0F', '\u2571'].map((c) => [c, '/']),
+    ...['\u3002', '\uFF0E', '\uFF61', '\u2024'].map((c) => [c, '.']),
+  ]);
+
+  /**
+   * Whether `text` claims to be a web address, per `URL_LIKE_TEXT` and the
+   * generosity rules above it. Used only to decide whether to judge the
+   * text; never to parse it.
+   *
+   * @param {string} text
+   * @returns {boolean}
+   */
+  function claimsAddress(text) {
+    const gated = Array.from(text.replace(LEADING_BLANKS, ''), (c) => GATE_LOOKALIKES.get(c) ?? c).join('');
+    return URL_LIKE_TEXT.test(gated);
+  }
+
+  /**
+   * A URL's serialization with one trailing slash removed from its PATH, so
+   * `/docs` and `/docs/` (or a bare origin and the `/` the parser adds to
+   * it) compare equal. That difference is common and almost never matters,
+   * and flagging it would teach people to ignore the warning. A slash at the
+   * end of a query or fragment is left alone: `?next=/` is not `?next=`.
+   * Percent escapes are compared case-insensitively (`%c3%bc` is `%C3%BC`),
+   * since the parser keeps them as written. An empty query or fragment
+   * (`https://a.example?`) compares equal to none, unlike in
+   * `displayedTarget`, which keeps the delimiter because it shows the exact
+   * target; here only the place matters.
+   *
+   * @param {URL} url
+   * @returns {string}
+   */
+  function comparableHref(url) {
+    const path = url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
+    const href = `${url.protocol}//${url.username}:${url.password}@${url.host}${path}${url.search}${url.hash}`;
+    return href.replace(/%[0-9a-f]{2}/gi, (escape) => escape.toUpperCase());
+  }
+
+  /**
+   * Whether an OSC 8 link's underlined `text` names a different place than
+   * its target `uri`, in which case the hover display turns into a loud
+   * warning (SPEC.md, Terminal experience).
+   *
+   * Only URL-like text is judged (see `URL_LIKE_TEXT`): "click here",
+   * "#123" or a file name never matches a URL, but it is not the lookalike
+   * trick the warning exists for, and such links keep the quiet display.
+   * URL-like text is parsed and compared with the parsed target, ignoring
+   * only a trailing slash; text without a scheme borrows the target's, so
+   * `example.com/x` matches `https://example.com/x`. Text that is merely a
+   * prefix of the target (`https://good.example` over
+   * `https://good.example.evil.test`) is a mismatch, as is URL-like text
+   * that does not parse.
+   *
+   * `text` is the hovered row's part of the link only: a link whose text
+   * wraps onto another row is judged on a fragment. A URL-like fragment
+   * never equals the whole target, so an honest wrapped URL gets a false
+   * warning. That is intentional. Joining the rows would need xterm's
+   * private internals (its public buffer API does not say which cells
+   * belong to a link), and agent TUIs wrap with cursor movement, so the next
+   * row is not even marked as a continuation. Erring loud keeps a fragment
+   * from ever being judged a MATCH. It does not make the check complete: a
+   * fragment that is not URL-like on its own (`https:/` on one row,
+   * `/github.com/login` on the next) is not judged at all, so a program that
+   * chooses its own line breaks can keep every row of a lookalike on the
+   * quiet display. That display still names the real host, which is the
+   * safeguard this warning adds to rather than replaces.
+   *
+   * @param {string | null | undefined} text
+   * @param {string} uri
+   * @returns {boolean}
+   */
+  function linkTextMismatch(text, uri) {
+    const claimed = (text || '').trim();
+    if (!claimsAddress(claimed)) return false;
+    let target;
+    try {
+      target = new URL(uri);
+    } catch {
+      return true;
+    }
+    let named;
+    try {
+      named = /^[^\s/:]+:\/\//u.test(claimed)
+        ? new URL(claimed)
+        : new URL(`${target.protocol}//${claimed}`);
+    } catch {
+      return true;
+    }
+    return comparableHref(named) !== comparableHref(target);
+  }
+
+  /**
+   * `text` with Unicode format characters (bidi controls, zero-width
+   * characters and the like) replaced by visible `<U+XXXX>` escapes.
+   *
+   * The terminal stores these characters without applying them, but the
+   * hover display is ordinary HTML, where a right-to-left override would
+   * reorder the very text the user is asked to compare. Showing them as
+   * escapes makes the hidden characters themselves visible. Right-to-left
+   * letters would still reorder the line by themselves; the stylesheet
+   * forces that line left to right (`.terminal-link-target-text`), the
+   * order the terminal draws it in.
+   *
+   * @param {string} text
+   * @returns {string}
+   */
+  function visibleFormatCharacters(text) {
+    return text.replace(/\p{Cf}/gu, (ch) =>
+      `<U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}>`,
+    );
+  }
+
+  /**
+   * The text an OSC 8 link underlines on the hovered row.
+   *
+   * `range` is what xterm's OSC 8 link provider passes as the third hover
+   * argument: 1-based cell coordinates of the link on one buffer row (the
+   * provider builds one link per row; see `linkTextMismatch` for what that
+   * means for wrapped links). Returns null when there is no range or the
+   * row is gone, so the caller falls back to the quiet display.
+   *
+   * @param {{buffer: {active: {getLine(y: number): any}}}} term
+   * @param {{start: {x: number, y: number}, end: {x: number, y: number}} | undefined} range
+   * @returns {string | null}
+   */
+  function linkRowText(term, range) {
+    if (!range || !range.start || !range.end) return null;
+    const line = term.buffer.active.getLine(range.start.y - 1);
+    if (!line) return null;
+    // The vendored provider always reports one row; a range that ends on a
+    // later row is cut at this row's end, a guard against a future
+    // provider that spans rows rather than something seen today.
+    const end = range.end.y === range.start.y ? range.end.x : line.length;
+    return line.translateToString(true, range.start.x - 1, end);
+  }
+
   /**
    * Show `uri` (an OSC 8 link's target) near the pointer while it hovers the
    * link. See `linkTargetParts` for what is shown and why.
@@ -196,11 +360,18 @@
    * when it has no host); the second is the target, shortened in the middle
    * when it is very long.
    *
+   * When `text`, the link's underlined text on the hovered row, is URL-like
+   * and names somewhere else (`linkTextMismatch`), the display becomes a
+   * loud warning instead: danger-styled and larger, led by a line saying
+   * the text does not match where the link goes, and showing the text
+   * beside the real target so the difference is visible before a click.
+   *
    * @param {MouseEvent} event
    * @param {string} uri
    * @param {HTMLElement} owner
+   * @param {string | null} [text]
    */
-  function showLinkTarget(event, uri, owner) {
+  function showLinkTarget(event, uri, owner, text) {
     let display = owner.querySelector(':scope > .terminal-link-target');
     if (!display) {
       display = document.createElement('div');
@@ -211,7 +382,22 @@
     }
     const parts = linkTargetParts(uri);
     const hostPart = parts.find((part) => part.host);
+    const mismatch = linkTextMismatch(text, uri);
+    display.classList.toggle('terminal-link-target-mismatch', mismatch);
     const lines = [];
+    if (mismatch) {
+      const warning = document.createElement('div');
+      warning.className = 'terminal-link-target-warning';
+      warning.textContent = 'link text does not match where it goes';
+      lines.push(warning);
+      const claimed = document.createElement('div');
+      claimed.className = 'terminal-link-target-text';
+      claimed.textContent = `text says: ${shortenedTarget(visibleFormatCharacters(text.trim()))}`;
+      lines.push(claimed);
+      const goes = document.createElement('div');
+      goes.textContent = 'actually goes to:';
+      lines.push(goes);
+    }
     if (hostPart) {
       const hostLine = document.createElement('div');
       const strong = document.createElement('strong');
@@ -259,6 +445,9 @@
     openTerminalUrl,
     isPlainWebUrl,
     linkTargetParts,
+    linkTextMismatch,
+    linkRowText,
+    visibleFormatCharacters,
     shortenedTarget,
     displayedTarget,
     showLinkTarget,
