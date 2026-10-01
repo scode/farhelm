@@ -112,3 +112,24 @@ It does not match when the consequence includes any of the following:
 - loss of user data, credentials, processes, or other user-owned work, including resuming the wrong conversation;
 - the helm, other sessions, or other hosts being affected;
 - a security or trust-boundary consequence.
+
+### Races a person would have to win inside a sub-second window
+
+Added 2026-10-01; widened the same day to cover convenience history.
+
+A finding matches when both of these hold:
+
+- The trigger needs a person to act (click, confirm, submit) inside a window of about a second or less that opens and
+  closes on its own, for example between the helm noticing a change and the next step it takes about that change.
+- The whole consequence is recoverable through ordinary use: the wrong state is replaced, or asked about again, on the
+  next connection, refresh or prompt, and anything it clears is either a cache Farhelm refills through ordinary use or
+  convenience history. Convenience history here means remembered suggestions that only pre-fill choices in the
+  new-session dialog, such as a host's recent setups and used folders, which build up again as the host is used. For
+  this filter it counts as recoverable; it is not user-owned work.
+
+It does not match when the consequence includes any of the following:
+
+- loss of user data, credentials, processes, or other user-owned work;
+- connecting to, sending an operation to, or acting on the wrong machine or session;
+- a wrong state that persists with no ordinary way back;
+- a security or trust-boundary consequence.

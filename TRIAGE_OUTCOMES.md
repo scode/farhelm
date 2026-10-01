@@ -4710,15 +4710,22 @@
   nothing connects to the wrong machine. The reverse direction (a genuine adoption refused as `StaleAttempt` after a
   failed reconcile) fails safely until the next successful reconcile.
 - Decision: the user chose to discard the finding and to record the class in `review_feedback_queue/FILTER.md`, so
-  similar findings stay out of the queue.
+  similar findings stay out of the queue. Superseded in part on 2026-10-01: asked during execution, the user chose to
+  widen the filter so that clearing convenience history (remembered suggestions that only pre-fill the new-session
+  dialog, such as recent setups and used folders) also counts as recoverable.
 - Completion criteria: add a filter to `review_feedback_queue/FILTER.md` for findings whose trigger needs a person to
   act inside a window of about a second or less that opens and closes on its own, and whose whole consequence is
   recoverable through ordinary use (the wrong state is replaced or asked about again on the next connection, refresh or
   prompt, and anything cleared is a cache Farhelm refills). Keep FILTER.md's standard exclusions: loss of user data,
   credentials, processes or other user-owned work; connecting to, sending an operation to, or acting on the wrong
   machine or session; a wrong state that persists with no ordinary way back; and any security or trust-boundary
-  consequence. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-feed-sink-identity.md`.
+  consequence. Remove this feedback file and its index entry. Superseded in part on 2026-10-01: "anything cleared is a
+  cache Farhelm refills" widens to "a cache Farhelm refills, or convenience history" as defined in the Decision.
+- Execution: complete: change `uyvlqzqposnk`, bookmark `triage-1001b/04-filter-sub-second-races`, PR
+  https://github.com/scode/farhelm/pull/1377. Adoption also deletes the replaced install's launch and folder history,
+  which Farhelm does not refill, so the filter as first agreed did not cover this finding. Asked about it, the
+  maintainer chose on 2026-10-01 to widen the filter to accept losing convenience history, so it now covers this finding
+  too.
 
 ## identity-mismatch-never-becomes-duplicate.md
 
