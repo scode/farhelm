@@ -73,7 +73,8 @@ async fn mint_webview_secret(base: &str) -> Result<String, String> {
 /// Only the first authentication holds the tree back. Once the app has
 /// mounted it stays mounted through every later re-authentication, so an
 /// action that ran into the rotation can still report its outcome; only a
-/// failure replaces it (SPEC.md "Signing in again").
+/// failure replaces it, with a Retry button that starts another run
+/// (SPEC.md "Signing in again").
 #[cfg(native_desktop)]
 #[component]
 pub(crate) fn DesktopBootstrapGate() -> Element {
@@ -224,8 +225,25 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
     match state.read().view() {
         GateView::Starting => rsx! { main { class: "auth-page", p { "Starting Farhelm…" } } },
         GateView::App => rsx! { crate::AppBody {} },
+        // Every failure offers Retry, with no attempt to sort transient
+        // causes from permanent ones: a retry of a permanent failure just
+        // shows the same error again, while a failure with no way out left
+        // the window dead until the app was relaunched. Retry goes through
+        // the same generation bump a native 401 uses, so there is one
+        // restart path; the run it starts shows "Starting Farhelm…" rather
+        // than the app until it succeeds (`GateState::held`).
         GateView::Failed(detail) => rsx! {
-            main { class: "auth-page", p { class: "auth-error", role: "alert", "{detail}" } }
+            main { class: "auth-page",
+                div { class: "auth-card",
+                    p { class: "auth-error", role: "alert", "{detail}" }
+                    button {
+                        class: "btn btn-primary auth-submit",
+                        r#type: "button",
+                        onclick: move |_| require_desktop_webview_reauth(),
+                        "Retry"
+                    }
+                }
+            }
         },
     }
 }
@@ -255,18 +273,30 @@ struct GateState {
     authenticated: bool,
     /// Why the latest authentication run failed, until another run starts.
     failure: Option<String>,
+    /// Whether the app stays off screen until the current run succeeds,
+    /// even though the window authenticated before. Set when a run starts
+    /// from the failure page (the Retry button): the webview credential
+    /// that just failed is still the one in place, and an app put back on
+    /// screen during that run would let the user start an action that a
+    /// repeat failure then cuts off with no outcome shown.
+    held: bool,
 }
 
 #[cfg(native_desktop)]
 impl GateState {
-    /// Start another authentication run. Clears a failure and leaves the app
-    /// mounted if it already was.
+    /// Start another authentication run. Clears a failure, and leaves the
+    /// app mounted if it already was: a run that starts from the app (a
+    /// native 401) keeps it, a run that starts from the failure page keeps
+    /// it off screen until it succeeds (see `held`).
     fn restart(&mut self) {
-        self.failure = None;
+        if self.failure.take().is_some() {
+            self.held = true;
+        }
     }
 
     fn succeed(&mut self) {
         self.authenticated = true;
+        self.held = false;
         self.failure = None;
     }
 
@@ -282,7 +312,7 @@ impl GateState {
     /// (`api::retry_desktop_request` asks only afterwards), so at most the
     /// caller's short read of an already-received reply can be cut off.
     fn view(&self) -> GateView<'_> {
-        match (&self.failure, self.authenticated) {
+        match (&self.failure, self.authenticated && !self.held) {
             (Some(detail), _) => GateView::Failed(detail),
             (None, true) => GateView::App,
             (None, false) => GateView::Starting,
@@ -294,7 +324,8 @@ impl GateState {
 #[cfg(native_desktop)]
 #[derive(Debug, PartialEq, Eq)]
 enum GateView<'a> {
-    /// The first authentication is still running.
+    /// The first authentication is still running, or a run started from
+    /// the failure page is.
     Starting,
     /// The app, mounted for the rest of the window's life unless a later
     /// authentication run fails.
@@ -693,7 +724,35 @@ mod gate_tests {
         state.restart();
         state.fail("later".to_string());
         assert_eq!(state.view(), super::GateView::Failed("later"));
+    }
+
+    /// A run started from the failure page (Retry) keeps the app off screen
+    /// until it succeeds, even when the window authenticated before. The
+    /// webview credential that just failed is still in place during that
+    /// run, and an app shown meanwhile would let the user start a Delete or
+    /// Stop that a repeat failure then cuts off with no outcome (SPEC.md
+    /// "Signing in again"). A run started from the app (a native 401) is
+    /// the other case and keeps the app mounted; see
+    /// `reauthentication_keeps_the_app_mounted`.
+    #[farhelm_testtrace::test]
+    fn retry_from_a_failure_holds_the_app_until_success() {
+        let mut state = super::GateState::default();
+        state.succeed();
         state.restart();
+        state.fail("rotated".to_string());
+        state.restart();
+        assert_eq!(state.view(), super::GateView::Starting);
+        state.fail("again".to_string());
+        assert_eq!(state.view(), super::GateView::Failed("again"));
+        state.restart();
+        assert_eq!(state.view(), super::GateView::Starting);
+        state.succeed();
         assert_eq!(state.view(), super::GateView::App);
+        state.restart();
+        assert_eq!(
+            state.view(),
+            super::GateView::App,
+            "after a success, a native 401 restarts with the app mounted again"
+        );
     }
 }
