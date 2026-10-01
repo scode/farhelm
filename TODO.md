@@ -149,6 +149,29 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   path already exists. Not yet investigated: it may fail like that every time, or something subtler about that session's
   state may have triggered it. Reproduce first, then fix whichever it turns out to be.
 
+- Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
+  restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.
+
+- Guard provisioning against pushing payloads older than the helm's own protocol. A release-shaped helm built from a
+  commit newer than the latest release (the local stable-binary flow does exactly this) provisions remote hosts with
+  DOWNLOADED released payloads by default (D13), so the freshly provisioned supervisor can speak an older protocol than
+  the helm that just installed it — and the helm then refuses it at the hello gate. Nothing is damaged (the refusal is
+  the version rule working), but the failure arrives one step late, as a skewed host instead of a refused provisioning
+  attempt. Possible shapes: compare the payload's version against the helm's `PROTOCOL_VERSION` before pushing and
+  refuse with a message naming the mismatch; or make the staged-payload path (`--payload-dir`,
+  `FARHELM_HELM_PAYLOAD_DIR`) the documented answer for from-main helms. Noted 2026-08-31 when upgrading the stable
+  install to a from-main build while the newest release was still 0.1.1.
+
+- **No network path for the desktop app.** The desktop app's webview talks to its embedded helm the way the browser
+  does, over HTTP and WebSockets on a loopback port, so one UI code path serves both clients. That port can be reached
+  by every process on the machine, including other accounts' (the credential stops them from using it), and the helm's
+  browser defenses need a scheme-level exemption for the webview's `dioxus://` origin, which every Dioxus desktop app
+  shares. Consider moving the desktop client to an in-process transport instead, as Tauri commands or Electron IPC do:
+  with nothing listening, nothing else on the machine can reach the desktop's API, and neither the port nor the origin
+  exemption is needed. The hard part is streaming: wry's custom-scheme handler answers each request with one complete
+  response, so terminal output and the event feed would have to travel over the webview's IPC channel, and the UI's
+  network layer would need a second transport beside HTTP.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
@@ -479,13 +502,6 @@ are large mostly because of their tests.
   use generic activity status without hooks or conversation resume; these are Farhelm integration gaps, not established
   limitations of Muse.
 
-- Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
-  restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.
-
-- Free up more space for session names in the sidebar: the agent and yolo/profile labels currently take too much of each
-  row. Use one small indicator for the agent and a separate small indicator for whether it is running in yolo mode.
-  Decide the agent indicator's form (SVG icon, short name, etc.) and the remaining display details when doing the work.
-
 - Separate an agent profile's common invocation (how to invoke the agent), initial launch arguments, and resume
   arguments into three independently specified parts. The immediate restart fix is deliberately simpler: when no
   explicit resume template is supplied, reuse the original invocation and append the agent's resume syntax, assuming
@@ -554,16 +570,6 @@ are large mostly because of their tests.
   released one), lets it register and run, then drives the panel's update action to the workspace build and asserts the
   supervisor comes back at the new version with its tmux sessions intact. The old half must be a real released artifact,
   not this tree's build — same-version update tests are exactly what could never see this bug.
-
-- Guard provisioning against pushing payloads older than the helm's own protocol. A release-shaped helm built from a
-  commit newer than the latest release (the local stable-binary flow does exactly this) provisions remote hosts with
-  DOWNLOADED released payloads by default (D13), so the freshly provisioned supervisor can speak an older protocol than
-  the helm that just installed it — and the helm then refuses it at the hello gate. Nothing is damaged (the refusal is
-  the version rule working), but the failure arrives one step late, as a skewed host instead of a refused provisioning
-  attempt. Possible shapes: compare the payload's version against the helm's `PROTOCOL_VERSION` before pushing and
-  refuse with a message naming the mismatch; or make the staged-payload path (`--payload-dir`,
-  `FARHELM_HELM_PAYLOAD_DIR`) the documented answer for from-main helms. Noted 2026-08-31 when upgrading the stable
-  install to a from-main build while the newest release was still 0.1.1.
 
 - Custom hover tooltips on buttons and menu items. Native `title` tooltips are free (the UI already uses them on the
   activity time, the cwd line and the profile chip) but the browser owns their ~1s delay and nothing — no CSS,
@@ -649,16 +655,6 @@ are large mostly because of their tests.
   upstream wasm ships only on the rolling `tip` release with nothing stable to pin. Medium to high effort; the payoff is
   dropping the scroll-freeze workaround and getting Ghostty's own grapheme and SGR handling. First step is a one- or
   two-day spike mounting ghostty-web in the island under WebKit.
-
-- **No network path for the desktop app.** The desktop app's webview talks to its embedded helm the way the browser
-  does, over HTTP and WebSockets on a loopback port, so one UI code path serves both clients. That port can be reached
-  by every process on the machine, including other accounts' (the credential stops them from using it), and the helm's
-  browser defenses need a scheme-level exemption for the webview's `dioxus://` origin, which every Dioxus desktop app
-  shares. Consider moving the desktop client to an in-process transport instead, as Tauri commands or Electron IPC do:
-  with nothing listening, nothing else on the machine can reach the desktop's API, and neither the port nor the origin
-  exemption is needed. The hard part is streaming: wry's custom-scheme handler answers each request with one complete
-  response, so terminal output and the event feed would have to travel over the webview's IPC channel, and the UI's
-  network layer would need a second transport beside HTTP.
 
 ## Unbucketized
 
