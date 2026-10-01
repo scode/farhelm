@@ -2149,16 +2149,20 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   hello was answered and refused; carries both protocol versions, the peer's build, and the remediation text, since
   SPEC.md demands actionable rather than merely diagnostic errors), **identity-mismatch** (frozen, carrying both
   identities, connecting nothing until the user adopts or fixes the destination), and **duplicate** (this entry's
-  identity is already another entry's; connects nothing while it stays one, so the HOST appears exactly once under the
-  twin while the entry stays visible as something to resolve). The local row's unreachable state additionally
-  distinguishes "no supervisor is running on this machine" from a generic transport failure, because that is the one
-  case whose remedy is a command on the machine the user is already sitting at — a manual-path hint, never an offer to
-  install (provisioning is M7's). A seventh state exists that is not about the host at all — **retired** — for an entry
-  whose actor has stopped: a panicked task, or one that outlived its own registry row. Without it, an actor's last
-  published status stands forever after the actor is gone, so a task that died mid-connection would leave the entry
-  reading connected, with a routable client, and nothing left running to ever correct it. Each actor is therefore
-  supervised by the task the manager actually holds, which publishes the retired state (client dropped) when the actor
-  it wraps finishes for any reason other than being cancelled on purpose.
+  identity is already another entry's; frozen like identity-mismatch, connecting nothing until a Retry, an edit of the
+  entry, or a helm restart asks again, while the entry stays visible naming the other one). First contact checks whether
+  another entry holds the reported identity before comparing it with the one this entry recorded, so an entry that
+  recorded one install and now reaches another entry's machine is a duplicate; and an adopt prompt shown before the
+  other entry recorded the identity turns into the duplicate state when its adoption is refused, because the refusal
+  starts the entry's next attempt. The local row's unreachable state additionally distinguishes "no supervisor is
+  running on this machine" from a generic transport failure, because that is the one case whose remedy is a command on
+  the machine the user is already sitting at — a manual-path hint, never an offer to install (provisioning is M7's). A
+  seventh state exists that is not about the host at all — **retired** — for an entry whose actor has stopped: a
+  panicked task, or one that outlived its own registry row. Without it, an actor's last published status stands forever
+  after the actor is gone, so a task that died mid-connection would leave the entry reading connected, with a routable
+  client, and nothing left running to ever correct it. Each actor is therefore supervised by the task the manager
+  actually holds, which publishes the retired state (client dropped) when the actor it wraps finishes for any reason
+  other than being cancelled on purpose.
 - A host's state and its live connection are read TOGETHER, from one borrow of the actor's published status. The pair
   has an invariant — a client exists exactly while the state is connected — and session routing is built on it, so two
   separate reads straddling a transition would let a caller refuse an operation against a host that is up, or route one
@@ -2176,9 +2180,9 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   attempt, and a fresh active window is granted only where something changed — startup, a connection that was up and was
   lost, or the resolution of a freeze. A re-probe also leaves the host's existing state alone while it dials, so an
   entry that has been unreachable overnight reads as unreachable instead of flickering into "connecting" every 45
-  seconds. Version-skewed and duplicate entries ride the same 45-second cadence: the first so an upgraded host
-  resurfaces by itself, the second to re-ask the registry whether the collision is still there. Identity-mismatch is
-  deliberately the one state with no timer at all, because no amount of waiting answers a question only a user can.
+  seconds. Version-skewed entries ride the same 45-second cadence, so an upgraded host resurfaces by itself.
+  Identity-mismatch and duplicate are deliberately the states with no timer at all, because no amount of waiting answers
+  a question only a user can.
 - Two DEADLINES bound what a peer can do to an actor by saying nothing, both injectable alongside the cadences. One
   connection attempt (dial and hello together) is bounded at 20 seconds, and expiry is an ordinary failed attempt so the
   ladder and the re-probe cadence carry on unchanged; one cache refresh is bounded at 30 seconds, and expiry drops the

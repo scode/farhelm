@@ -90,6 +90,33 @@ pub(crate) fn gui_host_name(name: &str, local: bool) -> String {
     }
 }
 
+/// Name each duplicate entry's other entry, from the same host list.
+///
+/// The duplicate message names the entry that already holds the machine,
+/// as the user knows it (SPEC.md: it says which entry holds it, by name).
+/// The helm sends only that entry's id, and every host list this UI reads
+/// already carries the names, so they are filled in here, once per read,
+/// rather than by a second request or a change to the wire format.
+pub(crate) fn name_duplicate_twins(hosts: &mut [Host]) {
+    let names: std::collections::HashMap<HostId, String> = hosts
+        .iter()
+        .map(|host| {
+            (
+                host.id,
+                gui_host_name(&host.name, host.kind.is_this_machine()),
+            )
+        })
+        .collect();
+    for host in hosts.iter_mut() {
+        if let HostPhase::Duplicate {
+            twin, twin_name, ..
+        } = &mut host.state
+        {
+            *twin_name = names.get(twin).cloned();
+        }
+    }
+}
+
 // ---------------------------------------------------------------------
 // The phase vocabulary
 // ---------------------------------------------------------------------
@@ -388,14 +415,30 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             ),
             DetailPart::peer(display_identity(recorded)),
         ],
-        HostPhase::Duplicate { twin, identity } => vec![
-            DetailPart::text("this entry reaches install "),
-            DetailPart::peer(display_identity(identity)),
-            DetailPart::text(format!(
-                ", which host {twin} already holds — the host itself is listed once, under that \
-                 entry"
-            )),
-        ],
+        HostPhase::Duplicate {
+            twin,
+            identity,
+            twin_name,
+        } => {
+            let mut parts = vec![
+                DetailPart::text("this entry reaches install "),
+                DetailPart::peer(display_identity(identity)),
+            ];
+            match twin_name {
+                Some(name) => {
+                    parts.push(DetailPart::text(", which the entry "));
+                    parts.push(DetailPart::peer(name.clone()));
+                    parts.push(DetailPart::text(" already holds"));
+                }
+                None => parts.push(DetailPart::text(format!(
+                    ", which another entry (host {twin}) already holds"
+                ))),
+            }
+            parts.push(DetailPart::text(
+                ", so nothing is connected through this one",
+            ));
+            parts
+        }
         HostPhase::Retired { reason } => {
             if reason.trim().is_empty() {
                 vec![DetailPart::text(
@@ -502,9 +545,16 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
              re-probed meanwhile, so a host that starts identifying itself again recovers on its \
              own",
         )]),
-        HostPhase::Duplicate { .. } => Some(vec![DetailPart::text(
-            "edit this entry to a different host, or remove it",
-        )]),
+        HostPhase::Duplicate { twin_name, .. } => Some(match twin_name {
+            Some(name) => vec![
+                DetailPart::text("remove "),
+                DetailPart::peer(name.clone()),
+                DetailPart::text(" or change this entry's destination, then press Retry"),
+            ],
+            None => vec![DetailPart::text(
+                "remove the other entry or change this entry's destination, then press Retry",
+            )],
+        }),
         HostPhase::Retired { .. } => Some(vec![DetailPart::text(
             "retry to start a fresh connection actor for this entry",
         )]),
@@ -3328,6 +3378,47 @@ mod tests {
         }
     }
 
+    /// A duplicate entry is told which entry holds its machine by that
+    /// entry's name, taken from the same host list, and its remedy names it
+    /// too.
+    ///
+    /// Why it matters: SPEC.md has the duplicate message say which entry
+    /// holds the machine, by name, and tell the user to remove it or change
+    /// this entry's destination, then press Retry. The helm sends only the
+    /// other entry's id, so a list that lost the naming step would leave the
+    /// user looking for a number. An id missing from the list falls back to
+    /// naming it by number rather than to nothing.
+    #[farhelm_testtrace::test]
+    fn a_duplicate_names_the_entry_holding_its_machine() {
+        let mut owner = host(HostPhase::Unrecognized);
+        owner.id = 7;
+        owner.name = "build box".to_string();
+        let mut duplicate = host(HostPhase::Duplicate {
+            twin: 7,
+            identity: "shared-install".to_string(),
+            twin_name: None,
+        });
+        duplicate.id = 8;
+        let mut orphan = host(HostPhase::Duplicate {
+            twin: 99,
+            identity: "other-install".to_string(),
+            twin_name: None,
+        });
+        orphan.id = 9;
+        let mut hosts = vec![owner, duplicate, orphan];
+        name_duplicate_twins(&mut hosts);
+
+        let detail = detail_text(&state_detail(&hosts[1].state));
+        let remedy = detail_text(&state_remedy(&hosts[1].state).expect("a remedy"));
+        assert!(detail.contains("build box"), "{detail}");
+        assert!(
+            remedy.contains("build box") && remedy.contains("Retry"),
+            "{remedy}"
+        );
+        let orphan_detail = detail_text(&state_detail(&hosts[2].state));
+        assert!(orphan_detail.contains("host 99"), "{orphan_detail}");
+    }
+
     /// Every phase, with a UNIQUE sentinel in each of its fields, so the
     /// tables below can prove not just that something rendered but that the
     /// RIGHT field rendered in the right place.
@@ -3364,6 +3455,7 @@ mod tests {
             HostPhase::Duplicate {
                 twin: 42,
                 identity: "sentinel-duplicate-identity".to_string(),
+                twin_name: None,
             },
             HostPhase::Retired {
                 reason: "sentinel-retired-reason".to_string(),
@@ -3465,8 +3557,17 @@ mod tests {
                 HostPhase::Duplicate {
                     twin: 42,
                     identity: "sentinel-duplicate-identity".to_string(),
+                    twin_name: None,
                 },
                 vec!["42", "sentinel-duplicate-identity"],
+            ),
+            (
+                HostPhase::Duplicate {
+                    twin: 42,
+                    identity: "sentinel-duplicate-identity".to_string(),
+                    twin_name: Some("sentinel-twin-name".to_string()),
+                },
+                vec!["sentinel-twin-name", "sentinel-duplicate-identity"],
             ),
             (
                 HostPhase::Retired {

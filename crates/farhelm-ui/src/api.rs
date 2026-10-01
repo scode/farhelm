@@ -3086,7 +3086,11 @@ pub(crate) async fn fetch_github_repositories(
 pub(crate) async fn decode_hosts(resp: reqwest::Response) -> Result<Vec<Host>, String> {
     resp.json::<HostListing>()
         .await
-        .map(|listing| listing.hosts)
+        .map(|listing| {
+            let mut hosts = listing.hosts;
+            crate::hosts::name_duplicate_twins(&mut hosts);
+            hosts
+        })
         .map_err(|e| e.to_string())
 }
 

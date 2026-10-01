@@ -842,9 +842,13 @@ fn refusal_text(host: store::HostId, state: &manager::HostState) -> String {
              install recorded as {recorded}; fix the host so it reports its identity, or \
              retarget or remove this entry"
         ),
-        manager::HostState::Duplicate { twin, .. } => {
-            format!("this entry duplicates host {twin}; edit or remove it")
-        }
+        // The other entry is named by id, not display name: this text is
+        // built without a registry read, and the UI, which holds the host
+        // list, names it properly in its own host details.
+        manager::HostState::Duplicate { twin, .. } => format!(
+            "this entry reaches the machine host {twin} already holds, so nothing is connected; \
+             remove that entry or change this one's destination, then press Retry"
+        ),
         manager::HostState::Retired { reason } => reason.clone(),
         // Unreachable in practice — a connected host has a client and
         // never reaches this function — but stated rather than

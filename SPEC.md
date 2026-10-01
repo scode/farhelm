@@ -138,9 +138,11 @@ host's identity or its sessions. Every host, the local one included, has a setti
 destination (SSH hosts), its alias, and whether it starts YOLO sessions without asking. Every host asks before YOLO
 launches until the user explicitly turns that off, including hosts that existed before the setting did. If a destination
 turns out to present a different identity than recorded (a wiped and reinstalled host, a recycled address), the helm
-says so and asks whether to adopt the new host or fix the destination — it never silently merges. Two destinations
-reaching the same identity are the same host, shown once. Last-known sessions of a host that is permanently gone are
-disposed of by removing the host from the registry.
+says so and asks whether to adopt the new host or fix the destination — it never silently merges. An entry that reaches
+a machine another entry already holds connects nothing: it says which entry holds the machine, by name, and asks the
+user to remove that entry or change this one's destination and then press Retry. Farhelm never connects two entries to
+one machine and never resolves this on its own. Last-known sessions of a host that is permanently gone are disposed of
+by removing the host from the registry.
 
 Exactly one helm runs at a time. Running several concurrently is unsupported in v1. The invariant supervisors enforce is
 at most one attachment per session, last attach wins — so a second helm cannot corrupt a session, but it can seize one,

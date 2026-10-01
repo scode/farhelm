@@ -162,9 +162,9 @@ pub(crate) enum HostStateView {
     /// starts identifying itself again recovers unaided.
     #[serde(rename = "identity-unverified")]
     IdentityUnverified { recorded: String },
-    /// This ENTRY reaches a host another entry already owns. The host
-    /// itself appears exactly once, under `twin`; this row is the entry the
-    /// user must edit or remove.
+    /// This ENTRY reaches a machine another entry already holds. Nothing is
+    /// connected through it; the user removes the other entry or changes
+    /// this one's destination, then presses Retry.
     #[serde(rename = "duplicate")]
     Duplicate { twin: HostId, identity: String },
     /// No actor is running for this row — it retired with its registry row,
@@ -2658,13 +2658,14 @@ mod tests {
     }
 
     /// A second entry reaching an already-registered install surfaces as an
-    /// entry needing resolution, while the HOST appears exactly once.
+    /// entry needing resolution, while the machine is served only once.
     ///
-    /// SPEC.md's shown-once rule and the user's ability to fix a mistyped
-    /// address have to coexist, and this is how: the duplicate ENTRY is
-    /// visible (so it can be edited or removed) but connects nothing and
-    /// contributes no sessions, so the host behind it is still listed once,
-    /// under the entry that owns it.
+    /// SPEC.md's rule that Farhelm never connects two entries to one machine
+    /// and the user's ability to fix a mistyped address have to coexist, and
+    /// this is how: the duplicate ENTRY is visible (so the user can remove
+    /// the other entry or change this one's destination, then Retry) but
+    /// connects nothing and contributes no sessions, so the machine's
+    /// sessions appear once, under the entry that holds it.
     #[farhelm_testtrace::test]
     async fn a_second_entry_for_one_install_is_marked_duplicate_and_serves_nothing() {
         let harness = lone_local_helm().await;

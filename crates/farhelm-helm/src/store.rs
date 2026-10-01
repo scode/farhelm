@@ -1374,9 +1374,11 @@ pub enum HostStoreError {
     /// Reachable in practice, not merely in theory: a rival entry can
     /// first-contact the very identity a user is being asked to adopt in
     /// the window between the mismatch being displayed and the adopt
-    /// arriving. The caller's correct response is to re-render the host,
-    /// which now shows the duplicate-resolution surface instead of the
-    /// adopt-or-fix one.
+    /// arriving, and it is the usual shape of a reinstalled host added again
+    /// while its old entry was already showing its prompt. The connection
+    /// manager answers this refusal by starting the entry's next attempt
+    /// (`ConnectionManager::adopt`), which [`HelmStore::record_first_contact`]
+    /// answers as a duplicate, because it checks the claim first.
     #[error("host {owner} already holds identity {identity:?}; host {host} cannot adopt it")]
     IdentityClaimed {
         host: HostId,
@@ -4488,18 +4490,25 @@ impl HelmStore {
     /// passes — there is no code path here that does so, rather than a
     /// runtime check a future edit could weaken.
     ///
-    /// Five outcomes, none of them ambiguous:
-    /// - stored is `NULL` and no other row claims `identity` → written,
-    ///   [`FirstContactOutcome::Recorded`].
+    /// Five outcomes, none of them ambiguous, decided in this order:
+    /// - the row was reconfigured since `dialed` was captured → nothing
+    ///   written, [`FirstContactOutcome::StaleAttempt`].
+    /// - ANOTHER row already claims `identity` → nothing written,
+    ///   [`FirstContactOutcome::Collision`] naming that row, whatever this
+    ///   row has recorded.
+    /// - stored is `NULL` → written, [`FirstContactOutcome::Recorded`].
     /// - stored equals `identity` → nothing to write, still
     ///   [`FirstContactOutcome::Recorded`] (an idempotent repeat hello).
     /// - stored is a DIFFERENT identity → nothing written,
     ///   [`FirstContactOutcome::Mismatch`] carrying both values so the
     ///   caller can surface SPEC.md's adopt-or-fix-destination choice.
-    /// - ANOTHER row already claims `identity` → nothing written,
-    ///   [`FirstContactOutcome::Collision`] naming that row.
-    /// - the row was reconfigured since `dialed` was captured → nothing
-    ///   written, [`FirstContactOutcome::StaleAttempt`].
+    ///
+    /// The claim is checked BEFORE the recorded identity, so an entry that
+    /// once recorded an identity and now reaches a machine another entry
+    /// holds (retargeted onto it, or the old entry of a reinstalled host
+    /// still pointing at it) is a duplicate. Comparing first made it a
+    /// mismatch whose adopt prompt could never succeed: adoption refuses an
+    /// identity another row holds ([`HostStoreError::IdentityClaimed`]).
     ///
     /// **Everything happens in ONE `BEGIN IMMEDIATE` transaction**, which
     /// is what makes the collision answer trustworthy rather than advisory.
@@ -4541,23 +4550,23 @@ impl HelmStore {
                             current: configured,
                         }
                     } else {
-                        match current {
-                            Some(recorded) if recorded == identity => FirstContactOutcome::Recorded,
-                            Some(recorded) => FirstContactOutcome::Mismatch {
+                        match (claimant_of(&tx, host, &identity)?, current) {
+                            (Some(owner), _) => FirstContactOutcome::Collision { owner },
+                            (None, Some(recorded)) if recorded == identity => {
+                                FirstContactOutcome::Recorded
+                            }
+                            (None, Some(recorded)) => FirstContactOutcome::Mismatch {
                                 recorded,
                                 reported: identity,
                             },
-                            None => match claimant_of(&tx, host, &identity)? {
-                                Some(owner) => FirstContactOutcome::Collision { owner },
-                                None => {
-                                    tx.execute(
-                                        "UPDATE hosts SET host_identity = ?2 WHERE id = ?1",
-                                        rusqlite::params![host, identity],
-                                    )
-                                    .context("recording first-contact identity")?;
-                                    FirstContactOutcome::Recorded
-                                }
-                            },
+                            (None, None) => {
+                                tx.execute(
+                                    "UPDATE hosts SET host_identity = ?2 WHERE id = ?1",
+                                    rusqlite::params![host, identity],
+                                )
+                                .context("recording first-contact identity")?;
+                                FirstContactOutcome::Recorded
+                            }
                         }
                     };
                     // Committed on every path, including the ones that wrote
@@ -4605,9 +4614,10 @@ impl HelmStore {
     /// transaction and for the same reasons:
     /// - a rival row that claimed `new` between the mismatch being shown
     ///   and this call arriving is refused as
-    ///   [`HostStoreError::IdentityClaimed`] — the user is then looking at
-    ///   a duplicate to resolve, not an adoption to confirm, and the
-    ///   compare-and-swap alone would not have noticed;
+    ///   [`HostStoreError::IdentityClaimed`] — there is then a duplicate to
+    ///   resolve, not an adoption to confirm (the manager starts the attempt
+    ///   that shows it as one), and the compare-and-swap alone would not
+    ///   have noticed;
     /// - a row reconfigured since `dialed` was captured is refused as
     ///   [`HostStoreError::StaleAttempt`], because the identity being
     ///   adopted was reported by an endpoint this row no longer names.
@@ -12216,6 +12226,69 @@ mod tests {
             1,
             "an unchanged identity must not purge the cache"
         );
+    }
+
+    /// An entry that has recorded one identity and now reaches a machine
+    /// ANOTHER entry holds is a duplicate, not a mismatch.
+    ///
+    /// Why it matters: a mismatch offers to adopt the reported identity,
+    /// and adoption refuses an identity another entry holds, so the user
+    /// was shown a prompt that could never succeed and the entry never
+    /// became a duplicate at all. Spec: the claim is checked before the
+    /// recorded identity, for both ordinary ways to get here, and nothing
+    /// is written either way.
+    #[farhelm_testtrace::test]
+    async fn record_first_contact_reports_a_claimed_identity_as_a_collision_over_a_mismatch() {
+        let (_dir, store) = fresh_store().await;
+
+        // An entry retargeted onto a machine another entry manages.
+        let owner = host_with_identity(&store, "owner@host", "identity-owner").await;
+        let retargeted = host_with_identity(&store, "retargeted@host", "identity-other").await;
+        assert_eq!(
+            store
+                .record_first_contact(
+                    retargeted,
+                    &dialed_as(&store, retargeted).await,
+                    "identity-owner"
+                )
+                .await
+                .unwrap(),
+            FirstContactOutcome::Collision { owner },
+        );
+
+        // A reinstalled host re-added as a new entry while the old entry
+        // still points at it: the new entry records the new install first.
+        let old = host_with_identity(&store, "old@reinstalled", "identity-before").await;
+        let readded = store
+            .add_ssh_host("new@reinstalled", None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .record_first_contact(readded, &dialed_as(&store, readded).await, "identity-after")
+                .await
+                .unwrap(),
+            FirstContactOutcome::Recorded,
+        );
+        assert_eq!(
+            store
+                .record_first_contact(old, &dialed_as(&store, old).await, "identity-after")
+                .await
+                .unwrap(),
+            FirstContactOutcome::Collision { owner: readded },
+        );
+
+        let hosts = store.list_hosts().await.unwrap();
+        let identity_of = |id: HostId| {
+            hosts
+                .iter()
+                .find(|h| h.id == id)
+                .unwrap()
+                .host_identity
+                .clone()
+        };
+        assert_eq!(identity_of(retargeted).as_deref(), Some("identity-other"));
+        assert_eq!(identity_of(old).as_deref(), Some("identity-before"));
     }
 
     /// The out-of-order case A1 exists to make structurally impossible: a

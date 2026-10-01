@@ -4756,4 +4756,5 @@
   and tell the user to remove it or change this entry's destination, then press Retry. Add tests for both triggers
   (retarget onto another entry's machine; re-added reinstalled host with the old entry still pointing at it) and for
   Retry clearing the freeze after the other entry is removed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-feed-sink-identity.md`.
+- Execution: complete: change `xqltwtssqnpw`, bookmark `triage-1001b/05-duplicate-hosts`, PR
+  https://github.com/scode/farhelm/pull/1378.
