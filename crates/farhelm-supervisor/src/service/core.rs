@@ -26671,6 +26671,32 @@ exit 0
     // properties of that whole pipeline, not of any single function.
     // -------------------------------------------------------------------------
 
+    /// Default seams with the scope manager disabled, for checkout tests
+    /// that Delete, Restart, or retry a create but are not about cgroup
+    /// scopes.
+    ///
+    /// On the default real manager, two paths ask the host's systemd user
+    /// manager a question whose missing answer is a refusal by design. A
+    /// teardown of a session whose launch was recorded as scoped must check
+    /// that scope, and refuses when it cannot (SPEC.md "Lifecycle
+    /// operations"). A create retry asks whether the reserved launch's
+    /// scope exists, whatever the row recorded, and refuses when the answer
+    /// does not come, because it cannot tell whether the first attempt
+    /// launched. Either way such a test passes or fails on the host's
+    /// systemd: the hosted release runner has a user manager that can
+    /// stall, and `an_ambiguous_planned_checkout_never_adopts_a_foreign_directory`
+    /// failed the v0.20.0 release gate on the first path (FLAKES.md,
+    /// 2026-09-30). A disabled manager never asks the host's systemd
+    /// anything and never records a scoped launch, so teardown takes the
+    /// plain process-tree sweep and a retry relies on the sentinel and tmux
+    /// evidence alone.
+    fn scopeless_seams() -> SupervisorSeams {
+        SupervisorSeams {
+            scopes: Arc::new(crate::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        }
+    }
+
     /// A helm-resolved checkout payload aimed at a REAL temporary root
     /// (canonicalized, since `validate_destination` compares the resolved
     /// root against the preview binding's). It represents an untitled preview
@@ -27891,7 +27917,7 @@ exit 0
                         })),
                         ..FaultHooks::default()
                     },
-                    ..SupervisorSeams::default()
+                    ..scopeless_seams()
                 },
             )
             .await
@@ -28639,7 +28665,9 @@ exit 0
 
     /// Interrupt one actual create boundary once, leaving the same supervisor
     /// usable for an in-process retry. Reopening tests drop it and reconstruct
-    /// the supervisor from the private state directory instead.
+    /// the supervisor from the private state directory instead, with the same
+    /// [`scopeless_seams`] this one uses, since the retry that follows must
+    /// not depend on the host's systemd answering.
     async fn checkout_crash_supervisor(state: &StateDir, boundary: CreateStage) -> Arc<Supervisor> {
         let fired = std::sync::atomic::AtomicBool::new(false);
         Supervisor::new_with_seams(
@@ -28658,7 +28686,7 @@ exit 0
                     })),
                     ..FaultHooks::default()
                 },
-                ..SupervisorSeams::default()
+                ..scopeless_seams()
             },
         )
         .await
@@ -28719,9 +28747,14 @@ exit 0
                 );
                 if reopen {
                     drop(sup);
-                    sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-                        .await
-                        .unwrap();
+                    sup = Supervisor::new_with_seams(
+                        state.path(),
+                        dummy_exe(),
+                        SupervisorTimeouts::default(),
+                        scopeless_seams(),
+                    )
+                    .await
+                    .unwrap();
                 }
                 // The retry supplies only the original client identity, not
                 // the root/hook or compiled mode that recovery must restore.
@@ -28929,9 +28962,14 @@ exit 0
             std::fs::remove_file(&ancestor).unwrap();
             std::fs::rename(&parked, &ancestor).unwrap();
             drop(sup);
-            let reopened = Supervisor::new_with_exe(state.path(), dummy_exe())
-                .await
-                .unwrap();
+            let reopened = Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                scopeless_seams(),
+            )
+            .await
+            .unwrap();
             let replay = fresh_create(&reopened, &checkout, Some(claim.clone()))
                 .await
                 .expect_err("replay durable refusal");
@@ -29077,9 +29115,14 @@ exit 0
                 let before_state = std::fs::read(&path).ok();
                 if reopen {
                     drop(sup);
-                    sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-                        .await
-                        .unwrap();
+                    sup = Supervisor::new_with_seams(
+                        state.path(),
+                        dummy_exe(),
+                        SupervisorTimeouts::default(),
+                        scopeless_seams(),
+                    )
+                    .await
+                    .unwrap();
                 }
                 let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
                     .await
@@ -29330,15 +29373,25 @@ exit 0
     /// Borrowers restart against the contents explicitly selected by the user;
     /// neither path may repeat preparation. Ready survives supervisor reopen
     /// but does not waive inode checks, including after a successful restart.
+    ///
+    /// Both supervisors run with a disabled scope manager
+    /// ([`scopeless_seams`]): every successful restart here tears down the
+    /// previous generation, and on the real manager that teardown depends on
+    /// the host's systemd answering.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn checkout_restart_requires_ready_only_for_origin() {
         use crate::launch::PreparationState;
         let state = StateDir::new();
         let root = state.path().join("checkouts");
         std::fs::create_dir(&root).unwrap();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .unwrap();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            scopeless_seams(),
+        )
+        .await
+        .unwrap();
         let origin = fresh_create(&sup, &checkout_fixture(&root), None)
             .await
             .unwrap();
@@ -29445,9 +29498,14 @@ exit 0
         // Reconstruct the service, rather than calling reload in place: the
         // next restart must derive its authority from durable state alone.
         drop(sup);
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .unwrap();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            scopeless_seams(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             crate::launch::read_preparation_state(&path, &plan.id)
                 .unwrap()
@@ -29531,7 +29589,7 @@ exit 0
                     })),
                     ..FaultHooks::default()
                 },
-                ..SupervisorSeams::default()
+                ..scopeless_seams()
             },
         )
         .await
@@ -29725,17 +29783,18 @@ exit 0
     /// slice's contract — asserted here as the state that teardown will
     /// consume).
     ///
-    /// Both supervisors run with a disabled scope manager, not the default
-    /// real one. With the real one, the first supervisor's create probes
-    /// the host's systemd user manager and, when it answers, records on the
-    /// row that the launch is scoped before the simulated crash. The reopened
-    /// supervisor gets a fresh manager and probes again at Delete, and
-    /// when that probe runs out its 15-second budget, the recorded scope
-    /// cannot be checked, which is an unconfirmed cleanup Delete must refuse
-    /// (SPEC.md "Lifecycle operations"). That failed the v0.20.0 release
-    /// gate on the hosted runner, which has a user manager (FLAKES.md,
-    /// 2026-09-30). Nothing here is about cgroup scopes, so the fixture
-    /// keeps the host's systemd out of the refusal-and-Delete contract.
+    /// Both supervisors run with a disabled scope manager
+    /// ([`scopeless_seams`]), not the default real one. With the real one, the
+    /// first supervisor's create probes the host's systemd user manager and,
+    /// when it answers, records on the row that the launch is scoped before the
+    /// simulated crash. The reopened supervisor gets a fresh manager that
+    /// probes again as it reopens, and when that probe runs out its 15-second
+    /// budget, Delete finds the recorded scope cannot be checked, which is an
+    /// unconfirmed cleanup it must refuse (SPEC.md "Lifecycle operations").
+    /// That failed the v0.20.0 release gate on the hosted runner, which has a
+    /// user manager (FLAKES.md, 2026-09-30). Nothing here is about cgroup
+    /// scopes, so the fixture keeps the host's systemd out of the
+    /// refusal-and-Delete contract.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn an_ambiguous_planned_checkout_never_adopts_a_foreign_directory() {
         let state = StateDir::new();
@@ -29766,8 +29825,7 @@ exit 0
                         })),
                         ..FaultHooks::default()
                     },
-                    scopes: Arc::new(crate::scope::ScopeManager::disabled()),
-                    ..SupervisorSeams::default()
+                    ..scopeless_seams()
                 },
             )
             .await
@@ -29786,10 +29844,7 @@ exit 0
             state.path(),
             dummy_exe(),
             SupervisorTimeouts::default(),
-            SupervisorSeams {
-                scopes: Arc::new(crate::scope::ScopeManager::disabled()),
-                ..SupervisorSeams::default()
-            },
+            scopeless_seams(),
         )
         .await
         .expect("supervisor");
@@ -29957,6 +30012,14 @@ exit 0
     /// is hinted to connected helms: the create itself replies with an
     /// error, and an already-terminal row with no pane gets no later
     /// ticker transition that could hint it instead.
+    ///
+    /// The first supervisor runs with a disabled scope manager
+    /// ([`scopeless_seams`]): on the real one the launch is set up to run
+    /// in a systemd scope, and the failure path then waits on the host's
+    /// user manager. That leaves the result alone but stretches the test
+    /// from under a second to about 25 seconds when the manager stops
+    /// answering. The reopened
+    /// supervisor only replays the settled refusal and keeps the defaults.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_tmux_failure_after_allocation_retains_the_error_session_and_ownership() {
         let state = StateDir::new();
@@ -29991,7 +30054,7 @@ exit 0
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
                     tmux_program: failing_tmux.clone(),
-                    ..SupervisorSeams::default()
+                    ..scopeless_seams()
                 },
             )
             .await
@@ -30071,6 +30134,11 @@ exit 0
     /// and identity-write faults use this contract: neither has enough
     /// identity evidence to mark the row Allocated, but each may have left
     /// the directory on disk and must therefore retain the Planned record.
+    ///
+    /// The first supervisor, which a `retained_refusal_fails` caller Deletes
+    /// through, runs with a disabled scope manager ([`scopeless_seams`]).
+    /// The reopened one only replays the refusal and tears nothing down, so
+    /// it keeps the default seams.
     async fn assert_post_mkdir_allocation_fault_retains_evidence(
         stage: Option<crate::working_copies::AllocationStage>,
         fault_name: &'static str,
@@ -30127,7 +30195,7 @@ exit 0
                     }),
                     ..FaultHooks::default()
                 },
-                ..SupervisorSeams::default()
+                ..scopeless_seams()
             },
         )
         .await
@@ -30419,6 +30487,9 @@ exit 0
     /// and pending key together. The fault fires after the real membership
     /// deletion inside SQLite's transaction, so surviving evidence proves
     /// rollback rather than merely a failure before cleanup started.
+    ///
+    /// The supervisor runs with a disabled scope manager
+    /// ([`scopeless_seams`]) because the test ends in Delete.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn failed_pre_mkdir_rollback_preserves_every_record() {
         let state = StateDir::new();
@@ -30459,7 +30530,7 @@ exit 0
                     })),
                     ..FaultHooks::default()
                 },
-                ..SupervisorSeams::default()
+                ..scopeless_seams()
             },
         )
         .await
