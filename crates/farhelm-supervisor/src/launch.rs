@@ -2712,12 +2712,36 @@ exec sleep 60
         }
 
         /// Spawn the shim child with null stdio and keep the handle, for
-        /// the D4 tests that must kill it mid-run or hold contention
-        /// evidence while it runs.
+        /// the D4 test that holds contention evidence while it runs.
+        #[cfg(target_os = "linux")]
         fn spawn_shim(&self) -> std::process::Child {
+            self.shim_command().spawn().expect("spawn the prep child")
+        }
+
+        /// Spawn the shim as the leader of its own process group, for a
+        /// test whose shim starts a preparation hook that can outlive it.
+        /// See [`OwnedShimGroup`] for why the group is the cleanup
+        /// boundary.
+        fn spawn_shim_group(&self) -> OwnedShimGroup {
+            use std::os::unix::process::CommandExt as _;
+            let child = self
+                .shim_command()
+                .process_group(0)
+                .spawn()
+                .expect("spawn the prep child in its own process group");
+            OwnedShimGroup {
+                group: Some(child.id()),
+                child,
+            }
+        }
+
+        /// The shim re-run of this test binary, with the spec written and
+        /// the child's environment wired, ready to spawn.
+        fn shim_command(&self) -> std::process::Command {
             self.write_spec();
             let exe = std::env::current_exe().expect("locate the supervisor test binary");
-            std::process::Command::new(&exe)
+            let mut command = std::process::Command::new(&exe);
+            command
                 .args([
                     "--exact",
                     "launch::tests::prep_failure_child",
@@ -2729,9 +2753,120 @@ exec sleep 60
                 .env("PATH", self.bin_dir())
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .expect("spawn the prep child")
+                .stderr(std::process::Stdio::null());
+            command
+        }
+    }
+
+    /// A shim and every process it started, owned as one process group
+    /// from the moment of spawn, so a failing assertion cannot leak them.
+    ///
+    /// The shim's preparation hook inherits the shim's group, and a hook
+    /// parked on a FIFO it opened read-write never sees EOF: deleting the
+    /// fixture directory does not unblock it, and killing only the shim
+    /// (what [`ReapedPrepChild`] does) orphans it. Leaked processes then
+    /// load the shared machine for good, which is exactly the stray load
+    /// FLAKES.md records tripping other tests' timing budgets.
+    ///
+    /// Signaling the group is only safe while its id is still reserved: a
+    /// freed id can be reused by an unrelated process group of the same
+    /// user (other agents' test runs, the live install). The leader keeps
+    /// the id reserved until it is reaped, even as a zombie, and only this
+    /// type reaps it, always after signaling the group. A test that needs
+    /// to know the shim died uses [`Self::wait_exited_without_reaping`] or
+    /// [`Self::exited_without_reaping`], never `Child::wait`/`try_wait`.
+    /// Because of that ordering the group can be signaled unconditionally
+    /// on drop, whether or not the test is unwinding; a passing test calls
+    /// [`Self::teardown`], which does the same thing earlier.
+    ///
+    /// Accepted trade-off: `process_group(0)` also takes the shim and hook
+    /// out of the test runner's process group. A runner that kills the test
+    /// process without unwinding (a nextest timeout, Ctrl-C) therefore no
+    /// longer takes them down with it; this owner covers the failing
+    /// assertions it can see.
+    struct OwnedShimGroup {
+        child: std::process::Child,
+        /// `process_group(0)` makes the leader's pid the group id, so this
+        /// is `child.id()` captured at spawn. `None` once the group has
+        /// been torn down, or if `waitid` reported the leader already
+        /// reaped (by something other than this type), since the id may
+        /// then be free.
+        group: Option<u32>,
+    }
+
+    impl OwnedShimGroup {
+        /// Block until the shim has exited, leaving it unreaped so its
+        /// group id stays reserved (see the type docs).
+        fn wait_exited_without_reaping(&mut self) {
+            while !self.waitid_without_reaping(0) {}
+        }
+
+        /// Whether the shim has exited, without reaping it; for
+        /// diagnostics that must not free the group id.
+        fn exited_without_reaping(&mut self) -> bool {
+            self.waitid_without_reaping(libc::WNOHANG)
+        }
+
+        /// `waitid(WEXITED | WNOWAIT)` on the shim: true once it has
+        /// exited. EINTR reports "not yet" to blocking callers, which loop.
+        /// ECHILD means someone else reaped the leader, so the group id is
+        /// no longer reserved: signaling is disarmed and the shim counts as
+        /// exited.
+        fn waitid_without_reaping(&mut self, extra: libc::c_int) -> bool {
+            // SAFETY: an all-zero siginfo_t is a valid value for waitid to
+            // fill in; with WNOHANG and no exited child it stays zeroed,
+            // so `si_signo == 0` means "still running" on every platform.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            // SAFETY: waitid on our own child's pid with a valid out
+            // pointer; WNOWAIT leaves the child waitable.
+            let rc = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    self.child.id() as libc::id_t,
+                    &mut info,
+                    libc::WEXITED | libc::WNOWAIT | extra,
+                )
+            };
+            if rc == 0 {
+                return info.si_signo != 0;
+            }
+            let error = std::io::Error::last_os_error();
+            match error.raw_os_error() {
+                Some(libc::EINTR) => false,
+                Some(libc::ECHILD) => {
+                    self.group = None;
+                    true
+                }
+                _ => panic!("waitid on the shim: {error}"),
+            }
+        }
+
+        /// Kill the whole group, then reap the leader: what drop does, done
+        /// at a point the test chooses.
+        fn teardown(mut self) {
+            self.signal_group_and_reap();
+        }
+
+        /// The group goes first, while the unreaped leader still reserves
+        /// the id; then the leader is killed if needed and reaped. Runs at
+        /// most once: afterwards the group is disarmed.
+        fn signal_group_and_reap(&mut self) {
+            if let Some(group) = self.group.take() {
+                // SAFETY: `kill` with a negative pid signals a process
+                // group and touches no memory. ESRCH (group already gone)
+                // is the outcome this wants anyway.
+                unsafe {
+                    let _ = libc::kill(-(group as libc::pid_t), libc::SIGKILL);
+                }
+            }
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    impl Drop for OwnedShimGroup {
+        fn drop(&mut self) {
+            self.signal_group_and_reap();
         }
     }
 
@@ -3630,6 +3765,13 @@ printf 'AGENT-RAN\n'
     /// record (written BEFORE the hook spawned) must make the restart
     /// refuse: no second hook execution, no agent spawn, partial files
     /// retained. The hook itself must exit after release (cleanup proof).
+    ///
+    /// Both the shim and its restart are owned as process groups from
+    /// spawn ([`OwnedShimGroup`]): every assertion below runs while a shim
+    /// or the FIFO-parked hook is alive, and a failure must not leave
+    /// them running on a shared machine. The deliberate SIGKILL still
+    /// targets the shim alone, because the orphaned hook is the
+    /// interruption this test exists to exercise.
     #[farhelm_testtrace::test]
     fn d4_killed_shim_never_repeats_the_hook_or_spawns_the_agent() {
         let (fixture, fifo) = build_d4_fixture();
@@ -3640,8 +3782,8 @@ printf 'AGENT-RAN\n'
             marker.with_extension("git").display()
         ));
 
-        let mut child = fixture.spawn_shim();
-        let child_pid = child.id();
+        let mut shim = fixture.spawn_shim_group();
+        let child_pid = shim.child.id();
         // The PID is published only after the hook has opened the FIFO.
         // An argv marker precedes that open and cannot establish readiness.
         let hook_entered = PathBuf::from(format!("{}.hook-ready", hook_record.display()));
@@ -3649,8 +3791,8 @@ printf 'AGENT-RAN\n'
             poll_until(Duration::from_secs(30), || {
                 std::fs::read_to_string(&hook_entered).is_ok_and(|text| text.parse::<u32>().is_ok())
             }),
-            "the blocking hook must publish its PID after opening the FIFO; shim status: {:?}",
-            child.try_wait()
+            "the blocking hook must publish its PID after opening the FIFO; shim exited: {}",
+            shim.exited_without_reaping()
         );
         let hook_pid: u32 = std::fs::read_to_string(&hook_entered)
             .unwrap()
@@ -3671,7 +3813,9 @@ printf 'AGENT-RAN\n'
             unsafe { libc::kill(child_pid as libc::pid_t, libc::SIGKILL) },
             0
         );
-        child.wait().expect("reap the killed shim");
+        // Observed, not reaped: the dead shim keeps the group id reserved
+        // until the teardown below has signaled the group.
+        shim.wait_exited_without_reaping();
 
         // Cleanup proof: release the parked hook and watch it exit.
         assert!(
@@ -3709,16 +3853,16 @@ printf 'AGENT-RAN\n'
             "owned hook did not exit: {:?}",
             crate::procs::read_process(hook_pid)
         );
+        shim.teardown();
 
         // Restart: HookStarted must refuse. Bounded through the
         // child-error oracle: a leaked lock would block the restart
         // forever and this poll would time out instead.
-        let mut restart = fixture.spawn_shim();
+        let restart = fixture.spawn_shim_group();
         let refused = poll_until(Duration::from_secs(30), || {
             fixture.spec_path.with_extension("child-error").exists()
         });
-        let _ = restart.kill();
-        restart.wait().expect("reap the restart");
+        restart.teardown();
         assert!(
             refused,
             "the restart must refuse in bounded time (HookStarted)"
