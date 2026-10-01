@@ -1629,8 +1629,17 @@ pub(super) fn CreateSessionForm(
     // intent: a confirmed create whose reply was lost must replay under its
     // key with the override, or the helm would refuse the replay and a
     // second confirmation would mint a new key and a second session.
-    let mut yolo_refusal = use_signal(|| None::<(String, String)>);
+    //
+    // "Start, and don't ask again on this host" adds a request to mark the
+    // host safe first, held the same way: under the refused key, set by that
+    // button's click just before the form submits, and taken by that one
+    // submit, so it can never ride along with a later Launch or "start
+    // anyway". `yolo_error` is that first step's failure, shown inside the
+    // confirmation, which stays up.
+    let mut yolo_refusal = use_signal(|| None::<(String, crate::yolo_confirm::YoloAsk)>);
     let mut yolo_confirmed_key = use_signal(|| None::<String>);
+    let mut yolo_stop_asking_key = use_signal(|| None::<String>);
+    let mut yolo_error = use_signal(|| None::<String>);
     // Ordinary New must never inherit the last-used profile merely because
     // its catalog arrives. This dormant command draft becomes active only
     // when Other is selected; structured mode still requires a harness choice.
@@ -2985,13 +2994,23 @@ pub(super) fn CreateSessionForm(
                 // the server knows whether the lost reply belonged to a
                 // session that actually exists. This handler's job is merely
                 // to send the SAME key for every retry of one intent.
+                // Taken before anything can refuse this submit, so a request
+                // to stop asking lives exactly as long as the one submit its
+                // button started.
+                let stop_asking_for = yolo_stop_asking_key.write().take();
                 let Some(op_guard) = ops.claim_guard() else {
                     return;
                 };
                 // The confirmation, if any, is matched against the key this
                 // submit ends up using, below; the question itself is
-                // answered either way.
-                yolo_refusal.set(None);
+                // answered either way. Except when this submit first has to
+                // mark the host safe: the confirmation stays up through that
+                // step, so a failure has somewhere to show and the user can
+                // still pick another answer.
+                if stop_asking_for.is_none() {
+                    yolo_refusal.set(None);
+                }
+                yolo_error.set(None);
                 // No agent, no create. "Nothing is selected" is a real state
                 // rather than a gap to be filled — a profile that was chosen
                 // and has since been deleted, or a clone whose own agent was
@@ -3231,6 +3250,13 @@ pub(super) fn CreateSessionForm(
                 // a vanished row, or one that has
                 // never connected — means no claim (see `connection_claim`).
                 let expected_incarnation = connection_claim(&hosts, binding.host);
+                // The name the YOLO confirmation shows for this create's
+                // host, from the same snapshot, should the helm ask.
+                let yolo_host_name = hosts
+                    .iter()
+                    .find(|host| host.id == binding.host)
+                    .map(HostOption::label)
+                    .unwrap_or_else(|| "this host".to_string());
                 error.set(None);
                 let catalog_for_recheck = catalog_for_submit.clone();
                 spawn(async move {
@@ -3375,6 +3401,21 @@ pub(super) fn CreateSessionForm(
                     // Only a confirmation given for THIS key counts; see
                     // `yolo_confirmed_key`.
                     let allow_yolo = yolo_confirmed_key.peek().as_deref() == Some(key.as_str());
+                    // "Don't ask again": mark the host safe before anything
+                    // is sent, and send nothing if that fails. The override
+                    // is withdrawn on failure too, so a later plain Launch
+                    // asks again rather than riding on this confirmation.
+                    if allow_yolo && stop_asking_for.as_deref() == Some(key.as_str()) {
+                        match crate::yolo_confirm::stop_asking(&base, bound.host, &yolo_host_name).await {
+                            Ok(()) => yolo_refusal.set(None),
+                            Err(reason) => {
+                                yolo_confirmed_key.set(None);
+                                yolo_error.set(Some(reason));
+                                ops.release();
+                                return;
+                            }
+                        }
+                    }
                     let agent = match &bound.agent {
                         LaunchIntent::Command(invocation) => CreateAgent::Command(invocation),
                         LaunchIntent::Profile(id) => CreateAgent::Profile(id),
@@ -3517,7 +3558,19 @@ pub(super) fn CreateSessionForm(
                                     // reconcile with it rather than start a
                                     // second session. The loud confirmation
                                     // replaces the ordinary error line.
-                                    yolo_refusal.set(Some((key.clone(), prose)));
+                                    yolo_refusal.set(Some((
+                                        key.clone(),
+                                        crate::yolo_confirm::YoloAsk {
+                                            host: Some(bound.host),
+                                            host_name: yolo_host_name.clone(),
+                                            reason: crate::yolo_confirm::YoloReason::of_launch(
+                                                match &bound.agent {
+                                                    LaunchIntent::Structured(selection) => Some(selection),
+                                                    LaunchIntent::Command(_) | LaunchIntent::Profile(_) => None,
+                                                },
+                                            ),
+                                        },
+                                    )));
                                     ops.release();
                                     return;
                                 }
@@ -3657,6 +3710,44 @@ pub(super) fn CreateSessionForm(
                         },
                         "reset choices"
                     }
+                }
+            }
+            // The YOLO question sits directly under Launch, where the click
+            // that raised it happened. Rendered after every other section, it
+            // landed below the launcher's visible edge and pressing Launch
+            // seemed to do nothing until the user scrolled.
+            //
+            // Shown only while the draft still holds the refused request's
+            // key: an edit that changes what would launch retires the key,
+            // and with it a question that no longer describes the draft.
+            if let Some((refused_key, ask)) = yolo_refusal.read().clone()
+                && intent_key.read().as_ref().is_some_and(|(key, _)| *key == refused_key)
+            {
+                crate::yolo_confirm::YoloConfirmation {
+                    ask,
+                    busy,
+                    error: yolo_error(),
+                    confirm_submits: true,
+                    // The one-off also disarms "don't ask again". Every
+                    // submit takes that request before anything can refuse
+                    // it, so this is defence in depth, for a click whose
+                    // submit never fired: the one-off must never mark the
+                    // host.
+                    on_confirm: {
+                        let refused_key = refused_key.clone();
+                        move |_| {
+                            yolo_stop_asking_key.set(None);
+                            yolo_confirmed_key.set(Some(refused_key.clone()));
+                        }
+                    },
+                    on_confirm_and_stop_asking: move |_| {
+                        yolo_confirmed_key.set(Some(refused_key.clone()));
+                        yolo_stop_asking_key.set(Some(refused_key.clone()));
+                    },
+                    on_cancel: move |_| {
+                        yolo_refusal.set(None);
+                        yolo_error.set(None);
+                    },
                 }
             }
             // Search belongs to the shared shell. A query can choose a
@@ -4889,20 +4980,6 @@ pub(super) fn CreateSessionForm(
                             "{display_peer(&child)}"
                         }
                     }
-                }
-            }
-            // Shown only while the draft still holds the refused request's
-            // key: an edit that changes what would launch retires the key,
-            // and with it a question that no longer describes the draft.
-            if let Some((refused_key, message)) = yolo_refusal.read().clone()
-                && intent_key.read().as_ref().is_some_and(|(key, _)| *key == refused_key)
-            {
-                crate::yolo_confirm::YoloConfirmation {
-                    message,
-                    busy,
-                    confirm_submits: true,
-                    on_confirm: move |_| yolo_confirmed_key.set(Some(refused_key.clone())),
-                    on_cancel: move |_| yolo_refusal.set(None),
                 }
             }
             if let Some(err) = error.read().clone() {

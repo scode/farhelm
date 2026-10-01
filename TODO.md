@@ -121,13 +121,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   provisioning lock and write lock inside the owned body. The review-feedback triage that fixed the other host edits
   (`host-edits-not-cancellation-safe`) did not list the alias edit.
 
-- **Mark a host YOLO safe from the YOLO confirmation.** Every host is sensitive until the user marks it YOLO safe, so
-  the first YOLO launch on any host gets the "YOLO launch on a sensitive host" confirmation, which offers only "start
-  YOLO session anyway" and "cancel" and tells the user to go mark the host safe in its settings. Add a button to that
-  confirmation that marks the host YOLO safe going forward (and starts the launch), so the user does not have to find
-  the host's settings to stop being asked. Exact wording and behavior to be decided when this is picked up. The default
-  itself stays as it is: every host starts sensitive.
-
 - **Confirm restart only while the agent is working.** Restart (from the session header or the sidebar) asks "still
   running — restarting stops the agent and its whole process tree first" whenever the agent is live at all, idle
   included, and also when its status is unknown. Asked that often, people click through without reading it. Only ask

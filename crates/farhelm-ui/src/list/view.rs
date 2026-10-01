@@ -1959,63 +1959,110 @@ pub(crate) fn ListView(
     let replace_base = base.clone();
     let replace_refresh = request_listing.clone();
     // A replace the helm refused as a YOLO launch on a sensitive host: the
-    // source row's id and the helm's refusal, shown as the loud confirmation
-    // above the list until the user confirms or cancels (see `yolo_confirm`).
-    let mut yolo_replace = use_signal(|| None::<(String, String)>);
-    let mut do_replace = move |id: String, allow_yolo: bool| {
-        if !begin_row_op(&id) {
-            return;
-        }
-        errors.write().remove(&id);
-        let base = replace_base.clone();
-        let refresh = replace_refresh.clone();
-        // The source row's host fields, taken now: the reply is bare, and
-        // the row may be gone from the listing by the time it lands. See
-        // `with_source_host`.
-        let source = listing.peek().as_ref().and_then(|listing| {
-            listing
-                .as_ref()
-                .ok()
-                .and_then(|listing| listing.sessions.iter().find(|s| s.id == id).cloned())
-        });
-        // The prompt the user confirmed was worded from this same row. When it
-        // warned of nothing alive, the source delete carries the precondition,
-        // so a stale row cannot turn that confirmation into a silent kill.
-        let only_if_nothing_alive = source.as_ref().is_some_and(|source| {
-            crate::status::shows_nothing_alive(&source.status, source.tabs.len())
-        });
-        spawn(async move {
-            match replace_session(&base, &id, only_if_nothing_alive, allow_yolo).await {
-                Ok((session, notice)) => {
-                    delete_notice.publish(notice);
-                    let session = match &source {
-                        Some(source) => super::with_source_host(session, source),
-                        None => session,
-                    };
-                    remember_selection(&base, preferences, &session.id);
-                    on_open.call(session);
-                    refresh(Trigger::Explicit);
-                }
-                Err(e) => {
-                    // Keyed by the SOURCE id: the row this error belongs
-                    // beside is the one the user clicked "replace" on,
-                    // which — on a delete-after-create failure — is also
-                    // the row that is still there to show it next to. On
-                    // that same failure the message already names the new
-                    // session's id too (`api::replace_session`'s own doc),
-                    // so nothing here needs to remember it separately.
-                    if e.yolo_confirmation {
-                        yolo_replace.set(Some((id.clone(), e.text)));
-                    } else {
-                        errors
-                            .write()
-                            .insert(id.clone(), format!("replace: {}", e.text));
+    // source row's id and what the confirmation needs to explain itself,
+    // shown as the loud confirmation above the list until the user confirms
+    // or cancels (see `yolo_confirm`). `yolo_replace_error` is why a
+    // "don't ask again" failed at its first step; the confirmation stays up
+    // with it.
+    let mut yolo_replace = use_signal(|| None::<(String, crate::yolo_confirm::YoloAsk)>);
+    let mut yolo_replace_error = use_signal(|| None::<String>);
+    // `stop_asking` is "start, and don't ask again on this host": the host
+    // (id and display name) the question named, to mark safe for YOLO
+    // launches first; nothing is replaced if that fails. It comes from the
+    // question the user answered, not from the row's current listing entry,
+    // which may have changed or gone since. It only ever comes with
+    // `allow_yolo`.
+    let mut do_replace =
+        move |id: String, allow_yolo: bool, stop_asking: Option<(crate::HostId, String)>| {
+            if !begin_row_op(&id) {
+                return;
+            }
+            errors.write().remove(&id);
+            let base = replace_base.clone();
+            let refresh = replace_refresh.clone();
+            // The source row's host fields, taken now: the reply is bare, and
+            // the row may be gone from the listing by the time it lands. See
+            // `with_source_host`.
+            let source = listing.peek().as_ref().and_then(|listing| {
+                listing
+                    .as_ref()
+                    .ok()
+                    .and_then(|listing| listing.sessions.iter().find(|s| s.id == id).cloned())
+            });
+            // The prompt the user confirmed was worded from this same row. When it
+            // warned of nothing alive, the source delete carries the precondition,
+            // so a stale row cannot turn that confirmation into a silent kill.
+            let only_if_nothing_alive = source.as_ref().is_some_and(|source| {
+                crate::status::shows_nothing_alive(&source.status, source.tabs.len())
+            });
+            spawn(async move {
+                // The question slot is shared by every row, and another row's
+                // replace can raise its own question while this mark is out,
+                // so the outcome only touches the slot while it is still
+                // this row's.
+                let still_ours = || {
+                    yolo_replace
+                        .peek()
+                        .as_ref()
+                        .is_some_and(|(source, _)| *source == id)
+                };
+                if let Some((host, name)) = stop_asking {
+                    if let Err(reason) = crate::yolo_confirm::stop_asking(&base, host, &name).await
+                    {
+                        if still_ours() {
+                            yolo_replace_error.set(Some(reason));
+                        }
+                        end_row_op(&id);
+                        return;
+                    }
+                    if still_ours() {
+                        yolo_replace.set(None);
                     }
                 }
-            }
-            end_row_op(&id);
-        });
-    };
+                match replace_session(&base, &id, only_if_nothing_alive, allow_yolo).await {
+                    Ok((session, notice)) => {
+                        delete_notice.publish(notice);
+                        let session = match &source {
+                            Some(source) => super::with_source_host(session, source),
+                            None => session,
+                        };
+                        remember_selection(&base, preferences, &session.id);
+                        on_open.call(session);
+                        refresh(Trigger::Explicit);
+                    }
+                    Err(e) => {
+                        // Keyed by the SOURCE id: the row this error belongs
+                        // beside is the one the user clicked "replace" on,
+                        // which — on a delete-after-create failure — is also
+                        // the row that is still there to show it next to. On
+                        // that same failure the message already names the new
+                        // session's id too (`api::replace_session`'s own doc),
+                        // so nothing here needs to remember it separately.
+                        if e.yolo_confirmation {
+                            let ask = crate::yolo_confirm::YoloAsk {
+                                host: source.as_ref().and_then(|source| source.host),
+                                host_name: source
+                                    .as_ref()
+                                    .and_then(|source| source.host_name.clone())
+                                    .unwrap_or_else(|| "this host".to_string()),
+                                reason: crate::yolo_confirm::YoloReason::of_launch(
+                                    source.as_ref().and_then(|source| source.launch.as_ref()),
+                                ),
+                            };
+                            // A new question starts without an earlier one's
+                            // "don't ask again" failure.
+                            yolo_replace_error.set(None);
+                            yolo_replace.set(Some((id.clone(), ask)));
+                        } else {
+                            errors
+                                .write()
+                                .insert(id.clone(), format!("replace: {}", e.text));
+                        }
+                    }
+                }
+                end_row_op(&id);
+            });
+        };
     // The "replace" menu item's click: guarded by the SAME predicate
     // `on_clone` uses (`clone_is_refused`'s own doc explains why the two
     // share it — the difference between clone and replace is never in
@@ -2053,7 +2100,7 @@ pub(crate) fn ListView(
             return;
         }
         if leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingReplace) {
-            do_replace(id, false);
+            do_replace(id, false, None);
         }
     };
     let cancel_replace = move |id: String| {
@@ -3110,19 +3157,48 @@ pub(crate) fn ListView(
                     if let Some(line) = rows::no_match_line(listing) {
                         div { class: "status filter-empty", "{line}" }
                     }
-                    if let Some((source, message)) = yolo_replace.read().clone() {
+                    if let Some((source, ask)) = yolo_replace.read().clone() {
+                        // Keyed by the source row, so another row's question
+                        // mounts fresh (scrolled into view, cancel focused)
+                        // instead of reusing this one's element.
                         crate::yolo_confirm::YoloConfirmation {
-                            message,
-                            busy: ops.busy(),
+                            key: "{source}",
+                            ask: ask.clone(),
+                            // This flow holds a row operation rather than
+                            // the page's token (`begin_row_op`), so its own
+                            // in-flight replace shows as the source row's
+                            // pending phase, not as `ops.busy()`.
+                            busy: ops.busy()
+                                || row_is(&row_phases.read(), &source, RowPhase::Pending),
+                            error: yolo_replace_error(),
                             confirm_submits: false,
                             on_confirm: {
                                 let mut do_replace = yolo_do_replace.clone();
+                                let source = source.clone();
                                 move |_| {
                                     yolo_replace.set(None);
-                                    do_replace(source.clone(), true);
+                                    yolo_replace_error.set(None);
+                                    do_replace(source.clone(), true, None);
                                 }
                             },
-                            on_cancel: move |_| yolo_replace.set(None),
+                            // The confirmation stays up through the first
+                            // step; `do_replace` takes it down once the host
+                            // is marked, or leaves it with the reason.
+                            on_confirm_and_stop_asking: {
+                                let mut do_replace = yolo_do_replace.clone();
+                                let source = source.clone();
+                                // Only offered when the question knows its
+                                // host (`YoloAsk::host`).
+                                let target = ask.host.map(|host| (host, ask.host_name.clone()));
+                                move |_| {
+                                    yolo_replace_error.set(None);
+                                    do_replace(source.clone(), true, target.clone());
+                                }
+                            },
+                            on_cancel: move |_| {
+                                yolo_replace.set(None);
+                                yolo_replace_error.set(None);
+                            },
                         }
                     }
                     div { class: "session-list",

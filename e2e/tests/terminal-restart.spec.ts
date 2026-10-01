@@ -9,8 +9,8 @@
 // ---------------------------------------------------------------------
 
 import { expect, test } from "./helpers/evidence";
-import { type Locator, type Page } from "@playwright/test";
-import { hideSeenState, SESSION_LISTING } from "./helpers/fleet";
+import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { hideSeenState, localHostId, openRowMenu, SESSION_LISTING } from "./helpers/fleet";
 import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
@@ -281,6 +281,207 @@ test("Replace confirms inline, can cancel, selects the fresh session, and surfac
   await expect(page.locator(".replace-error")).toContainText("source is no longer available");
   await expect(page.locator(".replace-error")).toHaveCSS("font-size", "12px");
   await expect(page.locator(".replace-from-notice")).toBeVisible();
+});
+
+/**
+ * Inject one interrupted session whose launch is YOLO on the local host, and
+ * mock its Replace and the local host's YOLO-safe write: a Replace without the
+ * override is refused with the helm's YOLO header, one with it succeeds and
+ * the replacement joins the listing; the host write is refused while
+ * `control.refuseMark` is set and succeeds otherwise. Every
+ * request is recorded, in order, in `sequence` ("replace", "mark",
+ * "replace+override"), which is what the "don't ask again" tests assert on.
+ * `withHost: false` omits the row's host fields, as a helm that sends none
+ * would.
+ * Nothing reaches the shared helm's real host setting or sessions.
+ */
+async function injectYoloReplaceSession(
+  page: Page,
+  request: APIRequestContext,
+  sessionId: string,
+  title: string,
+  { withHost = true }: { withHost?: boolean } = {},
+) {
+  const local = await localHostId(request);
+  const replacement = {
+    id: `${sessionId.slice(0, -1)}9`,
+    title: `${title} (replaced)`,
+    cwd: "/tmp",
+    invocation: "codex --yolo",
+    status: { state: "unknown" },
+    restart_offer: "resume",
+    created_at: 0,
+    last_activity_at: 0,
+    tabs: [],
+  };
+  let replaced = false;
+  await page.route(SESSION_LISTING, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const listing = await response.json();
+    listing.sessions.push({
+      id: sessionId,
+      title,
+      cwd: "/tmp",
+      invocation: "codex --yolo",
+      launch: { harness: "codex", model: null, effort: null, permissions: "yolo", workspace_trust: null },
+      ...(withHost ? { host: local, host_name: "this machine" } : {}),
+      status: { state: "interrupted" },
+      restart_offer: "resume",
+    });
+    listing.total += 1;
+    if (replaced) {
+      listing.sessions.push(replacement);
+      listing.total += 1;
+    }
+    await route.fulfill({ response, json: listing });
+  });
+  const sequence: string[] = [];
+  const replaceBodies: any[] = [];
+  await page.route(`**/api/sessions/${sessionId}/replace`, async (route) => {
+    const body = route.request().postDataJSON();
+    replaceBodies.push(body);
+    sequence.push(body.allow_yolo_on_sensitive_host ? "replace+override" : "replace");
+    if (!body.allow_yolo_on_sensitive_host) {
+      await fulfillAsHelm(route, {
+        status: 409,
+        contentType: "text/plain",
+        headers: { "x-farhelm-yolo-confirmation": "sensitive-host" },
+        body: "this machine is marked sensitive for YOLO launches; confirm with --allow-yolo-on-sensitive-host",
+      });
+      return;
+    }
+    replaced = true;
+    await fulfillAsHelm(route, { status: 200, contentType: "application/json", body: JSON.stringify(replacement) });
+  });
+  const marks: unknown[] = [];
+  const control = { refuseMark: false };
+  await page.route(`**/api/hosts/${local}/yolo-safe`, async (route) => {
+    marks.push(route.request().postDataJSON());
+    sequence.push("mark");
+    if (control.refuseMark) {
+      await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: "held by the test" });
+      return;
+    }
+    await fulfillAsHelm(route, { status: 200, contentType: "application/json", body: "{}" });
+  });
+
+  return { sequence, marks, replaceBodies, control };
+}
+
+// "Start, and don't ask again on this host" on a Replace the helm refused as
+// a YOLO launch. The interrupted card's Replace runs through the same
+// session-view path as the header's, so this covers both. Why: the button's
+// promise is only kept if the host is marked before the replace goes out,
+// and a replace that went out first would leave the user asked again next
+// time. Specifies: the refused replace shows the question with the GUI's own
+// explanation; the button sends the host mark, then exactly one more replace
+// carrying the override, in that order, and the view moves to the
+// replacement. Every request is route-mocked, so the shared helm's real host
+// setting and sessions are untouched.
+test("don't ask again on a refused YOLO replace marks the host, then replaces with the override", async ({
+  page,
+  request,
+}) => {
+  const sessionId = "11111111-2222-3333-4444-aaaaaaaaaaa0";
+  const title = `interrupted-replace-yolo-${Date.now()}`;
+  const { sequence, marks, replaceBodies, control } = await injectYoloReplaceSession(page, request, sessionId, title);
+
+  await page.goto("/");
+  await rowByTitle(page, title).locator(".session-row-open").click();
+  await page.locator(".replace-from-notice").click();
+  await page.locator(".replace-confirm-submit").click();
+  const confirmation = page.locator(".yolo-confirmation");
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toContainText("This launch uses YOLO permissions.");
+  await expect(confirmation).toContainText("this machine asks before every YOLO launch.");
+  expect(sequence).toEqual(["replace"]);
+
+  // A refused mark replaces nothing, and the question stays with its reason.
+  control.refuseMark = true;
+  await confirmation.locator(".yolo-confirm-stop-asking").click();
+  await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("held by the test");
+  expect(sequence, "a refused mark sends no replace").toEqual(["replace", "mark"]);
+  await expect(confirmation).toBeVisible();
+
+  control.refuseMark = false;
+  await confirmation.locator(".yolo-confirm-stop-asking").click();
+  await expect(page.locator(".titlebar .title")).toHaveText(`${title} (replaced)`);
+  expect(sequence, "the host is marked before the replace goes out").toEqual([
+    "replace",
+    "mark",
+    "mark",
+    "replace+override",
+  ]);
+  expect(marks).toEqual([{ yolo_safe: true }, { yolo_safe: true }]);
+  expect(replaceBodies).toHaveLength(2);
+});
+
+// The same answer on a Replace started from the session row's menu, which
+// runs a separate path in the session list (it holds a row operation rather
+// than the page's lock). Specifies what the session-view test above does, for
+// that path: the question appears above the list, and the button marks the
+// host before the one replace that carries the override.
+test("don't ask again on a refused YOLO replace from the row menu marks the host first", async ({
+  page,
+  request,
+}) => {
+  const sessionId = "11111111-2222-3333-4444-bbbbbbbbbbb0";
+  const title = `row-replace-yolo-${Date.now()}`;
+  const { sequence, marks, replaceBodies, control } = await injectYoloReplaceSession(page, request, sessionId, title);
+
+  await page.goto("/");
+  const row = rowByTitle(page, title);
+  await openRowMenu(row);
+  await row.locator(".session-row-replace").click();
+  await row.locator(".confirm-replace").click();
+  const confirmation = page.locator(".yolo-confirmation");
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toContainText("This launch uses YOLO permissions.");
+  expect(sequence).toEqual(["replace"]);
+
+  // A refused mark replaces nothing, the question stays with its reason, and
+  // the row operation is over, so the question is usable again.
+  control.refuseMark = true;
+  await confirmation.locator(".yolo-confirm-stop-asking").click();
+  await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("held by the test");
+  expect(sequence, "a refused mark sends no replace").toEqual(["replace", "mark"]);
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation.locator(".yolo-cancel"), "the question's buttons are usable again").toBeEnabled();
+
+  control.refuseMark = false;
+  await confirmation.locator(".yolo-confirm-stop-asking").click();
+  await expect.poll(() => sequence).toEqual(["replace", "mark", "mark", "replace+override"]);
+  await expect(confirmation).toHaveCount(0);
+  expect(marks).toEqual([{ yolo_safe: true }, { yolo_safe: true }]);
+  expect(replaceBodies).toHaveLength(2);
+});
+
+// "Don't ask again" needs a host to mark. A row whose host the helm did not
+// send cannot offer it: a button that marked nothing and then launched would
+// be the one-off override under a misleading label. Specifies: the question
+// for such a row shows the one-off and cancel, and no "don't ask again".
+test("a YOLO question for a row with no known host offers no don't-ask-again", async ({ page, request }) => {
+  const sessionId = "11111111-2222-3333-4444-ccccccccccc0";
+  const title = `row-replace-yolo-nohost-${Date.now()}`;
+  const { sequence } = await injectYoloReplaceSession(page, request, sessionId, title, { withHost: false });
+
+  await page.goto("/");
+  const row = rowByTitle(page, title);
+  await openRowMenu(row);
+  await row.locator(".session-row-replace").click();
+  await row.locator(".confirm-replace").click();
+  const confirmation = page.locator(".yolo-confirmation");
+  await expect(confirmation).toBeVisible();
+  expect(sequence).toEqual(["replace"]);
+  await expect(confirmation.locator(".yolo-confirm")).toBeVisible();
+  await expect(confirmation.locator(".yolo-cancel")).toBeVisible();
+  await expect(confirmation.locator(".yolo-confirm-stop-asking")).toHaveCount(0);
+  await confirmation.locator(".yolo-cancel").click();
+  await expect(confirmation).toHaveCount(0);
 });
 
 // The interrupted surface's own restart control is the same request the

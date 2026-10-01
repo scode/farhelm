@@ -5483,7 +5483,8 @@ samp {
    (`yolo_confirm`). Deliberately loud: accidental YOLO launches on the wrong
    machine are what it exists to stop, and a prompt that looks like every
    other line of text gets clicked through. A thick danger border and tint,
-   a heading, and the consequence in words before the helm's own sentence. */
+   a heading, what YOLO means, why this launch is one, and that nothing has
+   started yet. */
 .yolo-confirmation {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   border: 2px solid var(--danger);
@@ -5504,10 +5505,35 @@ samp {
   font-weight: 600;
   margin: 0;
 }
+.yolo-confirmation-reason,
+.yolo-confirmation-asks {
+  margin: 0;
+}
+.yolo-confirmation-asks {
+  color: var(--fg-dim);
+}
+.yolo-confirmation-error {
+  padding: 0;
+}
 .yolo-confirmation-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+/* "Start, and don't ask again on this host": red, like the one-off override
+   beside it, because it starts the same YOLO session, but outlined rather
+   than filled. A filled button draws the reflex click, and the answer that
+   turns the question off for good should not be the reflex target; the
+   one-off keeps the fill. SPEC_impl.md's button tiers record this as the one
+   deliberate fourth look. */
+.yolo-confirm-stop-asking {
+  background: var(--bg-2);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.yolo-confirm-stop-asking:hover:not(:disabled),
+.yolo-confirm-stop-asking:focus-visible:not(:disabled) {
+  background: var(--danger-bg-dim);
 }
 
 /* A completed delete's notice (a checkout left in place) above the session
