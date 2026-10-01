@@ -94,8 +94,6 @@ One line per open item. This file must always match the feedback files in this d
   session; #1310 removed only one trigger.
 - `create-dialog-empty-catalog-refuses.md` — when the model catalog fails to load or is still loading,
   clone/replace-with/recent setups are refused as "no longer supported".
-- `hosts-panel-leaks-page-lock.md` — a re-login during a host action (retry, adopt, forget, retarget, alias, YOLO
-  setting) leaves every page action disabled until reload.
 - `profile-popup-leaks-page-lock.md` — a re-login while saving or deleting a profile leaves every page action disabled
   until reload.
 - `codex-last-option-reads-idle.md` — a Codex trust dialog with the last option highlighted reads as Idle instead of
