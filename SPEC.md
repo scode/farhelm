@@ -1609,6 +1609,17 @@ the browser UI is not recommended. The native app is the preferred client and is
 narrows what a hypothetical flaw in it could reach, or that keeps other software from passing for it, is wanted, as long
 as it stays proportionate.
 
+### Signing in again
+
+Confirmed 2026-10-01: the desktop app is the primary supported surface. When a client has to sign in again, for example
+after the browser sign-in token was rotated or its device credential was evicted, that recovery may reset the page and
+lose open forms, dialogs and drafts. Friction in the browser's token prompt is acceptable too. Do not spend significant
+complexity preserving UI state across a sign-in.
+
+Three things still hold. An action the user started is never lost silently: it either completes and reports its outcome,
+or reports that its outcome is unknown. Sign-in recovery never crashes the window or leaves it dead. A failed desktop
+re-sign-in can be retried from the window, without restarting the app. This principle may be revisited later.
+
 ### Remote input, session defaults, and availability
 
 Agents may discover the helm catalog's profile names and IDs. Listing those names and IDs in lookup suggestions is

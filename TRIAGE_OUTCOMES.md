@@ -4342,7 +4342,8 @@
   desktop credential refresh not cancel the request it retries, for example by deferring the webview re-authentication
   until the retried response is in hand, so the triggering action reports its outcome. Add regression coverage where the
   desktop seam allows it. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `owzunvypkmpz`, bookmark `triage-1001/01-desktop-reauth-action`, PR
+  https://github.com/scode/farhelm/pull/1357.
 
 ## desktop-reauth-failure-dead-end.md
 

@@ -3,8 +3,12 @@
 //! The browser raises an ordinary in-page token prompt after a recognized
 //! 401. Desktop bootstrap instead performs two exchanges: native REST owns a
 //! process-scoped credential, while the webview receives a separate one over
-//! IPC for localStorage and WebSocket subprotocols. Every successful exchange
-//! remounts the active surface and feed so no reader retains revoked state.
+//! IPC for localStorage and WebSocket subprotocols. In the browser, every
+//! successful exchange remounts the active surface and feed so no reader
+//! retains revoked state. A desktop re-authentication instead runs underneath
+//! the live app (see [`DesktopBootstrapGate`]): the sockets that rotation
+//! closed reconnect on their own, reading the replacement secret from
+//! localStorage at each attempt.
 
 use crate::{ApiBase, api};
 use dioxus::prelude::*;
@@ -22,9 +26,11 @@ struct DesktopExchange {
 }
 
 /// Incremented when native REST observes a revoked desktop credential. The
-/// gate reacts by cancelling its completed authentication future and running
-/// a new validation/exchange inside the webview context, replacing that
-/// client's independently revoked WebSocket credential too.
+/// gate reacts by restarting its completed authentication future, running a
+/// new validation/exchange inside the webview context and replacing that
+/// client's independently revoked WebSocket credential too. The bump does not
+/// unmount the app: the native request that triggered it is still in flight
+/// and must be able to report its outcome (SPEC.md "Signing in again").
 #[cfg(native_desktop)]
 pub(crate) static DESKTOP_AUTH_GENERATION: GlobalSignal<u64> = Signal::global(|| 0);
 
@@ -33,18 +39,6 @@ pub(crate) fn require_desktop_webview_reauth() {
     *DESKTOP_AUTH_GENERATION.write() += 1;
 }
 
-/// Hold the component tree behind the webview's own authenticated exchange.
-///
-/// Native bootstrap has already authenticated reqwest. This second exchange
-/// runs inside the webview so its localStorage and WebSocket subprotocol carry
-/// a separately minted device credential. Values enter JavaScript through the
-/// eval IPC channel, never through a URL or rendered DOM, and the web token
-/// never enters it at all: native mints the webview's device secret itself
-/// (`mint_webview_secret`) and hands over only that. A validation 401 (or no
-/// stored secret) is the only state that mints: transport errors, capacity refusals, and failed
-/// WebSocket greetings return visibly over IPC and leave the device table
-/// alone. The generation signal explicitly restarts this future after token
-/// rotation; component-key remount behavior is not part of the contract.
 /// Mint the webview's device secret with the web token, re-reading the token
 /// once if the helm refuses it: the token file is a rotation boundary, and a
 /// rotation between reading and using it is the one refusal a retry fixes. A
@@ -63,12 +57,28 @@ async fn mint_webview_secret(base: &str) -> Result<String, String> {
     Err("webview device exchange failed with 401 Unauthorized".to_string())
 }
 
+/// Hold the component tree behind the webview's own authenticated exchange.
+///
+/// Native bootstrap has already authenticated reqwest. This second exchange
+/// runs inside the webview so its localStorage and WebSocket subprotocol carry
+/// a separately minted device credential. Values enter JavaScript through the
+/// eval IPC channel, never through a URL or rendered DOM, and the web token
+/// never enters it at all: native mints the webview's device secret itself
+/// (`mint_webview_secret`) and hands over only that. A validation 401 (or no
+/// stored secret) is the only state that mints: transport errors, capacity refusals, and failed
+/// WebSocket greetings return visibly over IPC and leave the device table
+/// alone. The generation signal explicitly restarts this future after token
+/// rotation; component-key remount behavior is not part of the contract.
+///
+/// Only the first authentication holds the tree back. Once the app has
+/// mounted it stays mounted through every later re-authentication, so an
+/// action that ran into the rotation can still report its outcome; only a
+/// failure replaces it (SPEC.md "Signing in again").
 #[cfg(native_desktop)]
 #[component]
 pub(crate) fn DesktopBootstrapGate() -> Element {
     let config = use_context::<crate::desktop::WebviewBootstrap>();
-    let mut ready = use_signal(|| false);
-    let mut failure = use_signal(|| None::<String>);
+    let mut state = use_signal(GateState::default);
     let generation = *DESKTOP_AUTH_GENERATION.read();
     let mut active_generation = use_signal(|| generation);
 
@@ -101,15 +111,17 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                 "base": config.base,
                 "persisted": config.persisted_secret,
             })) {
-                failure.set(Some(format!(
-                    "sending desktop authentication over IPC: {error}"
-                )));
+                state
+                    .write()
+                    .fail(format!("sending desktop authentication over IPC: {error}"));
                 return;
             }
             let mut exchange = match eval.recv::<DesktopExchange>().await {
                 Ok(exchange) => exchange,
                 Err(error) => {
-                    failure.set(Some(format!("desktop authentication IPC failed: {error}")));
+                    state
+                        .write()
+                        .fail(format!("desktop authentication IPC failed: {error}"));
                     return;
                 }
             };
@@ -120,63 +132,67 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
                     Err(error) => serde_json::json!({ "error": error }),
                 };
                 if let Err(error) = eval.send(reply) {
-                    failure.set(Some(format!(
+                    state.write().fail(format!(
                         "sending the minted webview credential over IPC: {error}"
-                    )));
+                    ));
                     return;
                 }
                 exchange = match eval.recv::<DesktopExchange>().await {
                     Ok(exchange) => exchange,
                     Err(error) => {
-                        failure.set(Some(format!(
+                        state.write().fail(format!(
                             "desktop authentication IPC failed after minting: {error}"
-                        )));
+                        ));
                         return;
                     }
                 };
             }
             if let Some(error) = exchange.error {
-                failure.set(Some(format!("desktop authentication failed: {error}")));
+                state
+                    .write()
+                    .fail(format!("desktop authentication failed: {error}"));
                 return;
             }
             let Some(secret) = exchange.secret else {
-                failure.set(Some(
+                state.write().fail(
                     "desktop authentication IPC returned neither a credential nor an error"
                         .to_string(),
-                ));
+                );
                 return;
             };
             if let Err(error) = crate::desktop::persist_webview_secret(secret.clone()) {
                 let _ = eval.send(serde_json::json!({ "persisted": false }));
-                failure.set(Some(format!(
-                    "persisting webview device session: {error:#}"
-                )));
+                state
+                    .write()
+                    .fail(format!("persisting webview device session: {error:#}"));
                 return;
             }
             if let Err(error) = eval.send(serde_json::json!({ "persisted": true })) {
-                failure.set(Some(format!(
+                state.write().fail(format!(
                     "acknowledging persisted webview session over IPC: {error}"
-                )));
+                ));
                 return;
             }
             let committed = match eval.recv::<DesktopExchange>().await {
                 Ok(committed) => committed,
                 Err(error) => {
-                    failure.set(Some(format!(
-                        "desktop authentication commit IPC failed: {error}"
-                    )));
+                    state
+                        .write()
+                        .fail(format!("desktop authentication commit IPC failed: {error}"));
                     return;
                 }
             };
             if let Some(error) = committed.error {
-                failure.set(Some(format!("desktop authentication failed: {error}")));
+                state
+                    .write()
+                    .fail(format!("desktop authentication failed: {error}"));
                 return;
             }
             if !committed.ready {
-                failure.set(Some(
+                state.write().fail(
                     "desktop authentication IPC did not confirm browser bootstrap completion"
                         .to_string(),
-                ));
+                );
                 return;
             }
             // Arm the console shim now that a device session genuinely
@@ -194,25 +210,97 @@ pub(crate) fn DesktopBootstrapGate() -> Element {
             // reauthentication — see `arm_native_clipboard`'s docs.
             arm_native_clipboard(&config.base, &secret);
             *TOKEN_REQUIRED.write() = false;
-            ready.set(true);
+            state.write().succeed();
         }
     });
     use_effect(use_reactive((&generation,), move |(generation,)| {
         if generation != *active_generation.peek() {
             active_generation.set(generation);
-            ready.set(false);
-            failure.set(None);
+            state.write().restart();
             authentication.restart();
         }
     }));
 
-    if *ready.read() {
-        rsx! { crate::AppBody {} }
-    } else if let Some(detail) = failure.read().as_ref() {
-        rsx! { main { class: "auth-page", p { class: "auth-error", role: "alert", "{detail}" } } }
-    } else {
-        rsx! { main { class: "auth-page", p { "Starting Farhelm…" } } }
+    match state.read().view() {
+        GateView::Starting => rsx! { main { class: "auth-page", p { "Starting Farhelm…" } } },
+        GateView::App => rsx! { crate::AppBody {} },
+        GateView::Failed(detail) => rsx! {
+            main { class: "auth-page", p { class: "auth-error", role: "alert", "{detail}" } }
+        },
     }
+}
+
+/// What [`DesktopBootstrapGate`] has learned about the webview's
+/// authentication, kept apart from the component so the rule a regression
+/// would break is testable without a webview.
+///
+/// That rule is that `authenticated` never goes back to false. Restarting
+/// for a re-authentication used to reset it, which unmounted `AppBody` and
+/// dropped every component-scoped task with it, including the very one
+/// awaiting the native retry that bumped the generation: the Delete, Stop
+/// or rename that ran into a token rotation ended with no outcome on screen.
+/// The page's own sockets need no remount to recover. Rotation closes them,
+/// and they reconnect with whatever secret localStorage holds at each
+/// attempt, which the gate's future replaces before it reports success.
+/// They reconnect on their own retry ladders, though, not the moment the
+/// new secret lands, so a terminal can show "reconnecting" for a few
+/// seconds longer than the old remount took, or until the next background
+/// probe if its ladder was already spent. Nothing here nudges them: the
+/// user can always reconnect by hand, and SPEC.md "Signing in again" puts
+/// little weight on preserving UI state across a sign-in.
+#[cfg(native_desktop)]
+#[derive(Debug, Default)]
+struct GateState {
+    /// Whether this window has authenticated at least once.
+    authenticated: bool,
+    /// Why the latest authentication run failed, until another run starts.
+    failure: Option<String>,
+}
+
+#[cfg(native_desktop)]
+impl GateState {
+    /// Start another authentication run. Clears a failure and leaves the app
+    /// mounted if it already was.
+    fn restart(&mut self) {
+        self.failure = None;
+    }
+
+    fn succeed(&mut self) {
+        self.authenticated = true;
+        self.failure = None;
+    }
+
+    fn fail(&mut self, detail: String) {
+        self.failure = Some(detail);
+    }
+
+    /// A failure wins even over an app that is already mounted: the
+    /// webview's own credential is unusable then, so its terminals and event
+    /// feed cannot reconnect, and `.auth-page` deliberately replaces rather
+    /// than floats over controls that cannot succeed. The native retry that
+    /// asked for the re-authentication has settled by then
+    /// (`api::retry_desktop_request` asks only afterwards), so at most the
+    /// caller's short read of an already-received reply can be cut off.
+    fn view(&self) -> GateView<'_> {
+        match (&self.failure, self.authenticated) {
+            (Some(detail), _) => GateView::Failed(detail),
+            (None, true) => GateView::App,
+            (None, false) => GateView::Starting,
+        }
+    }
+}
+
+/// The three things the desktop gate can show.
+#[cfg(native_desktop)]
+#[derive(Debug, PartialEq, Eq)]
+enum GateView<'a> {
+    /// The first authentication is still running.
+    Starting,
+    /// The app, mounted for the rest of the window's life unless a later
+    /// authentication run fails.
+    App,
+    /// The latest authentication run failed, with its detail.
+    Failed(&'a str),
 }
 
 /// Hand the webview console shim (`assets/client-log-shim.js`) the loopback
@@ -563,5 +651,49 @@ with `newline` and ${interpolation}"#,
             script.contains("window.__farhelmNativeClipboardWrite = function"),
             "the script must install the writer terminal.js prefers: {script}"
         );
+    }
+}
+
+#[cfg(all(test, native_desktop))]
+mod gate_tests {
+    /// A desktop re-authentication must not unmount the app. The native
+    /// retry that bumps the generation runs inside a component-scoped task
+    /// (a Delete, a Stop, a rename), and unmounting `AppBody` dropped that
+    /// task, so the action that ran into a token rotation finished with no
+    /// outcome on screen (SPEC.md "Signing in again"). Only the first run
+    /// shows "Starting Farhelm…".
+    #[farhelm_testtrace::test]
+    fn reauthentication_keeps_the_app_mounted() {
+        let mut state = super::GateState::default();
+        assert_eq!(state.view(), super::GateView::Starting);
+        state.succeed();
+        assert_eq!(state.view(), super::GateView::App);
+        state.restart();
+        assert_eq!(
+            state.view(),
+            super::GateView::App,
+            "a running re-authentication must leave the app mounted"
+        );
+        state.succeed();
+        assert_eq!(state.view(), super::GateView::App);
+    }
+
+    /// A failed authentication run replaces the app, before or after the
+    /// first success, and the next run clears it: the webview credential is
+    /// unusable while it stands, and a stale failure must not outlive the
+    /// run that replaces it.
+    #[farhelm_testtrace::test]
+    fn failure_replaces_the_app_until_the_next_run() {
+        let mut state = super::GateState::default();
+        state.fail("first".to_string());
+        assert_eq!(state.view(), super::GateView::Failed("first"));
+        state.restart();
+        assert_eq!(state.view(), super::GateView::Starting);
+        state.succeed();
+        state.restart();
+        state.fail("later".to_string());
+        assert_eq!(state.view(), super::GateView::Failed("later"));
+        state.restart();
+        assert_eq!(state.view(), super::GateView::App);
     }
 }

@@ -502,7 +502,8 @@ struct FieldWrite {
 ///
 /// It also carries this client's unpersisted choices across an
 /// authentication remount: `PreferencesGate` re-reads the helm's row after
-/// a credential exchange, and without [`Self::dirty`] overlaying the
+/// a browser credential exchange (or a desktop sign-in that failed and was
+/// then retried), and without [`Self::dirty`] overlaying the
 /// still-unacked local values, that re-read would roll the current client
 /// back to whatever the helm last stored — a silent persistence failure
 /// becoming a visible reversal, which SPEC.md's best-effort clause does
@@ -604,9 +605,9 @@ impl PreferenceWrites {
 }
 
 /// The process-wide write queue. A static, not component state, on
-/// purpose: it must survive `PreferencesGate` (and on desktop the whole
-/// `AppBody`) being unmounted and remounted by credential recovery — see
-/// [`PreferenceWrites`].
+/// purpose: it must survive `PreferencesGate` being unmounted and
+/// remounted by credential recovery (the browser's, or on desktop a failed
+/// sign-in replacing the whole `AppBody`) — see [`PreferenceWrites`].
 static PREFERENCE_WRITES: std::sync::LazyLock<std::sync::Mutex<PreferenceWrites>> =
     std::sync::LazyLock::new(Default::default);
 
@@ -1017,8 +1018,9 @@ const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// [`send_read`]'s [`READ_TIMEOUT`] instead, and the paged listing once had
 /// a budget of its own before it went and returned with the preference
 /// seed. In the desktop build, a recognized 401 refreshes the
-/// native credential, remounts the independently authenticated webview
-/// gate, and retries once, all inside one absolute deadline — recovery
+/// native credential, retries once, and then restarts the webview's own
+/// authentication without unmounting the app, all inside one absolute
+/// deadline — recovery
 /// cannot turn one request's remaining budget into two fresh ones; browser
 /// builds retain the ordinary full-page token prompt.
 async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
@@ -1233,11 +1235,16 @@ async fn send_inner(
             if !skew::build_skew_detected_now()
                 && let Some(retry) = retry
             {
-                return retry_desktop_request(retry, deadline, || async {
-                    crate::desktop::refresh_native_device()
-                        .await
-                        .map_err(|error| error.to_string())
-                })
+                return retry_desktop_request(
+                    retry,
+                    deadline,
+                    || async {
+                        crate::desktop::refresh_native_device()
+                            .await
+                            .map_err(|error| error.to_string())
+                    },
+                    crate::auth::require_desktop_webview_reauth,
+                )
                 .await;
             }
             // Stamp classification happens first. A bundle that disagrees
@@ -1284,13 +1291,23 @@ fn authorize_with_retry_copy(
 
 /// Refresh and retry inside the original request's absolute deadline.
 ///
-/// The injected refresh future is a narrow test seam for the deadline span;
-/// production still has exactly one caller and one native refresh operation.
+/// When this caller's refresh replaced the native credential, `reauth` asks
+/// the webview to sign in again too, since a rotation revoked its separate
+/// credential as well. That request waits until the retried request has
+/// settled, success or failure. A webview sign-in that fails replaces the
+/// app with its failure page, which cancels whatever component task is
+/// awaiting this retry; firing `reauth` first let a fast failure discard a
+/// Delete or Stop before its outcome existed (SPEC.md "Signing in again").
+///
+/// The injected refresh future and `reauth` are narrow test seams;
+/// production still has exactly one caller, one native refresh operation and
+/// one webview re-authentication trigger.
 #[cfg(native_desktop)]
 async fn retry_desktop_request<Refresh, Refreshed>(
     retry: reqwest::RequestBuilder,
     deadline: tokio::time::Instant,
     refresh: Refresh,
+    reauth: impl FnOnce(),
 ) -> Result<reqwest::Response, SendError>
 where
     Refresh: FnOnce() -> Refreshed,
@@ -1300,15 +1317,19 @@ where
         .await
         .map_err(|_| SendError::Request("request deadline elapsed".to_string()))?
         .map_err(SendError::Request)?;
-    if replaced {
-        crate::auth::require_desktop_webview_reauth();
+    let retried = async {
+        let allowance = remaining(deadline)?;
+        let (retry_client, built) = retry.bearer_auth(secret).timeout(allowance).build_split();
+        let built = built.map_err(|error| SendError::Request(error.to_string()))?;
+        execute_with_receipt(&retry_client, built)
+            .await
+            .map_err(|error| SendError::Request(error.to_string()))
     }
-    let allowance = remaining(deadline)?;
-    let (retry_client, built) = retry.bearer_auth(secret).timeout(allowance).build_split();
-    let built = built.map_err(|error| SendError::Request(error.to_string()))?;
-    let retried = execute_with_receipt(&retry_client, built)
-        .await
-        .map_err(|error| SendError::Request(error.to_string()))?;
+    .await;
+    if replaced {
+        reauth();
+    }
+    let retried = retried?;
     skew::note_build(&retried);
     if retried.status() != reqwest::StatusCode::UNAUTHORIZED {
         return Ok(retried);
@@ -1318,8 +1339,9 @@ where
         .map_err(|_| SendError::Request("request deadline elapsed".to_string()))?
         .map_err(|error| SendError::Request(error.to_string()))?;
     if device_auth_required(&retry_body) {
-        // Desktop recovery already remounted the webview's independent gate.
-        // The browser token prompt cannot persist a native credential.
+        // Desktop recovery already restarted the webview's independent
+        // authentication. The browser token prompt cannot persist a native
+        // credential.
         return Err(SendError::Unauthenticated);
     }
     let detail = retry_body.trim();
@@ -3782,12 +3804,55 @@ mod tests {
                 tokio::time::sleep(std::time::Duration::from_millis(40)).await;
                 Ok(("replacement".to_string(), false))
             },
+            || panic!("a refresh that replaced nothing must not ask the webview to sign in again"),
         )
         .await;
 
         assert!(matches!(result, Err(SendError::Request(_))));
         assert!(started.elapsed() >= std::time::Duration::from_millis(150));
         assert!(started.elapsed() < std::time::Duration::from_millis(250));
+        drop(listener);
+    }
+
+    /// The webview is asked to sign in again only after the retried
+    /// request has settled.
+    ///
+    /// Why it matters: that sign-in can fail, and a failure replaces the app,
+    /// cancelling the component task awaiting the retry. Asking first let a
+    /// fast failure discard a Delete or Stop before its outcome existed
+    /// (SPEC.md "Signing in again"). Spec: with a replaced credential the
+    /// trigger fires exactly once, and not before the retry's own outcome,
+    /// here a stall that runs to the deadline. A stall rather than an
+    /// answer, because an answered request would need a Dioxus runtime for
+    /// the build-skew bookkeeping (see the test below).
+    #[cfg(native_desktop)]
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn desktop_webview_reauth_waits_for_the_retry_to_settle() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let started = tokio::time::Instant::now();
+        let deadline = started + std::time::Duration::from_millis(150);
+        let fired_at = std::cell::Cell::new(None);
+
+        let result = retry_desktop_request(
+            client().get(format!("http://{addr}/stalled-retry")),
+            deadline,
+            || async { Ok(("replacement".to_string(), true)) },
+            || {
+                assert!(fired_at.get().is_none(), "the trigger fires once");
+                fired_at.set(Some(started.elapsed()));
+            },
+        )
+        .await;
+
+        assert!(matches!(result, Err(SendError::Request(_))));
+        let fired_at = fired_at
+            .get()
+            .expect("a replaced credential must ask the webview to sign in again");
+        assert!(
+            fired_at >= std::time::Duration::from_millis(150),
+            "the trigger fired at {fired_at:?}, before the retry settled at the deadline"
+        );
         drop(listener);
     }
 
