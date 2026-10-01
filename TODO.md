@@ -144,6 +144,24 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   needs a changelog entry for the flag. Split out of the pre-release UI work that added the "don't ask again" button to
   the YOLO confirmation, which may already use some of this wording.
 
+- **Clippy fails on main: too many arguments in the supervisor.** `cargo clippy --all-targets -- -D warnings` (and
+  `cargo clippy -p farhelm --bins -- -D warnings`) fail on main with `clippy::too_many_arguments` on
+  `finish_reported_admission` in `crates/farhelm-supervisor/src/service/core.rs`: #1282 turned it from an associated
+  function into a method by adding `&self`, which made it eight parameters, one over clippy's default limit. CI runs
+  clippy, so the next on-demand CI run fails on it. Found 2026-09-30 while validating the pre-release UI stack
+  (#1305–#1307), which does not touch the supervisor.
+
+- **Multi-host browser test `reboot-restart` fails on main.** In `e2e/tests/terminal-multihost.spec.ts`, the "after a
+  simulated reboot of the remote host" group's
+  `reboot-restart: restart from the interrupted surface attaches the new
+  terminal` failed in every run on 2026-09-30,
+  on Chromium and WebKit, at main `16eee58e` as well as on the pre-release UI stack built on it (recorder runs
+  `3ed0d328`, `6acec3c3`, `d022002a`; the other tests in the group passed). The restart is accepted, but the interrupted
+  card does not give way (Chromium) or the new terminal never becomes revealed (WebKit) within 60 s. Running the test
+  alone with `-g` is not a valid reproduction: it depends on the group's earlier tests to set up the interrupted
+  session. Cause not investigated yet; it reproduces every time on this machine, so it reads as a regression rather than
+  a latent flake.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
