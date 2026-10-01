@@ -492,6 +492,14 @@ are large mostly because of their tests.
   supervisor restarts; dropping the fallback would mean refusing to launch there instead, or probing again. Came up in
   review-feedback triage on 2026-09-28.
 
+- **Reassess the silent fallback when systemd is expected.** On Linux each session normally runs in its own systemd
+  scope, which is what guarantees all its processes stop with it. Since #1279, a launch that meets a slow systemd user
+  manager still starts, just without a scope, so that session relies on the weaker process-tree sweep for good; later
+  launches check again. Reassess whether a host that is expected to have systemd should hard-require it instead: refuse
+  the launch, or at least say so, rather than quietly falling back. Part of the question is how Farhelm knows a host is
+  expected to have it. Decide together with the entry above on dropping the no-systemd fallback altogether, which covers
+  hosts that never had a working user manager.
+
 - **Native `<dialog>` for the app's modal dialogs.** The restart-with dialog, the rename dialog (`rename.rs`), and the
   session launcher (`list/create_form.rs`, `install_composer_focus_trap`) are each a plain `div` with `role="dialog"`, a
   fixed backdrop, and a keydown-based Tab trap written in JavaScript. The restart-with dialog also marks the rest of the
