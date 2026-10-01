@@ -1360,16 +1360,25 @@ run `36811756125`, recorder run `80893b36-8051-45bd-97f4-9ed8e8b451fb`, clean te
 across binaries with zero retries, pinned tmux 3.7c with executable SHA256
 `0838fd84ec24dfb4c70e250f7a8db71e3c2a2095847ef8335aee8871c925c07a`, locale `C.UTF-8`, no ambient `FARHELM_*`, only
 recorder-owned `FARHELM_TEST_TRACE_DIR` supplied); the other 2605 tests passed. It panicked after 15.17 s at "Delete
-retires the committed refusal without a restart". The retained trace shows the supervisor's systemd user-manager probe
-starting about 130 ms into the test and reporting at 15.13 s that it did not finish within its 15 s bound, after which
-teardown found no usable user manager and took the sweep-only path, and Delete returned an error. The same code (the
-gate's source differs from v0.20.0-rc.4 only in the version, changelog and TODO.md) passed the rc.4 gate on the same
-runner type, and the exact test passed all 20 attempts of local hunt batch `dda5c41c-7b4e-4b78-af86-23bc4999924a` on
-Linux x86_64 at commit `e0b9992760ed27896d90b9c6826ce2959ecead3e`, where the user manager answers in milliseconds. This
-is the class of the 2026-09-29 entries above, a test exercising the host's real user manager on a runner where it can
-stay silent for the full probe bound; why Delete then fails on the sweep-only path is not established. Disposition:
-open, recorded as a TODO.md Near term entry; v0.20.0 was abandoned and re-cut as v0.20.1.
+retires the committed refusal without a restart". The retained trace shows the reopened supervisor's systemd
+user-manager probe starting about 130 ms into the test and reporting at 15.13 s that it did not finish within its 15 s
+bound, after which teardown found no usable user manager and took the sweep-only path, and Delete returned an error. The
+same code (the gate's source differs from v0.20.0-rc.4 only in the version, changelog and TODO.md) passed the rc.4 gate
+on the same runner type, and the exact test passed all 20 attempts of local hunt batch
+`dda5c41c-7b4e-4b78-af86-23bc4999924a` on Linux x86_64 at commit `e0b9992760ed27896d90b9c6826ce2959ecead3e`, where the
+user manager answers in milliseconds. This is the same exposure as the 2026-09-29 entries above, a test exercising the
+host's real user manager on a runner where it can stay silent for the full probe bound. Disposition: fixed in #1324,
+which gave the test a disabled scope manager. The test runs two supervisors on one store. The first, on the default real
+scope manager, found the user manager usable at 117 ms and recorded on the row that its launch was scoped before the
+simulated crash; the reopened supervisor got a fresh manager whose probe, started as it reopened, timed out before
+Delete ran. A recorded scope that cannot be checked is an unconfirmed cleanup, which Delete refuses by design (SPEC.md
+"Lifecycle operations"); the trace's last line is that warning for the row's `-0.scope` unit. So the sweep-only path
+itself did not fail: Delete refused on the scope evidence, as it does in production until the probe's one-minute backoff
+passes and the manager answers again. Locally, a `systemd-run` stand-in that reaches the real manager once and then
+models a scope that never appears failed the unchanged test with the same trace, and the fixed test passed under it in
+0.34 s without invoking the stand-in at all.
 
-Class: budget
+Class: substrate
 
-Cause: hypothesis
+Cause: established — the test depended on the host's systemd user manager answering twice, and the second probe ran out
+its 15-second bound.

@@ -202,18 +202,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `crates/farhelm-supervisor/tests/fixtures/screens/claude/` (see `docs/agent-screen-fixtures.md`); a fixture of this
   state belongs there.
 
-- **Ambiguous planned checkout test depends on the runner's real systemd.** In
-  `crates/farhelm-supervisor/src/service/core.rs`, `an_ambiguous_planned_checkout_never_adopts_a_foreign_directory`
-  failed the v0.20.0 release gate (GitHub Actions run `36811756125`, recorder run
-  `80893b36-8051-45bd-97f4-9ed8e8b451fb`) at its final assertion, "Delete retires the committed refusal without a
-  restart". Its trace shows the supervisor's systemd user-manager probe getting no answer for its full 15 s, after which
-  the teardown ran on the sweep-only path and Delete did not succeed. The same code passed the v0.20.0-rc.4 gate and 20
-  of 20 local repetitions (hunt batch `dda5c41c-7b4e-4b78-af86-23bc4999924a`), where the local manager answers at once.
-  It is the class FLAKES.md recorded on 2026-09-29 and #1228 fixed for two handler tests by giving their fixture a
-  disabled scope manager; this test still builds its supervisor with the real one. First step: decide whether the test
-  needs scopes at all, and if not give it the disabled scope manager the way #1228 did; separately, find out why Delete
-  fails on the sweep-only path, since that is reachable in production when the manager is slow.
-
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
