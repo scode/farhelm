@@ -128,6 +128,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Tell users that bash and zsh are the supported login shells on every host: agents and terminal tabs start through the
   login shell, and other shells, csh and tcsh included, may fail to launch them. SPEC.md's supported user environments
   section states the rule.
+- Tell users that agents and terminal tabs run without the private tmux server's `TMUX` and `TMUX_PANE`, as in an SSH
+  login, so shells an agent starts for its own work see no tmux either. A startup file that starts tmux when `TMUX` is
+  unset without first checking for an interactive shell (`[[ $- == *i* ]]`) or a terminal can then cut short the
+  environment an agent captures from it (Claude Code sources `.zshrc` without a terminal), leaving the agent without
+  setup made later in that file, such as a PATH entry; this is the same as running the agent in a terminal outside tmux.
+  SPEC.md's "Ownership during cleanup and provisioning" section states the rule.
 
 ## Tricky bugs
 
