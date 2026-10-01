@@ -476,11 +476,19 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   }
 
   # Prints the installation directory the bundle record of the app bundle
-  # at $1 names (its second field, byte for byte), followed by a sentinel
-  # `/` so the caller can keep a path that ends in newlines through command
-  # substitution; see bundle_record_moved_here. Fails unless the record is a
-  # regular, non-symlink file framed exactly as write_bundle_record writes
-  # it: `farhelm-app`, the directory, and four 64-hex-digit SHA-256 digests,
+  # at $1 names; see record_file_dir, which does the work on the record file
+  # itself.
+  bundle_record_dir() {
+    record_file_dir "$1/Contents/.farhelm-installation"
+  }
+
+  # Prints the installation directory a bundle record file at $1 names (its
+  # second field, byte for byte), followed by a sentinel `/` so the caller
+  # can keep a path that ends in newlines through command substitution; see
+  # record_file_moved_here. Works on the bundle's own record and on the copy
+  # an interrupted uninstall leaves next to the bundle, which has the same
+  # contents. Fails unless the record is a regular, non-symlink file framed
+  # exactly as write_bundle_record writes it: `farhelm-app`, the directory, and four 64-hex-digit SHA-256 digests,
   # each NUL-terminated, and nothing else.
   #
   # The framing is checked on the bytes, not inferred from lines: exactly
@@ -490,9 +498,9 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # newlines: every line between the first and the last four is part of the
   # directory, and joining them with newlines restores any the path itself
   # held. A record this does not accept is not ownership evidence, and the
-  # bundle it sits in is refused.
-  bundle_record_dir() {
-    brd_record="$1/Contents/.farhelm-installation"
+  # bundle (or leftover receipt) it belongs to is refused.
+  record_file_dir() {
+    brd_record=$1
     if [ -L "$brd_record" ] || [ ! -f "$brd_record" ]; then
       return 1
     fi
@@ -553,7 +561,14 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # renamed home directory) left every later install refusing its own
   # bundle, and the app stuck on the old version.
   bundle_record_moved_here() {
-    brmh_dir=$(bundle_record_dir "$1") || return 1
+    record_file_moved_here "$1/Contents/.farhelm-installation" "$2"
+  }
+
+  # bundle_record_moved_here's test on a record file at $1 directly, so the
+  # copy of the record an interrupted uninstall leaves next to the bundle
+  # gets the same moved-installation rule as the bundle's own record.
+  record_file_moved_here() {
+    brmh_dir=$(record_file_dir "$1") || return 1
     brmh_dir=${brmh_dir%/}
     # write_bundle_record only ever records an absolute canonical path.
     case $brmh_dir in
@@ -1679,8 +1694,13 @@ EOF
         # would leave both installations unable to uninstall, so this run
         # refuses the bundle step instead and says how to clear it.
         pending_receipt="$app_parent/.Farhelm.app.uninstall-receipt"
+        # A receipt naming a directory that has since moved here (or no
+        # longer holds an installation) is this installation's own, by the
+        # same rule the bundle's record gets below; refusing it would point
+        # the user at "that installation", which is this one.
         if { [ -e "$pending_receipt" ] || [ -L "$pending_receipt" ]; } &&
-          ! record_file_is_ours "$pending_receipt" "$pir_canonical"; then
+          ! record_file_is_ours "$pending_receipt" "$pir_canonical" &&
+          ! record_file_moved_here "$pending_receipt" "$pir_canonical"; then
           printf '%s was left by an interrupted farhelm uninstall and is not this installation'"'"'s record, and building %s now would leave that uninstall unable to finish; run that installation'"'"'s farhelm uninstall again to finish it (or delete %s if that installation is gone), then re-run this installer\n' "$pending_receipt" "$app_path" "$pending_receipt" >&2
           printf 'The binaries in %s are installed and usable.\n' "$INSTALL_DIR" >&2
           exit 1
@@ -1794,7 +1814,8 @@ PLIST_EOF
         # bundle lock above) now describes a bundle that no longer exists,
         # and would disagree with the new one (a different version's
         # Info.plist digest, say), so it goes.
-        if record_file_is_ours "$pending_receipt" "$pir_canonical"; then
+        if record_file_is_ours "$pending_receipt" "$pir_canonical" \
+          || record_file_moved_here "$pending_receipt" "$pir_canonical"; then
           rm -f "$pending_receipt" || printf 'note: could not delete %s, left by an interrupted uninstall; delete it by hand if a later uninstall refuses\n' "$pending_receipt" >&2
         fi
 

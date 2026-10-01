@@ -1319,6 +1319,49 @@ run_install "$MAC_TOOLS" "$HOME_RECEIPT" "$INSTALL_RECEIPT" "$BASE/good-v2" 1.2.
 check "leftover receipt: the reinstall exits 0" [ "$RC" -eq 0 ]
 check "leftover receipt: this installation's stale copy is removed" [ ! -e "$RECEIPT_COPY" ]
 
+# A leftover receipt whose installation has since moved here is this
+# installation's own (TODO: "Accept a leftover uninstall receipt after the
+# install directory moves"). Why: the receipt names the directory it was
+# written for, and before this an install from the new directory refused it
+# as foreign and told the user to finish "that installation's" uninstall,
+# which is this one. Spec: the receipt gets the bundle record's moved-here
+# rule; here the named directory no longer exists, the install builds the
+# bundle, and the receipt is removed.
+HOME_MOVEDRECEIPT="$WORKDIR/home-movedreceipt"
+mkdir -p "$HOME_MOVEDRECEIPT"
+run_install "$MAC_TOOLS" "$HOME_MOVEDRECEIPT" "$HOME_MOVEDRECEIPT/old/bin" "$BASE/good" 1.2.3
+check "moved receipt setup: first install exits 0" [ "$RC" -eq 0 ]
+MOVEDRECEIPT_APP="$HOME_MOVEDRECEIPT/Applications/Farhelm.app"
+MOVEDRECEIPT_COPY="$HOME_MOVEDRECEIPT/Applications/.Farhelm.app.uninstall-receipt"
+cp "$MOVEDRECEIPT_APP/Contents/.farhelm-installation" "$MOVEDRECEIPT_COPY"
+rm -rf "$MOVEDRECEIPT_APP" "$HOME_MOVEDRECEIPT/old"
+check "moved receipt premise: the receipt names the old directory" \
+  contains "$(tr '\000' '\n' <"$MOVEDRECEIPT_COPY")" "$HOME_MOVEDRECEIPT/old/bin"
+check "moved receipt premise: the old directory is gone" [ ! -e "$HOME_MOVEDRECEIPT/old" ]
+run_install "$MAC_TOOLS" "$HOME_MOVEDRECEIPT" "$HOME_MOVEDRECEIPT/new/bin" "$BASE/good-v2" 1.2.4
+check "moved receipt: the install from the new directory exits 0" [ "$RC" -eq 0 ]
+check "moved receipt: the bundle is built for the new directory" \
+  assert_bundle_record "$MOVEDRECEIPT_APP" "$HOME_MOVEDRECEIPT/new/bin"
+check "moved receipt: the leftover receipt is removed" [ ! -e "$MOVEDRECEIPT_COPY" ]
+
+# The other move shape: the recorded path is still there, now a symlink to
+# where the installation lives.
+HOME_LINKEDRECEIPT="$WORKDIR/home-linkedreceipt"
+mkdir -p "$HOME_LINKEDRECEIPT"
+run_install "$MAC_TOOLS" "$HOME_LINKEDRECEIPT" "$HOME_LINKEDRECEIPT/.local/bin" "$BASE/good" 1.2.3
+check "linked receipt setup: first install exits 0" [ "$RC" -eq 0 ]
+LINKEDRECEIPT_APP="$HOME_LINKEDRECEIPT/Applications/Farhelm.app"
+LINKEDRECEIPT_COPY="$HOME_LINKEDRECEIPT/Applications/.Farhelm.app.uninstall-receipt"
+cp "$LINKEDRECEIPT_APP/Contents/.farhelm-installation" "$LINKEDRECEIPT_COPY"
+rm -rf "$LINKEDRECEIPT_APP"
+mv "$HOME_LINKEDRECEIPT/.local/bin" "$HOME_LINKEDRECEIPT/.local/bin-real"
+ln -s bin-real "$HOME_LINKEDRECEIPT/.local/bin"
+check "linked receipt premise: the recorded path is now a symlink" [ -L "$HOME_LINKEDRECEIPT/.local/bin" ]
+run_install "$MAC_TOOLS" "$HOME_LINKEDRECEIPT" "$HOME_LINKEDRECEIPT/.local/bin" "$BASE/good-v2" 1.2.4
+check "linked receipt: the reinstall exits 0" [ "$RC" -eq 0 ]
+check "linked receipt: the leftover receipt is removed" [ ! -e "$LINKEDRECEIPT_COPY" ]
+check "linked receipt: the bundle is rebuilt" [ -d "$LINKEDRECEIPT_APP" ]
+
 # Another installation's leftover receipt is that installation's only way to
 # finish its uninstall. Installation A is installed, its uninstall is
 # interrupted after the bundle is gone (its receipt copy survives), and then
@@ -1332,6 +1375,10 @@ FOREIGN_APP="$HOME_FOREIGNRECEIPT/Applications/Farhelm.app"
 FOREIGN_COPY="$HOME_FOREIGNRECEIPT/Applications/.Farhelm.app.uninstall-receipt"
 cp "$FOREIGN_APP/Contents/.farhelm-installation" "$FOREIGN_COPY"
 rm -rf "$FOREIGN_APP"
+# The premise the refusal now rests on: A's directory still holds its
+# installation, so the moved-installation rule does not adopt A's receipt.
+check "foreign receipt premise: installation A is still installed" \
+  [ -f "$HOME_FOREIGNRECEIPT/a/bin/.farhelm-installation" ]
 FOREIGN_BYTES=$(od -An -tx1 "$FOREIGN_COPY")
 run_install "$MAC_TOOLS" "$HOME_FOREIGNRECEIPT" "$HOME_FOREIGNRECEIPT/b/bin" "$BASE/good-v2" 1.2.4
 check "foreign receipt: installation B refuses the bundle step" [ "$RC" -ne 0 ]
