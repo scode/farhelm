@@ -114,8 +114,6 @@ One line per open item. This file must always match the feedback files in this d
   refused as "folder replaced" and never retried.
 - `takeover-latch-misses-attaching-tabs.md` — a tab still attaching when another window takes over evicts the winner, so
   the two windows displace each other.
-- `claude-spinner-window-too-short.md` — the Claude spinner is searched only 6 lines above the input box, so a task list
-  in between may read as Idle mid-turn.
 - `claude-spinner-rejects-multiword.md` — the Claude spinner check rejects multi-word text like "Compacting
   conversation…", so compaction may read Idle.
 - `new-tab-mount-displaces-owner-during-recovery.md` — a recovering view mounts a newly appeared tab with a displacing

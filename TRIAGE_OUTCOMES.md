@@ -4464,7 +4464,8 @@
 - Decision: only clear, definite gaps in Claude Code or Codex activity detection are fixed. This one rests on an
   uncaptured layout, so it is discarded for now.
 - Completion criteria: remove this feedback file and its index entry, with no code or spec change.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `vkyuyuvypkoo`, bookmark `triage-1001/09-discard-spinner-window`, PR
+  https://github.com/scode/farhelm/pull/1365.
 
 ## claude-spinner-rejects-multiword.md
 
