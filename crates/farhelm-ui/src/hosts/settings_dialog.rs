@@ -242,9 +242,7 @@ pub(super) fn reset_yolo_checkbox() {
 /// The explanation under the YOLO checkbox, for its current state.
 ///
 /// Both sentences start by saying what YOLO means, because this is where a
-/// user decides about it and cannot be assumed to know the term. The label
-/// above the checkbox keeps its old wording until the setting is renamed
-/// everywhere (a separate TODO entry).
+/// user decides about it and cannot be assumed to know the term.
 fn yolo_help(yolo_safe: bool) -> &'static str {
     if yolo_safe {
         "YOLO means an agent runs with no approval prompts: any command, any file, without asking you. \
@@ -438,7 +436,7 @@ pub(super) fn HostSettingsDialog(
                             disabled: busy || editing.is_some(),
                             onchange: move |event| on_yolo_safe.call((id, event.checked())),
                         }
-                        span { "allow YOLO launches on this host" }
+                        span { "start YOLO sessions here without asking" }
                     }
                     p { class: "host-settings-help", "{yolo_help(host.yolo_safe)}" }
                     {outcome_for(Some(SettingsField::YoloSafe))}

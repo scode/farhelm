@@ -73,7 +73,7 @@ test("a YOLO launch on a sensitive host asks first, and starts only when confirm
     await expect(confirmation).toContainText("YOLO means the agent runs with no approval prompts");
     await expect(confirmation).toContainText("This launch uses YOLO permissions.");
     await expect(confirmation).toContainText("asks before every YOLO launch. Nothing has been started.");
-    await expect(confirmation).not.toContainText("--allow-yolo-on-sensitive-host");
+    await expect(confirmation).not.toContainText("--confirm-yolo");
     // Right under Launch, where the click happened, and on screen: it used to
     // render after every other section, below the launcher's visible edge.
     expect(

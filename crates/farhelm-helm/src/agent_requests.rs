@@ -3155,7 +3155,7 @@ mod tests {
             AgentOutcome::Err { kind, message } => {
                 assert_eq!(kind, farhelm_proto::ErrorKind::Conflict);
                 assert!(
-                    message.contains("--allow-yolo-on-sensitive-host"),
+                    message.contains("--confirm-yolo"),
                     "the refusal must name the override: {message}"
                 );
             }

@@ -161,7 +161,7 @@ mod skew;
 mod status;
 mod tabs;
 mod window_chrome;
-/// The loud confirmation a YOLO launch on a sensitive host asks for.
+/// The loud confirmation a YOLO launch asks for on a host that asks first.
 mod yolo_confirm;
 // Same reasoning as `webview_watchdog` below: declared for every non-wasm
 // build so its search-order tests run under the plain `cargo test` that is

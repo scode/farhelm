@@ -317,7 +317,7 @@ pub(crate) struct SpawnArgs {
     pub(crate) inherit_agent: bool,
     pub(crate) parent: Option<String>,
     pub(crate) idempotency_key: Option<String>,
-    /// See `farhelm spawn --allow-yolo-on-sensitive-host`.
+    /// See `farhelm spawn --confirm-yolo`.
     pub(crate) allow_yolo_on_sensitive_host: bool,
 }
 

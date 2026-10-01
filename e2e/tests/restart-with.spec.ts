@@ -190,7 +190,7 @@ test("a YOLO restart with refused for a sensitive host is confirmed inside the d
         status: 409,
         contentType: "text/plain",
         headers: { "x-farhelm-yolo-confirmation": "sensitive-host" },
-        body: "this machine is marked sensitive for YOLO launches; confirm with --allow-yolo-on-sensitive-host",
+        body: "this machine asks before YOLO launches; confirm with --confirm-yolo",
       });
       return;
     }
@@ -218,7 +218,7 @@ test("a YOLO restart with refused for a sensitive host is confirmed inside the d
   const confirmation = dialog.locator(".yolo-confirmation");
   await expect(confirmation, "the question must appear inside the modal dialog").toBeVisible();
   await expect(confirmation).toContainText("This launch uses YOLO permissions.");
-  await expect(confirmation).not.toContainText("--allow-yolo-on-sensitive-host");
+  await expect(confirmation).not.toContainText("--confirm-yolo");
   expect(bodies).toHaveLength(1);
 
   // Declining from the keyboard hands focus back to the dialog rather than
@@ -276,7 +276,7 @@ test("don't ask again from restart with keeps focus in the dialog and marks befo
         status: 409,
         contentType: "text/plain",
         headers: { "x-farhelm-yolo-confirmation": "sensitive-host" },
-        body: "this machine is marked sensitive for YOLO launches; confirm with --allow-yolo-on-sensitive-host",
+        body: "this machine asks before YOLO launches; confirm with --confirm-yolo",
       });
       return;
     }

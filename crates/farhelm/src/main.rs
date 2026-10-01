@@ -93,10 +93,10 @@ enum Cmd {
         #[arg(long)]
         idempotency_key: Option<String>,
         /// Start the child even if its profile is a YOLO launch and this
-        /// host is marked sensitive; without it the helm refuses. Only with
-        /// the user's explicit approval for this launch.
-        #[arg(long)]
-        allow_yolo_on_sensitive_host: bool,
+        /// host asks before YOLO launches; without it the helm refuses. Only
+        /// with the user's explicit approval for this launch.
+        #[arg(long = "confirm-yolo", alias = "allow-yolo-on-sensitive-host")]
+        confirm_yolo: bool,
     },
     /// Ask the helm about the fleet, or act on it, from inside a Farhelm
     /// session — `hosts`/`sessions` are read-only questions,
@@ -264,11 +264,11 @@ enum AgentCmd {
         /// Retry key: the same key creates the session only once.
         #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
         idempotency_key: Option<String>,
-        /// Start a YOLO session even though the target host is marked
-        /// sensitive; without it the helm refuses. Only with the user's
+        /// Start a YOLO session even though the target host asks before YOLO
+        /// launches; without it the helm refuses. Only with the user's
         /// explicit approval for this launch.
-        #[arg(long)]
-        allow_yolo_on_sensitive_host: bool,
+        #[arg(long = "confirm-yolo", alias = "allow-yolo-on-sensitive-host")]
+        confirm_yolo: bool,
     },
     /// Copy an explicitly named session onto any host; prints the new id.
     Clone {
@@ -287,11 +287,11 @@ enum AgentCmd {
         /// Retry key: the same key creates the session only once.
         #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
         idempotency_key: Option<String>,
-        /// Start a YOLO session even though the target host is marked
-        /// sensitive; without it the helm refuses. Only with the user's
+        /// Start a YOLO session even though the target host asks before YOLO
+        /// launches; without it the helm refuses. Only with the user's
         /// explicit approval for this launch.
-        #[arg(long)]
-        allow_yolo_on_sensitive_host: bool,
+        #[arg(long = "confirm-yolo", alias = "allow-yolo-on-sensitive-host")]
+        confirm_yolo: bool,
     },
     /// Print how to use these verbs, for an agent that was told to.
     Instructions,
@@ -344,7 +344,7 @@ impl AgentCmd {
                 invocation,
                 title,
                 idempotency_key,
-                allow_yolo_on_sensitive_host,
+                confirm_yolo,
             } => Some(farhelm_proto::AgentVerb::Create {
                 host: Some(host.clone()),
                 cwd: cwd.clone(),
@@ -357,7 +357,7 @@ impl AgentCmd {
                 invocation: invocation.clone(),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
-                allow_yolo_on_sensitive_host: *allow_yolo_on_sensitive_host,
+                allow_yolo_on_sensitive_host: *confirm_yolo,
             }),
             AgentCmd::Clone {
                 source_session,
@@ -365,14 +365,14 @@ impl AgentCmd {
                 cwd,
                 title,
                 idempotency_key,
-                allow_yolo_on_sensitive_host,
+                confirm_yolo,
             } => Some(farhelm_proto::AgentVerb::Clone {
                 source_session_id: Some(source_session.clone()),
                 host: Some(host.clone()),
                 cwd: cwd.clone(),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
-                allow_yolo_on_sensitive_host: *allow_yolo_on_sensitive_host,
+                allow_yolo_on_sensitive_host: *confirm_yolo,
             }),
             AgentCmd::Instructions | AgentCmd::Help => None,
         }
@@ -644,7 +644,7 @@ fn main() -> anyhow::Result<()> {
             inherit_agent,
             parent,
             idempotency_key,
-            allow_yolo_on_sensitive_host,
+            confirm_yolo,
         } => {
             let child = runtime()?.block_on(spawn_session(
                 &SessionEnv::from_env(),
@@ -656,7 +656,7 @@ fn main() -> anyhow::Result<()> {
                     inherit_agent,
                     parent,
                     idempotency_key,
-                    allow_yolo_on_sensitive_host,
+                    allow_yolo_on_sensitive_host: confirm_yolo,
                 },
             ))?;
             println!("{child}");
@@ -1457,6 +1457,96 @@ mod tests {
             panic!("expected set-post-clone");
         };
         assert_eq!(command, "-rm -rf /tmp/x");
+    }
+
+    /// `--confirm-yolo` is the YOLO override on every creating verb, and the
+    /// flag's earlier name, `--allow-yolo-on-sensitive-host`, still parses to
+    /// the same override without appearing in help.
+    ///
+    /// Why: the flag shipped under its old name in the stable v0.20.0
+    /// release and in the agent instructions, so scripts and agents may
+    /// still pass it; renaming
+    /// it must not turn those invocations into parse errors. Hiding the old
+    /// name keeps help, and the agent instructions rendered from it, on the
+    /// one wording the product uses now.
+    #[farhelm_testtrace::test]
+    fn the_yolo_override_parses_under_its_new_and_old_names() {
+        for flag in ["--confirm-yolo", "--allow-yolo-on-sensitive-host"] {
+            let cli =
+                Cli::try_parse_from(["farhelm", "spawn", "--cwd", "/w", "--agent", "a", flag])
+                    .unwrap();
+            assert!(
+                matches!(
+                    cli.command,
+                    Cmd::Spawn {
+                        confirm_yolo: true,
+                        ..
+                    }
+                ),
+                "spawn {flag}"
+            );
+            let cli = Cli::try_parse_from([
+                "farhelm",
+                "agent",
+                "create",
+                "--host",
+                "h",
+                "--cwd",
+                "/w",
+                "--profile",
+                "p",
+                flag,
+            ])
+            .unwrap();
+            assert!(
+                matches!(
+                    cli.command,
+                    Cmd::Agent {
+                        command: AgentCmd::Create {
+                            confirm_yolo: true,
+                            ..
+                        }
+                    }
+                ),
+                "agent create {flag}"
+            );
+            let cli = Cli::try_parse_from([
+                "farhelm",
+                "agent",
+                "clone",
+                "--source-session",
+                "s1",
+                "--host",
+                "h",
+                flag,
+            ])
+            .unwrap();
+            assert!(
+                matches!(
+                    cli.command,
+                    Cmd::Agent {
+                        command: AgentCmd::Clone {
+                            confirm_yolo: true,
+                            ..
+                        }
+                    }
+                ),
+                "agent clone {flag}"
+            );
+        }
+        let mut command = <Cli as clap::CommandFactory>::command();
+        for verb in [&["spawn"][..], &["agent", "create"], &["agent", "clone"]] {
+            let mut sub = &mut command;
+            for name in verb {
+                sub = sub.find_subcommand_mut(name).unwrap();
+            }
+            let help = sub.render_long_help().to_string();
+            assert!(help.contains("--confirm-yolo"), "{verb:?}: {help}");
+            assert!(
+                !help.contains("allow-yolo-on-sensitive-host"),
+                "{verb:?}: {help}"
+            );
+        }
     }
 
     /// The CLI must never manufacture a target, a restart mode, or consent

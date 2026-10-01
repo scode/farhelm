@@ -27,9 +27,9 @@ use crate::store::HostId;
 /// message is what the command line and agents show.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "{host_name} is marked sensitive for YOLO launches, and this launch skips approval prompts: \
-     nothing was started. Confirm the YOLO launch explicitly (the GUI asks; the farhelm command \
-     line takes --allow-yolo-on-sensitive-host), or mark the host safe for YOLO launches in its \
+    "{host_name} asks before YOLO launches, and this launch skips approval prompts: nothing was \
+     started. Confirm the YOLO launch explicitly (the GUI asks; the farhelm command line takes \
+     --confirm-yolo), or turn on \"start YOLO sessions here without asking\" in the host's \
      settings"
 )]
 pub(crate) struct YoloOnSensitiveHost {
