@@ -4342,7 +4342,7 @@
   desktop credential refresh not cancel the request it retries, for example by deferring the webview re-authentication
   until the retried response is in hand, so the triggering action reports its outcome. Add regression coverage where the
   desktop seam allows it. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## desktop-reauth-failure-dead-end.md
 
@@ -4357,7 +4357,7 @@
 - Completion criteria: give the failure state a way out (a Retry control that restarts the authentication, and/or an
   automatic retry with backoff for transient failures), keeping a terminal error only for causes that cannot be retried.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## seen-toggle-report-panics-after-unmount.md
 
@@ -4370,7 +4370,7 @@
 - Decision: under the sign-in principle, recovery must never crash the window. The fix is small.
 - Completion criteria: make the report tolerate a dropped signal (`try_write()` and drop the update), and document on
   the report type that a report can run after its caller unmounted. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## hosts-panel-leaks-page-lock.md
 
@@ -4384,7 +4384,7 @@
   complexity is to be spent on it.
 - Completion criteria: switch the runner to the self-releasing `claim_guard()` form and move the guard into the spawned
   task. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## profile-popup-leaks-page-lock.md
 
@@ -4396,7 +4396,7 @@
 - Completion criteria: switch both handlers to `claim_guard()` and move the guard into the spawned task, taking it after
   the save handler's local validation early returns (or letting those returns drop it). Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## codex-last-option-reads-idle.md
 
@@ -4415,7 +4415,7 @@
   not substitute for it). Accept a numbered option above the `›` row as evidence of a menu, or require every row from
   `›` down to be an option or a known footer. Add a fixture-derived test with the last option highlighted. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## codex-working-backstop-never-matches.md
 
@@ -4430,7 +4430,7 @@
 - Completion criteria: locate the composer by its `›` prompt row followed only by blank or indented rows, allow the
   blank rows the real fixtures show between the status line and the prompt, and test against the real `working-*.txt`
   fixtures with an empty title. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## claude-last-option-reads-idle.md
 
@@ -4446,7 +4446,7 @@
 - Completion criteria: require the input box's full shape (rule, `❯` row, closing rule), or check for the dialog footer
   before accepting a box candidate. Add the highlighted-last-option variant as a fixture-derived test, and correct the
   comment's assumption. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## claude-spinner-window-too-short.md
 
@@ -4456,7 +4456,7 @@
 - Decision: only clear, definite gaps in Claude Code or Codex activity detection are fixed. This one rests on an
   uncaptured layout, so it is discarded for now.
 - Completion criteria: remove this feedback file and its index entry, with no code or spec change.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## claude-spinner-rejects-multiword.md
 
@@ -4465,7 +4465,7 @@
   a multi-word spinner line such as `✻ Compacting conversation… (…)` is unverified; no captured screen contains it.
 - Decision: not a clear, definite gap, so it is discarded for now, as for `claude-spinner-window-too-short.md`.
 - Completion criteria: remove this feedback file and its index entry, with no code or spec change.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## pi-reporter-asset-not-renamed.md
 
@@ -4482,7 +4482,7 @@
   update any spec or doc text naming the Pi file, and add a test that ties each published asset's bytes to its file name
   (a pinned hash or a content-derived name), so a content change without a rename fails. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## checkout-preview-blocks-read-loop.md
 
@@ -4499,7 +4499,7 @@
 - Completion criteria: write the principle into SPEC.md next to "Healthy local filesystems" and "Waiting between
   operations on one host", keeping the existing requirement that one session's long operations never block another
   session's terminal I/O. Remove this feedback file and its index entry, with no code change.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## repo-search-blocking-scan.md
 
@@ -4509,7 +4509,7 @@
 - Decision: covered by the slow-host principle recorded for `checkout-preview-blocks-read-loop.md`.
 - Completion criteria: if that item's spec change has landed, confirm it covers this case. Otherwise land the principle
   here. Remove this feedback file and its index entry, with no code change.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## delete-holds-attachments-lock-through-archive.md
 
@@ -4527,7 +4527,7 @@
 - Completion criteria: clarify "Waiting between operations on one host" so that terminal I/O may wait on brief, bounded
   local work (such as a delete's renames, fsyncs and database commit), but never on long operations or kill grace
   periods. Remove this feedback file and its index entry, with no code change.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## restart-cwd-lossy-non-utf8.md
 
@@ -4542,7 +4542,7 @@
 - Completion criteria: state the principle in SPEC.md. Use strict conversion for the canonical working directory at
   create and in the restart/retry identity check, and refuse with a clear message. Add a test with a symlink to a
   non-UTF-8 directory. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## non-utf8-farhelm-path-breaks-launch.md
 
@@ -4559,7 +4559,7 @@
   naming the path, and correct the misleading docs and warning. Sweep the remaining lossy path conversions under the
   gate above. Report the sites changed, the sites left alone with the reason, and any non-trivial sites for the user's
   decision. Add a test covering the startup refusal. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
 
 ## sftp-overall-deadline-fails-slow-links.md
 
@@ -4572,4 +4572,4 @@
   fixed overall timeout and time out only on stalls, matching the download path.
 - Completion criteria: add that requirement to SPEC.md. No code change is needed unless execution finds a transfer on
   either path that still has a fixed overall deadline. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-signin-status-paths.md`.
