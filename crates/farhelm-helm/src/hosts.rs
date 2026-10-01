@@ -721,6 +721,20 @@ pub(crate) async fn set_alias(
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<AliasSpec>,
 ) -> impl IntoResponse {
+    // Commit, then reconcile: helm-owned for the reason `add_host` is. The
+    // hosts list reads names from the actors' snapshots, which only the
+    // reconcile updates (and announces), so a client that disconnected
+    // between the two would otherwise leave the alias saved while every
+    // client, its own after a reload included, kept showing the old name.
+    crate::run_owned(set_alias_owned(state, host, spec)).await
+}
+
+/// The body of [`set_alias`], run on a helm-owned task.
+async fn set_alias_owned(
+    state: Arc<AppState>,
+    host: HostId,
+    spec: AliasSpec,
+) -> axum::response::Response {
     let provisioning = state.manager.host_provision_lock(host).await;
     let serialized = state.manager.host_write_lock(host).await;
     if let Err(error) = state.store.update_alias(host, spec.alias.as_deref()).await {

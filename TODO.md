@@ -93,17 +93,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   avoid. Whatever is chosen, record it in SPEC_impl.md's scope paragraph ("The manager is probed once and the answer
   cached, with two exceptions ...").
 
-- **Run the host alias edit on a helm-owned task.** `set_alias` in `crates/farhelm-helm/src/hosts.rs` commits the new
-  alias (`store.update_alias`) and then calls `manager.sync_registry()`, both on the request's own task. The reconcile
-  is what announces the edit on the event feed (see the "Only the alias is compared" comment in `sync_registry` in
-  `manager.rs`), so a client that disconnects between the two leaves the alias saved while every other open client keeps
-  showing the old one until an unrelated reconcile runs (another host add, edit or removal, or a helm restart). That is
-  the commit-then-follow-up shape SPEC_impl.md "Who owns an accepted action" rules out. Add, retarget, remove, adopt and
-  the YOLO-safe toggle already run their bodies through `crate::run_owned`; give `set_alias` the same shape as
-  `set_destination` (a thin handler calling `crate::run_owned(set_alias_owned(state, host, spec))`), keeping its
-  provisioning lock and write lock inside the owned body. The review-feedback triage that fixed the other host edits
-  (`host-edits-not-cancellation-safe`) did not list the alias edit.
-
 - **Confirm restart only while the agent is working.** Restart (from the session header or the sidebar) asks "still
   running — restarting stops the agent and its whole process tree first" whenever the agent is live at all, idle
   included, and also when its status is unknown. Asked that often, people click through without reading it. Only ask
