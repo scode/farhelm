@@ -1458,7 +1458,23 @@ source differs from rc.1 only in the version, the changelog, and docs and test-s
 even a passing run spends a large share of the budget, but how much of it is the uninstall child itself is unavailable.
 The uninstall code and this script last changed in #1330 (2026-09-30), which added the install, app, setup and runtime
 locks. No earlier entry names this script. No reproduction was attempted; the hosted failure artifact expires
-2026-12-30. Disposition: open; v0.21.0 was re-cut as v0.21.1.
+2026-12-30. v0.21.0 was re-cut as v0.21.1, whose gate (run `36877043811`, job `110419166903`, clean tested commit
+`b13ddc71511b53f743e2e7f98e17b036ebd06e64`) failed the same way in `test_fresh_preview_and_remove`,
+`test_install_lock_interplay` and `test_missing_flat_desktop`, all `uninstall --yes` children at 30 s. A diagnostic copy
+of the script that timed each child and sampled it on timeout then separated the two hypotheses. Each uninstall verifies
+every file it removes against its recorded SHA-256, and since #1330 it does so twice, once for the plan and again under
+its locks; the step tests the debug build, whose `sha2` is unoptimized and whose CLI is hundreds of megabytes (354 MB on
+Linux), and the CLI is hashed twice per pass on macOS (the flat copy and the app's copy). On an otherwise idle Linux
+x86_64 machine a single pass (`--dry-run`) took 15.3 s and confirmed uninstalls 28 to 30 s, and one prompted uninstall
+timed out there with only its plan printed (recorder run `cdfd5583-b185-4d84-b353-8534a2b2220d`). On a hosted macOS
+runner outside the release job (CI run `36883649071`) passes took about 6.2 s and confirmed uninstalls about 12 s, and
+every child exited within 0.7 s of its last output, so there is no stall on exit; the release job ran the whole suite
+1.6 to 2 times slower (276 to 340 s against 173 s). Scaling by that alone puts a confirmed uninstall at 19 to 24 s,
+short of the 30 s the failures show, so the hashing there was slowed more than the suite as a whole; by how much is
+unmeasured. A kill landing just after the final report explains the complete output in the first failure. Disposition:
+fixed by the PR that adds this paragraph, which compiles `sha2` at `opt-level = 3` in the dev profile; with that, every
+uninstall child in the same Linux run finished in under 1 s and the suite passed (recorder run
+`891a907b-c3a7-458c-ba4c-b69bd7e3ee89`). The TODO.md entry is removed.
 
 ```
 FAIL: test_confirmation (__main__.InstalledUninstall.test_confirmation)
@@ -1467,8 +1483,7 @@ ERROR: test_fresh_preview_and_remove (__main__.InstalledUninstall.test_fresh_pre
 subprocess.TimeoutExpired: Command '['<fixture-home>/.local/bin/farhelm', 'uninstall', '--yes']' timed out after 30 seconds
 ```
 
-Class: unknown
+Class: budget
 
-Cause: unknown — either the macOS runner is slow enough that an uninstall which normally finishes inside the budget does
-not, or `farhelm uninstall` intermittently stalls on exit after removing its own executable; nothing seen so far
-separates the two.
+Cause: established — the debug build's unoptimized SHA-256, run twice over a debug CLI since #1330, put a confirmed
+uninstall at the harness's 30-second per-child limit on the release job's macOS runner.
