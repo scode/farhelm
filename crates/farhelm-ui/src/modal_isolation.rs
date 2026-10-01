@@ -17,11 +17,12 @@
 //!   inert subtree cannot be focused (`element.focus()` is a no-op), is
 //!   skipped by Tab, ignores the pointer, and leaves the accessibility tree,
 //!   so the question "which code might still call `focus()` behind the
-//!   modal" stops mattering. The dialog renders deep inside the session view,
-//!   which is why this walks the ancestor chain rather than marking one app
-//!   root. Siblings added to a path node while the dialog is mounted (a band
-//!   the view renders later, a container a reattachment re-creates) are
-//!   marked too.
+//!   modal" stops mattering. A dialog can render deep inside the page (the
+//!   restart-with dialog inside the session view, the host settings dialog
+//!   inside the sidebar), which is why this walks the ancestor chain rather
+//!   than marking one app root. Siblings added to a path node while the
+//!   dialog is mounted (a band the view renders later, a container a
+//!   reattachment re-creates) are marked too.
 //! - **A capture-phase `keydown` safety net.** If focus is nevertheless
 //!   outside the dialog when a key arrives (on `body` after a scrim click, or
 //!   in an engine without `inert`), the key is swallowed and focus goes back
@@ -45,8 +46,9 @@
 //! Engines that do not implement `inert` ignore the attribute. They keep the
 //! safety net and whatever per-dialog layers the caller has.
 //!
-//! Only the restart-with dialog uses this today. The rename dialog and the
-//! session launcher have the same shape and could adopt it.
+//! The restart-with dialog and the host settings dialog use this today. The
+//! rename dialog and the session launcher have the same shape and could
+//! adopt it.
 
 /// JavaScript that isolates the dialog matched by `dialog_selector`.
 ///

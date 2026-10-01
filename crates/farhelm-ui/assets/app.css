@@ -2148,43 +2148,104 @@ samp {
   flex-wrap: wrap;
 }
 
-/* The host settings panel (the menu's `settings` item): a column of
-   label/value/action rows below the row's controls, the same full-width
-   block the remove prompt uses so nothing clips at the sidebar's edge. The
-   value takes the slack and ellipsizes, because a destination is user data
-   of unbounded length; the action button never shrinks. */
-.host-settings-panel {
+/* The host settings dialog (the host menu's `settings` item). It used to
+   be a panel expanding inside the host's sidebar row, where the destination
+   was cut off and the buttons crowded the values; a dialog has the width to
+   show every value in full. Backdrop and card follow the rename and
+   restart-with dialogs so the app keeps one modal look.
+
+   Each setting is a grid row: a fixed label column, the value (which WRAPS,
+   never ellipsizes: a destination is user data of unbounded length, and the
+   point of the move was to show it whole), and its edit button. The field
+   editor and a write's outcome line span the value and button columns, so
+   they line up under the value they replace or explain. */
+.host-settings-backdrop {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  overflow: auto;
+  background: var(--scrim-dialog);
+}
+.host-settings-dialog {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 14px;
+  width: min(480px, 100%);
+  box-sizing: border-box;
+  max-height: calc(100vh - 40px);
+  padding: 20px 24px;
+  overflow: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border-dialog);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-dialog);
+}
+.host-settings-title {
+  color: var(--fg-0);
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 .host-settings-row {
-  align-items: center;
-  display: flex;
-  gap: 6px;
-  min-width: 0;
+  align-items: baseline;
+  column-gap: 12px;
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr) auto;
+  row-gap: 6px;
 }
 .host-settings-label {
   color: var(--fg-1);
-  flex: none;
 }
 .host-settings-value {
-  flex: 1 1 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--fg-0);
+  overflow-wrap: anywhere;
 }
-.host-settings-row .btn {
-  flex: none;
+/* The editor takes the place of the value AND the button, input on its own
+   line with save/cancel under it, as wide as the value it replaces. */
+.host-settings-row .host-destination-form {
+  flex-wrap: wrap;
+  grid-column: 2 / -1;
+  margin: 0;
 }
+.host-settings-row .host-destination-input {
+  flex-basis: 100%;
+}
+/* Two classes deep so it beats `.host-error`'s and `.host-warning`'s row
+   padding, which come later in the sheet. */
+.host-settings-dialog .host-settings-outcome {
+  grid-column: 2 / -1;
+  margin: 0;
+  padding: 0;
+}
+.host-settings-yolo {
+  border-top: 1px solid var(--border-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 14px;
+}
+.host-yolo-safe {
+  align-items: center;
+  color: var(--fg-0);
+  display: flex;
+  gap: 8px;
+}
+/* Indented to sit under the label text, past the checkbox. */
 .host-settings-help {
   color: var(--fg-1);
-  margin: 0;
+  font-size: 12px;
+  margin: 0 0 0 24px;
+}
+.host-settings-yolo .host-settings-outcome {
+  margin-left: 24px;
 }
 .host-settings-actions {
   display: flex;
-  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 /* ===== Rename editor ============================================== */
@@ -3499,9 +3560,9 @@ samp {
   min-width: 0;
 }
 
-/* Only the destination FORM's own two buttons keep this small pill sizing
-   now — `adopt`/`retry`/`edit destination`/`remove`/`profiles` all moved
-   into the "⋯" menu below and take `.host-row-menu-item`'s full-width row
+/* Only the settings dialog's field editor keeps this small pill sizing for
+   its two buttons; the host verbs (`adopt`, `retry`, `settings`, `remove`)
+   live in the "⋯" menu and take `.host-row-menu-item`'s full-width row
    shape instead (shared with the session row's menu items — see that
    rule's own comment). */
 .host-save-destination,

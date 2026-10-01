@@ -2,7 +2,7 @@
 //! an explicit override.
 //!
 //! Every host is sensitive until the user marks it safe for YOLO launches
-//! (`HostRow::yolo_safe`, the host settings panel). Starting an agent that
+//! (`HostRow::yolo_safe`, the host settings dialog). Starting an agent that
 //! runs without approval prompts on the wrong machine by accident is the
 //! failure this exists to stop, so the check lives here, on every create
 //! path the helm has (a new session, a fresh checkout, replace, and an
@@ -59,7 +59,7 @@ pub(crate) fn invocation_is_yolo(invocation: &str) -> bool {
 
 /// Refuse a YOLO launch on `host` unless the host is marked safe or the
 /// request carries the override. Reads the host's setting from the store at
-/// the moment of the decision, so a change in the settings panel applies to
+/// the moment of the decision, so a change in the settings dialog applies to
 /// the very next launch.
 pub(crate) async fn check(
     state: &AppState,
