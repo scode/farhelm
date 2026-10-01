@@ -4593,7 +4593,10 @@
   fixed overall timeout and time out only on stalls, matching the download path.
 - Completion criteria: add that requirement to SPEC.md. No code change is needed unless execution finds a transfer on
   either path that still has a fixed overall deadline. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `luxkrnwlmlwp`, bookmark `triage-1001/17-transfer-stall-spec`, PR
+  https://github.com/scode/farhelm/pull/1373. Both paths checked: no fixed overall deadline remains, so no code change.
+  The window before the host's temporary file appears has no deadline of its own; the maintainer accepted that on
+  2026-10-01 (ordinary ssh behavior bounds it), and SPEC.md's stall section records the acceptance.
 
 ## plain-retry-erases-pending-fresh-window.md
 

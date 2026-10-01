@@ -1560,6 +1560,18 @@ general resource-isolation feature. Refuse an oversized download with a simple f
 complexity rather than adding elaborate recovery or UX. This requirement concerns the helm's release-payload downloads,
 not `install.sh` or user attachment uploads. The precise threshold is an implementation choice with ample headroom.
 
+### Provisioning transfers time out only on stalls
+
+Confirmed 2026-10-01: moving Farhelm's payloads while adding, installing on or updating a host, whether the helm is
+downloading a release or sending its files to the host, has no fixed overall time limit. A transfer times out only when
+it stops making progress for a while. A release is tens of megabytes, and a fixed limit fails a slow but working
+connection at the same point on every retry, with nothing pointing at the link speed as the cause; a stall limit still
+catches a transfer that has stopped receiving bytes. This is a deliberate exception to [Slow hosts](#slow-hosts): a
+payload transfer is long on any link, so a fixed limit there is a failure, not a missed accommodation. The stall limit
+for a transfer to a host starts once the file being sent first exists on that host. A host that stops answering before
+then is bounded only by ordinary ssh and TCP behavior, with no time limit of Farhelm's own; that is accepted (confirmed
+2026-10-01).
+
 ### Partial deletion
 
 An explicitly requested Delete may partially remove a session's state before a later step fails. This includes removing
