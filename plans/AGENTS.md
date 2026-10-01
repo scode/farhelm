@@ -121,7 +121,8 @@ records:
 
 - the checkout the executor runs in. Unpushed work exists only there, so an executor started in a different checkout
   while the log names another one stops and asks the user instead of continuing;
-- the flow in progress (one plan, a drain, or a drain that keeps monitoring) and, while sleeping, the next wake time;
+- the flow in progress (one plan, a drain, or a drain that keeps monitoring) and, while waiting, the watcher's task
+  handle and baseline commit (see Draining);
 - the plan stack as a chain of PRs, bottom first, each with its bookmark, PR number, and the plan it belongs to. One
   plan can own PRs in several places in the chain, because a plan that blocks and later resumes continues at the tip;
 - every plan the executor has started whose `INDEX.md` line on main is not yet `[executed]`, with its state: active,
@@ -185,17 +186,48 @@ stack while the plan ran. Reconcile as in step 1 before continuing.
 Execute the next plan, then the next, until a round finds nothing eligible. Finish by reporting what was built, with PR
 links, and which plans are blocked on what.
 
-"Drain the plans and keep monitoring" adds a loop around that. When a drain finishes, record the next wake time, sleep
-one hour, then drain again, and keep going until the user says stop. Each round fetches, but rebases only when it is
-about to run a plan: a round with nothing eligible does not rebase or push anything, so an idle monitor does not
-force-push every open plan PR every hour. Sleep in a way that wakes the session without polling: in Claude Code, a
-background `sleep 3600` run with a background timeout longer than the sleep, whose completion re-invokes the session.
-The point is that a user can leave one agent monitoring and add plans from other sessions whenever they like, without
-coordinating with it.
+"Drain the plans and keep monitoring" adds a loop around that: when a drain finishes, wait until there may be new work,
+drain again, and keep going until the user says stop. The point is that a user can leave one agent monitoring and add
+plans from other sessions whenever they like, without coordinating with it.
 
-"Check for plans", or similar, said to a monitoring agent (typically by interrupting it while it sleeps) means: do not
-wait for the next wake-up. Stop the pending sleep, drain now, and then resume the loop with a fresh one-hour sleep, so
-only one wake-up is ever pending.
+The waiting is done by `scripts/plans-watch.sh`, not by the model. A model wake-up re-reads the agent's whole
+conversation, uncached after any long wait, so waking hourly just to find nothing would cost a full model round each
+time. The watcher polls GitHub cheaply and exits only when `plans/` on main changes, which is the only way an idle
+executor's next round can find work (its header explains why). An idle executor still wakes when the watcher reaches its
+maximum wait, about every 110 minutes by default, but that wake-up only restarts the watcher. Run it like this:
+
+- Start `scripts/plans-watch.sh --repo <OWNER/NAME> --baseline-from <commit>` from the checkout, where `<OWNER/NAME>` is
+  the GitHub repository of the `origin` remote and `<commit>` is the commit id of the `main@origin` that the drain's
+  last round selected from. Use that commit, not a fresh fetch, so a plan that landed in between still counts as a
+  change. If that round's fetch failed, do not start a watcher at all: its baseline would be stale, and every watcher
+  would report a change at once and wake the agent in a loop. Notify the user and stop monitoring instead.
+- Run it as a background command whose completion wakes the session: in Claude Code, `run_in_background` with a timeout
+  above the watcher's `--max-wait` (the defaults, 6600 seconds against Claude Code's two-hour background limit, fit).
+  Record its task handle and the baseline commit in the plans log, in place of a wake time. After a compaction or a
+  resume, if the recorded watcher is no longer running, start a new one with the recorded commit.
+- Act only on the exit of the watcher the plans log records. Exits of a watcher the agent stopped itself, or of any
+  other, are ignored.
+- Its exit decides what happens next:
+  - `changed` (status 0): drain again.
+  - `idle` (status 10): nothing changed; start it again with the same commit, without fetching or draining.
+  - `error:` (status 3): if the line mentions HTTP 401 or 403, the GitHub login needs the user; notify and stop
+    monitoring. Otherwise notify once, then keep restarting it with `--interval 1800` until a watcher exits `changed` or
+    `idle`, which also restores the default interval. Do not notify again for the same run of errors.
+  - `usage:` (status 2) or anything else: the invocation is wrong, so restarting cannot help. Notify and stop
+    monitoring.
+- A harness that cannot wake a session when a background command exits runs the watcher in the foreground instead, with
+  a `--max-wait` shorter than its own command timeout. That wakes the model at least once per command timeout, which can
+  be more often than an hourly sleep did, so prefer the background form wherever it exists.
+
+Ending the flow (a rejected plan PR, or a rebase conflict that needs the user, under Executing) ends monitoring too: no
+watcher runs until the user starts the flow again.
+
+Each round fetches, but rebases only when it is about to run a plan: a round with nothing eligible does not rebase or
+push anything, so a wake-up that finds nothing does not force-push the open plan PRs.
+
+"Check for plans", or similar, said to a monitoring agent (typically by interrupting it while it waits) means: do not
+wait for the watcher. Stop it, drain now, and then start a new watcher from that drain's last round, so only one watcher
+ever runs.
 
 ## Reports: "show the plan reports"
 
