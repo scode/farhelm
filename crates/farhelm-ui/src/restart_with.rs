@@ -151,22 +151,25 @@ fn focus_restart_with_cancel() {
 /// this dialog is mounted. The parent rechecks live availability before it
 /// sends a request, and passes a refusal back through `error`.
 ///
-/// `yolo_confirmation` is the helm's refusal of a YOLO restart on a host
-/// marked sensitive. It is shown inside the dialog because the dialog is
-/// modal: anything rendered beside it is inert. Confirming resubmits what the
-/// dialog shows NOW, with the override (`on_submit`'s `true`), so the answer
-/// always applies to the settings on screen rather than to a snapshot the
-/// user may have edited since.
+/// `yolo_confirmation` is what the confirmation for the helm's refusal of a
+/// YOLO restart on a host marked sensitive explains, and `yolo_error` why a
+/// "don't ask again" failed at its first step. It is shown inside the dialog
+/// because the dialog is modal: anything rendered beside it is inert.
+/// Confirming resubmits what the dialog shows NOW, with the override
+/// (`on_submit`'s second element), so the answer always applies to the
+/// settings on screen rather than to a snapshot the user may have edited
+/// since. The third element asks the parent to mark the host safe first.
 #[component]
 pub(crate) fn RestartWithDialog(
     session: Session,
     busy: bool,
     error: Option<String>,
-    yolo_confirmation: Option<String>,
+    yolo_confirmation: Option<crate::yolo_confirm::YoloAsk>,
+    yolo_error: Option<String>,
     stop_first: bool,
     stop_uncertain: bool,
     offer_label: String,
-    on_submit: EventHandler<(LaunchSelection, bool)>,
+    on_submit: EventHandler<(LaunchSelection, bool, bool)>,
     on_yolo_cancel: EventHandler<()>,
     on_cancel: EventHandler<()>,
 ) -> Element {
@@ -353,18 +356,33 @@ pub(crate) fn RestartWithDialog(
                 if let Some(message) = error {
                     p { class: "restart-with-error", role: "alert", "{message}" }
                 }
-                if let Some(message) = yolo_confirmation {
+                if let Some(ask) = yolo_confirmation {
                     crate::yolo_confirm::YoloConfirmation {
-                        message,
+                        ask,
                         busy,
+                        error: yolo_error,
                         confirm_submits: false,
-                        // Both hand focus to a control that outlives the
-                        // question before the parent unmounts it; see
-                        // `focus_restart_with_cancel`.
+                        // All three hand focus to a control that outlives
+                        // the question, or that stays enabled while the
+                        // request runs, before the parent unmounts or
+                        // disables the clicked one; see
+                        // `focus_restart_with_cancel` and
+                        // `focus_restart_with_submit`.
                         on_confirm: move |_| {
                             if may_submit {
                                 focus_restart_with_submit();
-                                on_submit.call((selection(), true));
+                                on_submit.call((selection(), true, false));
+                            }
+                        },
+                        // The question stays up while the host is marked
+                        // safe, with its buttons disabled, which is exactly
+                        // the native disabling of a focused control this
+                        // module's rule forbids; the submit button is the
+                        // control that stays enabled.
+                        on_confirm_and_stop_asking: move |_| {
+                            if may_submit {
+                                focus_restart_with_submit();
+                                on_submit.call((selection(), true, true));
                             }
                         },
                         on_cancel: move |_| {
@@ -408,7 +426,7 @@ pub(crate) fn RestartWithDialog(
                         onclick: move |_| {
                             if may_submit {
                                 focus_restart_with_submit();
-                                on_submit.call((selection(), false));
+                                on_submit.call((selection(), false, false));
                             }
                         },
                         if stop_first { "stop and restart" } else { "restart" }

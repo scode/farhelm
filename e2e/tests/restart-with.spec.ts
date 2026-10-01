@@ -217,12 +217,15 @@ test("a YOLO restart with refused for a sensitive host is confirmed inside the d
   await dialog.locator(".restart-with-submit").click();
   const confirmation = dialog.locator(".yolo-confirmation");
   await expect(confirmation, "the question must appear inside the modal dialog").toBeVisible();
-  await expect(confirmation).toContainText("--allow-yolo-on-sensitive-host");
+  await expect(confirmation).toContainText("This launch uses YOLO permissions.");
+  await expect(confirmation).not.toContainText("--allow-yolo-on-sensitive-host");
   expect(bodies).toHaveLength(1);
 
   // Declining from the keyboard hands focus back to the dialog rather than
-  // dropping it to the page body with the modal still open.
-  await confirmation.locator(".yolo-cancel").focus();
+  // dropping it to the page body with the modal still open. Cancel is the
+  // question's initial focus, given once its buttons are usable (it can mount
+  // while the refused restart is still finishing).
+  await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(confirmation).toHaveCount(0);
   await expect(dialog.locator(".restart-with-cancel")).toBeFocused();
@@ -232,11 +235,117 @@ test("a YOLO restart with refused for a sensitive host is confirmed inside the d
   await dialog.locator(".restart-with-submit").click();
   await expect(confirmation).toBeVisible();
   expect(bodies).toHaveLength(2);
+  await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
   await confirmation.locator(".yolo-confirm").focus();
+  await expect(confirmation.locator(".yolo-confirm")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(dialog).toHaveCount(0);
   expect(bodies).toHaveLength(3);
   expect(bodies[2]).toMatchObject({
+    mode: "resume",
+    with: { harness: "codex", permissions: "yolo" },
+    allow_yolo_on_sensitive_host: true,
+  });
+});
+
+/**
+ * "Start, and don't ask again on this host" from inside the restart-with
+ * dialog keeps focus in the dialog while it runs, launches nothing when the
+ * host cannot be marked, and restarts with the override once it can.
+ *
+ * Why: this dialog never lets focus fall to the page body (its module doc),
+ * because its modal isolation then swallows the next keystroke. Marking the
+ * host keeps the question up with its buttons disabled, which is exactly the
+ * native disabling of a focused control that would drop focus; and the
+ * button's promise ("don't ask again") is only kept if the host is marked
+ * before the restart goes out. Specifies: activated from the keyboard, focus
+ * moves to the dialog's submit (which stays enabled) while the mark is in
+ * flight; a refused mark shows its reason in the question, which stays up,
+ * and sends no restart; a mark that succeeds is followed by one restart that
+ * carries the override, and the dialog closes. The host write and the restart
+ * are both route-mocked, so the shared helm's real host setting is untouched.
+ */
+test("don't ask again from restart with keeps focus in the dialog and marks before restarting", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume");
+  const restarts: any[] = [];
+  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+    const body = route.request().postDataJSON();
+    restarts.push(body);
+    if (!body.allow_yolo_on_sensitive_host) {
+      await fulfillAsHelm(route, {
+        status: 409,
+        contentType: "text/plain",
+        headers: { "x-farhelm-yolo-confirmation": "sensitive-host" },
+        body: "this machine is marked sensitive for YOLO launches; confirm with --allow-yolo-on-sensitive-host",
+      });
+      return;
+    }
+    await fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: SESSION_ID,
+        title: TITLE,
+        cwd: "/tmp",
+        invocation: "codex --yolo",
+        launch: { ...BASELINE, permissions: "yolo" },
+        status: { state: "unknown" },
+        restart_offer: "resume",
+        created_at: 0,
+        last_activity_at: 0,
+        tabs: [],
+      }),
+    });
+  });
+  // The first mark is held, then refused; the second succeeds. Nothing
+  // reaches the real helm's host registry.
+  let releaseMark!: () => void;
+  let markHeld = new Promise<void>((resolve) => (releaseMark = resolve));
+  let refuseMark = true;
+  const marks: unknown[] = [];
+  await page.route("**/api/hosts/*/yolo-safe", async (route) => {
+    marks.push(route.request().postDataJSON());
+    await markHeld;
+    if (refuseMark) {
+      await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: "held by the test" });
+    } else {
+      await fulfillAsHelm(route, { status: 200, contentType: "application/json", body: "{}" });
+    }
+  });
+
+  const dialog = await openInjectedDialog(page);
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await dialog.locator(".restart-with-submit").click();
+  const confirmation = dialog.locator(".yolo-confirmation");
+  await expect(confirmation).toBeVisible();
+  expect(restarts).toHaveLength(1);
+
+  const stopAsking = confirmation.locator(".yolo-confirm-stop-asking");
+  // The question's initial focus lands on cancel once its buttons are usable;
+  // waiting for that handoff first keeps it from landing after this test has
+  // moved focus to another answer.
+  await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
+  await stopAsking.focus();
+  await expect(stopAsking).toBeFocused();
+  try {
+    await page.keyboard.press("Enter");
+    await expect.poll(() => marks.length, { message: "the mark reached the route" }).toBe(1);
+    await expect(stopAsking, "the question's buttons are disabled while the mark runs").toBeDisabled();
+    await expect(dialog.locator(".restart-with-submit"), "focus stays in the dialog").toBeFocused();
+  } finally {
+    releaseMark();
+  }
+  await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("held by the test");
+  await expect(confirmation, "a refused mark leaves the question up").toBeVisible();
+  expect(restarts, "a refused mark sends no restart").toHaveLength(1);
+
+  refuseMark = false;
+  markHeld = Promise.resolve();
+  await stopAsking.click();
+  await expect(dialog).toHaveCount(0);
+  expect(marks).toEqual([{ yolo_safe: true }, { yolo_safe: true }]);
+  expect(restarts).toHaveLength(2);
+  expect(restarts[1]).toMatchObject({
     mode: "resume",
     with: { harness: "codex", permissions: "yolo" },
     allow_yolo_on_sensitive_host: true,

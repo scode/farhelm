@@ -456,9 +456,12 @@ pub(crate) fn SessionView(
     let mut restart_with_open = use_signal(|| None::<Session>);
     let mut restart_with_error = use_signal(|| None::<String>);
     // A restart-with the helm refused as a YOLO launch on a sensitive host:
-    // the refusal the restart-with dialog shows as its confirmation (see
+    // what the restart-with dialog's confirmation explains (see
     // `yolo_confirm`). Confirming resubmits the dialog's current settings.
-    let mut restart_yolo = use_signal(|| None::<String>);
+    // `restart_yolo_error` is why a "don't ask again" failed at its first
+    // step; the confirmation stays up with it.
+    let mut restart_yolo = use_signal(|| None::<crate::yolo_confirm::YoloAsk>);
+    let mut restart_yolo_error = use_signal(|| None::<String>);
     // Replace has its own prompt and error because it creates a new session
     // before deleting this one; sharing restart state would lose the
     // endpoint's partial-failure wording or make the two operations race.
@@ -479,8 +482,10 @@ pub(crate) fn SessionView(
     // confirmed delete into a silent no-op.
     let mut confirming_header_delete: ConfirmSlot<(), OpGuard> = use_confirm_slot();
     let mut replace_error = use_signal(|| None::<String>);
-    // A replace the helm refused as a YOLO launch on a sensitive host.
-    let mut replace_yolo = use_signal(|| None::<String>);
+    // A replace the helm refused as a YOLO launch on a sensitive host, and
+    // why a "don't ask again" on it failed at its first step, if it did.
+    let mut replace_yolo = use_signal(|| None::<crate::yolo_confirm::YoloAsk>);
+    let mut replace_yolo_error = use_signal(|| None::<String>);
     // One synchronously claimed token covers the restart prompt as well as
     // the request, so two clicks in one render frame cannot authorize
     // operations from two different snapshots. The token
@@ -1111,7 +1116,15 @@ pub(crate) fn SessionView(
     let restart_base = base.clone();
     // The detail door, for the refresh a restart owes (see below).
     let refresh_after_restart = request_detail.clone();
-    let restart = move |stop_if_running: bool, with: Option<LaunchSelection>, allow_yolo: bool| {
+    // `stop_asking` is "start, and don't ask again on this host": the host
+    // (id and display name) the question named, to mark safe for YOLO
+    // launches before the restart; nothing is restarted if that fails. Taken
+    // from the question the user answered, not re-read from the session.
+    // Only a restart WITH new settings ever passes it.
+    let restart = move |stop_if_running: bool,
+                        with: Option<LaunchSelection>,
+                        allow_yolo: bool,
+                        stop_asking: Option<(crate::HostId, String)>| {
         if restarting() {
             if with.is_none() {
                 lifecycle.release();
@@ -1133,13 +1146,33 @@ pub(crate) fn SessionView(
         // closure runs again for the next restart.
         let refresh_after_restart = refresh_after_restart.clone();
         spawn(async move {
+            // Nothing has been sent yet, so a failure here detaches nothing
+            // and needs none of the remount and epoch work below; the
+            // restart-with dialog keeps its claim and its confirmation, now
+            // with the reason.
+            if let Some((host, name)) = stop_asking {
+                if let Err(reason) = crate::yolo_confirm::stop_asking(&base, host, &name).await {
+                    restart_yolo_error.set(Some(reason));
+                    restarting.set(false);
+                    return;
+                }
+                restart_yolo.set(None);
+            }
             let outcome =
                 restart_session(&base, &id, mode, stop_if_running, with.as_ref(), allow_yolo).await;
             match &outcome {
                 // Only a restart WITH new settings is ever refused this way;
                 // a plain restart relaunches a choice already made.
                 Err(e) if e.yolo_confirmation && with.is_some() => {
-                    restart_yolo.set(Some(e.text.clone()));
+                    let shown = current.peek();
+                    restart_yolo.set(Some(crate::yolo_confirm::YoloAsk {
+                        host: shown.host,
+                        host_name: shown
+                            .host_name
+                            .clone()
+                            .unwrap_or_else(|| "this host".to_string()),
+                        reason: crate::yolo_confirm::YoloReason::of_launch(with.as_ref()),
+                    }));
                 }
                 Err(e) if with.is_some() => restart_with_error.set(Some(e.text.clone())),
                 Err(e) => restart_error.set(Some(e.text.clone())),
@@ -1238,7 +1271,13 @@ pub(crate) fn SessionView(
     let delete_notice = use_context::<crate::list::DeleteNotice>();
     // Takes the lifecycle claim its confirmation handed over; the task owns
     // it and releases it when it ends (or is cancelled with the view).
-    let replace = move |claim: OpGuard, allow_yolo: bool| {
+    // `stop_asking` is "start, and don't ask again on this host": the host
+    // (id and display name) the question named, to mark safe for YOLO
+    // launches first; nothing is replaced if that fails. Taken from the
+    // question the user answered. It only ever comes with `allow_yolo`.
+    let replace = move |claim: OpGuard,
+                        allow_yolo: bool,
+                        stop_asking: Option<(crate::HostId, String)>| {
         if replacing() {
             return;
         }
@@ -1256,6 +1295,14 @@ pub(crate) fn SessionView(
             crate::status::shows_nothing_alive(&source.status, source.tabs.len());
         spawn(async move {
             let _claim = claim;
+            if let Some((host, name)) = stop_asking {
+                if let Err(reason) = crate::yolo_confirm::stop_asking(&base, host, &name).await {
+                    replace_yolo_error.set(Some(reason));
+                    replacing.set(false);
+                    return;
+                }
+                replace_yolo.set(None);
+            }
             match replace_session(&base, &id, only_if_nothing_alive, allow_yolo).await {
                 Ok((new_session, notice)) => {
                     delete_notice.publish(notice);
@@ -1263,7 +1310,19 @@ pub(crate) fn SessionView(
                     crate::list::remember_selection(&base, preferences, &new_session.id);
                     on_replaced.call(new_session);
                 }
-                Err(error) if error.yolo_confirmation => replace_yolo.set(Some(error.text)),
+                Err(error) if error.yolo_confirmation => {
+                    // A new question starts without an earlier one's
+                    // "don't ask again" failure.
+                    replace_yolo_error.set(None);
+                    replace_yolo.set(Some(crate::yolo_confirm::YoloAsk {
+                        host: source.host,
+                        host_name: source
+                            .host_name
+                            .clone()
+                            .unwrap_or_else(|| "this host".to_string()),
+                        reason: crate::yolo_confirm::YoloReason::of_launch(source.launch.as_ref()),
+                    }));
+                }
                 Err(error) => replace_error.set(Some(error.text)),
             }
             replacing.set(false);
@@ -1272,6 +1331,7 @@ pub(crate) fn SessionView(
     let mut confirm_replace = replace.clone();
     let mut header_confirm_replace = replace.clone();
     let mut yolo_confirm_replace = replace.clone();
+    let mut yolo_stop_asking_replace = replace.clone();
 
     // The add-tab control. Unlike `ListView`'s create, navigating away
     // while this is in flight is deliberately NOT locked out: a stranded
@@ -1853,7 +1913,7 @@ pub(crate) fn SessionView(
                                     // consent before sending that request.
                                     confirming.set(true);
                                 } else {
-                                    fresh_restart(false, None, false);
+                                    fresh_restart(false, None, false, None);
                                 }
                             },
                             "restart"
@@ -1899,7 +1959,7 @@ pub(crate) fn SessionView(
                                         // consent onto the wire, which the
                                         // supervisor then checks against
                                         // liveness it rechecks itself.
-                                        confirm_restart(true, None, false);
+                                        confirm_restart(true, None, false, None);
                                     },
                                     "confirm restart"
                                 }
@@ -1983,7 +2043,7 @@ pub(crate) fn SessionView(
                                     disabled: replacing(),
                                     onclick: move |_| {
                                         if let Some(claim) = confirming_header_replace.take(&()) {
-                                            header_confirm_replace(claim, false);
+                                            header_confirm_replace(claim, false, None);
                                         }
                                     },
                                     "replace"
@@ -2083,6 +2143,7 @@ pub(crate) fn SessionView(
                     busy: restarting(),
                     error: restart_with_error(),
                     yolo_confirmation: restart_yolo(),
+                    yolo_error: restart_yolo_error(),
                     stop_first: restart_needs_confirmation(&shown.status),
                     stop_uncertain: shown.status == SessionStatus::Unknown,
                     offer_label: restart_button_label(shown.restart_offer).to_string(),
@@ -2091,13 +2152,28 @@ pub(crate) fn SessionView(
                         restart_with_open.set(None);
                         restart_with_error.set(None);
                         restart_yolo.set(None);
+                        restart_yolo_error.set(None);
                         lifecycle.release();
                         focus_restart_with_trigger();
                     },
-                    on_yolo_cancel: move |_| restart_yolo.set(None),
-                    on_submit: move |(selection, allow_yolo): (LaunchSelection, bool)| {
-                        if restarting() { return; }
+                    on_yolo_cancel: move |_| {
                         restart_yolo.set(None);
+                        restart_yolo_error.set(None);
+                    },
+                    on_submit: move |(selection, allow_yolo, stop_asking): (LaunchSelection, bool, bool)| {
+                        if restarting() { return; }
+                        // "Don't ask again" keeps the confirmation up through
+                        // its first step; the restart task takes it down.
+                        // The host the question named, for "don't ask again".
+                        let stop_asking = if stop_asking {
+                            restart_yolo.peek().as_ref().and_then(|ask| {
+                                ask.host.map(|host| (host, ask.host_name.clone()))
+                            })
+                        } else {
+                            restart_yolo.set(None);
+                            None
+                        };
+                        restart_yolo_error.set(None);
                         if let Some(reason) = restart_with_reason(&current.read()) {
                             restart_with_error.set(Some(reason));
                             return;
@@ -2110,7 +2186,12 @@ pub(crate) fn SessionView(
                             restart_with_error.set(Some("the session harness cannot be changed here".to_string()));
                             return;
                         }
-                        with_restart(restart_needs_confirmation(&current.read().status), Some(selection), allow_yolo);
+                        with_restart(
+                            restart_needs_confirmation(&current.read().status),
+                            Some(selection),
+                            allow_yolo,
+                            stop_asking,
+                        );
                     },
                 }
             }
@@ -2132,18 +2213,38 @@ pub(crate) fn SessionView(
                     parts: vec![DetailPart::peer(err)],
                 }
             }
-            if let Some(message) = replace_yolo.read().clone() {
+            if let Some(ask) = replace_yolo.read().clone() {
                 crate::yolo_confirm::YoloConfirmation {
-                    message,
+                    ask,
                     busy: replacing(),
+                    error: replace_yolo_error(),
                     confirm_submits: false,
                     on_confirm: move |_| {
                         if let Some(claim) = lifecycle.claim_guard() {
                             replace_yolo.set(None);
-                            yolo_confirm_replace(claim, true);
+                            replace_yolo_error.set(None);
+                            yolo_confirm_replace(claim, true, None);
                         }
                     },
-                    on_cancel: move |_| replace_yolo.set(None),
+                    // The confirmation stays up through the first step; the
+                    // replace task takes it down once the host is marked,
+                    // or leaves it with the reason.
+                    on_confirm_and_stop_asking: move |_| {
+                        // The host the question named; the button is only
+                        // offered when it named one.
+                        let target = replace_yolo
+                            .peek()
+                            .as_ref()
+                            .and_then(|ask| ask.host.map(|host| (host, ask.host_name.clone())));
+                        if let Some(claim) = lifecycle.claim_guard() {
+                            replace_yolo_error.set(None);
+                            yolo_stop_asking_replace(claim, true, target);
+                        }
+                    },
+                    on_cancel: move |_| {
+                        replace_yolo.set(None);
+                        replace_yolo_error.set(None);
+                    },
                 }
             }
             if let Some(err) = replace_error.read().clone() {
@@ -2231,7 +2332,7 @@ pub(crate) fn SessionView(
                             if !lifecycle.claim() {
                                 return;
                             }
-                            notice_restart(false, None, false);
+                            notice_restart(false, None, false, None);
                         },
                         "restart"
                     }
@@ -2256,7 +2357,7 @@ pub(crate) fn SessionView(
                                 disabled: replacing(),
                                 onclick: move |_| {
                                     if let Some(claim) = confirming_replace.take(&()) {
-                                        confirm_replace(claim, false);
+                                        confirm_replace(claim, false, None);
                                     }
                                 },
                                 "confirm replace"
