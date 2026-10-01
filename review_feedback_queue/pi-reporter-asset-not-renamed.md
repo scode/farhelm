@@ -37,3 +37,22 @@ restart) and the instructions pointer, and the only evidence is a supervisor log
 delete the file by hand. The fix is to publish the current asset as `farhelm-conversation-v2.ts`, beside the old file,
 update SPEC_impl.md's Pi paragraph, and add a test that pins a hash of each published asset's bytes to its file name (or
 derives the name from the hash), so a future content change without a rename fails CI.
+
+## Additional detail merged from a second review (de774a1ee8815ce833da77deac593a55d82f7be3)
+
+A separate whole-codebase review found the same problem independently; its item
+(`pi-extension-stale-bytes-after-upgrade.md`) was folded into this one. It adds:
+
+- Blob ids: v0.9.0 through v0.12.0 ship `assets/pi-conversation-v1.ts` blob 8b9022d0; ce5ea14 (#811, first in v0.13.0)
+  changed it to blob 90cedb74 (adding `"--vendor", "pi"` to the hook argv) under the same published name.
+- A verification recipe: write the v0.12 blob
+  (`git show v0.12.0:crates/farhelm-supervisor/assets/pi-conversation-v1.ts`) to
+  `<state>/integrations/pi/farhelm-conversation-v1.ts` and call `materialize_asset(state, &PI_ASSET)`; it returns the
+  mismatch error. The existing test `mismatched_existing_artifact_is_refused` (`pi_extension.rs:132-148`) already
+  exercises this refusal with arbitrary bytes.
+- An alternative fix to renaming: when the existing file is a regular 0600 file in Farhelm's own private
+  `integrations/<vendor>/` directory, replace a byte mismatch atomically with the rename tier instead of refusing.
+  Running agents have already loaded their copy. A content-addressed name also prevents any future edit from repeating
+  this for either vendor.
+- Why FILTER.md's "Rare edge cases in harnesses without first-class support" filter does not apply: the trigger is not
+  rare or unconfirmed but deterministic on every host that launched a Pi session under v0.9–v0.12 and then upgraded.

@@ -40,3 +40,15 @@ same render that drew the prompt text (`session_view.rs:1736-1744`) rather than 
 suggested fix is to do the same for Replace: capture `only_if_nothing_alive` (together with the source host fields) when
 the Replace prompt is confirmed, carry it through the YOLO confirmation's state, and pass that captured value into
 `replace` instead of recomputing it. F50 is the same bug in the sidebar.
+
+## Additional detail merged from a second review (de774a1ee8815ce833da77deac593a55d82f7be3)
+
+A separate whole-codebase review found this path independently (as part of
+`confirmed-nothing-alive-prompt-kills-live-agent.md`, which now covers only the sidebar delete prompt and the header
+Restart confirm, with the same capture-from-the-rendered-prompt fix). It adds:
+
+- Since 35b41ff the YOLO confirmation has a second button, "Start, and don't ask again on this host"
+  (`on_confirm_and_stop_asking`), which goes through the same recomputation, so the fix must cover both buttons.
+- A browser verification recipe: mark the host as asking before YOLO launches, Replace an exited YOLO session, restart
+  it through the API while the YOLO question is shown, then confirm; the replace body carries
+  `"only_if_nothing_alive": false`.

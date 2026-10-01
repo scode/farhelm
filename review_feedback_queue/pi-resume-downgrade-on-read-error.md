@@ -41,3 +41,24 @@ Suggested fix: split the `Err` arm from the verified-absent arms. On `Err`, refu
 (retryable once the cause clears) without touching the row, and include the read error in the refusal; only `Ok(None)`
 and conversation mismatch should invalidate the stored locator. Refusing the restart on an unreadable file is correct
 fail-closed behavior and stays.
+
+### Update at de774a1ee8815ce833da77deac593a55d82f7be3: OMP has the same flaw
+
+Source: whole-codebase review, 2026-09-30, slice supervisor core; an independent checker confirmed it is the same issue
+rather than a new item.
+
+The Pi check has since been generalized. `verify_pi_resume` is now `verify_report_only_resume`
+(`crates/farhelm-supervisor/src/service/core.rs:6196`), and it routes both `AgentKind::Pi` and `AgentKind::Omp` through
+the same arm (core.rs:6230-6233):
+
+```rust
+let verified = match crate::agent_kind::read_record(Path::new(path), integration).await {
+    Ok(Some((record, _))) => record.conversation == locator.session_id,
+    Ok(None) | Err(_) => false,
+};
+```
+
+A non-verified result still replaces the stored locator with a fileless token through
+`replace_reported_conversation_if_current`. So OMP sessions lose a valid Resume offer on a transient read error exactly
+as Pi sessions do, and the suggested fix above (split `Err` from the verified-absent arms) fixes both. Line numbers in
+the original text above refer to the older reviewed commit.
