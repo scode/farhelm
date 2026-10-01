@@ -165,18 +165,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   repetition `a1b6e9b1-a246-4272-8d7b-89452a3f4c45` passed unchanged. Capture watcher and startup-process state at the
   failed cleanup boundary before changing the teardown contract.
 
-- **Composer viewport controls.**
-  `composer keeps launch and cancel inside the initial viewport at default and narrow width` in
-  `e2e/tests/sidebar.spec.ts` failed during browser run `946f3bb1-6398-4bbc-9ece-7ab6232be092` and passed unchanged in
-  focused run `51f444c3-d0db-4e33-bd27-32b6d429c3a7`. Reproduce with retained geometry measurements; the interrupted
-  original run did not retain the final assertion report.
-
-- **Working-copy identity reconciliation under the workspace battery.**
-  `working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone` failed
-  once in retained full Rust run `131912d5-0ee2-4313-a204-38edf6fc942c` and passed in the exact-test rerun
-  `c44ac1bf-bcce-49b0-8a44-5d9633c5172f`; investigate the concurrent filesystem premise before changing the
-  reconciliation contract.
-
 ### Difficult deflake
 
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
