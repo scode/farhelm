@@ -4573,3 +4573,152 @@
 - Completion criteria: add that requirement to SPEC.md. No code change is needed unless execution finds a transfer on
   either path that still has a fixed overall deadline. Remove this feedback file and its index entry.
 - Execution: planned in `plans/triage-signin-status-paths.md`.
+
+## plain-retry-erases-pending-fresh-window.md
+
+- Outcome: `discard`.
+- Assessment: confirmed by current-code inspection at a1655f0. `nudge_now` (`crates/farhelm-helm/src/manager.rs`)
+  overwrites `Nudge::fresh_window` on every send, so a plain retry (the Retry button, or the reconnect after an
+  adoption) that lands before the actor consumes a pending fresh-window nudge (from a destination change or
+  provisioning's attach) downgrades the fast reconnect ladder to a single probe plus the roughly 45-second re-probe
+  wait. The trigger is a human click inside a window of milliseconds. The consequence is a slower reconnect that heals
+  on the next attempt or another Retry. A nudge carries only a revision counter and that flag, and the destination
+  dialed comes from the host's row, so the downgrade never changes which machine is dialed.
+- Decision: the user chose to discard it, on the condition that it cannot cause a connection to the wrong host. That
+  condition holds per the assessment. The separate wrong-machine race after a retarget is
+  `retarget-race-republishes-old-client.md`, triaged on its own.
+- Completion criteria: remove this feedback file and its index entry, with no code or spec change.
+- Execution: `pending`.
+
+## unvalidated-state-dir-on-probe.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. 70f6786 (#1071, "fix: refuse unusable remote state directories when registering hosts")
+  added the `remote_state_dir_is_usable` refusal to all three registration paths, including `register_probed_ssh_host`
+  (`crates/farhelm-helm/src/store.rs`). The check runs before the transaction, so it covers both the insert and the
+  converge branch the finding named.
+- Decision: already fixed; recorded as `discard` without asking the user, per the triage rule for findings already fixed
+  on main.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## event-feed-liveness-postponed-by-revisions.md
+
+- Outcome: `fix code`.
+- Assessment: mechanism confirmed by current-code inspection at a1655f0; consequence overstated. In `serve_events`
+  (`crates/farhelm-helm/src/events.rs`), every successful revision write resets the `idle` timer, including while
+  `awaiting_liveness` is set, so on a fleet that changes more often than every 30 seconds an unanswered keepalive Ping
+  is never judged. That contradicts the module docs' promise that a vanished subscriber costs one idle interval, at most
+  two. The pile-up to the 64-subscriber cap is implausible in practice: a peer that stops acknowledging while the helm
+  (or the forwarding sshd) keeps sending is dropped by the kernel's retransmission timeout after roughly 15 to 30
+  minutes (standard TCP behavior, not reproduced here), so reaching the cap would need about 64 vanished clients inside
+  that window. Even at the cap, a refused tab falls back to the 3-second poll (`crates/farhelm-ui/src/feed.rs`) and
+  stays correct; the desktop app is affected only if its embedded helm's port is forwarded.
+- Decision: the user chose to fix it because the fix is trivial.
+- Completion criteria: stop a revision write from postponing a pending liveness check (skip the `idle` reset while
+  `awaiting_liveness` is true, or keep a separate liveness deadline), so a vanished subscriber is dropped within the
+  documented bound; extend the existing keepalive test to cover revisions arriving while a Ping is unanswered. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## sink-shutdown-retries-forever-after-delete.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed for Delete by current-code inspection at a1655f0; the reviewer's tmux 3.7c reproduction (2 of 10
+  concurrent trials) was not rerun. Delete's teardown (`crates/farhelm-supervisor/src/service/teardown.rs`) drops each
+  attachment's sink reference after joining its forwarder and goes on to `kill_session` without waiting for the sink's
+  background shutdown. If tmux destroys the session first, `SessionSink::shutdown`
+  (`crates/farhelm-supervisor/src/tmux/sink.rs`) fails its output-off handshake while the client process is still alive
+  (tmux holds its exit until queued output is drained, which nobody does any more), and
+  `shutdown_session_sink_until_safe` (`crates/farhelm-supervisor/src/service/terminals.rs`) retries forever, backing off
+  to 5 seconds. The consequence is a leaked tmux control client and a `refresh-client` spawn every 5 seconds until the
+  supervisor restarts, per unlucky delete of a session with more than about 64 KiB of unread pane output. Not confirmed:
+  the finding's more serious claim that the same race on a restart path that kills and recreates a tmux session under
+  the same name leaves the recreated session unattachable; no such restart path was found at a1655f0 (restart reuses the
+  tmux session), so that part may be outdated.
+- Decision: the user chose `fix code` with the recommended shape: Delete waits for the sink's orderly shutdown to finish
+  before killing the tmux session, so the output-off handshake always runs while the session still exists. The
+  alternative of closing and draining after tmux's "can't find client" answer was not chosen, because it changes the
+  crash-avoidance handshake itself.
+- Completion criteria: make Delete await the last sink's reap before `kill_session`, keeping the existing lock and
+  ordering contracts (see SPEC.md "Waiting between operations on one host" and whatever the triage plan for
+  `delete-holds-attachments-lock-through-archive.md` lands there). Add a regression test that a delete racing a busy
+  sink leaves no sink in a perpetual retry. If a restart path that kills and recreates a session under the same name
+  turns out to exist, give it the same ordering. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## input-client-notifications-pile-up.md
+
+- Outcome: `other`.
+- Assessment: confirmed by current-code inspection at a1655f0; the memory measurements are the reviewer's. The input
+  client (`crates/farhelm-supervisor/src/tmux/input.rs`) attaches with `-f no-output`, which suppresses pane output but
+  not tmux's server-wide notifications, and its stdout is read only inside `InputClient::send`. A terminal that stays
+  attached without being typed into never reads them, and once the 64 KiB pipe fills tmux queues the rest in its own
+  memory without bound (reviewer: 1.7 MB to 8.2 MB under 80,000 rename notifications on tmux 3.7c). The growth is
+  self-limiting in practice: any keystroke reads everything queued up to its reply, and a reattach replaces the client,
+  so only a long-idle attached terminal accumulates anything, at roughly a few hundred bytes per notification. A fix
+  would need a background reader feeding replies to `send` over a channel, redesigning a deliberately synchronous part
+  of the keystroke path.
+- Decision: the user chose not to fix it and to document it in `BUGS.md` as a known bug that is not planned to be fixed.
+- Completion criteria: add a `BUGS.md` entry in that file's style: what the user can notice (tmux server memory growing
+  while terminals stay open for long periods without typing, and the first keystroke reading the backlog), the mechanics
+  in brief, how sure we are (the reviewer's measurements; not reproduced in triage), and why it is not being fixed
+  (bounded in practice, reset by any keystroke or reattach, and a fix would complicate the keystroke path). Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## adopt-checks-current-row-not-dialed.md
+
+- Outcome: `other`.
+- Assessment: the code gap is confirmed at a1655f0, but its realistic trigger was closed after the reviewed commit.
+  `ConnectionManager::adopt` (`crates/farhelm-helm/src/manager.rs`) still builds its `DialedAs` guard from the manager's
+  current row, and `HostState::IdentityMismatch` carries no record of the configuration the mismatch was observed under.
+  The race the finding relies on, a mismatch from the old destination published after a retarget, was fixed by 411302e
+  (#920, merged 2026-09-25, after reviewed commit 2b597e9): `take_settled_outcome` drops a settled dial result when a
+  retarget nudge is pending. What remains is the gap between that check and the state publication, and a stale prompt
+  published there is replaced within milliseconds when the actor sees the nudge and dials the new destination; the user
+  would have to click Adopt inside that. The worst case is a wrong identity recorded on the entry and its cached
+  sessions purged; the cache refills, the next contact with the real destination raises a fresh mismatch prompt, and
+  nothing connects to the wrong machine. The reverse direction (a genuine adoption refused as `StaleAttempt` after a
+  failed reconcile) fails safely until the next successful reconcile.
+- Decision: the user chose to discard the finding and to record the class in `review_feedback_queue/FILTER.md`, so
+  similar findings stay out of the queue.
+- Completion criteria: add a filter to `review_feedback_queue/FILTER.md` for findings whose trigger needs a person to
+  act inside a window of about a second or less that opens and closes on its own, and whose whole consequence is
+  recoverable through ordinary use (the wrong state is replaced or asked about again on the next connection, refresh or
+  prompt, and anything cleared is a cache Farhelm refills). Keep FILTER.md's standard exclusions: loss of user data,
+  credentials, processes or other user-owned work; connecting to, sending an operation to, or acting on the wrong
+  machine or session; a wrong state that persists with no ordinary way back; and any security or trust-boundary
+  consequence. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## identity-mismatch-never-becomes-duplicate.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at a1655f0. `record_first_contact`
+  (`crates/farhelm-helm/src/store.rs`) returns `Mismatch` whenever the row's recorded identity differs from the reported
+  one and consults `claimant_of` only when nothing is recorded, so a row that has ever recorded an identity can never be
+  classified as a duplicate. It gets the adopt prompt instead, and `adopt_identity` always refuses with
+  `IdentityClaimed`; nothing ever switches the host to the duplicate state, despite that error's docs saying the host
+  should then re-render as one. Ordinary triggers: retargeting an entry onto a machine another entry manages, or
+  re-adding a reinstalled host as a new entry while the old entry still points at it. Context gathered in triage:
+  nothing is ever merged today; the duplicate state already connects nothing and asks the user to edit or remove an
+  entry. Its main extra machinery is the 45-second automatic re-check of the registry (the duplicate branch at the top
+  of the actor loop in `crates/farhelm-helm/src/manager.rs`, with its own retarget-race handling).
+- Decision: the user wants the simplest safe handling of this rare case, not a polished feature, and agreed to this
+  shape. Replace SPEC.md's "Two destinations reaching the same identity are the same host, shown once" with a plain
+  rule: an entry that reaches a machine another entry already holds connects nothing, says which entry holds it (by
+  name), and tells the user to remove that entry or change this one's destination and then press Retry; Farhelm never
+  connects two entries to one machine and never resolves this on its own. Check "held by another entry" before comparing
+  with the remembered identity, so the un-adoptable adopt prompt cannot occur. Drop the duplicate state's automatic
+  re-check: like identity-mismatch, it stays frozen until Retry, an edit of the entry, or a helm restart. Keep the
+  schema rule that one identity belongs to at most one entry, adoption for reinstalled hosts, and the existing refusal
+  when a probe would register an already-held identity.
+- Completion criteria: update SPEC.md (and SPEC_impl.md's host-state and cadence text, which describe the duplicate
+  re-check) to the rule above. In `record_first_contact`, resolve a claimant before the recorded-identity comparison and
+  return `Collision`. Remove the duplicate re-check timer and its race handling, making the duplicate state a frozen
+  state resolved by Retry, an edit, or a restart. Make the duplicate message name the other entry by its display name
+  and tell the user to remove it or change this entry's destination, then press Retry. Add tests for both triggers
+  (retarget onto another entry's machine; re-added reinstalled host with the old entry still pointing at it) and for
+  Retry clearing the freeze after the other entry is removed. Remove this feedback file and its index entry.
+- Execution: `pending`.
