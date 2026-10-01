@@ -2905,7 +2905,7 @@ async fn ensure_cwd_identity(cwd: &str, canonical: Option<&str>) -> anyhow::Resu
         return Ok(None);
     };
     let resolved = match tokio::fs::canonicalize(cwd).await {
-        Ok(resolved) => resolved.to_string_lossy().into_owned(),
+        Ok(resolved) => canonical_cwd_text(cwd, resolved)?,
         Err(e) => {
             return Err(RequestError::new(
                 ErrorKind::InvalidRequest,
@@ -2929,6 +2929,34 @@ async fn ensure_cwd_identity(cwd: &str, canonical: Option<&str>) -> anyhow::Resu
         ),
     )
     .into())
+}
+
+/// The canonical spelling of a working directory as text, or a refusal when
+/// it is not valid UTF-8.
+///
+/// Farhelm does not support such paths (SPEC.md "Paths that are not valid
+/// UTF-8"). The canonical spelling is the directory's recorded identity, and
+/// a restart or the retry of an unfinished create launches into it, so a
+/// lossy conversion was worse than useless there: it named a different,
+/// usually nonexistent, directory, tmux fell back to the home directory for
+/// one it could not enter, and the relaunch reported success with the agent
+/// somewhere else. A first create launched into the caller's own spelling
+/// and worked; it refuses too because it is what records the identity those
+/// relaunches would check and launch into. `cwd` is the spelling the caller
+/// gave, which is valid UTF-8 even when a symlink in it leads somewhere that
+/// is not.
+fn canonical_cwd_text(cwd: &str, resolved: std::path::PathBuf) -> anyhow::Result<String> {
+    resolved.into_os_string().into_string().map_err(|raw| {
+        RequestError::new(
+            ErrorKind::InvalidRequest,
+            format!(
+                "working directory {cwd} resolves to {}, which is not valid UTF-8; Farhelm does \
+                 not support such paths, so no agent is launched there",
+                std::path::Path::new(&raw).display()
+            ),
+        )
+        .into()
+    })
 }
 
 /// The geometry a relaunch's FRESH terminal starts at, for the same reason
@@ -7185,7 +7213,7 @@ impl Supervisor {
                          the session was not created"
                 )
             })?;
-            Some(resolved.to_string_lossy().into_owned())
+            Some(canonical_cwd_text(&cwd, resolved)?)
         };
         if !destination.is_fresh() {
             self.refuse_pending_archive(&cwd, canonical_cwd.as_deref())
@@ -25238,6 +25266,83 @@ exit 0
                 .expect("a session with no recorded identity has nothing to confirm"),
             None,
             "and it must stay restartable, or every row predating the column is stranded"
+        );
+    }
+
+    /// A working directory whose canonical path is not valid UTF-8 is
+    /// refused, at create and at relaunch, rather than converted lossily.
+    ///
+    /// Why it matters: the canonical path is the directory's recorded
+    /// identity, and a restart or create retry launches into it. Converted
+    /// lossily it named a directory that does not exist, tmux started the
+    /// agent in the home directory instead, and the relaunch reported
+    /// success. Rows created before this fix carry that lossy text, which the
+    /// old check computed again and so waved through; the relaunch half
+    /// below uses exactly that value.
+    /// Farhelm does not support such paths (SPEC.md "Paths that are not
+    /// valid UTF-8"), so the spec is a clear `InvalidRequest` naming the
+    /// path. The caller's own spelling is a valid UTF-8 symlink here, which
+    /// is the only way such a directory reaches these checks: the request
+    /// carries its working directory as text.
+    ///
+    /// Not on macOS: APFS refuses to create a name that is not valid UTF-8,
+    /// so the fixture cannot exist there, and neither can the case.
+    #[cfg(not(target_os = "macos"))]
+    #[farhelm_testtrace::test]
+    async fn a_non_utf8_canonical_working_directory_is_refused() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let state = StateDir::new();
+        let target = state
+            .path()
+            .join(std::ffi::OsStr::from_bytes(b"not-utf8-\xff"));
+        std::fs::create_dir(&target).expect("non-UTF-8 directory");
+        let link = state.path().join("work");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        let cwd = link.to_str().expect("the link itself is UTF-8").to_string();
+
+        let recorded = std::fs::canonicalize(&link)
+            .expect("canonicalize")
+            .to_string_lossy()
+            .into_owned();
+        let relaunch = ensure_cwd_identity(&cwd, Some(&recorded))
+            .await
+            .expect_err("a relaunch must not resolve into a path it cannot represent");
+        assert_eq!(error_kind(&relaunch), ErrorKind::InvalidRequest);
+        let relaunch = format!("{relaunch:#}");
+        assert!(
+            relaunch.contains("not valid UTF-8") && relaunch.contains(&cwd),
+            "the refusal names the path and the reason: {relaunch}"
+        );
+
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let create = match sup
+            .validate_create(CreateInputs {
+                github_checkout: None,
+                cwd: &cwd,
+                parent: None,
+                mode: CreateMode::Raw {
+                    invocation: "claude".to_string(),
+                    agent_kind: None,
+                    resume_template: None,
+                    source_profile: None,
+                    launch: None,
+                },
+                title: None,
+                cols: 80,
+                rows: 24,
+            })
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("a create must not record an identity it cannot represent"),
+        };
+        assert_eq!(error_kind(&create), ErrorKind::InvalidRequest);
+        let create = format!("{create:#}");
+        assert!(
+            create.contains("not valid UTF-8") && create.contains(&cwd),
+            "the create refusal names the path and the reason: {create}"
         );
     }
 

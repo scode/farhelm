@@ -86,8 +86,6 @@ One line per open item. This file must always match the feedback files in this d
   session; #1310 removed only one trigger.
 - `create-dialog-empty-catalog-refuses.md` — when the model catalog fails to load or is still loading,
   clone/replace-with/recent setups are refused as "no longer supported".
-- `restart-cwd-lossy-non-utf8.md` — restart/retry of a session whose folder resolves to a non-UTF-8 path starts the
-  agent in $HOME and reports success.
 - `non-utf8-farhelm-path-breaks-launch.md` — a farhelm binary or state directory at a non-UTF-8 path makes every launch
   fail, while the log claims only degraded mode.
 - `stop-terminalless-records-plain-exit.md` — Stop on an ambiguous, terminal-less launch records a plain exit before
