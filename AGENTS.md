@@ -419,15 +419,16 @@ with the comment "already fixed" and the fixing commit or PR, remove its feedbac
 execution complete, and move on. `discard` is used because it carries no judgment about the finding.
 
 Before presenting an item for a decision, check whether its behavior is explicitly accepted by the current SPEC.md or
-SPEC_impl.md, its fix is already covered by an item in TODO.md's `Planned` bucket, or it matches a review-only filter in
+SPEC_impl.md, its fix is already covered by an item in TODO.md's `Planned` bucket, it is a known bug root `BUGS.md`
+already records as one we have decided to live with, or it matches a review-only filter in
 `review_feedback_queue/FILTER.md`. Verify the actual trigger, consequence, and scope against that acceptance, planned
-work, or filter; sharing a subsystem or keyword is not enough. If fully covered, skip renewed discussion and record
-`other` with the exact spec section, planned item, or filter as the reason. Remove the feedback file and its index entry
-immediately, and record execution as complete for that queue cleanup; do not leave the item to be skipped again in later
-sessions. Already planned means acknowledged work, not an implemented fix. Do not implement it, broaden its scope, or
-create another TODO merely because the same issue appears in feedback. If only part is covered, bring the uncovered part
-to the user. Briefly report skipped items and their basis, then continue to the next undecided item. This is an
-exception to the per-item decision question below.
+work, known bug, or filter; sharing a subsystem or keyword is not enough. If fully covered, skip renewed discussion and
+record `other` with the exact spec section, planned item, `BUGS.md` entry, or filter as the reason. Remove the feedback
+file and its index entry immediately, and record execution as complete for that queue cleanup; do not leave the item to
+be skipped again in later sessions. Already planned means acknowledged work, not an implemented fix. Do not implement
+it, broaden its scope, or create another TODO merely because the same issue appears in feedback. If only part is
+covered, bring the uncovered part to the user. Briefly report skipped items and their basis, then continue to the next
+undecided item. This is an exception to the per-item decision question below.
 
 Assume the user knows Farhelm as a tool but has read neither the feedback nor the relevant code. Begin every item with
 plain-language context for the thing under discussion: name the user-facing feature or operation before describing any
