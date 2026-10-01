@@ -304,3 +304,51 @@ fn screen_fixtures_read_as_the_state_they_were_captured_in() {
         failures.join("\n")
     );
 }
+
+/// Codex's on-screen `Working (… • esc to interrupt)` widget alone reads
+/// the real working screens as working, without the pane title's spinner.
+///
+/// Why it matters: the title is the Codex reader's main working signal, and
+/// the widget is the backstop for when it is missing (a host whose title
+/// cannot be read, where the supervisor substitutes an empty one). The backstop's
+/// composer geometry once required a single footer row, which no real
+/// 0.159.0 screen has, so it never fired and nothing noticed: every fixture
+/// carried a title that answered first. Spec: every captured Codex working
+/// screen that shows the widget reads working with an empty title, and at
+/// least one such screen exists, so this cannot pass vacuously.
+#[test]
+fn codex_working_widget_alone_reads_real_screens_as_working() {
+    let mut checked = 0;
+    for fixture in load_fixtures() {
+        if fixture.harness != "codex"
+            || fixture.expected != "working"
+            || !fixture.screen.contains("esc to interrupt")
+        {
+            continue;
+        }
+        let text = crate::tmux::retain_pane_tail(&fixture.screen, SAMPLE_TAIL_BYTES);
+        let reading = reader_for(AgentKind::Codex).read(
+            SampleCounts {
+                samples: 9,
+                unchanged_streak: 0,
+            },
+            &Screen {
+                text: &text,
+                title: "",
+            },
+        );
+        assert_eq!(
+            reading.state,
+            ScreenState::Working,
+            "{} {}-{} with no title",
+            fixture.version,
+            fixture.expected,
+            fixture.scenario
+        );
+        checked += 1;
+    }
+    assert!(
+        checked > 0,
+        "no captured Codex working screen shows the widget"
+    );
+}
