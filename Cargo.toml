@@ -240,6 +240,18 @@ farhelm-testtrace-macros = { path = "crates/farhelm-testtrace-macros" }
 # workspace battery.
 farhelm-ui = { path = "crates/farhelm-ui" }
 
+# SHA-256 is compiled optimized even in debug builds. Tests hash real debug
+# binaries, which are hundreds of megabytes, and unoptimized `sha2` takes
+# seconds per pass over one: `farhelm uninstall` verifies every file it is
+# about to remove against its recorded digest, once for the plan and again
+# under its locks, and with an unoptimized `sha2` that alone ran the
+# installed-uninstall acceptance suite (scripts/test-uninstall.py) into its
+# 30-second per-child limit and failed the v0.21.0 and v0.21.1 release gates.
+# Shipped binaries are built optimized anyway, so this changes test and
+# development builds only.
+[profile.dev.package.sha2]
+opt-level = 3
+
 # `wasm-release` is the cargo profile dx compiles the web UI under; this
 # stanza merges into dx's own definition of it. The strip exists because
 # rustc's precompiled wasm32 std ships DWARF debug sections (~1.4 MB in our
