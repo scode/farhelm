@@ -545,8 +545,7 @@ pub enum HostKind {
     /// [`HelmStore::remove_ssh_host`] refuse a [`HostKind::Local`] row
     /// outright. Everything else treats it like any other host —
     /// [`HelmStore::update_alias`] accepts it exactly as it accepts an ssh
-    /// row (`plans/host-aliases.md`'s decisions section: "the local host
-    /// can be aliased too"), and identity ([`HelmStore::record_first_contact`],
+    /// row (SPEC.md: "the local host can carry one too"), and identity ([`HelmStore::record_first_contact`],
     /// [`HelmStore::adopt_identity`]) and cache
     /// ([`HelmStore::replace_host_sessions`]) operations serve it on the
     /// same terms as any other host: the local host learns its identity and
@@ -11319,12 +11318,10 @@ mod tests {
         );
     }
 
-    /// A host may alias itself to its own current derived name —
-    /// `plans/host-aliases.md`'s decisions section settles this explicitly
-    /// (the product-facing `SPEC.md` update is a later PR's work), and it
-    /// falls out of the
-    /// implementation for free (the collision scan is `WHERE id != ?1`, so
-    /// the row being written is never compared against itself), but the
+    /// A host may alias itself to its own current derived name. This falls
+    /// out of the implementation for free (the collision scan is
+    /// `WHERE id != ?1`, so the row being written is never compared against
+    /// itself), but the
     /// behavior is worth pinning directly: renaming a host to exactly what
     /// it already displays as must not be mistaken for a collision.
     #[farhelm_testtrace::test]
@@ -11356,9 +11353,8 @@ mod tests {
     /// The local row accepts an alias exactly like an ssh row — unlike
     /// `update_ssh_destination`, which refuses the local row outright
     /// (`update_ssh_destination_refuses_the_local_row`), `update_alias` does
-    /// not special-case `HostKind::Local` at all, per
-    /// `plans/host-aliases.md`'s decisions section ("the local host can be
-    /// aliased too").
+    /// not special-case `HostKind::Local` at all, per SPEC.md ("the local
+    /// host can carry one too").
     #[farhelm_testtrace::test]
     async fn update_alias_accepts_the_local_row() {
         let (_dir, store) = fresh_store().await;
