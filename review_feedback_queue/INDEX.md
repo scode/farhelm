@@ -114,8 +114,6 @@ One line per open item. This file must always match the feedback files in this d
   refused as "folder replaced" and never retried.
 - `takeover-latch-misses-attaching-tabs.md` — a tab still attaching when another window takes over evicts the winner, so
   the two windows displace each other.
-- `claude-last-option-reads-idle.md` — a Claude multiple-choice question with the last option highlighted is mistaken
-  for the input box and reads Idle.
 - `claude-spinner-window-too-short.md` — the Claude spinner is searched only 6 lines above the input box, so a task list
   in between may read as Idle mid-turn.
 - `claude-spinner-rejects-multiword.md` — the Claude spinner check rejects multi-word text like "Compacting
