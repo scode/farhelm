@@ -354,28 +354,10 @@ instructions is validated with the end-to-end procedure in `deflake/EVAL.md`, a 
 
 # plans/
 
-`plans/*.md` holds plan files for TODO.md entries: temporary working documents that exist while a piece of work is
-planned but not yet done, so its shape, effort, and return can be judged before anyone commits to it. A TODO entry may
-or may not have a plan; when it does, the entry links the file and carries the plan's effort estimate as one word — low,
-medium, or high — so the board can be read at a glance without opening plans; best judgment, no precision implied, and
-the plan itself says what the word rests on. A plan file is deleted in the same PR that finishes the work, together with
-the TODO entry it served. Name the file after the work with a mnemonic slug, so the name alone says what it is about
-(`plans/deflake-attach-boundary.md`, `plans/pre-upgrade-state-backups.md`), never a number or a date.
-
-Every plan starts with the commit hash and the date of the codebase it was written against. Plans are allowed to go
-stale; that is the point of recording the anchor. They are not refreshed on every push, only when they are about to be
-used.
-
-"Make a plan for <todo item>" means: read the code the entry touches, ask the maintainer the major decisions and
-questions up front (the usual planning flow, batched rather than dribbled), then write the plan in enough detail that
-the changes are roughly known file by file and the effort can be estimated, and add the reference to the TODO entry. The
-plan is the deliverable; it does not start the work.
-
-"Execute plans/<name>.md", "build plans/<name>.md", or a request to turn a plan into a goal file means: FIRST assess how
-stale the plan is against what has changed in the repository since its anchor commit (`git log <hash>..main` over the
-paths the plan names, and the specs it relies on), re-plan whatever that movement invalidates, asking again where the
-answer changed, and only then execute or write the goal. Never feed a plan to execution or goal creation unread against
-the current tree, however recent it looks.
+`plans/` holds one plan per planned TODO entry: a goal file to execute unattended, with `plans/INDEX.md` as the
+authoritative order to execute them in. "Plan to implement <TODO items>", "execute the next plan", "drain the plans"
+(optionally "and keep monitoring"), "show the plan reports", "delete the executed plans", and "plan help" are defined in
+`plans/AGENTS.md`; read it before any of those, or before changing anything in the directory.
 
 # review_feedback_queue/
 
