@@ -16,9 +16,32 @@ but were not fixed in the review itself. One file per finding, plus an index.
 
 ## Before recording a finding
 
-Check each finding from an automated review of committed code against `FILTER.md`, and do not record one that fully
-matches a filter there. The filters never apply to findings about a change still under review, or to a problem a person
-reported or asked to have fixed.
+Every finding goes through the checks below before it is written. Triage removes covered findings anyway (see
+Lifecycle), so recording one only to have triage verify and delete it costs a human's time and buys nothing. The checks
+move that work to recording time.
+
+- Covered: do not record a finding that is fully covered by behavior SPEC.md or SPEC_impl.md explicitly accepts, by an
+  item in TODO.md's `Planned` bucket, by an item already in this queue, or by a decision already recorded for the same
+  finding in root `TRIAGE_OUTCOMES.md`. Apply the test triage applies: the trigger, the consequence, and the scope must
+  all match. Sharing a subsystem or a keyword is not enough. When only part of a finding is covered, record the
+  remainder and name what covers the rest. When a new finding adds substance to an existing queue item, extend that item
+  rather than dropping the finding or writing a duplicate.
+- Filtered: do not record a finding from an automated review of committed code that fully matches a filter in
+  `FILTER.md`. The filters never apply to findings about a change still under review, or to a problem a person reported
+  or asked to have fixed.
+
+When it is unclear whether a finding is covered, it is not covered: record it and name the spec section or item that
+might cover it, so triage makes the call. When a person asked to have the finding recorded, do not drop it silently;
+tell them what covers it and let them decide.
+
+NOTE: A finding whose consequence would put it in the `highest` bucket (security, or loss of user data, credentials,
+processes, or other user-owned work; the root `AGENTS.md` defines the buckets) is never dropped on one agent's judgment.
+Before dropping it for any of the reasons above, give an independent reviewer with fresh context, one that neither
+produced the finding nor proposed the drop, the finding, the proposed basis for dropping it, and the spec, TODO, queue,
+ledger, or filter text that basis relies on. Drop the finding only when that reviewer agrees the drop is justified. If
+the reviewer disagrees, or its verdict is ambiguous, record the finding. The same applies when it is unclear whether a
+finding belongs in the `highest` bucket: treat it as if it does. A wrongly dropped security or data-loss finding is gone
+without anyone having looked at it, while a wrongly recorded one costs a few minutes of triage.
 
 ## What goes in a feedback file
 
