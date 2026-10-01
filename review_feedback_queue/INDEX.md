@@ -82,8 +82,6 @@ One line per open item. This file must always match the feedback files in this d
   erases finished uploads' landed path or failure message.
 - `replace-drop-skips-source-delete.md` — switching away or reloading during Replace creates the replacement but never
   deletes the original, with no error.
-- `checkout-preview-blocks-read-loop.md` — typing a GitHub repo in the create dialog can freeze typing in every terminal
-  on that host while the checkout folder is scanned.
 - `repo-search-blocking-scan.md` — repository search scans the checkout folder with blocking calls its timeout cannot
   interrupt, so a slow share can stall the whole supervisor.
 - `delete-holds-attachments-lock-through-archive.md` — Delete keeps the host-wide terminal lock through checkout

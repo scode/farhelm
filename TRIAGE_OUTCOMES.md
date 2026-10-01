@@ -4510,7 +4510,8 @@
 - Completion criteria: write the principle into SPEC.md next to "Healthy local filesystems" and "Waiting between
   operations on one host", keeping the existing requirement that one session's long operations never block another
   session's terminal I/O. Remove this feedback file and its index entry, with no code change.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `rlwwkmonmqvk`, bookmark `triage-1001/12-slow-host-spec`, PR
+  https://github.com/scode/farhelm/pull/1368.
 
 ## repo-search-blocking-scan.md
 

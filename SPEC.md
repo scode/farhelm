@@ -1503,7 +1503,21 @@ release downloads or clipboard writes:
 - removing a host, which must respond promptly whatever that host is doing, if only to refuse because it is busy.
 
 Waits caused by a failing or hung filesystem are governed by [Healthy local filesystems](#healthy-local-filesystems),
-not by this section.
+and waits caused by a slow host by [Slow hosts](#slow-hosts), not by this section.
+
+### Slow hosts
+
+Confirmed 2026-10-01: a slow host is slow. Do not add complexity to compensate for a slow remote host or a slow machine
+running the helm, whether the slowness is in the filesystem, the network or elsewhere, as long as the helm itself stays
+usable: it must not freeze, and one slow host must not stop the helm serving the others. Work that is brief on a healthy
+host with ordinary amounts of data, such as scanning a folder for a checkout preview or a repository search, may take as
+long as the host, or the size of what it scans, makes it take, and it may hold up that host's other work meanwhile,
+terminal input and output included. That is accepted, not a defect.
+
+The boundary is work that is long even on a healthy host. Such an operation, whether one session's (such as a git clone)
+or the host's own (such as an install or update), must never block another session's terminal input or output; see
+[Waiting between operations on one host](#waiting-between-operations-on-one-host). Failing or hung filesystems are
+governed by [Healthy local filesystems](#healthy-local-filesystems).
 
 ### Evidence after resumability is withdrawn
 
