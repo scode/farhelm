@@ -22,11 +22,20 @@ names. Use portable runner descriptions and redacted paths/commands; never put h
 private manifests here. Distinguish a recorded executable identity from a configured or reported version. The recorder
 and retention rules are in `docs/test-run-evidence.md` and AGENTS.md.
 
-After the paragraph, add `Class: <class>` and `Cause: <confidence>` as separate paragraphs. Classes are `readiness`,
-`replay-live`, `fixture-premise`, `peer-lifecycle`, `process-interference`, `budget`, `ambiguous-observable`,
-`pointer-focus`, `substrate`, `product`, `deterministic-regression`, or `unknown`. Confidence is `established`,
-`hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new entries. Missing historical fields
-are missing evidence, not an implicit cause classification.
+Quote the failure itself when the agent recording the entry has it at hand: the assertion or panic message, the
+Playwright error, or a script's `FAIL` lines, copied verbatim from the console, the retained run's output, or a CI log
+it can read. Put it in a fenced block right after the observation paragraph, trimmed to the lines that say what failed,
+with paths and identities redacted as above; no quoted line may start with two hash signs and a space, which would read
+as a new entry. Do not reconstruct a message that was never captured; when the run lost it (an interrupted run, a
+truncated log), say so in the paragraph instead. Retained runs are private to the machine that made them and hosted CI
+artifacts expire, so without the quote a later reader often cannot tell what actually failed, or whether two
+observations are the same failure.
+
+After the paragraph (and the quoted failure, if any), add `Class: <class>` and `Cause: <confidence>` as separate
+paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lifecycle`, `process-interference`,
+`budget`, `ambiguous-observable`, `pointer-focus`, `substrate`, `product`, `deterministic-regression`, or `unknown`.
+Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
+entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
 ## 2026-09-29 — `a tab list past the island cap is listed in full but only partly attached` (e2e/tests/terminal-tabs.spec.ts)
 
