@@ -8,16 +8,18 @@
 // lands on", "--danger-strong ... [c]alibrated to clear WCAG AA (4.5:1) on
 // every row surface", "--accent ... spent on selection ... and
 // `:focus-visible`" (a non-text UI indicator, so its own floor is the 3:1
-// WCAG sets for those rather than 4.5:1). Nothing else in this repo's test
-// suite checks that those promises hold. `cargo fmt`/`clippy` and `dprint`
-// have no notion of a contrast ratio; the Playwright suite reads rendered
-// pixels and DOM state, and a pair sitting at 4.3:1 instead of 4.5:1 looks
-// identical in a screenshot to anyone not running an actual contrast
-// checker over it — which is exactly how the palette shipped with a
-// `--danger-strong`/`--bg-2` pairing under the floor in the first place
-// (fixed alongside this test). This file computes the ratio itself, from
-// first principles, so a future retune that silently drops a promised
-// pair below its floor fails here instead of shipping unnoticed again.
+// WCAG sets for those rather than 4.5:1), and "--accent ... the words of the
+// wait after a confirmed delete" (text, so 4.5:1 on every surface those
+// words land on). Nothing else in this repo's test suite checks that those
+// promises hold. `cargo fmt`/`clippy` and `dprint` have no notion of a
+// contrast ratio; the Playwright suite reads rendered pixels and DOM state,
+// and a pair sitting at 4.3:1 instead of 4.5:1 looks identical in a
+// screenshot to anyone not running an actual contrast checker over it —
+// which is exactly how the palette shipped with a `--danger-strong`/`--bg-2`
+// pairing under the floor in the first place (fixed alongside this test).
+// This file computes the ratio itself, from first principles, so a future
+// retune that silently drops a promised pair below its floor fails here
+// instead of shipping unnoticed again.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -110,16 +112,25 @@ function contrastRatio(hexA, hexB) {
 
 // The bindings the palette's `:root` comments promise, as
 // [foreground token, background token, minimum ratio]. Text pairs use
-// WCAG AA's 4.5:1. `--accent` is the non-text foreground, on `--bg-1` and
-// (further down) on `--accent-fill`: the selection bar and every
+// WCAG AA's 4.5:1. `--accent` is mostly a non-text foreground, on `--bg-1`
+// and (further down) on `--accent-fill`: the selection bar and every
 // `:focus-visible` ring are graphical indicators, not text, so WCAG's lower
-// 3:1 floor for those applies instead of the text floor.
+// 3:1 floor for those applies instead of the text floor. Its one text use,
+// the delete-wait words ("Stopping agent…") on the session's row, in its
+// header and on the terminal overlay's card, is pinned at 4.5:1 on every row
+// surface: the row can be resting, have its "⋯" menu open (`--bg-2`), be
+// selected, or be selected with its menu open (`--accent-fill-hover`) while
+// the wait shows, and the card sits on `--bg-2`. Hover does not apply: the
+// row's open button is disabled for the whole wait. The tightest
+// of the four, `--accent-fill-hover`, measured about 4.6:1 when this was
+// added, so it is the pair a retune of either token is likeliest to break.
 const ROW_SURFACES = ["--bg-1", "--bg-2", "--accent-fill", "--accent-fill-hover"];
 const REQUIRED_BINDINGS = [
   ...["--bg-0", ...ROW_SURFACES].map((bg) => ["--fg-0", bg, 4.5]),
   ...["--bg-0", ...ROW_SURFACES].map((bg) => ["--fg-1", bg, 4.5]),
   ["--fg-2", "--bg-0", 4.5],
   ...ROW_SURFACES.map((bg) => ["--danger-strong", bg, 4.5]),
+  ...ROW_SURFACES.map((bg) => ["--accent", bg, 4.5]),
   ["--accent", "--bg-1", 3],
   // `.btn`'s own text sits directly on this fill while hovered or
   // keyboard-focused (app.css's `.btn:hover:not(:disabled),

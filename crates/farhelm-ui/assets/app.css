@@ -27,9 +27,9 @@
  * chrome — menus, dialogs, forms, bands that interrupt a pane — sit one
  * step above that. The accent is a single blue, and what it may be
  * spent on is a closed list: selection, focus rings, the one filled
- * primary control a surface is allowed, and the pressed state of a row's
- * actions-menu toggle. The `:root` comments below carry the element-by-
- * element map.
+ * primary control a surface is allowed, the pressed state of a row's
+ * actions-menu toggle, and the wait after a confirmed delete. The `:root`
+ * comments below carry the element-by-element map.
  *
  * Two more rules hold the look together across surfaces, and a dialog is
  * not exempt from either. Selection is ONE construct wherever it appears
@@ -205,7 +205,9 @@
      warn, red danger). --info's sky blue
      is the near neighbor; the two are kept apart by role and weight —
      --info is a light tone that carries a WORD, the accent is a
-     saturated fill, edge, or single glyph — never a run of prose.
+     saturated fill, edge, or single glyph — never a run of prose. The
+     one place the accent carries words is the short delete-wait label
+     below, which is why --accent is pinned at 4.5:1 as text as well.
 
      What it may be spent on is a CLOSED list, not a palette: selection,
      `:focus-visible`, the one filled primary control a surface is
@@ -215,13 +217,20 @@
      dialog), and the pressed state a row's actions-menu toggle holds
      while its menu is up. Every one of those says the same thing — this
      is where you are — and that is the test anything joining the list
-     has to pass. SPEC.md requires the sidebar to mark the selected
-     session's row "readable at a glance rather than only from the
-     titlebar", and a palette that spent the accent on ordinary
+     has to pass. The one deliberate exception is the wait after a
+     confirmed delete (`.delete-progress`, the header's dot, the terminal
+     overlay's card): the maintainer chose it over red, which read as a
+     failure, and over grey, which went unnoticed before. It is kept to
+     the spinner or dot, the words, and the overlay card's edge, with no
+     row tint, so it never looks like the selection it usually sits on.
+     SPEC.md requires the sidebar to mark the selected session's row
+     "readable at a glance rather than only from the titlebar", and a
+     palette that spent the accent on ordinary
      decoration would have nothing left to make that true. */
   --accent: #5896e8; /* the accent at full strength: the selected row's inset
-                        bar, every focus ring, and the glyph of an actions-menu
-                        toggle whose menu is open */
+                        bar, every focus ring, the glyph of an actions-menu
+                        toggle whose menu is open, and the delete-wait
+                        spinner, dot, words, and overlay card edge */
   --accent-fill: #15263d; /* accent-tinted SURFACE: every selected thing (session
                              row, tab, and the launch composer's chosen
                              harness, segment, folder, and list option), and
@@ -1894,6 +1903,16 @@ samp {
   opacity: 0.5;
   cursor: default;
 }
+/* Except on the row being deleted. Its open button is disabled like every
+   other row's (the delete holds the list-wide nav lock), but it carries the
+   delete-wait spinner and words in place of the title, and those are the
+   row's only marker now that it takes no tint. Half opacity would take the
+   accent words to about 2.4:1 and make them easy to miss, which is the one
+   thing they must not be. The words themselves already say the row is not
+   an ordinary clickable one. */
+.session-row.deleting .session-row-open:disabled {
+  opacity: 1;
+}
 
 /* ===== Row actions and confirmations ============================== */
 
@@ -3218,18 +3237,24 @@ samp {
 /* A committed delete waiting on the supervisor's reply: on the session's
    row (in place of its title line), in its header (in place of the
    actions), and over its terminal (`.terminal-delete-overlay`). The wait is
-   mostly the agent handling SIGTERM, a few seconds at most. The previous
-   version of this, a small pulsing dot and a dimmed row, went unnoticed
-   even by someone looking at the list, so this one is meant to be seen: a
-   danger tint and edge on the row, a spinner, and words where the eye
-   already is. */
-.session-row.deleting {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-  box-shadow: inset 3px 0 0 var(--danger);
-}
+   mostly the agent handling SIGTERM, a few seconds at most.
+
+   It has to be seen: an earlier version, a small pulsing dot and a dimmed
+   row, went unnoticed even by someone looking at the list. So it is a
+   spinner and words where the eye already is, in the accent. Not the
+   danger red it used to be: the user just confirmed this delete, so the
+   wait is the expected outcome, and red read as if something had broken.
+   Not grey either, which is what the unnoticed version was. SPEC_impl.md
+   ("GUI: Dioxus", the accent's closed list) lists this among the accent's
+   permitted uses.
+
+   The row carries no tint or edge of its own (`.deleting` stays on it as a
+   state hook). Accent fill plus a leading bar is how a SELECTED row looks,
+   and the session being deleted is usually the selected one, so a tint
+   here would read as selection rather than as "going". */
 .delete-progress {
   align-items: center;
-  color: var(--danger-strong);
+  color: var(--accent);
   display: inline-flex;
   font-weight: 600;
   gap: 6px;
@@ -3238,8 +3263,8 @@ samp {
 }
 .delete-spinner {
   animation: farhelm-delete-spin 0.8s linear infinite;
-  border: 2px solid color-mix(in srgb, var(--danger) 30%, transparent);
-  border-top-color: var(--danger);
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
   border-radius: 50%;
   box-sizing: border-box;
   display: inline-block;
@@ -3252,7 +3277,7 @@ samp {
    carries the spinner. */
 .delete-progress-dot {
   animation: farhelm-status-pulse 2s ease-in-out infinite;
-  background: var(--danger);
+  background: var(--accent);
   border-radius: 50%;
   display: inline-block;
   flex: 0 0 6px;
@@ -3282,10 +3307,10 @@ samp {
 .terminal-delete-overlay-card {
   align-items: center;
   background: var(--bg-2);
-  border: 1px solid var(--danger);
+  border: 1px solid var(--accent);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-menu);
-  color: var(--danger-strong);
+  color: var(--accent);
   display: inline-flex;
   font-size: 15px;
   font-weight: 600;
