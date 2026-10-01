@@ -55,6 +55,11 @@ fail() {
 pass() {
   echo "ok: $1"
 }
+# The same clock as start-stack.sh's lifecycle markers, so a kill sent here
+# can be lined up against the marker showing when the stack's trap ran.
+stamp() {
+  printf '%s' "${EPOCHREALTIME:-$(date +%s)}"
+}
 
 test -x "$fixtures" || { echo "missing $fixtures — run cargo build first" >&2; exit 1; }
 test -f "$repo/target/dx/farhelm-ui/release/web/public/index.html" || {
@@ -127,7 +132,10 @@ await_stack_ready() {
   # alone proves nothing: the kill below must hit a LIVE stack, or a
   # boot self-exit would be indistinguishable from the cleanup.
   for _ in $(seq 1 30); do
-    curl -s -m 2 -o /dev/null "$port" && return 0
+    curl -s -m 2 -o /dev/null "$port" && {
+      echo "$phase: stack ready at $(stamp)"
+      return 0
+    }
     kill -0 "$spawner_pid" 2>/dev/null || break
     sleep 1
   done
@@ -203,6 +211,46 @@ report_leftovers() {
   local leftovers
   leftovers="$(state_processes "$state")"
   test -n "$leftovers" && fail "$phase: processes still reference state: $leftovers"
+  dump_stack_state "$phase" "$state"
+}
+
+# What a failed phase still has to show, captured before emergency_cleanup
+# destroys it. The only failure on record (FLAKES.md, 2026-09-25 parent
+# SIGTERM cleanup) left every service running, and the cleanup then deleted
+# the logs, so nothing said which startup step the stack was in or whether
+# its trap had run. The process tree under the script names the foreground
+# command the shell is blocked on and how long it has run (`etime`), which
+# is where a deferred trap would be waiting; the log tails show what the
+# two supervisors were doing at the time. The helm writes no log file of
+# its own: its output, and start-stack.sh's lifecycle markers, are already
+# in this run's console above.
+dump_stack_state() {
+  local phase="$1" state="$2" root pids log
+  echo "--- $phase: stack state at $(stamp) ---" >&2
+  root="${script_pid:-$spawner_pid}"
+  if test -n "$root"; then
+    # Every descendant of the script (watcher, helm, supervisors, and any
+    # foreground curl or command substitution), walked from a single
+    # snapshot of the process table rather than by matching names.
+    pids="$(ps -A -o pid=,ppid= | awk -v root="$root" '
+      { parent[$1] = $2 }
+      END {
+        keep[root] = 1
+        do {
+          grew = 0
+          for (p in parent) if (!(p in keep) && (parent[p] in keep)) { keep[p] = 1; grew = 1 }
+        } while (grew)
+        sep = ""
+        for (p in keep) { printf "%s%s", sep, p; sep = "," }
+      }')"
+    ps -o pid,ppid,pgid,stat,etime,wchan,args -p "$pids" >&2 2>/dev/null \
+      || echo "(no live process under $root)" >&2
+  fi
+  for log in "$state"/*.log; do
+    test -f "$log" || continue
+    echo "--- last 40 lines of ${log#"$state"/} ---" >&2
+    tail -n 40 "$log" >&2
+  done
 }
 
 # After a failed phase, forcibly remove that stack so later phases start
@@ -257,6 +305,7 @@ kill -KILL "$hop_pid" 2>/dev/null || true
 boot_stack "sigkill-phase" || exit 1
 state="$(stack_state)" || exit 1
 kill -KILL "$spawner_pid" || exit 1
+echo "sigkill-phase: KILL sent to spawner $spawner_pid at $(stamp)"
 wait "$spawner_pid" 2>/dev/null || true
 if await_gone "sigkill-phase" "$state"; then
   pass "spawner SIGKILL frees the stack"
@@ -273,6 +322,7 @@ script_pid=""
 boot_stack "sigterm-phase" || exit 1
 state="$(stack_state)" || exit 1
 kill -TERM "$spawner_pid" || exit 1
+echo "sigterm-phase: TERM sent to spawner $spawner_pid at $(stamp)"
 wait "$spawner_pid" 2>/dev/null || true
 if await_gone "sigterm-phase" "$state"; then
   pass "spawner SIGTERM frees the stack"
@@ -289,6 +339,7 @@ script_pid=""
 boot_stack "trap-phase" || exit 1
 state="$(stack_state)" || exit 1
 kill -TERM "$script_pid" || exit 1
+echo "trap-phase: TERM sent to script $script_pid at $(stamp)"
 # Bounded: the spawner exits only after the script does, so an unbounded
 # wait here would hang exactly when the trap under test fails.
 for _ in $(seq 1 10); do

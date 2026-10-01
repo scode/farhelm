@@ -58,6 +58,28 @@ bin="$repo/target/debug/farhelm"
 fixtures="$repo/target/debug/farhelm-fixtures"
 dist="$repo/target/dx/farhelm-ui/release/web/public"
 
+# Lifecycle markers on stderr, one line per startup step, watcher decision,
+# signal and cleanup stage, so a run whose teardown went wrong shows where
+# this script was and when (FLAKES.md, 2026-09-25 parent SIGTERM cleanup:
+# the only failure on record left every service running and no trace of
+# which step the TERM landed in). The timestamp is epoch seconds, with
+# microseconds where bash provides EPOCHREALTIME.
+#
+# Each line is written from a subshell, never by this shell itself. Once
+# Playwright dies, stderr is a pipe nobody reads, and a write there raises
+# SIGPIPE, which would kill this shell in the middle of the very cleanup the
+# orphan watcher exists to run; in a subshell it kills only the subshell. The
+# subshell moves the real stderr to fd 3 and silences its own fd 2 first, so
+# a failed write cannot print an error either; redirecting the subshell's
+# stderr from outside would also swallow the marker itself.
+# Never pass a credential to it: these lines land in retained test output.
+stack_mark() {
+  (
+    exec 3>&2 2>/dev/null
+    printf 'start-stack[%s] %s: %s\n' "$$" "${EPOCHREALTIME:-$(date +%s)}" "$*" >&3
+  )
+}
+
 test -x "$bin" || {
   echo "missing $bin — run cargo build first" >&2
   exit 1
@@ -222,8 +244,10 @@ cleanup() {
   # delivered mid-cleanup would re-enter the exit path and abort the
   # sweep below. (On the orphan path itself the watcher already exited
   # after delivering; the kill then fails silently and the wait reaps it.)
+  stack_mark "cleanup: start"
   kill "${watcher_pid:-}" 2>/dev/null
   wait "${watcher_pid:-}" 2>/dev/null
+  stack_mark "cleanup: watcher reaped; stopping services"
   kill "${helm_pid:-}" 2>/dev/null
   kill "${sup_pid:-}" 2>/dev/null
   kill "${remote_sup_pid:-}" 2>/dev/null
@@ -236,9 +260,14 @@ cleanup() {
   tmux -S "$state/tmux.sock" kill-server 2>/dev/null
   tmux -S "$remote_state/tmux.sock" kill-server 2>/dev/null
   rm -rf "$state"
+  stack_mark "cleanup: done"
 }
 trap cleanup EXIT
-trap 'exit 143' TERM INT
+# The marker records when the trap RAN, which is not when the signal
+# arrived: bash defers a trap until the foreground command it is waiting on
+# returns (a `wait` builtin is the exception). A gap between the sender's
+# timestamp and this line is that deferral.
+trap 'stack_mark "signal trap: exiting 143"; exit 143' TERM INT
 
 # The spawner's pid, for the orphan watcher below. Playwright runs this
 # script detached in its own process group and SIGTERMs that group on its
@@ -260,21 +289,37 @@ trap 'exit 143' TERM INT
 spawner_pid=$PPID
 script_name=${0##*/}
 orphan_watch() {
-  command -v ps >/dev/null 2>&1 || exit 0
+  command -v ps >/dev/null 2>&1 || {
+    stack_mark "watcher: no ps on PATH; orphan watch disabled"
+    exit 0
+  }
   while kill -0 "$spawner_pid" 2>/dev/null; do
     sleep 2
   done
+  stack_mark "watcher: spawner $spawner_pid is gone"
   # If the script itself is already gone (SIGKILL, which no trap can
   # catch), signaling $$ would hit a dead or reused pid — deliver only
   # when $$ still runs this script. PPID cannot answer that: a
   # background subshell inherits its parent's PPID instead of its own,
   # so the check reads the live command line instead.
-  case "$(ps -p "$$" -o args= 2>/dev/null)" in
-    *"$script_name"*) kill -TERM $$ 2>/dev/null ;;
+  local args
+  args="$(ps -p "$$" -o args= 2>/dev/null)"
+  case "$args" in
+    *"$script_name"*)
+      if kill -TERM $$ 2>/dev/null; then
+        stack_mark "watcher: sent TERM to $$"
+      else
+        stack_mark "watcher: TERM to $$ failed"
+      fi
+      ;;
+    # The non-matching command line is not echoed: by definition it is
+    # some other process, and its argv is none of this log's business.
+    *) stack_mark "watcher: $$ no longer runs $script_name; not signalling" ;;
   esac
 }
 orphan_watch 9>&- &
 watcher_pid=$!
+stack_mark "watcher $watcher_pid watching spawner $spawner_pid; state $state"
 
 HOME="$structured_home" SHELL="$bash_shell" GIT_CONFIG_GLOBAL="$checkout_git_config" \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=0 GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 \
@@ -389,6 +434,7 @@ FARHELM_E2E_PROVISIONING_BACKEND_DIR="$provisioning_backend" "$bin" helm run \
   --ui-dist "$dist" \
   --ensure-hosts "$ensure" 9>&- &
 helm_pid=$!
+stack_mark "helm $helm_pid started on port $port; exchanging the harness token"
 
 base="http://127.0.0.1:$port"
 auth_header="$state/harness-auth-header"
@@ -425,6 +471,7 @@ test "$authenticated" = true || {
   echo "the helm never accepted the harness web token" >&2
   exit 1
 }
+stack_mark "token exchanged; waiting for the local host to connect"
 
 # The id of the reserved local row, once its connection to the supervisor
 # above is actually up.
@@ -465,6 +512,7 @@ for host in json.load(sys.stdin)["hosts"]:
 # retry loop is long), and an orphan holding the liveness lock would
 # stall the sweep that should be reclaiming the abandoned stack.
 host="$(connected_local_host 9>&-)" || exit 1
+stack_mark "local host $host connected"
 
 # The body is built by python rather than by string interpolation because
 # the invocation carries shell quoting of its own ('$fixtures' ...) that would
@@ -485,6 +533,7 @@ print(json.dumps({
 }))
 ' "$work" "$fixtures" "$host")" || exit 1
 
+stack_mark "creating the startup session"
 curl -sS -m 30 --fail-with-body \
   -X POST "$base/api/sessions" \
   -H "@$auth_header" \
@@ -494,4 +543,5 @@ curl -sS -m 30 --fail-with-body \
   exit 1
 }
 
+stack_mark "startup complete; waiting on the helm"
 wait "$helm_pid"

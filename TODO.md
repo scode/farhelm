@@ -162,8 +162,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Browser stack parent-SIGTERM cleanup.** `scripts/test-start-stack-cleanup.sh` left the stack serving, with state and
   processes intact, after killing its spawner with SIGTERM in run `f2355071-3c67-4a7b-ba05-37f853c4a6b3`. The isolated
-  repetition `a1b6e9b1-a246-4272-8d7b-89452a3f4c45` passed unchanged. Capture watcher and startup-process state at the
-  failed cleanup boundary before changing the teardown contract.
+  repetition `a1b6e9b1-a246-4272-8d7b-89452a3f4c45` passed unchanged. Leading hypothesis (2026-10-01 review, not
+  confirmed): the kill landed while `e2e/start-stack.sh` was still in a foreground startup step, and bash defers the
+  TERM trap until that command returns, past the check's 20-second wait. One candidate step is the startup session
+  create, whose first create probes the systemd user manager under a 15-second bound; nothing yet shows which step it
+  was. `start-stack.sh` now prints timestamped lifecycle markers (each startup step, the orphan watcher's decisions,
+  when the signal trap actually ran, cleanup stages), and a failed phase dumps the stack's process tree and supervisor
+  log tails before its emergency cleanup. On the next failure, compare the watcher's `sent TERM` marker (and the check's
+  own timestamped kill of the spawner) with the `signal trap` marker, and look for a long-running foreground command in
+  the dump. A missing `sent TERM` line alone is not proof the TERM was not sent: cleanup can kill the watcher between
+  its signal and its marker. A cheap check of the mechanism is a PATH `curl` shim that delays the startup
+  `POST /api/sessions` by 25 seconds.
 
 ### Difficult deflake
 
