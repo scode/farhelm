@@ -1168,11 +1168,15 @@ Linux x86_64 with one stack phase at a time and pinned tmux 3.7c, executable SHA
 the recorder supplied only `FARHELM_TEST_TRACE_DIR`. The working tree contained pending browser-test, lint and
 formatting changes above `2c25bf3ba22719fbe3896b18270d1c0194696379`; application builds used the main-source version.
 Neither run captured watcher state at the failed boundary, so the cause remains unknown. Disposition: open (TODO.md);
-retain both observations and instrument the owned processes on recurrence.
+retain both observations. The script and the stack now record lifecycle markers and, on a failed phase, the stack's
+process tree and log tails, so the next occurrence shows which startup step the TERM landed in and whether the trap ran.
+A 2026-10-01 review of this run's timestamps put the phase-2 kill about half a second to a second after the helm
+started, inside the script's foreground startup steps, where bash defers the TERM trap until the running command
+returns; that is a hypothesis, not established.
 
 Class: unknown
 
-Cause: unknown
+Cause: hypothesis
 
 ## 2026-09-25 — Replace refusal row (e2e/tests/terminal-restart.spec.ts)
 
