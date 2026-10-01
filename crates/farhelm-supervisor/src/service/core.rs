@@ -4066,29 +4066,22 @@ pub struct Supervisor {
     pub(crate) next_transfer: AtomicU64,
     /// This binary's own path: the launch shim is a subcommand of it.
     farhelm_exe: PathBuf,
-    /// [`Self::farhelm_exe`] as a `str`, or `None` when that path is not
-    /// UTF-8 — resolved ONCE at construction rather than per launch.
+    /// [`Self::farhelm_exe`] as a `str`, resolved ONCE at construction
+    /// rather than per launch.
     ///
     /// It exists because of what the conversation hook has to do with the
     /// path: every [`crate::agent_kind::AgentIntegration::hook_argv`]
     /// implementation embeds it in a vendor's own quoting syntax through
-    /// `shell_words::quote`, which takes `&str` and nothing else. Doing
-    /// the fallible `Path`-to-`str` conversion here means the failure has
-    /// exactly one home, and the launch paths get to treat "hookable" as a
-    /// plain `Option`. Fallible rather than lossy is the whole reason this
-    /// field is an `Option`: `Path::to_str` refuses a non-UTF-8 path
-    /// outright instead of substituting replacement characters, so there
-    /// is no mangled-but-plausible path to accidentally hand a vendor.
+    /// `shell_words::quote`, which takes `&str` and nothing else.
     ///
-    /// `None` is a real, if vanishing, state and not a should-never-happen:
-    /// a farhelm installed under a non-UTF-8 path simply never has reporter
-    /// controls injected — [`Supervisor::with_hook_argv`] logs the skip.
-    /// Claude retains its scan fallback; Codex, Goose, Pi, and OMP do not
-    /// gain a new exact target. Nothing else about the launch changes,
-    /// because the shim itself is addressed by `PathBuf`
-    /// (see [`crate::launch::window_command`]) and has never needed the
-    /// path to be text.
-    farhelm_exe_str: Option<String>,
+    /// Always present: construction refuses a farhelm path that is not
+    /// valid UTF-8 (SPEC.md "Paths that are not valid UTF-8"). An earlier
+    /// version kept `None` here as a supposedly harmless degradation, on the
+    /// belief that only the hooks needed the path as text, but the launch
+    /// shim is run through a shell command line too
+    /// ([`crate::launch::window_command`]), so such a path broke every
+    /// launch.
+    farhelm_exe_str: String,
     /// Admission control for the slow handlers spawned by
     /// `handle_control` (`ListSessions`/`StopSession`/`DeleteSession` —
     /// see `HANDLER_ADMISSION_PERMITS`'s own docs). Deliberately
@@ -4934,7 +4927,6 @@ impl Supervisor {
         // database opened just below relies on this same boundary for its
         // own confidentiality (see `SessionStore::open`'s docs), so it
         // must not be opened before this call.
-        crate::ensure_private_dir(state_dir).await?;
         let farhelm_exe = if farhelm_exe.is_absolute() {
             farhelm_exe
         } else {
@@ -4944,18 +4936,26 @@ impl Supervisor {
         };
         // Derived from the ABSOLUTE spelling above, never from the
         // caller's, so the string the hook flags carry is the same path
-        // the shim is launched through. See `Supervisor::farhelm_exe_str`
-        // for why the conversion is done once here instead of at each
-        // launch, and why losing it is a degradation rather than an error.
-        let farhelm_exe_str = farhelm_exe.to_str().map(str::to_string);
-        if farhelm_exe_str.is_none() {
-            warn!(
-                exe = %farhelm_exe.display(),
-                "this farhelm executable's path is not valid UTF-8, so no launch can carry \
-                 conversation reporter controls; Claude retains record scanning, while \
-                 Codex, Goose, Pi, and OMP cannot report a new exact target"
+        // the shim is launched through. Every launch runs the shim through a
+        // shell command line built from this path, so one that is not valid
+        // UTF-8 cannot launch anything; see `Supervisor::farhelm_exe_str`.
+        // Checked before the state directory is created, so a refused start
+        // leaves nothing behind.
+        let Some(farhelm_exe_str) = farhelm_exe.to_str().map(str::to_string) else {
+            anyhow::bail!(
+                "this farhelm program's path, {}, is not valid UTF-8; Farhelm does not \
+                 support such paths, and no agent could be launched through it",
+                farhelm_exe.display()
+            );
+        };
+        if state_dir.to_str().is_none() {
+            anyhow::bail!(
+                "the supervisor state directory, {}, is not valid UTF-8; Farhelm does not \
+                 support such paths, and no agent could be launched from it",
+                state_dir.display()
             );
         }
+        crate::ensure_private_dir(state_dir).await?;
         // Store one absolute spelling after creation. Every injected
         // socket path derives from this value, so a supervisor started
         // with a relative `--state-dir` cannot hand a tab or agent a path
@@ -4963,6 +4963,18 @@ impl Supervisor {
         let state_dir = tokio::fs::canonicalize(state_dir)
             .await
             .context("resolving the supervisor state directory")?;
+        // Launch specs and sockets live under the state directory, and their
+        // paths travel as text: on the shim's command line, and in the
+        // environment of every agent and tab. Checked again after
+        // resolving, because a valid spelling can lead through a symlink to
+        // a real path that is not.
+        if state_dir.to_str().is_none() {
+            anyhow::bail!(
+                "the supervisor state directory, {}, is not valid UTF-8; Farhelm does not \
+                 support such paths, and no agent could be launched from it",
+                state_dir.display()
+            );
+        }
         crate::ensure_private_dir(&state_dir.join("launch")).await?;
         // Items 6/24: a durable sentinel (`crate::files` module docs) is
         // only as durable as ITS OWN DIRECTORY'S directory-entry — a
@@ -8927,17 +8939,17 @@ impl Supervisor {
                     // path is a stranger, and git is never pointed at it.
                     match crate::working_copies::verify_identity(&plan_row) {
                         Ok(crate::working_copies::IdentityStatus::Matches) => {
+                            let canonical_text = plan_row
+                                .canonical_path
+                                .clone()
+                                .expect("an allocated row always carries its path");
                             crate::working_copies::AcceptedDirectory {
                                 row: plan_row.clone(),
                                 identity: plan_row.path_identity.expect(
                                     "an allocated row always carries its captured identity",
                                 ),
-                                canonical_path: std::path::PathBuf::from(
-                                    plan_row
-                                        .canonical_path
-                                        .clone()
-                                        .expect("an allocated row always carries its path"),
-                                ),
+                                canonical_path: std::path::PathBuf::from(&canonical_text),
+                                canonical_text,
                             }
                         }
                         Ok(status) => {
@@ -8987,11 +8999,7 @@ impl Supervisor {
             // path (not a rollback) records it.
             if let Err(accept_error) = self
                 .store
-                .accept_working_directory(
-                    &id,
-                    &accepted.canonical_path.to_string_lossy(),
-                    &accepted.canonical_path.to_string_lossy(),
-                )
+                .accept_working_directory(&id, &accepted.canonical_text, &accepted.canonical_text)
                 .await
             {
                 return Err(self
@@ -9007,7 +9015,7 @@ impl Supervisor {
                     )
                     .await);
             }
-            cwd = accepted.canonical_path.to_string_lossy().into_owned();
+            cwd = accepted.canonical_text.clone();
             launch_cwd = cwd.clone();
             canonical_cwd = Some(cwd.clone());
             let snapshot = retained_snapshot
@@ -12967,7 +12975,7 @@ impl Supervisor {
             snapshot,
             &self.seams.agent_hooks,
             self.seams.agent_instructions,
-            self.farhelm_exe_str.as_deref(),
+            Some(self.farhelm_exe_str.as_str()),
             vendor_extension,
             session,
         )
@@ -26613,15 +26621,17 @@ exit 0
         assert_eq!(result, argv);
     }
 
-    /// A farhelm binary whose path is not UTF-8 launches un-hooked rather
-    /// than failing the launch.
+    /// The hook layer injects nothing when it is given no farhelm path as
+    /// text. (The name predates the startup refusal; the case it guards is
+    /// the hook layer's `None` contract, which a supervisor no longer
+    /// reaches.)
     ///
     /// The hook command has to be embedded in a vendor's shell-quoting
-    /// syntax, which is `&str`-only, so a path that cannot be text has no
-    /// hook to offer. The contract this pins is the DEGRADATION: capture
-    /// falls back to the record scan and everything else about the launch
-    /// is unchanged, because the shim itself is addressed by path and has
-    /// never needed the name to be text.
+    /// syntax, which is `&str`-only. A supervisor never passes `None`
+    /// today, because construction refuses a farhelm path that is not
+    /// valid UTF-8 (see `a_non_utf8_farhelm_path_or_state_dir_is_refused_at_startup`);
+    /// this pins the layer's own contract, that a missing path leaves the
+    /// argv untouched instead of inventing one.
     #[farhelm_testtrace::test]
     fn with_hook_argv_cannot_hook_a_non_utf8_farhelm_path() {
         let argv = vec!["agent".to_string()];
@@ -26636,6 +26646,52 @@ exit 0
         );
         assert!(!hooked);
         assert_eq!(result, argv);
+    }
+
+    /// A supervisor refuses to start when its farhelm program's path or
+    /// its state directory is not valid UTF-8, naming the path.
+    ///
+    /// Why it matters: every launch runs the shim through a shell command
+    /// line that names both, so either one made every create and restart
+    /// fail with a confusing exec error, while the supervisor's own log
+    /// claimed only a mild loss of conversation hooks. Farhelm does not
+    /// support such paths (SPEC.md "Paths that are not valid UTF-8"), so the
+    /// spec is a refusal at startup that says which path and why. The state
+    /// directory half needs a directory with such a name, which APFS cannot
+    /// hold, so it does not run on macOS; the program path never has to
+    /// exist.
+    #[farhelm_testtrace::test]
+    async fn a_non_utf8_farhelm_path_or_state_dir_is_refused_at_startup() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let state = StateDir::new();
+        let exe = state
+            .path()
+            .join(std::ffi::OsStr::from_bytes(b"farhelm-\xff"));
+        let refusal = match Supervisor::new_with_exe(state.path(), exe.clone()).await {
+            Err(error) => format!("{error:#}"),
+            Ok(_) => panic!("a non-UTF-8 farhelm path must not start a supervisor"),
+        };
+        assert!(
+            refusal.contains("not valid UTF-8") && refusal.contains(&exe.display().to_string()),
+            "the refusal names the program path and the reason: {refusal}"
+        );
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let state_dir = state
+                .path()
+                .join(std::ffi::OsStr::from_bytes(b"state-\xff"));
+            std::fs::create_dir(&state_dir).expect("non-UTF-8 state directory");
+            let refusal = match Supervisor::new_with_exe(&state_dir, dummy_exe()).await {
+                Err(error) => format!("{error:#}"),
+                Ok(_) => panic!("a non-UTF-8 state directory must not start a supervisor"),
+            };
+            assert!(
+                refusal.contains("not valid UTF-8")
+                    && refusal.contains(&state_dir.display().to_string()),
+                "the refusal names the state directory and the reason: {refusal}"
+            );
+        }
     }
 
     /// The opt-out a supervisor was STARTED with reaches the launch

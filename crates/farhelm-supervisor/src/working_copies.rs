@@ -262,6 +262,11 @@ pub struct AcceptedDirectory {
     pub row: WorkingCopyRow,
     pub identity: DirectoryIdentity,
     pub canonical_path: PathBuf,
+    /// [`Self::canonical_path`] as text, which the session row records as
+    /// its working directory and identity. Checked rather than converted
+    /// lossily: [`allocate`] refuses a canonical path that is not valid
+    /// UTF-8 (SPEC.md "Paths that are not valid UTF-8").
+    pub canonical_text: String,
 }
 
 /// What [`archive_move`] did.
@@ -1182,6 +1187,18 @@ pub fn allocate_with_fault(
         .canonicalize()
         .map_err(WorkingCopyError::Io)
         .map_err(AllocationFailure::PostMkdir)?;
+    // The root and basename are valid UTF-8 text, but `canonicalize`
+    // follows symlinks in the root's ancestors, so the real path can still
+    // fail to be. Recording a lossy spelling would name a directory that
+    // does not exist, and the session would be launched there.
+    let canonical_text = canonical_path.to_str().map(str::to_string).ok_or_else(|| {
+        AllocationFailure::PostMkdir(WorkingCopyError::Other(anyhow::anyhow!(
+            "checkout directory {} resolves to {}, which is not valid UTF-8; Farhelm does \
+                 not support such paths",
+            target.display(),
+            canonical_path.display()
+        )))
+    })?;
     let root_observed = observe(&root)
         .map_err(WorkingCopyError::Io)
         .map_err(AllocationFailure::PostMkdir)?;
@@ -1219,7 +1236,7 @@ pub fn allocate_with_fault(
                 root_identity.1 as i64,
                 identity.0 as i64,
                 identity.1 as i64,
-                canonical_path.to_string_lossy(),
+                canonical_text,
                 AllocationState::Planned.as_str(),
                 root_birth,
                 path_birth,
@@ -1250,6 +1267,7 @@ pub fn allocate_with_fault(
         row: fresh,
         identity,
         canonical_path,
+        canonical_text,
     })
 }
 

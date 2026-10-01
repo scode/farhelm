@@ -955,10 +955,9 @@ async fn stage_claimed(
     // worse than a refusal. It fails BEFORE any file is created.
     //
     // Defence in depth, and known to be: the only way here is a non-UTF-8
-    // state directory, and creation already refuses one (the launch spec
-    // carries the same constraint), so no session on such a directory
-    // exists to upload into — pinned by
-    // `a_non_utf8_state_directory_is_refused_before_any_session_can_exist`.
+    // state directory, and supervisor startup refuses one, so no session on
+    // such a directory exists to upload into — pinned by
+    // `a_non_utf8_state_directory_is_refused_before_a_supervisor_starts`.
     // Kept anyway because this check is one line and the alternative, if
     // that ever changes, is a client inserting a path to a file that is
     // not there.

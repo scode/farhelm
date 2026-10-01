@@ -4575,7 +4575,12 @@
   naming the path, and correct the misleading docs and warning. Sweep the remaining lossy path conversions under the
   gate above. Report the sites changed, the sites left alone with the reason, and any non-trivial sites for the user's
   decision. Add a test covering the startup refusal. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `yunmwrpmyoxz`, bookmark `triage-1001/16-non-utf8-startup`, PR
+  https://github.com/scode/farhelm/pull/1372. Two sites were left for the maintainer, who decided them on 2026-10-01,
+  and the same change carries both: a captured conversation record path that is not valid UTF-8 is not stored (the
+  identity is kept, with no location hint; `store.rs`, `record_captured_conversation`), and the program lookup skips a
+  `systemd-run` or `systemctl` under a non-UTF-8 directory and keeps searching, so a copy that only exists there counts
+  as absent (`scope.rs`, `resolve_program_in`). The PR description lists every site.
 
 ## sftp-overall-deadline-fails-slow-links.md
 

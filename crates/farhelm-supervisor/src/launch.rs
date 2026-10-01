@@ -612,6 +612,12 @@ pub fn window_command(
     // `exec` is the one literal left bare: it is this crate's own keyword,
     // and the no-preamble test pins the script as starting with it.
     let mut words: Vec<String> = scope_prefix;
+    // Both paths are valid UTF-8, so these conversions never replace
+    // anything: supervisor startup refuses a farhelm program path or state
+    // directory that is not (SPEC.md "Paths that are not valid UTF-8"), and
+    // the spec file's name under the state directory is Farhelm's own. A
+    // replaced byte here would name a program that does not exist and fail
+    // every launch, which is why that refusal exists.
     words.push(farhelm_exe.to_string_lossy().into_owned());
     words.push("internal".to_string());
     words.push("launch".to_string());

@@ -4883,6 +4883,17 @@ impl SessionStore {
     /// argument — exactly the "another writer won" case `commit_capture`
     /// already handles, so no extra branch is needed here for the report
     /// case specifically.
+    ///
+    /// A `record` path that is not valid UTF-8 is not stored: the identity
+    /// is still recorded, with `captured_record` left `NULL`. The column is
+    /// only a locator hint (see [`StoredSession::captured_record`]), and
+    /// storing a lossily converted path would save a location that does not
+    /// exist, which SPEC.md ("Paths that are not valid UTF-8") forbids. The
+    /// cost is that re-verification after a supervisor restart has nothing
+    /// to check for this session and skips it, which it already does for
+    /// rows written before the hint existed. Refusing the whole claim
+    /// instead would cost the session its resume, and the maintainer chose
+    /// this over that (2026-10-01).
     pub async fn record_captured_conversation(
         &self,
         id: &str,
@@ -4892,7 +4903,7 @@ impl SessionStore {
     ) -> anyhow::Result<Option<String>> {
         let id = id.to_string();
         let conversation = conversation.to_string();
-        let record = record.to_string_lossy().into_owned();
+        let record: Option<String> = record.to_str().map(str::to_owned);
         self.conn
             .call(
                 "capture record task panicked",
@@ -10099,6 +10110,34 @@ mod tests {
             .record_first_input("s1", 0, 3_000)
             .await
             .expect("a vanished row is not a failure");
+    }
+
+    /// A scan capture whose conversation file sits at a path that is not
+    /// valid UTF-8 keeps its identity but stores no location. The identity
+    /// is what makes Resume possible, so it must survive; the location is
+    /// only a hint for re-verification after a restart, and storing it
+    /// lossily (as this did before) saved a path that does not exist, so
+    /// every re-verification afterwards warned that the record was gone.
+    #[farhelm_testtrace::test]
+    async fn a_capture_from_a_non_utf8_record_path_keeps_the_identity_without_a_location() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        let record = Path::new(std::ffi::OsStr::from_bytes(b"/records/bad-\xff.jsonl"));
+        assert_eq!(
+            store
+                .record_captured_conversation("s1", 0, "conv-a", record)
+                .await
+                .expect("capture"),
+            Some("conv-a".to_string())
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.captured_conversation.as_deref(), Some("conv-a"));
+        assert_eq!(
+            row.captured_record, None,
+            "a location that cannot be stored unchanged must not be stored at all"
+        );
     }
 
     // -----------------------------------------------------------------
