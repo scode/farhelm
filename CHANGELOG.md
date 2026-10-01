@@ -2,7 +2,7 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
-## v0.20.0 - 2026-09-30
+## v0.20.1 - 2026-09-30
 
 ### 💥 Breaking
 
