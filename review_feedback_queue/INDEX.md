@@ -82,8 +82,6 @@ One line per open item. This file must always match the feedback files in this d
   erases finished uploads' landed path or failure message.
 - `replace-drop-skips-source-delete.md` — switching away or reloading during Replace creates the replacement but never
   deletes the original, with no error.
-- `delete-holds-attachments-lock-through-archive.md` — Delete keeps the host-wide terminal lock through checkout
-  archiving and database fsyncs, so typing everywhere on the host pauses.
 - `restart-can-still-deselect-session.md` — restarting a session can still empty the main pane or jump to another
   session; #1310 removed only one trigger.
 - `create-dialog-empty-catalog-refuses.md` — when the model catalog fails to load or is still loading,

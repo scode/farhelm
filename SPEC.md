@@ -1502,6 +1502,13 @@ release downloads or clipboard writes:
 - other hosts;
 - removing a host, which must respond promptly whatever that host is doing, if only to refuse because it is busy.
 
+"Must not wait" is about the length of those operations, not about every moment of them. Terminal input and output,
+attaching, detaching and resizing may wait briefly on bounded local work that one of those operations does under a lock
+the terminals share, such as a delete's renames, directory syncs and final database commit, or the bounded shutdown of
+the deleted session's own terminal connections; that work is expected to take moments on a healthy disk. They must never
+wait on the long parts: a clone, an install or update, a download, or the grace period a session's processes get before
+they are killed.
+
 Waits caused by a failing or hung filesystem are governed by [Healthy local filesystems](#healthy-local-filesystems),
 and waits caused by a slow host by [Slow hosts](#slow-hosts), not by this section.
 
