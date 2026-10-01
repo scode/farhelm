@@ -909,10 +909,10 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
             &parent.id,
             "--host",
             "this machine",
-            // Cloning a YOLO parent onto a sensitive host needs the override;
-            // passing it here also proves the flag reaches the helm through
-            // the relay.
-            "--allow-yolo-on-sensitive-host",
+            // Cloning a YOLO parent onto a host that asks first needs the
+            // override; passing it here also proves the flag reaches the helm
+            // through the relay.
+            "--confirm-yolo",
         ],
         &parent.id,
         &token,

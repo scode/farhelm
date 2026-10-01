@@ -1,8 +1,8 @@
-//! The loud confirmation a YOLO launch on a sensitive host asks for.
+//! The loud confirmation a YOLO launch asks for on a host that asks first.
 //!
 //! The helm refuses to start a YOLO session (an agent running without
-//! approval prompts) on a host the user has not marked safe for YOLO launches,
-//! and says so with a header only its own code sets
+//! approval prompts) on a host the user has not set to start YOLO sessions
+//! without asking, and says so with a header only its own code sets
 //! (`api::asks_yolo_confirmation`). Every GUI flow that can hit that refusal
 //! (create, replace, replace with, restart with) shows this block instead of
 //! an ordinary error. Nothing was started when it appears.
@@ -21,9 +21,9 @@
 //! names a CLI flag), and the GUI has everything it needs to say it better.
 //!
 //! Three answers. "Start YOLO session anyway" is a one-off override. "Start,
-//! and don't ask again on this host" first marks the host safe for YOLO
-//! launches (the same helm write as the host settings checkbox), then starts
-//! the same way; the flow that owns the launch does both, in that order, and
+//! and don't ask again on this host" first sets the host to start YOLO
+//! sessions without asking (the same helm write as the host settings
+//! checkbox), then starts the same way; the flow that owns the launch does both, in that order, and
 //! launches nothing if the first step fails. Cancel has the initial focus.
 //! The one-off keeps the filled danger style and the permanent choice is only
 //! outlined: a filled button draws the reflex click, and the choice that
@@ -95,7 +95,7 @@ impl YoloReason {
 /// page has moved on since.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct YoloAsk {
-    /// The host to mark safe for "don't ask again". `None` when the flow does
+    /// The host to stop asking on for "don't ask again". `None` when the flow does
     /// not know it (a session row from a helm that sent no host), in which
     /// case that button is not offered.
     pub(crate) host: Option<HostId>,
@@ -104,9 +104,9 @@ pub(crate) struct YoloAsk {
     pub(crate) reason: YoloReason,
 }
 
-/// The first step of "start, and don't ask again on this host": mark `host`
-/// safe for YOLO launches, the same helm write as the host settings
-/// checkbox.
+/// The first step of "start, and don't ask again on this host": set `host`
+/// to start YOLO sessions without asking, the same helm write as the host
+/// settings checkbox.
 ///
 /// Every flow runs this inside the task that sends its launch, before the
 /// launch and under whatever operation claim that task already holds, and

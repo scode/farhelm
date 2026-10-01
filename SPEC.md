@@ -135,12 +135,12 @@ wiping and reinstalling a supervisor produces a new host identity whose predeces
 install. Removing a host from the registry merely forgets it — the supervisor and its sessions are untouched and
 reappear on re-registration. Registry entries are editable: an SSH destination can be corrected without touching the
 host's identity or its sessions. Every host, the local one included, has a settings dialog in the GUI that holds its
-destination (SSH hosts), its alias, and whether it is safe for YOLO launches. Every host is sensitive (not YOLO safe)
-until the user explicitly marks it safe, including hosts that existed before the setting did. If a destination turns out
-to present a different identity than recorded (a wiped and reinstalled host, a recycled address), the helm says so and
-asks whether to adopt the new host or fix the destination — it never silently merges. Two destinations reaching the same
-identity are the same host, shown once. Last-known sessions of a host that is permanently gone are disposed of by
-removing the host from the registry.
+destination (SSH hosts), its alias, and whether it starts YOLO sessions without asking. Every host asks before YOLO
+launches until the user explicitly turns that off, including hosts that existed before the setting did. If a destination
+turns out to present a different identity than recorded (a wiped and reinstalled host, a recycled address), the helm
+says so and asks whether to adopt the new host or fix the destination — it never silently merges. Two destinations
+reaching the same identity are the same host, shown once. Last-known sessions of a host that is permanently gone are
+disposed of by removing the host from the registry.
 
 Exactly one helm runs at a time. Running several concurrently is unsupported in v1. The invariant supervisors enforce is
 at most one attachment per session, last attach wins — so a second helm cannot corrupt a session, but it can seize one,
@@ -439,21 +439,22 @@ Creation guards against accidental double submission (a double-click, a retry af
 yields one session or a clear error, never two silently. Deliberately creating several sessions with identical
 parameters — same directory, same profile — is a sanctioned workflow, not a duplicate to be suppressed.
 
-A YOLO launch on a sensitive host (see the host settings under Topology) needs an explicit confirmation. A launch counts
-as YOLO when its structured permission is YOLO, which makes every Pi launch one, or when its command line carries a flag
-its vendor documents as skipping approval prompts, such as `claude --dangerously-skip-permissions` or `codex --yolo`;
-Codex's sandboxed `--full-auto` does not count. The helm enforces this, so no client can skip it: every create, clone,
-replace, replace with, and restart with that reaches it on a sensitive host without the override is refused before any
-supervisor is contacted, and nothing is started. The GUI answers that refusal with a prominent confirmation, shown with
-the control or surface that started the launch and scrolled into view, that names the host, says what YOLO means and why
-this launch is one (YOLO was chosen where the harness offers other modes, the harness has no mode with approval prompts,
-or the command line turns them off), and retries with the override only when the user confirms. Besides a one-off
-confirmation it offers to stop asking for that host: that answer marks the host safe for YOLO launches first, exactly as
-its settings would, and then retries with the override; if marking the host fails, nothing is started and the
-confirmation stays up with the reason. `farhelm agent create`, `farhelm agent clone`, and `farhelm spawn` with a catalog
-selector take `--allow-yolo-on-sensitive-host` as the override. A plain restart relaunches the session's own stored
-launch and is not asked again, and so does `farhelm spawn --inherit-agent`, which reuses the asking session's launch and
-is answered by its own supervisor with no helm involved.
+A YOLO launch on a host that asks before YOLO launches (see the host settings under Topology) needs an explicit
+confirmation. A launch counts as YOLO when its structured permission is YOLO, which makes every Pi launch one, or when
+its command line carries a flag its vendor documents as skipping approval prompts, such as
+`claude --dangerously-skip-permissions` or `codex --yolo`; Codex's sandboxed `--full-auto` does not count. The helm
+enforces this, so no client can skip it: every create, clone, replace, replace with, and restart with that reaches it on
+such a host without the override is refused before any supervisor is contacted, and nothing is started. The GUI answers
+that refusal with a prominent confirmation, shown with the control or surface that started the launch and scrolled into
+view, that names the host, says what YOLO means and why this launch is one (YOLO was chosen where the harness offers
+other modes, the harness has no mode with approval prompts, or the command line turns them off), and retries with the
+override only when the user confirms. Besides a one-off confirmation it offers to stop asking for that host: that answer
+first sets the host to start YOLO sessions without asking, exactly as its settings would, and then retries with the
+override; if changing that setting fails, nothing is started and the confirmation stays up with the reason.
+`farhelm agent create`, `farhelm agent clone`, and `farhelm spawn` with a catalog selector take `--confirm-yolo` as the
+override (its earlier name, `--allow-yolo-on-sensitive-host`, is still accepted but no longer shown in help). A plain
+restart relaunches the session's own stored launch and is not asked again, and so does `farhelm spawn --inherit-agent`,
+which reuses the asking session's launch and is answered by its own supervisor with no helm involved.
 
 A session snapshots its profile at creation — launch and resume invocations and integration selection alike. Editing or
 deleting a profile affects future sessions only; existing sessions keep working unchanged.

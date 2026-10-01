@@ -350,7 +350,7 @@ async function injectYoloReplaceSession(
         status: 409,
         contentType: "text/plain",
         headers: { "x-farhelm-yolo-confirmation": "sensitive-host" },
-        body: "this machine is marked sensitive for YOLO launches; confirm with --allow-yolo-on-sensitive-host",
+        body: "this machine asks before YOLO launches; confirm with --confirm-yolo",
       });
       return;
     }
