@@ -22,6 +22,26 @@ names. Use portable runner descriptions and redacted paths/commands; never put h
 private manifests here. Distinguish a recorded executable identity from a configured or reported version. The recorder
 and retention rules are in `docs/test-run-evidence.md` and AGENTS.md.
 
+Record as much of the following as can be had without a new run, and say "unavailable" rather than guessing. Each item
+is something that has been easy to note at the time and hard or impossible to recover later:
+
+- The other tests that failed in the same run, or that this one failed alone. A cluster points at a shared cause; a lone
+  failure points at the test.
+- How long the failing attempt took next to a typical pass, whether it failed fast on an assertion or ran into a
+  timeout, and which step the run's own timestamps show stalling.
+- What else was running on the machine: other test runs or builds, load average and memory pressure where available, and
+  the tests sharing its slot. "Under load" is often suspected here and rarely measured.
+- For a dirty tree, what the uncommitted change was (a diffstat or a one-line description), and the versions of the
+  tools involved: compiler, Node, Playwright and browser builds, OS and kernel.
+- Each reproduction attempt's command, conditions (alone, under added load, with a stand-in) and result as failures out
+  of attempts. "Did not reproduce" is evidence only with its count and conditions.
+- Hypotheses ruled out, each with the observation that ruled it out.
+- The latest changes to the test, its fixture, and the code it covers, or that there were none recently.
+- Earlier entries for the same test, and how often it has passed since it was last seen, when that is known.
+- Where the full evidence lives (a retained run on one machine, or a hosted artifact) and whether it expires; copy what
+  matters into the entry before it does.
+- Values that vary between runs and could matter: ports, process IDs, seeds, test order.
+
 Quote the failure itself when the agent recording the entry has it at hand: the assertion or panic message, the
 Playwright error, or a script's `FAIL` lines, copied verbatim from the console, the retained run's output, or a CI log
 it can read. Put it in a fenced block right after the observation paragraph, trimmed to the lines that say what failed,
