@@ -104,6 +104,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `crates/farhelm-supervisor/tests/fixtures/screens/claude/` (see `docs/agent-screen-fixtures.md`); a fixture of this
   state belongs there.
 
+- **Audio signal when an agent is waiting on input.** Play a sound when a session's agent gets stuck waiting for the
+  user (a question, an approval prompt), so a user looking at something else notices without watching the sidebar.
+  Possibly other events too; which ones, and the sound, volume, and any setting to turn it off, are to be decided when
+  this is picked up.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
