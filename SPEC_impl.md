@@ -1792,16 +1792,22 @@ evidence, but cannot authorize another directory move.
   gives, SIGKILL, then confirming the unit was actually collected, because `systemctl kill` returning only proves
   delivery. The manager is probed once and the answer cached, with two exceptions. A probe that runs out of time (15
   seconds overall, 5 per query) is not an answer, since a busy manager is not an absent one: that launch runs without
-  its own scope, and the first launch at least a minute later probes again. A definite negative stays cached, except
+  its own scope, and the first launch or teardown at least a minute later probes again. Teardown waits out that minute
+  too (decided 2026-09-30): Stop, Restart, Delete and tab close on a session or tab whose scope is recorded (a scoped
+  launch row, a tab window marked as opened in a scope, or an unmarked tab of a scoped session) refuse until it has
+  passed, because a scope that cannot be checked is an unconfirmed cleanup (below), and the periodic reaping of dead
+  tabs warns on each tick for the same reason. Probing again for every such teardown would cost up to the probe's 15
+  seconds each while the manager stays slow, which is what the minute exists to avoid; a timed-out probe is rare, and a
+  retry after the minute probes again and succeeds once the manager answers. A definite negative stays cached, except
   that teardown with evidence of a scope gets one re-probe: a unit its durable row says was scoped, a tab whose window
-  records that it was opened in a scope, and a tab with no record either way (skipped quietly if the manager is still
-  unusable, since nothing shows it ever had a scope). The sweep ALWAYS runs afterwards as the backstop, and is the whole
-  mechanism where no user manager exists — a missing manager never degrades stop below the sweep's guarantees. A broken
-  one does not silently pass either: for a scoped launch or tab, a scope that cannot be confirmed collected fails the
-  operation even when the sweep found nothing (SPEC.md, Lifecycle operations), since the scope is what catches the
-  processes the sweep cannot see. A wrapper that fails runs before the shim can write its exec-failure sentinel, so the
-  supervisor classifies that shape (a launch spec nothing ever consumed, on a dead pane, for a scoped launch) as
-  **error** rather than letting it masquerade as a plain exit.
+  records that it was opened in a scope, an unmarked tab of a scoped session, and an unmarked tab of an unscoped session
+  (skipped quietly if the manager is still unusable, since nothing shows it ever had a scope). The sweep ALWAYS runs
+  afterwards as the backstop, and is the whole mechanism where no user manager exists — a missing manager never degrades
+  stop below the sweep's guarantees. A broken one does not silently pass either: for a scoped launch or tab, a scope
+  that cannot be confirmed collected fails the operation even when the sweep found nothing (SPEC.md, Lifecycle
+  operations), since the scope is what catches the processes the sweep cannot see. A wrapper that fails runs before the
+  shim can write its exec-failure sentinel, so the supervisor classifies that shape (a launch spec nothing ever
+  consumed, on a dead pane, for a scoped launch) as **error** rather than letting it masquerade as a plain exit.
 
   Terminal tabs also receive separate scopes, named from the session and tab IDs. A tab has no database row, so whether
   its open selected a scope is recorded as an option on its tmux window, and closing the tab decides from that whether

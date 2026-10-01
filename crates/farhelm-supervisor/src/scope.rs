@@ -105,7 +105,10 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 /// a definite negative is. The launch that met it runs unscoped, and a later
 /// launch tries again once this has passed. One fixed interval, not a
 /// backoff: the cost it bounds is one probe round trip per interval on the
-/// create path of a host whose manager keeps timing out.
+/// create path of a host whose manager keeps timing out. Teardown with a
+/// recorded scope deliberately waits it out as well (and so refuses inside
+/// it) rather than probing again per teardown; SPEC_impl.md's scope paragraph
+/// records that decision and why.
 const TIMED_OUT_REPROBE_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Poll interval while waiting for a unit to appear or disappear.
