@@ -43,8 +43,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `pi-resume-downgrade-on-read-error.md` — Pi and OMP resume checks destroy a valid locator when the session file merely
-  fails to read.
 - `plain-retry-erases-pending-fresh-window.md` — plain retry downgrades a pending fast reconnect to a slow probe.
 - `sftp-overall-deadline-fails-slow-links.md` — sftp transfer's 60 s overall deadline fails slow links
   deterministically.

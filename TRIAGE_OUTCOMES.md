@@ -4307,3 +4307,269 @@
   ack the finding named and the other sends review found with the same stall: `UploadStarted`, cancellation during a
   chunk write, before staging and at commit, and the success reply after publication. Change `syplqxsvvurm`, bookmark
   `pr/upload-send-cancellable`, draft PR [#1207](https://github.com/scode/farhelm/pull/1207/changes).
+
+## pi-resume-downgrade-on-read-error.md
+
+- Outcome: `other`.
+- Assessment: confirmed by current-code inspection at 35076d8. `verify_report_only_resume` still folds a read error
+  (`Err`) into the not-verified arm and durably replaces the stored locator with a fileless token, so a transient read
+  error of the session file permanently withdraws the Resume offer for that Pi or OMP session. The match is FILTER.md
+  filter "Rare edge cases in harnesses without first-class support": Pi and OMP are not first-class harnesses, the
+  trigger (a transient read error or torn read at restart) is rare, and the whole consequence is a missing Resume offer
+  for the affected session. Nothing is resumed into the wrong conversation, and the conversation file on disk is intact.
+- Decision: skipped under the triage rule for findings covered by a review filter. On 2026-10-01 the user also decided
+  that Claude Code and Codex are the first-class harnesses, that support for other harnesses is intentionally partial,
+  and that gaps there are expected and not worth raising in review. This item is filtered, not fixed.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## desktop-reauth-remount-loses-action.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at 35076d8. `retry_desktop_request` (`crates/farhelm-ui/src/api.rs`)
+  calls `require_desktop_webview_reauth()` before sending the retried request. That bumps the generation the desktop
+  bootstrap gate watches, and the gate stops rendering `AppBody` (`crates/farhelm-ui/src/auth.rs`), which drops the
+  component-scoped task awaiting the retry. The first Delete, Stop, restart, rename or create after a token rotation in
+  the desktop app therefore ends with an unknown outcome and no message. The cancellation of component-scoped tasks on
+  unmount is the reviewer's account of Dioxus behavior and was not reproduced at runtime.
+- Decision: the user chose (b) from the sign-in product question of 2026-10-01, stated as a spec principle. The desktop
+  app is the primary supported surface. Signing in again after a token rotation may reset the page and lose open forms,
+  dialogs and drafts, and browser sign-in friction is acceptable; no significant complexity is spent preserving UI state
+  across it. What still holds: an action the user started is never lost silently (it completes and reports, or reports
+  that its outcome is unknown), sign-in recovery never crashes the window or leaves it dead, and a failed desktop
+  re-sign-in can be retried. The principle may be revisited later.
+- Completion criteria: add the principle to SPEC.md (and SPEC_impl.md if the mechanism needs recording). Make the
+  desktop credential refresh not cancel the request it retries, for example by deferring the webview re-authentication
+  until the retried response is in hand, so the triggering action reports its outcome. Add regression coverage where the
+  desktop seam allows it. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## desktop-reauth-failure-dead-end.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at 35076d8. The only caller of `require_desktop_webview_reauth()` is
+  the native 401 retry path in `crates/farhelm-ui/src/api.rs`, and the bootstrap gate's failure branch renders a single
+  error paragraph with no retry control or timer. A transient failure of the desktop webview's re-authentication
+  therefore leaves the window on that error until the app is relaunched. The trigger (a transient failure coinciding
+  with a token rotation) is plausible but not reproduced.
+- Decision: under the sign-in principle recorded for `desktop-reauth-remount-loses-action.md`, a failed desktop
+  re-sign-in must be retryable. Keep it simple.
+- Completion criteria: give the failure state a way out (a Retry control that restarts the authentication, and/or an
+  automatic retry with backoff for transient failures), keeping a terminal error only for causes that cannot be retried.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## seen-toggle-report-panics-after-unmount.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at 35076d8. The manual read/unread toggle's completion report calls
+  `errors.write()` on the session list's signal (`crates/farhelm-ui/src/list/view.rs`, around line 2649) from a task
+  that outlives the list. If the list has unmounted (desktop re-sign-in, or the browser token prompt), the write panics.
+  The panic follows from dioxus-signals' `write()` unwrapping `try_write()`, per the reviewer; not reproduced at
+  runtime.
+- Decision: under the sign-in principle, recovery must never crash the window. The fix is small.
+- Completion criteria: make the report tolerate a dropped signal (`try_write()` and drop the update), and document on
+  the report type that a report can run after its caller unmounted. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## hosts-panel-leaks-page-lock.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at 35076d8. The hosts panel's shared request runner still takes the
+  page-wide operation lock with a bare `ops.claim()` (`crates/farhelm-ui/src/hosts.rs:879`) and releases it by hand at
+  the end of a component-scoped task. A browser token prompt raised by another request unmounts the panel and drops the
+  task, so after re-login every lock-gated control silently refuses until reload. Browser only: in the desktop app,
+  re-sign-in remounts `AppBody`, which owns the lock, so the lock is rebuilt.
+- Decision: the user chose to fix it because the fix is easy. The trigger is rare and browser-only, so no significant
+  complexity is to be spent on it.
+- Completion criteria: switch the runner to the self-releasing `claim_guard()` form and move the guard into the spawned
+  task. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## profile-popup-leaks-page-lock.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at 35076d8. The profile save and delete handlers still take the page
+  lock with a bare `ops.claim()` (`crates/farhelm-ui/src/profiles.rs:1437` and `:1544`), with the same browser re-login
+  failure as `hosts-panel-leaks-page-lock.md`. Browser only.
+- Decision: as for `hosts-panel-leaks-page-lock.md`: fix, because it is easy; no significant complexity.
+- Completion criteria: switch both handlers to `claim_guard()` and move the guard into the spawned task, taking it after
+  the save handler's local validation early returns (or letting those returns drop it). Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## codex-last-option-reads-idle.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection against the real capture
+  `crates/farhelm-supervisor/tests/fixtures/screens/codex/0.159.0/waiting-trust.txt`. Its dialog ends with
+  `› 1. Trust and continue`, `2. Back to Agent Command Center` and the `enter continue · esc back` footer.
+  `codex_dialog_may_be_open` (`crates/farhelm-supervisor/src/agent_kind/screen_reader.rs`) requires a numbered option
+  below the `›` row, so with the highlight on option 2 it decides no dialog is open and never checks the footer. The
+  highlighted-last-option screen itself is not captured, but it follows from the captured dialog.
+- Decision: the user decided on 2026-10-01 that Claude Code and Codex are the first-class harnesses. A clear, definite
+  gap in their activity detection is fixed. Activity tracking, session tracking and similar integration features for
+  other harnesses are intentionally partial; gaps there are expected and not worth raising in code review. This may
+  improve later. That principle goes into SPEC.md with this item.
+- Completion criteria: state the first-class principle in SPEC.md (FILTER.md's harness filter is review-only and does
+  not substitute for it). Accept a numbered option above the `›` row as evidence of a menu, or require every row from
+  `›` down to be an option or a known footer. Add a fixture-derived test with the last option highlighted. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## codex-working-backstop-never-matches.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection against the real captures
+  `crates/farhelm-supervisor/tests/fixtures/screens/codex/0.159.0/working-*.txt`. Each ends with two footer rows (the
+  model/context line, then `← for agents · ? for shortcuts`). `codex_composer_bounds`
+  (`crates/farhelm-supervisor/src/agent_kind/mod.rs`) requires the second-to-last line to be blank padding, so it
+  returns `None` on every real working screen, and the screen-text "Working" backstop never fires.
+- Decision: a clear, definite gap in a first-class harness's activity detection, so it is fixed under the principle
+  recorded for `codex-last-option-reads-idle.md`.
+- Completion criteria: locate the composer by its `›` prompt row followed only by blank or indented rows, allow the
+  blank rows the real fixtures show between the status line and the prompt, and test against the real `working-*.txt`
+  fixtures with an empty title. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## claude-last-option-reads-idle.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection against the real capture
+  `crates/farhelm-supervisor/tests/fixtures/screens/claude/2.1.285/waiting-question.txt`. Option 4 (`Chat about this`)
+  sits directly under a `─` rule, and the highlighted option renders as `❯ 1. Tea` at column 0. `claude_input_box_rule`
+  (`crates/farhelm-supervisor/src/agent_kind/screen_reader.rs`) takes the last `❯` row under a rule as the input box,
+  and its comment assumes menus never draw `❯` under a rule, which this screen contradicts. The one inferred premise is
+  that a highlighted option 4 renders like the captured highlighted option 1; no capture shows it.
+- Decision: treated as a clear, definite gap in a first-class harness under the principle recorded for
+  `codex-last-option-reads-idle.md`.
+- Completion criteria: require the input box's full shape (rule, `❯` row, closing rule), or check for the dialog footer
+  before accepting a box candidate. Add the highlighted-last-option variant as a fixture-derived test, and correct the
+  comment's assumption. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## claude-spinner-window-too-short.md
+
+- Outcome: `discard`.
+- Assessment: unverified. The claim depends on Claude Code drawing a task list of five or more rows between its spinner
+  and its input box; no captured screen shows that layout.
+- Decision: only clear, definite gaps in Claude Code or Codex activity detection are fixed. This one rests on an
+  uncaptured layout, so it is discarded for now.
+- Completion criteria: remove this feedback file and its index entry, with no code or spec change.
+- Execution: `pending`.
+
+## claude-spinner-rejects-multiword.md
+
+- Outcome: `discard`.
+- Assessment: the code does reject multi-word activity text (a unit test pins it), but the claim that Claude Code draws
+  a multi-word spinner line such as `✻ Compacting conversation… (…)` is unverified; no captured screen contains it.
+- Decision: not a clear, definite gap, so it is discarded for now, as for `claude-spinner-window-too-short.md`.
+- Completion criteria: remove this feedback file and its index entry, with no code or spec change.
+- Execution: `pending`.
+
+## pi-reporter-asset-not-renamed.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at 35076d8. The Pi asset is still published as
+  `integrations/pi/farhelm-conversation-v1.ts` (`crates/farhelm-supervisor/src/pi_extension.rs`), its source changed in
+  ce5ea14 (#811, first released in v0.13.0) without a rename, and `materialize_asset` refuses an existing file whose
+  bytes differ. Every host that ran Pi before v0.13.0 launches Pi without the extension: no conversation capture, so no
+  Resume, and no `farhelm agent` instructions pointer. FILTER.md's harness filter does not apply, because the trigger is
+  deterministic rather than rare.
+- Decision: fix the code and add the test. The user is the only existing user, so no special handling, migration or
+  cleanup for hosts already carrying the stale file is wanted.
+- Completion criteria: publish the current Pi asset under a new file name (for example `farhelm-conversation-v2.ts`),
+  update any spec or doc text naming the Pi file, and add a test that ties each published asset's bytes to its file name
+  (a pinned hash or a content-derived name), so a content change without a rename fails. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## checkout-preview-blocks-read-loop.md
+
+- Outcome: `fix spec`.
+- Assessment: not re-verified in code. As described, the GitHub checkout preview scans the checkout folder inline on the
+  supervisor connection's read loop. It stalls other sessions' terminals only when that scan is slow (a slow network
+  share or a very large folder); on a healthy host it is a short scan.
+- Decision: the user decided on 2026-10-01 that a slow host is slow. No complexity is spent compensating for a slow
+  remote host, or a slow helm machine, whether the slowness is in the filesystem or elsewhere, as long as the helm
+  itself does not freeze or become unusable. Within one host, separate sessions should still stay independent, because
+  even a healthy host can take a while over some operations: terminal input being blocked behind a large operation such
+  as a git clone is not acceptable. This item's whole consequence is slowness, so the principle covers it. The principle
+  goes into SPEC.md with this item.
+- Completion criteria: write the principle into SPEC.md next to "Healthy local filesystems" and "Waiting between
+  operations on one host", keeping the existing requirement that one session's long operations never block another
+  session's terminal I/O. Remove this feedback file and its index entry, with no code change.
+- Execution: `pending`.
+
+## repo-search-blocking-scan.md
+
+- Outcome: `fix spec`.
+- Assessment: not re-verified in code. As described, GitHub repository search scans the checkout folder with blocking
+  calls on async workers; it can stall the supervisor only when listing or stat-ing that folder is slow.
+- Decision: covered by the slow-host principle recorded for `checkout-preview-blocks-read-loop.md`.
+- Completion criteria: if that item's spec change has landed, confirm it covers this case. Otherwise land the principle
+  here. Remove this feedback file and its index entry, with no code change.
+- Execution: `pending`.
+
+## delete-holds-attachments-lock-through-archive.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by current-code inspection at 35076d8, with the materiality unmeasured. Delete takes the
+  host-wide terminal attachments lock (`crates/farhelm-supervisor/src/service/teardown.rs`, around line 450) only after
+  the process sweep and its grace periods. It holds the lock through stopping forwarders, the tmux kill, quarantine
+  renames, checkout archive moves with parent-directory fsyncs, and the final database commit, then releases it around
+  line 833. All of that is short local work on a healthy disk, not a long operation like a clone. SPEC.md's "Waiting
+  between operations on one host" currently says terminal input must not wait on a delete of any session, which this
+  contradicts as written.
+- Decision: under the slow-host principle recorded for `checkout-preview-blocks-read-loop.md`, brief, bounded local work
+  under the shared terminal lock is acceptable, and a slow disk is just slow. Long operations must still not block other
+  sessions' terminals.
+- Completion criteria: clarify "Waiting between operations on one host" so that terminal I/O may wait on brief, bounded
+  local work (such as a delete's renames, fsyncs and database commit), but never on long operations or kill grace
+  periods. Remove this feedback file and its index entry, with no code change.
+- Execution: `pending`.
+
+## restart-cwd-lossy-non-utf8.md
+
+- Outcome: `fix spec+code`.
+- Assessment: not re-verified in code beyond the finding's trace. Create records the canonical working directory with
+  `to_string_lossy`, and the restart/create-retry check re-resolves it the same way and launches into the lossy text.
+  When the real target is not valid UTF-8, tmux falls back to `$HOME` and the restart reports success. The tmux fallback
+  is tmux behavior, cited by the reviewer.
+- Decision: the user decided on 2026-10-01 that paths that are not valid UTF-8 are not supported. They must be refused
+  clearly at every surface, and a path must never be silently corrupted. That principle goes into SPEC.md with this
+  item. A complexity gate applies; see `non-utf8-farhelm-path-breaks-launch.md` for the sweep.
+- Completion criteria: state the principle in SPEC.md. Use strict conversion for the canonical working directory at
+  create and in the restart/retry identity check, and refuse with a clear message. Add a test with a symlink to a
+  non-UTF-8 directory. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## non-utf8-farhelm-path-breaks-launch.md
+
+- Outcome: `fix code`.
+- Assessment: not re-verified in code beyond the finding's trace. `window_command` builds the launch shell command with
+  lossy conversions of the farhelm binary path and the launch-spec path, so a non-UTF-8 binary path or state directory
+  makes every launch exec a nonexistent file, while the field docs and the startup warning claim only degraded capture.
+- Decision: under the non-UTF-8 principle recorded for `restart-cwd-lossy-non-utf8.md`. The user chose to include a
+  sweep of the codebase's remaining lossy path conversions in this work, with a complexity gate. Change a site only when
+  refusing or blocking is clearly right and the fix is simple. Leave a site alone when that is not clear (for example,
+  lossy text in logs or display is usually fine). Anything non-trivial goes back to the user for judgment rather than
+  being fixed under the literal "never" rule.
+- Completion criteria: refuse a non-UTF-8 farhelm binary path or state directory at supervisor startup with a message
+  naming the path, and correct the misleading docs and warning. Sweep the remaining lossy path conversions under the
+  gate above. Report the sites changed, the sites left alone with the reason, and any non-trivial sites for the user's
+  decision. Add a test covering the startup refusal. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## sftp-overall-deadline-fails-slow-links.md
+
+- Outcome: `fix spec`.
+- Assessment: already fixed in code on main. #888 (4cb7fd7) replaced the fixed overall deadline with a stall timeout
+  that renews on verified growth of the remote temporary file (`TRANSFER_IDLE_TIMEOUT`), and #1143 (5d9ff14) replaced
+  the sftp upload with `ssh … cat` for every payload upload. Add and update share the same upload step. The specs do not
+  yet state the rule.
+- Decision: the user wants SPEC.md to require that payload transfers during both host add/install and update have no
+  fixed overall timeout and time out only on stalls, matching the download path.
+- Completion criteria: add that requirement to SPEC.md. No code change is needed unless execution finds a transfer on
+  either path that still has a fixed overall deadline. Remove this feedback file and its index entry.
+- Execution: `pending`.
