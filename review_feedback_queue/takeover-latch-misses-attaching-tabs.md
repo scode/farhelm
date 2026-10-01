@@ -40,3 +40,8 @@ keeps its snapshot and a take-control action instead of reattaching. The suggest
 mounted terminals whose attach has not yet been confirmed (not yet proved attached, or socket not yet open), and paint
 the "Detached: <reason>" banner with the reclaim button on those and on the cancelled pending ones, the same way
 `sync()` already does for tabs it discovers while latched.
+
+Related: `new-tab-mount-displaces-owner-during-recovery.md` (from a second review) has the same root with a different
+trigger: a view whose sockets were dead during the takeover never latches, and its reconciler mounts a newly appeared
+tab on the displacing route after connectivity returns. The fix here (have the latch also unmount unconfirmed attaches)
+does not cover that case, because no latch ever fires; the two are best fixed together.
