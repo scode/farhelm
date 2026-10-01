@@ -89,12 +89,20 @@ exact failing-test selections in run `51f444c3-d0db-4e33-bd27-32b6d429c3a7`. The
 `2c25bf3ba22719fbe3896b18270d1c0194696379` with unchanged RC application builds. Both used one browser worker and zero
 retries, locale `C.UTF-8`, and scrubbed ambient `FARHELM_*`; only recorder-owned `FARHELM_TEST_TRACE_DIR` was supplied.
 Tmux executable identity is unavailable because these runs did not record it. The original interruption left no final
-assertion report, so the failed geometry condition and cause remain unknown. Disposition: open (TODO.md); reproduce with
-retained layout measurements before changing the bounds assertion.
+assertion report, so at the time the failed geometry condition and cause were unknown. Disposition: ignored on
+2026-10-01 as most likely not a failure at all. A later review of the retained run found that it ended by interruption:
+its manifest records outcome `interrupted` and recorder exit 130, and the generic recorder mode forwarded SIGINT to the
+run and SIGKILLed it two seconds later. Playwright 1.62's list reporter marks a test that was running when the run is
+interrupted with the same `✘` and elapsed time as a failure, and prints the "interrupted" summary only after webServer
+teardown, which the SIGKILL cut off. This test is the last test line in the console, and no replacement worker started
+after it, as one did after every real failure earlier in that log. The test passed in the rerun above and in both full
+deflake sweeps on 2026-09-29, and its source is unchanged since. A real fast failure in the same 1.8 s is not ruled out,
+but nothing supports it. Browser runs through `record-test-run.py --runner playwright` record per-test outcomes, which
+tells an interrupted test from a failed one.
 
-Class: unknown
+Class: ambiguous-observable
 
-Cause: unknown
+Cause: hypothesis
 
 ## 2026-09-25 — `working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone` (crates/farhelm-supervisor/src/working_copies.rs)
 
@@ -103,12 +111,27 @@ passed immediately afterward in isolation. Retained full run `131912d5-0ee2-4313
 `c44ac1bf-bcce-49b0-8a44-5d9633c5172f`; tested commit `6f238ccab7ed8420f78c896ba1ed207947b03cdd` with the
 lifecycle-harness tree dirty. Selection was `workspace Rust targets` versus the exact test, both with four nextest slots
 and zero retries, pinned tmux 3.7c executable SHA256 `9a78dcb53a791edaf7de8ba3a9a65544d14c5a88e99bd69d3f1f12b60fc41e11`,
-locale `C.UTF-8`, and ambient `FARHELM_*` scrubbed. The cause is unknown; retain the full-run failure and investigate
-the concurrent filesystem premise before changing reconciliation behavior. Disposition: open (TODO.md).
+locale `C.UTF-8`, and ambient `FARHELM_*` scrubbed. At the time the cause was unknown, and the entry asked to
+investigate the concurrent filesystem premise before changing reconciliation behavior. Disposition: fixed by #1046,
+which landed on 2026-09-27, after this run. The test removes the checkout directory and then creates the "stranger" at
+the journaled destination with `create_dir_all`, which first creates an intermediate `.archive` directory. On its own,
+`.archive` takes the removed checkout's freed inode; but when a concurrent test frees a lower-numbered inode at any
+point after the checkout was created, `.archive` takes that one instead and the stranger gets the removed checkout's
+inode number. The code at this commit, which identified a directory by device and inode alone, took the stranger for the
+already-archived checkout and returned `Ok(MetadataComplete)` instead of `IdentityMismatch`. A 2026-10-01 analysis
+reproduced it at `6f238ccab7ed8420f78c896ba1ed207947b03cdd` by running the whole `working_copies` test module rather
+than the test alone (exact test 0 of 20; module 5 of 60 in hunt batch `8571e023-cbb0-4b96-87a3-c0c1e3e6c171`, and 3 of
+40 with the test instrumented to print identities in batch `52db9b77-7098-4607-9003-d15a35013a9e`); in the instrumented
+batch all three failures printed the stranger's identity equal to the recorded one and the result
+`Ok(MetadataComplete)`. #1046 added the directory's birth time to its identity, and the same module passed 60 of 60 at
+`541cc3dbee0e22e71ccad1b0b396561a6a523899` (batch `52d9f40f-448e-424f-a98d-1f5c7c1a352d`). The residual exposure is two
+directories created within one coarse clock tick, or a filesystem that reports no birth time, where identity falls back
+to device and inode and this test is as exposed as before; the tick case matters most to
+`a_recreated_checkout_directory_is_a_different_object`, which saw inode reuse in 45 of those 60 runs and no failure.
 
-Class: process-interference
+Class: product
 
-Cause: unknown
+Cause: established
 
 ## 2026-09-02 — `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` (crates/farhelm/tests/e2e)
 
