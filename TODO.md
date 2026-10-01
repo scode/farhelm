@@ -611,6 +611,10 @@ are large mostly because of their tests.
   dropping the scroll-freeze workaround and getting Ghostty's own grapheme and SGR handling. First step is a one- or
   two-day spike mounting ghostty-web in the island under WebKit.
 
+- **"Learn more" links from the GUI to the docs.** Once the official documentation lives at a stable URL, add direct
+  "Learn more…" style links in various places in the GUI that point at the relevant documentation page. Which places get
+  one is to be decided when this is picked up.
+
 ## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
