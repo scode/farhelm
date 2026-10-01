@@ -38,22 +38,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   startup, or session creation; the earlier carve-out that assumed these never overlap was dropped on 2026-09-28. Share
   the relevant locks and revalidate removal targets under them, or refuse, so none of these can race uninstall's checks
   and deletion. Prefer the simplest mechanism that gives a correct result.
-- **Accept a leftover uninstall receipt after the install directory moves.** On macOS, an interrupted
-  `farhelm uninstall` leaves `~/Applications/.Farhelm.app.uninstall-receipt`, a copy of the bundle's ownership record,
-  so a retry can finish. Before building `Farhelm.app`, `scripts/install.sh` checks that receipt with
-  `record_file_is_ours "$pending_receipt" "$pir_canonical"`, an exact match of the directory the record names against
-  this installation's canonical directory, and refuses the bundle step for any other receipt with "was left by an
-  interrupted farhelm uninstall and is not this installation's record ... (or delete it if that installation is gone)".
-  The bundle's own record gets a wider rule (#1278): `bundle_record_moved_here` also accepts a record naming a directory
-  that now resolves to this one (the old `~/.local/bin` replaced by a symlink, a renamed home) or that provably no
-  longer holds an installation (`path_provably_absent`), with `bundle_record_dir` parsing the record. The receipt check
-  never got that rule, so after such a move an interrupted uninstall's receipt is refused as foreign, and the message
-  points the user at "that installation", which is this one. Fix: give `bundle_record_dir` a variant that takes the
-  record file's path (as `record_file_is_ours` was split out of `bundle_record_is_ours`), accept the receipt when the
-  moved-here rule accepts it, and delete it after the rebuild the same way an exact-match receipt is deleted today.
-  Cover it in `scripts/test-install-sh.sh` next to the existing leftover-receipt cases, and update the leftover-receipt
-  paragraph in `docs/install_uninstall.md`. Low severity: the refusal is over-cautious, never destructive, and deleting
-  the receipt by hand recovers. Found while rebasing the review-feedback stack onto #1278.
+- **Uninstall after a move when the installer skipped the app.** On macOS, after the install directory moves
+  (`~/.local/bin` replaced by a symlink, a renamed home, a different `FARHELM_INSTALL_DIR`), `farhelm uninstall` refuses
+  until the installer is re-run from the new directory: the install directory's own ownership record, and the app's
+  record (or the receipt an interrupted uninstall leaves beside it), name the old path, and the uninstaller requires
+  each to name this installation's directory in its exact physical spelling (`field_path` and `inspect_bundle_at` in
+  `crates/farhelm/src/uninstall/ownership.rs`; `receipt_paths_require_exact_physical_spelling` pins it). Re-running the
+  installer rewrites both records (the app's by its moved-here rule, extended to the leftover receipt on 2026-09-30), so
+  the documented remedy works. What is left: a re-run that skips or fails the app step (`FARHELM_NO_APP_BUNDLE=1`, a
+  held or failed app lock) rewrites the directory's record but not the app's, and uninstall then refuses the app.
+  Porting the installer's moved-here rule to the uninstaller was considered and stopped, since accepting an alias or a
+  vanished directory in the step that deletes the app reverses that deliberate rule. Decide whether that leftover is
+  worth a change, or drop this entry.
 
 - **"Replace with" a gh: checkout refused because the checkout path exists.** Using "replace with" to switch a session
   to a `gh:` fresh checkout was refused with an error saying to pick a different session name because the git checkout

@@ -162,10 +162,13 @@ resolve the problem and rerun the same command. Already-removed files do not by 
 
 An interrupted macOS removal may leave `~/Applications/.Farhelm.app.uninstall-receipt` so the next attempt can recognize
 the remaining directories safely. Leave that file in place for the retry; successful bundle removal clears it. If you
-reinstall the same installation instead of retrying, the installer removes the file once it has built a new bundle. A
-file it cannot attribute to the installation being installed, such as one left by another installation's interrupted
-uninstall, makes the installer exit with an error before building the bundle, after the executables are already updated:
-finish that installation's uninstall first, or delete the file if that installation is gone. If only tidying the final
-executable-directory ownership record fails after the CLI is gone, uninstall reports the leftover record without
-treating the software removal as failed. Successful uninstall retains user data and does not mean every trace of Farhelm
-has been erased.
+reinstall the same installation instead of retrying, the installer removes the file once it has built a new bundle. That
+includes an installation whose directory has moved since (the file names a directory that now resolves to this one, or
+that no longer holds an installation), by the same rule the installer applies to the bundle's own record. A file it
+cannot attribute to the installation being installed, such as one left by another installation's interrupted uninstall,
+makes the installer exit with an error before building the bundle, after the executables are already updated: finish
+that installation's uninstall first, or delete the file if that installation is gone. `farhelm uninstall` refuses after
+the install directory moves until the installer is re-run from the new directory, which rewrites the ownership records
+it checks; then uninstall. If only tidying the final executable-directory ownership record fails after the CLI is gone,
+uninstall reports the leftover record without treating the software removal as failed. Successful uninstall retains user
+data and does not mean every trace of Farhelm has been erased.
