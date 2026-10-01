@@ -2450,7 +2450,14 @@ rollback is needed.
 On Linux, setup's existing managed-unit parser and removal machinery select services whose recorded executable resolves
 to this installation. Custom and other-installation units, drop-ins and linger remain untouched. Services are disabled
 and stopped before their unit files or executables are removed. The operation does not examine effective overrides or
-processes. Manual shutdown and excluding concurrent install, update, setup and startup remain operator prerequisites.
+processes. Manual shutdown remains an operator prerequisite. Concurrent install, update and setup (and on macOS desktop
+startup) are excluded by locks (`crates/farhelm/src/uninstall/locks.rs` and `lock_and_recheck` in uninstall.rs), taken
+after the confirmation rather than before it: the installer's two locks are directories, which nothing removes when a
+process dies, so holding them across the prompt would turn a Ctrl-C there into stale locks. Uninstall's install lock is
+shaped like the installer's own (a 0700 directory holding only `pid`), so an installer that finds it refuses while
+uninstall runs and clears it as stale after a crash. On Linux uninstall checks no runtime locks: it stops setup's
+services itself, after which only a process the user started by hand could hold them, which stopping is already the
+operator's job.
 
 The confirmation preview is flushed before mutation, and subsequent progress is buffered so an output-pipe failure does
 not interrupt removal midway. Filesystem and service failures retain the CLI, report concrete paths and operation

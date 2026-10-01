@@ -203,6 +203,8 @@ class InstalledUninstall(unittest.TestCase):
         self.assertFalse((self.install_dir / "farhelm-desktop").exists())
         self.assertFalse(self.bundle.exists())
         self.assertTrue(self.install_dir.is_dir())
+        # Uninstall's install lock never outlives it (see the lock interplay test).
+        self.assertFalse((self.install_dir / ".farhelm-install.lock").exists())
         self.assertEqual(self.data.read_bytes(), b"retained private fixture data")
 
     def test_fresh_preview_and_remove(self):
@@ -218,6 +220,40 @@ class InstalledUninstall(unittest.TestCase):
         self.assert_success(self.run_child([str(cli), "uninstall", "--yes"]))
         self.assert_removed()
         self.assertEqual(sentinel.read_bytes(), b"leave me alone")
+
+    def test_install_lock_interplay(self):
+        """Uninstall's install lock and the installer's exclude each other.
+
+        Why: SPEC.md ("Concurrent and interrupted runs") requires a correct
+        outcome when uninstall overlaps an install or update. Uninstall takes
+        the installer's own lock (a 0700 directory holding a `pid` file), so
+        the real installer must read a lock of that shape with a live pid as
+        "another run is going" and refuse, must clear one left by a dead
+        process (a crashed uninstall) as stale, and uninstall must refuse
+        while the lock is held. Spec: all three, against the actual shell
+        installer and installed CLI.
+        """
+        cli = self.install()
+        lock = self.install_dir / ".farhelm-install.lock"
+        lock.mkdir(mode=0o700)
+        (lock / "pid").write_text(f"{os.getpid()}\n")
+        refused_install = self.run_child(["/bin/sh", str(self.installer)], env=dict(
+            self.env, FARHELM_INSTALL_TEST_BASE_URL=self.url + "/current", FARHELM_VERSION=self.version))
+        self.assertNotEqual(refused_install.returncode, 0)
+        self.assertIn(b"already running", refused_install.stderr)
+        refused_uninstall = self.run_child([str(cli), "uninstall", "--yes"])
+        self.assertNotEqual(refused_uninstall.returncode, 0)
+        self.assertIn(b".farhelm-install.lock", refused_uninstall.stdout + refused_uninstall.stderr)
+        self.assertTrue(cli.is_file(), "a refused uninstall removes nothing")
+        # A dead owner: the pid of a child that has already been reaped.
+        dead = subprocess.run(["/bin/sh", "-c", "echo $$"], stdout=subprocess.PIPE, check=True)
+        with self.assertRaises(ProcessLookupError, msg="premise: the recorded owner is dead"):
+            os.kill(int(dead.stdout), 0)
+        (lock / "pid").write_text(dead.stdout.decode())
+        self.install()
+        self.assertFalse(lock.exists(), "the installer clears a lock left by a dead run")
+        self.assert_success(self.run_child([str(cli), "uninstall", "--yes"]))
+        self.assert_removed()
 
     def test_upgrade_custom_install_then_remove(self):
         """One upgrade supplies uninstall even when the old CLI never supported it."""

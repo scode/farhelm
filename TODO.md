@@ -33,11 +33,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Coordinate uninstall with installation, setup, and runtime startup.** SPEC.md's "Concurrent and interrupted runs"
-  now requires a correct outcome (refusing is fine) when uninstall overlaps installation, updates, setup, desktop
-  startup, or session creation; the earlier carve-out that assumed these never overlap was dropped on 2026-09-28. Share
-  the relevant locks and revalidate removal targets under them, or refuse, so none of these can race uninstall's checks
-  and deletion. Prefer the simplest mechanism that gives a correct result.
 - **Uninstall after a move when the installer skipped the app.** On macOS, after the install directory moves
   (`~/.local/bin` replaced by a symlink, a renamed home, a different `FARHELM_INSTALL_DIR`), `farhelm uninstall` refuses
   until the installer is re-run from the new directory: the install directory's own ownership record, and the app's

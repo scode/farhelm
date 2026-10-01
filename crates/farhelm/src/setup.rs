@@ -378,7 +378,56 @@ fn known_drop_in_directories(unit_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
 /// confirmation. Preview avoids both the directory lock and all mutating
 /// manager commands; a real run retains the old uninstall retry behavior by
 /// reloading whenever a reachable manager was part of the plan.
+///
+/// Test-only since `farhelm uninstall` took its lock early: uninstall now
+/// pairs [`lock_for_selected_services`] with
+/// [`remove_selected_services_locked`], and this wrapper keeps the setup
+/// tests' lock-then-remove shape in one call.
+#[cfg(test)]
 pub(crate) fn remove_selected_services(
+    plan: &SelectedServicePlan,
+    dry_run: bool,
+    units: &mut dyn UnitManager,
+    report: &mut String,
+) -> anyhow::Result<()> {
+    let _lock = if dry_run {
+        None
+    } else {
+        lock_for_selected_services(plan)?
+    };
+    remove_selected_services_locked(plan, dry_run, units, report)
+}
+
+/// Take setup's unit-directory lock for a plan from
+/// [`preflight_selected_services`], or `None` when the plan needs none (no
+/// reachable manager, or no unit directory and nothing selected; locking
+/// would then create `~/.config/systemd/user` for a CLI-only uninstall).
+///
+/// Exposed so `farhelm uninstall` can hold the lock from before it re-checks
+/// the plan until the services are removed, which keeps `farhelm helm setup`
+/// from rewriting a unit in between; [`remove_selected_services_locked`] is
+/// the removal to pair it with, since a second flock on a new descriptor
+/// would refuse the caller's own lock.
+pub(crate) fn lock_for_selected_services(
+    plan: &SelectedServicePlan,
+) -> anyhow::Result<Option<SetupLock>> {
+    if !plan.manager_available {
+        return Ok(None);
+    }
+    let directory_absent = plan.selected.is_empty()
+        && !plan
+            .unit_dir
+            .try_exists()
+            .with_context(|| format!("inspecting service directory {}", plan.unit_dir.display()))?;
+    if directory_absent {
+        return Ok(None);
+    }
+    lock_unit_directory(&plan.unit_dir).map(Some)
+}
+
+/// [`remove_selected_services`] for a caller that already holds the lock
+/// from [`lock_for_selected_services`] (or knows none is needed).
+pub(crate) fn remove_selected_services_locked(
     plan: &SelectedServicePlan,
     dry_run: bool,
     units: &mut dyn UnitManager,
@@ -387,16 +436,6 @@ pub(crate) fn remove_selected_services(
     if !plan.manager_available {
         return Ok(());
     }
-    let directory_absent = plan.selected.is_empty()
-        && !plan
-            .unit_dir
-            .try_exists()
-            .with_context(|| format!("inspecting service directory {}", plan.unit_dir.display()))?;
-    let _lock = if dry_run || directory_absent {
-        None
-    } else {
-        Some(lock_unit_directory(&plan.unit_dir)?)
-    };
     remove_service_files(&plan.unit_dir, &plan.selected, true, dry_run, units, report)
 }
 
@@ -951,7 +990,7 @@ fn require_service_command(
 ///
 /// `--dry-run` does not take it: it writes nothing to serialize, and a
 /// preview should never be refused because somebody else is mid-install.
-struct SetupLock {
+pub(crate) struct SetupLock {
     /// Kept open because closing it releases the lock. Nothing reads it.
     _file: std::fs::File,
 }
@@ -2425,6 +2464,42 @@ mod tests {
             std::fs::read_to_string(&custom).unwrap(),
             "[Service]\nExecStart=/usr/local/bin/custom-helm\n"
         );
+    }
+
+    /// Uninstall holds setup's lock from its re-check through the removal,
+    /// and the removal it pairs with does not try to lock again.
+    ///
+    /// Why: `farhelm uninstall` takes this lock before re-checking the
+    /// service plan so `farhelm helm setup` cannot rewrite a unit between
+    /// the check and the removal (SPEC.md, "Concurrent and interrupted
+    /// runs"); a removal that locked again on a new descriptor would refuse
+    /// uninstall's own lock. Spec: with the lock held, a second setup's lock
+    /// attempt refuses, the paired removal disables and deletes the selected
+    /// units, and the lock is free again once dropped.
+    #[farhelm_testtrace::test]
+    fn uninstall_holds_setup_lock_through_the_paired_removal() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        write_selected_service(&fixture.unit_dir().join(SUPERVISOR_UNIT_NAME), &selected);
+        let mut units = fixture.manager();
+        let plan = preflight_selected_services(
+            std::slice::from_ref(&selected),
+            &fixture.unit_dir(),
+            &mut units,
+        )
+        .unwrap();
+        let held = lock_for_selected_services(&plan)
+            .unwrap()
+            .expect("a reachable manager with a unit directory needs the lock");
+        let refusal = lock_unit_directory(&fixture.unit_dir())
+            .err()
+            .expect("a second setup refuses while uninstall holds the lock");
+        assert!(refusal.to_string().contains(LOCK_FILE), "{refusal:#}");
+        remove_selected_services_locked(&plan, false, &mut units, &mut String::new()).unwrap();
+        assert!(!fixture.unit_dir().join(SUPERVISOR_UNIT_NAME).exists());
+        drop(held);
+        lock_unit_directory(&fixture.unit_dir()).expect("released on drop");
     }
 
     /// A reload-only retry must not create configuration directories on a

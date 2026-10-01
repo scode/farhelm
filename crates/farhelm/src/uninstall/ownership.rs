@@ -46,14 +46,14 @@ pub(crate) struct InspectionInputs {
 /// Paths are derived from fixed names below a verified root. Metadata is kept
 /// apart from payloads, and `cli` remains separately identified because it
 /// must be the final flat artifact removed for an ordinary retry to work.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct OwnershipPlan {
     pub(crate) flat: FlatPlan,
     pub(crate) bundle: BundleInspection,
 }
 
 /// Verified ownership information for the selected standalone directory.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct FlatPlan {
     pub(crate) root: PathBuf,
     pub(crate) cli: PathBuf,
@@ -63,7 +63,7 @@ pub(crate) struct FlatPlan {
 }
 
 /// macOS bundle inspection result, including the fact that it was impossible.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum BundleInspection {
     NotApplicable,
     UninspectedWithoutHome,
@@ -84,7 +84,7 @@ pub(crate) enum BundleInspection {
 /// `files` never includes the receipt. `directories` is deepest-first and
 /// ends with the app root, so a remover can delete exactly these entries
 /// without recursively inventing authority over an unexpected child.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct BundlePlan {
     pub(crate) root: PathBuf,
     pub(crate) files: Vec<PathBuf>,
