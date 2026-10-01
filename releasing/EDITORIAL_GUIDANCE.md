@@ -26,3 +26,8 @@ with in place.
 - Something users can newly do or see belongs under Added, even when its PR was typed `fix`. The v0.19.0 terminal-link
   hover, which shows where a link really goes, came from a `fix:` PR and a `kind: fixed` fragment, and moved to Added.
   (Prompted by the v0.19.0 curation, 2026-09-29.)
+- Open an entry with what the user sees or can do, not with an umbrella word like "changes" or "improvements" that only
+  makes sense once the list after it has been read. The v0.20.0 draft's "Changes that happen on a host by themselves now
+  show up almost at once…" left the reader confused until the end; it became "The app now shows almost at once, instead
+  of up to three seconds later, when an agent's status changes, an agent exits, …". (Prompted by the v0.20.0 curation,
+  2026-09-30.)
