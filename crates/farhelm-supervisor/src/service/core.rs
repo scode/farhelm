@@ -388,6 +388,11 @@ pub struct SupervisorTimeouts {
     /// also widening this one can end up with a sink-ready wait shorter
     /// than the respawn attempt it is meant to cover.
     pub sink_ready: Duration,
+    /// See [`super::terminals::DELETE_SINK_REAP_WAIT`]: how long Delete waits
+    /// for a session sink's orderly shutdown before it kills the session's
+    /// tmux session anyway. Here so tests can reach that fallback without
+    /// waiting out the production budget.
+    pub delete_sink_reap: Duration,
     /// See [`AGENT_UPCALL_TIMEOUT`]. The one entry here that bounds a wait
     /// on the PEER rather than on tmux or a socket write — the supervisor
     /// is the client for the duration of an agent request. Counts only the
@@ -422,6 +427,7 @@ impl Default for SupervisorTimeouts {
             tmux_exchange: crate::tmux::CONTROL_EXCHANGE_TIMEOUT,
             tmux_pane_list: crate::tmux::PANE_LIST_TIMEOUT,
             sink_ready: SINK_READY_TIMEOUT,
+            delete_sink_reap: super::terminals::DELETE_SINK_REAP_WAIT,
             agent_upcall: AGENT_UPCALL_TIMEOUT,
             agent_deliver: AGENT_DELIVER_TIMEOUT,
             agent_fence_retain: AGENT_FENCE_RETAIN_TIMEOUT,
