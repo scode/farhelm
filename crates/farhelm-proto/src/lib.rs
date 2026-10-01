@@ -1622,7 +1622,7 @@ pub enum TerminalSelector {
     /// The agent's own terminal — the AGENT-MARKED window, which is
     /// window 0 in practice (creation order) but is resolved by its
     /// marker, never by position: PLAN_M4.md item 2 makes rediscovery
-    /// marker-based because pane processes inherit `TMUX` and can
+    /// marker-based because anything that reaches the private server can
     /// conjure windows the supervisor never made. The only terminal
     /// that existed before M4.
     #[default]
