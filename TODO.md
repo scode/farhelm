@@ -217,6 +217,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   dialog that explains what removal will do, and add a "don't ask again in the future" option. Same direction as the
   host-add dialog entry above.
 
+- **Install Claude and Codex on a host for the user.** Offer to install Claude Code and Codex (only those two) on a host
+  on the user's behalf, always through each vendor's one-line curl installer, and optionally copy the user's credentials
+  for them over to the host. Choosing to copy credentials must come with a warning that it is the user's call, including
+  the risk that a provider bans the account for use across hosts. Offer it in two places: as an action in the host's
+  pop-up menu, and as an opt-in option (off by default) when adding a host. Relatedly, adding a host should probe it
+  once Farhelm's own installation there is complete.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
