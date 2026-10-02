@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `merged-list-crowded-by-one-host.md` — a remote host reporting 500 future-dated or top-sorting sessions pushes every
-  other host's sessions out of the merged list.
 - `sessions-changed-hint-unthrottled.md` — the helm does not rate-limit "sessions changed" hints, so a hostile host can
   drive back-to-back refreshes and fleet-wide re-reads.
 - `claude-resume-template-selector-collision.md` — Claude's derived resume command keeps an original `--continue`,

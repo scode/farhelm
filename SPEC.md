@@ -1767,9 +1767,9 @@ determine that default for other hosts. The temporary agent-requested create/clo
 influence over user-driven session creation.
 
 Failures or malicious behavior from a remote host must not disrupt unrelated hosts or ordinary helm/GUI controls, apart
-from the explicitly permitted operations above. Supervisors need sensible recovery from ordinary failures; they need not
-defend their availability against hostile processes with the same local account authority. Choose proportionate remedies
-rather than assuming a quota or scheduling architecture is required.
+from the explicitly permitted operations above and the exceptions below. Supervisors need sensible recovery from
+ordinary failures; they need not defend their availability against hostile processes with the same local account
+authority. Choose proportionate remedies rather than assuming a quota or scheduling architecture is required.
 
 Session ownership is one deliberate exception. When a host reports a session id that another host already owns, the helm
 cannot tell which of the two is telling the truth, so it refuses to route any operation on that session (terminal, stop,
@@ -1779,6 +1779,14 @@ their agents keep running. That loss of access is the accepted response, because
 after a host's cache is cleared by removing and re-adding it or by adoption, whichever host lists an id first would own
 it, so a hostile host could quietly receive the terminal input, uploads, and stops meant for the real one. Removing the
 misbehaving host is the remedy; the refusal clears on the next refresh after it stops claiming the ids.
+
+Confirmed 2026-10-01: removing the host is the general remedy for a misbehaving host whose effect is limited to what the
+helm and the GUI show. A host may crowd or clutter those views so that other sessions are hard to reach, for example by
+reporting enough sessions that sort first to push every other host's sessions out of the merged all-hosts list (which is
+capped), and so out of agents' fleet listings, which have no per-host option. In the GUI, per-host views still show the
+others, routing by session id still reaches them, and removing the host restores the list. Farhelm is not required to
+defend against that. What must still be prevented is a host breaking the helm itself or affecting the security of other
+hosts.
 
 ### Ownership during cleanup and provisioning
 
