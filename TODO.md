@@ -42,6 +42,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Running sessions keep WindowServer busy and drain the battery.** On a MacBook, the desktop app held WindowServer at
+  roughly 40-50% CPU whenever sessions were running, even with the visible terminal idle and the window hidden; turning
+  on macOS Reduce Motion made it stop. The cause is the running-status pulse (`ease-in-out infinite`), which makes the
+  compositor redraw every display frame. Make every looping animation stepped (at most 10 changes a second), pause them
+  all while the window is unfocused or hidden, keep Reduce Motion static, and write the rule into the specs. Plan:
+  `plans/stepped-animations.md`.
 - **Remove heuristic conversation-identity fallbacks.** Decided 2026-10-01: Farhelm identifies an agent's conversation
   only from the harness's own explicit report (a hook, plugin, extension, or whatever reporting mechanism that harness
   needs), never from heuristics that cannot be relied upon. Remove Claude's record scan (`agent_kind/capture.rs`,
