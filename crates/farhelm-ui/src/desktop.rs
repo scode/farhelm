@@ -858,10 +858,24 @@ fn not_connected_in_time(spawned: bool) -> anyhow::Error {
 /// current one. An identity refusal is NOT fixed by stopping a hand-started
 /// supervisor: the identity lives in the shared state directory, so the
 /// app's own supervisor would report the same one on the next launch. The
-/// message says so instead of sending the user round that loop. The real
-/// remedies (adopting the reported identity on a mismatch; fixing the
-/// supervisor so it identifies itself when it reports none) are in a window
-/// this startup path never opens.
+/// message says so instead of sending the user round that loop.
+///
+/// On this path a mismatch has essentially one cause: the helm and the
+/// supervisor share `state_dir`, so the identity the helm recorded and the
+/// one the supervisor minted can only part ways when the two databases in
+/// it stop being a pair — one restored from a backup, replaced, or deleted
+/// (a deleted supervisor database mints a fresh identity) without the
+/// other. The message names that cause and the files rather than the
+/// abstract state. Adopting the reported identity is deliberately not
+/// offered: it is in a window this startup path never opens, and the
+/// maintainer chose a clear message over more machinery for a state that
+/// takes manual file surgery to reach. The remedy says to stop every
+/// supervisor for the directory first because one already running keeps the
+/// database open and the identity it read at startup, so even after the
+/// files are swapped it would keep reporting the old identity and the next
+/// launch would be refused again. A supervisor that reports
+/// no identity gets no remedy here: fixing it happens in a window this
+/// startup path never opens.
 fn local_supervisor_refusal(
     hosts: &[crate::Host],
     state_dir: &Path,
@@ -894,9 +908,12 @@ fn local_supervisor_refusal(
         }
         crate::HostPhase::IdentityMismatch { recorded, reported } => format!(
             "the {label} in {dir} reports identity {reported}, but this machine's host entry \
-             recorded {recorded}. The supervisor's data in {dir} no longer matches what this \
-             app recorded for this machine, so restarting the supervisor or this app will not \
-             change it."
+             recorded {recorded}. The supervisor's database (supervisor.db) and this app's own \
+             (helm.db) in {dir} no longer describe the same install, which happens when one of \
+             them is restored from a backup or replaced without the other, or when \
+             supervisor.db is deleted. Restarting this app alone will not change it. To fix \
+             it, quit Farhelm, make sure no supervisor is still running for {dir}, and restore \
+             both files from the same backup."
         ),
         crate::HostPhase::IdentityUnverified { recorded } => format!(
             "the {label} in {dir} reports no identity, but this machine's host entry recorded \
@@ -1333,10 +1350,12 @@ mod tests {
     /// spawns nothing and used to wait out its 30 s deadline, then fail with
     /// "managed local supervisor did not connect", naming neither the cause
     /// nor what to do, on every launch. Specified: each refusing state yields
-    /// a message carrying its details; when the app spawned nothing the
-    /// message is not "managed" and tells the user to stop the supervisor
-    /// they started; any other state of the local host, and a refusing state
-    /// on another host, leave startup waiting.
+    /// a message carrying its details; when the app spawned nothing a version
+    /// skew's message is not "managed" and tells the user to stop the
+    /// supervisor they started; an identity mismatch names the two databases
+    /// that disagree and says to restore both from the same backup with no
+    /// supervisor running; any other state of the local host, and a refusing
+    /// state on another host, leave startup waiting.
     #[farhelm_testtrace::test]
     fn a_refusing_local_supervisor_ends_startup_with_its_state_and_remedy() {
         let dir = Path::new("/home/someone/.local/state/farhelm");
@@ -1397,9 +1416,20 @@ mod tests {
         )
         .expect("an identity mismatch is a refusal");
         assert!(mismatch.contains("id-recorded") && mismatch.contains("id-reported"));
+        for expected in [
+            "supervisor.db",
+            "helm.db",
+            "no supervisor is still running",
+            "restore both files from the same backup",
+        ] {
+            assert!(
+                mismatch.contains(expected),
+                "the mismatch must name its likely cause ({expected:?}): {mismatch:?}"
+            );
+        }
         assert!(
             !mismatch.contains("Stop the supervisor") && !mismatch.contains("managed"),
-            "stopping a supervisor cannot fix an identity the state directory holds: {mismatch:?}"
+            "the mismatch remedy is restoring the pair, not the version-skew advice: {mismatch:?}"
         );
         let unverified = local_supervisor_refusal(
             &[host(
