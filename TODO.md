@@ -103,6 +103,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   of its own. The maintainer knows the cause and can fix it up by hand, but the clone flow for these sessions needs
   improving. Details TBD.
 
+- **Clone then gh: should pick a fresh session name and checkout directory.** When the user clones a session and enters
+  `gh:some/repo` as the clone's target, Farhelm should allocate a new session name and checkout directory for it. Today
+  the default experience is an error saying the checkout conflicts with the existing one. Closely related to the entry
+  above on clones reusing the original working copy. Details TBD.
+
 - Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
   restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.
 
