@@ -2603,6 +2603,12 @@ pub(crate) fn SessionView(
                 div {
                     class: "terminal-panes",
                     "data-deleting": if header_deleting { "true" } else { "false" },
+                    // What terminal.js's page-wide drop guard shows when a
+                    // drop lands on a pane no live terminal takes (a
+                    // terminal catching up or reconnecting is hidden, so the
+                    // drop reaches the pane): the same refusal a
+                    // disconnected terminal gives, from its one definition.
+                    "data-drop-refusal": crate::attachments::DETACHED_TEXT,
                     // The delete in flight, over the terminal where the eye
                     // is: the row and header say it too, but a user looking
                     // at the terminal would otherwise see nothing until the
@@ -2690,6 +2696,12 @@ pub(crate) fn SessionView(
                                     "this session reports more than {MAX_MOUNTED_TAB_ISLANDS} terminal tabs; \
                                      this one is listed but not attached (close some to attach it)"
                                 }
+                                // No terminal here, so nothing paints this
+                                // line but terminal.js's page-wide drop
+                                // guard: a file dropped on this pane gets the
+                                // "not connected" refusal like any other pane
+                                // with no live terminal.
+                                div { class: "attach-status" }
                             }
                         }
                     }

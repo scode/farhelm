@@ -527,7 +527,7 @@ const UNREADABLE_TEXT: &str = "{name} could not be read, so nothing was uploaded
 /// "an attachment must never disappear silently" failure SPEC.md forbids.
 /// No `{name}`: a payload can carry several files, and the reason has
 /// nothing to do with which.
-const DETACHED_TEXT: &str =
+pub(crate) const DETACHED_TEXT: &str =
     "this terminal is not connected, so nothing was attached — reconnect and try again";
 
 /// An upload that finished after its terminal lost its socket.

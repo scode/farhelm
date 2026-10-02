@@ -1206,6 +1206,150 @@ test("a payload dropped on a detached terminal is refused instead of uploaded", 
   }
 });
 
+/**
+ * Fire a dragover and a drop at `target` (an element handle's selector, or
+ * the element `elementFromPoint` found, marked by `data-stray-drop-target`),
+ * carrying one file or plain text, the way the engine would if the user
+ * dropped there. Reports whether each was cancelled and the drop effect the
+ * dragover chose. A plain `Event` with a stand-in `dataTransfer`, as
+ * `dispatchPayload` does, because WebKit will not build a populated
+ * `DataTransfer` for a synthetic event.
+ */
+async function dispatchStrayDrop(
+  page: Page,
+  selector: string,
+  kind: "file" | "text" = "file",
+): Promise<{ dragoverCancelled: boolean; dropCancelled: boolean; dropEffect: string }> {
+  return page.evaluate(({ selector, kind }) => {
+    const target = document.querySelector(selector);
+    if (!target) throw new Error(`no element ${selector}`);
+    const file = new File(["stray"], "stray.txt", { type: "text/plain" });
+    const data =
+      kind === "file"
+        ? {
+            items: [{ kind: "file", type: "text/plain", getAsFile: () => file, webkitGetAsEntry: () => null }],
+            files: [file],
+            types: ["Files"],
+            dropEffect: "unset",
+            getData: () => "",
+          }
+        : { items: [], files: [], types: ["text/plain"], dropEffect: "unset", getData: () => "dragged text" };
+    const fire = (type: string) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", { value: data });
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    const dragoverCancelled = fire("dragover");
+    const dropEffect = data.dropEffect;
+    return { dragoverCancelled, dropCancelled: fire("drop"), dropEffect };
+  }, { selector, kind });
+}
+
+// Why this matters: a terminal's own drop handling lives on its element,
+// which is hidden while it catches up or reconnects, so a file dropped on a
+// recovering terminal reaches the pane behind it instead, and a drop can
+// land anywhere else on the page too. Nothing cancelled the browser's
+// default there, and a web page's default for a dropped file is to open it,
+// taking the app, every terminal and every upload with it.
+//
+// Spec: while the agent terminal is hidden in a held catch-up, the element
+// a drop on its pane actually hits (found by hit-testing, not assumed) is
+// outside the terminal; a file dragged there is allowed ("copy", so the
+// engine delivers the drop), cancelled, and answered with the "not
+// connected" refusal in that pane; the refusal is gone once the same
+// terminal finishes catching up and is revealed (no remount repaints it).
+// A file dragged anywhere else, text field included, is cancelled with drop
+// effect "none"; plain text dragged onto a text field is left to the
+// browser, which inserts it there.
+test("a file dropped where no live terminal takes it is refused, never opened by the page", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  let id: string | undefined;
+  try {
+    // Hold the agent terminal's catch-up open: it stays hidden, mounted and
+    // connected, until the test releases it (see `replayControls`).
+    await page.addInitScript(() => {
+      (window as any).__farhelmTestReplay = { holdMarker: true, idleMs: 60_000 };
+    });
+    const session = await createTabSession(request, `attach-stray-${Date.now()}`);
+    id = session.id;
+    await page.goto("/");
+    await page.locator(`[data-session-id="${session.id}"]`).click();
+    await expect
+      .poll(
+        () => page.evaluate(() => (window as any).__farhelmIslands?.["terminal"]?.test?.replay?.heldReason ?? null),
+        { timeout: 60_000, message: "test premise: the agent terminal's catch-up is being held" },
+      )
+      .toBe("marker");
+    await expect
+      .poll(() => page.evaluate(() => getComputedStyle(document.getElementById("terminal")!).visibility))
+      .toBe("hidden");
+
+    // Where a real drop on the pane's middle lands while the terminal is
+    // hidden: some element of the pane, outside the terminal.
+    const hit = await page.evaluate(() => {
+      const pane = document.querySelector('.terminal-pane[data-terminal="agent"]')!;
+      const box = pane.getBoundingClientRect();
+      const found = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      if (!found) return "nothing";
+      if (document.getElementById("terminal")!.contains(found)) return "terminal";
+      if (!pane.contains(found)) return "outside";
+      found.setAttribute("data-stray-drop-target", "");
+      return "pane";
+    });
+    expect(hit, "test premise: a drop on the pane misses the hidden terminal").toBe("pane");
+
+    const onPane = await dispatchStrayDrop(page, "[data-stray-drop-target]");
+    expect(onPane).toEqual({ dragoverCancelled: true, dropCancelled: true, dropEffect: "copy" });
+    const refusal = page.locator('[data-terminal="agent"] .drop-refusal');
+    await expect(refusal).toBeVisible();
+    await expect(refusal).toContainText("not connected");
+
+    const elsewhere = await dispatchStrayDrop(page, "body");
+    expect(elsewhere).toEqual({ dragoverCancelled: true, dropCancelled: true, dropEffect: "none" });
+
+    await page.evaluate(() => {
+      const field = document.createElement("textarea");
+      field.id = "stray-drop-field";
+      document.body.appendChild(field);
+    });
+    expect(await dispatchStrayDrop(page, "#stray-drop-field", "file"), "a file over a text field").toEqual({
+      dragoverCancelled: true,
+      dropCancelled: true,
+      dropEffect: "none",
+    });
+    expect(await dispatchStrayDrop(page, "#stray-drop-field", "text"), "text over a text field").toEqual({
+      dragoverCancelled: false,
+      dropCancelled: false,
+      dropEffect: "unset",
+    });
+
+    // The same terminal finishes catching up and is revealed: the refusal
+    // about it goes, though nothing remounted to repaint its status line.
+    await page.evaluate(() => {
+      const win = window as any;
+      win.__strayDropHeldWs = win.__farhelmIslands["terminal"].ws;
+      win.__farhelmIslands["terminal"].test.releaseCatchUp();
+    });
+    await expect
+      .poll(() => page.evaluate(() => getComputedStyle(document.getElementById("terminal")!).visibility))
+      .toBe("visible");
+    expect(
+      await page.evaluate(() => {
+        const win = window as any;
+        return win.__farhelmIslands["terminal"].ws === win.__strayDropHeldWs;
+      }),
+      "test premise: the reveal is the same terminal, not a remount",
+    ).toBe(true);
+    await expect(refusal).toHaveCount(0);
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
 // The other side of the same seam: the terminal was live when the upload
 // started and gone by the time it finished. The file is real and published
 // by then, so the honest answer is to hand the user its path rather than
