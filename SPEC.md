@@ -1526,6 +1526,14 @@ or the host's own (such as an install or update), must never block another sessi
 [Waiting between operations on one host](#waiting-between-operations-on-one-host). Failing or hung filesystems are
 governed by [Healthy local filesystems](#healthy-local-filesystems).
 
+### Paths that are not valid UTF-8
+
+Confirmed 2026-10-01: Farhelm does not support paths that are not valid UTF-8, whether a working directory, a checkout
+root, the location of the farhelm program or its state directory. Every surface that meets one refuses it with a clear
+message naming the path as well as it can be shown, and nothing ever silently converts such a path into a different one,
+for example by replacing the bytes it cannot decode and then using the result as a path. Showing such a path in a log
+line or a message with those bytes replaced is fine; acting on the replaced text is not.
+
 ### Evidence after resumability is withdrawn
 
 Conversation resume is a core feature while Farhelm can safely identify the session's conversation. Once the current

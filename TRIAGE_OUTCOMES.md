@@ -4557,7 +4557,8 @@
 - Completion criteria: state the principle in SPEC.md. Use strict conversion for the canonical working directory at
   create and in the restart/retry identity check, and refuse with a clear message. Add a test with a symlink to a
   non-UTF-8 directory. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `uurollwwuosl`, bookmark `triage-1001/15-non-utf8-cwd`, PR
+  https://github.com/scode/farhelm/pull/1371.
 
 ## non-utf8-farhelm-path-breaks-launch.md
 
