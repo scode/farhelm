@@ -73,8 +73,6 @@ One line per open item. This file must always match the feedback files in this d
 - `escape-token-clamp-too-short.md` — the 64-character host label clamp can cut a `<U+E00xx>` escape token in half.
 - `tmux-build-script-bash32.md` — build-private-tmux.sh's macOS branch aborts under bash 3.2 because of empty arrays
   under `set -u`.
-- `terminal-font-promise-leak.md` — per-mount callbacks on a never-settling font promise retain every terminal instance,
-  so overnight reconnect loops grow without bound.
 - `delete-skips-scoped-tab-on-stale-verdict.md` — Delete skips a scoped tab's systemd scope on a stale "no user manager"
   verdict when the agent launch itself was unscoped.
 - `restart-with-skips-create-validation.md` — restart-with stores argv and resume templates without create's checks, so

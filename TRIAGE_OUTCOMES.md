@@ -5974,7 +5974,8 @@
   `Definite
   simplification` entry during triage (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`. The TODO.md entry was recorded during triage.
+- Execution: complete: change `lultloxq`, bookmark `triage-1001e/23-font-promise`, PR
+  https://github.com/scode/farhelm/pull/1465.
 
 ## desktop-copy-fallback-never-runs.md
 
