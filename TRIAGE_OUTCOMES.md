@@ -5952,7 +5952,7 @@
   browser's `navigator.clipboard` path (terminal.js's provider) if that stays simple. Add a test that bursts writes
   against a write that never settles and asserts retained and submitted work stays bounded, and that the latest value is
   the one written once the write settles. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/triage-clipboard-terminal-limit.md`.
 
 ## desktop-protocol-filesystem-fallback.md
 
@@ -5980,7 +5980,7 @@
   change.
 - Completion criteria: the TODO.md `Maybe later` entry "Close the desktop window's filesystem read fallback (hardening
   only)" exists (recorded during triage). Remove the feedback file and its index entry, without code or spec changes.
-- Execution: pending. The TODO.md entry was recorded during triage.
+- Execution: planned in `plans/triage-clipboard-terminal-limit.md`. The TODO.md entry was recorded during triage.
 
 ## terminal-output-queue-missing-byte-budget.md
 
@@ -6014,4 +6014,4 @@
   oversized data frame before `Attached` and shows it is refused, without a multi-gigabyte fixture. Rewrite
   `TERM_EVENT_QUEUE`'s comment so the memory bound it now implies (256 × the limit) is stated rather than disclaimed.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/triage-clipboard-terminal-limit.md`.

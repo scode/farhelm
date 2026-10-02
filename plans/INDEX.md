@@ -17,3 +17,6 @@ One line per plan, in the order the plans are executed. This file must always ma
   to what they showed, Farhelm's ssh connections never forward or run a `RemoteCommand`, report-only conversation
   identity in the spec, helm-side pacing of host hints, Claude's resume selector refusal, and small gated fixes and
   discards) (after `triage-restart-takeover-update.md`).
+- [pending] `triage-clipboard-terminal-limit.md` — execute the 2026-10-02 highest-priority triage outcomes (a bound on
+  the desktop window's pending clipboard writes, a hard size limit on terminal data from a supervisor, and removing the
+  deferred filesystem-fallback queue item).
