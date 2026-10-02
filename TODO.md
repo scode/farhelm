@@ -211,6 +211,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   sidebar. Instead, adding a host should show a clean, well-designed dialog that explains what will happen, and let the
   user answer either "yes" or "yes, and don't ask in the future".
 
+- **A proper dialog for removing a host.** Removing a host from the sidebar today asks inline, in the host's row: a
+  block of text ("forgetting a host leaves its supervisor and sessions running; re-adding the destination finds them
+  again", then the quoted host name) above "confirm remove" and "cancel" buttons. Replace it with a clean, modern pop-up
+  dialog that explains what removal will do, and add a "don't ask again in the future" option. Same direction as the
+  host-add dialog entry above.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
