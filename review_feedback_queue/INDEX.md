@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `uploads-aborted-silently-on-remount.md` — terminal reconnect or restart remount silently aborts in-flight uploads and
-  erases finished uploads' landed path or failure message.
 - `replace-drop-skips-source-delete.md` — switching away or reloading during Replace creates the replacement but never
   deletes the original, with no error.
 - `restart-can-still-deselect-session.md` — restarting a session can still empty the main pane or jump to another

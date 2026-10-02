@@ -5187,7 +5187,8 @@
   SPEC.md's failure-response rule. Clearing stale "attaching…" text on remount stays correct for an upload that is no
   longer running. Add a JS or browser test covering an upload interrupted by a remount and a failure message present
   across one. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `zvvqpykpqkrw`, bookmark `triage-1001d/07-upload-remount-messages`, PR
+  https://github.com/scode/farhelm/pull/1403.
 
 ## replace-drop-skips-source-delete.md
 

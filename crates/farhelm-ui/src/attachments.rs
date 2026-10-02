@@ -540,6 +540,26 @@ const DETACHED_TEXT: &str =
 const LANDED_TEXT: &str =
     "{name} landed at {path}; terminal detached — path not inserted, copy it from here";
 
+/// An upload cut off before its request started, because the terminal it
+/// belonged to was torn down (a reconnect, or the session restarting) while
+/// the file was still being checked. `{name}` is the file.
+///
+/// Says nothing was uploaded because that is known: the helm never saw the
+/// request. Shown by the pane's next mount, so the upload does not simply
+/// vanish from the status line (SPEC.md: an attachment must never disappear
+/// silently).
+const INTERRUPTED_UNSENT_TEXT: &str =
+    "attaching {name} was interrupted before it was sent, so nothing was uploaded";
+
+/// An upload cut off after its request started, for the same reasons as
+/// above. `{name}` is the file.
+///
+/// The outcome is unknown, and the message says so rather than guessing:
+/// the helm may have finished publishing the file before the abort reached
+/// it (SPEC.md, Attachments: a failure must tell a definitely unpublished
+/// upload apart from one whose outcome is unknown).
+const INTERRUPTED_UNKNOWN_TEXT: &str = "attaching {name} was interrupted — it may have reached the host anyway, but no path was inserted";
+
 /// An upload the helm refused without saying why — a status code and an
 /// empty body. `{status}` is that code.
 ///
@@ -640,6 +660,8 @@ pub(crate) fn attachment_policy(session_id: &str) -> serde_json::Value {
             "unreadable": UNREADABLE_TEXT,
             "detached": DETACHED_TEXT,
             "landed": LANDED_TEXT,
+            "interruptedUnsent": INTERRUPTED_UNSENT_TEXT,
+            "interruptedUnknown": INTERRUPTED_UNKNOWN_TEXT,
             "httpStatus": HTTP_STATUS_TEXT,
             "noPath": NO_PATH_TEXT,
             "skew": SKEW_TEXT,
@@ -938,6 +960,8 @@ mod tests {
             "unreadable",
             "detached",
             "landed",
+            "interruptedUnsent",
+            "interruptedUnknown",
             "httpStatus",
             "noPath",
             "skew",

@@ -49,6 +49,7 @@ import {
   createTabSession,
   disableReconnectFromNextLoad,
   fulfillAsHelm,
+  reconnectTimingsFromNextLoad,
   runInShell,
   selectTerminal,
   sharedSessionRow,
@@ -1255,6 +1256,167 @@ test("an upload that outlives its socket reports the path it could not insert", 
     ).not.toContain(landed);
   } finally {
     upload.release();
+    if (id) await cleanupSession(request, id);
+  }
+});
+
+/**
+ * Close the agent terminal's socket, remembering it so `waitForAgentRemount`
+ * can tell the island that replaces it from the one that is going away.
+ */
+async function closeAgentSocket(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const win = window as any;
+    win.__farhelmPriorWs = win.__farhelmIslands["terminal"].ws;
+    win.__farhelmPriorWs.close();
+  });
+}
+
+/**
+ * Wait until the automatic reconnect has mounted a fresh, connected island.
+ * A reconnect disposes the island and mounts a new one into the same pane,
+ * which is the teardown the tests below are about; waiting on the island's
+ * identity, rather than on anything on screen, keeps the old island from
+ * answering for the new one.
+ */
+async function waitForAgentRemount(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const island = (window as any).__farhelmIslands?.["terminal"];
+          return !!island && island.ws !== (window as any).__farhelmPriorWs
+            && island.ws.readyState === WebSocket.OPEN;
+        }),
+      { timeout: 20_000, message: "waiting for the reconnect to mount a fresh terminal" },
+    )
+    .toBe(true);
+}
+
+async function reconnectAgentTerminal(page: Page): Promise<void> {
+  await closeAgentSocket(page);
+  await waitForAgentRemount(page);
+}
+
+// SPEC.md: "Upload failures must be visible; an attachment must never
+// disappear silently." A reconnect used to abort an upload in flight and
+// blank the pane's status line, so the file vanished with no message and no
+// path. Two files are dropped, and uploads run one at a time. The first is
+// held at the network seam, so it is certainly running, with its request
+// sent, when the reconnect tears the terminal down; the helm may then have
+// published it or not, and its message has to say that it may have. The
+// second is still queued, so it was never sent, and its message says that.
+test("uploads cut off by a reconnect are reported by the remounted terminal", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  const stamp = Date.now();
+  const name = `cut-off-${stamp}.txt`;
+  const queuedName = `queued-${stamp}.txt`;
+  let id: string | undefined;
+  const upload = routeGate();
+  let requested!: () => void;
+  const sent = new Promise<void>((resolve) => (requested = resolve));
+  try {
+    await page.route("**/api/sessions/*/attachments*", async (route) => {
+      requested();
+      await upload.wait();
+      // The page aborted this request when the island went away, so there is
+      // usually nobody left to answer.
+      await route.abort().catch(() => {});
+    });
+    const session = await openAttachmentSession(page, request, `attach-cut-off-${stamp}`);
+    id = session.id;
+
+    await dispatchPayload(page, "terminal", "drop", {
+      entries: [
+        { name, mime: "text/plain", content: "in flight" },
+        { name: queuedName, mime: "text/plain", content: "waiting" },
+      ],
+    });
+    await sent;
+    await expect(page.locator('[data-terminal="agent"] .attach-busy')).toContainText(name);
+
+    await reconnectAgentTerminal(page);
+    const error = page.locator('[data-terminal="agent"] .attach-error');
+    await expect(error).toHaveCount(2);
+    await expect(error.nth(0)).toContainText(name);
+    await expect(error.nth(0)).toContainText("may have reached the host anyway");
+    await expect(error.nth(1)).toContainText(queuedName);
+    await expect(error.nth(1)).toContainText("nothing was uploaded");
+    await expect(
+      page.locator('[data-terminal="agent"] .attach-busy'),
+      "the upload is no longer running, so nothing says it is",
+    ).toHaveCount(0);
+  } finally {
+    upload.release();
+    if (id) await cleanupSession(request, id);
+  }
+});
+
+// The other half of the same rule: a failure already on screen must not be
+// wiped by the reconnect that follows it. The pane's status line used to be
+// blanked whenever its terminal was torn down, and the first automatic
+// reconnect after an outage erased the failure the outage had caused. Two
+// reconnects, because an outage is several: the second tears down a terminal
+// that never saw the upload, and the message has to survive that too.
+test("an upload failure stays on screen across a reconnect", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  const stamp = Date.now();
+  let id: string | undefined;
+  try {
+    await page.route("**/api/sessions/*/attachments*", async (route) => {
+      await fulfillAsHelm(route, {
+        status: 500,
+        contentType: "text/plain",
+        body: "storing the attachment failed: no space left on device\n",
+      });
+    });
+    const session = await openAttachmentSession(page, request, `attach-fail-reconnect-${stamp}`);
+    id = session.id;
+
+    await dispatchPayload(page, "terminal", "drop", {
+      entries: [{ name: "doomed.txt", mime: "text/plain", content: "never lands" }],
+    });
+    const error = page.locator('[data-terminal="agent"] .attach-error');
+    await expect(error).toContainText("no space left on device");
+
+    for (const attempt of [1, 2]) {
+      await reconnectAgentTerminal(page);
+      await expect(error, `after reconnect ${attempt}`).toHaveCount(1);
+      await expect(error, `after reconnect ${attempt}`).toContainText("doomed.txt");
+      await expect(error, `after reconnect ${attempt}`).toContainText("no space left on device");
+    }
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
+// The exception to keeping messages across a reconnect: "this terminal is
+// not connected — reconnect and try again" is about the socket that went
+// away, and the reconnect is what it asks for. Kept, it would sit over a
+// working terminal until the next drop. The reconnect is slowed to three
+// seconds so the drop certainly lands while the terminal is down.
+test("the not-connected refusal clears when the terminal reconnects", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  const stamp = Date.now();
+  let id: string | undefined;
+  try {
+    await reconnectTimingsFromNextLoad(page, { delaysMs: [3_000, 3_000, 3_000, 3_000, 3_000, 3_000] });
+    const session = await openAttachmentSession(page, request, `attach-refusal-clears-${stamp}`);
+    id = session.id;
+
+    await closeAgentSocket(page);
+    await page.waitForFunction(
+      () => (window as any).__farhelmIslands["terminal"].ws.readyState !== WebSocket.OPEN,
+    );
+    await dispatchPayload(page, "terminal", "drop", {
+      entries: [{ name: "early.txt", mime: "text/plain", content: "too early" }],
+    });
+    const error = page.locator('[data-terminal="agent"] .attach-error');
+    await expect(error).toContainText("not connected");
+
+    await waitForAgentRemount(page);
+    await expect(error).toHaveCount(0);
+  } finally {
     if (id) await cleanupSession(request, id);
   }
 });
