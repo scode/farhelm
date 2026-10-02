@@ -518,7 +518,9 @@ fn codex_dialog_may_be_open(lines: &[&str], raw: &str) -> bool {
 /// typed, a numbered list or a long wrapped paragraph included. The
 /// transcript echoes submitted prompts with the same `›`, but an echo is
 /// always followed by the agent's reply at column zero (`• …`), which is
-/// what rules it out. Codex menus mark their selected option with `›` as
+/// what rules it out. The working check's `codex_composer_top` locates the
+/// same composer more strictly, because it also needs the padding above the
+/// prompt; see its docs for how the two differ. Codex menus mark their selected option with `›` as
 /// well; the dialogs among them are recognized by their footers before this
 /// is asked.
 fn codex_has_composer(lines: &[&str]) -> bool {

@@ -1721,9 +1721,8 @@ const CODEX_SPARKLE_DOTS: [char; 8] = [
 /// history or quoted text, not the current state.
 fn codex_working(raw: &str) -> bool {
     let lines: Vec<&str> = raw.lines().collect();
-    codex_composer_bounds(&lines).is_some_and(|(upper_padding, _)| {
-        codex_status_region_start(&lines, upper_padding).is_some()
-    })
+    codex_composer_top(&lines)
+        .is_some_and(|upper_padding| codex_status_region_start(&lines, upper_padding).is_some())
 }
 
 /// Locate a current Codex status widget directly above the composer.
@@ -1755,35 +1754,63 @@ fn is_codex_status_continuation(line: &str) -> bool {
             .is_some_and(|text| !text.is_empty())
 }
 
-/// Find the padding rows surrounding a bottom Codex composer.
+/// How many padding rows may separate the status widget from the composer's
+/// prompt row. The captured 0.159.0 working screens show two; one is the
+/// layout the synthetic tests below use. Each extra row widens the window in
+/// which a status line left in history above an idle composer's blank rows
+/// would count as current, so the cap is the smallest the captures need.
+const CODEX_MAX_PADDING_ABOVE_PROMPT: usize = 2;
+
+/// Find the topmost padding row above a bottom Codex composer.
 ///
-/// The prompt identifies the first textarea row. Wrapped rows use Codex's
-/// two-column input indent, so they can be included only while that boundary
-/// is visible. Requiring the footer to be the final nonblank row anchors the
-/// recognition to the bottom pane; it intentionally declines modal and popup
-/// layouts whose ownership cannot be established from plain text.
-fn codex_composer_bounds(lines: &[&str]) -> Option<(usize, usize)> {
+/// The composer is the last prompt row (`›` at column zero) with a padding
+/// row right above it and nothing below it down to the last row but rows in
+/// Codex's two-column indent: wrapped draft lines, padding, and the footer
+/// rows (on 0.159.0 a status line such as the model and context use, then
+/// the key hints). The last row must not be padding, which ties the match
+/// to the bottom of the screen; it may be unindented only because the
+/// synthetic layouts in the tests use an unindented footer, while real
+/// 0.159.0 footers are always indented.
+///
+/// This geometry alone does not keep dialogs out: Codex's numbered menus
+/// (`› 1. Yes, proceed`) can match it. They are kept out by the reader's
+/// dialog checks, which run before the working check, and by
+/// [`codex_status_region_start`] finding no status row above them.
+///
+/// `screen_reader::codex_has_composer` answers the neighbouring question
+/// for the idle reading with a looser rule (any `›` row, anything indented
+/// or padding below it, no padding required above). The two differ on
+/// purpose: this one has to find the padding above the prompt to locate the
+/// widget, and it may be stricter because a false "working" pins a finished
+/// task. A Codex layout change likely needs both updated.
+///
+/// An earlier version required exactly one footer row with a padding row
+/// right above it, which no real 0.159.0 screen has (they end in two footer
+/// rows), so the status backstop this feeds never fired.
+fn codex_composer_top(lines: &[&str]) -> Option<usize> {
     if lines.len() < 4 || is_codex_composer_padding(lines.last()?) {
         return None;
     }
-    let lower_padding = lines.len() - 2;
-    if !is_codex_composer_padding(lines[lower_padding]) {
-        return None;
-    }
-    for first_input in (1..lower_padding).rev() {
-        if !is_codex_prompt_row(lines[first_input])
-            || !is_codex_composer_padding(lines[first_input - 1])
-        {
-            continue;
-        }
-        if lines[first_input + 1..lower_padding]
+    let last = lines.len() - 1;
+    let prompt = lines.iter().rposition(|line| is_codex_prompt_row(line))?;
+    if prompt == last
+        || !lines[prompt + 1..last]
             .iter()
             .all(|line| is_codex_wrapped_row(line))
-        {
-            return Some((first_input - 1, lower_padding));
-        }
+    {
+        return None;
     }
-    None
+    let mut top = prompt.checked_sub(1)?;
+    if !is_codex_composer_padding(lines[top]) {
+        return None;
+    }
+    while prompt - top < CODEX_MAX_PADDING_ABOVE_PROMPT
+        && top > 0
+        && is_codex_composer_padding(lines[top - 1])
+    {
+        top -= 1;
+    }
+    Some(top)
 }
 
 /// Whether a row is either blank or contains only the known Codex particles.
@@ -3071,6 +3098,15 @@ mod tests {
                 codex_working(&busy),
                 "current status was not recognized: {status:?}"
             );
+            // The 0.159.0 layout: two padding rows above the prompt, and two
+            // indented footer rows under it.
+            let real = format!(
+                "agent output\n{status}\n\n\n› draft\n\n  model · context\n  ← for agents · ? for shortcuts"
+            );
+            assert!(
+                codex_working(&real),
+                "current status was not recognized in the 0.159.0 layout: {status:?}"
+            );
         }
     }
 
@@ -3090,6 +3126,12 @@ mod tests {
             "agent output\nWorking (1h +2m 03s • esc to interrupt)\n\n› draft\n\ncustom footer",
             "agent output\nWorking (3s • esc to interrupt)\n  arbitrary transcript\n\n› draft\n\ncustom footer",
             "Working (3s • esc to interrupt)\n› draft",
+            // History above an idle composer's run of blank rows, past the
+            // padding a current widget is drawn with.
+            "Working (3s • esc to interrupt)\n\n\n\n› draft\n\n  footer\n  ? for shortcuts",
+            // An unindented row between the prompt and the last row is not
+            // part of the composer.
+            "agent output\nWorking (3s • esc to interrupt)\n\n› draft\nreply\n  footer",
         ] {
             assert!(
                 !codex_working(screen),

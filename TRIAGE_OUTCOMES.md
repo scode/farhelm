@@ -4436,7 +4436,8 @@
 - Completion criteria: locate the composer by its `›` prompt row followed only by blank or indented rows, allow the
   blank rows the real fixtures show between the status line and the prompt, and test against the real `working-*.txt`
   fixtures with an empty title. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `orrsomsxwzzw`, bookmark `triage-1001/07-codex-working-widget`, PR
+  https://github.com/scode/farhelm/pull/1363.
 
 ## claude-last-option-reads-idle.md
 
