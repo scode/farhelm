@@ -4387,7 +4387,8 @@
   complexity is to be spent on it.
 - Completion criteria: switch the runner to the self-releasing `claim_guard()` form and move the guard into the spawned
   task. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `vwklsuxsqrot`, bookmark `triage-1001/04-hosts-panel-lock`, PR
+  https://github.com/scode/farhelm/pull/1360.
 
 ## profile-popup-leaks-page-lock.md
 

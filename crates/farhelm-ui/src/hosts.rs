@@ -876,9 +876,16 @@ pub(crate) fn HostsPanel(
         if provisioning_busy_hosts.peek().contains(&host) {
             return false;
         }
-        if !ops.claim() {
+        // The guard, not a bare claim, because this panel can unmount
+        // with the request still in flight (the browser's token prompt
+        // replaces the page when another request is refused), and that
+        // drops the task below before it reaches any release of its own.
+        // Moved into the task, the guard releases the page lock either way;
+        // a bare claim stranded it, and every lock-gated control on the
+        // page then refused silently until a reload.
+        let Some(claim) = ops.claim_guard() else {
             return false;
-        }
+        };
         mutation_busy_hosts.write().insert(host);
         errors.write().remove(&host);
         warnings.write().remove(&host);
@@ -902,10 +909,13 @@ pub(crate) fn HostsPanel(
                 }
             }
             mutation_busy_hosts.write().remove(&host);
-            // Released on every path. A leaked token leaves the whole page
-            // inert with nothing on screen to explain why, which is a far
-            // worse failure than any of the outcomes above.
-            ops.release();
+            // Naming the guard here is what moves it into this task, so the
+            // lock is held until the request settles and is still released
+            // if the task is dropped (see the claim above). Without this
+            // line the guard would drop when `run` returns, freeing the lock
+            // mid-request. A leaked lock, the opposite failure, leaves the
+            // whole page inert with nothing on screen to explain why.
+            drop(claim);
         });
         true
     };
