@@ -2670,61 +2670,48 @@ async fn the_transfer_trail_carries_identifiers_and_byte_counts() {
     }
 }
 
-/// A state directory whose path is not valid UTF-8 is refused where it
-/// first matters — at session creation — so no attachment can ever be
-/// asked to report a path this protocol cannot represent.
+/// A state directory whose path is not valid UTF-8 is refused before a
+/// supervisor starts on it, so no attachment can ever be asked to report a
+/// path this protocol cannot represent.
 ///
 /// `UploadCommitted::path` is the product of the whole upload path, and
 /// the protocol has no representation for a non-UTF-8 one; reporting a
 /// lossily-converted path would be worse than failing, because the client
 /// would insert a path that merely RESEMBLES the real file. This pins
-/// where that is actually decided: creation refuses first (the launch
-/// spec has the same constraint), so a session on such a state directory
-/// does not exist to upload into. The upload path keeps its own check as
-/// defence in depth — see `stage_upload` — and this test is what records
-/// that the check is unreachable through a real session rather than
-/// merely untested.
+/// where that is actually decided: supervisor startup refuses such a state
+/// directory (SPEC.md "Paths that are not valid UTF-8"; the launch spec,
+/// the sockets and the uploads all live under it), so no session on it can
+/// exist to upload into. The upload path keeps its own check as defence in
+/// depth — see `stage_upload` — and this test is what records that the
+/// check is unreachable through a real supervisor rather than merely
+/// untested.
 #[farhelm_testtrace::test]
-async fn a_non_utf8_state_directory_is_refused_before_any_session_can_exist() {
+async fn a_non_utf8_state_directory_is_refused_before_a_supervisor_starts() {
     use std::os::unix::ffi::OsStringExt;
     use std::os::unix::fs::DirBuilderExt;
 
-    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let parent = farhelm_teststate::tempdir().expect("tempdir");
-    // One invalid byte is enough, and keeps the rest of the path (which
-    // tmux and SQLite also have to live with) ordinary.
+    // One invalid byte is enough, and keeps the rest of the path ordinary.
     let mut raw = parent.path().as_os_str().to_os_string().into_vec();
     raw.extend_from_slice(b"/state-\xff");
     let state = std::path::PathBuf::from(std::ffi::OsString::from_vec(raw));
     // Keep the same private-directory premise as TestDir: the unusual bytes
-    // are the subject, while teardown still needs an exclusive socket parent.
+    // are the subject, not a missing or shared directory.
     std::fs::DirBuilder::new()
         .mode(0o700)
         .create(&state)
         .expect("non-UTF-8 state dir");
 
-    let sup = Supervisor::new_with_exe(&state, farhelm_bin().into())
-        .await
-        .expect("a supervisor on a non-UTF-8 state dir");
-    let _tmux = TmuxServerGuard::new(state.join("tmux.sock"));
-    let client = connect_client(&sup).await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let refused = client
-        .create_session(
-            &work.path().to_string_lossy(),
-            &fixture_cmd("fake-agent --script basic"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect_err("a non-UTF-8 state dir must refuse creation rather than launder its paths");
+    let refused = match Supervisor::new_with_exe(&state, farhelm_bin().into()).await {
+        Err(error) => format!("{error:#}"),
+        Ok(_) => panic!("a non-UTF-8 state dir must refuse to start a supervisor"),
+    };
     assert!(
-        refused.to_string().contains("UTF-8"),
-        "the refusal must say what is wrong, got: {refused:#}"
+        refused.contains("not valid UTF-8") && refused.contains("state directory"),
+        "the refusal must say what is wrong, got: {refused}"
     );
     assert!(
         attachment_names(&state, "any-session").is_empty(),
-        "nothing may have been created for a session that does not exist"
+        "nothing may have been created for a supervisor that never started"
     );
 }

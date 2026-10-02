@@ -86,8 +86,6 @@ One line per open item. This file must always match the feedback files in this d
   session; #1310 removed only one trigger.
 - `create-dialog-empty-catalog-refuses.md` — when the model catalog fails to load or is still loading,
   clone/replace-with/recent setups are refused as "no longer supported".
-- `non-utf8-farhelm-path-breaks-launch.md` — a farhelm binary or state directory at a non-UTF-8 path makes every launch
-  fail, while the log claims only degraded mode.
 - `stop-terminalless-records-plain-exit.md` — Stop on an ambiguous, terminal-less launch records a plain exit before
   sweeping, losing the stop note and later Restart's consent check.
 - `probe-drops-add-busy-claim.md` — a probe during a rerun of a failed ADD can drop the busy claim, letting a second

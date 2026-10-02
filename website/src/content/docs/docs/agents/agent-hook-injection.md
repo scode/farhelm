@@ -89,10 +89,6 @@ talking, not the reporter.
 | `env FOO=1 claude …`                                                                          | generic              | no                   | no hook and no scan as written, and no `{cwd}` needed — set the kind, and write the resume invocation out by hand, since the derived default would be `env --resume …`                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `bash -c 'claude …'`                                                                          | generic              | no                   | the record scan once you set the kind, and no hook as written: the flags are appended to the argv, so they land as the shell's `$0` and the following positional parameters rather than reaching the agent inside the script string — a script that forwards `"$@"` does pass them on                                                                                                                                                                                                                                                                                                                    |
 
-One more case skips injection independent of invocation shape entirely: if farhelm's own absolute executable path (the
-one every injected hook command would name) is not valid UTF-8, no kind gets the hook, for any invocation — see
-"`farhelm executable path is not utf-8`" in the troubleshooting section below.
-
 The wrapper path is absolute on purpose: farhelm does not expand `~` in an invocation. The fallback resume invocation
 also has to be runnable as written — one carrying an unfilled `{conversation}` is refused rather than garbled, which
 lands back on the fresh-launch offer. For the generic rows, setting the profile's agent kind is what turns the
@@ -254,10 +250,10 @@ turned into a failure.
 - `conversation hook flags injected` — at launch, naming the kind and carrying `announce=true` or `announce=false` for
   whether `--announce` was included (`FARHELM_AGENT_INSTRUCTIONS`'s only visible effect on this log).
 - `conversation hook flags not injected` — the skip and its reason: `invocation already passes --settings`,
-  `invocation already configures codex hooks`, `invocation contains a bare --`, `disabled by FARHELM_AGENT_HOOKS`, or
-  `farhelm executable path is not utf-8`. A generic session logs nothing — no integration means there was never a hook
-  to skip. Every one of these launches still runs. Claude can use its record scan; Codex, Goose, Pi, and OMP keep
-  running without gaining a new exact target from that launch.
+  `invocation already configures codex hooks`, `invocation contains a bare --`, or `disabled by FARHELM_AGENT_HOOKS`. A
+  generic session logs nothing — no integration means there was never a hook to skip. Every one of these launches still
+  runs. Claude can use its record scan; Codex, Goose, Pi, and OMP keep running without gaining a new exact target from
+  that launch.
 - `recorded the conversation identity this session's agent reported` — an accepted report, with the conversation and the
   vendor's `source` word. When it displaced a claim naming a DIFFERENT id, a second line says so:
   `this session's

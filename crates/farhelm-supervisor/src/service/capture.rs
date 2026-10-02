@@ -1542,7 +1542,7 @@ async fn commit_capture(
     // the one this pass chose. If another writer got there first with a
     // different answer, the file this pass found is not that identity's
     // record — an empty path is the "identity held, record not located"
-    // state, which re-verification repairs on its next pass.
+    // state, which re-verification skips (see `reverify_capture`).
     let (record, stamp) = if committed == conversation {
         (record, stamp)
     } else {
@@ -1558,6 +1558,18 @@ async fn commit_capture(
         session = %entry.info.id, conversation = %committed,
         "captured this session's agent conversation identity"
     );
+    // The store keeps no location for a record path that is not valid
+    // UTF-8 (SPEC.md "Paths that are not valid UTF-8"); say so, naming the
+    // path, so a restart that later has nothing to re-verify for this
+    // session is not mistaken for a row from before the location existed.
+    if committed == conversation && record.to_str().is_none() {
+        warn!(
+            session = %entry.info.id, record = %record.to_string_lossy(),
+            "this session's conversation record path is not valid UTF-8, which is not \
+             supported; the conversation is tracked, but its location is not stored, so it \
+             is not re-checked after a supervisor restart"
+        );
+    }
     advance_capture(
         sup,
         entry,

@@ -505,9 +505,9 @@ pub trait AgentIntegration: Send + Sync {
     /// returns `None` for a non-UTF-8 path rather than substituting
     /// replacement characters, so nothing here ever embeds a mangled path
     /// in a vendor's config. A non-UTF-8 `farhelm_exe` is therefore not
-    /// this method's problem at all: the caller simply never calls it for
-    /// that launch, and logs the skip as one more entry in
-    /// `with_hook_argv`'s reason list.
+    /// this method's problem at all: a supervisor refuses to start on one
+    /// (SPEC.md "Paths that are not valid UTF-8"), and the hook policy's
+    /// `exe` being `None` makes the caller skip this method and log why.
     ///
     /// `instructions` selects whether the embedded command gets
     /// `--announce`, which makes the hook print one pointer line the agent
@@ -548,8 +548,10 @@ pub struct HookPolicy<'a> {
     pub hooks: &'a AgentHooks,
     /// Whether an injected hook should announce the instructions pointer.
     pub instructions: AgentInstructions,
-    /// The farhelm executable path, or `None` when it is not UTF-8 and so
-    /// cannot be embedded in a vendor's configuration.
+    /// The farhelm executable path, or `None` when there is none as text to
+    /// embed in a vendor's configuration. A supervisor refuses to start on a
+    /// path that is not valid UTF-8, so it always passes one; `None` is this
+    /// layer's own contract (inject nothing), kept for callers and tests.
     pub exe: Option<&'a str>,
     /// The materialized reporter extension for kinds that load one (Pi,
     /// OMP), or `None` when it is unavailable or the kind has none.

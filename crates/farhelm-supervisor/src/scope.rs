@@ -902,8 +902,16 @@ impl ScopeManager {
             // prefix naming a binary they never probed.
             _ => return None,
         };
+        // `resolve_program_in` only ever returns a UTF-8 path, so this never
+        // changes the path; a lossy conversion here would silently launch a
+        // file that does not exist.
+        let systemd_run = tools
+            .systemd_run
+            .to_str()
+            .expect("resolve_program_in only returns valid UTF-8 paths")
+            .to_owned();
         let mut prefix = vec![
-            tools.systemd_run.to_string_lossy().into_owned(),
+            systemd_run,
             "--user".to_string(),
             "--scope".to_string(),
             "--collect".to_string(),
@@ -1149,17 +1157,37 @@ fn unit_matches_pattern(pattern: &str, unit: &str) -> bool {
     unit == pattern
 }
 
-/// Resolve `name` to an absolute path by walking `$PATH`, or `None`.
+/// Resolve `name` to an absolute path by walking the supervisor's `$PATH`,
+/// or `None`. See [`resolve_program_in`] for which candidates count.
+fn resolve_program(name: &str) -> Option<PathBuf> {
+    resolve_program_in(name, &std::env::var_os("PATH")?)
+}
+
+/// Resolve `name` against the directory list `search_path` (in `$PATH`
+/// syntax), returning the first usable candidate, or `None`.
 ///
 /// Only regular-file candidates with an execute bit are accepted, and only
-/// ABSOLUTE `$PATH` entries are considered: a relative entry (including the
-/// empty string, which POSIX reads as the current directory) would resolve
+/// ABSOLUTE entries are considered: a relative entry (including the empty
+/// string, which POSIX reads as the current directory) would resolve
 /// against whatever directory the supervisor happens to be running in.
-fn resolve_program(name: &str) -> Option<PathBuf> {
+///
+/// A candidate whose path is not valid UTF-8 is skipped, and the walk
+/// continues to later entries. Such locations are unsupported (SPEC.md,
+/// "Paths that are not valid UTF-8"), and for `systemd-run` it matters
+/// concretely: its resolved path ends up as text on the agent's launch
+/// command line ([`ScopeManager::launch_prefix`]), which cannot carry such
+/// a path without changing it. `systemctl` is only ever run by path, so it
+/// would work from there, but both tools follow the one rule. Skipping
+/// rather than failing is the maintainer's call (2026-10-01): an odd
+/// directory early on `$PATH` must not stop the lookup from finding the
+/// ordinary `/usr/bin` copy. When the only copy lives under such a
+/// directory, the tool counts as absent, which is how an unsupported
+/// location is treated; the skip is logged so that outcome is not a
+/// mystery.
+fn resolve_program_in(name: &str, search_path: &std::ffi::OsStr) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
 
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
+    for dir in std::env::split_paths(search_path) {
         if !dir.is_absolute() {
             continue;
         }
@@ -1167,9 +1195,17 @@ fn resolve_program(name: &str) -> Option<PathBuf> {
         let Ok(meta) = std::fs::metadata(&candidate) else {
             continue;
         };
-        if meta.is_file() && meta.permissions().mode() & 0o111 != 0 {
-            return Some(candidate);
+        if !(meta.is_file() && meta.permissions().mode() & 0o111 != 0) {
+            continue;
         }
+        if candidate.to_str().is_none() {
+            tracing::warn!(
+                candidate = %candidate.to_string_lossy(),
+                "skipping a {name} whose path is not valid UTF-8; such paths are not supported"
+            );
+            continue;
+        }
+        return Some(candidate);
     }
     None
 }
@@ -1541,6 +1577,51 @@ async fn run_with_timeout(
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    /// The program lookup skips a copy under a directory whose path is not
+    /// valid UTF-8 and keeps walking, so junk early on the supervisor's
+    /// `$PATH` cannot hide the ordinary copy; with only the unusable copy
+    /// present, the tool counts as absent. Before this, the lookup returned
+    /// the first copy regardless, and the launch command line then carried
+    /// a mangled path to a file that does not exist, so every agent launch
+    /// on the host failed while the systemd probe (which runs the real
+    /// path) reported the manager usable.
+    // APFS refuses to create a non-UTF-8 file name, the same reason the
+    // non-UTF-8 working-directory test in `service/core.rs` is skipped there.
+    #[cfg(not(target_os = "macos"))]
+    #[farhelm_testtrace::test]
+    fn program_lookup_skips_copies_under_non_utf8_directories() {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Write an executable stub named `name` into `dir`, creating `dir`.
+        let plant_executable = |dir: &Path, name: &str| {
+            std::fs::create_dir_all(dir).unwrap();
+            let file = dir.join(name);
+            std::fs::write(&file, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+
+        let root = tempfile::tempdir().unwrap();
+        let bad = root.path().join(std::ffi::OsStr::from_bytes(b"bad-\xff"));
+        let good = root.path().join("good");
+        plant_executable(&bad, "systemd-run");
+        plant_executable(&good, "systemd-run");
+
+        let both = std::env::join_paths([&bad, &good]).unwrap();
+        assert_eq!(
+            resolve_program_in("systemd-run", &both),
+            Some(good.join("systemd-run")),
+            "the lookup must pass over the non-UTF-8 directory and find the later copy"
+        );
+
+        let only_bad = std::env::join_paths([&bad]).unwrap();
+        assert_eq!(
+            resolve_program_in("systemd-run", &only_bad),
+            None,
+            "a copy reachable only through a non-UTF-8 path must count as absent"
+        );
+    }
 
     const UUID_A: &str = "2b1f0e4c-0000-4000-8000-000000000001";
 
