@@ -476,6 +476,15 @@ pub(crate) fn SessionView(
     // webview does not have at all).
     let mut restarting = use_signal(|| false);
     let mut confirming = use_signal(|| false);
+    // The shared operation lock as claimed by this view's Restart controls
+    // (header Restart and its stop-first prompt, Restart with, and the
+    // interrupted card's Restart). Held here, as a guard in this view's own
+    // signal, rather than as a bare claim on the lock `AppBody` owns: when
+    // the view unmounts (the session deleted from another client, a sign-in
+    // prompt replacing the panes) the signal and its guard go with it, so a
+    // claim can never outlive the view and leave every write action in the
+    // window disabled. Releasing is setting it to `None`.
+    let mut view_claim = use_signal(|| None::<OpGuard>);
     let mut restart_error = use_signal(|| None::<String>);
     // One opening owns a fixed comparison baseline. Detail refreshes may
     // change the current offer, but they must not rewrite a draft in progress.
@@ -1153,7 +1162,7 @@ pub(crate) fn SessionView(
                         stop_asking: Option<(crate::HostId, String)>| {
         if restarting() {
             if with.is_none() {
-                lifecycle.release();
+                view_claim.set(None);
             }
             return;
         }
@@ -1249,7 +1258,7 @@ pub(crate) fn SessionView(
             // unconfirmed restart while the new run still reads working.
             restarting.set(false);
             if with.is_none() || outcome.is_ok() {
-                lifecycle.release();
+                view_claim.set(None);
             }
             // The authoritative refresh, asked for through the SAME door
             // every other read uses and issued after the final bump so it
@@ -1682,6 +1691,21 @@ pub(crate) fn SessionView(
         );
     });
 
+    // The interrupted card's Replace prompt holds a claim of the shared
+    // operation lock. When the card stops rendering while the view stays up
+    // (another client restarted the session, so it is no longer
+    // interrupted), nothing in the card can close the prompt any more, and
+    // its claim would stay held with every write action in the window
+    // disabled. Reconcile it away instead, which drops the claim.
+    //
+    // `interrupted_card_shown` is the ONE statement of when the card renders:
+    // the rsx below draws the card from it too, so the condition that closes
+    // the prompt cannot drift from the condition that shows it.
+    let interrupted_card_shown = move || {
+        terminal_absence(&current.read(), relaunched()) == Some(TerminalAbsence::Interrupted)
+    };
+    crate::ops::use_clear_when_hidden(confirming_replace, interrupted_card_shown);
+
     let shown = current.read().clone();
     let confirms_restart = restart_needs_confirmation(&shown.status);
     let tabs = visible_tabs(&shown.tabs, &opened_tabs.read(), &closed_tabs.read());
@@ -1944,7 +1968,7 @@ pub(crate) fn SessionView(
                             "aria-describedby": RESTART_OFFER_DESCRIPTION_ID,
                             disabled: lifecycle.busy(),
                             onclick: move |_| {
-                                if !lifecycle.claim() {
+                                if !lifecycle.claim_into(&mut view_claim) {
                                     return;
                                 }
                                 if confirms_restart {
@@ -2022,7 +2046,7 @@ pub(crate) fn SessionView(
                                             return;
                                         }
                                         confirming.set(false);
-                                        lifecycle.release();
+                                        view_claim.set(None);
                                     },
                                     "cancel"
                                 }
@@ -2041,7 +2065,9 @@ pub(crate) fn SessionView(
                             move |_| {
                                 // `aria-disabled` keeps the tooltip hoverable;
                                 // the handler is what actually refuses activation.
-                                if with_reason.is_some() || !lifecycle.claim() {
+                                if with_reason.is_some()
+                                    || !lifecycle.claim_into(&mut view_claim)
+                                {
                                     return;
                                 }
                                 restart_with_error.set(None);
@@ -2199,7 +2225,7 @@ pub(crate) fn SessionView(
                         restart_with_error.set(None);
                         restart_yolo.set(None);
                         restart_yolo_error.set(None);
-                        lifecycle.release();
+                        view_claim.set(None);
                         focus_restart_with_trigger();
                     },
                     on_yolo_cancel: move |_| {
@@ -2383,7 +2409,7 @@ pub(crate) fn SessionView(
             // nothing relaunches until the user asks). Both controls use the
             // shared lifecycle claim and existing request closures; Restart
             // remains unconfirmed because nothing is running.
-            if terminal_absence(&shown, relaunched()) == Some(TerminalAbsence::Interrupted) {
+            if interrupted_card_shown() {
                 div { class: "interrupted-card",
                     span { class: "interrupted-card-text", "{interrupted_surface_text(shown.restart_offer)}" }
                     button {
@@ -2396,7 +2422,7 @@ pub(crate) fn SessionView(
                         title: "{restart_label} — {offer_explanation}",
                         disabled: lifecycle.busy(),
                         onclick: move |_| {
-                            if !lifecycle.claim() {
+                            if !lifecycle.claim_into(&mut view_claim) {
                                 return;
                             }
                             notice_restart(false, None, false, None);

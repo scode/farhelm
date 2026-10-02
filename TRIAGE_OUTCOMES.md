@@ -5142,7 +5142,8 @@
   interrupted card's Replace prompt (and its claim) is cleared when the card stops rendering. Add regressions covering
   unmount while a Restart confirmation, an open "Restart with" dialog, and an in-flight Restart hold the claim, and the
   hidden interrupted-card prompt. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `lklyyznrrnzl`, bookmark `triage-1001d/05-session-view-lock-release`, PR
+  https://github.com/scode/farhelm/pull/1401.
 
 ## row-menu-drifts-on-row-height-change.md
 
