@@ -819,6 +819,93 @@ fn ensure_managed_supervisor_running(supervisor: &mut Option<Child>) -> anyhow::
     Ok(())
 }
 
+/// What startup messages call the local supervisor: "managed" only when this
+/// app spawned it. When a supervisor was already answering in the state
+/// directory the app spawned nothing, and calling that one managed sent the
+/// user looking for a process the app never started.
+fn local_supervisor_label(spawned: bool) -> &'static str {
+    if spawned {
+        "managed local supervisor"
+    } else {
+        "local supervisor"
+    }
+}
+
+/// The startup deadline ran out before the local host connected.
+fn not_connected_in_time(spawned: bool) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{} did not connect within 30 seconds",
+        local_supervisor_label(spawned)
+    )
+}
+
+/// Why the local host can never connect as things stand, if the helm says
+/// so: the supervisor answering in `state_dir` speaks another protocol
+/// version, or reports an identity other than the one recorded, or none.
+///
+/// Each of those is a settled refusal, not a slow start, so waiting out the
+/// startup deadline only delayed the same failure by 30 seconds and then
+/// reported it as a timeout that named neither the cause nor the remedy.
+/// `None` while the local host is connected, still connecting, or in any
+/// other state.
+///
+/// The remedy differs by state. A version mismatch with a supervisor the
+/// app did not spawn is the usual trigger: one the user started by hand,
+/// still running across an upgrade (SPEC.md, Supported host setup: such a
+/// supervisor may be refused, with a clear message), so the message tells
+/// the user to stop it. The helm's own remediation ("update the farhelm
+/// binary") is left out there, because the app's binary is already the
+/// current one. An identity refusal is NOT fixed by stopping a hand-started
+/// supervisor: the identity lives in the shared state directory, so the
+/// app's own supervisor would report the same one on the next launch. The
+/// message says so instead of sending the user round that loop. The real
+/// remedies (adopting the reported identity on a mismatch; fixing the
+/// supervisor so it identifies itself when it reports none) are in a window
+/// this startup path never opens.
+fn local_supervisor_refusal(
+    hosts: &[crate::Host],
+    state_dir: &Path,
+    spawned: bool,
+) -> Option<String> {
+    let local = hosts.iter().find(|host| host.kind.is_this_machine())?;
+    let label = local_supervisor_label(spawned);
+    let dir = state_dir.display();
+    Some(match &local.state {
+        crate::HostPhase::VersionSkew {
+            peer_protocol,
+            peer_build,
+            our_protocol,
+            our_build,
+            remediation,
+        } => {
+            let mismatch = format!(
+                "the {label} in {dir} speaks protocol {peer_protocol} (build {peer_build}), but \
+                 this app speaks protocol {our_protocol} (build {our_build})"
+            );
+            if spawned {
+                format!("{mismatch}: {remediation}")
+            } else {
+                format!(
+                    "{mismatch}. Stop the supervisor you started for {dir} (for example a \
+                     `farhelm supervisor run` still running in a terminal), then start Farhelm \
+                     again."
+                )
+            }
+        }
+        crate::HostPhase::IdentityMismatch { recorded, reported } => format!(
+            "the {label} in {dir} reports identity {reported}, but this machine's host entry \
+             recorded {recorded}. The supervisor's data in {dir} no longer matches what this \
+             app recorded for this machine, so restarting the supervisor or this app will not \
+             change it."
+        ),
+        crate::HostPhase::IdentityUnverified { recorded } => format!(
+            "the {label} in {dir} reports no identity, but this machine's host entry recorded \
+             {recorded}, so this app cannot tell whether it is the same supervisor."
+        ),
+        _ => return None,
+    })
+}
+
 /// Wait for the reserved local row to reach the supervisor started above.
 /// The manager intentionally starts actors without waiting for connections;
 /// desktop startup is the consumer that needs the stronger readiness point.
@@ -851,6 +938,9 @@ async fn await_local_supervisor_until(
     deadline: tokio::time::Instant,
 ) -> anyhow::Result<()> {
     let client = loopback_client()?;
+    // Whether this app started the supervisor it is waiting for, which only
+    // changes the wording of what startup reports.
+    let spawned = supervisor.is_some();
     loop {
         ensure_managed_supervisor_running(supervisor)?;
         let secret = state
@@ -865,16 +955,17 @@ async fn await_local_supervisor_until(
                 .send(),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("managed local supervisor did not connect within 30 seconds"))?
-        .context("checking the managed local supervisor")?;
+        .map_err(|_| not_connected_in_time(spawned))?
+        .context("checking the local supervisor")?;
         let status = response.status();
         if status.is_success() {
             let hosts = tokio::time::timeout_at(deadline, crate::api::decode_hosts(response))
                 .await
-                .map_err(|_| {
-                    anyhow::anyhow!("managed local supervisor did not connect within 30 seconds")
-                })?
+                .map_err(|_| not_connected_in_time(spawned))?
                 .map_err(anyhow::Error::msg)?;
+            if let Some(refusal) = local_supervisor_refusal(&hosts, state_dir, spawned) {
+                bail!(refusal);
+            }
             if hosts.iter().any(|host| {
                 host.kind.is_this_machine()
                     && matches!(host.state, crate::HostPhase::Connected { .. })
@@ -885,10 +976,8 @@ async fn await_local_supervisor_until(
         } else {
             let body = tokio::time::timeout_at(deadline, response.text())
                 .await
-                .map_err(|_| {
-                    anyhow::anyhow!("managed local supervisor did not connect within 30 seconds")
-                })?
-                .context("reading the managed local supervisor refusal")?;
+                .map_err(|_| not_connected_in_time(spawned))?
+                .context("reading the local supervisor check's refusal")?;
             if status == reqwest::StatusCode::UNAUTHORIZED
                 && crate::api::device_auth_required(&body)
             {
@@ -897,17 +986,13 @@ async fn await_local_supervisor_until(
                     farhelm_helm::show_token(Some(state_dir.to_path_buf())),
                 )
                 .await
-                .map_err(|_| {
-                    anyhow::anyhow!("managed local supervisor did not connect within 30 seconds")
-                })??;
+                .map_err(|_| not_connected_in_time(spawned))??;
                 let replacement = tokio::time::timeout_at(
                     deadline,
                     native_credential(base, &token, None, deadline),
                 )
                 .await
-                .map_err(|_| {
-                    anyhow::anyhow!("managed local supervisor did not connect within 30 seconds")
-                })??;
+                .map_err(|_| not_connected_in_time(spawned))??;
                 *state = persist_then_publish_native(state_path, replacement, |secret| {
                     crate::auth::install_native_device_secret(secret);
                 })?;
@@ -915,7 +1000,8 @@ async fn await_local_supervisor_until(
             }
             let detail = body.trim();
             bail!(
-                "managed local supervisor check failed with {status}{}",
+                "{} check failed with {status}{}",
+                local_supervisor_label(spawned),
                 if detail.is_empty() {
                     String::new()
                 } else {
@@ -924,7 +1010,7 @@ async fn await_local_supervisor_until(
             );
         }
         if tokio::time::Instant::now() >= deadline {
-            bail!("managed local supervisor did not connect within 30 seconds");
+            return Err(not_connected_in_time(spawned));
         }
         tokio::time::sleep_until(std::cmp::min(
             deadline,
@@ -1147,7 +1233,218 @@ mod tests {
                 .to_string()
                 .contains("did not connect within 30 seconds")
         );
+        assert!(
+            !error.to_string().contains("managed"),
+            "the app spawned nothing here, so nothing it reports is managed: {error}"
+        );
         drop(listener);
+    }
+
+    /// The startup wait stops at the first host list that shows the local
+    /// supervisor refused, well before its deadline.
+    ///
+    /// Why it matters: the refusal check is what ends the wait early; without
+    /// it, a refused supervisor waited out the whole 30 s. Specified: a fake
+    /// helm that answers every host-list read with the local host in version
+    /// skew ends the wait with the refusal message, long before a deadline set
+    /// an hour out.
+    #[farhelm_testtrace::test]
+    async fn the_startup_wait_ends_on_a_refused_local_supervisor() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = serde_json::json!({ "hosts": [{
+            "id": 1,
+            "kind": "local",
+            "destination": null,
+            "name": "this machine",
+            "identity": null,
+            "remote_farhelm": null,
+            "remote_state_dir": null,
+            "state": {
+                "phase": "version-skew",
+                "peer_protocol": 9,
+                "peer_build": "old-build",
+                "our_protocol": 10,
+                "our_build": "new-build",
+                "remediation": "update the supervisor"
+            }
+        }]})
+        .to_string();
+        // A minimal helm: every request, whatever it asks, gets the host list.
+        let helm = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let body = body.clone();
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut request = Vec::new();
+                    let mut buf = [0u8; 1024];
+                    while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                        let n = socket.read(&mut buf).await.unwrap();
+                        if n == 0 {
+                            return;
+                        }
+                        request.extend_from_slice(&buf[..n]);
+                    }
+                    let reply = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: \
+                         {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    socket.write_all(reply.as_bytes()).await.unwrap();
+                });
+            }
+        });
+        let root = tempfile::tempdir().unwrap();
+        let state_path = root.path().join(APP_STATE_FILE);
+        let mut state = PersistedState {
+            native_device_secret: Some("device-secret".to_string()),
+            ..PersistedState::default()
+        };
+        let mut supervisor = None;
+
+        let error = tokio::time::timeout(
+            Duration::from_secs(10),
+            await_local_supervisor_until(
+                &format!("http://{addr}"),
+                root.path(),
+                &state_path,
+                &mut state,
+                &mut supervisor,
+                tokio::time::Instant::now() + Duration::from_secs(3600),
+            ),
+        )
+        .await
+        .expect("a refused local supervisor must end the wait without waiting out its deadline")
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("speaks protocol 9"),
+            "the wait must end with the refusal, not a timeout: {error}"
+        );
+        helm.abort();
+    }
+
+    /// Startup ends at once, with the state and the remedy, when the helm
+    /// reports that the local supervisor can never connect: another protocol
+    /// version, another identity, or none.
+    ///
+    /// Why it matters: a supervisor the user started by hand and left running
+    /// across an upgrade answers in the app's state directory, so the app
+    /// spawns nothing and used to wait out its 30 s deadline, then fail with
+    /// "managed local supervisor did not connect", naming neither the cause
+    /// nor what to do, on every launch. Specified: each refusing state yields
+    /// a message carrying its details; when the app spawned nothing the
+    /// message is not "managed" and tells the user to stop the supervisor
+    /// they started; any other state of the local host, and a refusing state
+    /// on another host, leave startup waiting.
+    #[farhelm_testtrace::test]
+    fn a_refusing_local_supervisor_ends_startup_with_its_state_and_remedy() {
+        let dir = Path::new("/home/someone/.local/state/farhelm");
+        let host = |kind, state| crate::Host {
+            id: 1,
+            kind,
+            destination: None,
+            alias: None,
+            name: "this machine".to_string(),
+            identity: None,
+            remote_farhelm: None,
+            remote_state_dir: None,
+            state,
+            incarnation: 1,
+            yolo_safe: false,
+        };
+        let skew = crate::HostPhase::VersionSkew {
+            peer_protocol: 9,
+            peer_build: "old-build".to_string(),
+            our_protocol: 10,
+            our_build: "new-build".to_string(),
+            remediation: "update the supervisor".to_string(),
+        };
+
+        let refusal =
+            local_supervisor_refusal(&[host(crate::HostKind::Local, skew.clone())], dir, false)
+                .expect("a version skew is a refusal");
+        for expected in [
+            "protocol 9",
+            "old-build",
+            "protocol 10",
+            "new-build",
+            "Stop the supervisor you started",
+            "/home/someone/.local/state/farhelm",
+        ] {
+            assert!(
+                refusal.contains(expected),
+                "{expected:?} missing from {refusal:?}"
+            );
+        }
+        assert!(!refusal.contains("managed"), "{refusal:?}");
+        assert!(
+            !refusal.contains("update the supervisor"),
+            "the helm's update advice points at the wrong binary when the app spawned nothing: \
+             {refusal:?}"
+        );
+
+        let mismatch = local_supervisor_refusal(
+            &[host(
+                crate::HostKind::Local,
+                crate::HostPhase::IdentityMismatch {
+                    recorded: "id-recorded".to_string(),
+                    reported: "id-reported".to_string(),
+                },
+            )],
+            dir,
+            false,
+        )
+        .expect("an identity mismatch is a refusal");
+        assert!(mismatch.contains("id-recorded") && mismatch.contains("id-reported"));
+        assert!(
+            !mismatch.contains("Stop the supervisor") && !mismatch.contains("managed"),
+            "stopping a supervisor cannot fix an identity the state directory holds: {mismatch:?}"
+        );
+        let unverified = local_supervisor_refusal(
+            &[host(
+                crate::HostKind::Local,
+                crate::HostPhase::IdentityUnverified {
+                    recorded: "id-recorded".to_string(),
+                },
+            )],
+            dir,
+            false,
+        )
+        .expect("an unverifiable identity is a refusal");
+        assert!(unverified.contains("no identity") && unverified.contains("id-recorded"));
+        assert!(!unverified.contains("Stop the supervisor") && !unverified.contains("managed"));
+
+        let own =
+            local_supervisor_refusal(&[host(crate::HostKind::Local, skew.clone())], dir, true)
+                .expect("a refusal of the app's own supervisor still ends startup");
+        assert!(own.contains("managed local supervisor"), "{own:?}");
+        assert!(!own.contains("Stop the supervisor you started"), "{own:?}");
+        assert!(
+            own.contains("update the supervisor"),
+            "with the app's own supervisor refused, the helm's remediation is the remedy: {own:?}"
+        );
+
+        assert_eq!(
+            local_supervisor_refusal(&[host(crate::HostKind::Ssh, skew)], dir, false),
+            None,
+            "another host's refusal is not the local supervisor's"
+        );
+        assert_eq!(
+            local_supervisor_refusal(
+                &[host(
+                    crate::HostKind::Local,
+                    crate::HostPhase::Connecting {
+                        attempt: 1,
+                        last_error: None
+                    }
+                )],
+                dir,
+                false
+            ),
+            None,
+            "a local host still connecting keeps startup waiting"
+        );
     }
 
     /// The first credential exchange shares one absolute startup deadline

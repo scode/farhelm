@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `desktop-start-fails-on-skewed-supervisor.md` — a hand-started supervisor on another protocol version makes the
-  desktop app fail at startup with a misleading timeout.
 - `terminal-tombstone-never-buried.md` — a terminal's frozen post-takeover screen is never cleared when it leaves the
   view, leaving a blank pane and leaking memory.
 - `checkout-retry-raw-device-check.md` — a create retried after a reboot or remount that renumbered the device is
