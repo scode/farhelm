@@ -61,8 +61,6 @@ One line per open item. This file must always match the feedback files in this d
 
 - `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
   to read.
-- `sink-shutdown-retries-forever-after-delete.md` — deleting a busy session can leave its sink client stuck in an
-  endless shutdown-retry loop.
 - `session-view-leaks-page-lock.md` — the session view's restart/replace claim is not released on unmount, leaving every
   page action disabled until reload.
 - `row-menu-drifts-on-row-height-change.md` — an open row menu can float over a different row when a row above gains a

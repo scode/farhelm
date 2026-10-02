@@ -58,7 +58,7 @@ use super::launch_artifacts::remove_launch_artifacts_for_session;
 use super::sweep::{
     ScopeKillFailure, ScopeUnits, SweepTarget, capture_process_identity, reap_process_tree,
 };
-use super::terminals::{ActiveAttach, AttachmentKey};
+use super::terminals::{ActiveAttach, AttachmentKey, SinkReapWait};
 use super::uploads::abort_session_uploads;
 use crate::tmux::PaneProbe;
 
@@ -435,7 +435,9 @@ impl Supervisor {
         .map_err(TeardownError::Sweep)?;
 
         // Everything from here to the row's removal is fast (one tmux
-        // round trip, a few fail-closed removals, one sqlite write) and
+        // round trip plus the session sink's bounded orderly shutdown, see
+        // `DELETE_SINK_REAP_WAIT`, a few fail-closed removals, one sqlite
+        // write) and
         // runs under `attachments`; the slow removal of the deleted
         // session's files waits until after the guard is released. The
         // guarded part mirrors the Attach
@@ -592,6 +594,24 @@ impl Supervisor {
                 },
             };
             if let Some(tmux_name) = tmux_name {
+                // Let the session sink's orderly shutdown finish while the
+                // session still exists; see `DELETE_SINK_REAP_WAIT`. This
+                // waits under the `attachments` lock, which every keystroke,
+                // attach, detach and resize on this host goes through. That
+                // is the brief, bounded local work SPEC.md ("Waiting between
+                // operations on one host") lets terminals wait on: normally
+                // one tmux round trip, the same kind of work Delete already
+                // does under this lock, and the full limit only when tmux is
+                // not answering, when terminal I/O is stalled anyway.
+                let limit = self.timeouts.delete_sink_reap;
+                if self.await_sink_reap(&tmux_name, limit).await == SinkReapWait::TimedOut {
+                    warn!(
+                        session = %session_id,
+                        tmux = %tmux_name,
+                        "the session's terminal-output client had not finished its orderly \
+                         shutdown after {limit:?}; killing its tmux session anyway"
+                    );
+                }
                 self.tmux
                     .kill_session(&tmux_name)
                     .await
@@ -1184,16 +1204,21 @@ mod tests {
         seams: SupervisorSeams,
         id: &str,
     ) -> (StateDir, Arc<Supervisor>, Arc<SessionEntry>) {
+        scoped_session_with_timeouts(seams, SupervisorTimeouts::default(), id).await
+    }
+
+    /// [`scoped_session_with`] with the supervisor's timeouts chosen too, for
+    /// a test that has to reach a budget's expiry.
+    async fn scoped_session_with_timeouts(
+        seams: SupervisorSeams,
+        timeouts: SupervisorTimeouts,
+        id: &str,
+    ) -> (StateDir, Arc<Supervisor>, Arc<SessionEntry>) {
         let state = StateDir::new();
         let unit = crate::scope::unit_name(id, 0).expect("a UUID id must name a scope unit");
-        let sup = Supervisor::new_with_seams(
-            state.path(),
-            dummy_exe(),
-            SupervisorTimeouts::default(),
-            seams,
-        )
-        .await
-        .expect("supervisor");
+        let sup = Supervisor::new_with_seams(state.path(), dummy_exe(), timeouts, seams)
+            .await
+            .expect("supervisor");
         sup.store
             .insert_session(
                 StoredSession {
@@ -1397,6 +1422,268 @@ mod tests {
             matches!(result, Err(super::super::sweep::StopFailure::Sweep(_))),
             "an unconfirmed scope must fail the stop"
         );
+    }
+
+    /// A session with a real tmux session and one attachment whose sink is a
+    /// test-controlled fake, for the Delete-versus-sink-shutdown tests.
+    ///
+    /// The fake sink's task waits for the shutdown request and reports it on
+    /// `shutdown_seen`, which is the moment Delete has released the last sink
+    /// reference and the reaper is running. With `finish_on_release` it then
+    /// waits for `release`, records whether the tmux session still existed,
+    /// and ends; without it, it never ends, like a client tmux never answers.
+    struct SinkDeleteFixture {
+        _state: StateDir,
+        sup: Arc<Supervisor>,
+        entry: Arc<SessionEntry>,
+        id: String,
+        tmux_name: String,
+        shutdown_seen: oneshot::Receiver<()>,
+        release: oneshot::Sender<()>,
+        saw_session: oneshot::Receiver<anyhow::Result<bool>>,
+    }
+
+    async fn sink_delete_fixture(
+        timeouts: SupervisorTimeouts,
+        finish_on_release: bool,
+    ) -> SinkDeleteFixture {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (state, sup, entry) = scoped_session_with_timeouts(
+            SupervisorSeams {
+                scopes: Arc::new(working_scopes()),
+                ..SupervisorSeams::default()
+            },
+            timeouts,
+            &id,
+        )
+        .await;
+        let tmux_name = format!("fh-{id}");
+        let pane = sup
+            .tmux
+            .create_session(
+                &tmux_name,
+                "/",
+                80,
+                24,
+                &[],
+                &["sleep".to_string(), "60".to_string()],
+            )
+            .await
+            .expect("fixture premise: tmux session must be created before Delete");
+        let input = sup
+            .tmux
+            .open_input_client(&tmux_name, &pane)
+            .await
+            .expect("fixture premise: input client must attach");
+
+        let (shutdown, shutdown_rx) = oneshot::channel::<()>();
+        let (shutdown_seen_tx, shutdown_seen) = oneshot::channel::<()>();
+        let (release, released) = oneshot::channel::<()>();
+        let (saw_session_tx, saw_session) = oneshot::channel::<anyhow::Result<bool>>();
+        let (sink_state, _sink_state_rx) = watch::channel(None);
+        let sink_task = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            let tmux_name = tmux_name.clone();
+            async move {
+                let _ = shutdown_rx.await;
+                let _ = shutdown_seen_tx.send(());
+                if !finish_on_release {
+                    std::future::pending::<()>().await;
+                }
+                let _ = released.await;
+                let _ = saw_session_tx.send(sup.tmux.has_session(&tmux_name).await);
+                Ok::<_, anyhow::Error>(())
+            }
+        });
+        let handle = Arc::new(SessionSinkHandle {
+            tmux_name: tmux_name.clone(),
+            task: Some(sink_task),
+            shutdown: Some(shutdown),
+            state: sink_state,
+        });
+        sup.sinks.lock().expect("sink registry").insert(
+            tmux_name.clone(),
+            super::super::terminals::SinkRegistryEntry::Live(Arc::downgrade(&handle)),
+        );
+        let sink = SessionSinkLease::new(handle, Arc::clone(&sup.sinks));
+        let (notify, _notify_rx) = mpsc::channel(2);
+        let (forwarder_shutdown, _shutdown_observer) = watch::channel(false);
+        let (forwarder_cleanup, cleanup_rx) = watch::channel(None);
+        let (pause, _pause_rx) = watch::channel(None);
+        sup.attachments.lock().await.insert(
+            crate::service::terminals::AttachmentKey::new(
+                &id,
+                crate::service::terminals::TerminalId::Agent,
+            ),
+            ActiveAttach {
+                channel: 7,
+                lease: "test".to_string(),
+                notify,
+                forwarder: tokio::spawn(async {}),
+                forwarder_shutdown,
+                forwarder_cleanup: cleanup_rx,
+                input,
+                pause,
+                pane_death: super::super::terminals::PaneDeath::new(&tmux_name, &pane).0,
+                sink,
+            },
+        );
+        drop(forwarder_cleanup);
+        SinkDeleteFixture {
+            _state: state,
+            sup,
+            entry,
+            id,
+            tmux_name,
+            shutdown_seen,
+            release,
+            saw_session,
+        }
+    }
+
+    /// Delete lets the session sink's orderly shutdown finish before it kills
+    /// the session's tmux session, and leaves no sink behind.
+    ///
+    /// Why it matters: the shutdown turns the sink's output off through a
+    /// control-mode exchange with tmux, which only works while the session
+    /// exists. Killed first, tmux answered "can't find client" while the
+    /// client stayed alive behind its unread output, and the reaper retried
+    /// forever: a leaked tmux client and a tmux command every five seconds
+    /// until the supervisor restarted. Spec: while the reaper is still
+    /// running, Delete has not killed the session; once it finishes, Delete
+    /// kills it and succeeds, and the session's sink entry is gone. The test
+    /// holds the reaper itself, so the order is observed deterministically
+    /// rather than by reproducing the original race.
+    #[farhelm_testtrace::test]
+    async fn delete_lets_the_sink_shut_down_before_killing_tmux() {
+        let fixture = sink_delete_fixture(SupervisorTimeouts::default(), true).await;
+        let SinkDeleteFixture {
+            _state,
+            sup,
+            entry,
+            id,
+            tmux_name,
+            shutdown_seen,
+            release,
+            saw_session,
+        } = fixture;
+        let delete = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            async move {
+                let admission = test_admission(&sup).await;
+                sup.teardown_session(&entry, &id, admission).await
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(10), shutdown_seen)
+            .await
+            .expect("Delete must release the session sink")
+            .expect("the sink reports its shutdown request");
+        assert!(
+            matches!(
+                sup.sinks.lock().expect("sink registry").get(&tmux_name),
+                Some(super::super::terminals::SinkRegistryEntry::Reaping(_))
+            ),
+            "premise: the released sink is being reaped"
+        );
+        // sleep-ok: observation window in which a Delete that did not wait for the sink would already have killed tmux
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(
+            !delete.is_finished(),
+            "Delete must wait for the sink's shutdown"
+        );
+
+        release.send(()).expect("release the sink's shutdown");
+        assert!(
+            saw_session
+                .await
+                .expect("the sink reports")
+                .expect("probe the tmux session from the sink"),
+            "the sink finished while its tmux session still existed"
+        );
+        assert!(
+            delete.await.expect("delete task").is_ok(),
+            "Delete succeeds once the sink is gone"
+        );
+        assert!(
+            sup.sinks
+                .lock()
+                .expect("sink registry")
+                .get(&tmux_name)
+                .is_none(),
+            "no sink entry is left behind"
+        );
+        assert!(
+            !sup.tmux
+                .has_session_for_terminal_less_delete(&tmux_name)
+                .await
+                .expect("tmux liveness after Delete"),
+            "Delete kills the tmux session"
+        );
+    }
+
+    /// A sink whose orderly shutdown never finishes delays Delete only by
+    /// the bounded wait, after which Delete kills the session and succeeds.
+    ///
+    /// Why it matters: the wait exists for a shutdown that normally takes
+    /// one exchange with tmux, but it runs under the lock every terminal on
+    /// the host shares, so a client tmux never answers must not turn into a
+    /// Delete that fails or hangs (P3 of the plan that added the wait: kill
+    /// as before and log). Spec: with the budget expired, the session is
+    /// killed, the row removed and Delete reports success, while the sink's
+    /// entry is still `Reaping`, which the fallback deliberately leaves to
+    /// its reaper.
+    #[farhelm_testtrace::test]
+    async fn delete_kills_tmux_when_the_sink_shutdown_outlasts_its_wait() {
+        let fixture = sink_delete_fixture(
+            SupervisorTimeouts {
+                delete_sink_reap: std::time::Duration::from_millis(100),
+                ..SupervisorTimeouts::default()
+            },
+            false,
+        )
+        .await;
+        let admission = test_admission(&fixture.sup).await;
+        let deleted = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            fixture
+                .sup
+                .teardown_session(&fixture.entry, &fixture.id, admission),
+        )
+        .await
+        .expect("Delete must not wait past its budget");
+        assert!(deleted.is_ok(), "Delete succeeds after the bounded wait");
+        assert!(
+            !fixture
+                .sup
+                .tmux
+                .has_session_for_terminal_less_delete(&fixture.tmux_name)
+                .await
+                .expect("tmux liveness after Delete"),
+            "Delete kills the tmux session after the wait"
+        );
+        assert!(
+            fixture
+                .sup
+                .store
+                .session(&fixture.id)
+                .await
+                .expect("read the row")
+                .is_none(),
+            "Delete removes the session's row"
+        );
+        assert!(
+            matches!(
+                fixture
+                    .sup
+                    .sinks
+                    .lock()
+                    .expect("sink registry")
+                    .get(&fixture.tmux_name),
+                Some(super::super::terminals::SinkRegistryEntry::Reaping(_))
+            ),
+            "the unfinished shutdown stays with its reaper"
+        );
+        drop(fixture.release);
     }
 
     /// A failed forwarder join must still kill the session's tmux server, but

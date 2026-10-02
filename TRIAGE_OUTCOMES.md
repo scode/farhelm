@@ -4672,7 +4672,11 @@
   `delete-holds-attachments-lock-through-archive.md` lands there). Add a regression test that a delete racing a busy
   sink leaves no sink in a perpetual retry. If a restart path that kills and recreates a session under the same name
   turns out to exist, give it the same ordering. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-feed-sink-identity.md`.
+- Execution: complete: change `lluxuuzmvmut`, bookmark `triage-1001b/06-delete-waits-for-sink`, PR
+  https://github.com/scode/farhelm/pull/1379. No restart path kills and recreates a session under the same name (restart
+  reuses the tmux session), so only Delete changed. Remaining gap: Delete cannot wait for the shutdown of an output
+  client whose record an earlier failure already replaced. The maintainer accepted that gap on 2026-10-01 (not to be
+  fixed), and the code documents it.
 
 ## input-client-notifications-pile-up.md
 

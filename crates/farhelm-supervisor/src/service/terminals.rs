@@ -853,6 +853,32 @@ impl SessionSinkHandle {
 pub(crate) const SUPERVISOR_STOPPING: &str =
     "the supervisor is stopping; attach again once it is running";
 
+/// How long Delete waits for a session sink's orderly shutdown before it
+/// kills the session's tmux session anyway.
+///
+/// The orderly shutdown is one control-mode exchange with tmux (turn the
+/// client's output off, confirm, then close it), so it normally takes a
+/// round trip. It must run while the session still exists: killed first,
+/// tmux answers the exchange with "can't find client" while the client
+/// process is still alive behind its unread output, and the reaper retried
+/// that forever. Five seconds is reached only when tmux is not answering at
+/// all, and then the kill happens as it did before, with a warning.
+pub(crate) const DELETE_SINK_REAP_WAIT: Duration = Duration::from_secs(5);
+
+/// What [`Supervisor::await_sink_reap`] found.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SinkReapWait {
+    /// No orderly shutdown the registry tracks was under way: no sink, a
+    /// live one (an attach that raced the caller still holds it), or one
+    /// that already failed. A stale handle's untracked reaper may still be
+    /// running; see [`Supervisor::await_sink_reap`].
+    NotReaping,
+    /// The shutdown under way finished, or its reaper went away.
+    Settled,
+    /// The shutdown was still running when the limit ran out.
+    TimedOut,
+}
+
 /// Whether a reaper's completion channel still promises a result: nothing
 /// has been published yet AND its sender is alive. A dropped sender means
 /// the reaper task is gone and nothing will ever settle it, so a shutdown
@@ -1875,6 +1901,61 @@ impl Supervisor {
 
 // The session-sink lifecycle keeps pane filters backed by a live reader.
 impl Supervisor {
+    /// Wait at most `limit` for the orderly shutdowns of `tmux_name`'s
+    /// session sinks that are already under way.
+    ///
+    /// Waits for the registered sink's reaper (a `Reaping` entry) and for
+    /// any candidate client still being reaped after losing an open race.
+    /// A live entry means an attach that raced the caller still holds the
+    /// sink, and waiting on it would only burn the whole limit, so it is not
+    /// waited for. Not covered: the reaper of a handle whose slot a `Failed`
+    /// entry has since overwritten keeps no receiver anywhere, so nothing
+    /// can wait for it. The maintainer accepted that gap (2026-10-01) rather
+    /// than tracking such reapers: a `Failed` entry only comes from an
+    /// earlier failed open or reap on the same session, and the cost is
+    /// what this wait otherwise prevents, a leaked client and a shutdown
+    /// retry that repeats until the supervisor restarts. The reaper updates
+    /// the registry before it reports, so after [`SinkReapWait::Settled`] a
+    /// successful shutdown's entry is gone.
+    pub(crate) async fn await_sink_reap(&self, tmux_name: &str, limit: Duration) -> SinkReapWait {
+        let pending: Vec<SinkReapReceiver> = {
+            let sinks = self.sinks.lock().expect("sink registry poisoned");
+            let registered = match sinks.get(tmux_name) {
+                Some(SinkRegistryEntry::Reaping(done)) if still_reaping(done) => Some(done.clone()),
+                Some(_) | None => None,
+            };
+            registered
+                .into_iter()
+                .chain(
+                    sinks
+                        .candidates
+                        .get(tmux_name)
+                        .into_iter()
+                        .flatten()
+                        .filter(|done| still_reaping(done))
+                        .cloned(),
+                )
+                .collect()
+        };
+        if pending.is_empty() {
+            return SinkReapWait::NotReaping;
+        }
+        let settled = tokio::time::timeout(limit, async move {
+            for mut done in pending {
+                while done.borrow().is_none() {
+                    if done.changed().await.is_err() {
+                        break;
+                    }
+                }
+            }
+        })
+        .await;
+        match settled {
+            Ok(()) => SinkReapWait::Settled,
+            Err(_) => SinkReapWait::TimedOut,
+        }
+    }
+
     /// Open a candidate in a task that survives cancellation of its caller.
     ///
     /// Opening a tmux control client spawns a process before its bounded
