@@ -94,17 +94,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **"Replace with" a gh: checkout refused because the checkout path exists.** Using "replace with" to switch a session
   to a `gh:` fresh checkout was refused with an error saying to pick a different session name because the git checkout
   path already exists. Not yet investigated: it may fail like that every time, or something subtler about that session's
-  state may have triggered it. Reproduce first, then fix whichever it turns out to be.
+  state may have triggered it. Reproduce first, then fix whichever it turns out to be. Plan:
+  `plans/gh-clone-fresh-checkout.md`.
 
 - **Clone of a gh: checkout session reuses the same working copy.** Cloning a session launched on a `gh:` fresh
   checkout, then renaming the clone, still left the clone on the original session's working copy rather than a checkout
   of its own. The maintainer knows the cause and can fix it up by hand, but the clone flow for these sessions needs
-  improving. Details TBD.
+  improving. Details TBD. Plan: `plans/gh-clone-fresh-checkout.md`.
 
 - **Clone then gh: should pick a fresh session name and checkout directory.** When the user clones a session and enters
   `gh:some/repo` as the clone's target, Farhelm should allocate a new session name and checkout directory for it. Today
   the default experience is an error saying the checkout conflicts with the existing one. Closely related to the entry
-  above on clones reusing the original working copy. Details TBD.
+  above on clones reusing the original working copy. Details TBD. Plan: `plans/gh-clone-fresh-checkout.md`.
 
 - Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
   restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.
@@ -157,7 +158,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   step, elapsed time, and token count, listed under `● main`. Note that the spinner said 5 agents while the list showed
   one entry plus 3 more. The supervisor's Claude screen reader is tested against real screens in
   `crates/farhelm-supervisor/tests/fixtures/screens/claude/` (see `docs/agent-screen-fixtures.md`); a fixture of this
-  state belongs there.
+  state belongs there. Plan: `plans/claude-background-wait-status.md`.
 
 - **Audio signal when an agent is waiting on input.** Play a sound when a session's agent gets stuck waiting for the
   user (a question, an approval prompt), so a user looking at something else notices without watching the sidebar.
@@ -206,13 +207,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **A proper dialog for adding a remote host.** Must fix. Adding a remote host still throws a wall of text into the
   sidebar. Instead, adding a host should show a clean, well-designed dialog that explains what will happen, and let the
-  user answer either "yes" or "yes, and don't ask in the future".
+  user answer either "yes" or "yes, and don't ask in the future". Plan: `plans/host-dialogs-and-menu.md`.
 
 - **A proper dialog for removing a host.** Removing a host from the sidebar today asks inline, in the host's row: a
   block of text ("forgetting a host leaves its supervisor and sessions running; re-adding the destination finds them
   again", then the quoted host name) above "confirm remove" and "cancel" buttons. Replace it with a clean, modern pop-up
   dialog that explains what removal will do, and add a "don't ask again in the future" option. Same direction as the
-  host-add dialog entry above.
+  host-add dialog entry above. Plan: `plans/host-dialogs-and-menu.md`.
+
+- **A way to turn host add and remove confirmations back on.** The host dialogs plan adds "yes, and don't ask in the
+  future" to the add-host dialog and "remove, and don't ask again" to the remove-host dialog, both kept as helm
+  preferences shared by every client, but no way in the UI to undo either answer: decided 2026-10-02 to leave that out
+  of the plan and add it later. Farhelm has no app-wide settings screen to put it in, so where the switch lives is the
+  first question.
 
 - **Install Claude and Codex on a host for the user.** Offer to install Claude Code and Codex (only those two) on a host
   on the user's behalf, always through each vendor's one-line curl installer, and optionally copy the user's credentials
@@ -223,12 +230,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Make the host pop-up menu match the session pop-up menu.** Redesign the host pop-up menu so it looks and feels
   exactly like the session pop-up menu: the same positioning, the same style, the same per-item descriptions, and so on.
+  Plan: `plans/host-dialogs-and-menu.md`.
 
 - **An update button on hosts that can be updated.** When a host in the host list can be updated (an old version, or one
   that needs an update), show an actual clickable "update" button there instead of only text. Keep the update option in
   the host's pop-up menu as well. When an update is not just possible but required, the button should look different,
   probably red; the exact treatment is for design time. Hovering over the button should say what clicking it does and
-  whether the update is required or merely possible; wording TBD.
+  whether the update is required or merely possible; wording TBD. Plan: `plans/host-update-button.md`.
 
 ## Doc todo
 
