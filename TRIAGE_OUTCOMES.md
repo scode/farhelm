@@ -4541,7 +4541,8 @@
 - Completion criteria: clarify "Waiting between operations on one host" so that terminal I/O may wait on brief, bounded
   local work (such as a delete's renames, fsyncs and database commit), but never on long operations or kill grace
   periods. Remove this feedback file and its index entry, with no code change.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `wprvzxpmuyww`, bookmark `triage-1001/14-delete-lock-spec`, PR
+  https://github.com/scode/farhelm/pull/1370.
 
 ## restart-cwd-lossy-non-utf8.md
 
