@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `sidebar-replace-recomputes-alive.md` — sidebar Replace recomputes "nothing is alive" after the YOLO confirmation, so
-  it can kill an agent or shell restarted meanwhile.
 - `merged-list-crowded-by-one-host.md` — a remote host reporting 500 future-dated or top-sorting sessions pushes every
   other host's sessions out of the merged list.
 - `sessions-changed-hint-unthrottled.md` — the helm does not rate-limit "sessions changed" hints, so a hostile host can
