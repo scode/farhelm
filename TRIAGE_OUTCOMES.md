@@ -4991,7 +4991,8 @@
   classified: a separate resume command is not checked, and a plain Resume or Restart that runs it is not asked. Keep it
   consistent with the best-effort wording from `yolo-guard-misses-env-prefix.md`. No code change. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
+- Execution: complete: change `qsspryqlvrlp`, bookmark `triage-1001c/04-yolo-resume-spec`, PR
+  https://github.com/scode/farhelm/pull/1389.
 
 ## codex-resume-template-duplicates-selector.md
 

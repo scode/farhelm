@@ -28,8 +28,6 @@ One line per open item. This file must always match the feedback files in this d
   session's, so Resume appends to the wrong conversation.
 - `claude-resume-template-selector-collision.md` — Claude's derived resume command keeps an original `--continue`,
   `--resume` or `--`, so Resume can open the wrong conversation or start fresh.
-- `yolo-guard-skips-resume-template.md` — the sensitive-host YOLO guard never classifies a profile's separate resume
-  command, so the first Resume or Restart can skip approvals unconfirmed.
 - `omp-corridor-uncounted-pane-runtime.md` — when the foreground OMP's command line cannot be read, a nested OMP can
   take over the session's Resume target.
 - `claude-clear-report-dropped-on-claim-timeout.md` — a Claude `/clear` report refused after a 1 s capture-claim wait is
