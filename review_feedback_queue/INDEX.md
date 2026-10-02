@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `omp-corridor-uncounted-pane-runtime.md` — when the foreground OMP's command line cannot be read, a nested OMP can
-  take over the session's Resume target.
 - `claude-clear-report-dropped-on-claim-timeout.md` — a Claude `/clear` report refused after a 1 s capture-claim wait is
   never resent, so Resume keeps reopening the cleared conversation.
 

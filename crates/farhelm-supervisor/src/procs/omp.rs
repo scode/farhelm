@@ -243,21 +243,6 @@ pub(super) fn is_omp_shell_trampoline(exe: &[u8], argv: &[Vec<u8>], expected: &[
     }
 }
 
-/// OMP's instance of the restrictive corridor, over an already-walked
-/// chain: the reporter (first link, never itself a runtime candidate) must
-/// be the supported hook invocation; exactly one link must be the launched
-/// runtime's descriptor (Bun plus the selected entry, or the compiled
-/// target with TUI grammar); the pane anchor (last link) is accepted by
-/// position; links below the runtime must be narrow hook trampolines, and
-/// links above it must be recognized launchers or transparent shell
-/// trampolines for the launch's own program. Any additional
-/// session-hosting runtime of any kind and every unclassified intermediary
-/// refuses.
-///
-/// `program` is the durable launch's program classification: it selects
-/// which launcher spellings may appear above the runtime, so a chain whose
-/// live shape contradicts its launch refuses rather than being re-explained.
-///
 /// The launcher predicate plus the trampoline target spellings one OMP
 /// launch program admits above its runtime.
 pub(super) type OmpLauncherRules<'a> = (fn(&[Vec<u8>]) -> bool, &'a [&'a [u8]]);
@@ -267,11 +252,12 @@ pub(super) type OmpLauncherRules<'a> = (fn(&[Vec<u8>]) -> bool, &'a [&'a [u8]]);
 /// be the supported hook invocation; exactly one link must be the launched
 /// runtime's descriptor (Bun plus the selected entry, or the compiled
 /// target with TUI grammar); the pane anchor (last link) is accepted by
-/// position; links below the runtime must be narrow hook trampolines, and
-/// links above it must be recognized launchers or transparent shell
-/// trampolines for the launch's own program. Any additional
-/// session-hosting runtime of any kind and every unclassified intermediary
-/// refuses.
+/// position, except that an `omp` launch refuses a Bun or Node pane that is
+/// not the emitter; links below the runtime must be narrow hook
+/// trampolines, and links above it must be recognized launchers or
+/// transparent shell trampolines for the launch's own program. Any
+/// additional session-hosting runtime of any kind and every unclassified
+/// intermediary refuses.
 ///
 /// `program` is the durable launch's program classification: it selects
 /// which launcher spellings may appear above the runtime, so a chain whose
@@ -339,6 +325,23 @@ pub(super) fn omp_corridor(
         }
         return Err("the hook has no attributable OMP runtime".to_string());
     };
+    // The pane anchor is accepted by position, but for a launch of the
+    // installed `omp` command nothing launches the runtime: the pane either
+    // IS the runtime or a shell above it. A Bun or Node pane that is not
+    // the emitter is therefore a runtime the search above could not
+    // classify (its arguments unreadable, say, past the argv budget), and
+    // the emitter it found is a nested OMP below it. Admitting that would
+    // let the nested conversation's report stand for the session's own.
+    if matches!(program, OmpLaunchProgram::Omp) {
+        let pane_index = chain.len() - 1;
+        let pane = &chain[pane_index];
+        if pane_index != emitter_index && (is_bun_image(&pane.exe) || is_node_image(&pane.exe)) {
+            return Err(
+                "the pane runs a Bun or Node process that is not the reporting OMP runtime"
+                    .to_string(),
+            );
+        }
+    }
     // The live runtime argv must still describe an interactive TUI
     // conversation: the launch passed this grammar at spawn, but a process
     // that exec'd into a utility or print shape afterwards is no longer
@@ -400,8 +403,10 @@ pub(super) fn no_omp_launcher(_argv: &[Vec<u8>]) -> bool {
 }
 
 /// Whether one non-reporter link is an OMP runtime image: Bun (the entry
-/// check needs its argv, so an argv-less Bun link is not a candidate here
-/// and refuses downstream as unclassified) or the compiled target.
+/// check needs its argv, so an argv-less Bun link is not a candidate here;
+/// downstream it refuses as an unclassified intermediary, or as the pane of
+/// an installed-`omp` launch, and is accepted as any other launch's pane)
+/// or the compiled target.
 ///
 /// The entry may be named through a symlink: the installed `omp` command
 /// IS one, and the kernel hands Bun the launched spelling — observed live

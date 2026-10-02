@@ -1785,7 +1785,9 @@ evidence, but cannot authorize another directory move.
   because the installed `omp` command is one), `Ob` (the compiled target with TUI grammar), `L` (an exact `bun x`/`bunx`
   or npm/npx package selection above the runtime, Bun-resulting only), `S` (a known transparent `sh -c 'exec <runtime>'`
   trampoline, or an exec'd-away shell that leaves no link). Nested or additional session-hosting runtimes of any kind,
-  unclassified intermediaries, Node-executed OMP, unknown wrappers, and ambiguous package scripts all refuse; the live
+  unclassified intermediaries, Node-executed OMP, unknown wrappers, ambiguous package scripts, and, for a launch of the
+  installed `omp` command, a Bun or Node pane process that is not the runtime itself (one whose arguments could not be
+  read, for example, which would otherwise let a nested runtime below it stand as the emitter) all refuse; the live
   runtime argv is re-read through the same grammar injection uses, so a process that exec'd from a TUI launch into a
   utility or print shape refuses too. Attribution repeats around the evidence and the identities are compared. The
   source vocabulary is the asset's four tags (`session_start`, `session_switch` with its opaque upstream reason,

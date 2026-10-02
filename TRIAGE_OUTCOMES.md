@@ -5872,7 +5872,8 @@
   not the emitter or whose arguments cannot be read, with a unit test for the unreadable-pane chain; remove this
   feedback file and its index entry. If that turns out complicated, instead add a `Near term` TODO.md entry describing
   the problem and remove this feedback file and its index entry in the same change.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `qmlmzzyp`, bookmark `triage-1001e/16-omp-pane-runtime`, PR
+  https://github.com/scode/farhelm/pull/1459.
 
 ## process-snapshot-requires-supervisor-witness.md
 

@@ -2467,6 +2467,68 @@ mod tests {
         assert!(refusal.contains("nested OMP"), "{refusal}");
     }
 
+    /// Spec: for a launch of the installed `omp` command, a Bun or Node pane
+    /// process that is not the emitter refuses, including one whose
+    /// arguments could not be read; a pane that is itself the reporting
+    /// runtime and a package launcher pane of a Bun launch stay admitted.
+    /// (A shell pane above the runtime is admitted by
+    /// `an_installed_omp_runtime_with_a_direct_hook_child_is_admitted`.)
+    ///
+    /// Why: the pane is accepted by position, and a runtime whose arguments
+    /// are missing (an over-budget command line reads as none) is not
+    /// recognized as a runtime. Without this check, a nested OMP below such
+    /// a pane was the only runtime found, so its report was taken for the
+    /// session's and Resume reopened the nested conversation. The admitted
+    /// controls show the refusal is confined to the shape that cannot be a
+    /// legitimate `omp` launch.
+    #[farhelm_testtrace::test]
+    fn an_omp_launch_refuses_an_unclassified_runtime_pane_above_the_emitter() {
+        for pane in [
+            corridor_link_no_argv(11, "/opt/bun/bin/bun"),
+            corridor_link_no_argv(11, "/opt/node/bin/node"),
+            corridor_link(11, "/opt/bun/bin/bun", &["bun", "/opt/other/tool.js"]),
+        ] {
+            let chain = vec![
+                corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+                omp_runtime_link(12, &[]),
+                pane.clone(),
+            ];
+            let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+                .expect_err("a runtime pane that is not the emitter must refuse");
+            assert!(
+                refusal.contains("not the reporting OMP runtime"),
+                "{pane:?}: {refusal}"
+            );
+        }
+
+        let runtime_pane = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+        ];
+        let emitter = omp_corridor(
+            &runtime_pane,
+            &crate::agent_kind::omp::OmpLaunchProgram::Omp,
+        )
+        .expect("a Bun pane that is the reporting runtime stays admitted");
+        assert_eq!(emitter.pid, 12);
+
+        let launcher_pane = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(
+                11,
+                "/opt/bun/bin/bun",
+                &["bun", "x", "@oh-my-pi/pi-coding-agent"],
+            ),
+        ];
+        let emitter = omp_corridor(
+            &launcher_pane,
+            &crate::agent_kind::omp::OmpLaunchProgram::Bun,
+        )
+        .expect("a Bun launch's package launcher pane stays admitted");
+        assert_eq!(emitter.pid, 12);
+    }
+
     /// Node-executed OMP refuses with its own diagnostic: execution and
     /// lifecycle parity for Node is unverified, so the shape fails closed
     /// rather than riding the `.js` suffix into the Bun rule.
@@ -2669,10 +2731,10 @@ mod tests {
     /// A launcher between runtime and pane anchor contradicts an
     /// installed-`omp` launch: the installed command runs its runtime
     /// directly under the pane, so a package manager in between is not
-    /// this launch's shape. (The pane anchor itself is accepted by
-    /// position — the framework trusts the owned pane's own process, and
-    /// this test keeps a real anchor below the launcher to pin the
-    /// middle-link rule rather than the anchor rule.)
+    /// this launch's shape. (The pane anchor is otherwise accepted by
+    /// position, apart from an installed-`omp` launch's Bun or Node pane
+    /// that is not the emitter; this test keeps a shell anchor above the
+    /// launcher to pin the middle-link rule rather than the anchor rule.)
     #[farhelm_testtrace::test]
     fn a_launcher_above_an_installed_omp_launch_is_refused() {
         let chain = vec![
