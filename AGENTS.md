@@ -524,8 +524,9 @@ it, never the SVGs by hand, and the outline step only reruns when the word or th
 
 # Docs website
 
-`website/` is the user-facing documentation site. `website/AGENTS.md` holds its authoring rules (user-facing framing and
-the jargon list, liberal cross-referencing, the sidebar as the outline, and stub pages); read it before adding or
+`website/` is the user-facing documentation site. `website/AGENTS.md` holds its mechanics (link syntax, the sidebar as
+the outline, and stub pages), and `website/EDITORIAL_RULES.md` holds how its pages read (user-facing framing, the jargon
+list, liberal cross-referencing) and how maintainer feedback on drafts becomes new rules; read both before adding or
 changing a page there.
 
 # Desktop/web UI bug triage
