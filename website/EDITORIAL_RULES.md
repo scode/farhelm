@@ -1,8 +1,8 @@
 # Editorial rules for the docs website
 
 How the pages on this site should read: who they are written for, which words they may use, and how they hand the reader
-from one page to the next. Read this before drafting or revising any page. The site's mechanics (link syntax, the
-sidebar, stub pages, formatting traps) are in `AGENTS.md` beside this file.
+from one page to the next. Reading this file is required before any change under `website/`; `AGENTS.md` says so too.
+The site's mechanics (link syntax, the sidebar, stub pages, formatting traps) are in `AGENTS.md` beside this file.
 
 The goal is documentation that agents can mostly write and that still reads as if someone who cared wrote it. That only
 works if the maintainer's corrections stick, so this file is not a finished style guide. It grows from feedback on
@@ -14,6 +14,29 @@ maintainer comments on, or edits, wording you drafted for this site.
 NOTE: This is not reference documentation, and it is not a copy of the specs. `SPEC.md` and `SPEC_impl.md` stay the
 authority on behavior. A page must agree with them, but it explains what the behavior means for the person using Farhelm
 rather than restating the spec. Complete reference material (every flag, every field) is out of scope for now.
+
+## The Overview page is the maintainer's
+
+The Overview page is the docs front page at `/docs/`, the sidebar's "Overview" entry, rendered from
+`src/content/docs/docs/index.mdx`. The root `AGENTS.md` and the README scripts call it "the landing page". Agents edit
+it only when the maintainer asks for that specific edit, in conversation or in a TODO entry or plan of theirs that names
+the Overview page. The maintainer edits its wording by hand, sentence by sentence, and an agent improving it on its own
+initiative undoes that work.
+
+That covers everything the page shows, including the words in its drawings: the pillar titles and the how-it-works text
+are written in `scripts/render-svgs.mjs` and drawn into the SVGs under `src/assets/intro/`. Re-running that script after
+a requested change to the brand mark is fine as long as the Overview's words stay as they are.
+
+It holds even when another change seems to require touching the page: a link to a page you renamed or moved, prose its
+own comment says to keep in step with the README's introduction, a term that changed in the vocabulary lists, or a stub
+it points at that you just wrote. Do not edit it. Tell the maintainer what would need to change, show the exact edit you
+propose, and leave the decision to them. When the rest of your change cannot work without that edit (the build fails on
+a link the Overview page holds, for example), the change waits for the maintainer's answer; do not land it broken, and
+do not route around the rule by keeping the old page alive under its old name. A request to rewrite "the docs" or "every
+page" does not cover the Overview page either; ask.
+
+One edit is exempt: "Refresh the README screenshot" in the root `AGENTS.md` has `scripts/publish-readme-hero.sh` rewrite
+the screenshot URL between the markers in this page, and committing that one-line change is part of the refresh.
 
 ## Who the pages are for
 
