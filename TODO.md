@@ -77,8 +77,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Farhelm derives by appending a conversation selector to the original command line collides with a selector the user's
   own command already carries, so a Claude session started as `claude --continue`, or with a `--` in its command, can
   restart into a different conversation or a fresh one (`claude-resume-template-selector-collision.md`, triaged
-  2026-10-01; Codex has the same problem in `codex-resume-template-duplicates-selector.md`). First step: walk through
-  the launch paths with the maintainer.
+  2026-10-01; Codex had the same problem in `codex-resume-template-duplicates-selector.md` and now refuses such a launch
+  at create time unless it brings its own resume command). First step: walk through the launch paths with the
+  maintainer.
 
 - **Uninstall after a move when the installer skipped the app.** On macOS, after the install directory moves
   (`~/.local/bin` replaced by a symlink, a renamed home, a different `FARHELM_INSTALL_DIR`), `farhelm uninstall` refuses

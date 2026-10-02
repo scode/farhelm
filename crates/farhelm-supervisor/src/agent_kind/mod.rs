@@ -1133,6 +1133,26 @@ fn grok_has_ambiguous_resume_shape(args: &[String]) -> bool {
     })
 }
 
+/// Whether a Codex launch already selects a session, so appending the
+/// derived `resume <id>` would produce two selectors.
+///
+/// Codex selects a session with the `resume` or `fork` SUBCOMMAND, and its
+/// argument parser rejects a second one (`codex resume <old> resume <new>`
+/// fails with "unexpected argument", verified against codex-cli 0.159.3), so
+/// a Restart or Resume of a session launched as `codex resume <old>` would
+/// exit with an error instead of continuing. Every argument is scanned, the
+/// way [`grok_has_ambiguous_resume_shape`] does, so `codex --yolo resume
+/// <id>` is caught too. The cost, the same kind Grok accepts, is that any
+/// argument spelled exactly `resume` or `fork` is refused, not only the
+/// subcommand: a prompt that is that single word, or an option value such as
+/// `-p fork` (a config profile named `fork`), refuses a derived template even
+/// though it would have resumed. An explicit resume template (a profile's
+/// resume command) remains the escape hatch.
+fn codex_has_session_selector(args: &[String]) -> bool {
+    args.iter()
+        .any(|argument| matches!(argument.as_str(), "resume" | "fork"))
+}
+
 /// Remove OMP's session-source flags before inserting its verified file.
 ///
 /// OMP-SPECIFIC, and deliberately not shared with [`strip_pi_selectors`]:
@@ -1534,8 +1554,9 @@ impl AgentIntegration for CodexIntegration {
         inject_hook_argv_tail(self, AgentKind::Codex, argv, policy, codex::hook_refusal)
     }
 
-    fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
-        None
+    fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError> {
+        codex_has_session_selector(&original_argv[1..])
+            .then_some(SnapshotError::CodexAmbiguousResumeSelector)
     }
 
     /// `codex resume <id>`, the audited shape — a SUBCOMMAND rather than a
@@ -2105,6 +2126,17 @@ pub enum SnapshotError {
          Farhelm cannot append an unambiguous exact --resume target"
     )]
     GrokAmbiguousResumeBoundary,
+    /// A derived Codex template cannot append `resume <id>` to a launch that
+    /// already selects a session with the `resume` or `fork` subcommand (or
+    /// carries an argument spelled that way): Codex rejects a second
+    /// selector, so the Resume would fail.
+    #[error(
+        "a Codex invocation that already contains \"resume\" or \"fork\" cannot be resumed by \
+         Farhelm: Codex accepts only one session selector, so the resume command Farhelm would \
+         add could never start; launch it without that argument, or from a profile that sets \
+         its own resume command"
+    )]
+    CodexAmbiguousResumeSelector,
 }
 
 /// This module's stable spelling of a kind for human-facing messages.
@@ -2149,7 +2181,9 @@ impl IntegrationSnapshot {
     /// A derived template must also have an unambiguous place for its resume
     /// selector. OMP refuses a genuine end-of-options delimiter; Grok also
     /// refuses an existing selector because its derived form owns that
-    /// argument (see [`SnapshotError`] for the exact cases).
+    /// argument, and Codex refuses an argument spelled `resume` or `fork`
+    /// because it accepts only one session selector (see [`SnapshotError`]
+    /// for the exact cases).
     pub fn resolve(
         original_argv: &[String],
         kind_override: Option<AgentKind>,
@@ -3797,6 +3831,57 @@ mod tests {
             ]
         );
         assert_ne!(replacement.resume_template, previous.resume_template);
+    }
+
+    /// Spec: a Codex launch that already selects a session (`codex resume
+    /// <id>`, `codex --yolo resume <id>`, `codex fork <id>`) refuses a derived
+    /// resume template, an explicit template still resolves for it, and a
+    /// plain `codex` launch still derives `resume {conversation}`.
+    ///
+    /// Why: Codex accepts one session selector. Derivation appended a second,
+    /// so a Restart or Resume of such a session exited with "unexpected
+    /// argument" instead of continuing the conversation. Refusing at create
+    /// time, as Grok does, tells the user to supply a resume command instead.
+    #[farhelm_testtrace::test]
+    fn codex_derived_resume_refuses_an_existing_session_selector() {
+        let argv = |words: &[&str]| {
+            words
+                .iter()
+                .map(|word| word.to_string())
+                .collect::<Vec<_>>()
+        };
+        for refused in [
+            argv(&["codex", "resume", "old-id"]),
+            argv(&["codex", "--yolo", "resume", "old-id"]),
+            argv(&["codex", "fork", "old-id"]),
+        ] {
+            assert_eq!(
+                IntegrationSnapshot::resolve(&refused, None, None),
+                Err(SnapshotError::CodexAmbiguousResumeSelector),
+                "derived argv must refuse: {refused:?}"
+            );
+            let template = argv(&["codex", "resume", CONVERSATION_PLACEHOLDER]);
+            let explicit = IntegrationSnapshot::resolve(&refused, None, Some(template.clone()))
+                .unwrap_or_else(|error| {
+                    panic!("an explicit template must still resolve for {refused:?}: {error}")
+                });
+            assert_eq!(
+                explicit.resume_template,
+                Some(template),
+                "the explicit template is the one kept for {refused:?}"
+            );
+        }
+        let plain = IntegrationSnapshot::resolve(&argv(&["codex", "--yolo"]), None, None)
+            .expect("a plain codex launch derives");
+        assert_eq!(
+            plain.resume_template,
+            Some(argv(&[
+                "codex",
+                "--yolo",
+                "resume",
+                CONVERSATION_PLACEHOLDER
+            ]))
+        );
     }
 
     /// Derivation cannot safely append a selector after `--` or beside an

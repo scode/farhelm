@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `codex-resume-template-duplicates-selector.md` — restarting a Codex launch that already used `resume` can append a
-  second selector and fail.
 - `pi-resume-selector-option-boundaries.md` — Pi restart rewriting can delete an unrelated option value and lose the
   verified session selector.
 - `provisioning-child-output-drain-deadline.md` — provisioning can outlive its deadline while draining a descendant-held
