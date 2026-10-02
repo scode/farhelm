@@ -175,10 +175,17 @@ impl PaneGate {
         Self { lock, row_ops }
     }
 
-    /// [`Self::claim`], returning the cancellation-safe release guard
-    /// ([`OpGuard`]) instead of a bool, so the claim can be held by a
-    /// [`ConfirmSlot`] while its prompt is open and then moved into the task
-    /// the confirmation starts.
+    /// Claim the shared token, refusing while any sidebar row operation is
+    /// in flight, and return the cancellation-safe release guard
+    /// ([`OpGuard`]). Otherwise the same contract as [`OpLock::claim_guard`].
+    ///
+    /// The only way the session view claims the token: the guard is held by
+    /// a [`ConfirmSlot`] while a prompt is open, by the view's own claim slot
+    /// while a Restart is pending, or by the task a confirmation starts. Each
+    /// of those is dropped with the view, so no claim can outlive it. There
+    /// is deliberately no bare `claim`/`release` pair here: a hand-released
+    /// claim is exactly what used to strand the token when the view unmounted
+    /// mid-operation and left every write action in the window disabled.
     pub(crate) fn claim_guard(&mut self) -> Option<OpGuard> {
         if *self.row_ops.peek() > 0 {
             return None;
@@ -186,18 +193,19 @@ impl PaneGate {
         self.lock.claim_guard()
     }
 
-    /// Claim the shared token, refusing while any sidebar row operation is
-    /// in flight. Same contract as [`OpLock::claim`] otherwise.
-    pub(crate) fn claim(&mut self) -> bool {
-        if *self.row_ops.peek() > 0 {
-            return false;
+    /// [`Self::claim_guard`] into a slot the claiming component owns,
+    /// returning whether the claim succeeded. Releasing is setting the slot
+    /// to `None`; the slot is a signal of that component, so when the
+    /// component unmounts the guard is dropped with it and the claim cannot
+    /// outlive it. This is how the session view holds its Restart claims.
+    pub(crate) fn claim_into(&mut self, slot: &mut Signal<Option<OpGuard>>) -> bool {
+        match self.claim_guard() {
+            Some(guard) => {
+                slot.set(Some(guard));
+                true
+            }
+            None => false,
         }
-        self.lock.claim()
-    }
-
-    /// Release the shared token — see [`OpLock::release`].
-    pub(crate) fn release(&mut self) {
-        self.lock.release();
     }
 
     /// Handler-time busyness: the token OR a row operation. `peek`s, like
@@ -326,6 +334,27 @@ impl<K: 'static, P: 'static> PartialEq for ConfirmSlot<K, P> {
     fn eq(&self, other: &Self) -> bool {
         self.open == other.open
     }
+}
+
+/// Close `slot`, dropping whatever it holds, whenever `shown` reads false.
+/// A hook: call it unconditionally, once, in the component that owns the
+/// slot.
+///
+/// For a prompt drawn on a surface that can stop rendering while its
+/// component stays mounted (the session view's interrupted-session card,
+/// which disappears when the session is restarted elsewhere): nothing on the
+/// vanished surface can close the prompt any more, so without this its
+/// claim would stay held. `shown` is read reactively, so the effect reruns
+/// when what it reads changes.
+pub(crate) fn use_clear_when_hidden<K: PartialEq + Clone + 'static, P: 'static>(
+    mut slot: ConfirmSlot<K, P>,
+    shown: impl Fn() -> bool + 'static,
+) {
+    use_effect(move || {
+        if !shown() {
+            slot.clear();
+        }
+    });
 }
 
 /// Create a closed prompt slot. A hook: call it unconditionally, once, in
@@ -835,5 +864,141 @@ mod tests {
         assert!(!gate.accept_failure(old_get));
         let refresh = gate.start();
         assert!(gate.accept_success(refresh));
+    }
+
+    /// Why this matters: the session view's Restart controls hold the
+    /// shared lock between a click and the end of the restart (the stop-first
+    /// prompt, the "Restart with" dialog, the request in flight), and the
+    /// view can unmount meanwhile (the session deleted from another client).
+    /// The lock is owned by the page shell, so a hand-released claim used to
+    /// outlive the view and leave every write action in the window disabled.
+    /// Spec: a claim taken with `PaneGate::claim_into` into a slot the
+    /// claiming component owns holds the lock while that component is
+    /// mounted and is released when it unmounts.
+    #[farhelm_testtrace::test]
+    fn a_view_claim_is_released_when_the_view_unmounts() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static SHOW: Cell<bool> = const { Cell::new(true) };
+            static HELD: Cell<Option<bool>> = const { Cell::new(None) };
+        }
+
+        #[component]
+        fn View(gate: PaneGate) -> Element {
+            let mut slot = use_signal(|| None::<OpGuard>);
+            use_hook(move || {
+                let mut gate = gate;
+                assert!(gate.claim_into(&mut slot), "premise: the claim succeeds");
+            });
+            rsx! {}
+        }
+
+        fn app() -> Element {
+            let lock = use_op_lock();
+            let row_ops = use_signal(|| 0u32);
+            HELD.with(|held| held.set(Some(lock.busy_now())));
+            let show = SHOW.with(Cell::get);
+            rsx! {
+                if show {
+                    View { gate: PaneGate::new(lock, row_ops) }
+                }
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_to_vec();
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        assert_eq!(
+            HELD.with(Cell::get),
+            Some(true),
+            "premise: the view holds the claim"
+        );
+
+        SHOW.with(|show| show.set(false));
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        assert_eq!(
+            HELD.with(Cell::get),
+            Some(false),
+            "unmounting the view must release the claim it held"
+        );
+    }
+
+    /// Why this matters: the interrupted-session card's Replace prompt holds
+    /// the shared lock, and the card stops rendering when the session is
+    /// restarted elsewhere while the session view stays mounted. Nothing on
+    /// the vanished card can close the prompt, so its claim used to stay
+    /// held with the window's write actions disabled. Spec: a slot passed to
+    /// `use_clear_when_hidden` keeps its claim while `shown` is true and is
+    /// closed, releasing the claim, once `shown` turns false, with the owning
+    /// component still mounted.
+    #[farhelm_testtrace::test]
+    async fn a_prompt_on_a_hidden_surface_is_closed_and_releases_its_claim() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static HELD: Cell<Option<bool>> = const { Cell::new(None) };
+            static OPEN: Cell<Option<bool>> = const { Cell::new(None) };
+            static SHOWN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+        }
+
+        #[component]
+        fn Card(lock: OpLock) -> Element {
+            let mut slot: ConfirmSlot<(), OpGuard> = use_confirm_slot();
+            let shown = use_signal(|| true);
+            SHOWN.with(|cell| cell.set(Some(shown)));
+            use_hook(move || {
+                let mut lock = lock;
+                if let Some(claim) = lock.claim_guard() {
+                    slot.open((), claim);
+                }
+            });
+            use_clear_when_hidden(slot, move || *shown.read());
+            OPEN.with(|open| open.set(Some(slot.is_open())));
+            rsx! {}
+        }
+
+        fn app() -> Element {
+            let lock = use_op_lock();
+            HELD.with(|held| held.set(Some(lock.busy_now())));
+            rsx! { Card { lock } }
+        }
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        assert_eq!(
+            HELD.with(Cell::get),
+            Some(true),
+            "premise: the open prompt holds the claim"
+        );
+        assert_eq!(
+            OPEN.with(Cell::get),
+            Some(true),
+            "premise: the prompt is open"
+        );
+
+        let mut shown = SHOWN
+            .with(Cell::get)
+            .expect("the card registered its signal");
+        dom.in_runtime(|| shown.set(false));
+        // The effect runs as queued work; drive the runtime until the slot
+        // reports closed, which its own re-render records.
+        while OPEN.with(Cell::get) != Some(false) {
+            tokio::time::timeout(std::time::Duration::from_secs(5), dom.wait_for_work())
+                .await
+                .expect("the hidden-surface effect runs");
+            dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        }
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        assert_eq!(
+            HELD.with(Cell::get),
+            Some(false),
+            "closing the hidden prompt must release its claim"
+        );
     }
 }
