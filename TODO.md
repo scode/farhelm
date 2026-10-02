@@ -55,16 +55,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Apply identity reports that arrive while the session's record is busy.** Decided in triage 2026-10-01: a
   conversation-identity report from the correct, verified source must never be dropped because it arrived late. Today
   report admission waits at most a second for the session's capture claim (`CAPTURE_CLAIM_WAIT` in
-  `crates/farhelm-supervisor/src/service/core.rs`, and SPEC_impl.md's five-step admission promises that bound) and
-  otherwise refuses; Claude's hook never resends and nothing else catches up, so after a `/clear` whose report lost the
-  race, Resume reopens the cleared conversation. The complication found while planning the fix: simply waiting longer
-  overruns the hook's own 2 s budget and shows a hook error in the user's terminal, and replying first and writing later
-  breaks attribution, because Claude's check that the hook ran in the pane process or its direct child needs the
-  reporting process still alive and it exits once answered. The design that works runs the read-only attribution and
-  proofs before replying, outside the claim, then commits on a supervisor-owned task that takes the claim without a time
-  limit, reloads, and commits through the existing generation-and-binding compare-and-swap; that reorders the documented
-  admission steps and changes SPEC_impl.md. Codex, Grok and OMP share the same wait and should get the same rule. Review
-  item: `review_feedback_queue/claude-clear-report-dropped-on-claim-timeout.md`.
+  `crates/farhelm-supervisor/src/service/core.rs`) and otherwise refuses, and the hook never resends, so after a
+  `/clear` whose report lost the race, Resume reopens the cleared conversation. The hook also gives up at once if the
+  supervisor is restarting. Decided 2026-10-02: drop the time limit on the claim (everything under it is local), run
+  Claude's sender check before it, give the hook 30 s and Claude's, Codex's and Grok's kill timers 60 s, and retry while
+  no supervisor process is listening for about 4 s. The earlier idea of replying first and committing later is dropped:
+  its premise, that a longer wait shows the user a hook error, was wrong. Review item:
+  `review_feedback_queue/claude-clear-report-dropped-on-claim-timeout.md`. Plan: `plans/identity-report-wait-retry.md`.
 
 - **Re-examine and simplify how launches are represented.** The maintainer wants to interrogate how launches are handled
   end to end and reconsider the design with simplification in mind. Today a session can be launched from a structured
