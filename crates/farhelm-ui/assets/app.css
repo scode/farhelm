@@ -3295,6 +3295,12 @@ samp {
   color: var(--warn);
 }
 
+/* A host running a newer build than the helm is still usable, and the remedy
+   is updating the helm, so it reads as an advisory like an old version. */
+.host-status.too-new {
+  color: var(--warn);
+}
+
 /* An update's inline status is far wider than any phase label (e.g.
    `updating: 0/9 create-directories 0:00`, about 250px at this size), and
    the 340px sidebar cannot fit it beside even `.host-name`'s 4em floor and

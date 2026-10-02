@@ -10,7 +10,7 @@ One line per plan, in the order the plans are executed. This file must always ma
 - [executed] `triage-yolo-sighup-replace.md` — execute the third batch of 2026-10-01 triage outcomes (YOLO detection for
   custom launches and Cursor's switch to `cursor-agent`, the missing-host and adopt YOLO gaps, SIGHUP shutdown, and
   Replace keeping the confirmed "nothing alive" answer).
-- [pending] `triage-restart-takeover-update.md` — execute the fourth batch of 2026-10-01 triage outcomes, the
+- [executed] `triage-restart-takeover-update.md` — execute the fourth batch of 2026-10-01 triage outcomes, the
   high-priority review queue (Restart keeping the session selected, the stuck page lock, takeover-safe tab attaches,
   Update refusing to downgrade "too new" hosts, Replace and probe finishing after a dropped request, and smaller fixes).
 - [pending] `triage-confirm-ssh-identity.md` — execute the fifth batch of 2026-10-01 triage outcomes (confirmations bind

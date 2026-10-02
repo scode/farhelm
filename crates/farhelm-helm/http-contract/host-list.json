@@ -15,6 +15,7 @@
         "build_version": "0.16.0",
         "identity": "identity1",
         "old_version": false,
+        "newer_version": false,
         "phase": "connected",
         "refresh": {
           "sessions": 3,
@@ -157,6 +158,7 @@
         "build_version": "0.15.0",
         "identity": null,
         "old_version": true,
+        "newer_version": false,
         "phase": "connected",
         "refresh": {
           "error": "list failed",
@@ -179,6 +181,7 @@
         "build_version": "0.16.0",
         "identity": null,
         "old_version": false,
+        "newer_version": false,
         "phase": "connected",
         "refresh": {
           "status": "pending"

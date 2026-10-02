@@ -134,6 +134,12 @@ pub(crate) enum HostStateView {
         /// build. `false` also represents an unknown age when either side
         /// does not publish a valid semantic version.
         old_version: bool,
+        /// Whether the peer's parseable build is NEWER than this helm's: the
+        /// host list labels such a host "too new" (SPEC.md, host version
+        /// advisories) and Update refuses it, since an Update would install
+        /// this helm's older build over it. `false` also represents an
+        /// unknown age, as for `old_version`.
+        newer_version: bool,
         refresh: RefreshView,
     },
     /// Refused at the hello: both versions are named so the user can see
@@ -262,12 +268,17 @@ impl From<&HostState> for HostStateView {
                 identity,
                 build_version,
                 last_refresh,
-            } => HostStateView::Connected {
-                identity: identity.clone(),
-                old_version: peer_is_older(build_version),
-                build_version: build_version.clone(),
-                refresh: last_refresh.into(),
-            },
+            } => {
+                let (old_version, newer_version) =
+                    version_flags(build_version, farhelm_proto::BUILD_VERSION);
+                HostStateView::Connected {
+                    identity: identity.clone(),
+                    old_version,
+                    newer_version,
+                    build_version: build_version.clone(),
+                    refresh: last_refresh.into(),
+                }
+            }
             HostState::VersionSkew {
                 peer_protocol,
                 peer_build,
@@ -299,12 +310,13 @@ impl From<&HostState> for HostStateView {
     }
 }
 
-/// Return whether a connected peer is older than this helm by SemVer.
-///
-/// A thin binding of [`build_is_older`] to this helm's compiled build stamp;
-/// the ordering rules live there.
-fn peer_is_older(peer_build: &str) -> bool {
-    build_is_older(peer_build, farhelm_proto::BUILD_VERSION)
+/// A connected peer's `(old_version, newer_version)` against build `ours`:
+/// the two advisory flags the host view carries. Takes `ours` rather than
+/// reading the compiled stamp so a test can check the wiring against a
+/// release build; every test binary is a development build, for which
+/// `newer_version` is always false.
+fn version_flags(peer: &str, ours: &str) -> (bool, bool) {
+    (build_is_older(peer, ours), build_is_newer(peer, ours))
 }
 
 /// Return whether build `peer` sorts strictly before build `ours` by SemVer
@@ -315,17 +327,43 @@ fn peer_is_older(peer_build: &str) -> bool {
 /// side leaves the age unknown and therefore returns `false`; the connected
 /// phase remains usable in that case.
 ///
-/// Kept separate from [`peer_is_older`] so the ordering can be tested against
+/// Kept separate from the compiled build stamp so the ordering can be
+/// tested against
 /// fixed hypothetical versions. A test that compared literals with the real
 /// build stamp broke on every release bump that crossed one of its literals.
 fn build_is_older(peer: &str, ours: &str) -> bool {
-    let Ok(peer) = semver::Version::parse(peer) else {
-        return false;
-    };
-    let Ok(ours) = semver::Version::parse(ours) else {
-        return false;
-    };
-    peer < ours
+    release_order(peer, ours) == Some(std::cmp::Ordering::Less)
+}
+
+/// SemVer precedence of `peer` against `ours`, `None` when either does not
+/// parse. Precedence rather than `Ord`: the `semver` crate's `Ord` also
+/// orders build metadata, which SemVer says carries no precedence, so
+/// `1.0.0+a` and `1.0.0` are the same release here.
+fn release_order(peer: &str, ours: &str) -> Option<std::cmp::Ordering> {
+    let peer = semver::Version::parse(peer).ok()?;
+    let ours = semver::Version::parse(ours).ok()?;
+    Some(peer.cmp_precedence(&ours))
+}
+
+/// Return whether build `peer` sorts strictly AFTER build `ours` by SemVer
+/// precedence: the mirror of [`build_is_older`], with the same rules for
+/// prerelease, build metadata and an unparsable side (unknown, `false`).
+///
+/// One more case reads as unknown here: `ours` being a development build,
+/// version `0.0.0` with any prerelease (`0.0.0-unreleased` is what every
+/// build from source reports until a release sets the version). It sorts
+/// below every release, so taken literally every released host would be
+/// "too new" for a development helm and Update would refuse them all; a
+/// development build has no place in the release order to compare from.
+///
+/// Shared with provisioning, which refuses to Update a host whose build is
+/// newer than this helm's: an Update installs this helm's own build, so on
+/// such a host it would be a downgrade, and an older supervisor refuses a
+/// newer database schema and leaves the host unreachable.
+pub(crate) fn build_is_newer(peer: &str, ours: &str) -> bool {
+    let development = semver::Version::parse(ours)
+        .is_ok_and(|v| v.major == 0 && v.minor == 0 && v.patch == 0 && !v.pre.is_empty());
+    !development && release_order(peer, ours) == Some(std::cmp::Ordering::Greater)
 }
 
 /// Join the manager's live snapshots with helm.db's registry rows into the
@@ -947,6 +985,7 @@ mod tests {
                 identity: None,
                 build_version: "0.0.0".to_string(),
                 old_version: true,
+                newer_version: false,
                 refresh: RefreshView::Pending,
             },
             HostStateView::VersionSkew {
@@ -1028,6 +1067,49 @@ mod tests {
         assert!(!build_is_older("1.0.0", "1.0.0"));
         assert!(!build_is_older("peer-build", "1.0.0"));
         assert!(!build_is_older("1.0.0", "helm-build"));
+    }
+
+    /// The newer-than order is the exact mirror of the older-than one, unknown
+    /// included.
+    ///
+    /// Why it matters: it decides the "too new" label and Update's refusal
+    /// to downgrade a host, so it must agree with `build_is_older` on every
+    /// pair, and an unparsable build must never read as newer (that would
+    /// refuse Update on every development build). Specified: a later release,
+    /// a release after its own prerelease, and a numerically larger minor are
+    /// newer; equal builds, differing build metadata and unparsable builds
+    /// are not, and nothing is newer than a development helm (`0.0.0-*`).
+    #[farhelm_testtrace::test]
+    fn the_newer_than_order_mirrors_the_older_than_one() {
+        use super::build_is_newer;
+        assert!(build_is_newer("1.0.0-rc.2", "1.0.0-rc.1"));
+        assert!(build_is_newer("1.0.0", "1.0.0-rc.2"));
+        assert!(build_is_newer("1.10.0", "1.9.0"));
+        assert!(!build_is_newer("1.0.0", "1.0.0"));
+        assert!(!build_is_newer("1.0.0-rc.2+other-build", "1.0.0-rc.2"));
+        assert!(!build_is_newer("peer-build", "1.0.0"));
+        assert!(!build_is_newer("1.0.0", "helm-build"));
+        assert!(
+            !build_is_newer("1.0.0", "0.0.0-unreleased"),
+            "a development helm has no release order to call a host newer from"
+        );
+    }
+
+    /// The two advisory flags of a connected host come from the two
+    /// orderings, against the helm's build.
+    ///
+    /// Why it matters: this is where `newer_version` reaches the hosts
+    /// response, and every test binary is a development build, for which the
+    /// real wiring always reports `false`; testing the helper with a release
+    /// build is the only check that a newer peer is flagged. Specified: a
+    /// newer peer is newer only, an older one older only, an equal one
+    /// neither.
+    #[farhelm_testtrace::test]
+    fn a_connected_hosts_version_flags_follow_both_orderings() {
+        use super::version_flags;
+        assert_eq!(version_flags("2.0.0", "1.0.0"), (false, true));
+        assert_eq!(version_flags("0.9.0", "1.0.0"), (true, false));
+        assert_eq!(version_flags("1.0.0", "1.0.0"), (false, false));
     }
 
     /// Issue one request against the harness's real router and return the

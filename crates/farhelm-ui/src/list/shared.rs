@@ -1002,6 +1002,7 @@ pub(super) mod tests {
                 identity: Some(format!("install-{id}")),
                 build_version: "test".to_string(),
                 old_version: false,
+                newer_version: false,
                 refresh: crate::RefreshHealth::Pending,
             },
             incarnation: 1,

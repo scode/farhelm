@@ -87,6 +87,64 @@ pub(crate) struct ProvisioningMenuState {
     pub(crate) planning: bool,
 }
 
+/// What decides a host row's provisioning offers: [`ProvisioningMenuState::offered`]'s
+/// input, gathered by the row's provisioning component from its run, plan
+/// and host state.
+#[derive(Debug, Clone, Copy, Default)]
+struct MenuFacts {
+    /// A run is in progress on the host.
+    run_active: bool,
+    /// The operation of the host's last run, when it failed.
+    failed_operation: Option<ProvisioningOperation>,
+    /// The host kind accepts provisioning from the panel at all.
+    update_allowed: bool,
+    /// The local row's supervisor is not running (setup, not Update).
+    local_setup: bool,
+    /// A plan or an automatic-update intent is under way.
+    plan_in_flight: bool,
+    /// The local setup's automatic retry is allowed.
+    can_retry_local_setup: bool,
+    /// The host runs a newer farhelm than the helm
+    /// (`hosts::runs_newer_version`).
+    too_new: bool,
+}
+
+impl ProvisioningMenuState {
+    /// The offers a row's menu makes, as one pure function of its facts so
+    /// the rules can be tested without mounting the component.
+    ///
+    /// Update is never offered for a host running a newer farhelm than the
+    /// helm: it would install the helm's older build over it (SPEC.md:
+    /// Update never downgrades a host), and the helm refuses it anyway.
+    fn offered(facts: MenuFacts) -> Self {
+        let MenuFacts {
+            run_active,
+            failed_operation,
+            update_allowed,
+            local_setup,
+            plan_in_flight,
+            can_retry_local_setup,
+            too_new,
+        } = facts;
+        ProvisioningMenuState {
+            // A failed Update is not offered again on a too-new host either:
+            // the rerun is the same downgrade.
+            rerun: (update_allowed && !plan_in_flight)
+                .then_some(failed_operation)
+                .flatten()
+                .filter(|operation| !(too_new && *operation == ProvisioningOperation::Update)),
+            automatic_setup: !run_active
+                && update_allowed
+                && local_setup
+                && !plan_in_flight
+                && failed_operation.is_none()
+                && can_retry_local_setup,
+            update: !run_active && update_allowed && !local_setup && !plan_in_flight && !too_new,
+            planning: plan_in_flight,
+        }
+    }
+}
+
 /// The rendered facts that make one collapsed provisioning trace distinct.
 ///
 /// Progress-step churn is deliberately absent: fixed surfaces need dismissal
@@ -2136,9 +2194,12 @@ pub(crate) fn ProvisioningPanel(
     // truthful offer. Signal reads here keep the summary current without
     // moving any async state into the row.
     let menu_host_kind = host.kind;
+    // A host running a newer farhelm than the helm is never offered Update:
+    // it would install the helm's older build (`hosts::runs_newer_version`).
+    let menu_too_new = crate::hosts::runs_newer_version(&host.state);
     use_effect(use_reactive(
-        (&local_setup, &menu_host_kind),
-        move |(local_setup, menu_host_kind)| {
+        (&local_setup, &menu_host_kind, &menu_too_new),
+        move |(local_setup, menu_host_kind, menu_too_new)| {
             let snapshot = progress();
             let is_planning = planning();
             let has_pending_plan = pending().is_some();
@@ -2154,19 +2215,15 @@ pub(crate) fn ProvisioningPanel(
             });
             let update_allowed = menu_host_kind.offers_provisioning_actions();
             let plan_in_flight = is_planning || has_pending_plan || owned;
-            let next = ProvisioningMenuState {
-                rerun: (update_allowed && !plan_in_flight)
-                    .then_some(failed_operation)
-                    .flatten(),
-                automatic_setup: !run_active
-                    && update_allowed
-                    && local_setup
-                    && !plan_in_flight
-                    && failed_operation.is_none()
-                    && can_retry_local_setup,
-                update: !run_active && update_allowed && !local_setup && !plan_in_flight,
-                planning: plan_in_flight,
-            };
+            let next = ProvisioningMenuState::offered(MenuFacts {
+                run_active,
+                failed_operation,
+                update_allowed,
+                local_setup,
+                plan_in_flight,
+                can_retry_local_setup,
+                too_new: menu_too_new,
+            });
             if menu_states.peek().get(&host_id).copied() != Some(next) {
                 menu_states.write().insert(host_id, next);
             }
@@ -2453,6 +2510,51 @@ fn operation_label(operation: Option<ProvisioningOperation>) -> &'static str {
 mod tests {
     use super::*;
 
+    /// A host running a newer farhelm than the helm is never offered Update
+    /// from its row's menu, while an otherwise identical host is.
+    ///
+    /// Why it matters: the row offered Update on any remote host, and an
+    /// Update on a newer host installs the helm's older build over it
+    /// (SPEC.md: Update never downgrades a host). Specified: with every
+    /// other fact allowing Update, it is offered unless the host is too
+    /// new; the other offers are unaffected.
+    #[farhelm_testtrace::test]
+    fn a_too_new_host_is_not_offered_update() {
+        let ready = MenuFacts {
+            update_allowed: true,
+            ..MenuFacts::default()
+        };
+        assert!(ProvisioningMenuState::offered(ready).update);
+        let too_new = ProvisioningMenuState::offered(MenuFacts {
+            too_new: true,
+            ..ready
+        });
+        assert!(!too_new.update);
+        assert_eq!(
+            too_new,
+            ProvisioningMenuState {
+                update: false,
+                ..ProvisioningMenuState::offered(ready)
+            }
+        );
+        let failed_update = MenuFacts {
+            failed_operation: Some(ProvisioningOperation::Update),
+            ..ready
+        };
+        assert_eq!(
+            ProvisioningMenuState::offered(failed_update).rerun,
+            Some(ProvisioningOperation::Update)
+        );
+        assert_eq!(
+            ProvisioningMenuState::offered(MenuFacts {
+                too_new: true,
+                ..failed_update
+            })
+            .rerun,
+            None,
+            "rerunning a failed Update is the same downgrade"
+        );
+    }
     fn ssh_binding(id: HostId) -> HostBinding {
         HostBinding {
             id,

@@ -37,9 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `update-silently-downgrades-newer-hosts.md` — Update and "update all" downgrade hosts that run a newer Farhelm, which
-  can leave the supervisor unable to start.
-
 - `opencode-bare-model-rejected.md` — Some documented bare OpenCode model names fail to launch, even though the same
   model works with an opencode/ prefix.
 - `opencode-bare-model-switches-harness.md` — Pressing Enter on a supported bare OpenCode model can silently select

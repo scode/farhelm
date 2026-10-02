@@ -2107,6 +2107,7 @@ mod tests {
                 identity: None,
                 build_version: "0.0.0".to_string(),
                 old_version: true,
+                newer_version: false,
                 refresh: RefreshView::Pending,
             },
         );

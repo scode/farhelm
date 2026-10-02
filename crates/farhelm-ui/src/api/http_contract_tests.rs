@@ -182,6 +182,7 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
             identity: Some("identity1".to_string()),
             build_version: "0.16.0".to_string(),
             old_version: false,
+            newer_version: false,
             refresh: RefreshHealth::Ok { sessions: 3 },
         }
     );
@@ -201,6 +202,7 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
             identity: None,
             build_version: "0.15.0".to_string(),
             old_version: true,
+            newer_version: false,
             refresh: RefreshHealth::Failed {
                 error: "list failed".to_string(),
             },
@@ -212,6 +214,7 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
             identity: None,
             build_version: "0.16.0".to_string(),
             old_version: false,
+            newer_version: false,
             refresh: RefreshHealth::Pending,
         }
     );
