@@ -41,6 +41,15 @@
 //! per-request log line, so there is no amplification for a budget to take
 //! away — a page spamming this endpoint churns the clipboard exactly as
 //! fast as it could churn any clipboard API it held.
+//!
+//! At most [`MAX_IN_FLIGHT_WRITES`] native writes run at once
+//! ([`ClipboardAdmission`]). A write that finds them all busy is dropped
+//! with the same 204. The native writer serializes on one lock, so writes
+//! pile up past the cap when the OS clipboard is hung or very slow, or when
+//! a program floods OSC 52 faster than writes finish; SPEC.md assumes a
+//! working clipboard (Terminal experience), and copying is best effort.
+//! Without the cap each stuck write parked another thread of the blocking
+//! pool the helm's database work also uses.
 
 use crate::AppState;
 use axum::extract::State;
@@ -61,6 +70,42 @@ pub(crate) const MAX_TEXT_BYTES: usize = 256 * 1024;
 /// the wire — and the envelope.
 pub(crate) const MAX_BODY_BYTES: usize = 6 * MAX_TEXT_BYTES + 1024;
 
+/// How many native clipboard writes may run at once.
+///
+/// Four, kept BELOW the six or so connections a WebKit page keeps open to
+/// one origin, because an admitted write holds its request, and so one of
+/// those connections, until the native write returns. With the clipboard
+/// hung, four stuck copies still leave the page connections for everything
+/// else it asks the helm (uploads, client logs); a cap at or above the
+/// connection budget would let stuck copies take them all. The cost: a
+/// program that sends more than four clipboard writes within a single
+/// write's lifetime can have the later ones dropped even while the
+/// clipboard works. A write takes a few milliseconds, so that needs a
+/// program flooding OSC 52, and dropping copies is within the best-effort
+/// contract. The connection budget is WebKit's usual default, not verified
+/// for every build the desktop app runs on.
+pub(crate) const MAX_IN_FLIGHT_WRITES: usize = 4;
+
+/// The per-helm admission state for native clipboard writes: the permits
+/// that bound how many run at once ([`MAX_IN_FLIGHT_WRITES`]), and whether
+/// the current stretch of refusals has been logged yet.
+pub(crate) struct ClipboardAdmission {
+    permits: Arc<tokio::sync::Semaphore>,
+    /// Set by the first write dropped for want of a permit and cleared by the
+    /// next one admitted, so a hung clipboard logs once per episode instead
+    /// of once per copy.
+    dropping: std::sync::atomic::AtomicBool,
+}
+
+impl ClipboardAdmission {
+    pub(crate) fn new() -> ClipboardAdmission {
+        ClipboardAdmission {
+            permits: Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT_WRITES)),
+            dropping: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
 /// One clipboard write. `deny_unknown_fields` for the same reason
 /// client-log's request has it: a misspelled field silently ignored is a
 /// write that "succeeds" while carrying nothing the caller meant.
@@ -77,7 +122,9 @@ pub(crate) struct ClipboardRequest {
 /// [`crate::ClipboardSink`] is registered (not a desktop-embedded helm),
 /// 413 for text over [`MAX_TEXT_BYTES`], and otherwise 204 — including when
 /// the native write itself failed, which is logged and deliberately not
-/// reported (module docs: SPEC.md's best-effort clipboard contract).
+/// reported, and when [`MAX_IN_FLIGHT_WRITES`] writes are already running,
+/// in which case nothing is written (module docs: SPEC.md's best-effort
+/// clipboard contract).
 /// Authentication happened before this ran (`require_device_session` is
 /// layered in `lib.rs`).
 pub(crate) async fn post_clipboard(
@@ -90,16 +137,38 @@ pub(crate) async fn post_clipboard(
     if request.text.len() > MAX_TEXT_BYTES {
         return StatusCode::PAYLOAD_TOO_LARGE;
     }
+    let admission = &state.clipboard_admission;
+    let Ok(permit) = Arc::clone(&admission.permits).try_acquire_owned() else {
+        if !admission
+            .dropping
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            tracing::warn!(
+                in_flight = MAX_IN_FLIGHT_WRITES,
+                "native clipboard writes are piling up (the system clipboard may be stuck); \
+                 dropping copies until one finishes, per the best-effort contract"
+            );
+        }
+        return StatusCode::NO_CONTENT;
+    };
+    admission
+        .dropping
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    let sink = Arc::clone(sink);
     // On the blocking pool, never on an async worker: the native writer
     // takes a process-wide mutex and talks to the display server, and a
     // burst of copies (or a program spamming OSC 52) against a slow
     // clipboard backend would otherwise park the workers that serve every
     // terminal and the session list (SPEC.md "Waiting between operations on
     // one host").
-    let sink = Arc::clone(sink);
-    let written = tokio::task::spawn_blocking(move || sink(&request.text))
-        .await
-        .unwrap_or_else(|join| Err(format!("the clipboard write task failed: {join}")));
+    // The permit travels into the blocking task and is released when the
+    // write actually ends, not when this handler stops waiting for it.
+    let written = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        sink(&request.text)
+    })
+    .await
+    .unwrap_or_else(|join| Err(format!("the clipboard write task failed: {join}")));
     if let Err(why) = written {
         // The reason string comes from the native clipboard library, not a
         // peer, but it still crosses onto an operator's terminal — same
@@ -300,5 +369,100 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    /// Spec: while [`super::MAX_IN_FLIGHT_WRITES`] native writes are stuck in
+    /// the sink, a further write answers 204 promptly without reaching the
+    /// sink, and once the sink unblocks a new write reaches it again.
+    ///
+    /// Why it matters: a hung OS clipboard used to park one blocking-pool
+    /// thread per copy, without limit, and the helm's database work shares
+    /// that pool. A 204 that arrives while the sink is still blocked is the
+    /// proof that no blocking work was started for it, since an admitted
+    /// write is answered only after the sink returns.
+    #[farhelm_testtrace::test]
+    async fn writes_beyond_the_in_flight_cap_are_dropped_until_the_sink_frees_up() {
+        // The sink reports each entry, then blocks until the gate opens.
+        let (entered_tx, mut entered) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        // Opens the gate however this test ends, so a failed assertion does
+        // not leave blocking-pool threads parked in the sink and the test
+        // process hanging until the runner's timeout.
+        struct OpenOnDrop(Arc<(Mutex<bool>, std::sync::Condvar)>);
+        impl Drop for OpenOnDrop {
+            fn drop(&mut self) {
+                let (open, opened) = &*self.0;
+                *open.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+                opened.notify_all();
+            }
+        }
+        let gate_opener = OpenOnDrop(Arc::clone(&gate));
+        let sink_gate = Arc::clone(&gate);
+        let harness = rest_harness::idle_helm_with_clipboard_sink(Arc::new(move |text: &str| {
+            let _ = entered_tx.send(text.to_string());
+            let (open, opened) = &*sink_gate;
+            let mut open = open.lock().unwrap();
+            while !*open {
+                open = opened.wait(open).unwrap();
+            }
+            Ok(())
+        }))
+        .await;
+
+        let held = (0..super::MAX_IN_FLIGHT_WRITES)
+            .map(|i| {
+                let router = harness.router();
+                tokio::spawn(async move {
+                    router
+                        .oneshot(post(serde_json::json!({"text": format!("held-{i}")})))
+                        .await
+                        .unwrap()
+                        .status()
+                })
+            })
+            .collect::<Vec<_>>();
+        for _ in 0..super::MAX_IN_FLIGHT_WRITES {
+            tokio::time::timeout(std::time::Duration::from_secs(10), entered.recv())
+                .await
+                .expect("each held write reaches the sink in time")
+                .expect("a held write reaches the sink");
+        }
+
+        let dropped = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            harness
+                .router()
+                .oneshot(post(serde_json::json!({"text": "over the cap"}))),
+        )
+        .await
+        .expect("a write over the cap must be answered while the sink is still blocked")
+        .unwrap();
+        assert_eq!(dropped.status(), StatusCode::NO_CONTENT);
+        assert!(
+            entered.try_recv().is_err(),
+            "the write over the cap must not reach the sink"
+        );
+
+        drop(gate_opener);
+        for task in held {
+            let status = tokio::time::timeout(std::time::Duration::from_secs(10), task)
+                .await
+                .expect("a held write is answered once the sink unblocks")
+                .unwrap();
+            assert_eq!(status, StatusCode::NO_CONTENT);
+        }
+        let after = harness
+            .router()
+            .oneshot(post(serde_json::json!({"text": "after"})))
+            .await
+            .unwrap();
+        assert_eq!(after.status(), StatusCode::NO_CONTENT);
+        // An admitted write is answered only after the sink returns, so by
+        // now its entry is already queued: no wait needed.
+        assert_eq!(
+            entered.try_recv().ok().as_deref(),
+            Some("after"),
+            "once the sink frees up, writes reach it again"
+        );
     }
 }

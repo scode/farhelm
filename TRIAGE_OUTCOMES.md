@@ -5114,7 +5114,8 @@
   Farhelm assumes the host's system clipboard is functioning, and that a broken, hung or slow clipboard is outside what
   Farhelm adds complexity to support: copies may be dropped then, but the rest of Farhelm must not stall. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `wvyxxyxyowvw`, bookmark `triage-1001d/04-clipboard-write-cap`, PR
+  https://github.com/scode/farhelm/pull/1400.
 
 ## session-view-leaks-page-lock.md
 
