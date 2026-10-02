@@ -36,10 +36,11 @@
 //! count. The wording is pinned by the browser suite, so treat the
 //! strings as a contract rather than as copy.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::Session;
 use crate::api::SessionListing;
+use crate::status::status_badge;
 
 /// The listing as it should be RENDERED: the server's rows with this
 /// view's own just-landed renames painted over them (PLAN_M5.md item 6).
@@ -168,6 +169,18 @@ pub(crate) fn retire_vanished_renames(
 /// whose own fields merely updated (a status tick, say) keeps its index
 /// and must NOT close the menu — the user may still be reading it.
 ///
+/// The row also moves without changing index when a row ABOVE it gains or
+/// loses its detail line (the session ended, came back, or went stale), so
+/// that counts as a move too whenever detail lines are drawn at all
+/// (`detail_lines_shown`, false in compact mode, which has none). What is
+/// compared is how many rows above carry the line, not which ones: rows
+/// above trading places with each other leave the open row where it was.
+/// SPEC_impl.md's row-menu rule is that the menu closes on any layout
+/// change that could have moved its row. The per-row refusal line
+/// (`action-error`) is the other in-place height change, and it is not
+/// judged here because it lives in `ListView`'s own state rather than in
+/// the listing; [`any_shown_above`] is its half.
+///
 /// `previous` is `None` when there is no comparable baseline to diff
 /// against — a first load, or recovery from a failed read — which
 /// deliberately never counts as a reorder here: that recovery path is
@@ -178,13 +191,61 @@ pub(crate) fn menu_row_reordered(
     previous: Option<&[Session]>,
     current: &[Session],
     open_id: &str,
+    detail_lines_shown: bool,
 ) -> bool {
     let Some(previous) = previous else {
         return false;
     };
     let previous_index = previous.iter().position(|session| session.id == open_id);
     let current_index = current.iter().position(|session| session.id == open_id);
-    previous_index != current_index
+    if previous_index != current_index {
+        return true;
+    }
+    let Some(index) = current_index else {
+        return false;
+    };
+    let detail_lines_above =
+        |rows: &[Session]| rows[..index].iter().filter(|s| has_detail_line(s)).count();
+    detail_lines_shown && detail_lines_above(previous) != detail_lines_above(current)
+}
+
+/// Whether any of `ids` is displayed above the row `open_id` in `shown`, the
+/// session list in its displayed order.
+///
+/// The question `ListView` asks when rows gain or lose their refusal line
+/// while a session menu is open: a row above the menu's row changing height
+/// moves the menu's row, one below it does not. `false` when `open_id` is
+/// not shown at all, since a menu whose row left the list is closed by the
+/// listing reconciliation rather than here.
+pub(crate) fn any_shown_above<'a>(
+    shown: &[Session],
+    open_id: &str,
+    ids: impl IntoIterator<Item = &'a str>,
+) -> bool {
+    let Some(index) = shown.iter().position(|session| session.id == open_id) else {
+        return false;
+    };
+    let above: HashSet<&str> = shown[..index].iter().map(|s| s.id.as_str()).collect();
+    ids.into_iter().any(|id| above.contains(id))
+}
+
+/// Whether a session row, outside compact mode, draws its second,
+/// full-width detail line: the complete wording of an ended status, or the
+/// stale qualifier.
+///
+/// The one definition both the row's render (`list::SessionRow`) and
+/// [`menu_row_reordered`] use, so the sidebar's notion of which rows are
+/// taller cannot drift from what the rows actually draw. Live and unknown
+/// statuses draw their status as a dot in the identity line instead, which
+/// is why only an ENDED badge counts here.
+pub(crate) fn has_detail_line(session: &Session) -> bool {
+    status_badge(
+        &session.status,
+        session.annotation.as_deref(),
+        session.has_unseen_output(),
+    )
+    .is_some_and(|badge| badge.visible)
+        || session.stale
 }
 
 /// The order the session list DISPLAYS while its order is held under the
@@ -252,7 +313,14 @@ pub(crate) fn remove_row_reporting_menu_move(
     };
     let before = held_display_order(held, sessions);
     sessions.retain(|session| session.id != removed);
-    menu_row_reordered(Some(&before), &held_display_order(held, sessions), open_id)
+    // Removing a row changes no remaining row's detail line, so the
+    // detail-line half cannot fire here and the flag's value is immaterial.
+    menu_row_reordered(
+        Some(&before),
+        &held_display_order(held, sessions),
+        open_id,
+        true,
+    )
 }
 
 /// Whether the session list's order hold should end now.
@@ -850,13 +918,13 @@ mod tests {
 
         let inserted_above = vec![session("new", "new"), session("a", "a"), session("b", "b")];
         assert!(
-            menu_row_reordered(Some(&before), &inserted_above, "b"),
+            menu_row_reordered(Some(&before), &inserted_above, "b", true),
             "a row inserted above the open one must count as a reorder"
         );
 
         let removed_above = vec![session("b", "b")];
         assert!(
-            menu_row_reordered(Some(&before), &removed_above, "b"),
+            menu_row_reordered(Some(&before), &removed_above, "b", true),
             "a row removed from above the open one must count as a reorder"
         );
     }
@@ -871,7 +939,12 @@ mod tests {
     fn a_same_order_content_update_is_not_a_reorder() {
         let before = vec![session("a", "a"), session("b", "b")];
         let updated_in_place = vec![session("a", "a"), session("b", "b-updated")];
-        assert!(!menu_row_reordered(Some(&before), &updated_in_place, "b"));
+        assert!(!menu_row_reordered(
+            Some(&before),
+            &updated_in_place,
+            "b",
+            true
+        ));
     }
 
     /// Rows changing BELOW the open one leave its index — and therefore
@@ -886,15 +959,95 @@ mod tests {
 
         let inserted_below = vec![session("a", "a"), session("b", "b"), session("new", "new")];
         assert!(
-            !menu_row_reordered(Some(&before), &inserted_below, "a"),
+            !menu_row_reordered(Some(&before), &inserted_below, "a", true),
             "a row inserted below the open one leaves its position untouched"
         );
 
         let removed_below = vec![session("a", "a")];
         assert!(
-            !menu_row_reordered(Some(&before), &removed_below, "a"),
+            !menu_row_reordered(Some(&before), &removed_below, "a", true),
             "a row removed from below the open one leaves its position untouched"
         );
+    }
+
+    /// A session that ended, as the sidebar sees it: a detail line under its
+    /// identity in the default (non-compact) layout.
+    fn ended(id: &str) -> Session {
+        Session {
+            status: SessionStatus::Exited { exit_code: Some(0) },
+            ..session(id, id)
+        }
+    }
+
+    /// A row ABOVE the open one gaining or losing its detail line pushes the
+    /// open row down or pulls it up without changing any index, which left
+    /// the menu's panel beside the next row (SPEC_impl.md: the menu closes on
+    /// any layout change that could have moved its row). Both directions,
+    /// and the stale qualifier as well as an ended status, since each draws
+    /// the same line.
+    #[farhelm_testtrace::test]
+    fn a_row_above_gaining_or_losing_its_detail_line_moves_the_menu() {
+        let live = vec![session("a", "a"), session("b", "b")];
+        let ended_above = vec![ended("a"), session("b", "b")];
+        assert!(
+            menu_row_reordered(Some(&live), &ended_above, "b", true),
+            "a row above ending grows by a detail line"
+        );
+        assert!(
+            menu_row_reordered(Some(&ended_above), &live, "b", true),
+            "a row above coming back loses its detail line"
+        );
+        let stale_above = vec![
+            Session {
+                stale: true,
+                ..session("a", "a")
+            },
+            session("b", "b"),
+        ];
+        assert!(
+            menu_row_reordered(Some(&live), &stale_above, "b", true),
+            "a row above going stale grows by a detail line"
+        );
+    }
+
+    /// The complements, each guarding against an overbroad check that would
+    /// close a menu still sitting exactly where it was measured: a detail
+    /// line changing BELOW the open row, the open row's OWN detail line
+    /// (its top edge, where the panel is aligned, does not move), rows above
+    /// that trade places without changing how many carry the line, and any
+    /// change at all in compact mode, which draws no detail lines.
+    #[farhelm_testtrace::test]
+    fn detail_line_changes_that_leave_the_open_row_in_place_do_not_move_the_menu() {
+        let live = vec![session("a", "a"), session("b", "b"), session("c", "c")];
+        let ended_below = vec![session("a", "a"), session("b", "b"), ended("c")];
+        assert!(!menu_row_reordered(Some(&live), &ended_below, "b", true));
+        let ended_itself = vec![session("a", "a"), ended("b"), session("c", "c")];
+        assert!(!menu_row_reordered(Some(&live), &ended_itself, "b", true));
+
+        let one_ended_above = vec![ended("a"), session("x", "x"), session("c", "c")];
+        let swapped_above = vec![session("x", "x"), ended("a"), session("c", "c")];
+        assert!(!menu_row_reordered(
+            Some(&one_ended_above),
+            &swapped_above,
+            "c",
+            true
+        ));
+
+        let ended_above = vec![ended("a"), session("b", "b"), session("c", "c")];
+        assert!(!menu_row_reordered(Some(&live), &ended_above, "b", false));
+    }
+
+    /// The refusal line's half of the same rule (`ListView` closes the menu
+    /// when this is true): only a row displayed above the open one moves it.
+    /// A menu whose row is not shown is not this check's to close.
+    #[farhelm_testtrace::test]
+    fn only_a_refusal_line_above_the_open_row_moves_the_menu() {
+        let shown = vec![session("a", "a"), session("b", "b"), session("c", "c")];
+        assert!(any_shown_above(&shown, "b", ["a"]));
+        assert!(!any_shown_above(&shown, "b", ["c"]));
+        assert!(!any_shown_above(&shown, "b", ["b"]));
+        assert!(!any_shown_above(&shown, "b", ["gone"]));
+        assert!(!any_shown_above(&shown, "missing", ["a"]));
     }
 
     /// No baseline listing to diff against — a first load, or recovery
@@ -905,7 +1058,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn no_baseline_listing_is_never_a_reorder() {
         let current = vec![session("a", "a")];
-        assert!(!menu_row_reordered(None, &current, "a"));
+        assert!(!menu_row_reordered(None, &current, "a", true));
     }
 
     /// A FLEET-WIDE listing carrying `rows` sessions, with the count fields

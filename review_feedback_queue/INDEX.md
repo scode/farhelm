@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `row-menu-drifts-on-row-height-change.md` — an open row menu can float over a different row when a row above gains a
-  detail line at the same index.
 - `uploads-aborted-silently-on-remount.md` — terminal reconnect or restart remount silently aborts in-flight uploads and
   erases finished uploads' landed path or failure message.
 - `replace-drop-skips-source-delete.md` — switching away or reloading during Replace creates the replacement but never

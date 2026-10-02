@@ -273,7 +273,14 @@ fn stored_sort(preferences: SharedPreferences) -> ListSort {
 /// The route's typed boolean decoding rejects malformed stored API values
 /// before they could reach this fallback.
 fn stored_compact(preferences: SharedPreferences) -> bool {
-    preferences.0.read().compact.unwrap_or(false)
+    compact_choice(preferences.0.read().compact)
+}
+
+/// The compact-row default, shared by the render's subscribed read
+/// (`stored_compact`) and `commit_listing`'s unsubscribed one so the two
+/// cannot disagree about what an unset preference means.
+fn compact_choice(stored: Option<bool>) -> bool {
+    stored.unwrap_or(false)
 }
 
 /// Record a chosen order: written on CHANGE only (see `apply_sort`), so a
@@ -901,27 +908,31 @@ pub(crate) fn ListView(
     // provisioning-trace transitions, and automatic-disclosure transitions.
     // The initial run is a no-op because both row-menu signals start empty.
     //
-    // NOT exhaustive — a same-INDEX height change on a row already above
-    // the open one (a per-row error line appearing, say) moves the open
-    // row without tripping any of these signals or the index-based
-    // reflow check in `commit_listing`. See that check's own doc for the
-    // residual this leaves and why it is accepted rather than chased
-    // further here. `commit_listing`'s own reconciliation is SESSION-only,
-    // too: the hosts list carries no analogous reorder guard, on the
-    // judgment that a small, largely id-ordered registry reordering under
-    // an open host menu is enough rarer than a session listing reordering
-    // to accept as a residual rather than duplicate that machinery for a
-    // second row kind.
+    // NOT exhaustive. A session row above the open one changing height in
+    // place is mostly caught elsewhere: its detail line (ended, stale) comes
+    // from the listing, so `commit_listing`'s reflow check
+    // (`rows::menu_row_reordered`) sees it appear or go, and its refusal
+    // line comes from `errors`, which the effect beside `order_hold`
+    // watches. What still moves an open menu unnoticed, accepted because
+    // closing on these would mean measuring the toggle's position on every
+    // change rather than reasoning about what changed:
     //
-    // The host row accepts the identical same-index-height-change residual
-    // as the session row above, for the identical reason: it is covered by
-    // NEITHER a reorder guard nor the three consolidated dependencies above,
-    // and a host row's OWN detail/remedy/warning/error text growing or
-    // shrinking is exactly the shape of change that can move an open host
-    // menu without tripping any of them. Chasing it would mean
-    // watching every open row's own measured height, which is the same
-    // trade `commit_listing`'s doc already declines for the rarer
-    // reordering case, made again here for a residual judged rarer still.
+    // - a detail line that is already shown wrapping onto more or fewer
+    //   lines because its text changed (a new exit annotation, say);
+    // - a listing that carries a row with a refusal line across the open
+    //   row, in either direction, while the open row keeps its index;
+    // - a host row's own optional lines (error, warning, update progress,
+    //   or its detail text while host details are shown) growing or
+    //   shrinking. Host rows sit above the session list, so this moves an
+    //   open session menu as well as an open host menu below that row.
+    //
+    // `commit_listing`'s reconciliation is SESSION-only. The hosts list has
+    // no reorder guard, on the judgment that a small, largely id-ordered
+    // registry reordering under an open host menu is rare enough to accept
+    // rather than duplicate that machinery for a second row kind; the host
+    // rows' optional lines above are left for the same reason, since
+    // covering them would need that comparison for rows with several
+    // independent optional lines rather than the session row's one.
     use_effect(move || {
         layout_epoch();
         show_create();
@@ -1009,6 +1020,43 @@ pub(crate) fn ListView(
     // The query the committed `listing` answers, which is what a new reply
     // is compared against to decide whether the hold still applies.
     let mut listing_query = use_signal(|| None::<(SessionFilter, ListSort)>);
+    // A row's refusal line (`action-error`, drawn under the row while its
+    // own menu is closed) makes the row taller, so one appearing, clearing
+    // or changing its text on a row ABOVE the open session menu can move
+    // that menu's row without changing any listing. The listing-side check
+    // in `commit_listing` cannot see it, because the lines come from
+    // `errors`, so this effect closes the menu itself (SPEC_impl.md: the
+    // menu closes on any layout change that could have moved its row).
+    // `error_rows` is `errors` as of the previous run, kept in a plain cell
+    // because only this effect reads it and nothing renders from it.
+    let error_rows = use_hook(|| Rc::new(Cell::new(HashMap::<String, String>::new())));
+    use_effect(move || {
+        let now = errors.read().clone();
+        let before = error_rows.replace(now.clone());
+        let Some(open_id) = menu_open.peek().clone() else {
+            return;
+        };
+        let changed = before
+            .iter()
+            .filter(|(id, message)| now.get(*id) != Some(*message))
+            .chain(now.iter().filter(|(id, _)| !before.contains_key(*id)))
+            .map(|(id, _)| id.as_str());
+        let moved = {
+            let listing = listing.peek();
+            let Some(Ok(listing)) = listing.as_ref() else {
+                return;
+            };
+            let held = order_hold.peek().clone().unwrap_or_default();
+            rows::any_shown_above(
+                &rows::held_display_order(&held, &listing.sessions),
+                &open_id,
+                changed,
+            )
+        };
+        if moved {
+            menu_open.set(None);
+        }
+    });
     // The hold's pointer facts, read by `rows::hold_should_release`: when the
     // pointer last moved over the list, and whether it is over it now. Plain
     // cells rather than signals on purpose: they change on every pointer
@@ -1211,10 +1259,16 @@ pub(crate) fn ListView(
                     };
                     let previous_shown = previous_sessions
                         .map(|previous| rows::held_display_order(&previous_held, previous));
+                    // Peeked live rather than taken from this render's
+                    // `compact`: the reply may land renders after the
+                    // closure was built, and a toggle in between decides
+                    // whether detail lines are on screen now.
+                    let detail_lines_shown = !compact_choice(preferences.0.peek().compact);
                     menu_row_reordered(
                         previous_shown.as_deref(),
                         &rows::held_display_order(&incoming_held, &listing.sessions),
                         &open_id,
+                        detail_lines_shown,
                     )
                 };
                 if reordered {

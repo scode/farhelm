@@ -59,6 +59,7 @@ import {
   renameSession,
   SESSION_LISTING,
   setLocalYoloSafe,
+  stopSession,
   stubFeed,
 } from "./helpers/fleet";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
@@ -1967,6 +1968,46 @@ test("a row moving under a pointer-opened menu clears its tint without losing fo
     await rename.press("Escape");
     await expect(toggle).toBeFocused();
     await expect(target).toHaveCSS("background-color", restingBackground);
+  } finally {
+    for (const id of sessions.reverse()) await cleanupSession(request, id);
+  }
+});
+
+/**
+ * A row above an open menu that ends grows by its detail line and pushes the
+ * menu's row down without changing its place in the list, so the menu closes
+ * rather than staying beside the row below (SPEC_impl.md: the menu closes on
+ * any layout change that could have moved its row). The index-only reorder
+ * check never saw this, and the panel drifted onto the next row.
+ */
+test("a row above an open menu growing a detail line closes the menu", async ({ page, request }) => {
+  const sessions: string[] = [];
+  try {
+    const selected = await createSession(request, { title: "detail-selected", cwd: "/tmp" });
+    sessions.push(selected.id);
+    const above = await createSession(request, { title: "aaa-detail-above", cwd: "/tmp" });
+    sessions.push(above.id);
+    const target = await createSession(request, { title: "aab-detail-target", cwd: "/tmp" });
+    sessions.push(target.id);
+    await pinAutoSelect(page, selected.id);
+    await page.goto("/");
+    await waitForHostsListSettled(page);
+    await waitForSessionRevealed(page, selected.id);
+    await page.getByRole("combobox", { name: "sort", exact: true }).selectOption({ label: "title A–Z" });
+    await expect(page.locator(".session-row").first()).toHaveAttribute("data-session-id", above.id);
+    await expect(page.locator(".session-row").nth(1)).toHaveAttribute("data-session-id", target.id);
+    await expect(row(page, above.id).locator(".session-row-detail")).toHaveCount(0);
+    const toggle = row(page, target.id).locator(".session-row-menu");
+    await openRowMenu(row(page, target.id));
+    await expect(row(page, target.id).locator(".session-row-menu-panel")).toBeVisible();
+
+    await stopSession(request, above.id);
+    // Premises: the row above drew its detail line, and the menu's row kept
+    // its place, so only the height change can close the menu.
+    await expect(row(page, above.id).locator(".session-row-detail")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".session-row").nth(1)).toHaveAttribute("data-session-id", target.id);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(row(page, target.id).locator(".session-row-menu-panel")).toHaveCount(0);
   } finally {
     for (const id of sessions.reverse()) await cleanupSession(request, id);
   }
