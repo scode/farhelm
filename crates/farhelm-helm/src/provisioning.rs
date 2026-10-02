@@ -1932,6 +1932,89 @@ mod tests {
         assert_eq!(harness.store.list_hosts().await.unwrap(), before);
     }
 
+    /// A probe that finds a live supervisor for a host with a failed ADD on
+    /// record resolves that run but leaves another operation's busy claim
+    /// alone.
+    ///
+    /// Why it matters: the resolution used to clear the host's busy marker
+    /// unconditionally. The failed run had already released its own, so the
+    /// marker it cleared belonged to someone else, typically a rerun just
+    /// confirmed and still registering, and a second install or update was
+    /// then accepted beside it, the two overwriting each other's progress.
+    /// Specified: with a failed ADD retained and the host claimed busy, a
+    /// probe that discovers a supervisor marks the failed run completed and
+    /// the host is still busy afterwards.
+    #[farhelm_testtrace::test]
+    async fn a_probe_resolving_a_failed_add_leaves_another_busy_claim() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        *backend.fail.lock().unwrap() = Some("daemon-reload".to_string());
+        let service = service(&harness, backend.clone(), root.path());
+        let request = || ProbeRequest {
+            target: ProbeDestination::Ssh {
+                destination: "user@resolved".to_string(),
+            },
+            remote_farhelm: None,
+            remote_state_dir: None,
+        };
+        let ProbeResponse::Provisionable { probe_id, .. } = service.probe(request()).await.unwrap()
+        else {
+            panic!("expected plan")
+        };
+        let accepted = service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
+        let failed = wait_finished(&service, accepted.host_id).await;
+        assert_eq!(
+            failed.status,
+            RunStatus::Failed,
+            "test premise: the ADD failed"
+        );
+        // A second plan for the same host, taken while nothing answers yet, so
+        // the end of the test can try to confirm it.
+        let ProbeResponse::Provisionable {
+            probe_id: second, ..
+        } = service.probe(request()).await.unwrap()
+        else {
+            panic!("expected a second plan")
+        };
+        // Planted directly: it stands in for the claim a just-confirmed rerun
+        // holds while it registers the host, a gap a few awaits long that a
+        // test cannot hold open from outside.
+        assert!(
+            service.memory.lock().await.busy.insert(accepted.host_id),
+            "test premise: the failed ADD released its own claim, and another operation now holds one"
+        );
+
+        *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::Supervisor {
+            build_version: "test-build".to_string(),
+            host_identity: Some("test-identity".to_string()),
+            dial_farhelm: root.path().join("farhelm"),
+            dial_state_dir: Some(root.path().join("state")),
+        }));
+        let discovered = service.probe(request()).await.unwrap();
+        assert!(
+            matches!(discovered, ProbeResponse::Discovered { host_id, .. } if host_id == accepted.host_id),
+            "test premise: the probe discovered a supervisor on the same host, got {discovered:?}"
+        );
+        assert_eq!(
+            service.view(accepted.host_id).await.unwrap().status,
+            RunStatus::Completed,
+            "the failed ADD is resolved as used as-is"
+        );
+        assert!(
+            service.memory.lock().await.busy.contains(&accepted.host_id),
+            "another operation's busy claim must survive the resolution"
+        );
+        let error = service
+            .start_add(ProvisionRequest { probe_id: second })
+            .await
+            .expect_err("a second install must be refused while the host is busy");
+        assert!(error.to_string().contains("in flight"), "{error:#}");
+    }
+
     /// Confirmation registers the destination before the first plan action,
     /// and a second operation for that host is refused while the first waits.
     #[farhelm_testtrace::test]

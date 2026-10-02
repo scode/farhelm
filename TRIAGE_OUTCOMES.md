@@ -5300,7 +5300,8 @@
   redundant unconditional removal, keeping every failure path's own release); add a test showing a probe during a held
   ADD claim leaves the host busy so a second install or update is refused. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `souyzyuxtoqk`, bookmark `triage-1001d/11-probe-keeps-busy`, PR
+  https://github.com/scode/farhelm/pull/1407.
 
 ## retarget-race-republishes-old-client.md
 

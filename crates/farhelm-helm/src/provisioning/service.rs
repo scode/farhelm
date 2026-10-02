@@ -1222,6 +1222,12 @@ impl ProvisioningService {
     /// succeeded. Completed steps stay completed; every unfinished step is
     /// marked skipped because discovery, rather than another executor pass,
     /// established the final state.
+    ///
+    /// Leaves the host's busy marker alone. The failed run released its own
+    /// claim when it failed, so a marker present now belongs to another
+    /// operation, such as a rerun confirmed moments ago that has not yet
+    /// installed its progress view; clearing it let a second install or
+    /// update be accepted beside that one.
     async fn resolve_failed_add_discovery(&self, host: HostId, build_version: &str) {
         let message = format!(
             "a supervisor answered during recovery (build {build_version}); ADD used it as-is"
@@ -1241,7 +1247,6 @@ impl ProvisioningService {
                 step.message = Some(message.clone());
             }
         }
-        memory.busy.remove(&host);
         drop(memory);
         self.manager.events().bump();
     }
