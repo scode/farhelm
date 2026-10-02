@@ -60,7 +60,8 @@ pub(crate) fn invocation_is_yolo(invocation: &str) -> bool {
 /// Refuse a YOLO launch on `host` unless the host is marked safe or the
 /// request carries the override. Reads the host's setting from the store at
 /// the moment of the decision, so a change in the settings dialog applies to
-/// the very next launch.
+/// the very next launch. A YOLO launch to a host with no registry row is
+/// refused with the helm's unknown-host error rather than allowed.
 pub(crate) async fn check(
     state: &AppState,
     host: HostId,
@@ -85,15 +86,62 @@ pub(crate) async fn check(
                 row.alias.as_deref(),
             ),
         })),
-        // A host the registry no longer has is not this check's to report;
-        // routing to it refuses on its own.
-        None => Ok(()),
+        // A host the registry no longer has is refused here, with the same
+        // not-found error routing gives an unknown host
+        // (`sessions::no_such_host`). Routing does not
+        // cover it: create and restart-with take the host's connection
+        // before this check, and host removal deletes the row before it
+        // stops the connection, so a launch in that window would otherwise be
+        // dispatched over the still-open connection unasked. (The wider race
+        // of any create landing on a host being removed is accepted; this
+        // only keeps the YOLO check from failing open.)
+        None => Err(crate::sessions::no_such_host(host)),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec: a YOLO launch checked against a host id the registry has no row
+    /// for is refused with the helm's unknown-host error ("no such host", the
+    /// same text routing gives), not allowed; a launch that is not YOLO, or
+    /// carries the override, is not this check's to refuse.
+    ///
+    /// Why: create and restart-with hold the host's connection before this
+    /// check, and host removal deletes the row before stopping that
+    /// connection, so a missing row does not mean routing will refuse. When
+    /// this check let a missing row through, a YOLO launch in that window
+    /// started an approval-free agent on a sensitive host unasked.
+    #[farhelm_testtrace::test]
+    async fn a_yolo_check_against_a_host_with_no_registry_row_is_refused() {
+        let harness = crate::rest_harness::idle_helm().await;
+        let missing: HostId = 999_999;
+        assert!(
+            harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .all(|row| row.id != missing),
+            "premise: no registry row has this id"
+        );
+        let refused = check(&harness.state, missing, true, false)
+            .await
+            .expect_err("a YOLO launch to a missing host must be refused");
+        let refusal = refused
+            .downcast_ref::<crate::SupervisorError>()
+            .unwrap_or_else(|| panic!("refused with the helm's own error, got: {refused:#}"));
+        assert_eq!(refusal.kind, crate::ErrorKind::NotFound);
+        assert_eq!(
+            refusal.message,
+            format!("no such host: {missing}"),
+            "the same text as any launch to an unknown host"
+        );
+        assert!(check(&harness.state, missing, false, false).await.is_ok());
+        assert!(check(&harness.state, missing, true, true).await.is_ok());
+    }
 
     /// Spec: every built-in profile named `…-yolo` is classified YOLO by the
     /// sensitive-host guard, and every other built-in is not.

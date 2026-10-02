@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `yolo-guard-fails-open-without-row.md` — the sensitive-host YOLO guard lets a launch through if the host's registry
-  row disappears mid-request.
 - `sighup-skips-orderly-shutdown.md` — SIGHUP (closing the terminal that started the desktop app or a hand-run
   supervisor) skips the orderly tmux shutdown.
 - `header-replace-recomputes-alive.md` — header Replace recomputes "nothing is alive" after the YOLO confirmation, so it
