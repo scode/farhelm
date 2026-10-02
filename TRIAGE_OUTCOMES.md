@@ -4911,7 +4911,8 @@
   either order, in the guard and the sidebar badge; include the `-c`/`--config` spellings (`approval_policy="never"`
   with `sandbox_mode="danger-full-access"`) if that comes cheaply. Add classifier tests for each spelling and a guard
   test refusing such a create on a sensitive host. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
+- Execution: complete: change `yluskrnrnmwt`, bookmark `triage-1001c/02-yolo-codex-option-form`, PR
+  https://github.com/scode/farhelm/pull/1387.
 
 ## yolo-safe-survives-identity-adoption.md
 

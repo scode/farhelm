@@ -412,6 +412,57 @@ async fn a_yolo_create_on_a_sensitive_host_is_refused_until_confirmed() {
     peer.await.unwrap();
 }
 
+/// Spec: a create whose command line spells Codex's no-approvals,
+/// no-sandbox mode as options (`-a never` with `-s danger-full-access`, in
+/// either spelling) is refused on a host marked sensitive with the helm's
+/// YOLO-confirmation header, like `codex --yolo`.
+///
+/// Why: the classifier's table is only useful if the guard consults it on
+/// the real create path; this pins that the option form reaches the same
+/// refusal rather than starting on a sensitive host unasked.
+#[farhelm_testtrace::test]
+async fn a_codex_option_spelled_yolo_create_on_a_sensitive_host_is_refused() {
+    use tower::ServiceExt;
+
+    let harness = rest_harness::idle_helm().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    assert!(
+        !host_yolo_safe(&harness.store, local).await,
+        "premise: the local host starts sensitive"
+    );
+    for invocation in [
+        "codex -a never -s danger-full-access",
+        "codex --sandbox=danger-full-access --ask-for-approval=never",
+    ] {
+        let refused = harness
+            .router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/sessions")
+                    .header("host", "127.0.0.1:7433")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        serde_json::json!({"cwd": "/project", "invocation": invocation})
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            refused.status(),
+            axum::http::StatusCode::CONFLICT,
+            "{invocation}"
+        );
+        assert_eq!(
+            refused.headers()[farhelm_proto::http::YOLO_CONFIRMATION_HEADER],
+            farhelm_proto::http::YOLO_CONFIRMATION_SENSITIVE_HOST,
+            "{invocation}"
+        );
+    }
+}
+
 /// Mark the harness's local host safe for YOLO launches.
 ///
 /// Every host starts sensitive, so a test that launches YOLO for some other

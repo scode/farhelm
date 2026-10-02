@@ -218,15 +218,16 @@ an available host label, it only ever leaves the row free to show one it already
 promise on top rather than replacing the first. Legacy rows without a host name at all necessarily show none regardless
 — locality answers whether a name would be shown, not whether one exists to show. The agent track is rendered as glyphs:
 structured launch metadata decides the harness and permission mark when present, otherwise conservative recognition uses
-the program basename plus a permission glyph. Legacy recognition skips known option values and stops at unknown syntax,
-subcommands, or `--`, so argument data cannot earn a permission glyph. The closed approval glyph distinguishes Goose's
-`approve`, `smart approve`, and `chat` metadata from the open YOLO warning; an omitted Pi permission is rendered as YOLO
-for compatibility with older snapshots, while an omitted OMP permission is rendered as an honest absence — OMP has no
-rewrite-to-default rule for the raw-invocation marker to inherit. The full invocation and a profile's snapshotted name
-remain in its accessible text and tooltip. The working directory is tilde-folded against the `/home/<user>` and
-`/Users/<user>` shapes, since no home directory is on the wire to fold against properly. Every one of those
-abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the full
-truth stays one hover away.
+the program basename plus a permission glyph. Legacy recognition never reads a known option's value as a switch and
+stops at unknown syntax, subcommands, or `--`, so argument data cannot pose as a permission flag; it reads those values
+only to recognize a vendor's documented option-spelled mode (Codex's `-a never` with `-s danger-full-access`). The
+closed approval glyph distinguishes Goose's `approve`, `smart approve`, and `chat` metadata from the open YOLO warning;
+an omitted Pi permission is rendered as YOLO for compatibility with older snapshots, while an omitted OMP permission is
+rendered as an honest absence — OMP has no rewrite-to-default rule for the raw-invocation marker to inherit. The full
+invocation and a profile's snapshotted name remain in its accessible text and tooltip. The working directory is
+tilde-folded against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold
+against properly. Every one of those abbreviations is lossy, so the untouched string rides along in a `title` attribute
+— the row is a summary, and the full truth stays one hover away.
 
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
 The agent and permission SVGs sit in separate `title` targets, so hovering the open lock explains its permission mode

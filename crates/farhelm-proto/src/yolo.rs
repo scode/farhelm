@@ -7,8 +7,10 @@
 //! ([`crate::LaunchHarness::sole_permission`], which makes every Pi launch
 //! YOLO). A raw command line or profile invocation carries only argv, so it
 //! is YOLO when its program is a recognized vendor CLI and a leading switch
-//! is one of that vendor's permission-bypass flags, or when its program is
-//! one whose only mode is YOLO. Recognition of raw command lines is best
+//! is one of that vendor's permission-bypass flags or its options spell a
+//! YOLO mode (`--permission-mode bypassPermissions`, Codex's `-a never` with
+//! `-s danger-full-access`), or when its program is one whose only mode is
+//! YOLO. Recognition of raw command lines is best
 //! effort (SPEC.md, the YOLO-launch paragraph): it covers the documented
 //! shapes, including a program behind a simple `env NAME=value` prefix
 //! ([`effective_program_index`]), but no argv classifier can see through an
@@ -123,10 +125,99 @@ const INVOCATION_MARKERS: &[(&str, &[(&str, InvocationMarker)])] = &[
 /// (its other values, `always-ask` and `write`, are not YOLO), and Claude
 /// Code's `--permission-mode bypassPermissions`, which its CLI reference
 /// documents as the same mode `--dangerously-skip-permissions` selects.
+///
+/// Guard-only, like [`GUARD_ONLY_YOLO_FLAGS`]: the badge does not consult
+/// it. [`YOLO_OPTION_SETS`] could express these rows too (one setting each),
+/// and folding them in would badge them; that change of what the sidebar
+/// shows is left for its own decision.
 const YOLO_OPTION_VALUES: &[(&str, &str, &str)] = &[
     ("omp", "--approval-mode", "yolo"),
     ("claude", "--permission-mode", "bypassPermissions"),
 ];
+
+/// One setting in a [`YOLO_OPTION_SETS`] entry: the `(option, value)`
+/// spellings, any one of which sets it.
+type SettingSpellings = &'static [(&'static str, &'static str)];
+
+/// YOLO modes a vendor spells as several valued settings that must ALL be
+/// present: `(program, marker, settings)`, where each setting lists the
+/// `(option, value)` spellings that set it, each in either the two-argument
+/// or the `option=value` form, in any order.
+///
+/// Codex's never-ask approval policy together with its `danger-full-access`
+/// sandbox is the same mode as `--dangerously-bypass-approvals-and-sandbox`
+/// (its CLI help), so it carries that flag's marker. Either setting alone is
+/// not YOLO: `-a never` keeps Codex's sandbox, like `--full-auto`, and
+/// `-s danger-full-access` keeps its approval prompts. The `-c`/`--config`
+/// spellings set the same two config keys; Codex reads a config value as
+/// TOML, so a quoted value (`approval_policy="never"`) is the same setting
+/// ([`setting_value_matches`]).
+const YOLO_OPTION_SETS: &[(&str, InvocationMarker, &[SettingSpellings])] = &[(
+    "codex",
+    InvocationMarker::NoSandbox,
+    &[
+        &[
+            ("-a", "never"),
+            ("--ask-for-approval", "never"),
+            ("-c", "approval_policy=never"),
+            ("--config", "approval_policy=never"),
+        ],
+        &[
+            ("-s", "danger-full-access"),
+            ("--sandbox", "danger-full-access"),
+            ("-c", "sandbox_mode=danger-full-access"),
+            ("--config", "sandbox_mode=danger-full-access"),
+        ],
+    ],
+)];
+
+/// Whether an option's value as found on the command line sets the value a
+/// [`YOLO_OPTION_SETS`] spelling expects. A plain value must match exactly.
+/// An expected `key=value` (a `-c` config setting) matches the same key with
+/// the same value, allowing spaces around the `=` and one pair of TOML
+/// quotes around the value, since Codex parses it as TOML.
+fn setting_value_matches(found: &str, expected: &str) -> bool {
+    if found == expected {
+        return true;
+    }
+    let (Some((expected_key, expected_value)), Some((key, value))) =
+        (expected.split_once('='), found.split_once('='))
+    else {
+        return false;
+    };
+    let value = value.trim();
+    let unquoted = ['"', '\'']
+        .iter()
+        .find_map(|quote| {
+            value
+                .strip_prefix(*quote)
+                .and_then(|rest| rest.strip_suffix(*quote))
+        })
+        .unwrap_or(value);
+    key.trim() == expected_key && unquoted == expected_value
+}
+
+/// The markers of `program`'s [`YOLO_OPTION_SETS`] entries whose every
+/// setting appears among `values`, the `(option, value)` pairs read off a
+/// command line.
+fn satisfied_option_sets<'a>(
+    program: &'a str,
+    values: &'a [(&str, &str)],
+) -> impl Iterator<Item = InvocationMarker> + 'a {
+    YOLO_OPTION_SETS
+        .iter()
+        .filter(move |(vendor, _, _)| *vendor == program)
+        .filter(move |(_, _, settings)| {
+            settings.iter().all(|spellings| {
+                spellings.iter().any(|(option, expected)| {
+                    values.iter().any(|(found_option, found)| {
+                        found_option == option && setting_value_matches(found, expected)
+                    })
+                })
+            })
+        })
+        .map(|(_, marker, _)| *marker)
+}
 
 /// YOLO flags recognized only by the guard ([`argv_is_yolo`]), not by the
 /// row badge's [`invocation_marker`]: Grok's `--always-approve` follows its
@@ -208,15 +299,19 @@ fn is_classified_program(name: &str) -> bool {
         || YOLO_OPTION_VALUES
             .iter()
             .any(|(program, _, _)| *program == name)
+        || YOLO_OPTION_SETS
+            .iter()
+            .any(|(program, _, _)| *program == name)
         || GUARD_ONLY_YOLO_FLAGS
             .iter()
             .any(|(program, _)| *program == name)
         || SOLE_YOLO_PROGRAMS.contains(&name)
 }
 
-/// The first recognized permission flag among argv's leading switches, in
-/// the program's own precedence order, or `None` for an unrecognized
-/// program or no recognized flag.
+/// The highest-precedence permission marker among argv's leading switches,
+/// or `None` for an unrecognized program or none recognized: a recognized
+/// flag, or a [`YOLO_OPTION_SETS`] mode whose settings all appear there,
+/// ranked where its marker's flag sits in the program's own order.
 ///
 /// The program is the one behind a simple `env NAME=value` prefix, if any
 /// ([`effective_program_index`]). An `env` given an option earns no marker:
@@ -228,10 +323,23 @@ pub fn invocation_marker(argv: &[String]) -> Option<InvocationMarker> {
     let (_, flags) = INVOCATION_MARKERS
         .iter()
         .find(|(vendor, _)| *vendor == basename)?;
-    let leading_args = invocation_switches(basename, &argv[1..], flags);
+    let (leading_args, values) = invocation_switches(basename, &argv[1..], flags);
+    // A satisfied option set ranks where its marker's flag sits in the
+    // program's own precedence order, so it competes with the flags fairly.
+    let rank_of = |marker: InvocationMarker| {
+        flags
+            .iter()
+            .position(|(_, listed)| *listed == marker)
+            .unwrap_or(flags.len())
+    };
     flags
         .iter()
-        .find_map(|(flag, marker)| leading_args.contains(flag).then_some(*marker))
+        .enumerate()
+        .filter(|(_, (flag, _))| leading_args.contains(flag))
+        .map(|(rank, (_, marker))| (rank, *marker))
+        .chain(satisfied_option_sets(basename, &values).map(|marker| (rank_of(marker), marker)))
+        .min_by_key(|(rank, _)| *rank)
+        .map(|(_, marker)| marker)
 }
 
 /// Whether a raw command line (already split into argv) is a YOLO launch,
@@ -246,6 +354,9 @@ pub fn invocation_marker(argv: &[String]) -> Option<InvocationMarker> {
 /// it. The cost runs the other way here. A flag spelling that is really some
 /// other option's value (`codex -c --yolo`) is counted too, which only asks
 /// the user a question; a miss would start a YOLO session nobody confirmed.
+/// A mode spelled as several settings (Codex's `-a never` with
+/// `-s danger-full-access`, [`YOLO_OPTION_SETS`]) counts when every setting
+/// appears anywhere before the `--`.
 ///
 /// A simple `env NAME=value` prefix is looked past to the program behind it
 /// ([`effective_program_index`]), and the program found there is classified
@@ -299,6 +410,18 @@ fn program_argv_is_yolo(argv: &[String]) -> bool {
         .map(String::as_str)
         .take_while(|arg| *arg != "--")
         .collect::<Vec<_>>();
+    // Every `(option, value)` reading of the arguments: each word with the
+    // one after it, each `option=value` word split at its first `=`, and
+    // each single-dash word split after its short option (`-anever`, a
+    // value attached the way clap-based CLIs such as Codex accept).
+    // Readings that are not really option and value never match a setting.
+    let values = args
+        .iter()
+        .zip(args.iter().skip(1))
+        .map(|(option, value)| (*option, *value))
+        .chain(args.iter().filter_map(|arg| arg.split_once('=')))
+        .chain(args.iter().filter_map(|arg| attached_short_value(arg)))
+        .collect::<Vec<_>>();
     args.iter().enumerate().any(|(i, arg)| {
         flags.contains(arg)
             || options.iter().any(|(_, option, value)| {
@@ -308,7 +431,7 @@ fn program_argv_is_yolo(argv: &[String]) -> bool {
                         .and_then(|rest| rest.strip_prefix('='))
                         == Some(value)
             })
-    })
+    }) || satisfied_option_sets(basename, &values).any(InvocationMarker::is_yolo)
 }
 
 /// Whether a structured launch is a YOLO launch: its harness's only mode is
@@ -318,18 +441,33 @@ pub fn selection_is_yolo(selection: &LaunchSelection) -> bool {
         || selection.permissions == Some(LaunchPermission::Yolo)
 }
 
-/// Recognize only switches whose argv role is unambiguous.
+/// Split a single-dash word into its short option and an attached value
+/// (`-anever` into `-a` and `never`), or `None` for anything else: a long
+/// option, a bare short option, or a word that is not an option at all.
+fn attached_short_value(arg: &str) -> Option<(&str, &str)> {
+    if arg.starts_with("--") || !arg.starts_with('-') {
+        return None;
+    }
+    let (option, value) = (arg.get(..2)?, arg.get(2..)?);
+    (!value.is_empty()).then_some((option, value))
+}
+
+/// Recognize only switches whose argv role is unambiguous, and read the
+/// values of the known valued options among them.
 ///
 /// Shell quoting does not distinguish a switch from an option value after
-/// splitting. Skip the values of known options, and stop at unknown syntax
-/// (including subcommands), rather than claiming that a prompt/config value
-/// changes permissions. This deliberately recognizes only a prefix of legacy
-/// commands; structured launch provenance does not need this approximation.
+/// splitting. Treat the values of known options as values, never as
+/// switches, and stop at unknown syntax (including subcommands), rather than
+/// claiming that a prompt/config value changes permissions. This
+/// deliberately recognizes only a prefix of legacy commands; structured
+/// launch provenance does not need this approximation. Returns the
+/// recognized marker switches and the `(option, value)` pairs read, the
+/// latter for [`YOLO_OPTION_SETS`].
 fn invocation_switches<'a>(
     vendor: &str,
     args: &'a [String],
     markers: &[(&str, InvocationMarker)],
-) -> Vec<&'a str> {
+) -> (Vec<&'a str>, Vec<(&'a str, &'a str)>) {
     let valued: &[&str] = match vendor {
         "codex" => &[
             "-c",
@@ -364,25 +502,30 @@ fn invocation_switches<'a>(
         _ => &[],
     };
     let mut switches = Vec::new();
+    let mut values = Vec::new();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         if markers.iter().any(|(flag, _)| arg == flag) {
             switches.push(arg.as_str());
         } else if valued.contains(&arg.as_str()) {
             // A marker-looking value remains data, even when quoted.
-            if args.next().is_none_or(|value| value == "--") {
-                break;
+            match args.next() {
+                Some(value) if value != "--" => values.push((arg.as_str(), value.as_str())),
+                _ => break,
             }
-        } else if arg
-            .split_once('=')
-            .is_some_and(|(key, _)| valued.contains(&key))
+        } else if let Some((key, value)) =
+            arg.split_once('=').filter(|(key, _)| valued.contains(key))
         {
-            continue;
+            values.push((key, value));
+        } else if let Some((option, value)) =
+            attached_short_value(arg).filter(|(option, _)| valued.contains(option))
+        {
+            values.push((option, value));
         } else {
             break;
         }
     }
-    switches
+    (switches, values)
 }
 
 #[cfg(test)]
@@ -512,6 +655,54 @@ mod tests {
             None,
             "the badge labels only what it recognizes, not an uninterpreted env"
         );
+    }
+
+    /// Spec: Codex's never-ask approval policy together with its
+    /// `danger-full-access` sandbox is a YOLO launch in every spelling: short
+    /// and long options, two-argument, `=` and attached forms, either order,
+    /// and the `-c`/`--config` settings with or without TOML quotes. Either
+    /// setting alone is not. The badge shows Codex's no-sandbox marker for the
+    /// pair among its leading switches and nothing for either one alone.
+    ///
+    /// Why: Codex documents this pair as the same mode as
+    /// `--dangerously-bypass-approvals-and-sandbox`. Before, it matched no
+    /// table, so a host that asks before YOLO launches started it without
+    /// asking and the sidebar showed no badge; `-a never` alone keeps the
+    /// sandbox and must not start asking.
+    #[test]
+    fn codex_option_spelled_yolo_needs_both_settings_in_any_spelling() {
+        for yolo in [
+            "codex -a never -s danger-full-access",
+            "codex -s danger-full-access -a never",
+            "codex --ask-for-approval never --sandbox danger-full-access",
+            "codex --ask-for-approval=never --sandbox=danger-full-access",
+            "codex -a=never -s=danger-full-access",
+            "codex -m gpt -a never --model x -s danger-full-access",
+            "codex -c approval_policy=never -c sandbox_mode=danger-full-access",
+            r#"codex -c 'approval_policy="never"' --config='sandbox_mode="danger-full-access"'"#,
+            "codex -a never -c sandbox_mode=danger-full-access",
+            "codex -anever -sdanger-full-access",
+            "env A=1 codex -a never -s danger-full-access",
+        ] {
+            assert!(argv_is_yolo(&argv(yolo)), "{yolo}");
+            assert_eq!(
+                invocation_marker(&argv(yolo)),
+                Some(InvocationMarker::NoSandbox),
+                "{yolo}"
+            );
+        }
+        for not_yolo in [
+            "codex -a never",
+            "codex --ask-for-approval=never",
+            "codex -s danger-full-access",
+            "codex --sandbox danger-full-access -a on-request",
+            "codex -c approval_policy=never",
+            "codex -a never -- -s danger-full-access",
+            "claude -a never -s danger-full-access",
+        ] {
+            assert!(!argv_is_yolo(&argv(not_yolo)), "{not_yolo}");
+            assert_eq!(invocation_marker(&argv(not_yolo)), None, "{not_yolo}");
+        }
     }
 
     /// Spec: the shared program locator returns 0 for a command without an
