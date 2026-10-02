@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `pi-resume-selector-option-boundaries.md` — Pi restart rewriting can delete an unrelated option value and lose the
-  verified session selector.
 - `provisioning-child-output-drain-deadline.md` — provisioning can outlive its deadline while draining a descendant-held
   output pipe.
 - `clipboard-writes-unbounded-blocking-admission.md` — OSC 52 clipboard bursts can fill the shared blocking pool behind
