@@ -24,8 +24,9 @@ Once the helm or a supervisor accepts a request that changes state, the server o
 task the server owns, not on the task serving the client's connection, and that connection's handler only waits for the
 result. A client that disconnects, reloads, has its credential rotated, or is cancelled loses the reply, never part of
 the work. This applies wherever a connection's task can be cancelled: helm HTTP and WebSocket handlers, which the web
-framework drops when the client goes away, and supervisor request handlers, which are aborted after a grace period when
-the helm's connection closes.
+framework drops when the client goes away, supervisor request handlers, which are aborted after a grace period when the
+helm's connection closes, and the helm's answers to agent requests relayed by a supervisor, whose read-only answers are
+aborted when that supervisor's connection ends.
 
 The reason is that dropping an async task stops it at whatever step it had reached, while blocking work already handed
 to other threads, such as a database transaction, still finishes. A handler written as a sequence of steps (commit a
@@ -1126,8 +1127,8 @@ destructor aborts its registered answer tasks and signals the existing reader an
 Cancellation also interrupts a frame already being written: the connection is closing, so preserving frame
 synchronization cannot justify retaining its transport until a live-peer stall timeout. The manager also retires a
 withdrawn connection explicitly: it must close while callers still retain obsolete handles, rather than waiting for
-final-owner cleanup. Neither path claims that cancelling an answer rolls back a mutation the handler may already have
-applied.
+final-owner cleanup. Neither path cancels a mutation that has started: only read-only answers are registered for abort
+(see "Who owns an accepted action").
 
 The failure vocabulary is two kinds, split by whether a retry is free. `ErrorKind::Unavailable` means nothing is holding
 the request: no helm is attached, its connection died before or during the request, the request could not be delivered
@@ -1167,9 +1168,12 @@ one, and on a connection that stays healthy the waiter it strands has nothing el
 connection lost after the request was queued is reported to a mutating caller as `Timeout` ("delivered, outcome
 unknown") rather than `Unavailable` ("never delivered, retry freely"), with a remedy that says to look at the session
 before retrying — the change may already have taken effect, and the retry-safe kind would be an invitation to apply it
-twice. A listing keeps `Unavailable`, having nothing to double-apply. Which verbs are mutating is
-`AgentVerb::is_mutating`, one exhaustive match in the protocol crate that both the supervisor and the helm read, so a
-verb added later cannot be fenced on one side and not the other.
+twice. A listing keeps `Unavailable`, having nothing to double-apply. The fence's "until the connection dies" is
+accepted as a gap: the helm owns a mutation it has started (see "Who owns an accepted action") and may still be carrying
+it out after the link that asked is gone, so a delete of the asking session can proceed while, for example, a create it
+asked for still lands. Nothing is lost when it does: the new session appears in the list like any other. Which verbs are
+mutating is `AgentVerb::is_mutating`, one exhaustive match in the protocol crate that both the supervisor and the helm
+read, so a verb added later cannot be fenced on one side and not the other.
 
 That vocabulary is a rule about a PHASE, not a list of failures, and every hop applies it the same way: once a mutation
 has been handed to the next hop, the only endings that may speak plainly are the expected success reply and a refusal
