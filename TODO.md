@@ -160,6 +160,33 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   same. Which shortcuts, where the buttons go, whether it covers the terminal, the rest of the UI, or both, and whether
   the size is remembered, are to be decided when this is picked up.
 
+- **Download files named in the terminal.** When text in a session's terminal looks like a file path (an agent saying "I
+  wrote the file here"), hovering it should mark it as clickable, and clicking it should download that file from the
+  session's host to the user's machine. Which text counts as a path, how relative paths resolve, and what happens for a
+  missing file, a directory, or a very large file are to be decided when this is picked up.
+
+- **Copying text from Codex's prompt box does nothing.** Dragging over text typed into Codex's prompt box (the composer
+  at the bottom) highlights it, but nothing reaches the clipboard. Reproduced 2026-10-01 against Codex 0.159.3 in a
+  plain tmux, outside Farhelm: Codex turns on mouse reporting, so a plain drag goes to Codex rather than to the
+  terminal's own selection (SPEC.md, Terminal experience). Over the conversation above the prompt box, Codex copies on
+  release by itself (an OSC 52 write, with "Copy sent to terminal" in its footer), and Farhelm forwards that to the
+  clipboard. In the prompt box it only highlights; the copy happens only if Ctrl+C is pressed while the highlight is up,
+  which Codex does not advertise there. Option-drag on macOS (Shift-drag elsewhere) already works, because it makes
+  Farhelm's own selection, which copies on release. So the gap is Codex's behavior, and the fix question is what Farhelm
+  should do about it: a hint, making a Codex prompt-box drag copy without the user knowing about Ctrl+C, an upstream
+  report, or a combination. Any Codex-specific handling goes where the harness map in
+  `crates/farhelm-supervisor/src/agent_kind/mod.rs` says. Not yet checked: whether other harnesses' prompt boxes behave
+  the same way.
+
+- **Keyboard quick switcher.** A keyboard shortcut that opens a quick switcher, like Slack's: type to jump to an
+  existing session, or to start a new one. Details TBD.
+
+- **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
+  keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
+  the keyboard quick switcher. The nearest thing today is Stop followed later by Restart, which ends the agent but keeps
+  its terminal tabs running and shows the session as exited, the same as any other exit. Whether suspending also stops
+  terminal tabs, what bringing a session back does, and how it looks in the list are details TBD.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
