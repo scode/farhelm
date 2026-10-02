@@ -21,6 +21,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Definite simplification
 
+- **Make the bundled terminal font a hard requirement.** Decided 2026-10-01: JetBrains Mono Nerd Font ships with
+  Farhelm, so failing to load it is a broken deployment, like any other bundled asset, not something to survive. Remove
+  the fallback in `crates/farhelm-ui/assets/terminal.js` ("Font settling before mount": the 3 s settle deadline,
+  mounting in a fallback font, the late font swap and repaint paths, the do-nothing tracker for engines without the Font
+  Loading API) and gate terminal mounts on the font the way `mountWhenReady` already gates on the other bundled files.
+  The retry against the browser briefly reporting no face before the font is registered may still be needed. Accepted
+  cost: in the web UI over a slow link, a terminal shows nothing until the roughly 2 MB font arrives instead of
+  appearing in a fallback font after 3 s. Removes the cause of `terminal-font-promise-leak.md` (discarded 2026-10-01).
+
 ## Planned
 
 - **Keep session creation off the connection read loop.** Run creation through tracked background handlers so ordinary
@@ -33,6 +42,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Remove heuristic conversation-identity fallbacks.** Decided 2026-10-01: Farhelm identifies an agent's conversation
+  only from the harness's own explicit report (a hook, plugin, extension, or whatever reporting mechanism that harness
+  needs), never from heuristics that cannot be relied upon. Remove Claude's record scan (`agent_kind/capture.rs`,
+  `service/capture.rs`, and their e2e suites; roughly 6k lines) and the re-verification of records it captured earlier,
+  plus any other heuristic identity fallback found along the way. Launches without a report (a profile already passing
+  `--settings`, a bare `--`, `FARHELM_AGENT_HOOKS` opting out, a hook that failed) take the fallback SPEC.md already
+  defines for an uncaptured identity. Review feedback that is only true because this code still exists is discarded
+  rather than fixed. Alert the maintainer before landing if existing scan-captured sessions would lose a valid Resume
+  offer. Earlier write-up: https://claude.ai/code/artifact/554790ce-c744-4daa-b9a5-151facdb1f42
+
 - **Re-examine and simplify how launches are represented.** The maintainer wants to interrogate how launches are handled
   end to end and reconsider the design with simplification in mind. Today a session can be launched from a structured
   selection, a built-in profile, a user profile, or a raw command line, and a profile or raw create can carry a separate
@@ -40,8 +59,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   of the resulting complexity: the sensitive-host YOLO check classifies only the start command, so a custom profile
   whose hand-written resume command adds `--dangerously-skip-permissions` passes the check at creation and every later
   Resume runs with approvals off unconfirmed (`yolo-guard-skips-resume-template.md`, triaged 2026-10-01 as a spec
-  clarification rather than a code fix because closing it was not worth the complexity). First step: walk through the
-  launch paths with the maintainer.
+  clarification rather than a code fix because closing it was not worth the complexity). Another: the resume command
+  Farhelm derives by appending a conversation selector to the original command line collides with a selector the user's
+  own command already carries, so a Claude session started as `claude --continue`, or with a `--` in its command, can
+  restart into a different conversation or a fresh one (`claude-resume-template-selector-collision.md`, triaged
+  2026-10-01; Codex has the same problem in `codex-resume-template-duplicates-selector.md`). First step: walk through
+  the launch paths with the maintainer.
 
 - **Uninstall after a move when the installer skipped the app.** On macOS, after the install directory moves
   (`~/.local/bin` replaced by a symlink, a renamed home, a different `FARHELM_INSTALL_DIR`), `farhelm uninstall` refuses
@@ -281,10 +304,6 @@ is safe. Each is its own review unit.
 
 Real enough to keep, not established enough to act on. Each names what would settle it.
 
-- **Capture parsing at the 64 KiB prefix.** `A5-C20`. `read_prefix` (agent_kind/capture.rs:626-630) takes a flat byte
-  cut, and one unparseable leading line marks the whole scan incomplete and blocks every durable claim. Conditional on a
-  supported vendor record whose first line exceeds 64 KiB and on no successful identity hook; neither verified. If
-  shown: make the front of the read line-aware under a hard ceiling, or report mid-line truncation.
 - **One-sided activity clock guard.** `A6-C22`. `record_activity` (supervisor store.rs:3660-3665) accepts only forward
   moves, so a single forward clock jump pins the stamp. The notes want the whole activity, seen, and merge path
   investigated before any clock slack, and do not accept the literal permanent-freeze claim for every excursion.
@@ -546,16 +565,6 @@ are large mostly because of their tests.
   needs a body-level portal or `position: fixed` with measured coordinates — the row `…` menu's popover is the pattern
   to copy. If the native delay turns out tolerable, a `title` pass over the terse actions (stop / delete, the host row's
   buttons) is an hour and needs none of this.
-
-- Consider dropping conversation-identity SCAN support and keeping only the per-launch hook. The resume promise stays;
-  what goes is the second mechanism. The hook is the agent's own answer and covers `/clear` and `/new`, which the scan
-  cannot see at all; the scan (`agent_kind/capture.rs`, `service/capture.rs`, and their e2e suites — roughly 6k lines)
-  exists only for launches where the hook cannot be attached (a profile already passing `--settings` or Codex hook
-  config, a bare `--`, or `FARHELM_AGENT_HOOKS` opting out) and for a hook that failed. Those launches would take the
-  fallback SPEC.md already defines for an uncaptured identity — restart says so and offers the resume template or a
-  fresh launch — and the vendor-record parsing that breaks whenever a vendor changes its on-disk layout goes away. The
-  spec edit is one clause in Durability and resume ("and scanned from the outside … otherwise", plus "Scanning stays the
-  fallback …"). Write-up: https://claude.ai/code/artifact/554790ce-c744-4daa-b9a5-151facdb1f42
 
 - Consider dropping the race-proofing around host identity, keeping the identity itself. To be clear about what stays:
   the per-install identity the supervisor mints on first run and stores in its own database, independent of hostname and

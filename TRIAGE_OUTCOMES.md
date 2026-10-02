@@ -5471,3 +5471,440 @@
   and UI tests for the refusal, the skipped "update all" row, and the displayed state. Remove this feedback file and its
   index entry.
 - Execution: planned in `plans/triage-restart-takeover-update.md`.
+
+## confirmed-nothing-alive-prompt-kills-live-agent.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed for the sidebar Delete prompt, partly correct for the header Restart prompt, by code inspection
+  at f087e0b6 (not reproduced). The sidebar's inline delete prompt rewords itself from the row's current status on every
+  render and stays open while that status changes, but its confirm always sends a delete without the
+  `only_if_nothing_alive` precondition (`confirm_delete` in `crates/farhelm-ui/src/list/view.rs`), so a prompt that
+  drifted to "delete anyway" deletes an agent restarted meanwhile by the CLI, another window or an agent. A prompt that
+  warned only about tabs has the same gap for a newly restarted agent. Header Delete already captures the value from the
+  render that drew its prompt. The header Restart path needs the prompt to drift to interrupted or error and a restart
+  by someone else before the click; its cost is a restart, not a deletion. The page's live feed normally narrows the
+  window to moments; it widens when the feed is down. SPEC.md "Lifecycle operations" applies the binding reading to
+  Restart only and is silent on Delete and on a prompt that changes while open. Not covered by `Planned`, `BUGS.md`,
+  filters or plan items (the YOLO/Replace plan touches Replace only).
+- Decision: a destructive confirmation authorizes only what the prompt the user answered said would happen; by default
+  Farhelm does not accept races where a confirmation is applied to a state the user was not shown (user, 2026-10-01).
+- Completion criteria: SPEC.md states the principle generally for destructive confirmations (Delete, Restart, Replace,
+  Replace with, and any prompt that rewords while open): the request carries the precondition the answered prompt
+  implied, and the server refuses when the current state exceeds it, so the next attempt asks again. The sidebar Delete
+  confirm sends `only_if_nothing_alive` and `stop_if_running` derived from the prompt actually rendered, as header
+  Delete does; header Restart's confirm sends `stop_if_running` only when the answered prompt offered to stop a working
+  agent. Add UI tests for a prompt whose wording drifted. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## replace-with-kills-running-source-unwarned.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code inspection at f087e0b6 (not reproduced). "Replace with" opens the launcher straight from
+  the row menu with no confirmation and no indication of the source's status; its request (`replace_session_with` and
+  the fresh-checkout variant in `crates/farhelm-ui/src/api.rs`) omits `only_if_nothing_alive`, which the helm defaults
+  to false, so the source's agent and tabs are killed unconditionally. Plain Replace sends the flag. Because the
+  launcher stays open while the user edits settings, a source that was exited when it opened and was restarted meanwhile
+  has its new run killed silently. SPEC.md does not say whether the launcher's button is a confirmation. Not covered by
+  spec, `Planned`, `BUGS.md`, filters or plans.
+- Decision: as for `confirmed-nothing-alive-prompt-kills-live-agent.md`: a confirmation authorizes only what it said
+  (user, 2026-10-01).
+- Completion criteria: SPEC.md's "Replace with" text says the launcher shows Replace's consequence text whenever the
+  source has anything alive, and that launching carries the precondition matching what the launcher showed; the launch
+  is refused, and asks again, when the source's state has since grown. The UI shows that text and sends
+  `only_if_nothing_alive` (or the matching stop consent) from what the launcher displayed. Add UI tests for a running
+  source and for a source restarted while the launcher was open. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## claude-scan-claims-foreign-record.md
+
+- Outcome: `other`.
+- Assessment: confirmed by code inspection at f087e0b6 (not reproduced). Claude's record-scan fallback, used when a
+  Claude session has no accepted hook report, claims a lone record inside its correlation window after filtering only by
+  recorded working directory and by ids other Farhelm sessions reported; a `claude` run outside Farhelm in the same
+  folder is never a rival, so Resume can open and append to another process's conversation. The comment in
+  `crates/farhelm-supervisor/src/agent_kind/capture.rs` claiming a wrong claim is impossible is false. Likelihood is low
+  (an unhooked session plus a foreign record at the right moment), higher if the terminal's startup query reply counts
+  as first input (unverified). Highest bucket by SPEC.md "First-class harnesses" (resuming the wrong conversation is
+  lost user work).
+- Decision: Farhelm identifies an agent's conversation only from the harness's own explicit report, through a hook,
+  plugin, extension or whatever reporting mechanism the harness needs; heuristic fallbacks that cannot be relied upon,
+  such as correlating vendor files on disk, are not supported. Change SPEC.md accordingly, and record a near-term TODO
+  to remove the remaining fallback code. Feedback that is only true because that code still exists is discarded (user,
+  2026-10-01).
+- Completion criteria: SPEC.md "Durability and resume" (and the matching SPEC_impl.md capture text) states the
+  principle: conversation identity comes only from an explicit report; a launch whose harness cannot report, or whose
+  report never arrived, has no captured identity and takes the existing uncaptured-identity fallback; the Claude record
+  scan is named as pending removal under TODO.md's near-term entry rather than as supported behavior. Remove this
+  feedback file and its index entry. The code removal itself is the TODO entry, not this item.
+- Execution: `pending`. The near-term TODO entry was recorded during triage.
+
+## claude-scan-budget-never-settles.md
+
+- Outcome: `discard`.
+- Assessment: confirmed by code inspection at f087e0b6. The Claude record scan charges every directory entry against its
+  budget before the age cutoff, and an incomplete scan neither commits nor gives up, so an unhooked Claude session in a
+  project folder with more than about 4096 entries never offers Resume and is rescanned every 2 s. Rare.
+- Decision: only true because the Claude record scan still exists; removed with it under the near-term TODO from
+  `claude-scan-claims-foreign-record.md` (user, 2026-10-01).
+- Completion criteria: remove the feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## claude-capture-warns-forever.md
+
+- Outcome: `discard`.
+- Assessment: confirmed by code inspection at f087e0b6. Re-verification of a scan-captured Claude record logs a WARN and
+  changes nothing when the transcript is missing, so an exited session whose transcript Claude cleaned up or the user
+  deleted logs a warning every capture pass, across supervisor restarts. Only scan-captured Claude sessions are
+  affected.
+- Decision: only true because the Claude record scan still exists; removed with it under the near-term TODO from
+  `claude-scan-claims-foreign-record.md`, which also covers re-verification of records the scan captured earlier (user,
+  2026-10-01).
+- Completion criteria: remove the feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## ssh-forwarding-inherited.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code inspection at f087e0b6; the live exposure was not reproduced. Every helm ssh invocation
+  (the always-on supervisor connection and every provisioning step) builds its arguments from `ssh_base_args` in
+  `crates/farhelm-helm/src/ssh.rs`, which sets batch mode, connection sharing and the destination and nothing about
+  forwarding, so a `ForwardAgent yes` or `ForwardX11 yes` in the user's ssh config applies to Farhelm's permanent
+  connection. `ssh -G` confirmed command-line `ForwardAgent=no` and `ClearAllForwardings=yes` override the config. Agent
+  exposure needs the helm process to see an ssh agent (typical on macOS, deployment-dependent on Linux); X11 needs a
+  display. Any agent on such a host could then use the user's keys around the clock. SPEC.md says a remote host must not
+  gain access to secrets on the helm's machine or another host, while SPEC_impl.md lists agent forwarding among the ssh
+  config features real ssh honors. Not covered.
+- Decision: Farhelm's own ssh connections never forward the agent, X11 or ports, whatever the user's ssh config says;
+  the config still governs reaching the host (user, 2026-10-01).
+- Completion criteria: SPEC.md states that Farhelm's own connections honor the user's ssh config for reaching and
+  authenticating to the host (keys, the agent used for authentication, ProxyJump, Match blocks) but never forward the
+  agent, X11 or ports; SPEC_impl.md's list of honored features is corrected. Both branches of the shared argument prefix
+  add `ForwardAgent=no`, `ForwardX11=no` and `ClearAllForwardings=yes`, with argument tests updated; confirm during
+  execution that `ClearAllForwardings` leaves ProxyJump working. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## ssh-config-remotecommand-blocks-host.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed and reproduced with OpenSSH 9.6: a `RemoteCommand` in the user's ssh config makes ssh refuse
+  Farhelm's own remote command ("Cannot execute command-line and remote command.", exit 255) before connecting, so such
+  a host can never be added, set up, updated or connected to, and the hosts panel shows the generic handshake hint that
+  suggests starting a supervisor. `-o RemoteCommand=none` gets past the check. Whether `RequestTTY force` would also
+  corrupt the protocol stream is unverified. Rare.
+- Decision: same principle as `ssh-forwarding-inherited.md`: Farhelm's own connections override ssh settings that
+  conflict with running its own remote command (user, 2026-10-01).
+- Completion criteria: the same SPEC.md statement names `RemoteCommand` (and a forced TTY, if execution confirms it
+  matters) as overridden; the shared argument prefix adds `RemoteCommand=none` and, if needed, `-T`, with argument tests
+  updated. May share a PR with `ssh-forwarding-inherited.md`. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## merged-list-crowded-by-one-host.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by code inspection at f087e0b6. The helm merges, filters, sorts and then cuts the fleet list to
+  500 rows, checking only the row cap, id length and duplicates at ingress and clamping no timestamps, so a host that
+  reports about 500 sessions that sort first (future creation times, always running, or titles) pushes every other
+  host's sessions out of the all-hosts list and agents' listings. Per-host views still show them, routing by id still
+  works, and the rows carry the hostile host's name. Needs a hostile host; an honest one would need a fleet size SPEC.md
+  puts out of scope. Filed as highest; not a security or data-loss consequence, so `other`.
+- Decision: when a misbehaving remote host's effect is limited to things like spamming the UI so other sessions are hard
+  to reach, removing the host is the remedy; only effects that break the helm or affect the security of other hosts must
+  be prevented (user, 2026-10-01).
+- Completion criteria: SPEC.md "Remote input, session defaults, and availability" generalizes the session-ownership
+  carve-out: a misbehaving host may crowd or clutter what the helm and GUI show, including pushing other hosts' sessions
+  out of the merged list, and removing it is the remedy; it must still not break the helm or affect other hosts'
+  security. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## output-client-shutdown-can-retry-forever.md
+
+- Outcome: `other`.
+- Assessment: confirmed in code at f087e0b6, unreachable through supported use. The per-terminal output client retries
+  shutdown forever if its tmux session disappears while output is paused, but every production session kill (Delete,
+  create rollbacks, a relaunch racing a delete) first stops or never had attachments, and a `remain-on-exit` session
+  does not vanish on its own; the remaining trigger is killing the session through Farhelm's private tmux server
+  directly.
+- Decision: skipped under the triage rule for behavior the specification already accepts. SPEC.md "Ownership during
+  cleanup and provisioning" puts changes made through the private tmux server outside every guarantee and rules out
+  added recovery for them; the user confirmed not spending non-trivial complexity on direct poking at the internal tmux,
+  while trivial guards against mistakes remain fine (2026-10-01).
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry locally during triage.
+
+## attach-reports-generic-timeout.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection at f087e0b6. After provisioning a host, the attach wait recognizes only
+  "connected with a new connection number" or a vanished connection worker; version skew, identity mismatch, unverified
+  identity and duplicate states all spin for the full 30 s and fail with "waiting for the provisioned supervisor: timed
+  out", holding the host lock and a run slot meanwhile. The host row shows the real state, the run's error does not.
+  Realistic trigger: re-adding a host whose machine was reinstalled or whose state was wiped. Contradicts SPEC.md
+  "Errors and diagnostics"; same shape as the planned `desktop-start-fails-on-skewed-supervisor.md` fix.
+- Decision: fix the code; the user approved fixing the clear-cut small items, with a gate: anything that turns into a
+  significant complexity increase or refactor comes back to the user first (2026-10-01).
+- Completion criteria: the attach wait stops early on skew, identity mismatch, unverified identity and duplicate, and
+  reports the state and its remedy, reusing the existing update-trust wording; add tests. Remove this feedback file and
+  its index entry. Stop and ask before implementing if this needs significant new complexity or a refactor.
+- Execution: `pending`.
+
+## folder-picker-skips-symlinks.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection at f087e0b6. The supervisor's directory browse keeps an entry only when its
+  unfollowed file type is a directory, so symlinked folders (`~/src` pointing elsewhere) never appear in the create
+  dialog's picker, and a `?` on a per-entry type lookup fails the whole listing (rare on Linux). Typing the path works.
+  SPEC.md promises a directory picker; nothing addresses symlinks.
+- Decision: fix the code under the same gate as `attach-reports-generic-timeout.md` (user, 2026-10-01).
+- Completion criteria: the picker lists symlinks that resolve to directories, and an entry whose type cannot be read is
+  skipped rather than failing the listing; add a symlink test. Following links can block on a wedged mount, which the
+  existing browse worker and permit design tolerates. Remove this feedback file and its index entry. Stop and ask before
+  implementing if this needs significant new complexity or a refactor.
+- Execution: `pending`.
+
+## tilde-in-remote-path-fields.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection at f087e0b6. The hosts panel's remote farhelm path and remote state dir are
+  single-quoted into the probe script and the connection command, so `~` is never expanded; the helm only checks the
+  value is non-empty. `~/.local/bin/farhelm` then probes as "not installed" and offers setup on a host where Farhelm is
+  installed, and a state dir of `~/x` becomes `$HOME/~/x`. Update already refuses a non-absolute binary path.
+- Decision: fix the code under the same gate as `attach-reports-generic-timeout.md` (user, 2026-10-01). The fix refuses
+  rather than expands, matching Update's existing absolute-path rule.
+- Completion criteria: the helm refuses a non-absolute (including `~`-prefixed) remote farhelm path or state dir at the
+  API boundary with a message asking for an absolute path, and the UI shows that refusal; add tests. Remove this
+  feedback file and its index entry. Stop and ask before implementing if this needs significant new complexity or a
+  refactor.
+- Execution: `pending`.
+
+## drop-on-hidden-terminal-navigates-away.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection at f087e0b6 (browser navigation not observed). Drop and dragover handlers
+  exist only on the terminal element, which is hidden while catching up or reconnecting, and no page-wide handler
+  cancels the default, so a file dropped on a recovering terminal, or anywhere outside a live terminal, makes the web
+  page navigate to the file: every terminal detaches and in-flight uploads abort. Back or reload recovers. SPEC.md
+  Attachments classifies drops into any of a session's terminals.
+- Decision: fix the code under the same gate as `attach-reports-generic-timeout.md` (user, 2026-10-01).
+- Completion criteria: a page-wide dragover/drop handler cancels the browser default so a stray drop never navigates the
+  app; a drop on a pane with no live terminal shows the "not connected" outcome SPEC.md implies rather than nothing. Add
+  a browser regression. Remove this feedback file and its index entry. Stop and ask before implementing if this needs
+  significant new complexity or a refactor.
+- Execution: `pending`.
+
+## partial-release-download-left-behind.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection at f087e0b6. The helm's release download removes its `.part` file only on an
+  oversize or checksum failure; a body-stream error or a write, flush or fsync error returns early and leaves it.
+  Bounded to one partial file per asset, overwritten by the next attempt and swept after a helm restart, and never
+  mistaken for a verified download. The filesystem-error paths are arguably covered by SPEC.md "Healthy local
+  filesystems"; the network-error path is not.
+- Decision: fix the code under the same gate as `attach-reports-generic-timeout.md` (user, 2026-10-01).
+- Completion criteria: every failed download removes its partial file using the existing cleanup helper; add a test for
+  a mid-stream failure. Remove this feedback file and its index entry. Stop and ask before implementing if this needs
+  significant new complexity or a refactor.
+- Execution: `pending`.
+
+## incarnation-counter-restarts-per-process.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection at f087e0b6. A host connection's incarnation number starts at 1 in every helm
+  process and the create precondition compares only the number, so a client that has not yet noticed a helm restart (for
+  example a laptop woken with the create dialog open) can submit a stale number that happens to match a retargeted or
+  adopted host's new connection, and the session launches on the replacement machine instead of being refused. Compound
+  and unlikely, but the consequence is a launch on the wrong machine.
+- Decision: fix the code under the same gate as `attach-reports-generic-timeout.md` (user, 2026-10-01).
+- Completion criteria: incarnation numbers do not repeat across helm processes in practice (for example a per-process
+  random or time-derived starting value kept below 2^53 for JSON safety); add a test. Remove this feedback file and its
+  index entry. Stop and ask before implementing if this needs significant new complexity or a refactor.
+- Execution: `pending`.
+
+## sessions-changed-hint-unthrottled.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed mechanism by code inspection at f087e0b6; impact unmeasured. Each "sessions changed" hint from a
+  supervisor only bumps a counter on the helm, a refresh that answers a hint always raises a fleet-wide change event,
+  and the helm refreshes again at once if another hint arrived meanwhile. The only pacing is the supervisor's own 200 ms
+  minimum gap between hints, a sender-side rule. A hostile host can therefore drive back-to-back refreshes at network
+  round-trip rate, each making every open client re-read the session list and every open session view re-read its host's
+  full list; clients coalesce to one read in flight, so the cost is rate-bounded rather than queued. Cannot happen with
+  an honest supervisor. Filed as highest; it is a resource and availability concern with a hostile-only trigger, so
+  `other`.
+- Decision: fix the code, and also state in SPEC.md that a misbehaving host degrading the helm's performance or
+  availability (denial-of-service-style behavior) is accepted when it cannot easily be avoided: Farhelm avoids such
+  effects where it reasonably can, but does not spend elaborate complexity to do so (user, 2026-10-01).
+- Completion criteria: the helm enforces, per host connection, the same minimum gap between hint-driven refreshes that
+  the supervisor promises (`HINT_MIN_GAP`), with at most one pending refresh, so a hostile host costs no more than a
+  busy honest one; add a test with a flooding peer. SPEC.md "Remote input, session defaults, and availability" gains the
+  principle above, alongside the misbehaving-host remedy recorded under `merged-list-crowded-by-one-host.md`. Remove
+  this feedback file and its index entry.
+- Execution: `pending`.
+
+## claude-resume-template-selector-collision.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed in code at f087e0b6; Claude's handling of the conflicting flags was not checked. Claude's
+  derived resume template (`default_resume_template` for Claude in `crates/farhelm-supervisor/src/agent_kind/mod.rs`) is
+  the original argv plus `--resume {conversation}`, and its `ambiguous_derived_resume` always returns `None`, so
+  `claude --continue` restarts as `claude --continue --resume <id>` and a command containing `--` restarts with the
+  resume flag in prompt position. If Claude honors the original `--continue`, Resume opens the folder's most recent
+  conversation, harmful when another, newer conversation exists in the same folder, and the hook then records whatever
+  opened, replacing the valid offer; with `--`, Resume starts fresh or fails to launch. Built-in profiles never use
+  these flags; raw commands and custom profiles can. Same shape as `codex-resume-template-duplicates-selector.md`.
+- Decision: apply the Codex and Grok rule to Claude: refuse at creation when the original command already selects a
+  conversation or contains a real `--`, unless an explicit resume command is supplied. The user chose refusal at
+  creation over allowing the launch and withholding Resume, after being told it blocks a raw `claude --continue` launch.
+  Also add this case as an example to TODO.md's `Near term` entry "Re-examine and simplify how launches are represented"
+  (done during triage) (user, 2026-10-01).
+- Completion criteria: Claude's `ambiguous_derived_resume` refuses a derived template when the retained argv carries
+  `--continue`/`-c`, `--resume`/`-r`, `--session-id`, or a real end-of-options `--`, so the create fails with a clear
+  message unless an explicit resume template is supplied, mirroring `GrokAmbiguousResumeBoundary`. Amend SPEC.md's
+  derived-resume paragraph to list Claude beside Grok and Codex. Add regressions for an original `claude --continue` and
+  a `--` launch, with and without an explicit template. Remove this feedback file and its index entry.
+- Execution: `pending`. The TODO.md example was added during triage.
+
+## claude-clear-report-dropped-on-claim-timeout.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed in code at f087e0b6; real-host lock hold times not measured. A conversation-identity report
+  waits at most 1 s (`CAPTURE_CLAIM_WAIT` in `crates/farhelm-supervisor/src/service/core.rs`) for the session's capture
+  claim and is otherwise refused with `Conflict` and nothing written. Claude's hook makes one round trip and never
+  retries, Claude only reports on `SessionStart`, and the periodic refresh pass does nothing for Claude, so after a
+  `/clear` whose report was refused, Resume reopens the cleared conversation until the next `SessionStart`. The code
+  comments justifying the bound ("the reporter retries … the refresh pass converges the row") do not hold for Claude.
+  Needs the claim held for over 1 s (slow disk, or two reports within a second); rare on a healthy host. Codex's report
+  path uses the same wait and was not traced.
+- Decision: a valid identity report from the correct, verified source must not be dropped because it arrived while the
+  session's record was busy; it is applied once the record is free (user, 2026-10-01).
+- Completion criteria: a report that passes admission is applied after contention clears rather than refused after a
+  fixed wait, for Claude and for any other kind sharing the path (check Codex's); the hook's own bounded wait still
+  keeps the agent from being held up. Correct the comments that claim a retry or refresh converges the row. Add a
+  regression with the claim held past the old bound. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## omp-corridor-uncounted-pane-runtime.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed in code at f087e0b6; the trigger depends on an unverified premise. OMP report attribution
+  classifies the processes between the reporter and the session's pane, needs readable command-line arguments to
+  recognize a Bun-run OMP runtime, drops a command line over 64 KiB, and never classifies the pane process itself
+  (`crates/farhelm-supervisor/src/procs/omp.rs`). For a chain of reporter, nested OMP, then an unreadable pane runtime,
+  the nested OMP is taken as the foreground and its report accepted, so Resume reopens the nested conversation. Needs an
+  OMP launch command line over 64 KiB plus a nested interactive OMP that loads the gated reporter (unverified, since
+  injection is a per-launch `-e`). SPEC.md and SPEC_impl.md already require refusing nested or unclassifiable runtimes
+  and treating over-budget arguments as missing. Highest by consequence (SPEC.md "First-class harnesses" keeps resuming
+  the wrong conversation in scope for non-first-class harnesses); likelihood negligible.
+- Decision: fix the code with a complexity gate: if the fix turns out complicated, abandon it and record a `Near term`
+  TODO.md entry describing the problem for the maintainer's triage instead (user, 2026-10-01).
+- Completion criteria: for an `omp` launch, attribution refuses when the pane process is a Bun or Node runtime that is
+  not the emitter or whose arguments cannot be read, with a unit test for the unreadable-pane chain; remove this
+  feedback file and its index entry. If that turns out complicated, instead add a `Near term` TODO.md entry describing
+  the problem and remove this feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## process-snapshot-requires-supervisor-witness.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection at f087e0b6. The process-table snapshot passes an empty result straight
+  through on Linux (an empty `/proc`) and macOS (a zero-size kernel answer), with no check that the supervisor's own pid
+  is present, contradicting the module's fail-closed contract. Every process selection starts from a table row, so a
+  missing table can only cause a missed kill, never a wrong one: on a host without a usable systemd user manager, Stop
+  can record "stopped" while the agent keeps running and Delete can leave descendants behind. Hosts with a manager are
+  unaffected (the scope kill does not use the table). The trigger is practically impossible on a working host. SPEC.md
+  "Lifecycle operations" already requires that a process Farhelm could not examine counts as unconfirmed. Also tracked
+  as TODO.md's "Snapshot self-witness" entry. A move from highest to `other` was suggested and not decided.
+- Decision: fix the code, strictly scoped to the specific case of the snapshot not seeing the supervisor itself; this is
+  not an opening to address processes that hide their environment or otherwise escape discovery (user, 2026-10-01).
+- Completion criteria: a snapshot that does not contain the supervisor's own pid is an error ("could not look"), so
+  cleanup relying on it is unconfirmed rather than successful; add a pure test. No broader discovery changes. Remove
+  TODO.md's "Snapshot self-witness" entry, this feedback file and its index entry.
+- Execution: `pending`.
+
+## probe-cancellation-leaves-helper-processes.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct, by code inspection at f087e0b6. The host probe runs on the HTTP request's own task; the
+  backend isolates the probe child in its own process group but kills the group only on its normal paths, so a dropped
+  request (page closed or reloaded during a probe of up to 15 s) fires only `kill_on_drop` on the direct child and
+  leaves the stderr reader task unowned. The claimed consequence is overstated: a local probe's child starts no helpers,
+  plain ssh ends when killed, and ControlPersist masters are outside the group either way; what can survive is a
+  user-configured `ProxyCommand` that does not exit with its ssh. Only helm-side helper processes, never user work on a
+  host. Related planned item: `probe-register-not-helm-owned.md` (plan item 13 in
+  `plans/triage-restart-takeover-update.md`) moves registration, not the backend probe, onto a helm-owned task. Filed as
+  highest; recommended `other` (bucket move not explicitly decided).
+- Decision: fix the code (user, 2026-10-01).
+- Completion criteria: the whole probe runs on a helm-owned task (`run_owned`, as plan item 13 uses), so a dropped
+  request still runs the probe's own process-group cleanup within its timeout; add a dropped-request regression. Land
+  alongside or after plan item 13. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## pi-pointer-overrides-user-prompt.md
+
+- Outcome: `discard`.
+- Assessment: incorrect for the Pi version Farhelm verified against. Farhelm's Pi integration always appends its pointer
+  with `--append-system-prompt`, but Pi 0.85.1 accumulates repeated `--append-system-prompt` flags and joins them, so
+  the user's own text survives. Older Pi versions were not checked.
+- Decision: discard (user, 2026-10-01).
+- Completion criteria: remove the feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## refresh-starved-by-seeds.md
+
+- Outcome: `discard`.
+- Assessment: mostly fixed by #1281 (9221a8e3): a host refresh discarded because one of the helm's own writes landed
+  meanwhile now retries at once when a hint is pending instead of waiting 3 s. What remains needs a mutation landing
+  inside every successive refresh, continuously, on one host; other sessions there show stale status until the burst
+  stops, then correct themselves, while the host reads healthy.
+- Decision: discard (user, 2026-10-01).
+- Completion criteria: remove the feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## env-wrapper-hides-command-not-found.md
+
+- Outcome: `discard`.
+- Assessment: confirmed by code inspection at f087e0b6. Goose, Pi and OMP launches run through Farhelm's own `env`
+  wrapper, so a missing agent program surfaces as exited (127) rather than a launch error, unlike SPEC.md "Creation"'s
+  promise for "command not found". Likely covered by SPEC.md "First-class harnesses" (session tracking for other
+  harnesses is intentionally partial), though borderline because the error/exited split is a general session promise.
+- Decision: discard (user, 2026-10-01).
+- Completion criteria: remove the feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## event-feed-cap-refusal-invisible.md
+
+- Outcome: `discard`.
+- Assessment: partly correct at f087e0b6. With all 64 live-update seats taken (one per open web UI page or desktop app
+  window), the helm refuses the next subscriber with an HTTP 503 before the WebSocket upgrade, which browsers cannot
+  observe, so the code's stated rationale is wrong; b60ae0a2 (#1375) removed the zombie-seat trigger the finding cites.
+  The refused page silently falls back to its 3 s poll, by design, and stays correct. 64 pages is far beyond the handful
+  of clients the product targets.
+- Decision: discard (user, 2026-10-01).
+- Completion criteria: remove the feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## terminal-font-promise-leak.md
+
+- Outcome: `discard`.
+- Assessment: confirmed in code at f087e0b6. Each terminal mount attaches a callback to a page-wide font promise that
+  never settles when the bundled font is not confirmed within the 3 s settle deadline or the Font Loading API is
+  unusable, retaining every terminal instance; a terminal reconnecting for hours (about 1,000 mounts in 8 hours) grows
+  page memory until reload. It exists only because of the font fallback, which `terminal.js` documents as a deliberate
+  choice to treat the font as a best-effort enhancement rather than a required bundled asset.
+- Decision: discard, and remove the font fallback as its own task: the bundled font is to be treated like Farhelm's
+  other bundled assets, with the fallback complexity and behavior removed. Recorded as a TODO.md
+  `Definite
+  simplification` entry during triage (user, 2026-10-01).
+- Completion criteria: remove the feedback file and its index entry, without code or spec changes.
+- Execution: `pending`. The TODO.md entry was recorded during triage.
+
+## desktop-copy-fallback-never-runs.md
+
+- Outcome: `discard`.
+- Assessment: confirmed as dead code at f087e0b6, with a smaller consequence than reported. The header copy's
+  `navigator.clipboard` fallback runs only if the native writer throws or rejects, which the desktop writer never does,
+  and the helm's clipboard endpoint returns 204 whether or not the native write worked. What remains is a Linux desktop
+  copy during a brief re-sign-in that silently fails while the button shows "copied", within SPEC.md's best-effort,
+  silent-on-failure clipboard contract.
+- Decision: discard (user, 2026-10-01).
+- Completion criteria: remove the feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
