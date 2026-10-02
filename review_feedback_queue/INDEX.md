@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `provisioning-child-output-drain-deadline.md` — provisioning can outlive its deadline while draining a descendant-held
-  output pipe.
 - `clipboard-writes-unbounded-blocking-admission.md` — OSC 52 clipboard bursts can fill the shared blocking pool behind
   a stalled native sink.
 
