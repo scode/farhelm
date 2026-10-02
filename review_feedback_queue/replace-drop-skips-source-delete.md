@@ -36,3 +36,30 @@ The fix is to run the body through `crate::run_owned(async move { do_replace_ses
 owned arguments, keeping only the response rendering in the thin handler. Add a regression test in the style of the
 existing `owned_work_completes_after_its_waiter_is_dropped`: drop the HTTP future after the fake supervisor acknowledges
 the create, and assert that the delete still arrives.
+
+## Review evidence at f087e0b68aed3eb57d90f71b23ef9aa5499cb023
+
+Found by pre-pr-review-swarm run `20261002-0459-f087e0b6-2298` (entire repository; correctness and security only),
+`F9 / COR-REPLACE-OWNERSHIP`, reviewer `correctness_data_flow`, pass 3. Confidence: **definite**. Review disposition:
+**would fix**. Queue priority at recording: **high**.
+
+Anchor against the reviewed commit: `crates/farhelm-helm/src/sessions.rs:3494`. Recorded from the completed review
+without rechecking code after rebasing onto main.
+
+The review did not supply separate `proposed_drop` or `possible_cover` fields. Documentary coverage at recording: Same
+finding as this existing queue item. `TRIAGE_OUTCOMES.md` already accepts moving Replace onto a helm-owned task, planned
+in `plans/triage-restart-takeover-update.md`. That assessment corrects the older report: switching sessions is blocked
+by the UI operation lock, and ordinary desktop re-sign-in does not remount the app. It also leaves prompt HTTP-handler
+cancellation on client abort unverified. Preserve those caveats; this added review does not supersede the decision.
+
+Replace requires the helm to coordinate two operations: create and accept the replacement, then delete the original. The
+HTTP handler performs that sequence directly on the task serving the client connection. If the browser disconnects,
+reloads, or times out after the supervisor accepts creation but before the helm sends Delete, cancellation can discard
+the remainder of the sequence. The supervisor finishes creating the replacement, but nothing remains responsible for
+removing the original. This affects ordinary Replace and Replace with, including fresh-checkout replacements.
+
+Replace can therefore silently become a clone, potentially leaving two agents working in the same directory. Having the
+supervisor own each individual operation cannot compensate for the helm never sending the second one. Run the complete
+accepted replacement sequence through `run_owned`, the existing helper that keeps helm work alive after its HTTP waiter
+disappears. Test cancellation after creation reaches the supervisor but before its reply, and require the original's
+deletion to proceed after the HTTP waiter is gone. This follows SPEC_impl.md's accepted-action ownership rule.
