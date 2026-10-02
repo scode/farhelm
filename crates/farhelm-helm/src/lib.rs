@@ -473,6 +473,11 @@ struct AppState {
     /// `clipboard.rs` for why this channel exists at all (the webview's own
     /// clipboard API does not).
     clipboard_sink: Option<ClipboardSink>,
+    /// The cap on native clipboard writes in flight at once, so a hung OS
+    /// clipboard cannot pile blocking threads up behind it (see
+    /// `clipboard::ClipboardAdmission`). Per helm rather than process-wide,
+    /// so tests running many helms in one process cannot starve each other.
+    clipboard_admission: clipboard::ClipboardAdmission,
 }
 
 /// A native system-clipboard writer the embedding desktop shell provides.
@@ -528,6 +533,7 @@ impl AppState {
                 std::time::Instant::now(),
             )),
             clipboard_sink: None,
+            clipboard_admission: clipboard::ClipboardAdmission::new(),
         }
     }
 }

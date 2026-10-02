@@ -962,7 +962,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
   even one identical to what is already on the clipboard. Clipboard operations are explicitly best-effort and silent on
   failure — permission policy, secure-context requirements, and an engine's own clipboard behavior are outside this
   system's control — a deliberate, named exception to the Errors and diagnostics section's surface-every-error rule
-  below, not a lapse in it.
+  below, not a lapse in it. Farhelm assumes the host's system clipboard works. A broken, hung or slow clipboard is not
+  something Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else
+  in Farhelm may stall because of it.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind. A hyperlink a
   program emits (OSC 8) can underline text that differs from where it goes, so hovering it shows the exact target first,
   with its host emphasized. When the underlined text is itself a web address (it has a scheme, starts with `www.`, or is

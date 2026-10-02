@@ -37,9 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `clipboard-writes-unbounded-blocking-admission.md` — OSC 52 clipboard bursts can fill the shared blocking pool behind
-  a stalled native sink.
-
 - `session-view-leaks-page-lock.md` — the session view's restart/replace claim is not released on unmount, leaving every
   page action disabled until reload.
 - `row-menu-drifts-on-row-height-change.md` — an open row menu can float over a different row when a row above gains a

@@ -586,8 +586,10 @@ Known risks, accepted deliberately:
   (wry registers custom schemes as secure on webkit2gtk, and has no way to on WKWebView — which is why Linux never
   showed it). The built solution is the native-side fallback this entry reserved: the webview POSTs copy text to the
   embedded helm's `POST /api/clipboard` (device-session authenticated, enabled only when the desktop registered a
-  `ClipboardSink` — farhelm-helm's clipboard.rs) and the shell writes the real pasteboard via arboard. One correction to
-  the parenthetical this entry used to carry: loopback HTTP is a secure context in Chromium but NOT in WebKit — Safari
+  `ClipboardSink` — farhelm-helm's clipboard.rs) and the shell writes the real pasteboard via arboard. At most four such
+  writes run at once; a write arriving while all four are still waiting on the native clipboard is dropped with the same
+  success reply, so a hung OS clipboard cannot pile up threads in the helm's blocking pool. One correction to the
+  parenthetical this entry used to carry: loopback HTTP is a secure context in Chromium but NOT in WebKit — Safari
   against `http://127.0.0.1` has no `navigator.clipboard` either, so browser-tab copies work in Chromium-family browsers
   and stay silently refused in Safari, within SPEC.md's best-effort clipboard contract. One concrete thing to check
   early rather than debug late: wry's own file-drop handling swallows DOM drop events unless configured not to. Also
