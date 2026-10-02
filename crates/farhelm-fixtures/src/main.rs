@@ -65,6 +65,11 @@ enum Cmd {
         /// The status `--then exit` exits with.
         #[arg(long, default_value_t = 0)]
         exit_code: i32,
+        /// Whose dialog shape [`fake_agent::Script::Replay`]'s menus
+        /// imitate; staging passes the harness the session stands in for.
+        /// Ignored by every other script.
+        #[arg(long, value_enum, default_value_t)]
+        dialect: fake_agent::ReplayDialect,
         /// Whatever the supervisor appends for the real vendor after the
         /// fixture's own flags — the per-launch hook flags, or anything a
         /// test's resume template places there. Every script tolerates the
@@ -117,6 +122,7 @@ fn main() -> anyhow::Result<()> {
             transcript,
             then,
             exit_code,
+            dialect,
             // The fake agent does not need to understand the injected
             // tail — it only has to survive parsing it. The record
             // scripts read the same strings straight from
@@ -131,6 +137,7 @@ fn main() -> anyhow::Result<()> {
                 transcript,
                 then,
                 exit_code,
+                dialect,
             },
         ),
         Cmd::SweepTestState => {

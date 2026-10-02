@@ -258,6 +258,27 @@ pub struct ReplayOptions {
     pub then: Option<ReplayThen>,
     /// The status [`ReplayThen::Exit`] exits with.
     pub exit_code: i32,
+    /// Whose dialog shape the menu imitates.
+    pub dialect: ReplayDialect,
+}
+
+/// Which agent's screen the replay's menus imitate.
+///
+/// The two screen readers recognise a question differently, and the menu
+/// has to satisfy the one the session is classified by. Claude's reader
+/// looks only at the dialog's key-hint footer. Codex's reader also takes
+/// the last line starting with `›` (its composer and prompt-echo glyph) to
+/// be either a menu's selected option or the composer, and reads a screen
+/// whose last `›` line is not a numbered option as idle; a Codex-shaped
+/// transcript that echoes its prompt as `› …` therefore needs the menu's
+/// selected option to be a `›` line too, as real Codex draws it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum ReplayDialect {
+    /// Claude Code: the selected option is marked `❯`.
+    #[default]
+    Claude,
+    /// Codex: the selected option is marked `›`.
+    Codex,
 }
 
 /// The variable [`Script::EnvEcho`] reports, exported by the rc files a
@@ -2786,7 +2807,10 @@ fn set_raw_mode() -> anyhow::Result<()> {
 /// two characters `\e` become ESC so colour is possible without a binary
 /// file, and everything else is printed verbatim as one terminal line with
 /// a short delay between lines. The delay is cosmetic pacing for anyone
-/// watching a capture run; nothing keys on it.
+/// watching a capture run; nothing keys on it. Lines starting with `##@`
+/// are directives instead of comments (pacing, pauses, a working spinner, a
+/// question that waits for a key, a typed prompt); [`TranscriptStep`] lists
+/// them. The hero screenshot's transcripts use none of them.
 ///
 /// The ready marker every script owes the tests is printed first and then
 /// the screen AND the scrollback are cleared (`ESC[3J` is the xterm
@@ -2803,11 +2827,9 @@ fn replay_transcript(options: ReplayOptions) -> anyhow::Result<()> {
     if let Some(path) = &options.transcript {
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("reading transcript {}", path.display()))?;
-        for line in transcript_lines(&raw) {
-            write!(out, "{line}\r\n")?;
-            out.flush()?;
-            std::thread::sleep(std::time::Duration::from_millis(40));
-        }
+        let steps = transcript_steps(&raw)
+            .with_context(|| format!("parsing transcript {}", path.display()))?;
+        play_steps(&mut out, &steps, options.dialect)?;
     }
 
     match options.then.unwrap_or(ReplayThen::Quiet) {
@@ -2826,7 +2848,7 @@ fn replay_transcript(options: ReplayOptions) -> anyhow::Result<()> {
             }
         }
         ReplayThen::Menu => {
-            write!(out, "{}", menu_block())?;
+            write!(out, "{}", menu_block(options.dialect))?;
             out.flush()?;
             block_on_stdin()
         }
@@ -2835,46 +2857,245 @@ fn replay_transcript(options: ReplayOptions) -> anyhow::Result<()> {
     }
 }
 
-/// The lines a transcript file actually prints: comments dropped, `\e`
-/// expanded. Split out so the format has a unit test that does not need a
-/// terminal.
-fn transcript_lines(raw: &str) -> Vec<String> {
-    raw.lines()
-        .filter(|line| !line.starts_with("##"))
-        .map(|line| line.replace("\\e", "\x1b"))
-        .collect()
+/// One thing a replay transcript does: print a line, or act out one of the
+/// `##@` directives.
+///
+/// The directives exist for the README demo video (`docs/readme-video/SPEC.md`),
+/// whose sessions have to do more than print and freeze: a viewer watches
+/// an agent stream its turn, stop at a question, take an answer typed in
+/// the real terminal, and carry on. They ride on the comment syntax (`##`)
+/// so that a transcript written before they existed means exactly what it
+/// meant before, and so the hero screenshot's last-line lookup, which skips
+/// every `##` line, never mistakes a directive for printed output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TranscriptStep {
+    /// Print one terminal line, `\e` already expanded to ESC.
+    Line(String),
+    /// `##@ pace <ms>`: the delay after every following printed line
+    /// (40 ms until a transcript says otherwise). Pacing is what makes
+    /// output read as streaming in a video rather than appearing at once.
+    Pace(u64),
+    /// `##@ pause <ms>`: hold the screen still. Long enough pauses let the
+    /// supervisor's classifier call the pane idle, which a transcript may
+    /// want or must avoid; the directive itself does not care.
+    Pause(u64),
+    /// `##@ spin <seconds> [label]`: redraw a working status line once a
+    /// second for that long, then erase it. A screen that changes every
+    /// sample is what the classifier reads as running.
+    Spin { seconds: u64, label: String },
+    /// `##@ menu [question]`: show the yes/no dialog that reads as waiting,
+    /// block until one BYTE arrives on the terminal, then erase the dialog.
+    /// The question defaults to the hero's; a custom one should keep the
+    /// "Do you want to" shape real agents use (see [`menu_block`] for what
+    /// the readers actually key on).
+    ///
+    /// Answer with a key that sends one byte, such as `1` or Enter: an arrow
+    /// key's escape sequence would answer with its ESC and leave the rest
+    /// buffered for whatever reads input next. The erase counts the dialog's
+    /// lines, so a question wider than the terminal wraps and leaves a row
+    /// behind; keep questions to one row.
+    Menu(Option<String>),
+    /// `##@ prompt`: show a grey `> ` prompt and echo what is typed until
+    /// Enter, the way an agent's input box takes the next instruction.
+    Prompt,
+}
+
+/// Parse a transcript into steps: plain `##` comments dropped, `\e`
+/// expanded, `##@` directives recognised. Split out so the format has unit
+/// tests that do not need a terminal.
+///
+/// An unknown or malformed directive is an error naming its line rather
+/// than a silently skipped comment, because a typo in a hand-written
+/// transcript would otherwise produce a video that is missing a beat and
+/// looks plausible.
+fn transcript_steps(raw: &str) -> anyhow::Result<Vec<TranscriptStep>> {
+    let mut steps = Vec::new();
+    for (index, line) in raw.lines().enumerate() {
+        let number = index + 1;
+        let Some(directive) = line.strip_prefix("##@") else {
+            if !line.starts_with("##") {
+                steps.push(TranscriptStep::Line(line.replace("\\e", "\x1b")));
+            }
+            continue;
+        };
+        let mut words = directive.split_whitespace();
+        let name = words.next().unwrap_or("");
+        let rest: Vec<&str> = words.collect();
+        let number_arg = |what: &str| -> anyhow::Result<u64> {
+            rest.first()
+                .and_then(|word| word.parse().ok())
+                .with_context(|| format!("line {number}: `{name}` needs a whole number of {what}"))
+        };
+        // `pace` and `pause` take exactly their number: a trailing word such
+        // as `##@ pause 5 s` most likely means the author expected another
+        // unit, and accepting it would run the beat a thousand times faster.
+        let only_number = |what: &str| -> anyhow::Result<u64> {
+            anyhow::ensure!(
+                rest.len() <= 1,
+                "line {number}: `{name}` takes one number of {what} and nothing else"
+            );
+            number_arg(what)
+        };
+        let step = match name {
+            "pace" => TranscriptStep::Pace(only_number("milliseconds")?),
+            "pause" => TranscriptStep::Pause(only_number("milliseconds")?),
+            "spin" => TranscriptStep::Spin {
+                seconds: number_arg("seconds")?,
+                label: if rest.len() > 1 {
+                    rest[1..].join(" ")
+                } else {
+                    "Working".to_string()
+                },
+            },
+            "menu" => TranscriptStep::Menu((!rest.is_empty()).then(|| rest.join(" "))),
+            "prompt" if rest.is_empty() => TranscriptStep::Prompt,
+            "prompt" => anyhow::bail!("line {number}: `prompt` takes no arguments"),
+            _ => anyhow::bail!("line {number}: unknown transcript directive `##@{directive}`"),
+        };
+        steps.push(step);
+    }
+    Ok(steps)
+}
+
+/// Act out parsed transcript steps on the terminal.
+///
+/// The terminal goes raw only when the first input-gated step arrives, so a
+/// transcript that never asks for input leaves the pty exactly as the hero
+/// screenshot's sessions always had it. Raw mode turns output
+/// post-processing off too, which is harmless here because every write
+/// already spells out its own `\r\n`.
+fn play_steps(
+    out: &mut impl Write,
+    steps: &[TranscriptStep],
+    dialect: ReplayDialect,
+) -> anyhow::Result<()> {
+    let mut pace = std::time::Duration::from_millis(40);
+    let mut raw = false;
+    let mut stdin = std::io::stdin().lock();
+    for step in steps {
+        match step {
+            TranscriptStep::Line(line) => {
+                write!(out, "{line}\r\n")?;
+                out.flush()?;
+                std::thread::sleep(pace);
+            }
+            TranscriptStep::Pace(ms) => pace = std::time::Duration::from_millis(*ms),
+            TranscriptStep::Pause(ms) => std::thread::sleep(std::time::Duration::from_millis(*ms)),
+            TranscriptStep::Spin { seconds, label } => {
+                for elapsed in 0..*seconds {
+                    write!(out, "\r\x1b[K{}", spin_line_labelled(label, elapsed))?;
+                    out.flush()?;
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+                write!(out, "\r\x1b[K")?;
+                out.flush()?;
+            }
+            TranscriptStep::Menu(question) => {
+                if !raw {
+                    set_raw_mode()?;
+                    raw = true;
+                }
+                let block = match question {
+                    Some(question) => menu_block_asking(dialect, question),
+                    None => menu_block(dialect),
+                };
+                write!(out, "{block}")?;
+                out.flush()?;
+                // Any key answers: the video shows a choice being made, and
+                // the transcript, not the key, decides what happens next.
+                let mut key = [0u8; 1];
+                stdin
+                    .read_exact(&mut key)
+                    .context("waiting for the menu answer")?;
+                // Every line of the block ends in `\r\n`, so the cursor sits
+                // one line below the footer: step back over all of them and
+                // clear, leaving the screen as it was before the question.
+                let lines = block.matches("\r\n").count();
+                write!(out, "\x1b[{lines}A\r\x1b[J")?;
+                out.flush()?;
+            }
+            TranscriptStep::Prompt => {
+                if !raw {
+                    set_raw_mode()?;
+                    raw = true;
+                }
+                write!(out, "\x1b[90m> ")?;
+                out.flush()?;
+                // Echo printable bytes (UTF-8 continuation bytes included)
+                // until Enter. No line editing: the capture types its text
+                // in one go, and a fixture that half-implemented backspace
+                // would be the more surprising one.
+                let mut byte = [0u8; 1];
+                loop {
+                    stdin
+                        .read_exact(&mut byte)
+                        .context("waiting for prompt input")?;
+                    match byte[0] {
+                        b'\r' | b'\n' => break,
+                        b if b >= 0x20 && b != 0x7f => {
+                            out.write_all(&byte)?;
+                            out.flush()?;
+                        }
+                        _ => {}
+                    }
+                }
+                write!(out, "\x1b[0m\r\n")?;
+                out.flush()?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The status line [`ReplayThen::Spin`] redraws, with `elapsed` seconds
 /// rendered as `Mm SSs`.
 fn spin_line(elapsed: u64) -> String {
+    spin_line_labelled("Verifying", elapsed)
+}
+
+/// [`spin_line`] with the verb chosen by the transcript's `spin` directive.
+/// The "esc to interrupt" tail is the working-turn shape the real agents
+/// draw, kept so the line reads as theirs.
+fn spin_line_labelled(label: &str, elapsed: u64) -> String {
     format!(
-        "\x1b[33m✻ Verifying… ({}m {:02}s · esc to interrupt)\x1b[0m",
+        "\x1b[33m✻ {label}… ({}m {:02}s · esc to interrupt)\x1b[0m",
         elapsed / 60,
         elapsed % 60
     )
 }
 
-/// The dialog [`ReplayThen::Menu`] leaves on screen. Its last line is a
+/// The dialog [`ReplayThen::Menu`] leaves on screen. Its shape is a
 /// contract with the supervisor's Claude and Codex screen readers, not
 /// decoration: both read a dialog as waiting from its key-hint footer
-/// ("Esc to cancel"), the way the real agents end every question they ask.
-/// Drop or reword that line and the pane stops classifying as waiting.
+/// ("Esc to cancel"), the way the real agents end every question they ask,
+/// and the Codex reader additionally needs the selected option marked `›`
+/// with another numbered option below it (see [`ReplayDialect`]). Drop or
+/// reword the footer, or change the options, and the pane stops
+/// classifying as waiting.
 ///
 /// No colour escapes, on purpose: the supervisor samples the pane's
 /// rendered text, so escapes never reach the readers in production, but the
 /// unit test below feeds this string in directly and escapes would sit
 /// inside the footer there. Plain text keeps the test honest about what the
 /// readers see.
-fn menu_block() -> String {
-    concat!(
-        "\r\n",
-        "Do you want to make this edit to attach.spec.ts?\r\n",
-        "❯ 1. Yes\r\n",
-        "  2. No, and tell me what to do differently\r\n",
-        "Esc to cancel · Tab to amend\r\n",
+fn menu_block(dialect: ReplayDialect) -> String {
+    menu_block_asking(dialect, "Do you want to make this edit to attach.spec.ts?")
+}
+
+/// [`menu_block`] under a question of the transcript's choosing, for the
+/// `##@ menu` directive. Only the question and the dialect's selection
+/// marker vary; the options and the footer the readers key on stay fixed.
+fn menu_block_asking(dialect: ReplayDialect, question: &str) -> String {
+    let marker = match dialect {
+        ReplayDialect::Claude => '❯',
+        ReplayDialect::Codex => '›',
+    };
+    format!(
+        "\r\n{question}\r\n\
+         {marker} 1. Yes\r\n\
+         \x20 2. No, and tell me what to do differently\r\n\
+         Esc to cancel · Tab to amend\r\n"
     )
-    .to_string()
 }
 
 /// Sit on stdin until it closes, then exit cleanly. Used by the modes that
@@ -3148,13 +3369,58 @@ mod tests {
     fn replay_transcript_drops_comments_and_expands_escapes() {
         let raw = "## a comment\n\\e[32mgreen\\e[0m\n\nplain\n";
         assert_eq!(
-            transcript_lines(raw),
+            transcript_steps(raw).unwrap(),
             vec![
-                "\x1b[32mgreen\x1b[0m".to_string(),
-                String::new(),
-                "plain".to_string()
+                TranscriptStep::Line("\x1b[32mgreen\x1b[0m".to_string()),
+                TranscriptStep::Line(String::new()),
+                TranscriptStep::Line("plain".to_string()),
             ]
         );
+    }
+
+    /// The demo video's transcripts script a whole interaction with `##@`
+    /// directives (`docs/readme-video/SPEC.md`); this pins the syntax each
+    /// one accepts, including the defaults a bare `spin` and `menu` take,
+    /// so a transcript author can rely on what the format comment promises.
+    #[test]
+    fn replay_transcript_parses_every_directive() {
+        let raw = "##@ pace 120\n##@ pause 800\n##@ spin 3\n##@ spin 4 Running tests\n\
+                   ##@ menu\n##@ menu Do you want to apply the migration?\n##@ prompt\nafter\n";
+        assert_eq!(
+            transcript_steps(raw).unwrap(),
+            vec![
+                TranscriptStep::Pace(120),
+                TranscriptStep::Pause(800),
+                TranscriptStep::Spin {
+                    seconds: 3,
+                    label: "Working".to_string()
+                },
+                TranscriptStep::Spin {
+                    seconds: 4,
+                    label: "Running tests".to_string()
+                },
+                TranscriptStep::Menu(None),
+                TranscriptStep::Menu(Some("Do you want to apply the migration?".to_string())),
+                TranscriptStep::Prompt,
+                TranscriptStep::Line("after".to_string()),
+            ]
+        );
+    }
+
+    /// A misspelled or malformed directive must fail the replay loudly,
+    /// naming its line: dropping it like a comment would silently remove a
+    /// beat from the video while every capture step still passed.
+    #[test]
+    fn replay_transcript_rejects_unknown_or_malformed_directives() {
+        for raw in [
+            "ok\n##@ pasue 100\n",
+            "ok\n##@ pace fast\n",
+            "ok\n##@ pause 5 s\n",
+            "ok\n##@ prompt now\n",
+        ] {
+            let error = transcript_steps(raw).unwrap_err().to_string();
+            assert!(error.contains("line 2"), "{raw:?} gave {error}");
+        }
     }
 
     /// The menu the replay fixture leaves on screen exists to make the REAL
@@ -3166,12 +3432,33 @@ mod tests {
     fn replay_menu_is_read_as_waiting_by_the_real_screen_readers() {
         use farhelm_proto::AgentKind;
         use farhelm_supervisor::agent_kind::reads_as_waiting;
-        let tail = format!("earlier output\r\n{}", menu_block());
-        for kind in [AgentKind::Claude, AgentKind::Codex] {
-            assert!(
-                reads_as_waiting(kind, &tail),
-                "{kind:?} must read the replay menu as waiting"
-            );
+        // Each kind is checked under the dialect its sessions are staged
+        // with, below the prompt echo that kind's transcripts open with:
+        // Codex's `›` echo is what made a Claude-marked menu read idle under
+        // the Codex reader, so a tail without one would not catch that.
+        let cases = [
+            (
+                AgentKind::Claude,
+                ReplayDialect::Claude,
+                "> fix the flaky attach test",
+            ),
+            (
+                AgentKind::Codex,
+                ReplayDialect::Codex,
+                "› rotate the signing key",
+            ),
+        ];
+        for (kind, dialect, echo) in cases {
+            for block in [
+                menu_block(dialect),
+                menu_block_asking(dialect, "Do you want to run the migration?"),
+            ] {
+                let tail = format!("{echo}\r\nearlier output\r\n{block}");
+                assert!(
+                    reads_as_waiting(kind, &tail),
+                    "{kind:?} must read the replay menu as waiting: {tail:?}"
+                );
+            }
         }
     }
 

@@ -14,7 +14,8 @@
 # shallow mktemp under /tmp, why the flock, why the orphan watcher, why the
 # helm is a child and not an exec) is in the original and is not repeated.
 #
-# Inputs, all from readme-hero.config.ts's webServer.env:
+# Inputs, all from the capture's Playwright config (readme-hero.config.ts or
+# readme-video.config.ts), through its webServer.env:
 #   FARHELM_E2E_PORT        the helm's port
 #   FARHELM_HERO_REMOTES    JSON array of ssh destinations, one per remote host
 #   FARHELM_E2E_STACK_INFO  where to publish what was booted
@@ -39,7 +40,7 @@ test -x "$fixtures" || { echo "missing $fixtures — run cargo build first" >&2;
 test -f "$dist/index.html" || { echo "missing web dist — run dx build first" >&2; exit 1; }
 
 port="${FARHELM_E2E_PORT:-}"
-test -n "$port" || { echo "FARHELM_E2E_PORT is unset — readme-hero.config.ts sets it" >&2; exit 1; }
+test -n "$port" || { echo "FARHELM_E2E_PORT is unset — the capture's Playwright config (readme-hero.config.ts or readme-video.config.ts) sets it" >&2; exit 1; }
 case "$port" in
   *[!0-9]* | '' | ??????*) echo "FARHELM_E2E_PORT must be a TCP port number, got '$port'" >&2; exit 1 ;;
 esac
@@ -49,9 +50,9 @@ if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
 fi
 
 remotes_json="${FARHELM_HERO_REMOTES:-}"
-test -n "$remotes_json" || { echo "FARHELM_HERO_REMOTES is unset — readme-hero.config.ts sets it" >&2; exit 1; }
+test -n "$remotes_json" || { echo "FARHELM_HERO_REMOTES is unset — the capture's Playwright config (readme-hero.config.ts or readme-video.config.ts) sets it" >&2; exit 1; }
 stack_info="${FARHELM_E2E_STACK_INFO:-}"
-test -n "$stack_info" || { echo "FARHELM_E2E_STACK_INFO is unset — readme-hero.config.ts sets it" >&2; exit 1; }
+test -n "$stack_info" || { echo "FARHELM_E2E_STACK_INFO is unset — the capture's Playwright config (readme-hero.config.ts or readme-video.config.ts) sets it" >&2; exit 1; }
 
 # One destination per line for the shell loop below; python owns the JSON.
 remotes="$(printf '%s' "$remotes_json" | python3 -c '

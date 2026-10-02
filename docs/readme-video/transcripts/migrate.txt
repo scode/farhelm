@@ -1,0 +1,34 @@
+## THROWAWAY SAMPLE (see intent.md). Invented transcript for the session the demo video answers. Not a capture
+## of any real session. It streams a short turn, stops on a question (the
+## session reads as waiting until the video answers it), runs a long enough
+## working stretch for the status to visibly flip to running, then takes a
+## typed follow-up at its prompt and finishes.
+##
+## `##@` lines are replay directives: pace and pause in milliseconds, spin
+## in seconds with an optional label, menu with an optional question, and a
+## bare prompt. See `TranscriptStep` in the fake agent for what each does.
+##@ pace 60
+\e[90m> migrate the auth tokens table to the new schema\e[0m
+
+\e[32m⏺\e[0m I'll look at the current schema and the migration tooling first.
+\e[32m⏺\e[0m \e[1mRead\e[0m(db/schema/auth_tokens.sql)
+\e[90m  ⎿  Read 64 lines\e[0m
+\e[32m⏺\e[0m \e[1mWrite\e[0m(db/migrations/0042_auth_tokens_v2.sql)
+\e[90m  ⎿  Wrote 38 lines\e[0m
+
+\e[32m⏺\e[0m The migration is ready. It rewrites 1.2M rows in batches of 10k.
+##@ menu Do you want to apply the migration to staging?
+##@ pace 120
+\e[32m⏺\e[0m \e[1mBash\e[0m(./scripts/migrate --env staging 0042)
+##@ spin 20 Migrating
+\e[90m  ⎿  Applied 0042_auth_tokens_v2 in 19.6s (1,204,311 rows)\e[0m
+
+\e[32m⏺\e[0m Staging is on the new schema and token lookups pass the smoke test.
+  Anything else before production?
+
+##@ prompt
+
+\e[32m⏺\e[0m \e[1mUpdate\e[0m(docs/rollout.md)
+\e[90m  ⎿  Added the staging step and the rollback command\e[0m
+
+\e[32m⏺\e[0m Done. The rollout doc now covers staging and rollback.
