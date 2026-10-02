@@ -187,8 +187,11 @@
 // session — an eviction with nobody behind it. So automatic attempts carry
 // `if_unowned` and are REFUSED when another lease holds the session; the
 // refusal arrives as the ordinary takeover notice and lands this view in
-// the take-control state it was in all along. Manual reconnect and the
-// take-control button displace, because a press is intent.
+// the take-control state it was in all along. The same goes for every
+// terminal `sync()` mounts after the view's opening sync (a tab opened
+// here or elsewhere, a terminal reappearing): see `unattendedMount`.
+// Opening the session, manual reconnect and the take-control button
+// displace, because each is someone asking.
 //
 // That safety depends on the far end HONORING the request, and it is made
 // unignorable in two layers rather than trusted. An automatic attempt asks
@@ -1103,6 +1106,11 @@
   // further sync has been allowed to change anything.
   let lastSync = null;
 
+  // True only while `reclaim()` re-syncs: take control is intent, so the
+  // mounts it makes displace whoever holds the session (see
+  // `unattendedMount`).
+  let reclaiming = false;
+
   // ------------------------------------------------------------------
   // Auto-reconnect (PLAN_M6.md item 7; this file's header carries the
   // design and the carve-outs)
@@ -1322,6 +1330,30 @@
   function capabilityOf(policy) {
     if (!policy || !policy.delaysMs) return "off";
     return policy.auto !== false && !uploadSawMismatch ? "auto" : "manual-only";
+  }
+
+  /**
+   * Whether a mount `sync()` is about to make asks for the session only if
+   * nobody else holds it (`spec.pathUnowned`, the `if_unowned` attach),
+   * rather than taking it.
+   *
+   * Every mount after the view's opening sync is unattended: a tab someone
+   * opened, here or in another window, or a terminal reappearing. Nobody at
+   * this window asked to take the session for it, so it must not. On the
+   * displacing route such a mount evicted the window that had just taken
+   * control (a tab attaching within a round trip of the takeover), or the
+   * device the user moved to while this view was recovering from a dropped
+   * connection (a tab created there, first seen here by the fallback poll).
+   * Refused instead, it lands in the ordinary latched "Detached … take
+   * control" state. While this view holds the session the refusal never
+   * happens, so its own new tabs attach as before.
+   *
+   * Displacing only for intent (the opening sync, `reclaim()`; manual
+   * reconnect takes its own path) and only on a helm that serves the
+   * refusing route: the same capability gate automatic reconnects use.
+   */
+  function unattendedMount(opening) {
+    return !opening && !reclaiming && capabilityOf(syncedPolicy) === "auto";
   }
 
   /**
@@ -2564,6 +2596,10 @@
      * would have to add one.
      */
     sync(baseUrl, specs, attach, reconnect) {
+      // The view's first sync is the user opening the session, which is
+      // intent: its terminals take the session even from another window.
+      // Read before `lastSync` is set below.
+      const opening = lastSync === null;
       lastSync = { baseUrl, specs, attach, reconnect };
       // Adopted before anything below runs, so every decision this call
       // triggers — and every decision any controller makes afterwards —
@@ -2704,7 +2740,7 @@
         // harmless for the same reason, since the failing island has
         // already rolled itself back and bannered before rethrowing.
         try {
-          farhelmTerm.mountWhenReady(spec, baseUrl, attach);
+          farhelmTerm.mountWhenReady(spec, baseUrl, attach, unattendedMount(opening));
         } catch (err) {
           console.error("farhelm: mounting terminal", spec.el, "failed", err);
         }
@@ -2726,7 +2762,27 @@
     latchTakeover(reason) {
       if (takeover) return;
       takeover = reason;
-      for (const el of [...pendings.keys()]) farhelmTerm.unmount(el);
+      // A pending mount is cancelled before its socket exists, and gets
+      // the same notice as every terminal that was told: left blank, it
+      // showed nothing until the desired set next changed.
+      for (const [el, attempt] of [...pendings]) {
+        farhelmTerm.unmount(el);
+        paintBanner(attempt.spec.banner, `Detached: ${reason}`, true);
+      }
+      // An island whose socket is still connecting may be asking on the
+      // displacing route (one mounted by the opening sync or `reclaim()`):
+      // left to finish its handshake after this notice, it would take the
+      // session straight back from the window that just took it. It has
+      // attached nothing yet, so there is no screen to keep. This narrows
+      // the window rather than closing it: a socket that has already
+      // opened, or an attach the helm has already accepted, is past
+      // anything this page can stop.
+      for (const [el, island] of [...islands]) {
+        if (island.ws && island.ws.readyState === WebSocket.CONNECTING) {
+          farhelmTerm.unmount(el);
+          paintBanner(island.banner, `Detached: ${reason}`, true);
+        }
+      }
       // An island mid-RECOVERY may already have an attempt's socket in
       // flight — constructed, not yet open, and therefore not holding an
       // attachment anything has told about this takeover. Cancelling its
@@ -2782,19 +2838,24 @@
     reclaim() {
       if (!takeover) return;
       takeover = null;
+      reclaiming = true;
       for (const el of new Set([...islands.keys(), ...pendings.keys()])) {
         farhelmTerm.unmount(el);
       }
       // THIS is someone asking (see `tombstones`): the frozen screens a
       // takeover left go, and the re-sync below is allowed to attach.
       for (const el of [...tombstones.keys()]) buryTombstone(el);
-      if (lastSync) {
-        farhelmTerm.sync(
-          lastSync.baseUrl,
-          lastSync.specs,
-          lastSync.attach,
-          lastSync.reconnect,
-        );
+      try {
+        if (lastSync) {
+          farhelmTerm.sync(
+            lastSync.baseUrl,
+            lastSync.specs,
+            lastSync.attach,
+            lastSync.reconnect,
+          );
+        }
+      } finally {
+        reclaiming = false;
       }
     },
 
@@ -2924,7 +2985,9 @@
       ensureFontSettling();
       const previous = pendings.get(spec.el);
       if (previous) clearTimeout(previous.timer);
-      const attempt = { timer: null, path: spec.path, gen: spec.gen };
+      // `spec` is kept so a takeover that cancels this attempt can paint the
+      // Detached notice on its banner (see `latchTakeover`).
+      const attempt = { timer: null, path: spec.path, gen: spec.gen, spec };
       pendings.set(spec.el, attempt);
       const tryMount = () => {
         if (pendings.get(spec.el) !== attempt) return;
@@ -3428,8 +3491,10 @@
         // this view is in, and the latch below turns it into the
         // take-control surface.
         //
-        // Only automatic attempts take that route: a click, a reload and a
-        // reclaim all carry someone's intent, and go to the ordinary path.
+        // Only unattended attaches take that route (automatic reconnects,
+        // and `sync()` mounts after the opening sync; see
+        // `unattendedMount`): opening the session, a click and a reclaim all
+        // carry someone's intent, and go to the ordinary path.
         // `pathUnowned` falls back to `path` for a caller that predates it
         // — the same tolerance every other spec field gets, and safe
         // because the flow that needs it is the one this file also gates
@@ -5101,6 +5166,9 @@
           // other way to ask an island whether its socket survived.
           revive: reviveAfterRestore,
           connecting: spec.connecting,
+          // Where `latchTakeover` reports a takeover for an island it has to
+          // tear down mid-handshake.
+          banner: spec.banner,
           path: spec.path,
           gen: spec.gen,
           primary: !!spec.primary,

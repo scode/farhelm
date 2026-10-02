@@ -37,10 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `takeover-latch-misses-attaching-tabs.md` — a tab still attaching when another window takes over evicts the winner, so
-  the two windows displace each other.
-- `new-tab-mount-displaces-owner-during-recovery.md` — a recovering view mounts a newly appeared tab with a displacing
-  attach and silently takes the session from the device in use.
 - `update-silently-downgrades-newer-hosts.md` — Update and "update all" downgrade hosts that run a newer Farhelm, which
   can leave the supervisor unable to start.
 
