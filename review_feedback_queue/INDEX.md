@@ -41,8 +41,26 @@ One line per open item. This file must always match the feedback files in this d
 - `claude-clear-report-dropped-on-claim-timeout.md` — a Claude `/clear` report refused after a 1 s capture-claim wait is
   never resent, so Resume keeps reopening the cleared conversation.
 
+- `process-snapshot-requires-supervisor-witness.md` — process cleanup accepts an empty process table without proving the
+  supervisor was enumerated.
+- `probe-cancellation-leaves-helper-processes.md` — cancelling discovery can leave isolated probe helpers and stderr
+  readers alive.
+
 ## High priority: material UX degradation
 
+- `codex-resume-template-duplicates-selector.md` — restarting a Codex launch that already used `resume` can append a
+  second selector and fail.
+- `pi-resume-selector-option-boundaries.md` — Pi restart rewriting can delete an unrelated option value and lose the
+  verified session selector.
+- `provisioning-child-output-drain-deadline.md` — provisioning can outlive its deadline while draining a descendant-held
+  output pipe.
+- `clipboard-writes-unbounded-blocking-admission.md` — OSC 52 clipboard bursts can fill the shared blocking pool behind
+  a stalled native sink.
+- `tmux-capture-tail-deadline.md` — pane capture stops applying its deadline after stdout closes, so periodic sampling
+  can hang.
+
+- `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
+  to read.
 - `plain-retry-erases-pending-fresh-window.md` — plain retry downgrades a pending fast reconnect to a slow probe.
 - `sftp-overall-deadline-fails-slow-links.md` — sftp transfer's 60 s overall deadline fails slow links
   deterministically.
