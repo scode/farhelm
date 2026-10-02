@@ -804,11 +804,20 @@ pub enum HostPhase {
     /// that starts identifying again recovers unaided.
     #[serde(rename = "identity-unverified")]
     IdentityUnverified { recorded: String },
-    /// This ENTRY reaches a host another entry already owns. The host itself
-    /// is listed exactly once, under `twin`; this row exists so the
-    /// duplicate entry can be edited or removed.
+    /// This ENTRY reaches a machine another entry already holds. Nothing is
+    /// connected through it; this row exists so the user can remove the
+    /// other entry or change this one's destination, then press Retry.
     #[serde(rename = "duplicate")]
-    Duplicate { twin: HostId, identity: String },
+    Duplicate {
+        twin: HostId,
+        identity: String,
+        /// The other entry's name as this UI shows it, filled in from the
+        /// same host list once it is read (`hosts::name_duplicate_twins`);
+        /// the helm never sends it. `None` when that entry is not in the
+        /// list.
+        #[serde(skip)]
+        twin_name: Option<String>,
+    },
     /// No connection actor is running for this row. Reported rather than
     /// hidden, because an operation refused against it has to have something
     /// honest to name — and because retry is what brings it back.
@@ -2193,7 +2202,7 @@ mod tests {
         ));
         assert!(matches!(
             &hosts[2].state,
-            HostPhase::Duplicate { twin: 2, identity } if identity == "identity-shared"
+            HostPhase::Duplicate { twin: 2, identity, .. } if identity == "identity-shared"
         ));
     }
 

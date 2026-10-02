@@ -1189,7 +1189,8 @@ impl ProvisioningService {
             Some(HostState::Duplicate { twin, identity }) => Err(BackendFailure::new(
                 "UPDATE is refused while the host duplicates another registry row",
                 format!(
-                    "identity {identity:?} belongs to host {twin}; resolve the duplicate first"
+                    "identity {identity:?} belongs to host {twin}; remove that entry or change this \
+                     one's destination, then press Retry"
                 ),
             )),
             _ => Ok(()),

@@ -132,14 +132,12 @@ pub const CONNECT_BACKOFF: [Duration; 6] = [
 /// user was told to expect, while a fleet of down hosts costs a little over
 /// one connection attempt per host per minute.
 ///
-/// The SAME cadence deliberately serves three different-looking states.
-/// Version skew re-probes on it because the fix is a binary upgrade on the
-/// host, which the helm cannot observe any other way — so an upgraded host
-/// resurfaces by itself, alone, with no user action (PLAN_M6.md item 4).
-/// Duplicate entries re-probe on it not to dial anything (a duplicate
-/// connects nothing) but to re-ask the registry whether they are still
-/// duplicates, so removing the twin unsticks the entry on the same
-/// timescale everything else recovers on.
+/// The same cadence also re-probes a version-skewed host, because the fix
+/// is a binary upgrade on the host, which the helm cannot observe any other
+/// way — so an upgraded host resurfaces by itself, alone, with no user
+/// action (PLAN_M6.md item 4). Duplicate entries do not ride it: like an
+/// identity mismatch, a duplicate waits for the user (see
+/// [`HostState::Duplicate`]).
 pub const REPROBE_INTERVAL: Duration = Duration::from_secs(45);
 
 /// How often a CONNECTED host's session list is drained into the cache.
@@ -501,28 +499,27 @@ pub enum HostState {
         recorded: String,
     },
     /// This entry reaches an identity that ANOTHER registry entry already
-    /// holds — two rows, one host.
+    /// holds — two rows, one machine.
     ///
-    /// Connects nothing while it stays one, so the host appears exactly
-    /// once (under `twin`, whose actor is the one that owns it) while this
-    /// entry remains visible as something the user must resolve by editing
-    /// or removing it. That is how SPEC.md's shown-once rule and the
-    /// user's ability to fix a mis-typed destination coexist.
+    /// Connects nothing (SPEC.md: Farhelm never connects two entries to one
+    /// machine and never resolves this on its own), so the machine is
+    /// reached only through `twin`, while this entry stays visible with a
+    /// message that names `twin` and asks the user to remove it or change
+    /// this entry's destination, then press Retry.
     ///
     /// Entered on the STORE's answer, not on a check this side made first:
     /// the identity claim is resolved inside the same transaction that
     /// would have recorded it (see [`HelmStore::record_first_contact`]), so
     /// two entries racing one host cannot both believe they won.
     ///
-    /// Re-evaluated on [`Cadence::reprobe`] against the registry — a
-    /// REGISTRY read, not a dial: if the twin no longer holds the identity
-    /// (it was removed, or adopted a different one) this entry stops being
-    /// a duplicate and goes back to connecting, unaided. A registry that
-    /// cannot be READ leaves the freeze in place, since "I could not check"
-    /// is not "there is no twin". The other exit is the user's: editing
-    /// this entry's destination reconnects it (see
-    /// [`ConnectionManager::sync_registry`]), which is how a duplicate
-    /// resolves while its twin stays exactly where it is.
+    /// Frozen with NO timer, like [`Self::IdentityMismatch`]: nothing
+    /// re-checks the registry on its own. A Retry, an edit of this entry
+    /// (see [`ConnectionManager::sync_registry`]), or a helm restart starts
+    /// a fresh attempt, which the store answers again; once the twin is
+    /// removed or retargeted, that attempt connects. An earlier version
+    /// re-read the registry every [`Cadence::reprobe`] to resolve the
+    /// collision unaided, which cost its own race handling for a rare case
+    /// whose remedy is a deliberate user action anyway.
     ///
     /// "Connects nothing" is precise about one boundary worth stating: an
     /// identity is only knowable from a hello, so discovering the
@@ -2360,10 +2357,28 @@ impl ConnectionManager {
                 reported,
             }));
         }
-        self.store
+        if let Err(error) = self
+            .store
             .adopt_identity(host, &DialedAs::of(&row), &recorded, &reported)
             .await
-            .with_context(|| format!("adopting host {host}'s new identity"))?;
+        {
+            // Another entry holds the identity this mismatch offered, which
+            // no adoption can take (SPEC.md: never two entries on one
+            // machine). That is a duplicate, and the actor would only learn
+            // so on its next attempt, which a mismatch never makes on its
+            // own; it is typical for a reinstalled host whose new entry was
+            // added after the old one had already shown its prompt. So start
+            // that attempt now, and the entry turns into the duplicate
+            // message that names the holder, instead of keeping a prompt
+            // that can only be refused again.
+            if matches!(
+                error.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::IdentityClaimed { .. })
+            ) {
+                self.nudge_now(host, false).await?;
+            }
+            return Err(error.context(format!("adopting host {host}'s new identity")));
+        }
         // Logged with the actor's own metadata — host, kind, destination —
         // because this decision happens on the MANAGER, outside the actor's
         // span, and an adoption line with no host context would be the one
@@ -2966,71 +2981,6 @@ impl HostActor {
             *self.destination.lock().expect("destination mutex poisoned") =
                 display_destination(&row);
 
-            // A duplicate freeze is re-evaluated BEFORE anything is
-            // dialed, so an entry that is still a twin of another never
-            // opens a connection at all (PLAN_M6.md item 4: a duplicate
-            // entry connects nothing while it stays one). The check is a
-            // registry read, not a network round trip — and it happens
-            // AFTER the row reload above, so an entry whose destination was
-            // edited dials the new one on this pass rather than staying
-            // frozen against an answer the old one gave.
-            //
-            // The borrow is scoped to its own binding on purpose: a
-            // `watch::Ref` is not `Send`, so holding one across the await
-            // below would make this whole task unspawnable.
-            let frozen_as_duplicate = match &self.status.borrow().state {
-                HostState::Duplicate { identity, .. } => Some(identity.clone()),
-                _ => None,
-            };
-            if let Some(identity) = frozen_as_duplicate {
-                match self.twin_holding(&identity).await {
-                    Ok(Some(twin)) => {
-                        #[cfg(test)]
-                        self.before_duplicate_publication().await;
-                        // The manager may have published a retargeted
-                        // Connecting state while the registry re-check was
-                        // in flight. Consume that nudge before restoring the
-                        // old duplicate result, or this publication would
-                        // freeze the actor against the stale identity again.
-                        if let Some(request) = taken_nudge(&mut nudge) {
-                            active |= request.fresh_window;
-                            continue;
-                        }
-                        self.set_state(HostState::Duplicate { twin, identity });
-                        active = self.hold(&mut nudge, self.cadence.reprobe).await;
-                        continue;
-                    }
-                    Ok(None) => {
-                        // The collision is gone — the twin was removed, or
-                        // adopted a different identity. That is a state
-                        // change, so this entry earns a fresh active window
-                        // rather than being made to wait out re-probes for
-                        // a host that is probably fine.
-                        info!(
-                            destination = %self.destination(),
-                            "no longer a duplicate of another entry; resuming connection attempts"
-                        );
-                        active = true;
-                    }
-                    Err(error) => {
-                        // A registry that cannot be read is a FAILED check,
-                        // never a "no twin found": answering the latter
-                        // would connect an entry on the strength of a
-                        // database hiccup, which is precisely the outcome
-                        // the duplicate freeze exists to prevent. The
-                        // freeze is retained and re-checked next pass.
-                        warn!(
-                            error = %error,
-                            destination = %self.destination(),
-                            "could not re-check whether this entry is still a duplicate; \
-                             keeping the freeze"
-                        );
-                        active = self.hold(&mut nudge, self.cadence.reprobe).await;
-                        continue;
-                    }
-                }
-            }
-
             // An empty ladder is one attempt and no retries — exactly what
             // a background re-probe is. See this function's own docs on
             // `active`.
@@ -3115,7 +3065,11 @@ impl HostActor {
                         continue;
                     }
                     self.set_state(HostState::Duplicate { twin, identity });
-                    active = self.hold(&mut nudge, self.cadence.reprobe).await;
+                    // Frozen with NO timer, like a mismatch: only the user's
+                    // Retry or edit (or a restart) asks again. See
+                    // `HostState::Duplicate`.
+                    next_nudge(&mut nudge).await;
+                    active = true;
                 }
                 AttemptOutcome::Failed { cause, error } => {
                     self.set_state(HostState::Unreachable {
@@ -3977,34 +3931,6 @@ impl HostActor {
                 }
             }
         }
-    }
-
-    /// The registry row holding `identity`, if any row OTHER than this one
-    /// does.
-    ///
-    /// A store failure PROPAGATES rather than answering "no twin known".
-    /// Answering the latter — the shape this had — turns a database hiccup
-    /// into a decision to connect an entry the registry might well say is a
-    /// duplicate, which is the exact outcome the freeze exists to prevent;
-    /// a failed check is a failed check, and the caller retains whatever
-    /// freeze it already had and asks again next pass.
-    ///
-    /// Only the DUPLICATE state's re-evaluation calls this now. The
-    /// once-per-attempt "does another row hold this identity" pre-check is
-    /// gone: the store resolves that inside the transaction that would have
-    /// written (see [`HelmStore::record_first_contact`]), and a row's own
-    /// stored identity can no longer belong to another row at all, because
-    /// the schema refuses to hold two such rows.
-    async fn twin_holding(&self, identity: &str) -> anyhow::Result<Option<HostId>> {
-        let rows = self
-            .store
-            .list_hosts()
-            .await
-            .context("reading the registry to re-check a duplicate host")?;
-        Ok(rows
-            .into_iter()
-            .find(|row| row.id != self.id && row.host_identity.as_deref() == Some(identity))
-            .map(|row| row.id))
     }
 
     /// This actor's registry row as it stands right now.
@@ -7295,12 +7221,16 @@ mod tests {
         );
     }
 
-    /// Removing the twin resolves the duplicate by itself, on the re-probe
-    /// cadence — the "edit it or remove it" resolution actually working
-    /// end to end, rather than leaving the surviving entry stuck in a
-    /// state whose cause is gone.
+    /// Removing the other entry and pressing Retry resolves a duplicate,
+    /// and nothing resolves it before the Retry.
+    ///
+    /// Why it matters: this is the remedy the duplicate message tells the
+    /// user to take (SPEC.md: remove that entry or change this one's
+    /// destination, then press Retry), so it has to work end to end. The
+    /// state has no timer of its own any more, so the entry must stay
+    /// frozen until the Retry even though its cause is gone.
     #[farhelm_testtrace::test(start_paused = true)]
-    async fn a_duplicate_resolves_itself_once_the_twin_is_gone() {
+    async fn retry_clears_a_duplicate_once_the_other_entry_is_gone() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let first = store
                 .add_ssh_host("host.example", None, None)
@@ -7337,7 +7267,27 @@ mod tests {
 
         fixture.store.remove_ssh_host(first).await.unwrap();
         fixture.manager.sync_registry().await.unwrap();
+        // Let the actor run as long as it likes: the paused clock only
+        // advances once its store work has drained, so a re-check or a dial
+        // on any timer would get through within this window.
+        assert!(
+            tokio::time::timeout(
+                REPROBE_INTERVAL * 3,
+                fixture
+                    .manager
+                    .wait_for_state(second, HostState::is_connected),
+            )
+            .await
+            .is_err(),
+            "a duplicate waits for the user, however long its cause has been gone"
+        );
+        assert_eq!(
+            fixture.transport.attempts(second).len(),
+            1,
+            "and it does not dial again before the Retry"
+        );
 
+        assert!(fixture.manager.retry_now(second).await.unwrap());
         let state = fixture
             .manager
             .wait_for_state(second, HostState::is_connected)
@@ -7355,21 +7305,93 @@ mod tests {
         );
     }
 
-    /// A duplicate that STAYS one must keep re-checking the registry and
-    /// must never dial again while it does.
+    /// An adoption refused because another entry holds the identity turns
+    /// the entry into a duplicate naming that entry.
     ///
-    /// "Connects nothing while it stays one" is the whole content of the
-    /// duplicate state, and it is a claim about the network, not about the
-    /// state label: discovering the collision costs exactly one connection,
-    /// and everything after that is a registry read. A re-probe that dialed
-    /// would mean two entries holding connections to one host — the
-    /// shown-once rule broken in the one place it is hardest to notice,
-    /// since the extra connection is invisible in the state.
-    ///
-    /// The dial count is pinned across several re-probe intervals, which is
-    /// what distinguishes "not dialing" from "not dialing yet".
+    /// Why it matters: the natural order of a reinstall is that the old
+    /// entry dials the reinstalled machine first and shows its adopt prompt,
+    /// and the user then adds the machine again as a new entry. Checking the
+    /// claim first in the store does not help that old entry, because a
+    /// mismatch never dials again on its own, so its prompt stayed up and
+    /// every adopt was refused. Spec: the refused adopt starts a new attempt,
+    /// which the store answers as a duplicate of the new entry.
     #[farhelm_testtrace::test(start_paused = true)]
-    async fn an_unresolved_duplicate_rechecks_the_registry_without_redialing() {
+    async fn a_refused_adoption_of_a_claimed_identity_becomes_a_duplicate() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let old = store
+                .add_ssh_host("reinstalled.example", None, None)
+                .await
+                .unwrap();
+            record_contact(&store, old, "identity-before").await;
+            transport.set_script(
+                old,
+                Script {
+                    identity: Some("identity-after".to_string()),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let old = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(old, |state| {
+                matches!(state, HostState::IdentityMismatch { .. })
+            })
+            .await
+            .expect("actor is running");
+
+        let readded = fixture
+            .store
+            .add_ssh_host("reinstalled.example.again", None, None)
+            .await
+            .unwrap();
+        fixture.transport.set_script(
+            readded,
+            Script {
+                identity: Some("identity-after".to_string()),
+                ..Script::default()
+            },
+        );
+        fixture.manager.sync_registry().await.unwrap();
+        fixture
+            .manager
+            .wait_for_state(readded, HostState::is_connected)
+            .await
+            .expect("actor is running");
+
+        fixture
+            .manager
+            .adopt(old, "identity-after")
+            .await
+            .expect_err("another entry holds the identity, so adoption is refused");
+        let state = fixture
+            .manager
+            .wait_for_state(old, |state| matches!(state, HostState::Duplicate { .. }))
+            .await
+            .expect("actor is running");
+        assert_eq!(
+            state,
+            HostState::Duplicate {
+                twin: readded,
+                identity: "identity-after".to_string(),
+            }
+        );
+    }
+
+    /// A duplicate never dials again on its own.
+    ///
+    /// "Connects nothing" is the whole content of the duplicate state, and
+    /// it is a claim about the network, not about the state label:
+    /// discovering the collision costs exactly one connection, and after
+    /// that the entry waits for the user. A timer that dialed would mean two
+    /// entries holding connections to one machine, which SPEC.md forbids,
+    /// in the one place it is hardest to notice, since the extra connection
+    /// is invisible in the state. The dial count is pinned across several
+    /// re-probe intervals, which is what distinguishes "not dialing" from
+    /// "not dialing yet".
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_frozen_duplicate_never_dials_again_on_its_own() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let first = store
                 .add_ssh_host("owner.example", None, None)
@@ -7414,7 +7436,7 @@ mod tests {
         assert_eq!(
             fixture.transport.attempts(second).len(),
             1,
-            "a duplicate must re-ask the REGISTRY, never the host"
+            "a duplicate must not dial again until the user asks"
         );
         assert!(
             matches!(
@@ -7425,7 +7447,7 @@ mod tests {
         );
         assert!(
             status_client(&fixture.manager, second).is_none(),
-            "a duplicate holds no connection at any point in that loop"
+            "a duplicate holds no connection while it waits"
         );
     }
 
@@ -7593,95 +7615,6 @@ mod tests {
         assert_eq!(
             seconds(&attempts),
             vec![0, 0, 1, 3, 7, 15, 30, 60],
-            "the edited destination must receive a fresh active window"
-        );
-        assert_eq!(
-            fixture.transport.dialed_destinations(second),
-            [old_destination.to_string()]
-                .into_iter()
-                .chain(std::iter::repeat_n(new_destination.to_string(), 7))
-                .collect::<Vec<_>>(),
-            "every retry after the edit must use the edited destination"
-        );
-    }
-
-    /// A retarget that lands while a frozen duplicate is being re-checked
-    /// must take the same path as the post-attempt race: discard the old
-    /// publication and retry the edited destination under a fresh window.
-    #[farhelm_testtrace::test(start_paused = true)]
-    async fn retargeting_during_duplicate_recheck_drops_the_stale_freeze() {
-        let old_destination = "duplicate-recheck-old.example";
-        let new_destination = "duplicate-recheck-new.example";
-        let fixture = fixture(Cadence::default(), |store, transport| async move {
-            let first = store
-                .add_ssh_host("duplicate-recheck-owner.example", None, None)
-                .await
-                .unwrap();
-            record_contact(&store, first, "shared").await;
-            let second = store
-                .add_ssh_host(old_destination, None, None)
-                .await
-                .unwrap();
-            transport.set_script(
-                first,
-                Script {
-                    reachable: false,
-                    ..Script::default()
-                },
-            );
-            transport.set_script(
-                second,
-                Script {
-                    identity: Some("shared".to_string()),
-                    ..Script::default()
-                },
-            );
-        })
-        .await;
-        let rows = fixture.store.list_hosts().await.unwrap();
-        let second = rows[2].id;
-        fixture
-            .manager
-            .wait_for_state(second, |state| matches!(state, HostState::Duplicate { .. }))
-            .await
-            .expect("the actor is frozen as a duplicate");
-        let mut status = status_receiver(&fixture.manager, second);
-        let _ = status.borrow_and_update();
-        let gate = install_duplicate_gate(&fixture.manager, old_destination);
-
-        tokio::time::advance(REPROBE_INTERVAL).await;
-        gate.reached.notified().await;
-        fixture.transport.edit(second, |script| {
-            script.reachable = false;
-            script.identity = Some("edited-recheck-identity".to_string());
-        });
-        fixture
-            .store
-            .update_ssh_destination(second, new_destination)
-            .await
-            .expect("retarget the frozen duplicate");
-        fixture.manager.sync_registry().await.unwrap();
-        clear_duplicate_gate(&fixture.manager);
-        gate.release.notify_one();
-
-        let mut saw_unreachable = false;
-        while !saw_unreachable {
-            status
-                .changed()
-                .await
-                .expect("the duplicate actor is still running");
-            let state = status.borrow().state.clone();
-            assert!(
-                !matches!(state, HostState::Duplicate { .. }),
-                "the stale duplicate state must not be republished after the retarget"
-            );
-            saw_unreachable = matches!(state, HostState::Unreachable { .. });
-        }
-
-        let attempts = fixture.transport.wait_for_attempts(second, 8).await;
-        assert_eq!(
-            seconds(&attempts),
-            vec![0, 45, 46, 48, 52, 60, 75, 105],
             "the edited destination must receive a fresh active window"
         );
         assert_eq!(

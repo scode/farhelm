@@ -151,6 +151,7 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
         HostPhase::Duplicate {
             twin: 2,
             identity: "identity2".to_string(),
+            twin_name: None,
         }
     );
     assert_eq!(
