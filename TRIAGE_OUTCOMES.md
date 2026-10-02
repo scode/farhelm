@@ -5921,7 +5921,8 @@
   the user's own text survives. Older Pi versions were not checked.
 - Decision: discard (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `ykwnwmmm`, bookmark `triage-1001e/19-pi-pointer`, PR
+  https://github.com/scode/farhelm/pull/1461.
 
 ## refresh-starved-by-seeds.md
 

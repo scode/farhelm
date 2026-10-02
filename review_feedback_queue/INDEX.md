@@ -79,8 +79,6 @@ One line per open item. This file must always match the feedback files in this d
 - `escape-token-clamp-too-short.md` — the 64-character host label clamp can cut a `<U+E00xx>` escape token in half.
 - `tmux-build-script-bash32.md` — build-private-tmux.sh's macOS branch aborts under bash 3.2 because of empty arrays
   under `set -u`.
-- `pi-pointer-overrides-user-prompt.md` — Pi injection always adds `--append-system-prompt`, which may silently replace
-  the user's own (OMP already yields).
 - `terminal-font-promise-leak.md` — per-mount callbacks on a never-settling font promise retain every terminal instance,
   so overnight reconnect loops grow without bound.
 - `delete-skips-scoped-tab-on-stale-verdict.md` — Delete skips a scoped tab's systemd scope on a stale "no user manager"
