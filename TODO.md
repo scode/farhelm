@@ -207,6 +207,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   ask by default, and let the user turn asking off for a host. Related to the Maybe later entry on closing the
   cross-host execution hole in agent-requested session creation and cloning.
 
+- **A proper dialog for adding a remote host.** Must fix. Adding a remote host still throws a wall of text into the
+  sidebar. Instead, adding a host should show a clean, well-designed dialog that explains what will happen, and let the
+  user answer either "yes" or "yes, and don't ask in the future".
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
