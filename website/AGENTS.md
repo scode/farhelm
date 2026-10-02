@@ -1,81 +1,18 @@
 # Docs website agent instructions
 
 This directory is Farhelm's documentation site (Astro + Starlight). The pages live under `src/content/docs/docs/` and
-render under `/docs/`. How to build it and which checks apply are in the root `AGENTS.md`; this file is about writing
-the pages.
+render under `/docs/`. How to build it and which checks apply are in the root `AGENTS.md`. This file covers the site's
+mechanics: links, the sidebar, stub pages, and formatting traps.
 
-NOTE: This is not reference documentation, and it is not a copy of the specs. `SPEC.md` and `SPEC_impl.md` stay the
-authority on behavior. A page must agree with them, but it explains what the behavior means for the person using Farhelm
-rather than restating the spec. Complete reference material (every flag, every field) is out of scope for now.
+## Editorial rules
 
-## Who the pages are for
+How the pages read (who they are for, which words they may use, what to link) is in
+[EDITORIAL_RULES.md](EDITORIAL_RULES.md). Read it before drafting or revising any page. It is not a fixed style guide:
+it grows from the maintainer's feedback on drafts, and its "Learning from feedback" section says how. Follow that
+section whenever the maintainer comments on or edits wording you drafted for this site, including offering a rule when a
+correction looks like it would apply beyond the sentence it was given on.
 
-Someone running Farhelm, not someone working on it. Aim for a good experience before completeness: accessible,
-pragmatic, organized around what the reader is trying to do. Lead with the effect on the user and keep mechanism to the
-minimum needed to use the thing well. Write in the second person and in plain words, following the maintainer's voice.
-
-The site is meant to go live when the README's "you probably should not use this" notice comes down. Write for that
-reader; do not carry the notice, or notes about the documentation's migration from `docs/`, into the pages.
-
-## Every page is user facing
-
-This rule is not negotiable. Every sentence on this site is written for a person using Farhelm, in the words that person
-would use. The specs, the code, and the development history all have their own vocabulary, and it leaks into drafts
-easily, because it is the vocabulary an agent reads while researching a page. Do not let it through.
-
-Never use internal jargon unless the page cannot do its job without it. When a term really is unavoidable, do not assume
-the reader knows it: say what it means in plain words where it first appears on the page, and link its canonical page if
-it has one. Describe what the user sees and does ("the session's status changes to waiting") rather than the mechanism
-that causes it. Name things the way the UI names them, and when in doubt, write the sentence the way you would say it to
-someone sitting next to you who has never read the source.
-
-Before finishing a page, reread it as that reader and check every term against the vocabulary lists below.
-
-## Vocabulary
-
-This section is how the site learns its own vocabulary. It has two lists: jargon that should not appear on the site, and
-terms that are settled as user-facing concepts. Keep it current as part of writing pages. When the maintainer's feedback
-on a draft calls a term jargon, or approves one as fine for users, add it to the right list in the same change that
-fixes the draft, with a short note: for jargon, what to say instead; for a user-facing term, how a page introduces it. A
-term on neither list that sounds like it came from the specs or the code is jargon until decided; if a page needs it,
-ask the maintainer and record the answer here.
-
-### User-facing concepts
-
-- **session**: one agent running in one working directory on one host, with its terminal. The central unit of the whole
-  product.
-- **host**: a machine that runs sessions, your Mac or a Linux machine.
-- **helm**: the one program that shows you every host's sessions and serves the UI. Introduce it with a plain
-  description and link [The pieces](/docs/how-it-works/the-pieces/).
-- **supervisor**: the program on each host that keeps that host's sessions running. Introduce and link it the same way
-  as the helm.
-- **agent**: the coding agent a session runs (Claude, Codex, and so on).
-- **harness**: the agent program a session runs, as the UI names it ("choose a harness"). Use it where the reader is
-  looking at those UI labels; plain prose can say "agent".
-- **session launcher**: what you start a session from. Use this name, not "launch dialog" or "launch composer".
-- **status**: what the session list says an agent is doing: running, waiting (it needs you), idle, exited, interrupted,
-  or error. Use these words, the ones the UI shows.
-
-### Jargon
-
-- **provisioning**: say "setting up Farhelm on the host" or "adding a host".
-- **registry**, **host registry**: say "your list of hosts".
-- **install identity**, **registry row**: rephrase around the host the user added; readers never need these.
-- **launch composer**, **structured launch**: say "the session launcher" or "starting a session".
-- **agent kind**: rephrase as "which agent this is" until the maintainer settles a UI name.
-- **conversation identity**, **conversation capture**, **conversation reporter**: say what the user gets ("Resume opens
-  the conversation you were in").
-- **hook injection**: describe the effect, not the mechanism.
-- **pane**, **tmux session**, **socket**: say "the session's terminal"; mention tmux only where the reader has to
-  install or configure it.
-
-## Cross-reference liberally
-
-Every fact has one canonical page, and every other page that touches it links there instead of restating it. What
-survives a restart, for example, lives in `how-it-works/what-survives-what.md`; a guide that mentions a restart links to
-it rather than paraphrasing it. Link a concept on its first mention in a section whenever it has a page of its own, and
-end a page by pointing to where the reader goes next. When in doubt, add the link: a redundant link costs a reader
-nothing, a missing one sends them searching.
+## Internal links
 
 Write internal links as absolute site paths with a trailing slash: `[Manage hosts](/docs/using/manage-hosts/)`, or with
 a heading anchor, `/docs/agents/grok/#launching`. The build checks every internal link and anchor
