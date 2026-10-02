@@ -1236,8 +1236,18 @@ fn run_checkout_preparation(
     }
 
     // Identity: the directory the clone is aimed at must still be the
-    // one that was allocated. stat the CURRENT directory and compare
-    // device+inode with what the allocation recorded.
+    // one the create accepted. stat the CURRENT directory and compare
+    // device+inode with what the create handed over.
+    //
+    // A plain `(dev, ino)` comparison, which is NOT the device-number
+    // identity check SPEC.md forbids for directories Farhelm created: the
+    // value compared against is never the one recorded at allocation days
+    // ago. A first attempt hands over what its own mkdir just captured, and
+    // a retry hands over what `working_copies::verify_identity_observed`
+    // read moments ago after accepting the folder by inode and creation
+    // time. Both readings come from one create, seconds apart, which no
+    // remount separates; the remount-tolerant rule itself lives only in
+    // `working_copies::same_directory`.
     let cwd = Path::new(&preparation.cwd);
     let identity = match std::fs::metadata(cwd) {
         Ok(metadata) => (metadata.dev(), metadata.ino()),

@@ -543,6 +543,14 @@ visible error session and refuses to adopt or prepare the unknown directory. Exp
 session and plan; the directory remains untouched for manual inspection, and Delete's result tells the user so and names
 the preserved path, as below.
 
+Farhelm identifies a directory it created by its inode number plus its creation time, and uses the device number only
+where no creation time is available. On supported setups such as btrfs subvolumes (Fedora's default `/home`), NFS,
+overlayfs and some device-mapper configurations, the device number is assigned when the filesystem is mounted and can
+change across an ordinary reboot or remount while the folder is untouched. A check that compares device numbers would
+then refuse the user's own folder as replaced and permanently break the operation it guards, while inode plus creation
+time still detects a folder actually replaced at the same path, which is what these checks exist for. Every check of
+such a directory against an identity recorded earlier follows this rule rather than comparing device numbers.
+
 Ownership follows use, not the lifetime of the session that first requested the checkout. Ordinary sessions in a managed
 directory or its canonical subdirectories also retain references, including references to managed ancestors. Stopped,
 exited, and errored sessions still count. Delete releases its reference; only the final reference causes the recorded

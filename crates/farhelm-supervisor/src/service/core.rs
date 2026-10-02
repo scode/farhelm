@@ -8978,25 +8978,31 @@ impl Supervisor {
                     // The mkdir already won under the reservation — a
                     // retry must REUSE this allocation, never mkdir
                     // another (that would be a second checkout under one
-                    // intent). The captured `(dev, ino)` is re-verified
+                    // intent). The captured identity is re-verified
                     // against the world first: a replacement object at the
                     // path is a stranger, and git is never pointed at it.
-                    match crate::working_copies::verify_identity(&plan_row) {
-                        Ok(crate::working_copies::IdentityStatus::Matches) => {
+                    //
+                    // The launcher is then handed the identity just
+                    // observed, not the one recorded: its own check
+                    // compares `(dev, ino)` exactly, and a remount since
+                    // the allocation may have renumbered the device of an
+                    // untouched folder (see `working_copies::same_directory`).
+                    match crate::working_copies::verify_identity_observed(&plan_row) {
+                        Ok((crate::working_copies::IdentityStatus::Matches, observed)) => {
                             let canonical_text = plan_row
                                 .canonical_path
                                 .clone()
                                 .expect("an allocated row always carries its path");
                             crate::working_copies::AcceptedDirectory {
                                 row: plan_row.clone(),
-                                identity: plan_row.path_identity.expect(
-                                    "an allocated row always carries its captured identity",
+                                identity: observed.expect(
+                                    "a matching folder always comes with the reading that matched",
                                 ),
                                 canonical_path: std::path::PathBuf::from(&canonical_text),
                                 canonical_text,
                             }
                         }
-                        Ok(status) => {
+                        Ok((status, _)) => {
                             return Err(self.retain_create_refusal(reserved, anyhow::anyhow!(
                                 "the fresh checkout's allocated directory for session {id} is \
                                  no longer the object its registry row captured ({status:?}); \
@@ -29304,6 +29310,111 @@ exit 0
                 assert_eq!(preparation.working_copy_id, original.id);
             }
         }
+    }
+
+    /// A fresh-checkout create retried after a remount renumbered its
+    /// folder's device hands the launcher the folder as it is now.
+    ///
+    /// Why it matters: the retry accepts the allocated folder by inode and
+    /// creation time (`working_copies::same_directory`), but used to hand the
+    /// in-terminal launcher the device and inode recorded at allocation, and
+    /// the launcher compares those exactly. On btrfs, NFS or overlayfs a
+    /// reboot or remount can renumber the device of an untouched folder, so
+    /// the retry was refused as "replaced" and could never succeed.
+    /// Specified: with the create interrupted after allocation and the
+    /// recorded device number changed, the retry succeeds and the launcher's
+    /// preparation names the folder's current device and inode. On a
+    /// filesystem without creation times the same retry is refused instead,
+    /// since nothing can confirm the change. The device change is planted in
+    /// the recorded row because a test cannot remount the filesystem it runs
+    /// on.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_retried_fresh_create_survives_a_renumbered_device() {
+        use std::os::unix::fs::MetadataExt as _;
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir_all(&root).unwrap();
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: "renumbered-device".into(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let sup = checkout_crash_supervisor(&state, CreateStage::AfterCheckoutAllocation).await;
+        let crash = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect_err("allocation crash");
+        assert!(crash.is::<SimulatedCrash>(), "{crash:#}");
+        let reservation = sup
+            .store
+            .reservation(&claim.intent_key)
+            .await
+            .unwrap()
+            .unwrap();
+        let plan = sup
+            .store
+            .origin_working_copy(&reservation.session_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let folder = std::fs::metadata(plan.canonical_path.as_deref().unwrap()).unwrap();
+        {
+            let conn = rusqlite::Connection::open(state.path().join("supervisor.db"))
+                .expect("open the database directly");
+            conn.execute(
+                "UPDATE working_copies SET path_device = path_device + 1 WHERE id = ?1",
+                rusqlite::params![plan.id],
+            )
+            .expect("plant a remount's new device number");
+        }
+        let replanted = sup
+            .store
+            .origin_working_copy(&reservation.session_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(
+            replanted.path_identity.unwrap().0,
+            folder.dev(),
+            "test premise: the recorded device number no longer matches the folder"
+        );
+
+        // Without a recorded creation time nothing can confirm the changed
+        // device number, and SPEC.md's rule then refuses rather than guess.
+        if plan.path_birth_ns.is_none() {
+            let refusal = fresh_create(&sup, &checkout, Some(claim))
+                .await
+                .expect_err("an unconfirmable device change is refused");
+            // Either refusal names the device change: the create's own
+            // identity check, or recovery's validation if it runs first.
+            let text = format!("{refusal:#}");
+            assert!(
+                text.contains("DeviceChangedUnconfirmed") || text.contains("device number changed"),
+                "{text}"
+            );
+            return;
+        }
+        let info = fresh_create(&sup, &checkout, Some(claim))
+            .await
+            .expect("a retry after a renumbered device succeeds");
+        let row = sup.store.session(&info.id).await.unwrap().unwrap();
+        let spec: LaunchSpec = serde_json::from_slice(
+            &std::fs::read(crate::launch::spec_path_for_launch(
+                state.path(),
+                &info.id,
+                row.generation,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let preparation = spec
+            .preparation
+            .expect("the retry hands over a preparation");
+        assert_eq!(
+            (preparation.directory_device, preparation.directory_inode),
+            (folder.dev(), folder.ino()),
+            "the launcher must be handed the folder's current identity, not the recorded one"
+        );
     }
 
     /// Canonical spelling can change while both captured inodes still match.

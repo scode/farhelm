@@ -5423,7 +5423,8 @@
   permanently breaks the operation guarding it, while inode plus creation time still detects a folder actually replaced
   at the same path, which is what these checks exist for. New ownership or identity checks must follow that rule rather
   than compare device numbers. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `pnrqrqqzsyks`, bookmark `triage-1001d/16-checkout-retry-device`, PR
+  https://github.com/scode/farhelm/pull/1412.
 
 ## takeover-latch-misses-attaching-tabs.md
 
