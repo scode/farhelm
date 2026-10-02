@@ -4358,7 +4358,8 @@
 - Completion criteria: give the failure state a way out (a Retry control that restarts the authentication, and/or an
   automatic retry with backoff for transient failures), keeping a terminal error only for causes that cannot be retried.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `zlwstzouwypu`, bookmark `triage-1001/02-desktop-reauth-retry`, PR
+  https://github.com/scode/farhelm/pull/1358.
 
 ## seen-toggle-report-panics-after-unmount.md
 

@@ -74,8 +74,6 @@ One line per open item. This file must always match the feedback files in this d
   retarget adopts the old machine's identity.
 - `identity-mismatch-never-becomes-duplicate.md` — a host that reaches another entry's identity offers an adopt that
   always 409s and never shows as duplicate.
-- `desktop-reauth-failure-dead-end.md` — a transient webview re-auth failure after rotation leaves only an error line
-  with no retry until relaunch.
 - `session-view-leaks-page-lock.md` — the session view's restart/replace claim is not released on unmount, leaving every
   page action disabled until reload.
 - `row-menu-drifts-on-row-height-change.md` — an open row menu can float over a different row when a row above gains a
