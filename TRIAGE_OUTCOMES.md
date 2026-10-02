@@ -5945,7 +5945,8 @@
   harnesses is intentionally partial), though borderline because the error/exited split is a general session promise.
 - Decision: discard (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `zmxosmrx`, bookmark `triage-1001e/21-env-wrapper`, PR
+  https://github.com/scode/farhelm/pull/1463.
 
 ## event-feed-cap-refusal-invisible.md
 
