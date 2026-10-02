@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `probe-register-not-helm-owned.md` — a probe interrupted mid-registration leaves a host that is registered but
-  invisible, never dialed, and blocks re-adding it.
 - `desktop-start-fails-on-skewed-supervisor.md` — a hand-started supervisor on another protocol version makes the
   desktop app fail at startup with a misleading timeout.
 - `terminal-tombstone-never-buried.md` — a terminal's frozen post-takeover screen is never cleared when it leaves the
