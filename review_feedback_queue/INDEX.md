@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `probe-drops-add-busy-claim.md` — a probe during a rerun of a failed ADD can drop the busy claim, letting a second
-  install run back to back.
 - `retarget-race-republishes-old-client.md` — a refresh finishing during a retarget can republish the old connection,
   possibly routing an operation to the old machine.
 - `probe-register-not-helm-owned.md` — a probe interrupted mid-registration leaves a host that is registered but
