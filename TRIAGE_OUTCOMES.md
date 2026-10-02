@@ -5259,7 +5259,8 @@
   stays the authority. Apply the pending-fetch half to "Restart with" too, so both dialogs share one rule. Add a test
   covering a failed and a pending catalog with an effort-bearing prefilled selection. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `zloxqttnwoul`, bookmark `triage-1001d/10-create-catalog-read`, PR
+  https://github.com/scode/farhelm/pull/1406.
 
 ## stop-terminalless-records-plain-exit.md
 

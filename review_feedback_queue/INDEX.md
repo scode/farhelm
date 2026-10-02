@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `create-dialog-empty-catalog-refuses.md` — when the model catalog fails to load or is still loading,
-  clone/replace-with/recent setups are refused as "no longer supported".
 - `probe-drops-add-busy-claim.md` — a probe during a rerun of a failed ADD can drop the busy claim, letting a second
   install run back to back.
 - `retarget-race-republishes-old-client.md` — a refresh finishing during a retarget can republish the old connection,

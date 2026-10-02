@@ -1199,6 +1199,72 @@ pub(crate) fn selection_is_compatible(
             == selection.workspace_trust
 }
 
+/// Whether a structured choice may launch given what a dialog knows about the
+/// catalog: the helm's answer, or `None` while the read is still pending or
+/// after it failed.
+///
+/// No catalog never refuses on anything the catalog decides: which models a
+/// harness owns and which efforts a model takes. Not having it, through a
+/// slow read or an outage, says nothing about whether a stored or typed choice
+/// is still valid; refusing on it disabled Launch and showed "no longer
+/// supported" for choices that were fine. What does not need the catalog is
+/// still checked: an effort on a harness that takes none, a model on a harness
+/// without a model choice, the permission mode and workspace trust. The helm
+/// validates the final request either way. The new-session dialog and
+/// "Restart with" both decide through this, so the two cannot apply different
+/// rules to the same missing catalog.
+pub(crate) fn selection_fits_catalog(
+    selection: &LaunchSelection,
+    catalog: Option<&[LaunchCatalogModel]>,
+) -> bool {
+    match catalog {
+        Some(catalog) => selection_is_compatible(selection, catalog),
+        // The effort is set aside for the catalog-free checks, which would
+        // otherwise judge it against an empty list, and kept only where the
+        // harness takes one at all.
+        None => {
+            (selection.effort.is_none() || selection.harness.offers_effort())
+                && selection_is_compatible(
+                    &LaunchSelection {
+                        effort: None,
+                        ..selection.clone()
+                    },
+                    &[],
+                )
+        }
+    }
+}
+
+/// [`reconcile_harness_selection`] against what a dialog knows about the
+/// catalog, `None` while its read is pending or after it failed.
+///
+/// With no catalog in hand the effort survives the move wherever the
+/// destination harness takes an effort at all: the reconciliation would
+/// otherwise check it against an empty list, clear it and say it is "not in
+/// Farhelm's offering", the same unfounded refusal
+/// [`selection_fits_catalog`] exists to prevent. Everything that does not
+/// depend on the catalog (a harness without a model choice, permissions,
+/// workspace trust) is reconciled as usual.
+pub(crate) fn reconcile_harness_for_catalog_read(
+    selection: LaunchSelection,
+    model_owner: Option<LaunchHarness>,
+    harness: LaunchHarness,
+    catalog: Option<&[LaunchCatalogModel]>,
+) -> (LaunchSelection, Option<LaunchHarness>) {
+    match catalog {
+        Some(catalog) => reconcile_harness_selection(selection, model_owner, harness, catalog),
+        None => {
+            let effort = selection.effort;
+            let (mut reconciled, owner) =
+                reconcile_harness_selection(selection, model_owner, harness, &[]);
+            if harness.offers_effort() {
+                reconciled.effort = effort;
+            }
+            (reconciled, owner)
+        }
+    }
+}
+
 /// Move a structured choice to another harness without retaining impossible
 /// dependent values.
 ///
@@ -1877,6 +1943,105 @@ mod tests {
             1,
             "a different canonical destination cannot borrow another folder's frequency"
         );
+    }
+
+    /// A dialog without a catalog (the read still pending, or failed) never
+    /// treats a choice as incompatible, while a catalog in hand still does.
+    ///
+    /// Why it matters: an effort-bearing choice (a clone, a "Replace with", a
+    /// recent setup) used to be checked against an empty stand-in list, which
+    /// rejects every effort, so the new-session dialog showed "no longer
+    /// supported by the current catalog" and disabled Launch until the read
+    /// landed, or for good when it failed. "Restart with" refused the same way
+    /// while its read was pending. The helm validates the final request.
+    #[test]
+    fn a_missing_catalog_never_makes_a_choice_incompatible() {
+        let catalog = vec![LaunchCatalogModel {
+            id: "gpt-6.1-sol".into(),
+            harness: LaunchHarness::Codex,
+            efforts: vec![LaunchEffort::Low, LaunchEffort::Medium],
+        }];
+        let mut prefilled = selection(LaunchHarness::Codex, Some("gpt-6.1-sol"), None);
+        prefilled.effort = Some(LaunchEffort::Medium);
+
+        assert!(
+            !selection_is_compatible(&prefilled, &[]),
+            "premise: an empty list rejects the effort, which is what a missing catalog used to stand for"
+        );
+        assert!(
+            selection_fits_catalog(&prefilled, None),
+            "no catalog yet (pending or failed) refuses nothing"
+        );
+        assert!(selection_fits_catalog(&prefilled, Some(&catalog)));
+        let mut unsupported = prefilled.clone();
+        unsupported.effort = Some(LaunchEffort::High);
+        assert!(
+            !selection_fits_catalog(&unsupported, Some(&catalog)),
+            "a catalog in hand still rejects an effort its model does not offer"
+        );
+        let mut effort_on_cursor = selection(LaunchHarness::Cursor, None, None);
+        effort_on_cursor.effort = Some(LaunchEffort::Medium);
+        assert!(
+            !selection_fits_catalog(&effort_on_cursor, None),
+            "a harness that takes no effort refuses one without any catalog"
+        );
+        assert!(
+            !selection_fits_catalog(
+                &selection(LaunchHarness::Grok, Some("any-model"), None),
+                None
+            ),
+            "a harness without a model choice refuses a model without any catalog"
+        );
+    }
+
+    /// Re-choosing a harness while the catalog is unknown keeps the effort a
+    /// clone or recent setup carried, while a known catalog still clears an
+    /// effort it does not offer.
+    ///
+    /// Why it matters: the reconciliation checked the effort against an empty
+    /// stand-in list, so a harness click in a dialog whose catalog read was
+    /// pending or had failed dropped the effort and reported it as "not in
+    /// Farhelm's offering", the refusal `selection_fits_catalog` removes
+    /// everywhere else.
+    #[test]
+    fn a_harness_change_without_a_catalog_keeps_the_effort() {
+        let mut prefilled = selection(LaunchHarness::Codex, Some("gpt-6.1-sol"), None);
+        prefilled.effort = Some(LaunchEffort::Medium);
+
+        let (same, _) = reconcile_harness_for_catalog_read(
+            prefilled.clone(),
+            Some(LaunchHarness::Codex),
+            LaunchHarness::Codex,
+            None,
+        );
+        assert_eq!(same.effort, Some(LaunchEffort::Medium));
+        let (cleared, _) = reconcile_harness_for_catalog_read(
+            prefilled,
+            Some(LaunchHarness::Codex),
+            LaunchHarness::Codex,
+            Some(&[LaunchCatalogModel {
+                id: "gpt-6.1-sol".into(),
+                harness: LaunchHarness::Codex,
+                efforts: vec![LaunchEffort::Low],
+            }]),
+        );
+        assert_eq!(
+            cleared.effort, None,
+            "a catalog in hand still clears an effort its model does not offer"
+        );
+        let mut codex = selection(LaunchHarness::Codex, None, None);
+        codex.effort = Some(LaunchEffort::Medium);
+        for harness in [LaunchHarness::Cursor, LaunchHarness::OpenCode] {
+            assert!(
+                !harness.offers_effort(),
+                "premise: {harness:?} takes no effort"
+            );
+            let (moved, _) = reconcile_harness_for_catalog_read(codex.clone(), None, harness, None);
+            assert_eq!(
+                moved.effort, None,
+                "{harness:?} takes no effort, so none is kept even without a catalog"
+            );
+        }
     }
 
     /// A known model belongs to one harness. Accepting it after a harness

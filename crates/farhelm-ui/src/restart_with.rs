@@ -182,11 +182,12 @@ pub(crate) fn RestartWithDialog(
         async move { api::fetch_launch_catalog(&base).await }
     });
     let catalog_result = catalog_resource.read();
-    let catalog = catalog_result
+    // `None` until a catalog is in hand: still loading, or the read failed.
+    let catalog_answer = catalog_result
         .as_ref()
         .and_then(|result| result.as_ref().ok())
-        .cloned()
-        .unwrap_or_default();
+        .cloned();
+    let catalog = catalog_answer.clone().unwrap_or_default();
     let catalog_error = catalog_result
         .as_ref()
         .and_then(|result| result.as_ref().err())
@@ -202,10 +203,9 @@ pub(crate) fn RestartWithDialog(
     let mut model_edited = use_signal(|| false);
     let current = selection();
     let draft_pending = model_open() && !model_draft().is_empty();
-    // The catalog describes offered choices; an outage cannot establish that
-    // a stored selection became invalid. The helm validates the final request.
-    let compatible =
-        catalog_error.is_some() || launch_composer::selection_is_compatible(&current, &catalog);
+    // A pending or failed catalog read cannot establish that a stored
+    // selection became invalid (`launch_composer::selection_fits_catalog`).
+    let compatible = launch_composer::selection_fits_catalog(&current, catalog_answer.as_deref());
     let may_submit =
         !busy && current != baseline && !draft_pending && model_error().is_none() && compatible;
     let host = session.host_name.as_deref().unwrap_or("unknown host");

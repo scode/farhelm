@@ -4445,6 +4445,15 @@ samp {
   font-size: 12px;
 }
 
+/* The new-session dialog's catalog read failed. The empty model list it
+   leaves refuses nothing, so this line explains the empty list and offers
+   the read again in place. */
+.create-catalog-error {
+  margin: 0;
+  color: var(--warn);
+  font-size: 12px;
+}
+
 /* The field and its "<n> for <Harness>" hint share a row that may wrap: at
    phone width the hint drops under the field rather than squeezing it. The
    listbox is positioned against this wrapper, so a wrapped hint moves the

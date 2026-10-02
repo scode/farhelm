@@ -187,9 +187,12 @@ fn apply_composer_search_result(
     mut structured_workspace_trust: Signal<Option<bool>>,
     mut structured_workspace_trust_is_explicit: Signal<bool>,
     mut composer_reset_reason: Signal<Option<String>>,
-    catalog: &[crate::api::LaunchCatalogModel],
+    // `None` while the catalog read is pending or failed; see
+    // `launch_composer::selection_fits_catalog`.
+    catalog_answer: Option<&[crate::api::LaunchCatalogModel]>,
     mut intent_key: Signal<Option<(String, IntentBinding)>>,
 ) -> Option<String> {
+    let catalog = catalog_answer.unwrap_or_default();
     use crate::launch_composer::ComposerSearchResult;
     if matches!(
         &result,
@@ -275,11 +278,11 @@ fn apply_composer_search_result(
                 permissions: structured_permissions(),
                 workspace_trust: structured_workspace_trust(),
             };
-            let (selection, owner) = crate::launch_composer::reconcile_harness_selection(
+            let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
                 before.clone(),
                 *custom_model_harness.peek(),
                 harness,
-                catalog,
+                catalog_answer,
             );
             composer_reset_reason.set(draft_reconciliation_reason(
                 &before,
@@ -314,11 +317,11 @@ fn apply_composer_search_result(
                 permissions: structured_permissions(),
                 workspace_trust: structured_workspace_trust(),
             };
-            let (selection, owner) = crate::launch_composer::reconcile_harness_selection(
+            let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
                 selection,
                 Some(harness),
                 harness,
-                catalog,
+                catalog_answer,
             );
             composer_reset_reason.set(draft_reconciliation_reason(
                 &before,
@@ -1499,7 +1502,7 @@ pub(super) fn CreateSessionForm(
     // into it afterward.
     let preferences = use_context::<SharedPreferences>();
     let launch_catalog_base = base.clone();
-    let launch_catalog = use_resource(move || {
+    let mut launch_catalog = use_resource(move || {
         let base = launch_catalog_base.clone();
         async move { api::fetch_launch_catalog(&base).await }
     });
@@ -2239,12 +2242,21 @@ pub(super) fn CreateSessionForm(
         }
     });
 
-    let catalog_models = launch_catalog
+    // `None` until a catalog is in hand: still loading, or the read failed.
+    // Compatibility checks take this rather than `catalog_models`, because an
+    // empty list stands for "no models" there, not "not known yet"
+    // (`launch_composer::selection_fits_catalog`).
+    let catalog_answer = launch_catalog
         .read()
         .as_ref()
         .and_then(|result| result.as_ref().ok())
-        .cloned()
-        .unwrap_or_default();
+        .cloned();
+    let catalog_models = catalog_answer.clone().unwrap_or_default();
+    let catalog_error = launch_catalog
+        .read()
+        .as_ref()
+        .and_then(|result| result.as_ref().err())
+        .cloned();
     let current_history_target = create_target();
     let recent_history = offered_history
         .read()
@@ -2311,7 +2323,7 @@ pub(super) fn CreateSessionForm(
             permissions: structured_permissions(),
             workspace_trust: crate::launch_composer::normalized_workspace_trust(harness, structured_workspace_trust()),
         };
-        (!crate::launch_composer::selection_is_compatible(&selection, &catalog_models)).then_some(
+        (!crate::launch_composer::selection_fits_catalog(&selection, catalog_answer.as_deref())).then_some(
             "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
         )
     });
@@ -2454,9 +2466,9 @@ pub(super) fn CreateSessionForm(
     }
     .map(crate::launch_composer::permission_value)
     .unwrap_or("default");
-    let catalog_for_submit = catalog_models.clone();
-    let catalog_for_harness = catalog_models.clone();
-    let catalog_for_search = catalog_models.clone();
+    let catalog_for_submit = catalog_answer.clone();
+    let catalog_for_harness = catalog_answer.clone();
+    let catalog_for_search = catalog_answer.clone();
     // Pointer activation and Enter both apply exactly the same saved draft.
     // Enter deliberately submits only AFTER this callback returns: the form's
     // submit handler owns the intent key and operation lock, so it must remain
@@ -2544,6 +2556,7 @@ pub(super) fn CreateSessionForm(
     // submit) apply the filter text as a custom id over the model just chosen.
     let apply_model_option = Callback::<crate::launch_composer::ModelOption>::new({
         let catalog = catalog_models.clone();
+        let catalog_answer = catalog_answer.clone();
         move |option| {
             // Showing or hiding other harnesses' rows is a view toggle, not a
             // draft change: no busy gate, no intent-key invalidation.
@@ -2604,7 +2617,7 @@ pub(super) fn CreateSessionForm(
                             workspace_trust: structured_workspace_trust(),
                         };
                         let (selection, owner) =
-                            crate::launch_composer::reconcile_harness_selection(
+                            crate::launch_composer::reconcile_harness_for_catalog_read(
                                 LaunchSelection {
                                     harness,
                                     model: Some(id),
@@ -2614,7 +2627,7 @@ pub(super) fn CreateSessionForm(
                                 },
                                 None,
                                 harness,
-                                &catalog,
+                                catalog_answer.as_deref(),
                             );
                         composer_reset_reason.set(draft_reconciliation_reason(
                             &before,
@@ -3224,7 +3237,7 @@ pub(super) fn CreateSessionForm(
                 // New requests still validate against today's catalog.
                 if !replaying_fresh
                     && let LaunchIntent::Structured(selection) = &binding.agent
-                    && !crate::launch_composer::selection_is_compatible(selection, &catalog_for_submit)
+                    && !crate::launch_composer::selection_fits_catalog(selection, catalog_for_submit.as_deref())
                 {
                     error.set(Some("this saved choice is no longer supported by the current catalog; choose a compatible model or effort".into()));
                     return;
@@ -3349,9 +3362,9 @@ pub(super) fn CreateSessionForm(
                                 ),
                             };
                             if *creation_surface.peek() != CreationSurface::Structured
-                                || !crate::launch_composer::selection_is_compatible(
+                                || !crate::launch_composer::selection_fits_catalog(
                                     &selection,
-                                    &catalog_for_recheck,
+                                    catalog_for_recheck.as_deref(),
                                 )
                             {
                                 error.set(Some(
@@ -3981,7 +3994,7 @@ pub(super) fn CreateSessionForm(
                                             structured_workspace_trust,
                                             structured_workspace_trust_is_explicit,
                                             composer_reset_reason,
-                                            &catalog,
+                                            catalog.as_deref(),
                                             intent_key,
                                         );
                                         if let Some(path) = browse_path {
@@ -4086,7 +4099,7 @@ pub(super) fn CreateSessionForm(
                                                                 structured_workspace_trust,
                                                                 structured_workspace_trust_is_explicit,
                                                                 composer_reset_reason,
-                                                                &catalog, intent_key,
+                                                                catalog.as_deref(), intent_key,
                                                             );
                                                             if let Some(path) = browse_path {
                                                                 request_directory_browse(
@@ -4509,8 +4522,8 @@ pub(super) fn CreateSessionForm(
                                                 permissions: structured_permissions(),
                                                 workspace_trust: structured_workspace_trust(),
                                             };
-                                            let (selection, owner) = crate::launch_composer::reconcile_harness_selection(
-                                                selection, *custom_model_harness.peek(), harness, &catalog,
+                                            let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
+                                                selection, *custom_model_harness.peek(), harness, catalog.as_deref(),
                                             );
                                             composer_reset_reason.set(draft_reconciliation_reason(
                                                 &LaunchSelection {
@@ -4565,6 +4578,31 @@ pub(super) fn CreateSessionForm(
                             }
                         }
                         if *creation_surface.read() == CreationSurface::Structured {
+                            // A failed catalog read leaves the model list empty but
+                            // refuses nothing (`selection_fits_catalog`), so say why the
+                            // list is empty and offer to read it again rather than
+                            // making the user reopen the dialog and lose its draft.
+                            if let Some(message) = catalog_error.clone() {
+                                // The button sits beside the live region rather than in
+                                // it, so a screen reader announces the failure, not the
+                                // control.
+                                p { class: "create-catalog-error",
+                                    span { role: "status", "model catalog unavailable: {message} " }
+                                    button {
+                                        r#type: "button",
+                                        class: "btn btn-neutral",
+                                        // Cleared first so the line goes away while the
+                                        // read is out and comes back only if it fails
+                                        // again; left in place, a retry would look like a
+                                        // dead button until the new read settled.
+                                        onclick: move |_| {
+                                            launch_catalog.clear();
+                                            launch_catalog.restart();
+                                        },
+                                        "retry"
+                                    }
+                                }
+                            }
                             // These callbacks retain the create form's history and intent
                             // boundaries. The shared controls only report the user's edits.
                             LaunchControls {
@@ -4615,7 +4653,7 @@ pub(super) fn CreateSessionForm(
                                 },
                                 on_model_active: move |index| model_active.set(index),
                                 on_model_enter: {
-                                    let catalog = catalog_models.clone();
+                                    let catalog_answer = catalog_answer.clone();
                                     move |target| {
                                         if !draft_transition_allowed(ops) { return; }
                                         match target {
@@ -4645,8 +4683,10 @@ pub(super) fn CreateSessionForm(
                                                     permissions: structured_permissions(),
                                                     workspace_trust: structured_workspace_trust(),
                                                 };
-                                                if !crate::launch_composer::selection_is_compatible(
-                                                    &selection, &catalog,
+                                                // An unknown catalog keeps the effort: see
+                                                // `selection_fits_catalog`.
+                                                if !crate::launch_composer::selection_fits_catalog(
+                                                    &selection, catalog_answer.as_deref(),
                                                 ) {
                                                     structured_effort.set(None);
                                                     composer_reset_reason.set(
