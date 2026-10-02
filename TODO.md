@@ -667,6 +667,10 @@ are large mostly because of their tests.
   session leak that defeats idle-suspend until the leaked sessions are reaped (evidence in the lore entry; worth
   reporting upstream).
 
+- **Pluggable host creation.** Let users plug in their own scripts that spawn and destroy hosts for sessions to run on,
+  rather than Farhelm knowing each provider itself. Related to the Sprites and Tensorlake host-kind entries above, which
+  assess building specific providers in.
+
 - Sandboxed agents with scoped GitLab credentials, especially on the Tensorlake and Fly.io Sprites host kinds above:
   give an agent a token that reaches only the repositories it works on, minted per sandbox. GitLab rather than GitHub
   because GitLab lets the token creation be automated, while GitHub's scoped tokens have to be created by hand in a
