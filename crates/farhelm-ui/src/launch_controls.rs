@@ -78,7 +78,15 @@ pub(crate) fn LaunchControls(
     on_workspace_trust: EventHandler<Option<bool>>,
 ) -> Element {
     let efforts = harness
-        .map(|harness| launch_composer::compatible_efforts(harness, model.as_deref(), &catalog))
+        .map(|harness| {
+            launch_composer::displayed_efforts(
+                harness,
+                model.as_deref(),
+                &catalog,
+                effort,
+                baseline.as_ref().and_then(|old| old.effort),
+            )
+        })
         .unwrap_or_default();
     let mut options =
         launch_composer::model_options(&catalog, harness, &model_draft, model_show_all);
