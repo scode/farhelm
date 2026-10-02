@@ -201,6 +201,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **In-app feedback.** A super simple way to give feedback on Farhelm from inside the app. Where the feedback goes and
   what the UI looks like are details TBD.
 
+- **Permission prompts for actions requested through the `farhelm` CLI.** Every action an agent or a user attempts
+  through the `farhelm` tool, against any host or session, should ask the user for permission first, with an "always
+  allow when coming from this host" option. Model it on the per-host setting for starting YOLO sessions without asking:
+  ask by default, and let the user turn asking off for a host. Related to the Maybe later entry on closing the
+  cross-host execution hole in agent-requested session creation and cloning.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
