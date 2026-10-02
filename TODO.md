@@ -198,6 +198,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   its terminal tabs running and shows the session as exited, the same as any other exit. Whether suspending also stops
   terminal tabs, what bringing a session back does, and how it looks in the list are details TBD.
 
+- **In-app feedback.** A super simple way to give feedback on Farhelm from inside the app. Where the feedback goes and
+  what the UI looks like are details TBD.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
