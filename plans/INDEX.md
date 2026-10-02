@@ -30,3 +30,5 @@ One line per plan, in the order the plans are executed. This file must always ma
   for background work to finish.
 - [pending] `gh-clone-fresh-checkout.md` — Clone or Replace with into a fresh GitHub checkout uses the next free
   `repo-N` instead of refusing the copied title as taken.
+- [pending] `stepped-animations.md` — looping indicators (the running pulse and its kin) step at most 10 times a second
+  instead of redrawing every frame, and pause while the window is not active, with the rule written into the specs.
