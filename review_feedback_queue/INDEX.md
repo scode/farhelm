@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `restart-can-still-deselect-session.md` — restarting a session can still empty the main pane or jump to another
-  session; #1310 removed only one trigger.
 - `create-dialog-empty-catalog-refuses.md` — when the model catalog fails to load or is still loading,
   clone/replace-with/recent setups are refused as "no longer supported".
 - `probe-drops-add-busy-claim.md` — a probe during a rerun of a failed ADD can drop the busy claim, letting a second

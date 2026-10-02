@@ -5237,7 +5237,8 @@
   window as they are today; the UI therefore keeps the session selected through a restart. Update the code comment that
   accepts the omission. Add a regression that forces a listing into the relaunch window and asserts the session is
   present. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `nxroulqzvtkk`, bookmark `triage-1001d/09-restart-keeps-listed`, PR
+  https://github.com/scode/farhelm/pull/1405.
 
 ## create-dialog-empty-catalog-refuses.md
 

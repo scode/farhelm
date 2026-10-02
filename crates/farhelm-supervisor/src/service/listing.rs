@@ -62,6 +62,25 @@ fn order_and_cut<T>(mut items: Vec<T>, info: impl Fn(&T) -> &SessionInfo) -> (Ve
     (items, truncated)
 }
 
+/// One row of a listing before it is described: a session on the map, whose
+/// row this pass computes, or a session mid-restart, whose row the restart
+/// path already holds (see [`list_all`]).
+enum Listed {
+    Live(Arc<SessionEntry>),
+    /// Boxed: a row is several hundred bytes, the live variant one pointer.
+    Held(Box<SessionInfo>),
+}
+
+impl Listed {
+    /// The row the listing orders by: the entry's own, or the held one.
+    fn info(&self) -> &SessionInfo {
+        match self {
+            Listed::Live(entry) => &entry.info,
+            Listed::Held(row) => row.as_ref(),
+        }
+    }
+}
+
 /// What one `ListSessions` answers with, before it is put in a frame: the
 /// rows that survived the cap, freshly described, and whether the cap
 /// dropped any.
@@ -98,9 +117,24 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     // The cut happens BEFORE any entry is status-annotated: the per-entry
     // observation below is not free, and past the cap it would be work
     // for rows the reply cannot carry.
-    let snapshot: Vec<Arc<SessionEntry>> = {
+    //
+    // Sessions mid-restart are off the map but still listed, from the rows
+    // the restart path holds for them (`Supervisor::restarting_rows`, read
+    // under the same lock that keeps it in step with the map). A held row
+    // goes into the reply as it is: no tmux, sentinel or exit observation
+    // runs on it, because its pane is mid-respawn and anything read from it
+    // now would describe the run being replaced as having just ended.
+    let (snapshot, held): (Vec<Arc<SessionEntry>>, Vec<SessionInfo>) = {
         let sessions = sup.sessions.lock().await;
-        sessions.values().cloned().collect()
+        let held = sup
+            .restarting_rows
+            .lock()
+            .expect("restarting-rows mutex poisoned")
+            .iter()
+            .filter(|(id, _)| !sessions.contains_key(*id))
+            .map(|(_, row)| row.clone())
+            .collect();
+        (sessions.values().cloned().collect(), held)
     };
     // From the whole snapshot, not the cut: whether a renamed pane now
     // belongs to another farhelm session depends on every session this
@@ -114,7 +148,19 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
                 .map(|terminal| terminal.tmux_name.as_str()),
         )
     }));
-    let (entries, truncated) = order_and_cut(snapshot, |entry| &entry.info);
+    let listed: Vec<Listed> = snapshot
+        .into_iter()
+        .map(Listed::Live)
+        .chain(held.into_iter().map(|row| Listed::Held(Box::new(row))))
+        .collect();
+    let (listed, truncated) = order_and_cut(listed, Listed::info);
+    let entries: Vec<Arc<SessionEntry>> = listed
+        .iter()
+        .filter_map(|row| match row {
+            Listed::Live(entry) => Some(Arc::clone(entry)),
+            Listed::Held(_) => None,
+        })
+        .collect();
     // Before the reply is computed, so an identity claimed on
     // this very pass is reflected in the `restart_offer` it
     // carries rather than only in the next poll's. Cheap by
@@ -294,18 +340,23 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
             ),
         }
     }
-    let sessions: Vec<SessionInfo> = entries
+    let sessions: Vec<SessionInfo> = listed
         .iter()
-        .map(|entry| {
-            entry_info(
+        .map(|row| match row {
+            Listed::Live(entry) => entry_info(
                 entry,
                 &pane_states,
                 &known,
                 sentinel_hits.get(&entry.info.id).map(String::as_str),
-            )
+            ),
+            Listed::Held(held) => held.as_ref().clone(),
         })
         .collect();
     let sessions = sup.store.project_checkout_metadata(sessions).await?;
+    *sup.last_listed.lock().expect("last-listed mutex poisoned") = sessions
+        .iter()
+        .map(|row| (row.id.clone(), row.clone()))
+        .collect();
     Ok(ListReply {
         sessions,
         truncated,
