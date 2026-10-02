@@ -23,6 +23,32 @@ enum Stop {
     Sigterm,
     /// The desktop app exiting: its end of the stdin tether closes.
     TetherClosed,
+    /// A terminal hangup: the terminal the supervisor's stderr is on goes
+    /// away, then SIGHUP reaches the whole process group the supervisor
+    /// leads, as when a hand-started supervisor's terminal closes or its ssh
+    /// connection drops.
+    HangupToGroup,
+}
+
+/// Spec: a terminal hangup (the pseudo-terminal holding the supervisor's
+/// stderr closes, then SIGHUP reaches the supervisor's whole process group)
+/// runs the same orderly output shutdown as SIGTERM: the supervisor exits
+/// with status 0 after both output clients acknowledged `no-output`, and
+/// the session survives.
+///
+/// Why it matters: a terminal hangup is how a hand-started
+/// `farhelm supervisor run` (or a desktop app launched from a terminal) is
+/// most often stopped, and three separate failures hid behind it. Unhandled,
+/// SIGHUP killed the supervisor outright. Because the signal goes to the
+/// whole group, the tmux clients the supervisor spawned got it too and were
+/// torn down before the supervisor could switch them off. And with its
+/// stderr terminal gone, the supervisor's first log line after the hangup
+/// panicked the process before the shutdown ran. The supervisor is started
+/// as a group leader so the signal reaches its group and not the test
+/// runner's.
+#[farhelm_testtrace::test]
+async fn a_hangup_to_the_supervisors_group_closes_output_clients_in_order() {
+    stop_attached_supervisor(Stop::HangupToGroup).await;
 }
 
 /// Spec: a supervisor holding a live, streaming terminal attachment answers
@@ -91,7 +117,20 @@ fn no_output_recording_tmux(dir: &std::path::Path, log: &std::path::Path) -> std
 async fn stop_attached_supervisor(stop: Stop) {
     let state = farhelm_teststate::tempdir().expect("supervisor state dir");
     let stderr_path = state.path().join("supervisor-stderr.log");
-    let stderr = std::fs::File::create(&stderr_path).expect("stderr capture file");
+    // A hangup needs a terminal to hang up: the supervisor's stderr is then a
+    // pseudo-terminal whose controlling side this test closes, so every
+    // later write to it fails as it does after a real terminal closes. The
+    // other stops log to a file the assertions below read.
+    let mut pty_master = None;
+    let stderr: std::process::Stdio = if matches!(stop, Stop::HangupToGroup) {
+        let (master, slave) = open_pty();
+        pty_master = Some(master);
+        std::process::Stdio::from(slave)
+    } else {
+        std::fs::File::create(&stderr_path)
+            .expect("stderr capture file")
+            .into()
+    };
     let no_output_log = state.path().join("no-output.log");
     let wrapper = no_output_recording_tmux(state.path(), &no_output_log);
     let mut command = tokio::process::Command::new(farhelm_bin());
@@ -104,6 +143,12 @@ async fn stop_attached_supervisor(stop: Stop) {
         command
             .arg("--exit-on-stdin-close")
             .stdin(std::process::Stdio::piped());
+    }
+    if matches!(stop, Stop::HangupToGroup) {
+        // A group of its own, led by the supervisor: the hangup below goes
+        // to that group, the way a closing terminal signals its foreground
+        // job, and never to the test runner's own group.
+        command.process_group(0);
     }
     let sock = state.path().join("tmux.sock");
     let _tmux = tmux_guard_for_supervisor_child(sock.clone(), command.as_std());
@@ -162,6 +207,20 @@ async fn stop_attached_supervisor(stop: Stop) {
             assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0, "send SIGTERM");
         }
         Stop::TetherClosed => drop(child.stdin.take().expect("piped tether")),
+        Stop::HangupToGroup => {
+            // The terminal goes first, as it does for real: the kernel hangs
+            // the line up before it delivers SIGHUP.
+            drop(pty_master.take().expect("the stderr pseudo-terminal"));
+            let pid = child.id().expect("supervisor pid") as libc::pid_t;
+            // SAFETY: as above; `process_group(0)` made the live child the
+            // leader of a group with its own pid as the id, so `-pid` names
+            // exactly that group.
+            assert_eq!(
+                unsafe { libc::kill(-pid, libc::SIGHUP) },
+                0,
+                "send SIGHUP to the supervisor's process group"
+            );
+        }
     }
     let status = tokio::time::timeout(Duration::from_secs(30), child.wait())
         .await
@@ -172,15 +231,19 @@ async fn stop_attached_supervisor(stop: Stop) {
         "{stop:?}: the supervisor must exit cleanly, not die of the stop: {status:?}"
     );
 
-    let log = std::fs::read_to_string(&stderr_path).expect("read supervisor stderr");
-    assert!(
-        log.contains("stopping: closing terminal-output clients in order before exit"),
-        "{stop:?} must reach the orderly output shutdown; stderr was:\n{log}"
-    );
-    assert!(
-        !log.contains("did not finish closing in time"),
-        "{stop:?}: the orderly shutdown must finish inside its budget; stderr was:\n{log}"
-    );
+    // A hangup's stderr went to the closed terminal, so for it the orderly
+    // shutdown is evidenced by the acknowledgements and exit status alone.
+    if !matches!(stop, Stop::HangupToGroup) {
+        let log = std::fs::read_to_string(&stderr_path).expect("read supervisor stderr");
+        assert!(
+            log.contains("stopping: closing terminal-output clients in order before exit"),
+            "{stop:?} must reach the orderly output shutdown; stderr was:\n{log}"
+        );
+        assert!(
+            !log.contains("did not finish closing in time"),
+            "{stop:?}: the orderly shutdown must finish inside its budget; stderr was:\n{log}"
+        );
+    }
     // Both output-bearing clients of the attachment, the terminal's
     // forwarder and the session sink, must have been switched off with an
     // acknowledgement after the stop began. (The input client never carried
@@ -210,6 +273,105 @@ async fn stop_attached_supervisor(stop: Stop) {
         has_session.status.success(),
         "{stop:?}: the session must survive its supervisor's orderly stop: {}",
         String::from_utf8_lossy(&has_session.stderr)
+    );
+}
+
+/// Open a pseudo-terminal pair: the controlling (master) side, whose drop
+/// hangs the line up, and the terminal (slave) side to hand a child as a
+/// standard stream.
+fn open_pty() -> (std::os::fd::OwnedFd, std::os::fd::OwnedFd) {
+    use std::os::fd::FromRawFd as _;
+    let (mut master, mut slave) = (-1, -1);
+    // SAFETY: both out-pointers are valid, and null name, termios and
+    // window-size arguments are documented as "use the defaults".
+    let rc = unsafe {
+        libc::openpty(
+            &mut master,
+            &mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    assert_eq!(rc, 0, "openpty: {}", std::io::Error::last_os_error());
+    // Close-on-exec on both, which openpty does not set: a child that
+    // inherited the controlling side would keep the line up after the test
+    // closes its own copy, and the hangup would never happen. (The terminal
+    // side still reaches the child as the stream it is handed.)
+    for fd in [master, slave] {
+        // SAFETY: `fd` is a descriptor openpty just returned.
+        let set = unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+        assert_eq!(
+            set,
+            0,
+            "set FD_CLOEXEC: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    // SAFETY: openpty succeeded, so both are fresh descriptors nothing else
+    // owns.
+    unsafe {
+        (
+            std::os::fd::OwnedFd::from_raw_fd(master),
+            std::os::fd::OwnedFd::from_raw_fd(slave),
+        )
+    }
+}
+
+/// Spec: a supervisor started with SIGHUP already ignored (under `nohup`)
+/// keeps running when it receives SIGHUP, and still stops cleanly on
+/// SIGTERM afterwards.
+///
+/// Why it matters: `nohup farhelm supervisor run &` is the conventional way
+/// to keep a hand-started supervisor running past an ssh logout. Handling
+/// SIGHUP for an orderly shutdown must not override that explicit request;
+/// a listener installed unconditionally would replace the inherited ignore
+/// and stop the supervisor at logout, leaving the host offline.
+#[farhelm_testtrace::test]
+async fn an_inherited_ignored_hangup_leaves_the_supervisor_running() {
+    let state = farhelm_teststate::tempdir().expect("supervisor state dir");
+    // `nohup` sets SIGHUP to ignored and execs the program, so the child's
+    // pid is the supervisor's own.
+    let mut command = tokio::process::Command::new("nohup");
+    command
+        .arg(farhelm_bin())
+        .args(["supervisor", "run", "--state-dir"])
+        .arg(state.path());
+    let sock = state.path().join("tmux.sock");
+    let _tmux = tmux_guard_for_supervisor_child(sock, command.as_std());
+    let mut child = command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn supervisor under nohup");
+    wait_for_supervisor_ready(state.path()).await;
+
+    let pid = child.id().expect("supervisor pid") as libc::pid_t;
+    // SAFETY: `pid` is our own live child, which `kill_on_drop` still owns;
+    // nothing has waited on it, so it cannot have been reaped and recycled.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGHUP) }, 0, "send SIGHUP");
+    // An unignored SIGHUP stops the supervisor within milliseconds, and
+    // nothing positive marks "still ignoring", so this waits and then looks.
+    // sleep-ok: observation window for an ignored SIGHUP
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(
+        child.try_wait().expect("poll the supervisor").is_none(),
+        "the supervisor must ignore SIGHUP it inherited as ignored"
+    );
+    farhelm_supervisor::service::connect(state.path())
+        .await
+        .expect("the supervisor must still be serving after the ignored SIGHUP");
+
+    // SAFETY: as above.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0, "send SIGTERM");
+    let status = tokio::time::timeout(Duration::from_secs(30), child.wait())
+        .await
+        .expect("the supervisor must exit after SIGTERM")
+        .expect("wait for the supervisor");
+    assert!(
+        status.success(),
+        "SIGTERM must still stop it cleanly: {status:?}"
     );
 }
 

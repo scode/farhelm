@@ -34,7 +34,7 @@ impl TmuxDriver {
         // target below.
         let session_target = format!("={session}");
         let mut child = self
-            .command()
+            .attached_client_command()
             .arg("-C")
             .arg("attach")
             .arg("-f")

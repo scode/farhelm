@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `sighup-skips-orderly-shutdown.md` — SIGHUP (closing the terminal that started the desktop app or a hand-run
-  supervisor) skips the orderly tmux shutdown.
 - `header-replace-recomputes-alive.md` — header Replace recomputes "nothing is alive" after the YOLO confirmation, so it
   can kill an agent or shell restarted meanwhile.
 - `sidebar-replace-recomputes-alive.md` — sidebar Replace recomputes "nothing is alive" after the YOLO confirmation, so
