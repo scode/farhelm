@@ -1,8 +1,10 @@
-// The README hero scenario as TypeScript sees it: one parser for
-// `docs/readme-hero/scenario.json5`, shared by the Playwright config (which
-// needs the host list and viewport before the stack boots) and the capture
-// spec (which needs everything). One reader means the design file cannot
-// mean two different things to the two consumers.
+// A staged-fleet scenario as TypeScript sees it: one parser for
+// `docs/readme-hero/scenario.json5` and `docs/readme-video/scenario.json5`,
+// shared by each Playwright config (which needs the host list and viewport
+// before the stack boots) and each capture spec (which needs everything).
+// One reader means a design file cannot mean two different things to its
+// consumers, and the screenshot and the video cannot drift into two dialects
+// of the same format.
 //
 // Validation is deliberately strict and loud. The scenario is hand-edited by
 // a maintainer, and a typo that silently dropped a session or misread a
@@ -11,16 +13,17 @@ import JSON5 from "json5";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-/** Where the design lives, relative to this file. */
+/** Where the hero screenshot's design lives, relative to this file. */
 export const SCENARIO_DIR = path.resolve(__dirname, "../../docs/readme-hero");
-export const SCENARIO_PATH = path.join(SCENARIO_DIR, "scenario.json5");
-/** Where the stack script publishes what it booted. Gitignored, per run. */
+/** Where the hero stack script publishes what it booted. Gitignored, per run. */
 export const STACK_INFO_PATH = path.join(__dirname, ".stack-info.json");
 /** The config's handoff of ssh destinations to the stack script: a JSON array. */
 export const REMOTES_ENV = "FARHELM_HERO_REMOTES";
 
 export type HostKind = "local" | "remote";
 export type TargetStatus = "running" | "waiting" | "idle" | "exited";
+/** The replay fixture's `--then` shapes; see `ReplayThen` in the fixture. */
+export type ReplayThen = "spin" | "menu" | "quiet" | "exit";
 export type Wrapper = "claude" | "codex";
 
 export interface ScenarioHost {
@@ -45,6 +48,14 @@ export interface ScenarioSession {
   open?: boolean;
   /** Transcript file name, relative to the scenario directory. */
   transcript?: string;
+  /**
+   * What the fake agent does once its transcript ends, when that differs
+   * from what `status` implies. `status` is the classification the staging
+   * waits for; for a transcript that stops mid-way on a `##@` directive
+   * (the demo video's interactive sessions), that is not what happens after
+   * the end, so the end shape is named separately.
+   */
+  then?: ReplayThen;
 }
 
 export interface Scenario {
@@ -54,20 +65,23 @@ export interface Scenario {
 }
 
 const STATUSES: TargetStatus[] = ["running", "waiting", "idle", "exited"];
+const THENS: ReplayThen[] = ["spin", "menu", "quiet", "exit"];
 const WRAPPERS: Wrapper[] = ["claude", "codex"];
 
-function fail(message: string): never {
-  throw new Error(`${SCENARIO_PATH}: ${message}`);
-}
-
-/** Read and validate the scenario, expanding `$USER` in ssh destinations.
+/** Read and validate `scenario.json5` in `dir`, expanding `$USER` in ssh destinations.
  *
  * `$USER` is the one substitution allowed, because a self-ssh spelling that
  * names the account is the cheapest second destination a machine has, and
  * the account name must not be written into a public file.
  */
-export function loadScenario(): Scenario {
-  const raw = JSON5.parse(readFileSync(SCENARIO_PATH, "utf8")) as Record<string, unknown>;
+export function loadScenario(dir: string = SCENARIO_DIR): Scenario {
+  const scenarioPath = path.join(dir, "scenario.json5");
+  // Annotated rather than inferred: TypeScript only narrows on a call to a
+  // `never`-returning function when the callee's own declaration says so.
+  const fail: (message: string) => never = (message) => {
+    throw new Error(`${scenarioPath}: ${message}`);
+  };
+  const raw = JSON5.parse(readFileSync(scenarioPath, "utf8")) as Record<string, unknown>;
   const viewport = raw.viewport as Scenario["viewport"] | undefined;
   if (
     !viewport || !Number.isInteger(viewport.width) || !Number.isInteger(viewport.height) ||
@@ -114,6 +128,9 @@ export function loadScenario(): Scenario {
       fail(`session ${session.title}: yolo must be a boolean`);
     }
     if (!STATUSES.includes(session.status)) fail(`session ${session.title}: unknown status ${session.status}`);
+    if (session.then !== undefined && !THENS.includes(session.then)) {
+      fail(`session ${session.title}: then must be one of ${THENS.join(", ")}`);
+    }
     if (session.status === "idle" && typeof session.seen !== "boolean") {
       fail(`session ${session.title}: idle sessions need seen: true or false`);
     }

@@ -544,6 +544,17 @@ only thing that pushes the `readme-assets` branch; never run that push by hand, 
 Neither script is a gate: nothing in CI runs or checks the image. Changing the publish script means running its
 `--self-test`, which is its whole validation and needs no network.
 
+# README demo video
+
+The demo video is recorded from the web UI against a staged fleet, governed by `docs/readme-video/SPEC.md`; read it
+before touching anything under `docs/readme-video/` or `e2e/readme-video/`. "Refresh the demo video" means: run
+`scripts/readme-video.sh`, and if a beat no longer works on the current UI, rewrite that beat in
+`e2e/readme-video/capture.spec.ts` to realise the same intent, then look at every still it prints and fix annotation
+placement until each one points at the right thing and hides nothing the viewer should see.
+`docs/readme-video/intent.md`, the scenario, and the transcripts are the maintainer's design and change only when asked.
+While `intent.md` opens with its THROWAWAY SAMPLE note, the video only demonstrates the machinery; say so when handing
+it over. The upload is manual; nothing in CI records or checks the video.
+
 # Agent screen fixtures
 
 The supervisor's Claude and Codex screen readers are tested against real screens under

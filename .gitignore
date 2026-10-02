@@ -52,6 +52,8 @@ e2e/.auth/storage-state.json
 # What the README hero capture's stack script publishes about the fleet it
 # booted (e2e/readme-hero/start-stack.sh); per run, removed by its trap.
 e2e/readme-hero/.stack-info.json
+# The demo video's equivalent (e2e/readme-video.config.ts), same lifecycle.
+e2e/readme-video/.stack-info.json
 __pycache__/
 
 # Astro build output and content-collection cache for the docs website;

@@ -1,0 +1,80 @@
+// THROWAWAY SAMPLE: this fleet belongs to the placeholder video described at
+// the top of intent.md and is replaced with it.
+//
+// The fleet the README demo video is recorded against. Same format, same
+// loader, and same staging as the hero screenshot's scenario
+// (docs/readme-hero/scenario.json5 explains every field); see SPEC.md in this
+// directory for how the video uses it.
+//
+// `status` is what each session must be classified as when recording starts.
+// A session whose transcript stops on an input-gated `##@` directive names
+// what it does after its transcript ends with `then`, because that is no
+// longer implied by its starting status.
+//
+// Every name here is invented. Nothing may name a real host, user, or project
+// from the machine that takes the capture.
+{
+  // Screencast frames arrive at the viewport's CSS-pixel size whatever the
+  // scale factor, so the viewport IS the video's resolution; keep scale 1.
+  viewport: { width: 1920, height: 1080, scale: 1 },
+
+  hosts: [
+    { key: "local", alias: "this machine", kind: "local" },
+    { key: "build-box", alias: "build-box", kind: "remote", ssh: "localhost" },
+    { key: "gpu-1", alias: "gpu-1", kind: "remote", ssh: "$USER@localhost" },
+  ],
+
+  sessions: [
+    {
+      title: "fix flaky attach test",
+      host: "build-box",
+      cwd: "~/src/farhelm",
+      wrapper: "claude",
+      yolo: true,
+      status: "running",
+      age: 120,
+      open: true,
+      transcript: "transcripts/attach.txt",
+    },
+    {
+      title: "migrate auth tokens",
+      host: "local",
+      cwd: "~/src/api",
+      wrapper: "claude",
+      status: "waiting",
+      then: "quiet",
+      age: 480,
+      transcript: "transcripts/migrate.txt",
+    },
+    {
+      title: "readme rewrite",
+      host: "gpu-1",
+      cwd: "~/work/docs",
+      wrapper: "claude",
+      yolo: true,
+      status: "idle",
+      seen: false,
+      age: 2460,
+      transcript: "transcripts/filler-claude.txt",
+    },
+    {
+      title: "bench tokenizer on H100",
+      host: "gpu-1",
+      cwd: "~/work/tok",
+      wrapper: "claude",
+      status: "running",
+      age: 3600,
+      transcript: "transcripts/filler-claude.txt",
+    },
+    {
+      title: "release 0.3.1",
+      host: "build-box",
+      cwd: "~/src/farhelm",
+      wrapper: "codex",
+      status: "exited",
+      exit_code: 0,
+      age: 86400,
+      transcript: "transcripts/filler-codex.txt",
+    },
+  ],
+}

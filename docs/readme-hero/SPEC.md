@@ -2,7 +2,9 @@
 
 This directory is the design of the screenshot at the top of the README, which the docs website's landing page shows
 too, and the requirements that govern how it is produced. The capture code lives under `e2e/readme-hero/` and the two
-commands under `scripts/`; this file is what they are built to satisfy.
+commands under `scripts/`; this file is what they are built to satisfy. The fleet staging (`e2e/readme-hero/stage.ts`)
+is shared with the demo video (`docs/readme-video/SPEC.md`), so what this file says about staging governs both, and a
+change to it changes both.
 
 NOTE: This is not a visual regression fixture. Nothing in CI looks at the image, compares it, or fails when it drifts.
 It exists so the README shows the real product at whatever version is checked out, and so an agent can refresh it
