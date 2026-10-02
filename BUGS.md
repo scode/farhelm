@@ -76,3 +76,26 @@ Why we are not fixing it: in practice it stays small. Only a terminal that is op
 accumulates anything, any keystroke drains it, and reopening the terminal replaces the connection. The fix would be a
 background reader that drains the connection continuously and hands keystroke confirmations to the sender over a
 channel, which turns a deliberately simple, synchronous part of the keystroke path into a concurrent one.
+
+## A host install or update can hang until the helm restarts if a local ssh helper keeps its output open
+
+If the ssh command the helm runs to install or update a host starts a local helper that outlives it and keeps its output
+open, the install or update never finishes. The host stays mid-install or mid-update (its row keeps showing the run in
+progress) until the helm restarts: renaming it or changing its destination waits, removing it is refused as busy, and
+one of the helm's four install slots stays taken meanwhile. The kind of helper that could do it is an ssh `ProxyCommand`
+(or a similar local helper) that forks a child which keeps running after ssh itself exits.
+
+Here's the TLDR of the mechanics. Each provisioning step runs a local process (`ssh` for a remote host) and reads its
+output to the end. The step's deadline covers waiting for that process to exit, but not reading its output afterwards,
+so a lingering process that inherited the output pipe keeps the read, and the step, waiting forever. Sending Farhelm's
+files to the host has the same gap. Work left behind on the remote side cannot cause this, because it keeps `ssh` itself
+from exiting, and that wait has a deadline.
+
+How sure we are: this comes from reading the code; nobody has seen it happen. Farhelm's own provisioning scripts start
+no background processes, and a check with OpenSSH 9.6p1 showed that ssh's connection sharing (a `ControlPersist` master
+that stays alive after the command) does not hold the output open: the read finishes within about half a second. Older
+OpenSSH releases were not checked.
+
+Why we are not fixing it: there is no realistic trigger on current OpenSSH, and the fix would have to stretch one
+deadline over the process's exit, both output reads and the cleanup of its process group. That is a real change to a
+path every install and update takes, made for a case nobody has hit.

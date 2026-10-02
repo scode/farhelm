@@ -5089,7 +5089,8 @@
   plus the OpenSSH 9.6 ControlPersist check; no observed trigger), and why it is not being fixed (no realistic trigger
   on current OpenSSH; the fix would extend one deadline over exit, both output drains and process-group cleanup). Remove
   the feedback file and its index entry. No code or spec change.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `xnpnzvlpmoln`, bookmark `triage-1001d/03-bugs-provisioning-drain`, PR
+  https://github.com/scode/farhelm/pull/1399.
 
 ## clipboard-writes-unbounded-blocking-admission.md
 
