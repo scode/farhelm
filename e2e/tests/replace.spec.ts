@@ -26,10 +26,24 @@
 // launching, reaches the override endpoint with exactly what was typed.
 
 import { expect, test } from "./helpers/evidence";
-import { Page } from "@playwright/test";
-import { cleanupSession, createSession, FAKE_AGENT, hideSeenState, localHostId, openRowMenu, type SessionRow } from "./helpers/fleet";
+import type { APIRequestContext, Locator, Page } from "@playwright/test";
+import {
+  cleanupSession,
+  createSession,
+  FAKE_AGENT,
+  hideSeenState,
+  listSessions,
+  localHostId,
+  observeFeedReaders,
+  openRowMenu,
+  type SessionRow,
+  stopSession,
+  stubFeed,
+  waitForFeedReadersSettled,
+} from "./helpers/fleet";
 import { attachFocusTrace, installFocusTrace } from "./helpers/focus-trace";
 import { stackScratchDir } from "./helpers/scratch";
+import { LIVE_BADGE, LIVE_STATES } from "./helpers/terminal-suite";
 import { attachSession, waitForTermText } from "./helpers/term";
 
 /** Find one session by its opaque server id, independent of title changes —
@@ -525,5 +539,193 @@ test("cancelling a replace-with composer leaves the source untouched and creates
     await expect(target.locator(".session-title")).toHaveText(title);
   } finally {
     await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * Open "replace with" on `sourceId` and return the launcher form, after the
+ * row's badge matches `badge`: the premise each test below states about what
+ * the launcher was opened on.
+ */
+async function openReplaceWith(page: Page, sourceId: string, badge: RegExp) {
+  const sourceRow = row(page, sourceId);
+  await expect(sourceRow.locator(".status-badge")).toHaveText(badge, { timeout: 20_000 });
+  await openRowMenu(sourceRow);
+  await sourceRow.locator(".session-row-replace-with").click();
+  const form = page.locator('.create-session-form[role="dialog"]');
+  await expect(form).toBeVisible();
+  await expect(form.locator(".create-session-submit")).toContainText("replace");
+  await expect(form.locator(".create-session-submit")).toBeEnabled();
+  return form;
+}
+
+/** Press the launcher's replace button and return the replace request's body
+ * together with the helm's reply. */
+async function pressReplace(page: Page, form: Locator, sourceId: string) {
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      (r) => r.request().method() === "POST" && r.url().endsWith(`/api/sessions/${sourceId}/replace`),
+    ),
+    form.locator(".create-session-submit").click(),
+  ]);
+  return { body: response.request().postDataJSON(), response };
+}
+
+/** Wait until the helm lists `id` in `state` ("exited", or any live state for
+ * "live"): the server-side settling the drift tests need before the page is
+ * told, or deliberately not told, about it. */
+async function waitForListedState(request: APIRequestContext, id: string, state: "exited" | "live") {
+  await expect
+    .poll(
+      async () => {
+        const listed = (await listSessions(request)).sessions.find((one) => one.id === id)?.status?.state;
+        return state === "live" ? LIVE_STATES.includes(listed ?? "") : listed === state;
+      },
+      { timeout: 20_000 },
+    )
+    .toBe(true);
+}
+
+/**
+ * Why this matters: "replace with" used to kill a running source's agent
+ * with nothing in the launcher saying so (SPEC.md "Replace with": the launch
+ * button is the confirmation of the source's delete). Spec: on a running
+ * source the launcher shows Replace's kill warning, ending with the launched
+ * session rather than "the same settings"; launching sends neither
+ * precondition flag, since the warning covered the running agent, and the
+ * source is replaced.
+ */
+test("replace with on a running source warns that its agent is killed, then replaces it", async ({
+  page,
+  request,
+}) => {
+  const title = `replace-with-running-${Date.now()}`;
+  const source = await createSession(request, { title });
+  let replacedId: string | undefined;
+  try {
+    await waitForListedState(request, source.id, "live");
+    await page.goto("/");
+    const form = await openReplaceWith(page, source.id, LIVE_BADGE);
+    const warning = form.locator(".launch-composer-replace-warning");
+    await expect(warning).toHaveText(
+      "still running — replacing kills the agent and discards the conversation; the session launched here " +
+        "takes its place.",
+    );
+    // The button that is the confirmation names the warning as its description.
+    await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-describedby", "launch-composer-replace-warning");
+
+    const { body, response } = await pressReplace(page, form, source.id);
+    expect(response.ok(), `replace with: ${await response.text()}`).toBe(true);
+    replacedId = (await response.json()).id;
+    expect(body).toMatchObject({ only_if_nothing_alive: false, only_if_agent_ended: false });
+    expect(
+      (await listSessions(request)).sessions.some((one) => one.id === source.id),
+      "the warned-about source must be gone",
+    ).toBe(false);
+  } finally {
+    if (replacedId) await cleanupSession(request, replacedId);
+    await cleanupSession(request, source.id);
+  }
+});
+
+/**
+ * Why this matters: the launcher can stay open for minutes while the user
+ * edits, and a source that another client restarts meanwhile must not be
+ * killed by a launch whose launcher said nothing was running. Spec: a
+ * launcher opened on an exited, tabless source shows no warning; when the
+ * source is restarted behind the page's back (the stubbed feed never tells
+ * the page), launching sends `only_if_nothing_alive`, the replacement is
+ * still created, the restarted source is kept, and the launcher shows
+ * Replace's both-sessions-exist error.
+ */
+test("replace with keeps a source restarted while its launcher showed nothing alive", async ({
+  page,
+  request,
+}) => {
+  const title = `replace-with-restarted-${Date.now()}`;
+  const source = await createSession(request, { title });
+  try {
+    await stopSession(request, source.id);
+    await waitForListedState(request, source.id, "exited");
+
+    await observeFeedReaders(page);
+    const feed = await stubFeed(page);
+    await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(1);
+    const form = await openReplaceWith(page, source.id, /exited/);
+    await expect(form.locator(".launch-composer-replace-warning")).toBeEmpty();
+    // Setup reads must retire before the restart, so nothing the page reads
+    // afterwards can carry the restarted state into the launcher.
+    await waitForFeedReadersSettled(page);
+
+    const restarted = await request.post(`/api/sessions/${source.id}/restart`, { data: { mode: "fresh" } });
+    expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
+    await waitForListedState(request, source.id, "live");
+    // Premise: the launcher still shows the state it opened on.
+    await expect(form.locator(".launch-composer-replace-warning")).toBeEmpty();
+
+    const { body, response } = await pressReplace(page, form, source.id);
+    expect(response.ok(), "the source's delete must be refused").toBe(false);
+    expect(body).toMatchObject({ only_if_nothing_alive: true, only_if_agent_ended: false });
+    await expect(form.locator(".create-session-error")).toContainText("both sessions still exist");
+
+    const listed = (await listSessions(request)).sessions;
+    const kept = listed.find((one) => one.id === source.id);
+    expect(kept, "the restarted source must be kept").toBeTruthy();
+    expect(LIVE_STATES).toContain(kept?.status?.state);
+    expect(
+      listed.some((one) => one.id !== source.id && one.title === title),
+      "the replacement is created before the refused delete",
+    ).toBe(true);
+  } finally {
+    for (const one of (await listSessions(request)).sessions.filter((s) => s.title === title)) {
+      await cleanupSession(request, one.id);
+    }
+  }
+});
+
+/**
+ * Why this matters: the warning has to describe the source at the click,
+ * not at the moment the launcher opened, or a launcher opened on an exited
+ * source would keep reassuring the user after the source came back to life.
+ * Spec: a launcher opened on an exited, tabless source shows no warning;
+ * once the page learns the source was restarted, the launcher shows the
+ * running-agent warning, and launching then sends neither precondition flag
+ * and replaces the source.
+ */
+test("replace with's warning follows a source restarted while the launcher is open", async ({
+  page,
+  request,
+}) => {
+  const title = `replace-with-follows-${Date.now()}`;
+  const source = await createSession(request, { title });
+  let replacedId: string | undefined;
+  try {
+    await stopSession(request, source.id);
+    await waitForListedState(request, source.id, "exited");
+
+    const feed = await stubFeed(page);
+    await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(1);
+    const form = await openReplaceWith(page, source.id, /exited/);
+    const warning = form.locator(".launch-composer-replace-warning");
+    await expect(warning).toBeEmpty();
+    await expect(form.locator(".create-session-submit")).not.toHaveAttribute("aria-describedby", /./);
+
+    const restarted = await request.post(`/api/sessions/${source.id}/restart`, { data: { mode: "fresh" } });
+    expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
+    await waitForListedState(request, source.id, "live");
+    feed.notify(2);
+    await expect(warning).toContainText("still running — replacing kills the agent", { timeout: 20_000 });
+
+    const { body, response } = await pressReplace(page, form, source.id);
+    expect(response.ok(), `replace with: ${await response.text()}`).toBe(true);
+    replacedId = (await response.json()).id;
+    expect(body).toMatchObject({ only_if_nothing_alive: false, only_if_agent_ended: false });
+  } finally {
+    if (replacedId) await cleanupSession(request, replacedId);
+    await cleanupSession(request, source.id);
   }
 });

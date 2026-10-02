@@ -1844,18 +1844,24 @@ fn is_stale_precondition(headers: &reqwest::header::HeaderMap) -> bool {
 /// places is what makes that always true from this client rather than a
 /// rule this function has to additionally enforce.
 ///
+/// `guard` is the precondition matching the warning the launcher showed
+/// (see [`replace_with_payload`]); a source with more alive than that is kept,
+/// after the replacement is created, with the "both sessions exist" error.
+///
 /// Error surfacing matches [`replace_session`]'s own doc: the helm's body
 /// verbatim, including the two delete-after-create shapes that name both
 /// ids — this is the SAME endpoint, so a failure reads exactly the same
 /// regardless of which form of the request produced it.
 #[expect(
     clippy::too_many_arguments,
-    reason = "mirrors create_session's own argument list plus the replace-with source id; splitting \
-              them into a struct would only move the coupling this comment already explains"
+    reason = "mirrors create_session's own argument list plus the replace-with source id and its \
+              precondition; splitting them into a struct would only move the coupling this comment \
+              already explains"
 )]
 pub(crate) async fn replace_session_with(
     base: &str,
     source: &str,
+    guard: crate::DeleteGuard,
     cwd: &str,
     agent: CreateAgent<'_>,
     title: &str,
@@ -1872,15 +1878,35 @@ pub(crate) async fn replace_session_with(
         "{base}/api/sessions/{}/replace",
         encode_path_segment(source)
     );
-    let body = serde_json::json!({
-        "intent_key": intent_key,
-        "with": with_body,
-    });
+    let body = replace_with_payload(serde_json::json!(intent_key), with_body, guard);
     let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(CreateRefusal::read("POST", &url, resp).await);
     }
     replace_reply(resp).await.map_err(CreateRefusal::from)
+}
+
+/// The body of a "Replace with" request: the replace endpoint's own
+/// idempotency key, the override create body, and the source delete's
+/// precondition. Shared by [`replace_session_with`] and the fresh-checkout
+/// path ([`submit_fresh_create`]) so neither can drop the precondition.
+///
+/// SPEC.md "Replace with": the launcher is the confirmation, so `guard` is
+/// what its warning (or the absence of one) covered, derived by the launcher
+/// from the same source state it drew. Both flags are always written, as
+/// plain Replace writes them ([`replace_session`]), so the request states its
+/// level rather than leaning on the helm's default.
+fn replace_with_payload(
+    intent_key: serde_json::Value,
+    with: serde_json::Value,
+    guard: crate::DeleteGuard,
+) -> serde_json::Value {
+    serde_json::json!({
+        "intent_key": intent_key,
+        "with": with,
+        "only_if_nothing_alive": guard.only_if_nothing_alive(),
+        "only_if_agent_ended": guard.only_if_agent_ended(),
+    })
 }
 
 /// Read a successful replace reply: the new session, plus the notice the
@@ -1981,21 +2007,21 @@ pub(crate) fn fresh_create_body(
 /// status 409 alone also describes spent and unresolved accepted intents.
 /// For these keyed requests the marker proves permanent refusal of the exact
 /// original request on its preview's installation, even after a lost reply.
+///
+/// `guard` is the Replace-with source's precondition, taken from the press
+/// that sends this request rather than retained with the body: a retry
+/// replays the exact create, but its delete authorizes only what the
+/// launcher shows at that press (SPEC.md "Replace with"). The helm's
+/// idempotency identity for a fresh replacement covers the source id and the
+/// create, not the delete's precondition, so a different guard on a retry
+/// cannot start a second session. Ignored for a plain create.
 pub(crate) async fn submit_fresh_create(
     base: &str,
     source: Option<&str>,
+    guard: crate::DeleteGuard,
     body: &serde_json::Value,
 ) -> Result<(Session, Option<String>), FreshCreateError> {
-    let (url, payload) = match source {
-        Some(source) => (
-            format!(
-                "{base}/api/sessions/{}/replace",
-                encode_path_segment(source)
-            ),
-            serde_json::json!({"intent_key": body["intent_key"], "with": body}),
-        ),
-        None => (format!("{base}/api/sessions"), body.clone()),
-    };
+    let (url, payload) = fresh_create_request(base, source, guard, body);
     let resp = send(client().post(&url).json(&payload))
         .await
         .map_err(FreshCreateError::Unresolved)?;
@@ -2023,6 +2049,27 @@ pub(crate) async fn submit_fresh_create(
     replace_reply(resp)
         .await
         .map_err(FreshCreateError::Unresolved)
+}
+
+/// Where [`submit_fresh_create`] sends its retained body and what it wraps it
+/// in, split out so the Replace-with precondition's presence in the replayed
+/// request is checkable without a helm.
+fn fresh_create_request(
+    base: &str,
+    source: Option<&str>,
+    guard: crate::DeleteGuard,
+    body: &serde_json::Value,
+) -> (String, serde_json::Value) {
+    match source {
+        Some(source) => (
+            format!(
+                "{base}/api/sessions/{}/replace",
+                encode_path_segment(source)
+            ),
+            replace_with_payload(body["intent_key"].clone(), body.clone(), guard),
+        ),
+        None => (format!("{base}/api/sessions"), body.clone()),
+    }
 }
 
 /// The JavaScript the WEB (wasm) build's random client-side identifiers
@@ -3688,6 +3735,63 @@ mod tests {
             delete_url("http://h", "s1", crate::DeleteGuard::Unconditional),
             "http://h/api/sessions/s1"
         );
+    }
+
+    /// Why this matters: "Replace with" used to send no precondition at all,
+    /// so its source was deleted unconditionally whatever the launcher had
+    /// shown (SPEC.md "Replace with"). Spec: the replace body carries the
+    /// launcher's level as the same two flags plain Replace sends, beside
+    /// the top-level key and the untouched override body.
+    #[farhelm_testtrace::test]
+    fn a_replace_with_body_carries_the_launchers_precondition() {
+        let with = serde_json::json!({"cwd": "/w", "intent_key": "k"});
+        for (guard, nothing_alive, agent_ended) in [
+            (crate::DeleteGuard::NothingAlive, true, false),
+            (crate::DeleteGuard::AgentEnded, false, true),
+            (crate::DeleteGuard::Unconditional, false, false),
+        ] {
+            assert_eq!(
+                replace_with_payload(serde_json::json!("k"), with.clone(), guard),
+                serde_json::json!({
+                    "intent_key": "k",
+                    "with": with,
+                    "only_if_nothing_alive": nothing_alive,
+                    "only_if_agent_ended": agent_ended,
+                }),
+                "{guard:?}"
+            );
+        }
+    }
+
+    /// Why this matters: a fresh-checkout "Replace with" goes out through its
+    /// own sender, which must not drop the precondition the plain path sends.
+    /// Spec: the retained body goes to the source's replace endpoint, wrapped
+    /// with its own key and the guard it is given; a plain fresh create posts
+    /// the body unchanged, guard ignored. Which guard a retry is given is the
+    /// launcher's business, pinned by the GitHub-checkout browser spec.
+    #[farhelm_testtrace::test]
+    fn a_fresh_replace_with_wraps_its_body_with_the_given_precondition() {
+        let body = serde_json::json!({"intent_key": "k", "github_checkout": {"repo": "acme/bar"}});
+        let (url, payload) = fresh_create_request(
+            "http://h",
+            Some("a/b"),
+            crate::DeleteGuard::NothingAlive,
+            &body,
+        );
+        assert_eq!(url, "http://h/api/sessions/a%2Fb/replace");
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "intent_key": "k",
+                "with": body,
+                "only_if_nothing_alive": true,
+                "only_if_agent_ended": false,
+            })
+        );
+        let (url, payload) =
+            fresh_create_request("http://h", None, crate::DeleteGuard::NothingAlive, &body);
+        assert_eq!(url, "http://h/api/sessions");
+        assert_eq!(payload, body);
     }
 
     use super::*;

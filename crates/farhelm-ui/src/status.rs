@@ -436,8 +436,45 @@ pub(crate) fn confirm_consequence(status: &SessionStatus, tabs: usize) -> String
 /// [`confirm_consequence`]'s counterpart for Replace, which deletes the
 /// source session (tabs included) after creating its replacement.
 pub(crate) fn replace_consequence(status: &SessionStatus, tabs: usize) -> String {
-    with_tabs("replacing", tabs, replace_consequence_for_agent(status))
+    with_tabs(
+        "replacing",
+        tabs,
+        &format!(
+            "{}; {REPLACE_SUCCESSOR}",
+            replace_consequence_for_agent(status)
+        ),
+    )
 }
+
+/// What the "Replace with" launcher shows beside its replace button while the
+/// source still has anything alive: Replace's own warning about the source,
+/// word for word, closed by the session the launcher starts rather than by
+/// "the same settings", which the launcher lets the user change.
+///
+/// SPEC.md "Replace with": the launcher's button is the confirmation, so it
+/// has to say what Replace's prompt says, and the request it sends carries
+/// the precondition matching this text (`delete_guard` of the same status and
+/// tab count). The launcher shows nothing when [`shows_nothing_alive`] holds,
+/// so this is never drawn for a session with nothing left to stop.
+pub(crate) fn replace_with_consequence(status: &SessionStatus, tabs: usize) -> String {
+    with_tabs(
+        "replacing",
+        tabs,
+        &format!(
+            "{}; {REPLACE_WITH_SUCCESSOR}",
+            replace_consequence_for_agent(status)
+        ),
+    )
+}
+
+/// How Replace's prompt ends: what takes the source's place.
+const REPLACE_SUCCESSOR: &str = "a fresh session with the same settings takes its place:";
+
+/// How the "Replace with" launcher's warning ends instead. The launcher's
+/// settings are an edited copy, so "the same settings" would be untrue there,
+/// and the warning is a sentence of its own under the button rather than a
+/// lead-in to confirm and cancel buttons, so it ends in a full stop.
+const REPLACE_WITH_SUCCESSOR: &str = "the session launched here takes its place.";
 
 /// Prefix an agent consequence with the tab clause, or return it unchanged
 /// when the listing shows no tabs.
@@ -465,12 +502,14 @@ fn with_tabs(verb: &str, tabs: usize, agent: &str) -> String {
 /// uncertainty,
 /// and neither `Exited` nor `Interrupted` may claim a kill that cannot
 /// happen. What replace adds beyond delete's wording is the OTHER half of
-/// the operation — every arm ends by saying a fresh session with the same
-/// settings takes the old one's place, which is the one sentence that
-/// tells a reader this prompt is not delete's. Without it, a user
-/// skimming a familiar-looking warning could read "kills the agent" and
-/// assume the row is simply gone, missing that a running replacement is
-/// what they are actually about to get.
+/// the operation — every arm is followed by a clause saying what takes the
+/// old session's place ([`REPLACE_SUCCESSOR`] for Replace,
+/// [`REPLACE_WITH_SUCCESSOR`] for the "Replace with" launcher), which is the
+/// one sentence that tells a reader this prompt is not delete's. Without it,
+/// a user skimming a familiar-looking warning could read "kills the agent"
+/// and assume the row is simply gone, missing that a running replacement is
+/// what they are actually about to get. The arms stop short of that clause
+/// so both callers share the warning about the source word for word.
 ///
 /// Unlike [`confirm_consequence`], EVERY arm here can legitimately open
 /// this prompt — replace has no `has_ended()`-style bypass the way delete
@@ -484,26 +523,18 @@ fn with_tabs(verb: &str, tabs: usize, agent: &str) -> String {
 fn replace_consequence_for_agent(status: &SessionStatus) -> &'static str {
     match status {
         SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
-            "still running — replacing kills the agent and discards the conversation; a fresh \
-             session with the same settings takes its place:"
+            "still running — replacing kills the agent and discards the conversation"
         }
         SessionStatus::Unknown => {
             "status unknown — the agent may still be running and will be killed, and the \
-             conversation is discarded either way; a fresh session with the same settings \
-             takes its place:"
+             conversation is discarded either way"
         }
-        SessionStatus::Exited { .. } => {
-            "replacing discards the conversation; a fresh session with the same settings takes \
-             its place:"
-        }
+        SessionStatus::Exited { .. } => "replacing discards the conversation",
         SessionStatus::Interrupted => {
             "interrupted by a host reboot, which ended the agent, but replacing still discards \
-             the conversation; a fresh session with the same settings takes its place:"
+             the conversation"
         }
-        SessionStatus::Error { .. } => {
-            "the agent never started; a fresh session with the same settings \
-             takes its place:"
-        }
+        SessionStatus::Error { .. } => "the agent never started",
     }
 }
 
@@ -807,7 +838,10 @@ mod tests {
         );
         assert_eq!(
             replace_consequence(&exited, 0),
-            replace_consequence_for_agent(&exited)
+            format!(
+                "{}; {REPLACE_SUCCESSOR}",
+                replace_consequence_for_agent(&exited)
+            )
         );
         // An Error session can have tabs (opening one needs a terminal, not
         // a live agent), so its prompt must not promise there is nothing
@@ -1140,12 +1174,56 @@ mod tests {
             },
         ];
         for status in statuses {
-            let wording = replace_consequence_for_agent(&status);
+            let wording = replace_consequence(&status, 0);
             assert!(
                 wording.contains("fresh session") && wording.contains("takes its place"),
                 "{status:?}'s wording must promise a replacement, not just a consequence: \
                  {wording}"
             );
         }
+    }
+
+    /// The "Replace with" launcher's warning is Replace's own, so a running
+    /// source reads the same kill warning in both places (SPEC.md "Replace
+    /// with"), but it must not promise "the same settings": the launcher is
+    /// where the user edits them. Spec: for every status and tab count, the
+    /// launcher's text equals Replace's up to the successor clause, then
+    /// names the launched session instead.
+    #[farhelm_testtrace::test]
+    fn replace_with_consequence_is_replaces_warning_with_the_launched_session_as_successor() {
+        let statuses = [
+            SessionStatus::Running,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+            SessionStatus::Unknown,
+            SessionStatus::Exited { exit_code: Some(0) },
+            SessionStatus::Interrupted,
+            SessionStatus::Error {
+                detail: "exec_failed argv0=/nope errno=2".to_string(),
+            },
+        ];
+        for status in statuses {
+            for tabs in [0, 1, 3] {
+                let replace = replace_consequence(&status, tabs);
+                let replace_with = replace_with_consequence(&status, tabs);
+                let shared = replace
+                    .strip_suffix(REPLACE_SUCCESSOR)
+                    .expect("Replace's prompt ends with its successor clause");
+                assert_eq!(
+                    replace_with,
+                    format!("{shared}{REPLACE_WITH_SUCCESSOR}"),
+                    "{status:?} with {tabs} tabs"
+                );
+                assert!(
+                    !replace_with.contains("same settings"),
+                    "the launcher's settings are edited, so it must not claim they are the \
+                     same: {replace_with}"
+                );
+            }
+        }
+        assert!(
+            replace_with_consequence(&SessionStatus::Running, 0).starts_with("still running"),
+            "a running source's launcher must lead with the kill warning"
+        );
     }
 }

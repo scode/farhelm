@@ -4826,6 +4826,16 @@ samp {
   gap: 8px;
 }
 
+/* "Replace with"'s warning about the source session, directly under the
+   replace button it qualifies: that button is the confirmation (SPEC.md
+   "Replace with"), so the warning is Replace's own wording in the
+   confirmation color, and it wraps rather than truncating. */
+.launch-composer-replace-warning {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warn-bright);
+}
+
 /* Name belongs to destination because it describes the session created there,
    not the action that starts it. Its input remains a full-width form well. */
 .launch-composer-name > input {

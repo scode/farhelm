@@ -5,7 +5,17 @@
  * have separate integration coverage; these tests make no allocation claim.
  */
 import { expect, test } from "./helpers/evidence";
-import { observeFeedReaders, readFeedReaders, stubFeed } from "./helpers/fleet";
+import {
+  cleanupSession,
+  createSession,
+  listSessions,
+  observeFeedReaders,
+  openRowMenu,
+  readFeedReaders,
+  stopSession,
+  stubFeed,
+} from "./helpers/fleet";
+import { LIVE_BADGE, LIVE_STATES } from "./helpers/terminal-suite";
 import type { APIRequestContext, Page, Route } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -234,6 +244,78 @@ test("ambiguous checkout retries retain the exact original body after a later re
   }
   expect(creates[1]).toEqual(creates[0]);
   expect(creates[2]).toEqual(creates[0]);
+});
+
+/**
+ * Why this matters: a fresh-checkout "Replace with" retries by resending its
+ * retained request, and the source delete it ends with must still authorize
+ * only what the launcher shows at that press (SPEC.md "Replace with"); a
+ * retry that reused the first press's permission could kill a session the
+ * launcher no longer warned about. Spec: the first press on a running source
+ * sends neither precondition flag; after an ambiguous failure and the
+ * source's exit reaching the page, the launcher's warning is gone and the
+ * retry sends `only_if_nothing_alive` with the identical retained create body.
+ */
+test("a fresh-checkout replace-with retry carries the precondition shown at that press", async ({ page, request }) => {
+  const host = await localHost(request);
+  const title = `fresh-replace-retry-${Date.now()}`;
+  const source = await createSession(request, { title });
+  try {
+    await expect
+      .poll(
+        async () =>
+          LIVE_STATES.includes((await listSessions(request)).sessions.find((one) => one.id === source.id)?.status?.state ?? ""),
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+    await unavailableDiscovery(page, host);
+    await page.route("**/api/github-checkout-preview", async (route) => {
+      await fulfill(route, { json: previewFor(route.request().postDataJSON(), host, 1) });
+    });
+    const replaces: { only_if_nothing_alive: boolean; only_if_agent_ended: boolean; with: unknown }[] = [];
+    await page.route(`**/api/sessions/${source.id}/replace`, async (route) => {
+      replaces.push(route.request().postDataJSON());
+      if (replaces.length === 1) await route.abort("failed");
+      else await fulfill(route, { status: 409, json: { error: "fixture unresolved conflict" } });
+    });
+    const feed = await stubFeed(page);
+    await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(1);
+    const sourceRow = page.locator(`.session-row[data-session-id="${source.id}"]`);
+    await expect(sourceRow.locator(".status-badge")).toHaveText(LIVE_BADGE, { timeout: 20_000 });
+    await openRowMenu(sourceRow);
+    await sourceRow.locator(".session-row-replace-with").click();
+    const form = page.locator('.create-session-form[role="dialog"]');
+    await expect(form).toBeVisible();
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    await selectRepo(page);
+    // The fixture names the checkout after the launch's title, here the source's.
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(`/checkout-fixture/bar-${title}`);
+    const warning = form.locator(".launch-composer-replace-warning");
+    await expect(warning).toContainText("still running");
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
+    await form.locator(".create-session-submit").click();
+    await expect(form.locator(".create-session-error")).toContainText("original request is retained");
+    expect(replaces).toHaveLength(1);
+    expect(replaces[0]).toMatchObject({ only_if_nothing_alive: false, only_if_agent_ended: false });
+
+    await stopSession(request, source.id);
+    await expect
+      .poll(async () => (await listSessions(request)).sessions.find((one) => one.id === source.id)?.status?.state, {
+        timeout: 20_000,
+      })
+      .toBe("exited");
+    feed.notify(2);
+    await expect(warning).toBeEmpty({ timeout: 20_000 });
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
+    await form.locator(".create-session-submit").click();
+    await expect.poll(() => replaces.length).toBe(2);
+    expect(replaces[1]).toMatchObject({ only_if_nothing_alive: true, only_if_agent_ended: false });
+    expect(replaces[1].with).toEqual(replaces[0].with);
+  } finally {
+    await cleanupSession(request, source.id);
+  }
 });
 
 /** Recent repo intent must never restore its old ephemeral directory. The

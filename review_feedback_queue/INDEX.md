@@ -10,8 +10,6 @@ One line per open item. This file must always match the feedback files in this d
   drive back-to-back refreshes and fleet-wide re-reads.
 - `ssh-forwarding-inherited.md` — with ForwardAgent/ForwardX11 in the user's ssh config, the helm's always-on
   connections expose the ssh agent and X display to remote agents.
-- `replace-with-kills-running-source-unwarned.md` — Replace with kills a running source session with no warning and no
-  liveness precondition.
 - `claude-scan-claims-foreign-record.md` — the Claude scan fallback can commit another process's conversation as the
   session's, so Resume appends to the wrong conversation.
 - `claude-resume-template-selector-collision.md` — Claude's derived resume command keeps an original `--continue`,
