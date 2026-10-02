@@ -378,19 +378,53 @@ impl ProvisioningService {
             .acquire()
             .await
             .expect("the provisioning planning semaphore is never closed");
-        // A rerun against a row this helm already knows must probe the
-        // installed path recorded at registration, not fall back to PATH.
-        // A brand-new helm has no such row; the remote probe itself also
-        // checks the standard flat install path for that recovery case.
-        if let ProbeDestination::Ssh { destination } = &request.target
-            && (request.remote_farhelm.is_none() || request.remote_state_dir.is_none())
-            && let Some(row) = self
+        // The stored row for this destination, if this helm knows one. Its
+        // paths fill in any the request leaves out (below), and a requested
+        // path EQUAL to the stored one is not new input either: the host
+        // row's own set up action sends its stored paths back.
+        let stored = match &request.target {
+            ProbeDestination::Ssh { destination } => self
                 .store
                 .list_hosts()
                 .await?
                 .into_iter()
-                .find(|row| row.destination.as_deref() == Some(destination.as_str()))
-        {
+                .find(|row| row.destination.as_deref() == Some(destination.as_str())),
+            ProbeDestination::Local => None,
+        };
+        // What the person entered is held to the full rule, in the registry's
+        // own words, before anything is probed: probing `~/...` reported
+        // "not installed" for a host where Farhelm is installed and offered
+        // to set it up. A path the helm already stores for this destination
+        // keeps the looser rule, so a host stored before the full rule
+        // existed can be set up again, which is what repairs it (the install
+        // uses absolute paths and the host is re-registered with them).
+        if matches!(request.target, ProbeDestination::Ssh { .. }) {
+            fn entered<'a>(requested: Option<&'a str>, kept: Option<&str>) -> Option<&'a str> {
+                requested.filter(|value| Some(*value) != kept)
+            }
+            crate::store::require_usable_remote_paths(
+                entered(
+                    request.remote_farhelm.as_deref(),
+                    stored
+                        .as_ref()
+                        .and_then(|row| row.remote_farhelm.as_deref()),
+                ),
+                entered(
+                    request.remote_state_dir.as_deref(),
+                    stored
+                        .as_ref()
+                        .and_then(|row| row.remote_state_dir.as_deref()),
+                ),
+            )
+            .map_err(|refusal| {
+                anyhow::Error::new(ProvisioningRequestError::InvalidProbe(refusal.to_string()))
+            })?;
+        }
+        // A rerun against a row this helm already knows must probe the
+        // installed path recorded at registration, not fall back to PATH.
+        // A brand-new helm has no such row; the remote probe itself also
+        // checks the standard flat install path for that recovery case.
+        if let Some(row) = stored {
             request.remote_farhelm = request.remote_farhelm.or(row.remote_farhelm);
             request.remote_state_dir = request.remote_state_dir.or(row.remote_state_dir);
         }
