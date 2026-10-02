@@ -227,6 +227,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Make the host pop-up menu match the session pop-up menu.** Redesign the host pop-up menu so it looks and feels
   exactly like the session pop-up menu: the same positioning, the same style, the same per-item descriptions, and so on.
 
+- **An update button on hosts that can be updated.** When a host in the host list can be updated (an old version, or one
+  that needs an update), show an actual clickable "update" button there instead of only text. Keep the update option in
+  the host's pop-up menu as well. When an update is not just possible but required, the button should look different,
+  probably red; the exact treatment is for design time.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
