@@ -1185,10 +1185,11 @@ the runtime session ID or encoded locator; for Grok it means the verified UUID, 
 evidence path. The original argv is reused as-is, including permission and configuration arguments, and is preserved as
 argv elements rather than rejoined shell text — except that OMP's own session selectors are stripped from the retained
 argv first, so an old resume or fork target cannot survive between the user and the verified one. Grok instead refuses
-to derive a template when the retained argv already has a session selector or a real `--`; an explicit template remains
-available for a custom supported shape. This immediate rule assumes every original argument is reusable and that the
-launch has no initial prompt or launch-only option; separating those concerns into common, launch, and resume arguments
-is deferred.
+to derive a template when the retained argv already has a session selector or a real `--`, and Codex refuses when any
+argument is spelled `resume` or `fork` (its session-selecting subcommands, which Codex accepts only once), even where
+that word is an option value or the prompt; an explicit template remains available for a custom supported shape. This
+immediate rule assumes every original argument is reusable and that the launch has no initial prompt or launch-only
+option; separating those concerns into common, launch, and resume arguments is deferred.
 
 Anything farhelm attaches to an agent launch must be invisible from inside the session when it works AND when it fails:
 no output on the agent's terminal, no non-zero exit, no error the agent's own UI can show. A hook that cannot do its job

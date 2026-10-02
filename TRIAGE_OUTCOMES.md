@@ -5025,7 +5025,8 @@
   `codex resume <id>` launch with and without an explicit template. Add the Codex resume-selector collision as an
   example to the TODO.md `Near term` entry "Re-examine and simplify how launches are represented". Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `uzvukoxktxkq`, bookmark `triage-1001d/01-codex-resume-selector`, PR
+  https://github.com/scode/farhelm/pull/1397.
 
 ## tmux-capture-tail-deadline.md
 
