@@ -5630,7 +5630,8 @@
   agent, X11 or ports; SPEC_impl.md's list of honored features is corrected. Both branches of the shared argument prefix
   add `ForwardAgent=no`, `ForwardX11=no` and `ClearAllForwardings=yes`, with argument tests updated; confirm during
   execution that `ClearAllForwardings` leaves ProxyJump working. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `xxwsvlnt` (shared with the other ssh outcome, by plan decision P2), bookmark
+  `triage-1001e/06-ssh-overrides`, PR https://github.com/scode/farhelm/pull/1447.
 
 ## ssh-config-remotecommand-blocks-host.md
 
@@ -5645,7 +5646,8 @@
 - Completion criteria: the same SPEC.md statement names `RemoteCommand` (and a forced TTY, if execution confirms it
   matters) as overridden; the shared argument prefix adds `RemoteCommand=none` and, if needed, `-T`, with argument tests
   updated. May share a PR with `ssh-forwarding-inherited.md`. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `xxwsvlnt` (shared with the other ssh outcome, by plan decision P2), bookmark
+  `triage-1001e/06-ssh-overrides`, PR https://github.com/scode/farhelm/pull/1447.
 
 ## merged-list-crowded-by-one-host.md
 

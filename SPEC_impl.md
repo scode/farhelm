@@ -1024,9 +1024,18 @@ versions; it refuses protocol-version incompatibility per SPEC.md's version-skew
 diagnostics only — mixed builds with a compatible protocol are the normal steady state SPEC.md describes.
 
 Motivation: SPEC.md promises provisioning and transport ride "the user's keys, agent, and config" — only the real ssh
-binary honors ~/.ssh/config fully (ProxyJump, Match blocks, agent forwarding, ControlMaster). russh was rejected for
-exactly that: partial config support would quietly break the promise. JSON control frames keep the protocol debuggable
-by eye; raw binary data channels keep PTY throughput off the JSON path.
+binary honors ~/.ssh/config fully (ProxyJump, Match blocks, the agent used to authenticate, ControlMaster). russh was
+rejected for exactly that: partial config support would quietly break the promise. What the config does not get is what
+rides Farhelm's connections: every ssh invocation carries `-o` overrides (`CONNECTION_OVERRIDES` in
+`crates/farhelm-helm/src/ssh.rs`) for agent, X11 and port forwarding, `RemoteCommand`, `RequestTTY` and
+`PermitLocalCommand`, which win over the config file. They set an OpenSSH 7.6 floor on the helm machine, and settings
+whose override keywords are newer (`SessionType`, `StdinNull`, `ForkAfterAuthentication`, all 8.7) are left alone rather
+than break older ssh. A port forward set up by a shared connection's master that predates an upgrade survives if the new
+helm reuses that master within its 60 seconds of persistence (the ordinary path for the macOS desktop app: quit,
+install, reopen), and lasts until the master exits (left unused for over a minute, its connection to the host dropped,
+or `ssh -O exit` on its socket); see the `CONNECTION_OVERRIDES` docs. `ClearAllForwardings` leaves ProxyJump working,
+because the jump runs as its own `ssh -W` child; that was checked with a real connection through a jump on localhost.
+JSON control frames keep the protocol debuggable by eye; raw binary data channels keep PTY throughput off the JSON path.
 
 `SessionInfo` carries a `last_activity_at` (unix seconds) beside `created_at`: the last time the supervisor observed
 that session's agent pane change. It was added WITHIN protocol version 11 rather than bumping it, per the running rule

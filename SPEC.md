@@ -1465,7 +1465,14 @@ Further requirements:
   provisioning, updates, and all supervisor communication. How the SSH connection itself is possible (a tailnet, a LAN,
   whatever) is the user's business. No public relay, no third-party rendezvous service.
 - Provisioning rides the user's existing SSH access — their keys, agent, and config. Farhelm stores no SSH credentials
-  of its own.
+  of its own. Confirmed 2026-10-01: the config governs reaching and authenticating to the host (keys, the agent used to
+  authenticate, ProxyJump, Match blocks), not what rides Farhelm's connections. Whatever the config says, Farhelm's own
+  ssh connections, the supervisor connection and every provisioning step alike, never forward the agent, X11 or ports,
+  and override the settings that would replace or wrap Farhelm's own remote command: a `RemoteCommand`, a forced
+  terminal, and a `LocalCommand`. A remote host therefore cannot reach the helm machine's ssh agent, display or local
+  ports through a connection that stays up around the clock. Accepted: right after an upgrade, a helm started within a
+  minute of the previous version stopping (the desktop app reopened, or a helm run by hand) can attach to a shared ssh
+  connection the previous version left open, and port forwards that connection set up last until it closes.
 - Agent credentials (e.g. Claude subscription auth) live on the host running the agent, in the agent's own standard
   configuration. The system must not extract, proxy, or repurpose agent OAuth credentials. Claude Code authenticates
   directly with a consumer subscription, unmodified.
