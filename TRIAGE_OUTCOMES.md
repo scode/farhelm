@@ -4453,7 +4453,8 @@
 - Completion criteria: require the input box's full shape (rule, `❯` row, closing rule), or check for the dialog footer
   before accepting a box candidate. Add the highlighted-last-option variant as a fixture-derived test, and correct the
   comment's assumption. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `vnqnvtnwvllq`, bookmark `triage-1001/08-claude-last-option`, PR
+  https://github.com/scode/farhelm/pull/1364.
 
 ## claude-spinner-window-too-short.md
 

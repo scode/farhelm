@@ -270,7 +270,8 @@ impl ScreenReader for GenericReader {}
 /// Claude Code's reader.
 ///
 /// Claude draws its input box as a `❯` line directly below a horizontal
-/// rule, with a user-configurable status area below it. While a turn runs,
+/// rule and above a closing rule, with a user-configurable status area
+/// below it. While a turn runs,
 /// a spinner line (`✶ Imagining… (2s · thinking)`, the glyph and verb
 /// rotating) sits just above that box for the whole turn, tool runs
 /// included. Every dialog that needs the user — permission prompts,
@@ -326,15 +327,30 @@ impl ScreenReader for ClaudeReader {
 }
 
 /// The index of the horizontal rule that opens Claude's input box: the
-/// last `❯` line whose preceding line is a rule.
+/// last `❯` line with a rule directly above it and another rule somewhere
+/// below it, the box's closing rule.
 ///
 /// The last one, because Claude echoes submitted prompts into the
 /// transcript with the same `❯` prefix; only the box has a rule directly
-/// above it. Menus draw `❯` at a selected option, but never under a rule.
+/// above it. Menus draw `❯` at their selected option, and that can sit
+/// under a rule too: the captured question dialog separates its last
+/// option (`Chat about this`) from the others with one, so highlighting
+/// that option puts `❯ 4. …` right under it. Every captured input box has a
+/// closing rule below its `❯` row and that dialog has none below its last
+/// option, so the box's whole shape is required rather than just its top.
+/// A dialog not yet captured that draws a rule below such an option would
+/// still pass for a box.
+///
+/// Somewhere below rather than directly below, because a draft longer than
+/// one row puts its wrapped rows between the `❯` row and the closing rule.
 fn claude_input_box_rule(lines: &[&str]) -> Option<usize> {
     (1..lines.len())
         .rev()
-        .find(|&index| lines[index].starts_with('❯') && lines[index - 1].starts_with('─'))
+        .find(|&index| {
+            lines[index].starts_with('❯')
+                && lines[index - 1].starts_with('─')
+                && lines[index + 1..].iter().any(|line| line.starts_with('─'))
+        })
         .map(|index| index - 1)
 }
 
@@ -795,6 +811,14 @@ mod tests {
             "● done\n────────\n❯ what does Esc to cancel do\n────────\n  user@host:~/work";
         assert_eq!(
             read(AgentKind::Claude, claude_draft, "").state,
+            ScreenState::Idle
+        );
+        // A draft that wraps puts rows between the `❯` row and the box's
+        // closing rule; the box must still be recognized.
+        let wrapped_draft =
+            "● done\n────────\n❯ what does Esc to\n  cancel do\n────────\n  user@host:~/work";
+        assert_eq!(
+            read(AgentKind::Claude, wrapped_draft, "").state,
             ScreenState::Idle
         );
     }
