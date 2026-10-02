@@ -526,8 +526,15 @@ it, never the SVGs by hand, and the outline step only reruns when the word or th
 
 `website/` is the user-facing documentation site. `website/AGENTS.md` holds its mechanics (link syntax, the sidebar as
 the outline, and stub pages), and `website/EDITORIAL_RULES.md` holds how its pages read (user-facing framing, the jargon
-list, liberal cross-referencing) and how maintainer feedback on drafts becomes new rules; read both before adding or
-changing a page there.
+list, liberal cross-referencing) and how maintainer feedback on drafts becomes new rules; read both before changing
+anything there, whatever the change. The docs Overview page (`website/src/content/docs/docs/index.mdx`, which the README
+screenshot procedure below calls the landing page) and the words drawn into its intro SVGs by
+`website/scripts/render-svgs.mjs` are edited only when the maintainer asks for that edit, even when the README
+introduction they mirror changes; propose the edit instead. The README screenshot refresh's one-line URL rewrite is the
+one exception (`website/EDITORIAL_RULES.md` has the details). `website/scripts/preview.sh` serves the site from a
+checkout at a fixed local port for the maintainer to review drafts in a browser; `website/AGENTS.md` says when to start
+it and which links to hand over. Its fixed port is deliberate (the script says why) and is not a harness that the
+fixed-port rule below applies to.
 
 # Desktop/web UI bug triage
 
