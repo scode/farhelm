@@ -107,8 +107,14 @@ const WRITE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
 ///
 /// Thirty seconds is long enough that an idle fleet pays almost no scheduling
 /// cost, while a silently vanished seat is reclaimed well within a minute or
-/// two. A revision write resets this idle window, but only a Pong or other
-/// inbound frame answers the Ping and proves the peer is still participating.
+/// two. The window measures silence from the PEER: only an inbound frame (a
+/// Pong, or any control frame) and the Ping itself restart it, never a
+/// revision this side writes. A write succeeding proves nothing, since the
+/// kernel buffers it for a peer that is gone, and when writes did restart the
+/// window, a fleet that changed more often than every thirty seconds never
+/// let a Ping fall due, so a vanished subscriber kept its seat until the
+/// network connection itself timed out. A live subscriber on a busy fleet now
+/// answers one Ping per interval, which costs nothing worth counting.
 const IDLE_PING_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// How many clients may hold a subscription at once, across this helm.
@@ -241,7 +247,8 @@ async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket, auth: Aut
                 if !notify(&mut tx, revision, &auth).await {
                     return;
                 }
-                idle.as_mut().reset(tokio::time::Instant::now() + IDLE_PING_INTERVAL);
+                // No idle reset here: a write is not evidence the peer is
+                // still there (see `IDLE_PING_INTERVAL`).
             }
             incoming = rx.next() => {
                 match incoming {
@@ -372,6 +379,24 @@ mod tests {
             .get("revision")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or_else(|| panic!("a revision notice carries a `revision` number: {text}"))
+    }
+
+    /// Read the rest of a feed until the server closes it, as the opcodes
+    /// of its frames in order.
+    ///
+    /// The keepalive tests read the feed only once the timed part is over.
+    /// Waiting on the socket lets the paused clock jump to the next timer,
+    /// and the next timer is exactly the keepalive schedule under test, so
+    /// the timed part never waits on IO and checks its premise afterwards.
+    async fn opcodes_until_close(ws: &mut WsTestClient) -> Vec<u8> {
+        let mut opcodes = Vec::new();
+        while let Some((opcode, _)) = ws.recv().await {
+            if opcode == 8 {
+                break;
+            }
+            opcodes.push(opcode);
+        }
+        opcodes
     }
 
     /// Coalescing is the property that makes a lagged subscriber a
@@ -937,9 +962,13 @@ mod tests {
 
     /// A peer that disappears without sending FIN must not occupy the only
     /// seat forever. The first interval gives it a Ping; the second interval
-    /// is the bounded observation window in which it must answer. Revision
-    /// bursts between the handshake and the Ping cost extra intervals, so
-    /// the bound below is on the silence, not the schedule.
+    /// is the bounded observation window in which it must answer. Revisions
+    /// written to it meanwhile must not postpone either step: on a fleet
+    /// that changed more often than every interval they used to keep the
+    /// Ping from ever falling due, so a vanished subscriber kept its seat
+    /// until the network connection itself timed out. So a revision arrives
+    /// every quarter interval throughout, and the seat must still free
+    /// within two intervals of the handshake, after exactly one Ping.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn an_unanswered_keepalive_releases_the_subscriber_seat() {
         let mut harness = rest_harness::FleetBuilder::new()
@@ -978,57 +1007,59 @@ mod tests {
             "the pinned revision must arrive before the keepalive"
         );
 
-        // Revisions reset the idle window, so each one consumed costs an
-        // interval; a ladder restart mid-test publishes a few more. The cap
-        // bounds that burst — past it the test fails loud instead of
-        // spinning, and well past anything the quiesce above leaves behind.
-        let (opcode, payload) = 'keepalive: {
-            for _ in 0..10 {
-                tokio::time::advance(super::IDLE_PING_INTERVAL).await;
+        // A busy fleet from here on: a revision every quarter interval,
+        // written to a subscriber that never reads or answers. The window
+        // opened no later than the handshake and writes must not restart it,
+        // so the Ping falls due within one interval and the verdict one
+        // interval later. Nothing in this loop waits on the socket (see
+        // `opcodes_until_close`).
+        let events = harness.manager.events().clone();
+        let quarter = super::IDLE_PING_INTERVAL / 4;
+        let mut released = false;
+        'window: for _ in 0..8 {
+            tokio::time::advance(quarter).await;
+            for _ in 0..20 {
                 tokio::task::yield_now().await;
-                let frame = vanished
-                    .recv()
-                    .await
-                    .expect("the idle subscriber must receive a keepalive Ping");
-                if frame.0 != 1 {
-                    break 'keepalive frame;
+                if let Some(seat) = events.admit(1) {
+                    drop(seat);
+                    released = true;
+                    break 'window;
                 }
             }
-            panic!("ten intervals passed without a keepalive Ping");
-        };
-        assert_eq!(opcode, 9, "the keepalive must be a WebSocket Ping");
-        assert!(
-            payload.is_empty(),
-            "the keepalive Ping has no application payload"
-        );
-
-        // The seat is still held. Read through the same counter the endpoint
-        // gates on rather than another socket: a round trip here would race
-        // loopback IO against the paused clock.
-        assert!(
-            harness.manager.events().admit(1).is_none(),
-            "one unanswered Ping must not release the seat yet"
-        );
-
-        // A revision that landed after the Ping pushed its release an
-        // interval out; keep advancing until the seat frees rather than
-        // assuming the next interval is the one. Same cap discipline: a
-        // bounded silence is the property, and past the cap something is
-        // genuinely stuck.
-        for _ in 0..5 {
-            tokio::time::advance(super::IDLE_PING_INTERVAL).await;
-            tokio::task::yield_now().await;
-            let released = harness.manager.events().admit(1);
-            if released.is_some() {
-                drop(released);
-                return;
+            events.bump();
+            for _ in 0..3 {
+                tokio::task::yield_now().await;
             }
         }
-        panic!("five silent intervals passed without releasing the seat");
+        assert!(
+            released,
+            "a silent subscriber must give its seat back within two intervals, however busy the fleet"
+        );
+
+        // The premise, checked now that the clock no longer matters: the
+        // revisions really were written to the silent subscriber, before and
+        // after its one Ping, and it was then closed.
+        let opcodes = opcodes_until_close(&mut vanished).await;
+        let ping = opcodes
+            .iter()
+            .position(|&opcode| opcode == 9)
+            .unwrap_or_else(|| panic!("the subscriber must have been pinged: {opcodes:?}"));
+        assert_eq!(
+            opcodes.iter().filter(|&&opcode| opcode == 9).count(),
+            1,
+            "one unanswered Ping, then the verdict: {opcodes:?}"
+        );
+        assert!(
+            opcodes[ping + 1..].contains(&1),
+            "revisions kept being written while the Ping went unanswered: {opcodes:?}"
+        );
     }
 
-    /// A live peer that answers each keepalive remains admitted across idle
-    /// periods, which is the behavior browsers provide automatically.
+    /// A live peer that answers each keepalive remains admitted, which is the
+    /// behavior browsers provide automatically. Driven on a busy fleet,
+    /// because since revision writes stopped restarting the idle window a
+    /// live subscriber is pinged every interval however much is written to
+    /// it, and its answers alone must keep it connected.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn a_subscriber_answering_keepalives_stays_connected() {
         let mut harness = rest_harness::FleetBuilder::new()
@@ -1040,28 +1071,28 @@ mod tests {
         let mut ws = WsTestClient::connect(addr, "/api/events").await;
         revision(&mut ws).await;
 
-        for _ in 0..3 {
-            // The local row's connect ladder may still be walking after the
-            // handshake, so consume those legitimate revisions before looking
-            // for the keepalive whose interval each resets.
-            let (opcode, payload) = loop {
-                tokio::time::advance(super::IDLE_PING_INTERVAL).await;
-                tokio::task::yield_now().await;
-                let frame = ws
-                    .recv()
-                    .await
-                    .expect("a live subscriber must receive each keepalive");
-                if frame.0 != 1 {
-                    break frame;
-                }
-            };
-            assert_eq!(opcode, 9, "the keepalive must be a WebSocket Ping");
-            assert!(
-                payload.is_empty(),
-                "the keepalive Ping has no application payload"
-            );
-            ws.send_pong().await;
+        // A busy fleet, as in the test above, with a subscriber that answers:
+        // a revision every quarter interval and a Pong every interval. The
+        // Pongs land after each Ping has fallen due, so every Ping is sent
+        // and answered inside its observation window. Nothing waits on the
+        // socket here (see `opcodes_until_close`); the many yields after a
+        // Pong let the scheduler poll the socket so the server reads it.
+        let events = harness.manager.events().clone();
+        let quarter = super::IDLE_PING_INTERVAL / 4;
+        for q in 1..=18 {
+            tokio::time::advance(quarter).await;
             tokio::task::yield_now().await;
+            events.bump();
+            if q % 4 == 2 {
+                ws.send_pong().await;
+                for _ in 0..200 {
+                    tokio::task::yield_now().await;
+                }
+            } else {
+                for _ in 0..3 {
+                    tokio::task::yield_now().await;
+                }
+            }
         }
 
         let replacement = WsTestClient::try_connect(addr, "/api/events")
@@ -1069,6 +1100,16 @@ mod tests {
             .err()
             .expect("a live subscriber must retain its seat");
         assert_eq!(replacement, 503);
+
+        // The premise: it really was pinged repeatedly while revisions
+        // flowed. Reading on, it stops answering, so the feed ends with one
+        // last unanswered Ping and the verdict.
+        let opcodes = opcodes_until_close(&mut ws).await;
+        assert!(
+            opcodes.iter().filter(|&&opcode| opcode == 9).count() >= 4,
+            "a busy subscriber is still pinged every interval: {opcodes:?}"
+        );
+        assert!(opcodes.contains(&1), "revisions were written: {opcodes:?}");
     }
 
     /// Both inbound size bounds are enforced, and each is caught BEFORE the

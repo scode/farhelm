@@ -61,8 +61,6 @@ One line per open item. This file must always match the feedback files in this d
 
 - `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
   to read.
-- `event-feed-liveness-postponed-by-revisions.md` — the event feed's liveness check never fires on a busy fleet, so dead
-  subscribers hold the 64 seats.
 - `sink-shutdown-retries-forever-after-delete.md` — deleting a busy session can leave its sink client stuck in an
   endless shutdown-retry loop.
 - `input-client-notifications-pile-up.md` — idle input clients never read tmux notifications, so tmux server memory
