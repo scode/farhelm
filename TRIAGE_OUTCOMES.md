@@ -5826,7 +5826,8 @@
   message unless an explicit resume template is supplied, mirroring `GrokAmbiguousResumeBoundary`. Amend SPEC.md's
   derived-resume paragraph to list Claude beside Grok and Codex. Add regressions for an original `claude --continue` and
   a `--` launch, with and without an explicit template. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`. The TODO.md example was added during triage.
+- Execution: complete: change `pmkorkrq`, bookmark `triage-1001e/15-claude-resume-selector`, PR
+  https://github.com/scode/farhelm/pull/1458. The TODO.md example was added during triage.
 
 ## claude-clear-report-dropped-on-claim-timeout.md
 

@@ -1133,6 +1133,46 @@ fn grok_has_ambiguous_resume_shape(args: &[String]) -> bool {
     })
 }
 
+/// Whether appending Claude's derived `--resume <id>` would collide with a
+/// conversation the launch already selects, or land behind `--`.
+///
+/// Claude's selectors are `--continue`/`-c` (the folder's most recent
+/// conversation), `--resume`/`-r`, `--session-id`, `--from-pr` and
+/// `--teleport` (checked against Claude Code 2.1.288's `--help`), plus
+/// `--fork-session`, which makes a resume fork a copy instead of continuing
+/// the conversation it names. Appended beside one of them, the derived
+/// `--resume <id>` leaves Claude two answers to "which conversation", and if
+/// it honors the original one, Resume opens a different conversation than
+/// the one Farhelm captured, whose identity then replaces the valid offer.
+/// Behind a whole-element `--`, the appended flag is prompt text, so Resume
+/// starts a fresh conversation instead.
+///
+/// Every argument is scanned, the way [`grok_has_ambiguous_resume_shape`]
+/// does, rather than mirroring Claude's option grammar. Two costs follow,
+/// of the kind Grok and Codex accept. A wrapper or launcher declared as the
+/// Claude kind whose OWN arguments include `-c` or `--` (the documented
+/// `sh -c '...' w {cwd} claude` wrapper, `mise exec -- claude`) is
+/// refused, though its derived resume would have worked; it needs an
+/// explicit resume template, the escape hatch for every refusal here. And clustered or attached short forms (`-pc`,
+/// `-r<id>`), which Claude's parser accepts, are not recognized.
+fn claude_has_ambiguous_resume_shape(args: &[String]) -> bool {
+    args.iter().any(|argument| {
+        matches!(
+            argument.as_str(),
+            "--" | "--continue"
+                | "-c"
+                | "--resume"
+                | "-r"
+                | "--session-id"
+                | "--from-pr"
+                | "--teleport"
+                | "--fork-session"
+        ) || ["--resume=", "--session-id=", "--from-pr=", "--teleport="]
+            .iter()
+            .any(|prefix| argument.starts_with(prefix))
+    })
+}
+
 /// Whether a Codex launch already selects a session, so appending the
 /// derived `resume <id>` would produce two selectors.
 ///
@@ -1451,8 +1491,9 @@ impl AgentIntegration for ClaudeIntegration {
         inject_hook_argv_tail(self, AgentKind::Claude, argv, policy, claude::hook_refusal)
     }
 
-    fn ambiguous_derived_resume(&self, _original_argv: &[String]) -> Option<SnapshotError> {
-        None
+    fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError> {
+        claude_has_ambiguous_resume_shape(&original_argv[1..])
+            .then_some(SnapshotError::ClaudeAmbiguousResumeSelector)
     }
 
     fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
@@ -2137,6 +2178,21 @@ pub enum SnapshotError {
          its own resume command"
     )]
     CodexAmbiguousResumeSelector,
+    /// A derived Claude template cannot append `--resume <id>` to a launch
+    /// that already selects a conversation (`--continue`/`-c`,
+    /// `--resume`/`-r`, `--session-id`, `--from-pr`, `--teleport`,
+    /// `--fork-session`, or an argument spelled that way) or carries a
+    /// whole-element `--`: the first could resume a different conversation
+    /// than the captured one, the second would read the appended flag as
+    /// prompt text.
+    #[error(
+        "a Claude invocation that already contains --continue, -c, --resume, -r, --session-id, \
+         --from-pr, --teleport, --fork-session or a bare \"--\" cannot be resumed by Farhelm: \
+         the --resume flag Farhelm would add could open a different conversation or be read as \
+         prompt text; launch it without that argument, or from a profile that sets its own \
+         resume command"
+    )]
+    ClaudeAmbiguousResumeSelector,
 }
 
 /// This module's stable spelling of a kind for human-facing messages.
@@ -2179,11 +2235,11 @@ impl IntegrationSnapshot {
     /// do not match the resolved kind: integrated kinds need the placeholder,
     /// while generic kinds cannot use it because they have no identity capture.
     /// A derived template must also have an unambiguous place for its resume
-    /// selector. OMP refuses a genuine end-of-options delimiter; Grok also
-    /// refuses an existing selector because its derived form owns that
-    /// argument, and Codex refuses an argument spelled `resume` or `fork`
-    /// because it accepts only one session selector (see [`SnapshotError`]
-    /// for the exact cases).
+    /// selector. OMP refuses a genuine end-of-options delimiter; Grok and
+    /// Claude also refuse an existing selector because their derived form
+    /// owns that argument, and Codex refuses an argument spelled `resume` or
+    /// `fork` because it accepts only one session selector (see
+    /// [`SnapshotError`] for the exact cases).
     pub fn resolve(
         original_argv: &[String],
         kind_override: Option<AgentKind>,
@@ -3879,6 +3935,77 @@ mod tests {
                 "codex",
                 "--yolo",
                 "resume",
+                CONVERSATION_PLACEHOLDER
+            ]))
+        );
+    }
+
+    /// Spec: a Claude launch that already selects a conversation
+    /// (`--continue`/`-c`, `--resume`/`-r`, `--session-id`, `--from-pr`,
+    /// `--teleport`, `--fork-session`, inline `=` forms included) or carries a
+    /// bare `--` refuses a derived resume template;
+    /// an explicit template still resolves for each, and a plain Claude
+    /// launch, flags and prompt included, still derives `--resume
+    /// {conversation}`.
+    ///
+    /// Why: the derived template appends `--resume <id>`. Beside an existing
+    /// selector, Claude can resume a different conversation than the
+    /// captured one, which then replaces the valid Resume offer; behind
+    /// `--`, the flag becomes prompt text and Resume starts afresh. Refusing
+    /// at create time, as Grok and Codex do, tells the user to supply a
+    /// resume command instead.
+    #[farhelm_testtrace::test]
+    fn claude_derived_resume_refuses_an_existing_selector_or_boundary() {
+        let argv = |words: &[&str]| {
+            words
+                .iter()
+                .map(|word| word.to_string())
+                .collect::<Vec<_>>()
+        };
+        for refused in [
+            argv(&["claude", "--continue"]),
+            argv(&["claude", "--model", "opus", "-c"]),
+            argv(&["claude", "--resume", "old-id"]),
+            argv(&["claude", "-r", "old-id"]),
+            argv(&["claude", "--resume=old-id"]),
+            argv(&["claude", "--session-id", "old-id"]),
+            argv(&["claude", "--session-id=old-id"]),
+            argv(&["claude", "--", "fix the build"]),
+            argv(&["claude", "--from-pr", "123"]),
+            argv(&["claude", "--from-pr=123"]),
+            argv(&["claude", "--teleport"]),
+            argv(&["claude", "--fork-session"]),
+        ] {
+            assert_eq!(
+                IntegrationSnapshot::resolve(&refused, None, None),
+                Err(SnapshotError::ClaudeAmbiguousResumeSelector),
+                "derived argv must refuse: {refused:?}"
+            );
+            let template = argv(&["claude", "--resume", CONVERSATION_PLACEHOLDER]);
+            let explicit = IntegrationSnapshot::resolve(&refused, None, Some(template.clone()))
+                .unwrap_or_else(|error| {
+                    panic!("an explicit template must still resolve for {refused:?}: {error}")
+                });
+            assert_eq!(
+                explicit.resume_template,
+                Some(template),
+                "the explicit template is the one kept for {refused:?}"
+            );
+        }
+        let plain = IntegrationSnapshot::resolve(
+            &argv(&["claude", "--model", "opus", "fix the build"]),
+            None,
+            None,
+        )
+        .expect("a plain claude launch derives");
+        assert_eq!(
+            plain.resume_template,
+            Some(argv(&[
+                "claude",
+                "--model",
+                "opus",
+                "fix the build",
+                "--resume",
                 CONVERSATION_PLACEHOLDER
             ]))
         );

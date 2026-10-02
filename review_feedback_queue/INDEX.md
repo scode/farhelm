@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `claude-resume-template-selector-collision.md` — Claude's derived resume command keeps an original `--continue`,
-  `--resume` or `--`, so Resume can open the wrong conversation or start fresh.
 - `omp-corridor-uncounted-pane-runtime.md` — when the foreground OMP's command line cannot be read, a nested OMP can
   take over the session's Resume target.
 - `claude-clear-report-dropped-on-claim-timeout.md` — a Claude `/clear` report refused after a 1 s capture-claim wait is
