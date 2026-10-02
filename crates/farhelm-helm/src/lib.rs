@@ -621,8 +621,9 @@ fn api_router(state: Arc<AppState>) -> Router {
         // a partial-update shape this API has nowhere else.
         .route("/api/hosts", get(hosts::list_hosts).post(hosts::add_host))
         // Provisioning is separate from registry management: probe is
-        // discovery-first and non-mutating on absence, while provision and
-        // update return run identities whose state is re-read after feed
+        // discovery-first. It changes nothing when no supervisor answers, and
+        // registers the host (on a helm-owned task) when one does; provision
+        // and update return run identities whose state is re-read after feed
         // bumps. Their in-flight exclusion lives in AppState, not in one
         // browser's operation lock.
         .route(

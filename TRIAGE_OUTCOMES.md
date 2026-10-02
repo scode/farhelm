@@ -5346,7 +5346,8 @@
   runs on a helm-owned task, as #1196 did for the other host edits, so a dropped probe request loses only the reply;
   correct the route comment that calls the probe non-mutating. Add a regression that drops the request after the save
   and asserts the host is registered and dialed. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `mxmoyukwsztm`, bookmark `triage-1001d/13-probe-registration-owned`, PR
+  https://github.com/scode/farhelm/pull/1409.
 
 ## desktop-start-fails-on-skewed-supervisor.md
 

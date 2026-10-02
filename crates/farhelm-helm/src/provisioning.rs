@@ -955,6 +955,87 @@ mod tests {
         assert!(backend.operations.lock().unwrap().is_empty());
     }
 
+    /// A probe that finds a supervisor finishes registering the host even if
+    /// its request is dropped after the host's row is saved.
+    ///
+    /// Why it matters: registration saves the row and then starts the host's
+    /// connection actor. Run on the request's task, a reload or closed tab
+    /// between the two left a saved host with no actor, missing from the host
+    /// list and never dialed until something unrelated re-read the registry
+    /// (SPEC_impl.md "Who owns an accepted action"). Specified: with the
+    /// registration held after the save, dropping the probe request still
+    /// ends with the host's actor running and the host connected.
+    #[farhelm_testtrace::test]
+    async fn a_dropped_probe_still_finishes_registering_a_discovered_host() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        let service = service(&harness, backend, root.path());
+        let gate = Arc::new(service::RegistrySyncGate {
+            reached: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        *service.registry_sync_gate.lock().unwrap() = Some(Arc::clone(&gate));
+        let probe = tokio::spawn({
+            let service = Arc::clone(&service);
+            async move {
+                service
+                    .probe(ProbeRequest {
+                        target: ProbeDestination::Ssh {
+                            destination: "user@dropped".to_string(),
+                        },
+                        remote_farhelm: None,
+                        remote_state_dir: None,
+                    })
+                    .await
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(10), gate.reached.notified())
+            .await
+            .expect("test premise: registration reaches the reconcile after saving the row");
+        let host = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.destination.as_deref() == Some("user@dropped"))
+            .expect("test premise: the row is saved before the reconcile")
+            .id;
+        assert!(
+            harness.manager.status(host).is_none(),
+            "test premise: no actor runs for the host before the reconcile"
+        );
+        // The fleet's peer for this host reports the identity the probe
+        // recorded, so the dial below can connect rather than freeze.
+        harness.fleet.edit(host, |script| {
+            script.identity = Some("test-identity".to_string());
+        });
+        // The client goes away, which is axum dropping the handler's future.
+        probe.abort();
+        let dropped = probe.await;
+        assert!(
+            dropped.as_ref().is_err_and(|join| join.is_cancelled()),
+            "test premise: the probe was still in flight when dropped"
+        );
+        gate.release.notify_one();
+
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while harness.manager.status(host).is_none() {
+                // sleep-ok: polling interval for the actor set, which raises no event a test can await.
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the discovered host's actor must start after its probe request was dropped");
+        // And the owned task's dial goes through: the host connects.
+        // `await_state` bounds the wait itself and reports the last state on
+        // a stall.
+        harness
+            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await;
+    }
+
     /// Positive absence may offer a plan, but probing itself must not create
     /// a registry row, directory, unit, or payload transfer.
     #[farhelm_testtrace::test]

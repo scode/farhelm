@@ -124,6 +124,21 @@ pub(crate) struct ProvisioningService {
     /// database and actor set do not diverge after registration commits.
     #[cfg(test)]
     pub(super) fail_registry_sync: std::sync::atomic::AtomicBool,
+    /// Hold the next durable-to-live registry handoff. Lets a test drop the
+    /// request that is registering a host after its row is saved and before
+    /// its actor is reconciled.
+    #[cfg(test)]
+    pub(super) registry_sync_gate: std::sync::Mutex<Option<Arc<RegistrySyncGate>>>,
+}
+
+/// A one-shot hold on [`ProvisioningService::sync_registry`]; see
+/// `registry_sync_gate`.
+#[cfg(test)]
+pub(super) struct RegistrySyncGate {
+    /// Notified when registration reaches the reconcile.
+    pub(super) reached: tokio::sync::Notify,
+    /// Notified by the test to let the reconcile run.
+    pub(super) release: tokio::sync::Notify,
 }
 
 impl ProvisioningService {
@@ -161,6 +176,8 @@ impl ProvisioningService {
                 progress_read_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PROGRESS_READS),
                 #[cfg(test)]
                 fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
+                #[cfg(test)]
+                registry_sync_gate: std::sync::Mutex::new(None),
             }));
         }
         // The directory a RELATIVE `--payload-dir` is spelled against
@@ -182,6 +199,8 @@ impl ProvisioningService {
             progress_read_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PROGRESS_READS),
             #[cfg(test)]
             fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            registry_sync_gate: std::sync::Mutex::new(None),
         }))
     }
 
@@ -207,6 +226,7 @@ impl ProvisioningService {
             plan_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PLANS),
             progress_read_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PROGRESS_READS),
             fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
+            registry_sync_gate: std::sync::Mutex::new(None),
         })
     }
 
@@ -316,7 +336,10 @@ impl ProvisioningService {
 
     /// Complete discovery before either registering an answer or retaining a
     /// non-mutating plan for later confirmation.
-    pub(super) async fn probe(&self, mut request: ProbeRequest) -> anyhow::Result<ProbeResponse> {
+    pub(super) async fn probe(
+        self: &Arc<Self>,
+        mut request: ProbeRequest,
+    ) -> anyhow::Result<ProbeResponse> {
         let _slot = self
             .plan_slots
             .acquire()
@@ -358,18 +381,16 @@ impl ProvisioningService {
                 dial_state_dir,
             } => {
                 let host_id = self
-                    .register(
-                        &registration,
-                        None,
-                        Some(DiscoveredDial {
+                    .register_discovered(
+                        registration,
+                        DiscoveredDial {
                             farhelm: dial_farhelm,
                             state_dir: dial_state_dir,
                             identity: host_identity.clone(),
-                        }),
+                        },
+                        build_version.clone(),
                     )
                     .await?;
-                self.resolve_failed_add_discovery(host_id, &build_version)
-                    .await;
                 Ok(ProbeResponse::Discovered {
                     host_id,
                     build_version,
@@ -389,18 +410,16 @@ impl ProvisioningService {
                 dial_state_dir,
             } => {
                 let host_id = self
-                    .register(
-                        &registration,
-                        None,
-                        Some(DiscoveredDial {
+                    .register_discovered(
+                        registration,
+                        DiscoveredDial {
                             farhelm: dial_farhelm,
                             state_dir: dial_state_dir,
                             identity: None,
-                        }),
+                        },
+                        peer_build.clone(),
                     )
                     .await?;
-                self.resolve_failed_add_discovery(host_id, &peer_build)
-                    .await;
                 Ok(ProbeResponse::Discovered {
                     host_id,
                     build_version: peer_build,
@@ -459,6 +478,35 @@ impl ProvisioningService {
                 })
             }
         }
+    }
+
+    /// Register a host a probe found already running a supervisor, and
+    /// settle a failed ADD the discovery makes obsolete, on a task this
+    /// service owns (SPEC_impl.md "Who owns an accepted action").
+    ///
+    /// Registration saves the row and then reconciles the actor set and dials
+    /// the host. Run on the request's task, a request dropped between those
+    /// steps (a reload, a closed tab) left a saved host with no actor: absent
+    /// from the host list and never dialed, or for a re-probed host, still
+    /// dialing its old paths, until something unrelated re-read the
+    /// registry. A dropped request now loses only the reply.
+    async fn register_discovered(
+        self: &Arc<Self>,
+        registration: ProbeRegistration,
+        discovered: DiscoveredDial,
+        build_version: String,
+    ) -> anyhow::Result<HostId> {
+        let service = Arc::clone(self);
+        crate::run_owned(async move {
+            let host_id = service
+                .register(&registration, None, Some(discovered))
+                .await?;
+            service
+                .resolve_failed_add_discovery(host_id, &build_version)
+                .await;
+            anyhow::Ok(host_id)
+        })
+        .await
     }
 
     /// Establish the host id and the exact dial configuration proved by the
@@ -577,6 +625,18 @@ impl ProvisioningService {
             .swap(false, std::sync::atomic::Ordering::SeqCst)
         {
             bail!("planted registry synchronization failure");
+        }
+        #[cfg(test)]
+        {
+            let gate = self
+                .registry_sync_gate
+                .lock()
+                .expect("registry sync gate mutex poisoned")
+                .take();
+            if let Some(gate) = gate {
+                gate.reached.notify_one();
+                gate.release.notified().await;
+            }
         }
         self.manager.sync_registry().await
     }
