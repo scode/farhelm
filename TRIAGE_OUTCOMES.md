@@ -5494,7 +5494,13 @@
   confirm sends `only_if_nothing_alive` and `stop_if_running` derived from the prompt actually rendered, as header
   Delete does; header Restart's confirm sends `stop_if_running` only when the answered prompt offered to stop a working
   agent. Add UI tests for a prompt whose wording drifted. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Decision (plan time, 2026-10-01, refines the above): Delete has no stop consent and only one precondition, so the user
+  authorized a second, narrower precondition, "only if the agent has ended", on the Delete and Replace requests (proto,
+  helm and supervisor), chosen by the UI from the prompt the user answered: nothing alive sends `only_if_nothing_alive`,
+  a tabs-only warning sends the new one, a warning that the agent runs sends neither. It applies to header Delete as
+  well. Accepted: a tab opened between the prompt and the click is still closed; naming the exact tabs shown is not
+  required.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## replace-with-kills-running-source-unwarned.md
 
@@ -5513,7 +5519,12 @@
   is refused, and asks again, when the source's state has since grown. The UI shows that text and sends
   `only_if_nothing_alive` (or the matching stop consent) from what the launcher displayed. Add UI tests for a running
   source and for a source restarted while the launcher was open. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Decision (plan time, 2026-10-01, refines the above): the precondition levels from
+  `confirmed-nothing-alive-prompt-kills-live-agent.md` apply. "Refused" keeps Replace's existing semantics, which the
+  user accepted: the replacement is created first and a source that no longer matches what the launcher showed is kept,
+  with the existing both-sessions-exist error; no liveness check before the create. SPEC.md is written to match. The
+  fresh-checkout launch fixes the precondition into its retained, replayable payload at launch time.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## claude-scan-claims-foreign-record.md
 
@@ -5536,7 +5547,7 @@
   report never arrived, has no captured identity and takes the existing uncaptured-identity fallback; the Claude record
   scan is named as pending removal under TODO.md's near-term entry rather than as supported behavior. Remove this
   feedback file and its index entry. The code removal itself is the TODO entry, not this item.
-- Execution: `pending`. The near-term TODO entry was recorded during triage.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`. The near-term TODO entry was recorded during triage.
 
 ## claude-scan-budget-never-settles.md
 
@@ -5547,7 +5558,7 @@
 - Decision: only true because the Claude record scan still exists; removed with it under the near-term TODO from
   `claude-scan-claims-foreign-record.md` (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## claude-capture-warns-forever.md
 
@@ -5560,7 +5571,7 @@
   `claude-scan-claims-foreign-record.md`, which also covers re-verification of records the scan captured earlier (user,
   2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## ssh-forwarding-inherited.md
 
@@ -5581,7 +5592,7 @@
   agent, X11 or ports; SPEC_impl.md's list of honored features is corrected. Both branches of the shared argument prefix
   add `ForwardAgent=no`, `ForwardX11=no` and `ClearAllForwardings=yes`, with argument tests updated; confirm during
   execution that `ClearAllForwardings` leaves ProxyJump working. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## ssh-config-remotecommand-blocks-host.md
 
@@ -5596,7 +5607,7 @@
 - Completion criteria: the same SPEC.md statement names `RemoteCommand` (and a forced TTY, if execution confirms it
   matters) as overridden; the shared argument prefix adds `RemoteCommand=none` and, if needed, `-T`, with argument tests
   updated. May share a PR with `ssh-forwarding-inherited.md`. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## merged-list-crowded-by-one-host.md
 
@@ -5614,7 +5625,7 @@
   carve-out: a misbehaving host may crowd or clutter what the helm and GUI show, including pushing other hosts' sessions
   out of the merged list, and removing it is the remedy; it must still not break the helm or affect other hosts'
   security. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## output-client-shutdown-can-retry-forever.md
 
@@ -5645,7 +5656,7 @@
 - Completion criteria: the attach wait stops early on skew, identity mismatch, unverified identity and duplicate, and
   reports the state and its remedy, reusing the existing update-trust wording; add tests. Remove this feedback file and
   its index entry. Stop and ask before implementing if this needs significant new complexity or a refactor.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## folder-picker-skips-symlinks.md
 
@@ -5659,7 +5670,7 @@
   skipped rather than failing the listing; add a symlink test. Following links can block on a wedged mount, which the
   existing browse worker and permit design tolerates. Remove this feedback file and its index entry. Stop and ask before
   implementing if this needs significant new complexity or a refactor.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## tilde-in-remote-path-fields.md
 
@@ -5674,7 +5685,10 @@
   API boundary with a message asking for an absolute path, and the UI shows that refusal; add tests. Remove this
   feedback file and its index entry. Stop and ask before implementing if this needs significant new complexity or a
   refactor.
-- Execution: `pending`.
+- Decision (plan time, 2026-10-01, refines the above): a bare program name in the remote farhelm field (resolved through
+  the remote PATH) is an existing, tested form and stays valid; refuse a leading `~` and a relative value containing `/`
+  there, and anything non-absolute in the remote state dir field.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## drop-on-hidden-terminal-navigates-away.md
 
@@ -5689,7 +5703,7 @@
   app; a drop on a pane with no live terminal shows the "not connected" outcome SPEC.md implies rather than nothing. Add
   a browser regression. Remove this feedback file and its index entry. Stop and ask before implementing if this needs
   significant new complexity or a refactor.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## partial-release-download-left-behind.md
 
@@ -5703,7 +5717,7 @@
 - Completion criteria: every failed download removes its partial file using the existing cleanup helper; add a test for
   a mid-stream failure. Remove this feedback file and its index entry. Stop and ask before implementing if this needs
   significant new complexity or a refactor.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## incarnation-counter-restarts-per-process.md
 
@@ -5717,7 +5731,7 @@
 - Completion criteria: incarnation numbers do not repeat across helm processes in practice (for example a per-process
   random or time-derived starting value kept below 2^53 for JSON safety); add a test. Remove this feedback file and its
   index entry. Stop and ask before implementing if this needs significant new complexity or a refactor.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## sessions-changed-hint-unthrottled.md
 
@@ -5738,7 +5752,7 @@
   busy honest one; add a test with a flooding peer. SPEC.md "Remote input, session defaults, and availability" gains the
   principle above, alongside the misbehaving-host remedy recorded under `merged-list-crowded-by-one-host.md`. Remove
   this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## claude-resume-template-selector-collision.md
 
@@ -5761,7 +5775,7 @@
   message unless an explicit resume template is supplied, mirroring `GrokAmbiguousResumeBoundary`. Amend SPEC.md's
   derived-resume paragraph to list Claude beside Grok and Codex. Add regressions for an original `claude --continue` and
   a `--` launch, with and without an explicit template. Remove this feedback file and its index entry.
-- Execution: `pending`. The TODO.md example was added during triage.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`. The TODO.md example was added during triage.
 
 ## claude-clear-report-dropped-on-claim-timeout.md
 
@@ -5780,7 +5794,13 @@
   fixed wait, for Claude and for any other kind sharing the path (check Codex's); the hook's own bounded wait still
   keeps the agent from being held up. Correct the comments that claim a retry or refresh converges the row. Add a
   regression with the claim held past the old bound. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Decision (plan time, 2026-10-01, supersedes the code fix above): planning found the fix needs a reorder of the
+  documented report-admission steps (both simple approaches fail: a longer wait overruns the hook's 2 s budget, and a
+  deferred write cannot redo Claude's live-process attribution). The user chose to promote it to a `Near term` TODO.md
+  entry referencing this review item and explaining the complication, instead of fixing it now. The feedback file stays,
+  referenced by that entry.
+- Execution: `deferred`; promoted to TODO.md's `Near term` entry "Apply identity reports that arrive while the session's
+  record is busy" during planning. The feedback file and its index line stay until that entry is done.
 
 ## omp-corridor-uncounted-pane-runtime.md
 
@@ -5800,7 +5820,7 @@
   not the emitter or whose arguments cannot be read, with a unit test for the unreadable-pane chain; remove this
   feedback file and its index entry. If that turns out complicated, instead add a `Near term` TODO.md entry describing
   the problem and remove this feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## process-snapshot-requires-supervisor-witness.md
 
@@ -5818,7 +5838,7 @@
 - Completion criteria: a snapshot that does not contain the supervisor's own pid is an error ("could not look"), so
   cleanup relying on it is unconfirmed rather than successful; add a pure test. No broader discovery changes. Remove
   TODO.md's "Snapshot self-witness" entry, this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## probe-cancellation-leaves-helper-processes.md
 
@@ -5836,7 +5856,7 @@
 - Completion criteria: the whole probe runs on a helm-owned task (`run_owned`, as plan item 13 uses), so a dropped
   request still runs the probe's own process-group cleanup within its timeout; add a dropped-request regression. Land
   alongside or after plan item 13. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## pi-pointer-overrides-user-prompt.md
 
@@ -5846,7 +5866,7 @@
   the user's own text survives. Older Pi versions were not checked.
 - Decision: discard (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## refresh-starved-by-seeds.md
 
@@ -5857,7 +5877,7 @@
   stops, then correct themselves, while the host reads healthy.
 - Decision: discard (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## env-wrapper-hides-command-not-found.md
 
@@ -5868,7 +5888,7 @@
   harnesses is intentionally partial), though borderline because the error/exited split is a general session promise.
 - Decision: discard (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## event-feed-cap-refusal-invisible.md
 
@@ -5880,7 +5900,7 @@
   of clients the product targets.
 - Decision: discard (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
 
 ## terminal-font-promise-leak.md
 
@@ -5895,7 +5915,7 @@
   `Definite
   simplification` entry during triage (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: `pending`. The TODO.md entry was recorded during triage.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`. The TODO.md entry was recorded during triage.
 
 ## desktop-copy-fallback-never-runs.md
 
@@ -5907,4 +5927,4 @@
   silent-on-failure clipboard contract.
 - Decision: discard (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
