@@ -412,7 +412,7 @@ pub(crate) fn builtin_profiles() -> Vec<farhelm_proto::Profile> {
             id: "builtin-cursor".to_string(),
             builtin: true,
             name: "cursor".to_string(),
-            invocation: "agent".to_string(),
+            invocation: "cursor-agent".to_string(),
             agent_kind: farhelm_proto::AgentKind::Generic,
             resume_template: None,
         },
@@ -420,7 +420,7 @@ pub(crate) fn builtin_profiles() -> Vec<farhelm_proto::Profile> {
             id: "builtin-cursor-yolo".to_string(),
             builtin: true,
             name: "cursor-yolo".to_string(),
-            invocation: "agent --force".to_string(),
+            invocation: "cursor-agent --force".to_string(),
             agent_kind: farhelm_proto::AgentKind::Generic,
             resume_template: None,
         },
@@ -14225,8 +14225,8 @@ mod tests {
         for (id, name, invocation) in [
             ("builtin-muse", "muse", "muse"),
             ("builtin-muse-yolo", "muse-yolo", "muse --yolo"),
-            ("builtin-cursor", "cursor", "agent"),
-            ("builtin-cursor-yolo", "cursor-yolo", "agent --force"),
+            ("builtin-cursor", "cursor", "cursor-agent"),
+            ("builtin-cursor-yolo", "cursor-yolo", "cursor-agent --force"),
         ] {
             expected_builtins.push(farhelm_proto::Profile {
                 id: id.to_string(),

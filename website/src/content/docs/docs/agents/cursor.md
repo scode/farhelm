@@ -1,24 +1,25 @@
 ---
 title: Cursor
-description: Launching Cursor's agent CLI; conversation tracking and Resume are not supported.
+description: Launching Cursor's cursor-agent CLI; conversation tracking and Resume are not supported.
 sidebar:
   order: 10
 ---
 
-Farhelm can launch Cursor's `agent` CLI, with optional model selection and a YOLO permission choice. **Conversation
-tracking and Resume are not supported.** Restart starts a new conversation; clone preserves launch choices, not the
-conversation. This page describes Cursor CLI `2026.09.18-9a7762b`.
+Farhelm can launch Cursor's `cursor-agent` CLI, with optional model selection and a YOLO permission choice.
+**Conversation tracking and Resume are not supported.** Restart starts a new conversation; clone preserves launch
+choices, not the conversation. This page describes Cursor CLI `2026.09.18-9a7762b`.
 
 ## Launching
 
 Install and authenticate [Cursor CLI](https://cursor.com/docs/cli/overview) on each host/account where you will run it.
-The `agent` command on that host's PATH must be Cursor's executable. If another program uses that name, use an explicit
-path to Cursor's `cursor-agent` launcher through “other / command” or a custom Generic profile.
+Farhelm starts it as `cursor-agent`, so that command must be on the host's PATH. Cursor also installs it as `agent`, but
+Farhelm does not use that name: other tools install a command called `agent` too, so the name says nothing about which
+program will run.
 
-Choose Cursor in the launch composer, or use the `cursor` / `cursor-yolo` built-in profiles. These produce `agent` and
-`agent --force`, respectively. Omitting a model leaves Cursor's default in effect. The small suggested model list
-contains `auto` and `composer-2.5`; a custom Cursor model ID is passed as one literal `--model` argument. Saved
-structured choices survive history, clone and fresh restart.
+Choose Cursor in the launch composer, or use the `cursor` / `cursor-yolo` built-in profiles. These produce
+`cursor-agent` and `cursor-agent --force`, respectively. Omitting a model leaves Cursor's default in effect. The small
+suggested model list contains `auto` and `composer-2.5`; a custom Cursor model ID is passed as one literal `--model`
+argument. Saved structured choices survive history, clone and fresh restart.
 
 Default permissions add no flag and retain Cursor's configuration. YOLO adds `--force`, which allows commands except
 those explicitly denied by Cursor's configuration. Other vendor modes can be used in raw commands. Farhelm does not

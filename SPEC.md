@@ -161,7 +161,8 @@ as Built-in; historical stored starter rows remain editable and deletable. Integ
 profile optionally names an agent kind from Farhelm's built-in v1 catalog (Claude Code, Codex), which selects that
 kind's status heuristics and conversation-identity capture; profiles without a kind get generic treatment.
 
-Cursor is a structured harness with `cursor` and `cursor-yolo` built-in profiles invoking `agent` and `agent --force`.
+Cursor is a structured harness with `cursor` and `cursor-yolo` built-in profiles invoking `cursor-agent` and
+`cursor-agent --force`; Farhelm launches Cursor by that name, never as the generic `agent`, which other tools also use.
 Its model is optional, with `auto`, `composer-2.5` and literal custom IDs supported. Default permissions add no flag;
 YOLO preserves explicit Cursor denies. There is no separate effort selector. Cursor uses generic activity status and has
 no conversation tracking, automatic Resume, configuration editing, hooks or instruction injection. The launcher states
@@ -458,19 +459,22 @@ Structured launches are classified exactly. For a custom launch (a typed command
 recognition is best effort: Farhelm covers the common documented shapes, including an agent started behind an
 `env NAME=value` prefix, and counts an `env` given options it does not interpret as YOLO when it goes on to name an
 agent program Farhelm knows, but it cannot promise to recognize every command line that turns approval prompts off. An
-arbitrary wrapper, such as a script or `sh -c`, is not guaranteed to be detected. The helm enforces this, so no client
-can skip it: every create, clone, replace, replace with, and restart with that reaches it on such a host without the
-override is refused before any supervisor is contacted, and nothing is started. The GUI answers that refusal with a
-prominent confirmation, shown with the control or surface that started the launch and scrolled into view, that names the
-host, says what YOLO means and why this launch is one (YOLO was chosen where the harness offers other modes, the harness
-has no mode with approval prompts, or the command line turns them off), and retries with the override only when the user
-confirms. Besides a one-off confirmation it offers to stop asking for that host: that answer first sets the host to
-start YOLO sessions without asking, exactly as its settings would, and then retries with the override; if changing that
-setting fails, nothing is started and the confirmation stays up with the reason. `farhelm agent create`,
-`farhelm agent clone`, and `farhelm spawn` with a catalog selector take `--confirm-yolo` as the override (its earlier
-name, `--allow-yolo-on-sensitive-host`, is still accepted but no longer shown in help). A plain restart relaunches the
-session's own stored launch and is not asked again, and so does `farhelm spawn --inherit-agent`, which reuses the asking
-session's launch and is answered by its own supervisor with no helm involved.
+arbitrary wrapper, such as a script or `sh -c`, is not guaranteed to be detected. A custom command line is recognized by
+its vendor's standard program name (`cursor-agent` for Cursor, `grok` for Grok, `pi` for Pi, and so on). The generic
+name `agent` is not interpreted, and an agent installed or launched under any other name, including a launch that
+declares the Pi kind (in a profile or a create request) for a program not named `pi`, is not detected. The helm enforces
+this, so no client can skip it: every create, clone, replace, replace with, and restart with that reaches it on such a
+host without the override is refused before any supervisor is contacted, and nothing is started. The GUI answers that
+refusal with a prominent confirmation, shown with the control or surface that started the launch and scrolled into view,
+that names the host, says what YOLO means and why this launch is one (YOLO was chosen where the harness offers other
+modes, the harness has no mode with approval prompts, or the command line turns them off), and retries with the override
+only when the user confirms. Besides a one-off confirmation it offers to stop asking for that host: that answer first
+sets the host to start YOLO sessions without asking, exactly as its settings would, and then retries with the override;
+if changing that setting fails, nothing is started and the confirmation stays up with the reason.
+`farhelm agent create`, `farhelm agent clone`, and `farhelm spawn` with a catalog selector take `--confirm-yolo` as the
+override (its earlier name, `--allow-yolo-on-sensitive-host`, is still accepted but no longer shown in help). A plain
+restart relaunches the session's own stored launch and is not asked again, and so does `farhelm spawn --inherit-agent`,
+which reuses the asking session's launch and is answered by its own supervisor with no helm involved.
 
 A session snapshots its profile at creation — launch and resume invocations and integration selection alike. Editing or
 deleting a profile affects future sessions only; existing sessions keep working unchanged.

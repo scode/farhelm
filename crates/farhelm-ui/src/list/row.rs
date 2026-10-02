@@ -432,7 +432,7 @@ fn known_harness(program: &str) -> HarnessGlyph {
         "codex" => HarnessGlyph::Codex,
         "claude" => HarnessGlyph::Claude,
         "muse" => HarnessGlyph::Muse,
-        "agent" | "cursor-agent" => HarnessGlyph::Cursor,
+        "cursor-agent" => HarnessGlyph::Cursor,
         "goose" => HarnessGlyph::Goose,
         "pi" => HarnessGlyph::Pi,
         "omp" => HarnessGlyph::Omp,
@@ -3005,8 +3005,9 @@ mod tests {
         assert_eq!(known_harness("codex"), HarnessGlyph::Codex);
         assert_eq!(known_harness("claude"), HarnessGlyph::Claude);
         assert_eq!(known_harness("muse"), HarnessGlyph::Muse);
-        assert_eq!(known_harness("agent"), HarnessGlyph::Cursor);
         assert_eq!(known_harness("cursor-agent"), HarnessGlyph::Cursor);
+        // Too general a name to mean Cursor: other vendors install under it.
+        assert_eq!(known_harness("agent"), HarnessGlyph::Terminal);
         assert_eq!(known_harness("goose"), HarnessGlyph::Goose);
         assert_eq!(known_harness("pi"), HarnessGlyph::Pi);
         assert_eq!(known_harness("opencode"), HarnessGlyph::OpenCode);

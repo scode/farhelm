@@ -487,7 +487,7 @@ fn program(harness: LaunchHarness) -> &'static str {
         LaunchHarness::Codex => "codex",
         LaunchHarness::Claude => "claude",
         LaunchHarness::Muse => "muse",
-        LaunchHarness::Cursor => "agent",
+        LaunchHarness::Cursor => "cursor-agent",
         LaunchHarness::OpenCode => "opencode",
         LaunchHarness::Goose => "goose",
         LaunchHarness::Pi => "pi",
@@ -657,7 +657,7 @@ mod tests {
                     workspace_trust: None,
                 };
                 let launch = compile(input.clone()).unwrap();
-                let mut expected = vec!["agent".to_string()];
+                let mut expected = vec!["cursor-agent".to_string()];
                 if let Some(model) = model {
                     expected.extend(["--model".into(), model.into()]);
                 }

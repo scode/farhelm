@@ -103,17 +103,16 @@ const INVOCATION_MARKERS: &[(&str, &[(&str, InvocationMarker)])] = &[
     // OpenCode calls its permission-bypass mode `--auto`; it is a YOLO
     // equivalent, unlike Codex's separately sandboxed `--full-auto`.
     ("opencode", &[("--auto", InvocationMarker::Yolo)]),
-    (
-        "agent",
-        &[
-            ("--force", InvocationMarker::Yolo),
-            ("--yolo", InvocationMarker::Yolo),
-        ],
-    ),
+    // Cursor's CLI, by its own program name only. The generic name `agent`
+    // is deliberately absent: other tools install a command by that name
+    // too, so a flag after `agent` says nothing about which vendor's
+    // meaning applies. Farhelm launches Cursor as
+    // `cursor-agent` for the same reason.
     (
         "cursor-agent",
         &[
             ("--force", InvocationMarker::Yolo),
+            ("-f", InvocationMarker::Yolo),
             ("--yolo", InvocationMarker::Yolo),
         ],
     ),
@@ -498,7 +497,7 @@ fn invocation_switches<'a>(
             "--settings",
         ],
         "muse" | "opencode" => &["--model", "-m"],
-        "agent" | "cursor-agent" => &["--model"],
+        "cursor-agent" => &["--model"],
         _ => &[],
     };
     let mut switches = Vec::new();
@@ -540,12 +539,17 @@ mod tests {
     /// Spec: a raw command line is YOLO when a recognized vendor program
     /// carries one of its YOLO-class flags anywhere before `--` (Claude's
     /// skip-permissions, Codex's `--yolo` and its long form, Muse's,
-    /// OpenCode's `--auto`, Cursor's `--force`/`--yolo`, Grok's
-    /// `--always-approve`), OMP's `--approval-mode yolo` or Claude's
-    /// `--permission-mode bypassPermissions` in either spelling, or when its
-    /// program is Pi. Codex's sandboxed `--full-auto`,
-    /// OMP's other approval modes, an unrecognized program carrying the same
-    /// spelling, and anything after `--` are not. A flag spelling used as
+    /// OpenCode's `--auto`, Cursor's `--force`/`-f`/`--yolo` under the name
+    /// `cursor-agent`, Grok's `--always-approve`), OMP's
+    /// `--approval-mode yolo` or Claude's `--permission-mode
+    /// bypassPermissions` in either spelling, or when its program is Pi.
+    /// Codex's sandboxed `--full-auto`, OMP's other approval modes, an
+    /// unrecognized program carrying the same spelling, and anything after
+    /// `--` are not. Neither is the generic program name `agent`, whatever
+    /// flags follow it: other tools install a command by that name, so it is
+    /// deliberately not interpreted (Farhelm launches Cursor as
+    /// `cursor-agent`). The badge recognizes Cursor's `-f` too and ignores
+    /// `agent`. A flag spelling used as
     /// another option's value counts, by design.
     ///
     /// Why: this decides whether the helm refuses a launch on a sensitive
@@ -562,7 +566,9 @@ mod tests {
             "codex -m gpt --yolo",
             "muse --yolo",
             "opencode --auto",
-            "agent --force",
+            "cursor-agent --force",
+            "cursor-agent -f",
+            "cursor-agent --model m -f",
             "cursor-agent --yolo",
             "pi",
             "/usr/local/bin/pi --model x",
@@ -584,6 +590,9 @@ mod tests {
             "codex",
             "echo --yolo",
             "codex -- --yolo",
+            "agent --force",
+            "agent -f",
+            "agent --no-leader --always-approve",
             "grok --no-leader",
             "omp --approval-mode always-ask",
             "claude --permission-mode acceptEdits",
@@ -597,6 +606,11 @@ mod tests {
             invocation_marker(&argv("codex --full-auto")),
             Some(InvocationMarker::FullAuto)
         );
+        assert_eq!(
+            invocation_marker(&argv("cursor-agent --model m -f")),
+            Some(InvocationMarker::Yolo)
+        );
+        assert_eq!(invocation_marker(&argv("agent --force")), None);
     }
 
     /// Spec: the classifier looks past a leading simple `env NAME=value`
