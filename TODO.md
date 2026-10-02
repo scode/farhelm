@@ -723,6 +723,12 @@ are large mostly because of their tests.
   the panic. When this is fixed, also correct SPEC_impl.md's "no bundle-directory fallback at all", which holds only
   under `/assets/`. Came up in review-feedback triage (`desktop-protocol-filesystem-fallback.md`) on 2026-10-02.
 
+- **Inject commands into agents.** Let something other than a person typing in the terminal send commands into a running
+  agent session. Two motivating uses: a UI button such as "stop all work and restart", and automation, scripts, or an
+  orchestrating agent driving workhorse agents that run as Farhelm sessions. The second overlaps with the cross-host
+  orchestration authority question in the earlier entry on closing the cross-host execution hole in agent-requested
+  session creation.
+
 ## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
