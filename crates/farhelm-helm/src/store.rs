@@ -4597,6 +4597,15 @@ impl HelmStore {
     /// one. A separate follow-up call could leave the two writes torn by a
     /// crash or a concurrent reader between them; one transaction cannot.
     ///
+    /// The host's "start YOLO sessions without asking" setting (`yolo_safe`)
+    /// is cleared in the same statement, so the adopted install asks before
+    /// YOLO launches again. Sensitivity is a property of the machine, and a
+    /// new identity at this destination means a different machine or a fresh
+    /// install the user has not judged yet (SPEC.md: the host settings
+    /// paragraph). Only adoption resets it; a stale settings dialog, and a
+    /// row marked before its first contact and then retargeted, are left
+    /// alone for now (the maintainer's triage decision, 2026-10-01).
+    ///
     /// The remembered default profile is NOT purged. Adoption replaces one
     /// host's installation identity, while the preference is a helm-wide
     /// singleton with no ownership relationship to that host or its cache.
@@ -4662,9 +4671,12 @@ impl HelmStore {
                     // flag was the PREDECESSOR install's word about the rows being
                     // purged below, and an empty successor cache marked incomplete
                     // would show the notice indefinitely if the first refresh under
-                    // the new identity failed.
+                    // the new identity failed. `yolo_safe` is reset too: the user's
+                    // "start YOLO sessions without asking" was a judgment about the
+                    // install being replaced, not this one.
                     tx.execute(
-                        "UPDATE hosts SET host_identity = ?2, cache_truncated = 0 WHERE id = ?1",
+                        "UPDATE hosts SET host_identity = ?2, cache_truncated = 0, yolo_safe = 0 \
+                         WHERE id = ?1",
                         rusqlite::params![host, new],
                     )
                     .context("adopting new host identity")?;
@@ -8827,6 +8839,40 @@ mod tests {
         assert!(
             store.cached_rows(&[host]).await.unwrap().is_empty(),
             "and the cache it described is gone"
+        );
+    }
+
+    /// Adopting a new identity resets the host to asking before YOLO
+    /// launches: a host marked to start YOLO sessions without asking is no
+    /// longer marked after the adoption.
+    ///
+    /// Why: that setting is the user's judgment of one machine. A new
+    /// identity at the same destination is a reinstall, a recycled address
+    /// or another machine, so carrying the mark over let YOLO launches start
+    /// there without the confirmation the user never waived for it.
+    #[farhelm_testtrace::test]
+    async fn adoption_resets_the_host_to_asking_before_yolo_launches() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "adopt@yolo", "old-identity").await;
+        store.set_yolo_safe(host, true).await.expect("mark safe");
+        let row = |rows: Vec<HostRow>| rows.into_iter().find(|r| r.id == host).unwrap();
+        assert!(
+            row(store.list_hosts().await.unwrap()).yolo_safe,
+            "premise: the host is marked to start YOLO sessions without asking"
+        );
+
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "old-identity",
+                "new-identity",
+            )
+            .await
+            .expect("adopt");
+        assert!(
+            !row(store.list_hosts().await.unwrap()).yolo_safe,
+            "the adopted install must ask before YOLO launches again"
         );
     }
 

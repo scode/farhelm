@@ -536,7 +536,8 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
             (!remediation.trim().is_empty()).then(|| vec![DetailPart::peer(remediation)])
         }
         HostPhase::IdentityMismatch { .. } => Some(vec![DetailPart::text(
-            "adopt the identity the host reports, or fix the destination",
+            "adopt the identity the host reports, or fix the destination; adopting resets this \
+             host to asking before YOLO launches",
         )]),
         // Adopt is deliberately absent from this list of remedies, because
         // it is absent from the host's options: see `adoptable`.

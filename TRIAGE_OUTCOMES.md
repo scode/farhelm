@@ -4936,7 +4936,8 @@
   settings paragraph that adopting a new identity resets the host to asking before YOLO launches. Add a store test (mark
   safe, adopt a different identity, the row is no longer safe). Do not add an identity precondition to the setter or
   change first-contact recording. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
+- Execution: complete: change `vqonszswtolv`, bookmark `triage-1001c/06-adopt-resets-yolo`, PR
+  https://github.com/scode/farhelm/pull/1391.
 
 ## yolo-guard-misses-equivalent-spellings.md
 
