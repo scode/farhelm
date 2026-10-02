@@ -244,6 +244,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   probably red; the exact treatment is for design time. Hovering over the button should say what clicking it does and
   whether the update is required or merely possible; wording TBD. Plan: `plans/host-update-button.md`.
 
+- **Replace the YOLO session icon.** The sidebar marks a YOLO session with an open padlock, but the other permission
+  modes use a closed one, and the difference is hard to see. That makes it easy to read as "this session is locked
+  down", which is the opposite of what it means. Replace it with a mark that cannot be mistaken for a lock; the
+  replacement is TBD. The marks are drawn by `PermissionIcon` in `crates/farhelm-ui/src/icons.rs`.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
