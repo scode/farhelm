@@ -1707,6 +1707,16 @@ of writing, and says setup manages it there, the same hand-off the helm's own ma
 that exact name on a host the user asks Farhelm to provision is the user's to move aside first; provisioning does not
 try to tell it apart from its own.
 
+### First-class harnesses
+
+Confirmed 2026-10-01: Claude Code and Codex are the first-class harnesses. A clear, definite gap in how Farhelm reads
+their activity, such as a screen either agent draws in ordinary use that its reader classifies wrongly, is a defect and
+gets fixed. Activity tracking, session tracking and similar integration features for every other harness (Goose, Pi,
+OMP, Grok, and any added later) are intentionally partial; gaps there are expected and are not worth raising in code
+review. That allowance stops at those features. It does not cover lost user work (resuming the wrong conversation
+included), a session that fails to launch or run, an effect on other sessions, other hosts or the helm, or a security
+consequence. This may change as those integrations mature.
+
 ### Supported user environments
 
 Confirmed 2026-09-28: bash and zsh are the supported login shells, for agent launches and terminal tabs alike. Other

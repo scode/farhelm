@@ -416,7 +416,7 @@ impl ScreenReader for CodexReader {
         // (`› 1. Yes, proceed`). With a plain draft in the composer instead,
         // no dialog is open, and footer words in its last rows are the
         // user's own text.
-        let footer: Vec<&str> = if codex_dialog_may_be_open(&lines) {
+        let footer: Vec<&str> = if codex_dialog_may_be_open(&lines, screen.text) {
             last_lines(&lines, CODEX_FOOTER_LINES)
                 .iter()
                 .copied()
@@ -465,12 +465,21 @@ fn codex_queued_question(bottom: &[&str]) -> bool {
 /// Whether a Codex dialog may be on screen.
 ///
 /// Codex draws its dialogs as menus in place of the composer: the selected
-/// option marked `› 1. …` with at least one more numbered option below it
-/// (`  2. …`). A `›` row that is not such a menu is the composer holding a
+/// option marked `› 1. …` with another numbered option below it
+/// (`  2. …`) or, when the highlight sits on the last option, in the same
+/// block of rows above it. A `›` row that is not such a menu is the composer holding a
 /// draft, which Codex never shows beside a dialog, and so is a screen whose
 /// last rows carry the idle composer's own `? for shortcuts` hint. With no
 /// `›` row at all, a dialog may be open.
-fn codex_dialog_may_be_open(lines: &[&str]) -> bool {
+///
+/// The block above is read in the raw grid (`raw`), not in `lines`, which
+/// drops blank rows, and it ends at the first blank row: the composer always
+/// has a blank padding row over it, so for a numbered draft the block is
+/// empty, while a menu's options sit together in one block even when an
+/// option wraps onto a continuation row. Looking past that blank row would
+/// let a numbered list at the end of the transcript turn a draft into a
+/// menu.
+fn codex_dialog_may_be_open(lines: &[&str], raw: &str) -> bool {
     if last_lines(lines, CODEX_FOOTER_LINES)
         .iter()
         .any(|line| line.contains("for shortcuts"))
@@ -488,10 +497,17 @@ fn codex_dialog_may_be_open(lines: &[&str]) -> bool {
         .strip_prefix('›')
         .unwrap_or(lines[prompt])
         .trim_start();
-    is_option(selected)
-        && lines[prompt + 1..]
-            .iter()
-            .any(|line| is_option(line.trim_start()))
+    let option_below = lines[prompt + 1..]
+        .iter()
+        .any(|line| is_option(line.trim_start()));
+    let option_above = raw
+        .lines()
+        .rev()
+        .skip_while(|line| !line.starts_with('›'))
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .any(|line| is_option(line.trim_start()));
+    is_option(selected) && (option_below || option_above)
 }
 
 /// Whether a Codex screen ends in its composer: the last `›` line, with
@@ -697,6 +713,32 @@ mod tests {
         assert!(!codex_has_composer(&["  footer only"]));
     }
 
+    /// A Codex menu with its last option highlighted reads waiting even when
+    /// the option above it wraps onto a continuation row, and with no title
+    /// to go on.
+    ///
+    /// Why it matters: Codex is a first-class harness (SPEC.md "First-class
+    /// harnesses"), and the permission dialog's second option is long enough
+    /// to wrap in an 80-column pane. With the highlight on the last option,
+    /// the row right above it is then that continuation, and a check of only
+    /// that row read the dialog as an idle numbered draft. The title usually
+    /// says "Action Required" too, but a reader must not depend on it: some
+    /// hosts cannot read titles.
+    #[test]
+    fn codex_last_option_under_a_wrapped_option_reads_waiting() {
+        let menu = concat!(
+            "  $ sleep 20 && echo done > marker.txt\n",
+            "\n",
+            "  1. Yes, proceed (y)\n",
+            "  2. Yes, and don't ask again for commands that start with\n",
+            "     `sleep 20 && echo done` (p)\n",
+            "› 3. No, and tell Codex what to do differently (esc)\n",
+            "\n",
+            "  Press enter to confirm or esc to cancel",
+        );
+        assert_eq!(read(AgentKind::Codex, menu, "").state, ScreenState::Waiting);
+    }
+
     /// Text that merely mentions a dialog's words is not a dialog: a draft
     /// in either agent's input, and a conversation topic in Codex's title.
     ///
@@ -711,6 +753,10 @@ mod tests {
             "output\n› Explain the shortcut\n  Esc to cancel\n  status line",
             "output\n› 1. Explain the shortcut\n  Esc to cancel\n  status line",
             "output\n› 1. Explain\n  2. the shortcut\n  Esc to cancel\n  ? for shortcuts",
+            // A numbered list ending the transcript sits above the composer's
+            // blank padding row, never directly above the draft, so it does
+            // not make a numbered draft read as a highlighted last option.
+            "1. first\n2. second\n\n› 3. Explain the shortcut\n  Esc to cancel\n  status line",
         ] {
             assert_eq!(
                 read(AgentKind::Codex, draft, "task | codex").state,
