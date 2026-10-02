@@ -7,3 +7,6 @@ One line per plan, in the order the plans are executed. This file must always ma
 - [executed] `triage-feed-sink-identity.md` — execute the second batch of 2026-10-01 triage outcomes (event-feed
   keepalive, Delete waiting for the terminal reader, simpler duplicate-host handling, plus a `BUGS.md` entry and a
   `FILTER.md` filter).
+- [pending] `triage-yolo-sighup-replace.md` — execute the third batch of 2026-10-01 triage outcomes (YOLO detection for
+  custom launches and Cursor's switch to `cursor-agent`, the missing-host and adopt YOLO gaps, SIGHUP shutdown, and
+  Replace keeping the confirmed "nothing alive" answer).
