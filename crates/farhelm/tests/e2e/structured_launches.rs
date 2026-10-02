@@ -82,7 +82,7 @@ impl FakeHarness {
                     LaunchHarness::Codex => "codex",
                     LaunchHarness::Claude => "claude",
                     LaunchHarness::Muse => "muse",
-                    LaunchHarness::Cursor => "agent",
+                    LaunchHarness::Cursor => "cursor-agent",
                     LaunchHarness::Goose => "goose",
                     LaunchHarness::Pi => "pi",
                     LaunchHarness::Omp => "omp",
@@ -190,7 +190,14 @@ impl FakeHarness {
 pub(crate) fn fake_harness() -> FakeHarness {
     let bin = farhelm_teststate::tempdir().expect("fixture executable directory");
     let home = farhelm_teststate::tempdir().expect("structured launch agent home");
-    for name in ["codex", "claude", "muse", "opencode", "agent", "grok"] {
+    for name in [
+        "codex",
+        "claude",
+        "muse",
+        "opencode",
+        "cursor-agent",
+        "grok",
+    ] {
         let executable = bin.path().join(name);
         let counter = bin.path().join(format!("{name}.generation"));
         std::fs::write(

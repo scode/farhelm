@@ -90,3 +90,38 @@ pub(crate) async fn check(
         None => Ok(()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Spec: every built-in profile named `…-yolo` is classified YOLO by the
+    /// sensitive-host guard, and every other built-in is not.
+    ///
+    /// Why: built-in profiles are plain command lines, so the guard sees them
+    /// only through the shared classifier's tables. When the classifier
+    /// stopped reading the generic name `agent`, the built-in `cursor-yolo`
+    /// profile (then `agent --force`) would have started on a sensitive host
+    /// without asking had its launch not moved to `cursor-agent` in the same
+    /// change. An edit to either the built-in table or the classifier tables
+    /// can break that coupling silently; this catches it.
+    #[test]
+    fn builtin_yolo_profiles_are_guarded_and_the_rest_are_not() {
+        let builtins = crate::store::builtin_profiles();
+        assert!(
+            builtins
+                .iter()
+                .any(|profile| profile.name.ends_with("-yolo")),
+            "premise: some built-in YOLO profile exists"
+        );
+        for profile in builtins {
+            assert_eq!(
+                invocation_is_yolo(&profile.invocation),
+                profile.name.ends_with("-yolo"),
+                "built-in profile {} ({})",
+                profile.name,
+                profile.invocation
+            );
+        }
+    }
+}

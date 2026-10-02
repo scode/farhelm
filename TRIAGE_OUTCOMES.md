@@ -4970,7 +4970,8 @@
   name `agent` is not interpreted, and agents installed or launched under other names are not detected. OMP's
   `--auto-approve` and Grok's `--permission-mode bypassPermissions` are not part of this decision. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
+- Execution: complete: change `tqwsvpvomkwm`, bookmark `triage-1001c/03-cursor-agent-name`, PR
+  https://github.com/scode/farhelm/pull/1388.
 
 ## yolo-guard-skips-resume-template.md
 
