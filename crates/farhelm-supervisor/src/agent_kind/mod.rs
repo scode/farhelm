@@ -186,6 +186,13 @@ use farhelm_proto::{AgentKind, RestartOffer};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Locate the executable behind the launcher's simple `env NAME=value` prefix.
+/// Option-bearing `env` commands have different parsing rules and are deliberately
+/// left unsupported. Injection and resume must agree on this boundary, and so
+/// must the helm's YOLO guard, which is why the one copy of the rule lives in
+/// `farhelm-proto` beside the YOLO classifier.
+pub(crate) use farhelm_proto::yolo::effective_program_index;
+
 mod capture;
 pub(crate) mod claude;
 pub(crate) mod codex;
@@ -662,9 +669,7 @@ fn inject_hook_argv_tail(
 pub(crate) fn with_launch_environment(argv: Vec<String>, assignments: &[String]) -> Vec<String> {
     if argv
         .first()
-        .and_then(|program| Path::new(program).file_name())
-        .and_then(|name| name.to_str())
-        == Some("env")
+        .is_some_and(|program| farhelm_proto::yolo::is_env_program(program))
     {
         let mut wrapped = Vec::with_capacity(argv.len() + assignments.len());
         wrapped.push(argv[0].clone());
@@ -778,26 +783,6 @@ struct OmpIntegration;
 
 /// Grok is manually hooked and resumes only from an exact verified UUID.
 struct GrokIntegration;
-
-/// Locate the executable behind the launcher's simple `env NAME=value` prefix.
-/// Option-bearing `env` commands have different parsing rules and are deliberately
-/// left unsupported. Injection and resume must agree on this boundary.
-pub(crate) fn effective_program_index(argv: &[String]) -> Option<usize> {
-    let first = Path::new(argv.first()?).file_name()?.to_str()?;
-    if first != "env" {
-        return Some(0);
-    }
-    for (index, argument) in argv.iter().enumerate().skip(1) {
-        if argument.starts_with('-') {
-            return None;
-        }
-        if argument.contains('=') {
-            continue;
-        }
-        return Some(index);
-    }
-    None
-}
 
 impl AgentIntegration for GooseIntegration {
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
