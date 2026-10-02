@@ -275,7 +275,7 @@ impl TmuxDriver {
     ) -> anyhow::Result<ReplayStreamCandidate> {
         let deadline = tokio::time::Instant::now() + self.exchange_timeout;
         let mut child = self
-            .command()
+            .attached_client_command()
             .arg("-C")
             .arg("attach")
             .arg("-f")

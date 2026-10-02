@@ -2050,6 +2050,26 @@ impl TmuxDriver {
         cmd
     }
 
+    /// [`TmuxDriver::command`] for a long-lived attached control client
+    /// (terminal output, session sink, keystroke input): the same command,
+    /// started in a process group of its own.
+    ///
+    /// A terminal hangup or Ctrl-C goes to the whole foreground process
+    /// group. Sharing the supervisor's group, these clients got the signal
+    /// too and tmux tore the output-bearing ones down before the supervisor
+    /// could switch them off, the abrupt close that can abort the private
+    /// server (BUGS.md, "Abrupt supervisor death"). In a group of their own
+    /// they hear nothing of the terminal; the supervisor handles the signal
+    /// and closes the output-bearing clients in order, and drops the input
+    /// client, which carries no output. Not applied in `command` itself,
+    /// which also runs short one-off commands that should stay in the
+    /// supervisor's group.
+    pub(crate) fn attached_client_command(&self) -> Command {
+        let mut cmd = self.command();
+        cmd.process_group(0);
+        cmd
+    }
+
     /// Run one tmux command against the private server and return its
     /// stdout, turning a non-zero exit into an error carrying tmux's own
     /// stderr — tmux explains its refusals in prose ("can't find session",

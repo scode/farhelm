@@ -52,7 +52,7 @@ impl TmuxDriver {
         // retrying. With `=`, the attach fails and that retry loop handles
         // it.
         let mut child = self
-            .command()
+            .attached_client_command()
             .arg("-C")
             .arg("attach")
             .arg("-t")

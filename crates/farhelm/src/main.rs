@@ -1218,6 +1218,14 @@ fn runtime() -> anyhow::Result<tokio::runtime::Runtime> {
 /// Logging to stderr, always. stdout belongs to the protocol under
 /// `internal stdio` and to machine-readable output elsewhere, so a stray
 /// log line on it would corrupt frames rather than merely look untidy.
+///
+/// A log line that cannot be written is dropped silently
+/// (`log_internal_errors(false)`). By default the subscriber reports a failed
+/// write with `eprintln!` to the same stderr, which panics when stderr is a
+/// terminal that has gone away. That is exactly a hand-started supervisor's
+/// situation after its terminal closes or its ssh connection drops: the
+/// first log line after the hangup panicked the process before its orderly
+/// shutdown could run, the abrupt exit that shutdown exists to avoid.
 fn init_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -1225,6 +1233,7 @@ fn init_tracing() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .with_writer(std::io::stderr)
+        .log_internal_errors(false)
         .init();
 }
 

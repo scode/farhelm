@@ -4840,7 +4840,9 @@
   (optionally also start the desktop app's managed supervisor in its own group); correct `BUGS.md`'s description of
   which deaths skip the orderly path; add a focused test that a SIGHUP to the supervisor's process group runs the
   orderly shutdown. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
+- Execution: complete: change `xvywxyuqsnuz`, bookmark `triage-1001c/07-sighup-orderly-shutdown`, PR
+  https://github.com/scode/farhelm/pull/1392. The desktop app's managed-supervisor spawn was left alone (optional per
+  this entry).
 
 ## header-replace-recomputes-alive.md
 

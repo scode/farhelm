@@ -14391,18 +14391,26 @@ const SHUTDOWN_OUTPUT_BUDGET: Duration = Duration::from_secs(10);
 /// `farhelm supervisor run` in one call: build a supervisor on `state_dir`
 /// and serve its socket until it is told to stop.
 ///
-/// A stop is SIGTERM, SIGINT, or `stop` completing (the desktop app's stdin
-/// tether; callers without one pass a future that never completes). On any
-/// of them the supervisor closes every terminal-output client through its
-/// orderly no-output boundary, within [`SHUTDOWN_OUTPUT_BUDGET`], and then
-/// returns. That handler is the point of this function's shape, not
-/// ceremony: without it every planned stop, restart, or upgrade (which
-/// `KillMode=process` makes a SIGTERM to this process alone) killed the
-/// process with every output client still streaming, and tmux can abort
-/// its whole private server, and every session on the host, when such a
-/// client sees EOF with output queued. See
+/// A stop is SIGTERM, SIGINT, SIGHUP, or `stop` completing (the desktop
+/// app's stdin tether; callers without one pass a future that never
+/// completes). On any of them the supervisor closes every terminal-output
+/// client through its orderly no-output boundary, within
+/// [`SHUTDOWN_OUTPUT_BUDGET`], and then returns. That handler is the point
+/// of this function's shape, not ceremony: without it every planned stop,
+/// restart, or upgrade (which `KillMode=process` makes a SIGTERM to this
+/// process alone) killed the process with every output client still
+/// streaming, and tmux can abort its whole private server, and every
+/// session on the host, when such a client sees EOF with output queued. See
 /// [`Supervisor::shutdown_output_clients`]. SIGKILL, OOM kills and crashes
 /// remain the accepted residual recorded in BUGS.md.
+///
+/// SIGHUP is handled because its default action would kill the process on
+/// the spot, and a hangup is how a hand-started supervisor usually ends: its
+/// terminal closes or its ssh connection drops, and a desktop app's managed
+/// supervisor gets one when the terminal that launched the app closes. A
+/// SIGHUP that was already ignored when the process started (`nohup`) stays
+/// ignored: that is an explicit request to outlive the terminal, and
+/// installing a listener would override it.
 ///
 /// Returns `Err` on a fatal serving error, or with `stop`'s own error after
 /// the orderly shutdown ran.
@@ -14434,10 +14442,25 @@ pub async fn run(
     let mut terminate =
         signal(SignalKind::terminate()).context("installing the SIGTERM handler")?;
     let mut interrupt = signal(SignalKind::interrupt()).context("installing the SIGINT handler")?;
+    // `None` when an inherited ignore (`nohup`) is honored; see the docs.
+    let mut hangup = if sighup_is_ignored() {
+        None
+    } else {
+        Some(signal(SignalKind::hangup()).context("installing the SIGHUP handler")?)
+    };
+    let hangup_received = async {
+        match hangup.as_mut() {
+            Some(hangup) => {
+                hangup.recv().await;
+            }
+            None => std::future::pending::<()>().await,
+        }
+    };
     let (reason, stopped) = tokio::select! {
         result = sup.serve() => return result,
         _ = terminate.recv() => ("SIGTERM", Ok(())),
         _ = interrupt.recv() => ("SIGINT", Ok(())),
+        _ = hangup_received => ("SIGHUP", Ok(())),
         result = &mut stop => ("the stop tether", result),
     };
     tracing::info!(
@@ -14451,6 +14474,19 @@ pub async fn run(
         );
     }
     stopped
+}
+
+/// Whether SIGHUP's disposition is currently "ignore", as `nohup` leaves it
+/// for the program it runs. Read once, before [`run`] installs any listener,
+/// since installing one replaces the disposition.
+fn sighup_is_ignored() -> bool {
+    // SAFETY: a null new action makes `sigaction` a pure query; `current` is
+    // a zeroed, writable `sigaction` that the call fills in.
+    unsafe {
+        let mut current: libc::sigaction = std::mem::zeroed();
+        libc::sigaction(libc::SIGHUP, std::ptr::null(), &mut current) == 0
+            && current.sa_sigaction == libc::SIG_IGN
+    }
 }
 
 /// Connect to a running supervisor's socket (used by `internal stdio`).
