@@ -661,6 +661,41 @@ are large mostly because of their tests.
   action), including how moving between devices would work, and that agents acting through fleet operations are not a UI
   and would still act concurrently. Came up in review-feedback triage on 2026-10-01.
 
+- **Close the desktop window's filesystem read fallback (hardening only).** NOTE: This is defense in depth, not a bug
+  fix. No exploitable bug motivated it, and nothing known today can exercise it. The desktop window loads its page and
+  assets over Dioxus's private `dioxus://` scheme. Farhelm's embedded-asset handler
+  (`crates/farhelm-ui/src/desktop/assets.rs`) claims only the `assets` path segment, and every other path falls through
+  to the pinned dioxus-desktop 0.7.10 default (`protocol.rs`'s `desktop_handler`), whose dioxus-asset-resolver
+  percent-decodes the path, uses it as is when it names an existing absolute file, reads it, and answers 200 with
+  `Access-Control-Allow-Origin: *`. The page itself lives at `dioxus://index.html/`, so script in the window could fetch
+  `dioxus://index.html/etc/passwd`, or the user's ssh keys, same-origin. The resolver also `.expect()`s UTF-8 on the
+  decoded path, so a request like `dioxus://index.html/%ff` likely panics in the protocol callback, possibly aborting
+  the app (unverified).
+
+  Why this is not exploitable today: the only script in that window is Farhelm's own, embedded in the binary. The
+  `dioxus://` scheme is an in-process handler, not a listener, so no other program or web page can send it requests (and
+  same-account processes, which could read the files directly, are trusted by SPEC.md's threat model anyway). Dioxus's
+  navigation handler blocks every in-window navigation after the first load and hands http(s) links to the system
+  browser, so no outside page or iframe runs there. Everything untrusted is rendered as text: terminal output, session
+  titles and host-reported metadata, which SPEC.md's "Local authority and trust between hosts" says the GUI must treat
+  as untrusted, go through xterm.js cells, Dioxus's escaped text or `textContent`, never `innerHTML` or
+  `dangerous_inner_html`, and Rust-built page script interpolates only JSON-serialized values. Exploiting the fallback
+  would need a new script-injection bug in Farhelm's rendering or xterm.js, or a navigation escape in Dioxus or WebKit.
+  Such script would already hold the device secret and could drive the whole helm API, typing into terminals included,
+  so the file read adds a quieter route to files rather than new power. It is wanted at all because SPEC.md's "Client
+  hardening" holds the native app to a higher bar: proportionate hardening that narrows what a hypothetical flaw could
+  reach.
+
+  Why it is not done yet: as of 2026-10-02 every complete fix seems to need patching Dioxus, either through a
+  `[patch.crates-io]` fork of dioxus-desktop or dioxus-asset-resolver (the repo's first patched Rust dependency, to be
+  re-applied on every Dioxus upgrade) or through an upstream change picked up on a later Dioxus bump. The in-tree
+  alternatives do not hold up: claiming top-level directories as handler names fails because Dioxus matches the raw
+  first segment before percent-decoding, so `/%65tc/passwd` still reads `/etc/passwd`; wry refuses to re-register the
+  `dioxus` scheme, so replacing it means reimplementing Dioxus's page bootstrap and event channel; and a
+  Content-Security-Policy through the custom-head hook is partial, engine-dependent on custom schemes, and does not fix
+  the panic. When this is fixed, also correct SPEC_impl.md's "no bundle-directory fallback at all", which holds only
+  under `/assets/`. Came up in review-feedback triage (`desktop-protocol-filesystem-fallback.md`) on 2026-10-02.
+
 ## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
