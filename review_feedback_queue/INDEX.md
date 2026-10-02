@@ -63,8 +63,6 @@ One line per open item. This file must always match the feedback files in this d
   to read.
 - `sink-shutdown-retries-forever-after-delete.md` — deleting a busy session can leave its sink client stuck in an
   endless shutdown-retry loop.
-- `adopt-checks-current-row-not-dialed.md` — adopt checks the manager's current row, so a stale mismatch after a
-  retarget adopts the old machine's identity.
 - `identity-mismatch-never-becomes-duplicate.md` — a host that reaches another entry's identity offers an adopt that
   always 409s and never shows as duplicate.
 - `session-view-leaks-page-lock.md` — the session view's restart/replace claim is not released on unmount, leaving every
