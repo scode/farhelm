@@ -12,8 +12,6 @@ One line per open item. This file must always match the feedback files in this d
   can kill an agent or shell restarted meanwhile.
 - `sidebar-replace-recomputes-alive.md` — sidebar Replace recomputes "nothing is alive" after the YOLO confirmation, so
   it can kill an agent or shell restarted meanwhile.
-- `yolo-guard-misses-codex-option-form.md` — `codex -a never -s danger-full-access` is not treated as YOLO, so it runs
-  on a sensitive host with no confirmation or badge.
 - `merged-list-crowded-by-one-host.md` — a remote host reporting 500 future-dated or top-sorting sessions pushes every
   other host's sessions out of the merged list.
 - `sessions-changed-hint-unthrottled.md` — the helm does not rate-limit "sessions changed" hints, so a hostile host can
