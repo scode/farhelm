@@ -230,7 +230,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **An update button on hosts that can be updated.** When a host in the host list can be updated (an old version, or one
   that needs an update), show an actual clickable "update" button there instead of only text. Keep the update option in
   the host's pop-up menu as well. When an update is not just possible but required, the button should look different,
-  probably red; the exact treatment is for design time.
+  probably red; the exact treatment is for design time. Hovering over the button should say what clicking it does and
+  whether the update is required or merely possible; wording TBD.
 
 ## Doc todo
 
