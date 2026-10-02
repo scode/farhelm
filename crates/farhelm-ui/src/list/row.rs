@@ -857,7 +857,10 @@ pub(super) fn SessionRow(
     /// — but not from this click alone; see `on_confirm_replace` for the
     /// step that actually acts.
     on_replace: EventHandler<Session>,
-    on_confirm_replace: EventHandler<String>,
+    /// The replace prompt's confirm: hands up the `Session` this render drew
+    /// the prompt's consequence text from, so the replace acts on what the
+    /// user read (see `ListView`'s `confirm_replace`).
+    on_confirm_replace: EventHandler<Session>,
     on_cancel_replace: EventHandler<String>,
     on_stop: EventHandler<String>,
     on_delete: EventHandler<DeleteTarget>,
@@ -980,7 +983,7 @@ pub(super) fn SessionRow(
     let replace_target = session.clone();
     let confirm_id = session.id.clone();
     let cancel_id = session.id.clone();
-    let confirm_replace_id = session.id.clone();
+    let confirm_replace_source = session.clone();
     let cancel_replace_id = session.id.clone();
     let rename_start = (session.id.clone(), session.title.clone());
     // The toggle is offered on a LIVE row (running, waiting, idle — SPEC.md;
@@ -1932,7 +1935,7 @@ pub(super) fn SessionRow(
                                 class: "btn btn-danger confirm-replace",
                                 // See confirm-delete: refusal made visible.
                                 disabled: busy,
-                                onclick: move |_| on_confirm_replace.call(confirm_replace_id.clone()),
+                                onclick: move |_| on_confirm_replace.call(confirm_replace_source.clone()),
                                 "confirm replace"
                             }
                             button {
@@ -2500,7 +2503,7 @@ mod tests {
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_replace = use_callback(|_: Session| {});
-            let on_confirm_replace = use_callback(|_: String| {});
+            let on_confirm_replace = use_callback(|_: Session| {});
             let on_cancel_replace = use_callback(|_: String| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
@@ -2629,7 +2632,7 @@ mod tests {
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_replace = use_callback(|_: Session| {});
-            let on_confirm_replace = use_callback(|_: String| {});
+            let on_confirm_replace = use_callback(|_: Session| {});
             let on_cancel_replace = use_callback(|_: String| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
@@ -2715,7 +2718,7 @@ mod tests {
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_replace = use_callback(|_: Session| {});
-            let on_confirm_replace = use_callback(|_: String| {});
+            let on_confirm_replace = use_callback(|_: Session| {});
             let on_cancel_replace = use_callback(|_: String| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});

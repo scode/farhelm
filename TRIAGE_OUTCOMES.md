@@ -4892,7 +4892,9 @@
   stop and return the item to the user. If the header item's execution has already added the single-GUI principle to
   SPEC.md, this item needs no further spec change; otherwise add it as described there. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
+- Execution: complete: change `ysntyqlspvxq`, bookmark `triage-1001c/09-sidebar-replace-keeps-answer`, PR
+  https://github.com/scode/farhelm/pull/1396. No spec change here: the single-GUI principle landed with
+  `header-replace-recomputes-alive.md`.
 
 ## yolo-guard-misses-codex-option-form.md
 
