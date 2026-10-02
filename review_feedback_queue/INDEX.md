@@ -114,8 +114,6 @@ One line per open item. This file must always match the feedback files in this d
   refused as "folder replaced" and never retried.
 - `takeover-latch-misses-attaching-tabs.md` — a tab still attaching when another window takes over evicts the winner, so
   the two windows displace each other.
-- `claude-spinner-rejects-multiword.md` — the Claude spinner check rejects multi-word text like "Compacting
-  conversation…", so compaction may read Idle.
 - `new-tab-mount-displaces-owner-during-recovery.md` — a recovering view mounts a newly appeared tab with a displacing
   attach and silently takes the session from the device in use.
 - `update-silently-downgrades-newer-hosts.md` — Update and "update all" downgrade hosts that run a newer Farhelm, which
