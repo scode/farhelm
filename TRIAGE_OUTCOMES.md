@@ -5987,7 +5987,8 @@
   silent-on-failure clipboard contract.
 - Decision: discard (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `ktroylmk`, bookmark `triage-1001e/24-copy-fallback`, PR
+  https://github.com/scode/farhelm/pull/1466.
 
 ## desktop-clipboard-fetch-backlog.md
 
