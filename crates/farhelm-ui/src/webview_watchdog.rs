@@ -189,8 +189,8 @@ async fn probe_once() -> TickOutcome {
 /// `desktop::use_foreground_on_launch`, the existing precedent for a
 /// desktop-only, launch-once background task: a `use_hook` that spawns a
 /// future and never restarts it, because `App` itself never remounts across
-/// the app's lifetime (reauthentication remounts `DesktopBootstrapGate`
-/// underneath it, not `App`).
+/// the app's lifetime (reauthentication restarts `DesktopBootstrapGate`'s
+/// authentication underneath it, and never remounts `App`).
 ///
 /// The first tick is deliberately skipped rather than probed immediately —
 /// firing a heartbeat before the webview and its document context have had

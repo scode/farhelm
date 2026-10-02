@@ -101,11 +101,12 @@ pub(crate) fn ActivityClock() -> Element {
     // spawned — because [`ACTIVITY_NOW`] outlives THIS component. The
     // global is initialized once per page and keeps whatever value it last
     // held, while this clock is unmounted and remounted whenever the
-    // authenticated tree is rebuilt (`auth`'s credential exchange remounts
-    // it). Without this line the page would spend its first tick's worth of
-    // time — thirty seconds, and after a long-idle reauthentication a value
-    // that could be hours stale — showing ages measured against the clock
-    // reading from before the unmount.
+    // authenticated tree is rebuilt (the browser's credential exchange
+    // remounts it; a desktop re-authentication does not). Without this
+    // line the page would spend its first tick's worth of time — thirty
+    // seconds, and after a long-idle reauthentication a value that could be
+    // hours stale — showing ages measured against the clock reading from
+    // before the unmount.
     use_hook(|| {
         *ACTIVITY_NOW.write() = client_now_secs();
     });

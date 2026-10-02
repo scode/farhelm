@@ -142,12 +142,13 @@ then changes. A write is a sparse patch naming only the field the user changed, 
 field is untouched, an explicit `null` clears one), so two clients changing different fields at nearly the same time
 cannot clobber each other; the signal in the page is updated before the request leaves, which is what keeps the choice
 in force when the write fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot
-land on the helm in reverse order; the write queue is process state outside the remounted tree, and after credential
-recovery the gate overlays and replays any local choice whose write never got through, so reauthentication cannot roll
-the current client back to the helm's older row. The seed read runs under a seconds-scale deadline of its own and expiry
-reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for the funnel's full sixty
-seconds. The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the
-selection is a bare session id (the browser's old `{helm, id}` record was keyed by helm identity only because
+land on the helm in reverse order; the write queue is process state outside the remounted tree, and after the browser's
+credential recovery the gate overlays and replays any local choice whose write never got through, so reauthentication
+cannot roll the current client back to the helm's older row. Desktop recovery does not remount the tree: the native
+funnel retries the write itself under the refreshed credential. The seed read runs under a seconds-scale deadline of its
+own and expiry reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for the funnel's
+full sixty seconds. The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the
+write; the selection is a bare session id (the browser's old `{helm, id}` record was keyed by helm identity only because
 origin-scoped storage could outlive a state-directory swap, and a row in the helm's own database cannot describe another
 helm's fleet). An absent or unrecognized sort word still reads as the UI default (`activity`) on the client, because the
 row outlives the build that validated it. Nothing is kept per client: no localStorage key, no field in

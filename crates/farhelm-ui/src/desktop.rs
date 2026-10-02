@@ -700,8 +700,8 @@ pub(crate) fn use_foreground_on_launch() {
 /// Replace the native credential after the helm explicitly returns 401.
 ///
 /// The boolean reports whether this caller performed the exchange. Concurrent
-/// callers validate and reuse that result so only the winner remounts the
-/// webview authentication gate.
+/// callers validate and reuse that result so only the winner restarts the
+/// webview's authentication.
 pub(crate) async fn refresh_native_device() -> anyhow::Result<(String, bool)> {
     let _guard = DEVICE_REFRESH
         .get_or_init(|| tokio::sync::Mutex::new(()))

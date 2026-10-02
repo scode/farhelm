@@ -95,9 +95,11 @@
 //!   from, so a tab left open across a helm upgrade says so instead of
 //!   failing in ways nothing explains.
 //! - `auth`: the browser's full-page bootstrap-token exchange and the desktop
-//!   webview's IPC exchange (PLAN_M7.md items 3 and 8). Both remount the
-//!   authenticated component tree after a credential change so every reader
-//!   starts again from a clean state.
+//!   webview's IPC exchange (PLAN_M7.md items 3 and 8). The browser exchange
+//!   remounts the authenticated component tree after a credential change so
+//!   every reader starts again from a clean state; a desktop re-sign-in runs
+//!   underneath the live tree instead, so an action in flight can still
+//!   report its outcome.
 //! - `webview_watchdog`: the desktop eval-bridge heartbeat (PLAN_desktop_
 //!   web_bug_triage.md) — a pure three-state health machine plus one
 //!   desktop-only probe loop that turns a dead bridge (MT-5 class) into a
@@ -1272,9 +1274,11 @@ fn AppBody() -> Element {
                 // down and re-handshaked on every selection switch — a window
                 // with no live updates and a fallback poll spinning back up
                 // to cover it, several times a working hour. The gate above
-                // it remounts only when the token branch does (a credential
-                // exchange), which is when the feed had to re-handshake
-                // anyway. It renders nothing (PLAN_M6_75.md item 6); what it
+                // it remounts only when the token branch does (a browser
+                // credential exchange), which is when the feed had to
+                // re-handshake anyway; a desktop re-sign-in leaves it mounted
+                // and the feed re-handshakes through its own retry ladder.
+                // It renders nothing (PLAN_M6_75.md item 6); what it
                 // produces is the revision counter each page re-reads on.
                 feed::FleetFeed {}
                 // Beside the feed, and for the same reason: the coarse "now"
@@ -1441,12 +1445,13 @@ fn AppBody() -> Element {
 /// stalled preference endpoint costs the remembered values, never a
 /// minute of blank page. A recognized 401 takes an engine-specific path:
 /// in the browser `api::send` raises the token prompt and `AppBody`
-/// unmounts this gate in favor of it; on desktop the funnel refreshes the
-/// native credential, remounts the webview authentication gate (which
-/// unmounts this one), and retries. Either way the gate remounts after
-/// recovery and re-reads — and `api::seed_with_local_changes` overlays any
-/// choice made in THIS client whose write never got through, so recovery
-/// cannot roll the current client back to the helm's older row.
+/// unmounts this gate in favor of it, and the gate remounts after recovery
+/// and re-reads — and `api::seed_with_local_changes` overlays any choice
+/// made in THIS client whose write never got through, so recovery cannot
+/// roll the current client back to the helm's older row. On desktop the
+/// funnel refreshes the native credential and retries the read itself, and
+/// the webview's re-authentication runs without unmounting this gate
+/// (`auth::DesktopBootstrapGate`), so nothing here remounts.
 #[component]
 fn PreferencesGate(children: Element) -> Element {
     let base = use_context::<ApiBase>().0;
