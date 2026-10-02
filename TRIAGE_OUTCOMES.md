@@ -5014,7 +5014,7 @@
   `codex resume <id>` launch with and without an explicit template. Add the Codex resume-selector collision as an
   example to the TODO.md `Near term` entry "Re-examine and simplify how launches are represented". Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## tmux-capture-tail-deadline.md
 
@@ -5051,7 +5051,7 @@
   stripped, while the code also strips Pi's.
 - Decision: discard; the trigger is unrealistic and Pi support is intentionally partial.
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## provisioning-child-output-drain-deadline.md
 
@@ -5076,7 +5076,7 @@
   plus the OpenSSH 9.6 ControlPersist check; no observed trigger), and why it is not being fixed (no realistic trigger
   on current OpenSSH; the fix would extend one deadline over exit, both output drains and process-group cleanup). Remove
   the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## clipboard-writes-unbounded-blocking-admission.md
 
@@ -5100,7 +5100,7 @@
   Farhelm assumes the host's system clipboard is functioning, and that a broken, hung or slow clipboard is outside what
   Farhelm adds complexity to support: copies may be dropped then, but the rest of Farhelm must not stall. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## session-view-leaks-page-lock.md
 
@@ -5127,7 +5127,7 @@
   interrupted card's Replace prompt (and its claim) is cleared when the card stops rendering. Add regressions covering
   unmount while a Restart confirmation, an open "Restart with" dialog, and an in-flight Restart hold the claim, and the
   hidden interrupted-card prompt. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## row-menu-drifts-on-row-height-change.md
 
@@ -5149,7 +5149,7 @@
   the same comment) is covered by the same mechanism cheaply; if not, leave it and say so. Add a unit test alongside the
   existing `rows.rs` ones covering a height change above the open row (closes) and below it (stays open). Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## uploads-aborted-silently-on-remount.md
 
@@ -5170,7 +5170,7 @@
   SPEC.md's failure-response rule. Clearing stale "attaching…" text on remount stays correct for an upload that is no
   longer running. Add a JS or browser test covering an upload interrupted by a remount and a failure message present
   across one. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## replace-drop-skips-source-delete.md
 
@@ -5192,9 +5192,10 @@
   cancelled loses only the reply; add a regression that drops the request after the create is sent and asserts the
   source delete still happens. During execution, check the helm's other session routes (create, delete, restart and
   similar) against the same SPEC_impl.md rule and report any that are also request-task-bound; fix them in this change
-  only if they share the same small mechanism, otherwise bring them back to the user. Remove this feedback file and its
+  only if they share the same small mechanism, otherwise bring them back to the user by listing them in the executing
+  plan's final report, without blocking (user decision at planning time, 2026-10-01). Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## restart-can-still-deselect-session.md
 
@@ -5217,7 +5218,7 @@
   window as they are today; the UI therefore keeps the session selected through a restart. Update the code comment that
   accepts the omission. Add a regression that forces a listing into the relaunch window and asserts the session is
   present. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## create-dialog-empty-catalog-refuses.md
 
@@ -5238,7 +5239,7 @@
   stays the authority. Apply the pending-fetch half to "Restart with" too, so both dialogs share one rule. Add a test
   covering a failed and a pending catalog with an effort-bearing prefilled selection. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## stop-terminalless-records-plain-exit.md
 
@@ -5278,7 +5279,7 @@
   redundant unconditional removal, keeping every failure path's own release); add a test showing a probe during a held
   ADD claim leaves the host busy so a second install or update is refused. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## retarget-race-republishes-old-client.md
 
@@ -5300,7 +5301,7 @@
   (inside the same `send_modify` or equivalent). Add a deterministic regression using a gate seam like the existing
   `DuplicatePublicationGate` that lands a retarget between the refresh's check and its publish. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## probe-register-not-helm-owned.md
 
@@ -5322,7 +5323,7 @@
   runs on a helm-owned task, as #1196 did for the other host edits, so a dropped probe request loses only the reply;
   correct the route comment that calls the probe non-mutating. Add a regression that drops the request after the save
   and asserts the host is registered and dialed. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## desktop-start-fails-on-skewed-supervisor.md
 
@@ -5345,7 +5346,7 @@
   supervisor the user started; the message does not say "managed" when the app spawned no supervisor. Opening the window
   instead of failing is out of scope. Add a unit test alongside the existing timeout-text test. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## terminal-tombstone-never-buried.md
 
@@ -5364,7 +5365,7 @@
   entry removed), with the identity lookup falling back to the tombstone so a departed tombstone is handled without
   error; a terminal that returns after its tombstone was buried mounts or shows its Detached notice normally. Add a JS
   or browser test covering departure and return of a tombstoned terminal. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## checkout-retry-raw-device-check.md
 
@@ -5396,7 +5397,7 @@
   permanently breaks the operation guarding it, while inode plus creation time still detects a folder actually replaced
   at the same path, which is what these checks exist for. New ownership or identity checks must follow that rule rather
   than compare device numbers. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## takeover-latch-misses-attaching-tabs.md
 
@@ -5422,7 +5423,7 @@
   pending mount cancelled by the latch. Add browser regressions on Chromium and WebKit using the existing two-client
   takeover setup for a tab attaching during another window's takeover. One PR together with
   `new-tab-mount-displaces-owner-during-recovery.md`, removing both feedback files and index entries.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## new-tab-mount-displaces-owner-during-recovery.md
 
@@ -5440,7 +5441,7 @@
 - Completion criteria: as for `takeover-latch-misses-attaching-tabs.md`, plus a browser regression where a view
   recovering from a dropped connection sees a tab created by the client that took over and does not displace it. Same PR
   as that item.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
 
 ## update-silently-downgrades-newer-hosts.md
 
@@ -5461,10 +5462,12 @@
 - Decision: fix the code and the spec. The host list must not merely stop showing "needs update" or "old version" for
   such a host: it must say the host runs a future (newer) version than the helm, so the user can tell something is off.
 - Completion criteria: the helm refuses Update of a host whose probed build is newer than its own with a clear error
-  naming both versions; the hosts panel hides Update on such rows and "update all" skips them; the host list shows an
-  explicit "newer than this helm" (future version) state for such a host instead of "needs update" or "old version",
-  including when the newer version also differs in protocol. Amend SPEC.md (the Update authorization text and the host
-  version advisories) to say Update never downgrades a host, and that a host newer than the helm is shown as such. Add
-  helm and UI tests for the refusal, the skipped "update all" row, and the displayed state. Remove this feedback file
-  and its index entry.
-- Execution: `pending`.
+  naming both versions; the hosts panel hides Update on such rows and "update all" skips them; the host list labels such
+  a host "too new" instead of "needs update" or "old version", including when the newer version also differs in
+  protocol; the label stays that short for the host list's layout, and hovering it shows the full information: the
+  helm's version and what the helm knows from the host's supervisor, such as its version and both protocol versions
+  (user decision at planning time, 2026-10-01). Amend SPEC.md (the Update authorization text and the host version
+  advisories) to say Update never downgrades a host, and that a host newer than the helm is shown as "too new". Add helm
+  and UI tests for the refusal, the skipped "update all" row, and the displayed state. Remove this feedback file and its
+  index entry.
+- Execution: planned in `plans/triage-restart-takeover-update.md`.
