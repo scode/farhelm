@@ -1430,15 +1430,22 @@ pub(crate) fn ProfilesPopup(
     });
 
     let on_submit = move |_| {
-        // The claim IS the guard and it happens synchronously: the rerender
-        // that disables these controls is not synchronous with the event that
-        // queued this submit, so a second submit would otherwise create two
-        // profiles for one intent.
-        if !ops.claim() {
+        // The claim is what refuses a second submit, and it happens
+        // synchronously: the rerender that disables these controls is not
+        // synchronous with the event that queued this submit, so a second
+        // submit would otherwise create two profiles for one intent.
+        //
+        // A guard rather than a bare claim, so that every way out releases
+        // it: the early returns below by dropping it, and the request task
+        // by dropping it when it finishes or when this popup unmounts under
+        // it (the browser's token prompt replaces the page when another
+        // request is refused). A bare claim released by hand stranded the
+        // page lock in that last case, and every lock-gated control then
+        // refused silently until a reload.
+        let Some(claim) = ops.claim_guard() else {
             return;
-        }
+        };
         let Some(editing_now) = editing.peek().clone() else {
-            ops.release();
             return;
         };
         if let Editing::Existing(id) = &editing_now
@@ -1449,7 +1456,6 @@ pub(crate) fn ProfilesPopup(
             )
         {
             form_error.set(Some("built-in profiles are read-only".to_string()));
-            ops.release();
             return;
         }
         let spec = match draft.peek().spec() {
@@ -1460,7 +1466,6 @@ pub(crate) fn ProfilesPopup(
             // refused. The form stays open with the draft intact.
             Err(reason) => {
                 form_error.set(Some(reason));
-                ops.release();
                 return;
             }
         };
@@ -1527,9 +1532,11 @@ pub(crate) fn ProfilesPopup(
                 destination,
                 Replace::Completion,
             );
-            // Released on every path: a leaked token leaves the whole page
-            // inert with nothing on screen to explain why.
-            ops.release();
+            // Naming the guard here is what moves it into this task, so the
+            // lock is held until the request settles and is still released
+            // if the popup unmounts first. Without this line it would drop
+            // when the handler returns, freeing the lock mid-request.
+            drop(claim);
         });
     };
 
@@ -1541,9 +1548,11 @@ pub(crate) fn ProfilesPopup(
         if confirming.peek().as_deref() != Some(id.as_str()) {
             return;
         }
-        if !ops.claim() {
+        // A guard, moved into the task below, for the same reason as the
+        // save handler's.
+        let Some(claim) = ops.claim_guard() else {
             return;
-        }
+        };
         errors.write().remove(&id);
         warning.set(None);
         notice.set(None);
@@ -1584,7 +1593,8 @@ pub(crate) fn ProfilesPopup(
                 destination,
                 Replace::Completion,
             );
-            ops.release();
+            // Moves the guard into this task; see the save handler.
+            drop(claim);
         });
     };
 

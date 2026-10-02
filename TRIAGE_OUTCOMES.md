@@ -4400,7 +4400,8 @@
 - Completion criteria: switch both handlers to `claim_guard()` and move the guard into the spawned task, taking it after
   the save handler's local validation early returns (or letting those returns drop it). Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `tnvvxtkkpzrx`, bookmark `triage-1001/05-profile-popup-lock`, PR
+  https://github.com/scode/farhelm/pull/1361.
 
 ## codex-last-option-reads-idle.md
 
