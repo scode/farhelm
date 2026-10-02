@@ -260,6 +260,11 @@ pub enum IdentityStatus {
 #[derive(Clone, Debug)]
 pub struct AcceptedDirectory {
     pub row: WorkingCopyRow,
+    /// The `(dev, ino)` the in-terminal launcher must find at the path:
+    /// captured by the mkdir on a first attempt, or as observed moments ago
+    /// by [`verify_identity_observed`] on a retry. Not necessarily the
+    /// identity the row recorded, whose device number a remount may have
+    /// changed since.
     pub identity: DirectoryIdentity,
     pub canonical_path: PathBuf,
     /// [`Self::canonical_path`] as text, which the session row records as
@@ -1323,21 +1328,39 @@ fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
 /// row's captured identity. Pure observation: never mutates the
 /// filesystem or the row. See [`IdentityStatus`] for the four answers.
 pub fn verify_identity(row: &WorkingCopyRow) -> Result<IdentityStatus> {
+    Ok(verify_identity_observed(row)?.0)
+}
+
+/// [`verify_identity`], plus the `(dev, ino)` it just observed when the
+/// folder matched.
+///
+/// For a caller that hands the folder's identity on to a later, plain
+/// comparison: a retried fresh create gives it to the in-terminal launcher,
+/// which compares `(dev, ino)` exactly. Handing it the identity recorded at
+/// allocation reintroduced the device-number check [`same_directory`]
+/// exists to avoid, so a retry after a remount that renumbered the device
+/// was refused as "replaced" for good. The reading returned here was taken
+/// by the same `stat` that [`same_directory`] accepted, so the launcher
+/// compares two readings of one folder taken seconds apart within one
+/// create. `None` for every status but [`IdentityStatus::Matches`].
+pub fn verify_identity_observed(
+    row: &WorkingCopyRow,
+) -> Result<(IdentityStatus, Option<DirectoryIdentity>)> {
     let Some(identity) = row.path_identity else {
-        return Ok(IdentityStatus::NoCapturedIdentity);
+        return Ok((IdentityStatus::NoCapturedIdentity, None));
     };
     let Some(path) = &row.canonical_path else {
-        return Ok(IdentityStatus::NoCapturedIdentity);
+        return Ok((IdentityStatus::NoCapturedIdentity, None));
     };
     match observe(Path::new(path)) {
         Ok(observed) if same_directory(&observed, identity, row.path_birth_ns) => {
-            Ok(IdentityStatus::Matches)
+            Ok((IdentityStatus::Matches, Some((observed.dev, observed.ino))))
         }
         Ok(observed) if device_change_unconfirmed(&observed, identity, row.path_birth_ns) => {
-            Ok(IdentityStatus::DeviceChangedUnconfirmed)
+            Ok((IdentityStatus::DeviceChangedUnconfirmed, None))
         }
-        Ok(_) => Ok(IdentityStatus::DifferentObject),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(IdentityStatus::Missing),
+        Ok(_) => Ok((IdentityStatus::DifferentObject, None)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok((IdentityStatus::Missing, None)),
         Err(e) => Err(e.into()),
     }
 }

@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `checkout-retry-raw-device-check.md` — a create retried after a reboot or remount that renumbered the device is
-  refused as "folder replaced" and never retried.
 - `takeover-latch-misses-attaching-tabs.md` — a tab still attaching when another window takes over evicts the winner, so
   the two windows displace each other.
 - `new-tab-mount-displaces-owner-during-recovery.md` — a recovering view mounts a newly appeared tab with a displacing
