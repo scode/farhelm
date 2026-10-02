@@ -393,6 +393,25 @@ fn followed_title(selected: Option<&Session>, shown: &Session) -> Option<String>
     (selected.id == shown.id && selected.title != shown.title).then(|| selected.title.clone())
 }
 
+/// A Replace the helm refused as a YOLO launch, waiting on the user's answer
+/// to the YOLO question.
+///
+/// It carries what the Replace prompt the user confirmed was drawn from:
+/// the session snapshot (its host fields become the new session's, see
+/// `list::with_source_host`) and whether that prompt said nothing is alive,
+/// which decides the supervisor-side "only if nothing is alive" precondition
+/// on deleting the source. Both answers to the YOLO question send these
+/// stored values. Recomputed at answer time instead, a session restarted or
+/// given a tab while the question was open (from another window, an agent,
+/// or this view) dropped the precondition, and the delete killed processes
+/// after a prompt that said none were running.
+#[derive(Clone, PartialEq)]
+struct PendingYoloReplace {
+    ask: crate::yolo_confirm::YoloAsk,
+    source: Session,
+    only_if_nothing_alive: bool,
+}
+
 #[component]
 pub(crate) fn SessionView(
     session: Session,
@@ -491,7 +510,7 @@ pub(crate) fn SessionView(
     let mut replace_error = use_signal(|| None::<String>);
     // A replace the helm refused as a YOLO launch on a sensitive host, and
     // why a "don't ask again" on it failed at its first step, if it did.
-    let mut replace_yolo = use_signal(|| None::<crate::yolo_confirm::YoloAsk>);
+    let mut replace_yolo = use_signal(|| None::<PendingYoloReplace>);
     let mut replace_yolo_error = use_signal(|| None::<String>);
     // One synchronously claimed token covers the restart prompt as well as
     // the request, so two clicks in one render frame cannot authorize
@@ -1283,9 +1302,15 @@ pub(crate) fn SessionView(
     // (id and display name) the question named, to mark safe for YOLO
     // launches first; nothing is replaced if that fails. Taken from the
     // question the user answered. It only ever comes with `allow_yolo`.
+    //
+    // `source` and `only_if_nothing_alive` are the snapshot the confirmed
+    // prompt was drawn from and whether it said nothing is alive; see
+    // `PendingYoloReplace` for why they are passed in rather than read here.
     let replace = move |claim: OpGuard,
                         allow_yolo: bool,
-                        stop_asking: Option<(crate::HostId, String)>| {
+                        stop_asking: Option<(crate::HostId, String)>,
+                        source: Session,
+                        only_if_nothing_alive: bool| {
         if replacing() {
             return;
         }
@@ -1294,13 +1319,6 @@ pub(crate) fn SessionView(
         let base = replace_base.clone();
         let id = replace_session_id.clone();
         let preferences = replace_preferences;
-        // The shown session's host fields: the reply is bare, and it becomes
-        // the selection as-is. See `list::with_source_host`.
-        let source = current.peek().clone();
-        // Same rule as the sidebar's Replace: a confirmation that warned of
-        // nothing alive sends the precondition with the source delete.
-        let only_if_nothing_alive =
-            crate::status::shows_nothing_alive(&source.status, source.tabs.len());
         spawn(async move {
             let _claim = claim;
             if let Some((host, name)) = stop_asking {
@@ -1322,13 +1340,19 @@ pub(crate) fn SessionView(
                     // A new question starts without an earlier one's
                     // "don't ask again" failure.
                     replace_yolo_error.set(None);
-                    replace_yolo.set(Some(crate::yolo_confirm::YoloAsk {
-                        host: source.host,
-                        host_name: source
-                            .host_name
-                            .clone()
-                            .unwrap_or_else(|| "this host".to_string()),
-                        reason: crate::yolo_confirm::YoloReason::of_launch(source.launch.as_ref()),
+                    replace_yolo.set(Some(PendingYoloReplace {
+                        ask: crate::yolo_confirm::YoloAsk {
+                            host: source.host,
+                            host_name: source
+                                .host_name
+                                .clone()
+                                .unwrap_or_else(|| "this host".to_string()),
+                            reason: crate::yolo_confirm::YoloReason::of_launch(
+                                source.launch.as_ref(),
+                            ),
+                        },
+                        source: source.clone(),
+                        only_if_nothing_alive,
                     }));
                 }
                 Err(error) => replace_error.set(Some(error.text)),
@@ -1750,6 +1774,14 @@ pub(crate) fn SessionView(
     // redraws the text and replaces the handler together, so the two agree.
     let header_delete_warned_nothing_alive =
         crate::status::shows_nothing_alive(&shown.status, shown.tabs.len());
+    // The same capture for both Replace prompts (the header's and the
+    // interrupted card's), whose consequence text is drawn from `shown`: the
+    // snapshot the confirmed prompt showed and whether it said nothing is
+    // alive. A Replace that then meets the YOLO question carries both to its
+    // answer (`PendingYoloReplace`).
+    let header_replace_source = shown.clone();
+    let card_replace_source = shown.clone();
+    let replace_prompt_warned_nothing_alive = header_delete_warned_nothing_alive;
     let header_deleting = deleting.read().contains(&shown.id);
     let with_reason = restart_with_reason(&shown);
     let restart_with_description = with_reason.clone().unwrap_or_else(|| {
@@ -2052,7 +2084,13 @@ pub(crate) fn SessionView(
                                     disabled: replacing(),
                                     onclick: move |_| {
                                         if let Some(claim) = confirming_header_replace.take(&()) {
-                                            header_confirm_replace(claim, false, None);
+                                            header_confirm_replace(
+                                                claim,
+                                                false,
+                                                None,
+                                                header_replace_source.clone(),
+                                                replace_prompt_warned_nothing_alive,
+                                            );
                                         }
                                     },
                                     "replace"
@@ -2221,32 +2259,53 @@ pub(crate) fn SessionView(
                     parts: vec![DetailPart::peer(err)],
                 }
             }
-            if let Some(ask) = replace_yolo.read().clone() {
+            if let Some(pending) = replace_yolo.read().clone() {
                 crate::yolo_confirm::YoloConfirmation {
-                    ask,
+                    ask: pending.ask,
                     busy: replacing(),
                     error: replace_yolo_error(),
                     confirm_submits: false,
+                    // Both answers continue the Replace the user confirmed,
+                    // with the snapshot and nothing-alive answer that prompt
+                    // carried, not a fresh read of the session.
                     on_confirm: move |_| {
+                        let Some(pending) = replace_yolo.peek().clone() else {
+                            return;
+                        };
                         if let Some(claim) = lifecycle.claim_guard() {
                             replace_yolo.set(None);
                             replace_yolo_error.set(None);
-                            yolo_confirm_replace(claim, true, None);
+                            yolo_confirm_replace(
+                                claim,
+                                true,
+                                None,
+                                pending.source,
+                                pending.only_if_nothing_alive,
+                            );
                         }
                     },
                     // The confirmation stays up through the first step; the
                     // replace task takes it down once the host is marked,
                     // or leaves it with the reason.
                     on_confirm_and_stop_asking: move |_| {
+                        let Some(pending) = replace_yolo.peek().clone() else {
+                            return;
+                        };
                         // The host the question named; the button is only
                         // offered when it named one.
-                        let target = replace_yolo
-                            .peek()
-                            .as_ref()
-                            .and_then(|ask| ask.host.map(|host| (host, ask.host_name.clone())));
+                        let target = pending
+                            .ask
+                            .host
+                            .map(|host| (host, pending.ask.host_name.clone()));
                         if let Some(claim) = lifecycle.claim_guard() {
                             replace_yolo_error.set(None);
-                            yolo_stop_asking_replace(claim, true, target);
+                            yolo_stop_asking_replace(
+                                claim,
+                                true,
+                                target,
+                                pending.source,
+                                pending.only_if_nothing_alive,
+                            );
                         }
                     },
                     on_cancel: move |_| {
@@ -2365,7 +2424,13 @@ pub(crate) fn SessionView(
                                 disabled: replacing(),
                                 onclick: move |_| {
                                     if let Some(claim) = confirming_replace.take(&()) {
-                                        confirm_replace(claim, false, None);
+                                        confirm_replace(
+                                            claim,
+                                            false,
+                                            None,
+                                            card_replace_source.clone(),
+                                            replace_prompt_warned_nothing_alive,
+                                        );
                                     }
                                 },
                                 "confirm replace"

@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `header-replace-recomputes-alive.md` — header Replace recomputes "nothing is alive" after the YOLO confirmation, so it
-  can kill an agent or shell restarted meanwhile.
 - `sidebar-replace-recomputes-alive.md` — sidebar Replace recomputes "nothing is alive" after the YOLO confirmation, so
   it can kill an agent or shell restarted meanwhile.
 - `merged-list-crowded-by-one-host.md` — a remote host reporting 500 future-dated or top-sorting sessions pushes every
