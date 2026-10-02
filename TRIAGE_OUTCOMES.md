@@ -4612,7 +4612,8 @@
   condition holds per the assessment. The separate wrong-machine race after a retarget is
   `retarget-race-republishes-old-client.md`, triaged on its own.
 - Completion criteria: remove this feedback file and its index entry, with no code or spec change.
-- Execution: planned in `plans/triage-feed-sink-identity.md`.
+- Execution: complete: change `zznrvwypywxo`, bookmark `triage-1001b/01-discard-retry-fresh-window`, PR
+  https://github.com/scode/farhelm/pull/1374.
 
 ## unvalidated-state-dir-on-probe.md
 
