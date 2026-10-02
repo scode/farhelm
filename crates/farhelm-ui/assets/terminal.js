@@ -1153,7 +1153,17 @@
     const tomb = tombstones.get(el);
     if (!tomb) return;
     tombstones.delete(el);
+    publishTombstones();
     tomb.term.dispose();
+  }
+
+  // Test-only mirror of `tombstones`' keys (the e2e terminal spec family),
+  // the counterpart of `window.__farhelmIslands`: a tombstone has no socket
+  // or island to observe, so this is the only way a test can tell one that
+  // was buried from one left behind. Rewritten on every change to the map.
+  // Never read by production code.
+  function publishTombstones() {
+    window.__farhelmTombstones = [...tombstones.keys()];
   }
 
   /**
@@ -1603,6 +1613,7 @@
         path: controller.path,
         gen: controller.gen,
       });
+      publishTombstones();
     } else if (held) {
       held.dispose();
     }
@@ -2576,10 +2587,11 @@
       }
       const wanted = new Map(specs.map((spec) => [spec.el, spec]));
 
-      // Tear down first, over the UNION of both maps (an element id is in
-      // at most one of them), so an island being REBUILT — its path or
-      // generation changed — has released its element, socket, and banner
-      // before the replacement mount touches any of them.
+      // Tear down first, over the UNION of the four maps below (an
+      // element id is in at most one of them), so an island being
+      // REBUILT — its path or generation changed — has released its
+      // element, socket, and banner before the replacement mount touches
+      // any of them.
       //
       // While latched, only DEPARTURES are honored: a terminal that left
       // the desired set goes, but an identity change is not allowed to tear
@@ -2594,9 +2606,21 @@
       // identity changed (a restart bumping `gen`) is a different
       // attachment — the recovery of the old one is moot, and the ordinary
       // mount below is what should happen instead.
-      for (const el of new Set([...islands.keys(), ...pendings.keys(), ...reconnects.keys()])) {
+      // Tombstones are in this set too: a tombstoned terminal whose tab
+      // closes, or whose session view empties under a stale host, has to
+      // be buried here like any other departure. Left out, it kept its
+      // xterm alive for the life of the view, and when the same terminal
+      // came back `tombstoned()` skipped it before anything was painted,
+      // leaving a blank pane with no way to take control.
+      for (const el of new Set([
+        ...islands.keys(),
+        ...pendings.keys(),
+        ...reconnects.keys(),
+        ...tombstones.keys(),
+      ])) {
         const spec = wanted.get(el);
-        const held = islands.get(el) ?? pendings.get(el) ?? reconnects.get(el);
+        const held =
+          islands.get(el) ?? pendings.get(el) ?? reconnects.get(el) ?? tombstones.get(el);
         const departed = !spec;
         const changed = spec && (spec.path !== held.path || spec.gen !== held.gen);
         if (departed || (changed && !takeover)) {
@@ -5240,7 +5264,7 @@
      * Tear down every terminal and cancel every pending mount — the whole
      * session view going away (SessionView's `use_drop`, lib.rs).
      *
-     * Iterates over a snapshot of the union of both key sets because
+     * Iterates over a snapshot of the union of every key set because
      * `unmount()` mutates them as it goes. Every scrap of view-scoped
      * state goes with them:
      *

@@ -37,8 +37,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `terminal-tombstone-never-buried.md` — a terminal's frozen post-takeover screen is never cleared when it leaves the
-  view, leaving a blank pane and leaking memory.
 - `checkout-retry-raw-device-check.md` — a create retried after a reboot or remount that renumbered the device is
   refused as "folder replaced" and never retried.
 - `takeover-latch-misses-attaching-tabs.md` — a tab still attaching when another window takes over evicts the winner, so

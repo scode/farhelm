@@ -5390,7 +5390,8 @@
   entry removed), with the identity lookup falling back to the tombstone so a departed tombstone is handled without
   error; a terminal that returns after its tombstone was buried mounts or shows its Detached notice normally. Add a JS
   or browser test covering departure and return of a tombstoned terminal. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `olxrkyourypv`, bookmark `triage-1001d/15-tombstone-departure`, PR
+  https://github.com/scode/farhelm/pull/1411.
 
 ## checkout-retry-raw-device-check.md
 

@@ -1572,6 +1572,139 @@ try {
 }
 });
 
+// A terminal holding a stall decision's frozen screen (a tombstone) that
+// leaves the view is buried with it, and comes back as a normal terminal
+// when the view wants it again.
+//
+// The departure check in `sync()` used to skip tombstones, so a tombstoned
+// terminal whose tab closed, or whose session view emptied under a stale
+// host, kept its xterm alive, and when the same terminal returned it was
+// skipped as still tombstoned before anything was painted: a blank pane with
+// no way to take control. The view's own syncs are captured and replayed
+// without, then with, the agent terminal, which is the departure and the
+// return a stale host produces, without needing a host to go stale.
+test("a-departed-tombstone-is-buried-and-its-terminal-comes-back", async ({ page, request }) => {
+test.setTimeout(90_000);
+const title = `tombstone-departure-${Date.now()}`;
+let id: string | undefined;
+try {
+  await reconnectTimingsFromNextLoad(page, {
+    delaysMs: [100, 100, 100, 100, 100, 100],
+  });
+  const session = await createTabSession(request, title);
+  id = session.id;
+  await page.goto("/");
+  await attachSession(page, id);
+  await waitForTermText(page, "FAKE-AGENT READY");
+  // Record every sync the view makes, so the test can replay the latest
+  // with a different set of terminals.
+  await page.evaluate(() => {
+    const term = (window as any).farhelmTerm;
+    const real = term.sync.bind(term);
+    term.sync = (...args: any[]) => {
+      (window as any).__lastSyncArgs = args;
+      return real(...args);
+    };
+  });
+
+  // The stall decision during a recovery, as in the test above, leaves the
+  // agent terminal tombstoned.
+  await page.evaluate(() => {
+    const Real = (window as any).WebSocket;
+    (window as any).__realWebSocket = Real;
+    const Stalling: any = function (url: string, protocols?: any) {
+      const ws = new Real(url, protocols);
+      let handler: any = null;
+      Object.defineProperty(ws, "onmessage", {
+        get: () => handler,
+        set: (fn) => {
+          handler = fn;
+          // sleep-ok: deliver the synthetic detach asynchronously after the message handler is installed.
+          setTimeout(() => {
+            if (!handler) return;
+            handler({
+              data: JSON.stringify({
+                type: "detached",
+                reason: "terminal stopped consuming output (stalled)",
+                code: "stalled",
+              }),
+            });
+          }, 20);
+        },
+        configurable: true,
+      });
+      return ws;
+    };
+    for (const state of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) {
+      Stalling[state] = Real[state];
+    }
+    (window as any).WebSocket = Stalling;
+  });
+  await page.evaluate(() => (window as any).__farhelmIslands["terminal"].ws.close());
+  await expect(page.locator("#term-banner")).toContainText("stalled", { timeout: 20_000 });
+  await page.evaluate(() => {
+    (window as any).WebSocket = (window as any).__realWebSocket;
+  });
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__farhelmTombstones ?? []))
+    .toContain("terminal");
+  // A tab opening makes the view sync, which records the arguments replayed
+  // below; the tab's own mount proves that sync was reconciled.
+  await page.evaluate(() => {
+    (window as any).__lastSyncArgs = undefined;
+  });
+  const tabId = await addTab(page, 0);
+  await waitForSessionMounted(page, session.id, { tabId });
+  // The same sync replayed here, where a throw fails this evaluate: a
+  // tombstoned terminal that is still wanted is looked up by identity, which
+  // is the lookup that must fall back to the tombstone.
+  await page.evaluate(() => {
+    (window as any).__savedSyncArgs = (window as any).__lastSyncArgs;
+    const [baseUrl, specs, ...rest] = (window as any).__savedSyncArgs;
+    (window as any).farhelmTerm.sync(baseUrl, specs, ...rest);
+  });
+  expect(
+    await page.evaluate(() => (window as any).__farhelmTombstones),
+    "premise: the agent terminal is still tombstoned while it is still wanted",
+  ).toContain("terminal");
+
+  // Departure: the same sync without the agent terminal. Replayed from the
+  // copy kept aside above, since these calls go through the recording
+  // wrapper too.
+  await page.evaluate(() => {
+    const [baseUrl, specs, ...rest] = (window as any).__savedSyncArgs;
+    (window as any).farhelmTerm.sync(
+      baseUrl,
+      specs.filter((spec: any) => spec.el !== "terminal"),
+      ...rest,
+    );
+  });
+  expect(
+    await page.evaluate(() => (window as any).__farhelmTombstones),
+    "a departed terminal takes its tombstone with it",
+  ).not.toContain("terminal");
+
+  // Return: the same terminal is wanted again and mounts.
+  await page.evaluate(() => {
+    const [baseUrl, specs, ...rest] = (window as any).__savedSyncArgs;
+    (window as any).farhelmTerm.sync(baseUrl, specs, ...rest);
+  });
+  await expect
+    .poll(() => page.evaluate(() => !!(window as any).__farhelmIslands?.["terminal"]), {
+      timeout: 20_000,
+      message: "the returning agent terminal must mount, not be skipped as tombstoned",
+    })
+    .toBe(true);
+  await waitForTermText(page, "FAKE-AGENT READY", 20_000);
+  expect(
+    await page.evaluate(() => document.querySelectorAll("#terminal .xterm-rows").length),
+    "exactly one terminal in the element: the buried screen was disposed",
+  ).toBe(1);
+} finally {
+  if (id) await cleanupSession(request, id);
+}
+});
+
 // A frame QUEUED before the evidence-free idle gave up must not confirm
 // the recovery it arrives after.
 //
