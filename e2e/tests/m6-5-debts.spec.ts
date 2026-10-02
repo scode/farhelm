@@ -376,16 +376,19 @@ test.describe("the M6.5 test debts", () => {
     feed.notify(2);
     await reads.waitForCaptures(1);
 
-    // The restart takes the session off the supervisor's map between the
-    // generation claim and the republication (`Supervisor::relaunch`), so a
-    // read that lands in that gap is honestly answered 404 — a reply this
-    // test cannot re-sign. Release gap answers and read again; every attempt
-    // still starts inside the restart, so each carries the same epoch, and
-    // the first JSON reply in hand is the mid-restart one.
+    // The supervisor keeps listing a restarting session from its pre-restart
+    // row (`Supervisor::restarting_rows`), so a read gets a JSON reply even
+    // if it lands inside the relaunch; a 404 there would mean the session
+    // dropped out of the listing mid-restart. That is pinned by the
+    // supervisor's own test, not here: this test is about the client's epoch
+    // guard, so it releases a 404 (a reply it cannot re-sign) and reads
+    // again rather than failing. Every attempt still starts inside the
+    // restart, so each carries the same epoch, and the first JSON reply in
+    // hand is the mid-restart one.
     //
-    // Only the gap's own 404 is retried: any other failure is evidence about
-    // the server rather than the gap, and failing loudly keeps this test from
-    // laundering it. The deadline stops issuing new reads after 30 s; one
+    // Only a 404 is retried: any other failure is evidence about
+    // the server rather than about the listing, and failing loudly keeps this
+    // test from laundering it. The deadline stops issuing new reads after 30 s; one
     // already-waited capture may land past it, and the test's own timeout
     // remains the outer bound.
     let held = 1;
@@ -397,12 +400,12 @@ test.describe("the M6.5 test debts", () => {
       }
       if (reply.status !== 404) {
         throw new Error(
-          `the mid-restart read was answered ${reply.status}, not the restart gap's 404 ` +
+          `the mid-restart read was answered ${reply.status}, not a 404 ` +
             `(capture ${held}): ${reply.body.slice(0, 200)}`,
         );
       }
       if (Date.now() > gapDeadline) {
-        throw new Error(`the mid-restart read kept landing in the restart gap (capture ${held})`);
+        throw new Error(`the mid-restart read kept being answered 404 (capture ${held})`);
       }
       reads.release(held);
       held += 1;

@@ -683,6 +683,15 @@ pub type DeletedSessionCleanupGate = SinkReservationGate;
 /// the settle's own timing is untouched.
 pub type TabSettleGate = SinkReservationGate;
 
+/// A hook awaited in Restart just after the session is taken off the session
+/// map for its relaunch, before the previous run's terminal is detached.
+///
+/// A listing that lands inside that window must still show the session (see
+/// [`Supervisor::restarting_rows`]). The window lasts as long as detaching the
+/// old terminal and relaunching, which a test cannot time a listing into, so a
+/// test holds it open here. Production installs none.
+pub type RestartWindowGate = SinkReservationGate;
+
 /// Declares [`FaultHooks`]: one optional hook per entry, present only when
 /// tests can install it, each with an accessor that reads `None` otherwise.
 macro_rules! fault_hooks {
@@ -789,6 +798,8 @@ fault_hooks! {
     deleted_session_cleanup_gate: DeletedSessionCleanupGate,
     /// See [`ReplacementFault`]. `None` in production.
     replacement_fault: ReplacementFault,
+    /// See [`RestartWindowGate`]. `None` in production.
+    restart_window_gate: RestartWindowGate,
 }
 
 /// The injectable seams a `Supervisor` is built with. All default to
@@ -3934,6 +3945,11 @@ pub(crate) struct SessionCells {
 /// - `sampling_admission`: taken at the top of a ticker pass with nothing
 ///   else held, and kept across the pass, which takes `sessions`, lifecycle
 ///   claims (work-start persistence, tab reaping), and `capture.lock`.
+/// - `sessions` before `restarting_rows` and `last_listed`: the restart
+///   window swaps a session for its held row, and a listing reads the held
+///   rows, under `sessions`. Both are std mutexes held only for a map
+///   operation, never across an await and never together; `last_listed` is
+///   also written with nothing else held.
 ///
 /// Known coarseness, acceptable in M1 and revisit at M2: the map-wide
 /// mutex serializes input for EVERY session behind any in-flight attach
@@ -3973,6 +3989,26 @@ pub struct Supervisor {
     /// never entitled to produce.
     pub(crate) host_identity: Option<String>,
     pub(crate) sessions: Mutex<HashMap<String, Arc<SessionEntry>>>,
+    /// The listing rows the restart path shows in place of sessions it has
+    /// taken off [`Self::sessions`] for the length of their relaunch (see
+    /// the "Off the map for the duration" block in `Supervisor::relaunch`).
+    ///
+    /// A listing that simply omitted such a session made every client that
+    /// had it open deselect it, and nothing selected it again when it came
+    /// back. Each row is the session as the last `ListSessions` reply
+    /// described it before the restart began ([`Self::last_listed`]), not a
+    /// fresh pane read: the pane is mid-respawn, and reading it would report
+    /// the session exited, or record an exit, for a run that is about to
+    /// start.
+    ///
+    /// Only ever read or written while [`Self::sessions`] is locked, so a
+    /// listing sees each restarting session exactly once: in this map or in
+    /// `sessions`, never in neither and never in both.
+    pub(crate) restarting_rows: std::sync::Mutex<HashMap<String, SessionInfo>>,
+    /// Every row of the most recent `ListSessions` reply, by session id: the
+    /// source of [`Self::restarting_rows`]. Replaced wholesale by each reply,
+    /// so a deleted session's row lasts only until the next listing.
+    pub(crate) last_listed: std::sync::Mutex<HashMap<String, SessionInfo>>,
     /// Every live attachment in this supervisor, keyed per (session,
     /// terminal) — see [`AttachmentKey`].
     ///
@@ -5131,6 +5167,8 @@ impl Supervisor {
             store,
             host_identity,
             sessions: Mutex::new(sessions),
+            restarting_rows: std::sync::Mutex::new(HashMap::new()),
+            last_listed: std::sync::Mutex::new(HashMap::new()),
             attachments: Mutex::new(HashMap::new()),
             helm_links: Mutex::new(Vec::new()),
             change_hints: Arc::new(super::hints::ChangeHints::default()),
@@ -10384,21 +10422,46 @@ impl Supervisor {
         // — they queue behind it rather than seeing a missing entry — and
         // this removal is the belt to that suspenders: nothing can install
         // an attachment on, or tear down, a session whose terminal is
-        // being replaced. The visible cost is that a `ListSessions`
-        // landing inside this window omits the session entirely: accepted,
-        // because the window is a couple of tmux round trips long, and
-        // publishing an entry whose pane is mid-respawn would be worse
-        // than briefly publishing none.
+        // being replaced.
         //
-        // Deliberately NOT hinted. A hint makes the helm list this host at
-        // once, and a listing inside this window is exactly the one that
-        // omits the session: a client that has it open then sees it vanish
-        // and deselects it, and the republication moments later does not
-        // bring the selection back. Every way out of the window hints
-        // instead: the republication (`publish_relaunched`), the restore
-        // after a failure, and the no-restore branch below for a session
-        // deleted meanwhile.
-        self.sessions.lock().await.remove(&id);
+        // Still LISTED for the duration, though, from a held row (see
+        // `Supervisor::restarting_rows`): the window covers detaching the
+        // old terminal and the whole relaunch, and a `ListSessions` landing
+        // in it that omitted the session made every client with it open
+        // deselect it for good. The held row is the session as last listed
+        // before the restart, status included, rather than anything read
+        // from the pane now: a pane mid-respawn would read as an exit,
+        // which is worse than showing the pre-restart state for a moment.
+        // Swapped under the same lock, so no listing sees neither.
+        //
+        // Deliberately NOT hinted. Nothing a client sees has changed yet,
+        // and every way out of the window hints instead: the republication
+        // (`publish_relaunched`), the restore after a failure, and the
+        // no-restore branch below for a session deleted meanwhile. Each of
+        // those drops the held row in the same lock scope that puts the
+        // entry back (or decides not to).
+        {
+            let mut sessions = self.sessions.lock().await;
+            let held = self
+                .last_listed
+                .lock()
+                .expect("last-listed mutex poisoned")
+                .get(&id)
+                .cloned()
+                // Not in the last listing (never listed since this
+                // supervisor started, created since, or past the reply's
+                // cap): the entry's own row, whose status is the one it was
+                // built with.
+                .unwrap_or_else(|| entry.info.clone());
+            self.restarting_rows
+                .lock()
+                .expect("restarting-rows mutex poisoned")
+                .insert(id.clone(), held);
+            sessions.remove(&id);
+        }
+        if let Some(gate) = self.seams.faults.restart_window_gate() {
+            gate().await;
+        }
         // Whatever is attached is attached to the PREVIOUS run: the pane is
         // about to be respawned under it (or replaced outright), so the
         // client is told to reattach rather than left watching a stream
@@ -10570,11 +10633,16 @@ impl Supervisor {
                         true
                     }
                 };
+                let mut sessions = self.sessions.lock().await;
+                self.restarting_rows
+                    .lock()
+                    .expect("restarting-rows mutex poisoned")
+                    .remove(&id);
                 if still_exists {
                     let recovered_info = entry.info.clone();
                     let terminal =
                         republished_terminal(definitive, terminal_survives, entry.terminal.clone());
-                    self.sessions.lock().await.insert(
+                    sessions.insert(
                         id.clone(),
                         relaunched_entry(
                             entry,
@@ -10592,6 +10660,7 @@ impl Supervisor {
                         ),
                     );
                 }
+                drop(sessions);
                 // Hinted either way: a restored entry is a change from the
                 // window above, and so is a session that stays off the map
                 // because a delete removed it meanwhile.
@@ -11394,10 +11463,16 @@ impl Supervisor {
                 .hooked
                 .store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        self.sessions
-            .lock()
-            .await
-            .insert(entry.info.id.clone(), published);
+        {
+            // The held row is dropped in the same lock scope the entry comes
+            // back in (see the restart window in `Supervisor::relaunch`).
+            let mut sessions = self.sessions.lock().await;
+            sessions.insert(entry.info.id.clone(), published);
+            self.restarting_rows
+                .lock()
+                .expect("restarting-rows mutex poisoned")
+                .remove(&entry.info.id);
+        }
         // Every relaunch publication goes through here, whichever request
         // or recovery drove it; see `hints` for why marks sit at
         // publication rather than in the handlers.
@@ -17311,6 +17386,120 @@ pub(crate) mod tests {
                 "the {quiet:?} agent was stopped and relaunched"
             );
         }
+    }
+
+    /// A session in the middle of a restart is still in the session list,
+    /// described as it was last listed before the restart began.
+    ///
+    /// Why it matters: the restart takes the session off the supervisor's
+    /// map while it detaches the old terminal and relaunches, and a listing
+    /// in that window used to leave the session out. The helm passes that
+    /// listing on, and a client that had the session open deselects it and
+    /// never selects it again (the browser build's sidebar closes it, the
+    /// open view goes away). Specified: a listing taken while the restart is
+    /// held inside that window carries the session with the row the previous
+    /// listing gave it, status included, and the session is listed again,
+    /// once, after the restart finishes.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_listing_during_a_restart_keeps_the_session_as_last_listed() {
+        let (reached_tx, reached_rx) = tokio::sync::oneshot::channel::<()>();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let reached = Arc::new(std::sync::Mutex::new(Some(reached_tx)));
+        let release = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+        let gate: RestartWindowGate = Arc::new(move || {
+            let reached = Arc::clone(&reached);
+            let release = Arc::clone(&release);
+            Box::pin(async move {
+                if let Some(tx) = reached.lock().expect("gate mutex").take() {
+                    let _ = tx.send(());
+                }
+                if let Some(rx) = release.lock().await.take() {
+                    let _ = rx.await;
+                }
+            })
+        });
+        let mut seams = SupervisorSeams::default();
+        seams.faults.restart_window_gate = Some(gate);
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            seams,
+        )
+        .await
+        .expect("supervisor");
+        let created = sup
+            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
+            .await
+            .expect("agent session");
+        let before = crate::service::listing::list_all(&sup)
+            .await
+            .expect("list before the restart")
+            .sessions
+            .into_iter()
+            .find(|row| row.id == created.id)
+            .expect("fixture premise: the session is listed before its restart");
+
+        let restart = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            let id = created.id.clone();
+            async move {
+                sup.restart_session(&id, RestartMode::Fresh, true, None, None, None)
+                    .await
+            }
+        });
+        let mut restart = restart;
+        // A restart that fails before the window never reaches the gate, so
+        // its own result is what the failure must report.
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            tokio::select! {
+                reached = reached_rx => reached.expect("the restart window gate reports arrival"),
+                done = &mut restart => panic!(
+                    "the restart finished before reaching its relaunch window: {done:?}"
+                ),
+            }
+        })
+        .await
+        .expect("the restart neither reached its relaunch window nor finished within 30 s");
+        assert!(
+            !sup.sessions.lock().await.contains_key(&created.id),
+            "test premise: the session is off the map inside the window"
+        );
+        let during: Vec<SessionInfo> = crate::service::listing::list_all(&sup)
+            .await
+            .expect("list during the restart")
+            .sessions
+            .into_iter()
+            .filter(|row| row.id == created.id)
+            .collect();
+        assert_eq!(
+            during,
+            vec![before],
+            "a listing inside the restart window shows the session as last listed"
+        );
+
+        release_tx.send(()).expect("release the restart window");
+        tokio::time::timeout(std::time::Duration::from_secs(30), restart)
+            .await
+            .expect("the restart finishes once released")
+            .expect("restart task")
+            .expect("restart succeeds");
+        let after = crate::service::listing::list_all(&sup)
+            .await
+            .expect("list after the restart")
+            .sessions
+            .into_iter()
+            .filter(|row| row.id == created.id)
+            .count();
+        assert_eq!(after, 1, "the restarted session is listed exactly once");
+        assert!(
+            sup.restarting_rows
+                .lock()
+                .expect("restarting-rows mutex")
+                .is_empty(),
+            "the held row is dropped when the restart republishes the session"
+        );
     }
 
     /// A dead agent pane must be replaced inside its surviving tmux session.
