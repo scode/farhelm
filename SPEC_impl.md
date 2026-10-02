@@ -1515,15 +1515,17 @@ evidence, but cannot authorize another directory move.
   until an authoritative refresh arrives.
 - Agent-kind integrations live in the supervisor as a small trait (`AgentIntegration`; `AgentKind` is the wire enum
   naming the kind itself) for conversation-identity capture; status reading is the separate `ScreenReader` above, so a
-  kind can have either without the other. Claude Code: watch `~/.claude/projects/<munged-cwd>/` for the session record.
-  Audited specifics that shape this: the record appears at first prompt submission, not at launch, so correlation keys
-  on first-input time and tolerates an unbounded launch-to-first-input gap; the cwd munging is non-injective (`/`, `.`,
-  `_` all become `-`); and per-line JSON fields (sessionId, cwd, timestamps) are the reliable correlators — file birth
-  times can postdate content after rewrites. An identity is claimed only when correlation is unambiguous — two
-  near-simultaneous launches in one cwd stay uncaptured rather than choosing a record arbitrarily. A scan-derived Claude
-  identity retains its exact record locator for append/restart re-verification; a Claude hook report instead remains the
-  agent's direct answer. Codex no longer uses this fallback: even a single matching rollout may belong to a nested
-  invocation rather than the foreground.
+  kind can have either without the other. Claude Code's record scan, described here as it exists, is pending removal
+  (SPEC.md "Durability and resume": identity comes only from an explicit report; TODO.md "Remove heuristic
+  conversation-identity fallbacks"), so nothing new should build on it. It watches `~/.claude/projects/<munged-cwd>/`
+  for the session record. Audited specifics that shape this: the record appears at first prompt submission, not at
+  launch, so correlation keys on first-input time and tolerates an unbounded launch-to-first-input gap; the cwd munging
+  is non-injective (`/`, `.`, `_` all become `-`); and per-line JSON fields (sessionId, cwd, timestamps) are the
+  reliable correlators — file birth times can postdate content after rewrites. An identity is claimed only when
+  correlation is unambiguous — two near-simultaneous launches in one cwd stay uncaptured rather than choosing a record
+  arbitrarily. A scan-derived Claude identity retains its exact record locator for append/restart re-verification; a
+  Claude hook report instead remains the agent's direct answer. Codex no longer uses this fallback: even a single
+  matching rollout may belong to a nested invocation rather than the foreground.
 
   **Codex attribution and exact-record validation.** The Unix accept loop captures the kernel peer PID and its process
   start token before scheduling the connection handler. For a Codex report, a bounded, revalidated ancestry walk must
@@ -1644,15 +1646,15 @@ evidence, but cannot authorize another directory move.
   install layouts, and the injected `--settings` hook is a vendor detail that may change on its own; the closed attempt
   in PR #830 shows where following either leads. A shelled-out child is always at least two links below the pane,
   because the foreground's Bash tool runs it through a shell that does not `exec` it. Accepted costs: a wrapper chain
-  deeper than one level loses hook capture and falls back to the scan, and a child the foreground Claude spawned with no
-  shell between them in a wrapperless launch would be admitted (not observed; the Bash tool always interposes a shell).
-  The check writes no provenance and does not flip Claude's predicate, because flipping it would make every existing
-  Claude capture fresh-only until its next proven report, and stopping replacement needs no version. The offer gate has
-  its final shape but flips per kind: Codex, Grok, and OMP require version 1, while the other kinds keep today's offer
-  behavior until their proof lands, writes 1, and flips the single per-kind predicate every surface consults. There is
-  no general report epoch. Grok's locator carries only its vendor-specific selection timestamp; no other kind inherits
-  that ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology. Old processes and assets fail
-  closed after the upgrade; nothing is grandfathered.
+  deeper than one level loses hook capture and falls back to the scan (pending removal), and a child the foreground
+  Claude spawned with no shell between them in a wrapperless launch would be admitted (not observed; the Bash tool
+  always interposes a shell). The check writes no provenance and does not flip Claude's predicate, because flipping it
+  would make every existing Claude capture fresh-only until its next proven report, and stopping replacement needs no
+  version. The offer gate has its final shape but flips per kind: Codex, Grok, and OMP require version 1, while the
+  other kinds keep today's offer behavior until their proof lands, writes 1, and flips the single per-kind predicate
+  every surface consults. There is no general report epoch. Grok's locator carries only its vendor-specific selection
+  timestamp; no other kind inherits that ordering rule. OMP uses serial cancellation fences, not cross-reporter
+  chronology. Old processes and assets fail closed after the upgrade; nothing is grandfathered.
 
   **The per-launch identity hook.** Scanning cannot see a conversation being replaced inside a live process: Claude
   Code's `/clear` and Codex's `/new` both mint a new conversation id with nothing on disk pointing back at the record
@@ -1685,8 +1687,8 @@ evidence, but cannot authorize another directory move.
   risks a rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and —
   for either vendor — an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the
   supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read
-  once at supervisor start and carried as a seam value. Claude's scan remains the fallback when no report has been
-  accepted; Codex requires attributed reporting and does not infer ownership from nearby rollout files. An accepted
+  once at supervisor start and carried as a seam value. Claude's scan, pending removal, still runs when no report has
+  been accepted; Codex requires attributed reporting and does not infer ownership from nearby rollout files. An accepted
   report dominates scan-derived state, including ambiguity.
   `website/src/content/docs/docs/agents/agent-hook-injection.md` is the user-facing account of the same mechanism.
 
