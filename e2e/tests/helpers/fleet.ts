@@ -168,6 +168,8 @@ export interface SessionRow {
   id: string;
   title: string;
   status?: { state: string };
+  /** What a plain restart may do now: "resume", "fresh_only" or "fallback_template". */
+  restart_offer?: string;
   /** Working directory and invocation as the listing reports them; the
    * badge-render test compares the rendered row against these. */
   cwd?: string;

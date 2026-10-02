@@ -10,7 +10,7 @@
 // really carries the override the helm reads; a UI that dropped it would
 // loop on the confirmation forever, and one that skipped the question would
 // defeat the guard.
-import { type Locator, type Page } from "@playwright/test";
+import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import {
   cleanupSession,
@@ -19,6 +19,7 @@ import {
   localHostId,
   patchPreferences,
   setLocalYoloSafe,
+  stopSession,
 } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 import { fulfillAsHelm } from "./helpers/terminal-suite";
@@ -230,4 +231,119 @@ test("don't ask again marks the host safe before launching, and a failed mark la
     await patchPreferences(request, { remembered_permissions: null });
     for (const id of created) await cleanupSession(request, id);
   }
+});
+
+/**
+ * Drive one Replace started from an open session's top bar into the YOLO
+ * question, bring the session back to life while the question is open, and
+ * answer it with `answer` (one of the confirmation's two YOLO buttons).
+ * Asserts that the answered request still carries the confirmed prompt's
+ * `only_if_nothing_alive: true` and that the precondition refused the source
+ * delete, so the restarted session survives.
+ */
+async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, answer: string): Promise<void> {
+  const cwd = stackScratchDir("yolo-header-replace-");
+  const local = await localHostId(request);
+  const created = await request.post("/api/sessions", {
+    data: {
+      cwd,
+      title: `yolo-header-replace-${Date.now()}`,
+      host: local,
+      launch: { harness: "codex", permissions: "yolo" },
+      // The fixture itself is a YOLO launch on the sensitive-by-default host;
+      // the question under test is the Replace's, not this create's.
+      allow_yolo_on_sensitive_host: true,
+    },
+  });
+  expect(created.ok(), `creating the YOLO source: ${await created.text()}`).toBe(true);
+  const sourceId = (await created.json()).id as string;
+  try {
+    await setLocalYoloSafe(request, false);
+    await stopSession(request, sourceId);
+    await page.goto("/");
+    await page.locator(`.session-row[data-session-id="${sourceId}"]`).click();
+    const exitedBadge = page.locator(".titlebar .status-badge.exited");
+    await expect(exitedBadge).toBeVisible({ timeout: 20_000 });
+    const header = page.locator(".header-replace-anchor");
+    await header.locator(".header-replace").click();
+    // Premise: the prompt the user confirms says nothing is alive (an exited
+    // agent and no open tabs, which would add a clause of their own).
+    await expect(header.locator(".confirm-consequence")).toHaveText(
+      "replacing discards the conversation; a fresh session with the same settings takes its place:",
+    );
+
+    const [refused] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${sourceId}/replace`),
+      ),
+      header.locator(".header-replace-confirm .btn-danger").click(),
+    ]);
+    expect(refused.status(), "the replace is refused as a YOLO launch on a sensitive host").toBe(409);
+    const confirmation = page.locator(".yolo-confirmation");
+    await expect(confirmation).toBeVisible();
+
+    // While the question is open, the session comes back to life from
+    // outside the prompt. A structured Codex launch offers a fresh restart
+    // (or a resume once a conversation was captured), never a fallback
+    // template, so those are the two modes to choose between.
+    const listed = (await listSessions(request)).sessions.find((row) => row.id === sourceId);
+    const mode = listed?.restart_offer === "resume" ? "resume" : "fresh";
+    const restarted = await request.post(`/api/sessions/${sourceId}/restart`, { data: { mode } });
+    expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
+    // And this page has seen it: code that re-read the session when the
+    // answer arrived would now find it alive and send no precondition.
+    await expect(exitedBadge).toHaveCount(0, { timeout: 20_000 });
+
+    const [answered] = await Promise.all([
+      page.waitForRequest(
+        (candidate) => candidate.method() === "POST" && candidate.url().endsWith(`/api/sessions/${sourceId}/replace`),
+      ),
+      confirmation.locator(answer).click(),
+    ]);
+    const body = JSON.parse(answered.postData() ?? "{}");
+    expect(body.only_if_nothing_alive, "the confirmed prompt said nothing was alive").toBe(true);
+    expect(body.allow_yolo_on_sensitive_host, "the answer carries the YOLO override").toBe(true);
+    // The precondition refuses the source delete: the replacement is made,
+    // the restarted source is kept, and the page says both exist.
+    const reply = await answered.response();
+    expect(reply?.ok(), "the precondition refuses the source delete").toBe(false);
+    expect(await reply?.text()).toContain("both sessions still exist");
+    await expect(page.locator(".replace-error")).toContainText("both sessions still exist");
+    expect((await listSessions(request)).sessions.some((row) => row.id === sourceId)).toBe(true);
+  } finally {
+    await setLocalYoloSafe(request, false);
+    await patchPreferences(request, { remembered_permissions: null });
+    for (const row of (await listSessions(request)).sessions.filter((candidate) => candidate.cwd === cwd)) {
+      await cleanupSession(request, row.id);
+    }
+  }
+}
+
+/**
+ * A Replace started from an open session's top bar that meets the YOLO
+ * question keeps the "nothing is alive" answer of the prompt the user
+ * confirmed, even when the session comes back to life while the question is
+ * open, for both of the question's YOLO answers. Why: the prompt that said
+ * nothing was running is what the user agreed to, so the source delete must
+ * carry the supervisor-side "only if nothing is alive" precondition.
+ * Recomputed when the YOLO answer arrived, a session restarted in the
+ * meantime (from another window, an agent, or this view) sent no
+ * precondition, and the delete killed the freshly started agent after a
+ * prompt that said nothing was alive.
+ */
+test("a header replace keeps its confirmed nothing-alive answer when confirmed once", async ({ page, request }) => {
+  await headerReplaceKeepsAnswer(page, request, ".yolo-confirm");
+});
+
+/**
+ * The same as the test above, answered with "Start, and don't ask again on
+ * this host": that answer also re-sends the Replace, so it must carry the
+ * same confirmed answer. Specifies the same request and survival outcome.
+ */
+test("a header replace keeps its confirmed nothing-alive answer when told not to ask again", async ({
+  page,
+  request,
+}) => {
+  await headerReplaceKeepsAnswer(page, request, ".yolo-confirm-stop-asking");
 });

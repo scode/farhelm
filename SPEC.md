@@ -1679,6 +1679,20 @@ Three things still hold. An action the user started is never lost silently: it e
 or reports that its outcome is unknown. Sign-in recovery never crashes the window or leaves it dead. A failed desktop
 re-sign-in can be retried from the window, without restarting the app. This principle may be revisited later.
 
+### One GUI at a time
+
+Confirmed 2026-10-01: a single GUI attached to the helm, one browser tab or the desktop app's window, is the supported
+user surface. Several GUIs open on the same helm at once work on a best-effort basis: an action taken in one can race a
+change made in another, and the outcome may reflect what that GUI last showed rather than the newest state. Fix such a
+race when the fix is easy and adds little complexity; do not add significant machinery to keep concurrent GUIs
+consistent. This does not withdraw the session view's multi-client rules (one attached client per session, takeover,
+displaced clients), which still hold whenever more than one client opens a session, and the desktop app remains the
+primary GUI (see Signing in again).
+
+The `farhelm` command line, and the agent skill through which agents act on the fleet, are a fully supported primary
+surface alongside the GUI, including while a GUI is open: operations they perform concurrently with a GUI must behave
+correctly, and the best-effort qualifier above applies only to several GUIs at once.
+
 ### Remote input, session defaults, and availability
 
 Agents may discover the helm catalog's profile names and IDs. Listing those names and IDs in lookup suggestions is

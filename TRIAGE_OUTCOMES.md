@@ -4870,7 +4870,8 @@
   (agents acting through fleet operations) are a fully supported primary surface alongside the UI, including
   concurrently with it; the spec must say so, and the best-effort qualifier applies only to several concurrent GUIs.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
+- Execution: complete: change `sxxkpwstxrtl`, bookmark `triage-1001c/08-header-replace-keeps-answer`, PR
+  https://github.com/scode/farhelm/pull/1394.
 
 ## sidebar-replace-recomputes-alive.md
 
