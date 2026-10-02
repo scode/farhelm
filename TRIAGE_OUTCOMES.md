@@ -5891,7 +5891,8 @@
 - Completion criteria: a snapshot that does not contain the supervisor's own pid is an error ("could not look"), so
   cleanup relying on it is unconfirmed rather than successful; add a pure test. No broader discovery changes. Remove
   TODO.md's "Snapshot self-witness" entry, this feedback file and its index entry.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `rvukuktu`, bookmark `triage-1001e/17-snapshot-self-witness`, PR
+  https://github.com/scode/farhelm/pull/1467.
 
 ## probe-cancellation-leaves-helper-processes.md
 

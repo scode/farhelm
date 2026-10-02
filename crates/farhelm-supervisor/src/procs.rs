@@ -105,9 +105,12 @@ pub(crate) type ProcessTable = HashMap<u32, (u32, u64)>;
 /// map: reporting "found nothing" when nothing was ever looked at is
 /// precisely the failure mode the sweep exists to avoid, so the caller
 /// must be able to tell "the tree is clean" from "the tree was never
-/// examined". A problem confined to ONE process (an unreadable row on
-/// Linux) lands in the returned `Vec<String>` instead, so a single odd
-/// process does not blind the scan to every other one.
+/// examined". A walk that ran but did not see this supervisor's own
+/// process (an empty `/proc`, a zero-size `sysctl` answer) is `Err` for the
+/// same reason: the caller is always in its own table, so a table without
+/// it was not really read. A problem confined to ONE process (an unreadable
+/// row on Linux) lands in the returned `Vec<String>` instead, so a single
+/// odd process does not blind the scan to every other one.
 ///
 /// The scope is same-euid, mirroring what each platform can actually read:
 /// another user's processes are neither killable by this supervisor nor
@@ -122,7 +125,52 @@ pub(crate) type ProcessTable = HashMap<u32, (u32, u64)>;
 /// following snapshot PPID edges, re-walking between signal phases, and
 /// re-checking each chosen process at the moment of signaling.
 pub(crate) fn snapshot() -> Result<(ProcessTable, Vec<String>), String> {
-    imp::snapshot()
+    let (table, soft_errors) = imp::snapshot()?;
+    require_own_row(table, soft_errors, std::process::id())
+}
+
+/// The self-witness check behind [`snapshot`]: a table that lacks `own_pid`
+/// is an error, anything else passes through unchanged.
+///
+/// Only presence is checked, deliberately. This catches a walk that came
+/// back empty or truncated without failing; it is not a general test of
+/// whether every process was visible, and a process that hides from the
+/// walk while this supervisor's own row is present is out of its scope.
+/// Pure over its inputs so the refusal is testable without a broken
+/// process table.
+///
+/// On Linux the walk keeps only `/proc` entries owned by this euid, and the
+/// kernel shows a non-dumpable process's entry as root's. A supervisor made
+/// non-dumpable (`PR_SET_DUMPABLE` 0, as some hardening does) would
+/// therefore fail every walk here, and Stop and Delete would be unconfirmed
+/// on every host without a systemd user manager.
+///
+/// The first few of the walk's per-process errors, and how many there were,
+/// are carried into the refusal, since one of them is usually why this
+/// supervisor's row was missing.
+fn require_own_row(
+    table: ProcessTable,
+    soft_errors: Vec<String>,
+    own_pid: u32,
+) -> Result<(ProcessTable, Vec<String>), String> {
+    if !table.contains_key(&own_pid) {
+        let mut message = format!(
+            "the process table walk did not include this supervisor (pid {own_pid}), so it cannot \
+             be trusted to show the processes it is meant to find"
+        );
+        // A few examples and a count, not the whole list: a policy that denies
+        // every read yields one error per process this user owns, and the
+        // sweep's own report is bounded.
+        if !soft_errors.is_empty() {
+            message.push_str("; errors during the walk: ");
+            message.push_str(&soft_errors[..soft_errors.len().min(3)].join("; "));
+            if soft_errors.len() > 3 {
+                message.push_str(&format!("; and {} more", soft_errors.len() - 3));
+            }
+        }
+        return Err(message);
+    }
+    Ok((table, soft_errors))
 }
 
 /// One process's `(ppid, start time, state)`, or `Ok(None)` when it is gone
@@ -1692,6 +1740,55 @@ mod tests {
         let mut greedy = 9i32.to_ne_bytes().to_vec();
         greedy.extend_from_slice(&buf[4..]);
         assert_eq!(parse_procargs2(&greedy).unwrap(), b"");
+    }
+
+    /// Spec: a process-table walk that does not contain the caller's own
+    /// pid is an error, while one that does passes through with its soft
+    /// errors intact.
+    ///
+    /// Why: Stop and Delete find a session's processes in the table. A walk
+    /// that silently came back empty (an unmounted `/proc`, a zero-size
+    /// `sysctl` answer) found nothing to stop, so cleanup reported success
+    /// having examined nothing; the caller is always in its own table, so
+    /// its absence is the one cheap proof the walk did not happen. The
+    /// refusal keeps the walk's per-process errors, which usually say why.
+    #[farhelm_testtrace::test]
+    fn a_snapshot_without_its_own_row_is_an_error() {
+        assert!(
+            require_own_row(ProcessTable::new(), Vec::new(), 4242).is_err(),
+            "an empty table must not read as \"nothing running\""
+        );
+        let refusal = require_own_row(
+            ProcessTable::new(),
+            vec!["pid 4242: permission denied".to_string()],
+            4242,
+        )
+        .expect_err("an empty table refuses whatever its soft errors");
+        assert!(
+            refusal.contains("pid 4242: permission denied"),
+            "the refusal must say why the row was missing: {refusal}"
+        );
+        let many = (0..1000).map(|pid| format!("pid {pid}: denied")).collect();
+        let refusal = require_own_row(ProcessTable::new(), many, 4242)
+            .expect_err("an empty table refuses whatever its soft errors");
+        assert!(
+            refusal.contains("pid 2: denied; and 997 more") && !refusal.contains("pid 3: denied"),
+            "a flood of per-process errors is summarized, not copied whole: {refusal}"
+        );
+        let mut others = ProcessTable::new();
+        others.insert(17, (1, 1_000));
+        assert!(
+            require_own_row(others, Vec::new(), 4242).is_err(),
+            "a table missing only the caller must still refuse"
+        );
+        let mut table = ProcessTable::new();
+        table.insert(4242, (1, 1_000));
+        table.insert(17, (4242, 2_000));
+        let (passed, soft) =
+            require_own_row(table.clone(), vec!["pid 99: unreadable".to_string()], 4242)
+                .expect("a table containing the caller passes");
+        assert_eq!(passed, table);
+        assert_eq!(soft, vec!["pid 99: unreadable".to_string()]);
     }
 
     /// This process must be able to find ITSELF in the table, with its own

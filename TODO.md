@@ -389,12 +389,6 @@ client-scale decisions.
 Mechanism verified on main, fix is trivial or small, and the notes attach no design question. Ordered roughly by
 severity.
 
-- **Snapshot self-witness.** `A3-C3`. High, trivial. `procs::snapshot` (procs.rs:372-402) returns `Ok` with an empty map
-  when `/proc` is present but unmounted, and the macOS path (procs.rs:765) returns `Ok(Vec::new())` for a zero-sized
-  `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
-  fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
-  `std::process::id()`. Also backstops the real-uid changes below.
-
 ### Next: high confidence, needs care
 
 Mechanism verified on main, but the fix touches lifecycle, locking, or the kill set, or needs a reproduction before it
@@ -408,8 +402,9 @@ is safe. Each is its own review unit.
   offset assertion for `kp_eproc.e_pcred.p_ruid` beside the four at :678 and accept a row when real or effective uid
   matches; on Linux select by the real uid from `/proc/<pid>/status` and keep the directory-owner check only where
   `read_process` uses it to classify a failed read; correct the `snapshot` docstring's "not killable" premise. Do macOS
-  first, Linux second, each with the self-witness above already landed. Fence: ordinary descendants in scope, deliberate
-  same-account escape not; never broaden a kill set on identity that has not been revalidated.
+  first, Linux second; the snapshot already refuses a table without the supervisor's own row. Fence: ordinary
+  descendants in scope, deliberate same-account escape not; never broaden a kill set on identity that has not been
+  revalidated.
 - **Tab close leaves input aimed at the agent pane.** `A5-S4`. High, small, medium risk. `close_tab_window`
   (core.rs:8901-8932) reaps, kills the window, reaps again, and only then calls `detach_closed_tab`; the audited
   `=<session>:.<pane>` target doc (tmux.rs:1552-1559) records that a vanished pane silently degrades to the session's

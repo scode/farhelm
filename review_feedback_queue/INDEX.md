@@ -7,8 +7,6 @@ One line per open item. This file must always match the feedback files in this d
 - `claude-clear-report-dropped-on-claim-timeout.md` — a Claude `/clear` report refused after a 1 s capture-claim wait is
   never resent, so Resume keeps reopening the cleared conversation.
 
-- `process-snapshot-requires-supervisor-witness.md` — process cleanup accepts an empty process table without proving the
-  supervisor was enumerated.
 - `probe-cancellation-leaves-helper-processes.md` — cancelling discovery can leave isolated probe helpers and stderr
   readers alive.
 
