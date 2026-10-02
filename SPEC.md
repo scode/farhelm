@@ -1788,6 +1788,13 @@ others, routing by session id still reaches them, and removing the host restores
 defend against that. What must still be prevented is a host breaking the helm itself or affecting the security of other
 hosts.
 
+Confirmed 2026-10-01: a misbehaving host degrading the helm's performance or availability, the way a denial-of-service
+attack would, is accepted when it cannot easily be avoided. Farhelm avoids such effects where it reasonably can but does
+not spend elaborate complexity on them. One it avoids: a supervisor's "sessions changed" hints make the helm refresh
+that host at once, and each such refresh makes every open client re-read, so the helm spaces the refreshes hints cause
+by the same minimum gap the supervisor promises to keep between its hints, with at most one more pending. A host that
+hints without pause then costs the helm no more than a busy honest one.
+
 ### Ownership during cleanup and provisioning
 
 Confirmed 2026-09-28: Farhelm's private tmux server is an implementation detail, not an interface, and the product

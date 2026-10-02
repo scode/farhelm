@@ -218,6 +218,24 @@ pub const PROTOCOL_VERSION: u32 = 35;
 /// "could not read to the end" — nothing else produces it.
 pub const LIST_SESSIONS_CAP: usize = 500;
 
+/// The least time between two [`ControlMsg::SessionsChanged`] hints, and
+/// between two refreshes a helm runs because of them.
+///
+/// Both ends hold to it, for different reasons. Each hint costs the helm a
+/// whole `ListSessions` round trip (an ssh round trip for a remote host,
+/// plus the capture sweep that listing runs), and each refresh that answers
+/// one raises a fleet-wide event that makes every open client re-read the
+/// list and every open session view do a live read of its own host. An
+/// honest supervisor spaces its hints this far apart to bound that during a
+/// burst. The helm enforces the same gap on its side, because supervisor
+/// messages are untrusted (SPEC.md): without it, a host that hints after
+/// every reply would drive back-to-back refreshes at round-trip rate, and
+/// with it a hostile host costs the helm no more than a busy honest one.
+///
+/// Well under the three-second poll the hint is meant to beat. Lowering it
+/// on one side only does nothing: the slower of the two ends sets the pace.
+pub const SESSIONS_CHANGED_MIN_GAP: std::time::Duration = std::time::Duration::from_millis(200);
+
 /// Most repositories one [`ControlMsg::GithubRepoResults`] reply carries; a
 /// backend with more matches cuts the list here and says so with
 /// `truncated`.
