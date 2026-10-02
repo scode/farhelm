@@ -33,6 +33,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Re-examine and simplify how launches are represented.** The maintainer wants to interrogate how launches are handled
+  end to end and reconsider the design with simplification in mind. Today a session can be launched from a structured
+  selection, a built-in profile, a user profile, or a raw command line, and a profile or raw create can carry a separate
+  resume command alongside its start command; each path decides YOLO, resume and restart behavior its own way. Example
+  of the resulting complexity: the sensitive-host YOLO check classifies only the start command, so a custom profile
+  whose hand-written resume command adds `--dangerously-skip-permissions` passes the check at creation and every later
+  Resume runs with approvals off unconfirmed (`yolo-guard-skips-resume-template.md`, triaged 2026-10-01 as a spec
+  clarification rather than a code fix because closing it was not worth the complexity). First step: walk through the
+  launch paths with the maintainer.
+
 - **Uninstall after a move when the installer skipped the app.** On macOS, after the install directory moves
   (`~/.local/bin` replaced by a symlink, a renamed home, a different `FARHELM_INSTALL_DIR`), `farhelm uninstall` refuses
   until the installer is re-run from the new directory: the install directory's own ownership record, and the app's
@@ -143,6 +153,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   environment an agent captures from it (Claude Code sources `.zshrc` without a terminal), leaving the agent without
   setup made later in that file, such as a PATH entry; this is the same as running the agent in a terminal outside tmux.
   SPEC.md's "Ownership during cleanup and provisioning" section states the rule.
+- Tell users that the sensitive-host YOLO confirmation, and the sidebar's YOLO badge, recognize a custom command line or
+  profile as YOLO only on a best-effort basis: common shapes such as a vendor's approval-skipping flag, also behind an
+  `env NAME=value` prefix, are caught, but an arbitrary wrapper (a script, `sh -c '…'`) that turns approvals off may not
+  be. Launches built with the New dialog's harness and permission choices are always classified exactly. SPEC.md's
+  YOLO-launch paragraph will state the rule once `yolo-guard-misses-env-prefix.md`'s triage outcome lands.
 
 ## Tricky bugs
 
@@ -614,6 +629,14 @@ are large mostly because of their tests.
 
 - **In-app intro guide.** Build an introductory guide into the app itself, so a new user can learn Farhelm's core
   concepts and first steps without leaving it. Form and content are to be decided when this is picked up.
+
+- **Consider allowing exactly one UI attached to the helm.** A single GUI attached to the helm is the supported user
+  surface, and several concurrent GUIs (browser tabs, the desktop app, other devices) are best effort. Consider going
+  further and refusing a second concurrent UI outright, for simplicity: races between clients would stop being possible
+  rather than merely unsupported. Part of deciding is what replaces today's multi-client machinery that SPEC.md's
+  session view section specifies (one attached client per session, takeover with a displaced snapshot and take-control
+  action), including how moving between devices would work, and that agents acting through fleet operations are not a UI
+  and would still act concurrently. Came up in review-feedback triage on 2026-10-01.
 
 ## Unbucketized
 

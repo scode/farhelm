@@ -4762,3 +4762,230 @@
   Retry clearing the freeze after the other entry is removed. Remove this feedback file and its index entry.
 - Execution: complete: change `xqltwtssqnpw`, bookmark `triage-1001b/05-duplicate-hosts`, PR
   https://github.com/scode/farhelm/pull/1378.
+
+## yolo-guard-misses-env-prefix.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at 961e0a0. `argv_is_yolo` (`crates/farhelm-proto/src/yolo.rs`) picks
+  the vendor's flag table from the first word's basename only, so
+  `env NAME=value claude
+  --dangerously-skip-permissions` (or `env A=1 codex --yolo`, or `env A=b pi`) classifies as
+  `env`, matches no vendor, and is not YOLO. The helm guard (`invocation_is_yolo` in
+  `crates/farhelm-helm/src/yolo_guard.rs`) therefore lets it start on a sensitive host without confirmation, and the
+  sidebar badge (`invocation_marker`, same first-word lookup) misses it too. Farhelm itself treats a leading
+  `env NAME=value` prefix as an ordinary launch shape: the supervisor's `effective_program_index`
+  (`crates/farhelm-supervisor/src/agent_kind/mod.rs`) skips it to find the real program. No test pins either behavior,
+  and no spec text, `Planned` item, `BUGS.md` entry or filter covers it. Affects raw command lines and profile
+  invocations (and clone/replace of such sources, `farhelm agent create`/`spawn`); structured launches are unaffected.
+- Decision: the user chose spec+code with an explicit principle: for custom launches (raw command lines and profile
+  invocations), YOLO detection is best effort. Farhelm cannot guarantee that every possible command line that turns off
+  approvals is recognized; it should cover as many reasonable shapes as it can, and an `env NAME=value` prefix is one of
+  them. The spec must not claim complete detection for custom launches with arbitrary command lines.
+- Completion criteria: make the shared YOLO classifier (guard and badge) look past a leading simple `env NAME=value`
+  prefix using one shared copy of the rule the supervisor's `effective_program_index` applies, so the two cannot drift;
+  an `env` followed by an option (such as `env -i`) is treated as YOLO by the guard rather than as not-YOLO. Add tests
+  for `env A=1 claude --dangerously-skip-permissions`, `/usr/bin/env A=1 codex --yolo`, and `env A=b pi`. Amend
+  SPEC.md's YOLO-launch paragraph (and SPEC_impl.md where it describes the classifier) to state that recognition of
+  custom command lines is best effort: common shapes are covered, but arbitrary wrappers (scripts, `sh -c`, and the
+  like) are not guaranteed to be detected; structured launches remain exact. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## yolo-guard-fails-open-without-row.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at 961e0a0, not reproduced at runtime. `check`
+  (`crates/farhelm-helm/src/yolo_guard.rs`) returns OK when the host's registry row is missing, on the premise that
+  routing to a removed host refuses on its own; but create and restart-with (`crates/farhelm-helm/src/sessions.rs`) take
+  the host's connection client before calling the guard, and host removal (`remove_host_owned` in
+  `crates/farhelm-helm/src/hosts.rs`) deletes the row before it stops the connection actor. Nothing serializes create
+  against removal. A YOLO launch without the override (most plausibly an agent's `farhelm agent create`/`clone` or
+  `farhelm spawn`) that reaches the guard in that window of a few awaits is allowed and dispatched over the still-open
+  connection, starting an approval-free agent on a sensitive host that then runs invisibly because the helm has
+  forgotten the host. Nothing in the spec, `Planned`, `BUGS.md` or filters covers it. Triage also identified the wider
+  race behind it: any create routed before a removal can land on the forgotten host and run invisibly, YOLO or not.
+  Closing that needs a new per-host lock held by every create path across dispatch and taken exclusively by removal,
+  with lock ordering against the provisioning and cache-write locks and slower removal.
+- Decision: the user chose the narrow fix only and discarded the wider create-versus-removal race: its consequence is a
+  session the user or their agent asked for that is not visible until the host is re-added, not a safety bypass, and
+  closing it is not worth the added locking.
+- Completion criteria: make the YOLO guard treat a missing host row as host-not-found, refusing with the same error the
+  helm gives for an unknown host, and correct the comment that claims routing refuses on its own. Add a unit test that a
+  YOLO check against a host id with no registry row is refused. Do not add serialization between create and host
+  removal. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## sighup-skips-orderly-shutdown.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at 961e0a0, not reproduced at runtime. The supervisor's `run`
+  (`crates/farhelm-supervisor/src/service/core.rs`) installs listeners only for SIGTERM, SIGINT and the desktop tether,
+  and nothing in the supervisor or the `farhelm` binary handles or ignores SIGHUP, so a hangup kills the supervisor with
+  its default action and skips the orderly tmux output shutdown; per `BUGS.md` that can abort the private tmux server
+  and every session on the host. Triggers: closing the terminal or losing the ssh connection of a hand-started
+  `farhelm
+  supervisor run` (a remedy the hosts page suggests), or closing the terminal a Linux desktop app was
+  launched from (the managed supervisor is spawned in the app's process group, `crates/farhelm-ui/src/desktop.rs`).
+  systemd-unit supervisors and desktop apps launched without a terminal are unaffected. `BUGS.md`'s "Abrupt supervisor
+  death" entry does not cover this and is inaccurate: it says every planned stop runs the orderly path and only deaths
+  that run no code remain, but SIGHUP is catchable and unhandled. Triage added a premise the finding understates: the
+  tmux output and sink clients (`crates/farhelm-supervisor/src/tmux/stream.rs`, `tmux/sink.rs`) share the supervisor's
+  process group, so a terminal hangup also reaches them and tmux tears them down outside the orderly order; a supervisor
+  SIGHUP handler alone may not restore safe ordering (inferred from tmux 3.7c source, not tested).
+- Decision: the user chose the code fix as recommended.
+- Completion criteria: route SIGHUP into the same orderly shutdown as SIGTERM and SIGINT, updating `run`'s docs; start
+  the tmux output and sink clients in their own process group so a terminal hangup or Ctrl-C reaches only the supervisor
+  (optionally also start the desktop app's managed supervisor in its own group); correct `BUGS.md`'s description of
+  which deaths skip the orderly path; add a focused test that a SIGHUP to the supervisor's process group runs the
+  orderly shutdown. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## header-replace-recomputes-alive.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at 961e0a0, not reproduced in a browser. The header's `replace`
+  closure (`crates/farhelm-ui/src/session_view.rs`) recomputes `only_if_nothing_alive` from the session's current state
+  each time it runs, and both YOLO-confirmation buttons call it again. If the session is restarted or gains a tab while
+  the YOLO question is open (another window, the desktop app, an agent through fleet operations, or a tab the user opens
+  in the same view, which operations do not block), the re-run sends `false` and the supervisor deletes the source
+  unconditionally (`crates/farhelm-supervisor/src/service/handlers.rs`), killing the just-started agent or shell after a
+  prompt that said nothing was alive. Header Delete already captures the value from the render that drew its prompt. The
+  reverse drift is harmless. Not covered by the spec, `Planned`, `BUGS.md` or filters; it is a hole in the
+  `delete-lacks-liveness-precondition.md` outcome (#1152, #1160), which said Replace sets the flag when its confirmation
+  showed nothing alive.
+- Decision: the user chose the code fix provided it is easy and adds little complexity (it follows the existing Delete
+  pattern), plus a spec principle: a single GUI attached to the helm is the supported user surface, and several
+  concurrent GUIs are best effort. The user also asked for a `Maybe later` TODO entry to consider refusing more than one
+  UI outright for simplicity (added during triage).
+- Completion criteria: capture the nothing-alive value (with the source fields) from the prompt the user confirmed,
+  carry it in the pending YOLO question's state, and send that stored value from both YOLO buttons; add a browser
+  regression on Chromium and WebKit. If the fix turns out not to be easy, stop and return the item to the user rather
+  than adding machinery. Add the single-GUI principle to SPEC.md (concurrent GUIs are best effort), worded so it does
+  not contradict or remove the existing multi-client behavior the session view section specifies (one attached client
+  per session, takeover, displaced clients). The user confirmed that the `farhelm` command line and the agent skill
+  (agents acting through fleet operations) are a fully supported primary surface alongside the UI, including
+  concurrently with it; the spec must say so, and the best-effort qualifier applies only to several concurrent GUIs.
+  Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## sidebar-replace-recomputes-alive.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at 961e0a0, not reproduced in a browser. Same root cause as
+  `header-replace-recomputes-alive.md` in the sidebar: `do_replace` (`crates/farhelm-ui/src/list/view.rs`) looks the row
+  up again and recomputes `only_if_nothing_alive` each time it runs, and both YOLO-confirmation buttons re-enter it; its
+  comment claiming the prompt was worded from the same row holds only on the first run. If the row has meanwhile dropped
+  out of the list, `is_some_and` yields `false`, an unguarded delete. Trigger and consequence as in the header item
+  (another window, the desktop app, or an agent restarts the session or opens a tab while the YOLO question is open; the
+  just-started agent or shell is killed). Not covered by the spec, `Planned`, `BUGS.md` or filters.
+- Decision: as for `header-replace-recomputes-alive.md`: the code fix provided it is easy and adds little complexity,
+  plus the single-GUI spec principle (a single GUI attached to the helm is supported; several concurrent GUIs are best
+  effort). The `Maybe later` TODO entry was added once, for both items.
+- Completion criteria: capture the nothing-alive value from the row the confirm prompt was drawn from, carry it in the
+  sidebar YOLO question's state, and send the stored value from both YOLO buttons; a row missing from the list must not
+  turn into an unguarded delete. Add a browser regression on Chromium and WebKit. If the fix turns out not to be easy,
+  stop and return the item to the user. If the header item's execution has already added the single-GUI principle to
+  SPEC.md, this item needs no further spec change; otherwise add it as described there. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## yolo-guard-misses-codex-option-form.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection at 961e0a0. `YOLO_OPTION_VALUES` (`crates/farhelm-proto/src/yolo.rs`)
+  has entries for OMP's `--approval-mode yolo` and Claude's `--permission-mode bypassPermissions` but none for Codex, so
+  `codex -a never -s danger-full-access` (and the long and `=` spellings) classifies as not YOLO in both the helm guard
+  and the sidebar badge. The vendor premise the reviewer could not check was verified in triage against the installed
+  `codex-cli 0.159.3 --help`: `-a never` is "Never ask for user approval" and `-s danger-full-access` removes the
+  sandbox, together the same as `--dangerously-bypass-approvals-and-sandbox`. Reach is that of
+  `yolo-guard-misses-env-prefix.md` (raw command lines, profiles, clone/replace of such sources,
+  `farhelm agent
+  create`/`spawn`); structured launches are unaffected. Not covered by the spec, `Planned`, `BUGS.md`
+  or filters; the best-effort principle recorded for `yolo-guard-misses-env-prefix.md` frames this as a common
+  documented shape to cover.
+- Decision: the user chose the code fix as recommended. `-a never` alone keeps Codex's sandbox and does not count, like
+  `--full-auto`; `-s danger-full-access` alone keeps approval prompts and does not count.
+- Completion criteria: classify a Codex command as YOLO when it carries both a never-ask approval policy and the
+  `danger-full-access` sandbox, in any of the `-a`/`--ask-for-approval`, `-s`/`--sandbox` and `=` spellings and in
+  either order, in the guard and the sidebar badge; include the `-c`/`--config` spellings (`approval_policy="never"`
+  with `sandbox_mode="danger-full-access"`) if that comes cheaply. Add classifier tests for each spelling and a guard
+  test refusing such a create on a sensitive host. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## yolo-safe-survives-identity-adoption.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at 961e0a0. The "start YOLO sessions without asking" setting is a
+  column on the registry row (`hosts.yolo_safe`), read only by the YOLO guard (`crates/farhelm-helm/src/yolo_guard.rs`).
+  Adoption (`adopt_identity` in `crates/farhelm-helm/src/store.rs`) swaps the identity and deliberately purges the old
+  install's session cache and install-scoped history, but leaves `yolo_safe` untouched, so after an adopt (recycled
+  address, reinstall, or a retarget to another machine followed by Adopt) YOLO launches on the new install skip the
+  confirmation and the hosts panel shows nothing unusual. The setter's own docs say sensitivity is a property of the
+  machine, and SPEC.md's Topology section treats a new identity as a new host. Not covered by the spec, `Planned`,
+  `BUGS.md` or filters. The finding also names two narrower variants with the same root: a settings dialog or the YOLO
+  confirmation's "don't ask again on this host" left open across a concurrent retarget/adopt marks whatever machine the
+  row now points at (no identity precondition on `set_yolo_safe`); and a row marked before first contact, then
+  retargeted, records the new machine's identity at first contact and keeps the mark.
+- Decision: the user chose to fix the main adopt case only and to discard both narrower variants (stale-dialog toggle,
+  and the never-contacted row retargeted before first contact) for now.
+- Completion criteria: clear `yolo_safe` inside `adopt_identity`'s existing transaction, so an adopted host asks before
+  YOLO launches again; make the adopt prompt say that YOLO launches will ask again after adopting; add to SPEC.md's host
+  settings paragraph that adopting a new identity resets the host to asking before YOLO launches. Add a store test (mark
+  safe, adopt a different identity, the row is no longer safe). Do not add an identity precondition to the setter or
+  change first-contact recording. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## yolo-guard-misses-equivalent-spellings.md
+
+- Outcome: `fix spec+code`.
+- Assessment: both parts confirmed by current-code inspection at 961e0a0. (A) Cursor: the classifier's Cursor rows
+  (`agent`, `cursor-agent` in `crates/farhelm-proto/src/yolo.rs`) list only `--force` and `--yolo`, so the documented
+  short `-f` (verified in the installed `cursor-agent --help`:
+  `-f, --force  Force allow commands unless explicitly
+  denied`) is not YOLO in the guard or the badge. (B) Pi: a
+  launch declared as kind Pi (a profile's `agent_kind`, or a raw create's kind override) whose program is not named `pi`
+  is not YOLO; the declared kind is available to the guard (`create_is_yolo` in `crates/farhelm-helm/src/yolo_guard.rs`,
+  `ResolveProfile` in `agent_requests.rs`) but ignored. Restart-with is already covered; raw clone/replace drop the kind
+  entirely. Triage also found that the program name `agent` is ambiguous: on the development host `agent` is Grok's
+  executable, not Cursor's, so the classifier's assumption that `agent` means Cursor is unsound (Grok's
+  `--always-approve` under the name `agent` is missed). Also noticed in passing, outside this finding: OMP's documented
+  `--auto-approve` and Grok's `--permission-mode
+  bypassPermissions` are absent from the tables.
+- Decision: fix Cursor's `-f`. Agents installed or launched under alternative program names are explicitly out of scope
+  for YOLO detection, a declared Pi kind under another program name included; record that in the spec rather than
+  checking the declared kind. Recognize `cursor-agent` as Cursor and `grok` as Grok, and assume nothing about the
+  program name `agent`, which is too general; say so explicitly in the spec. Because Farhelm's own built-in `cursor` and
+  `cursor-yolo` profiles and the structured Cursor harness launch `agent`, and dropping `agent` from detection would
+  leave the built-in `cursor-yolo` profile (classified by its invocation `agent --force`) unguarded, the user chose to
+  switch Farhelm's Cursor launches to always use the `cursor-agent` program name, as the simplest option.
+- Completion criteria: change the built-in `cursor` and `cursor-yolo` profiles (`builtin_profiles` in
+  `crates/farhelm-helm/src/store.rs`) and the structured Cursor harness compiler to launch `cursor-agent` instead of
+  `agent`; remove `agent` from the YOLO classifier tables and add `-f` to `cursor-agent`'s YOLO flags, in the guard and
+  the badge; update tests that assume `agent` (including UI code keyed on the built-in Cursor profiles). Already stored
+  sessions keep their recorded launch. Amend SPEC.md: the Cursor section names `cursor-agent`; the YOLO-launch paragraph
+  (alongside the best-effort wording from `yolo-guard-misses-env-prefix.md`) says custom command lines are recognized by
+  each vendor's standard program name (`cursor-agent` for Cursor, `grok` for Grok, `pi` for Pi, and so on), the generic
+  name `agent` is not interpreted, and agents installed or launched under other names are not detected. OMP's
+  `--auto-approve` and Grok's `--permission-mode bypassPermissions` are not part of this decision. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## yolo-guard-skips-resume-template.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by current-code inspection at 961e0a0. `create_is_yolo`
+  (`crates/farhelm-helm/src/yolo_guard.rs`) and the `farhelm spawn` profile lookup (`agent_requests.rs`) classify only
+  the start command, never a profile's or a raw create's separate resume command, so a custom launch whose start command
+  is plain and whose hand-written resume command carries a vendor YOLO flag passes the sensitive-host check at creation,
+  and every later Resume (or Restart of a generic profile) runs it unconfirmed, because a plain restart is not asked
+  again. Affects only custom launches (user profiles with a hand-written resume command, raw API creates that send one):
+  structured launches build their resume command from the checked selection, built-in plain profiles have none, and
+  built-in YOLO profiles' start command is already YOLO. Not covered by the spec, `Planned`, `BUGS.md` or filters.
+- Decision: the user chose a spec clarification and discarded the code fix as not worth the complexity, and asked for a
+  `Near term` TODO entry (added during triage) to re-examine and simplify how launches are handled, with this issue as
+  the example.
+- Completion criteria: amend SPEC.md's YOLO-launch paragraph so that, for custom launches, only the start command is
+  classified: a separate resume command is not checked, and a plain Resume or Restart that runs it is not asked. Keep it
+  consistent with the best-effort wording from `yolo-guard-misses-env-prefix.md`. No code change. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
