@@ -5165,7 +5165,8 @@
   the same comment) is covered by the same mechanism cheaply; if not, leave it and say so. Add a unit test alongside the
   existing `rows.rs` ones covering a height change above the open row (closes) and below it (stays open). Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `yopkmnvsxpvx`, bookmark `triage-1001d/06-row-menu-height-drift`, PR
+  https://github.com/scode/farhelm/pull/1402.
 
 ## uploads-aborted-silently-on-remount.md
 

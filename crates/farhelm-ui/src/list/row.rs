@@ -957,8 +957,10 @@ pub(super) fn SessionRow(
     // A noncompact detail line is meaningful when it carries either the
     // complete ended message or a qualifier whose compact presentation is a
     // glyph. Live and unknown rows otherwise keep their existing two-line
-    // height rather than acquiring an empty layout row.
-    let has_detail = ended_badge.is_some() || session.stale;
+    // height rather than acquiring an empty layout row. The list's
+    // menu-placement check counts these lines through the same function
+    // (`rows::menu_row_reordered`), so it must stay the one definition.
+    let has_detail = crate::rows::has_detail_line(&session);
     // The browser suite's stable wire token for locality, the same role
     // `data-host-kind` plays in the host panel: a plain string rather than
     // `Debug`'s derived spelling, so a rename of the enum's variants (their
