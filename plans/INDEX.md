@@ -13,3 +13,7 @@ One line per plan, in the order the plans are executed. This file must always ma
 - [pending] `triage-restart-takeover-update.md` — execute the fourth batch of 2026-10-01 triage outcomes, the
   high-priority review queue (Restart keeping the session selected, the stuck page lock, takeover-safe tab attaches,
   Update refusing to downgrade "too new" hosts, Replace and probe finishing after a dropped request, and smaller fixes).
+- [pending] `triage-confirm-ssh-identity.md` — execute the fifth batch of 2026-10-01 triage outcomes (confirmations bind
+  to what they showed, Farhelm's ssh connections never forward or run a `RemoteCommand`, report-only conversation
+  identity in the spec, helm-side pacing of host hints, Claude's resume selector refusal, and small gated fixes and
+  discards) (after `triage-restart-takeover-update.md`).
