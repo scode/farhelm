@@ -3114,7 +3114,7 @@ impl HostActor {
                         peer_build: skew.peer_build,
                         our_protocol: skew.our_protocol,
                         our_build: skew.our_build,
-                        remediation: skew_remediation(&row),
+                        remediation: skew_remediation(&row, skew.peer_protocol, skew.our_protocol),
                     });
                     active = self.hold(&mut nudge, self.cadence.reprobe).await;
                 }
@@ -4345,32 +4345,87 @@ fn failure(row: &HostRow, error: anyhow::Error) -> AttemptOutcome {
 
 /// The remediation text a version-skewed host carries.
 ///
-/// SPEC.md demands errors be actionable, not merely diagnostic, and the
-/// action here is always the same one: update the farhelm binary on the
-/// host. The destination is named because a user staring at a hosts list
-/// needs to know WHICH machine to go to, and the local row is named as
-/// such because "update the binary on <local>" would be nonsense.
-fn skew_remediation(row: &HostRow) -> String {
-    match row.destination.as_deref() {
-        Some(dest) => format!(
+/// SPEC.md demands errors be actionable, not merely diagnostic. When the
+/// host is behind, the action is to update the farhelm binary on the host;
+/// when the host is AHEAD (its protocol is the higher one), the helm is the
+/// one to update, and recommending the host's update would be wrong twice
+/// over: the panel's Update refuses it, since it would install this helm's
+/// older build over a newer one (SPEC.md: Update never downgrades a host).
+/// The destination is named because a user staring at a hosts list needs to
+/// know WHICH machine to go to, and the local row is named as such because
+/// "update the binary on <local>" would be nonsense.
+fn skew_remediation(row: &HostRow, peer_protocol: u32, our_protocol: u32) -> String {
+    let host_is_newer = peer_protocol > our_protocol;
+    match (row.destination.as_deref(), host_is_newer) {
+        (Some(dest), false) => format!(
             "update the farhelm binary on {dest} (or this helm) so the two speak the same protocol \
              version"
         ),
-        None => "update the farhelm binary on this machine so the helm and its local supervisor \
-                 speak the same protocol version"
+        (Some(dest), true) => format!(
+            "{dest} runs a newer farhelm than this helm; update this helm so the two speak the \
+             same protocol version"
+        ),
+        (None, false) => "update the farhelm binary on this machine so the helm and its local \
+                          supervisor speak the same protocol version"
             .to_string(),
+        (None, true) => {
+            "the local supervisor runs a newer farhelm than this helm; update the helm \
+                         so the two speak the same protocol version"
+                .to_string()
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::transport::classify_local_dial;
     use farhelm_proto::io::{FrameReader, FrameWriter, parse_control};
     use farhelm_proto::{ControlMsg, PROTOCOL_VERSION, RestartOffer, SessionStatus};
     use std::{future::Future, pin::Pin};
     use tokio::io::{AsyncRead, AsyncWrite};
     use tokio::sync::broadcast;
+
+    /// A skewed host's remedy names the side that is behind.
+    ///
+    /// Why it matters: the remedy used to say "update the farhelm binary on
+    /// <host>" even when the host was the newer side, sending the user to
+    /// the panel's Update, which now refuses to install the helm's older
+    /// build over it. Specified: an older host is told to update the host,
+    /// a newer host (higher protocol) to update this helm, for a remote row
+    /// and for the local one.
+    #[farhelm_testtrace::test]
+    fn a_skew_remedy_names_the_side_that_is_behind() {
+        let row = |id, kind, destination: Option<&str>| HostRow {
+            id,
+            kind,
+            destination: destination.map(str::to_string),
+            alias: None,
+            remote_farhelm: None,
+            remote_state_dir: None,
+            host_identity: None,
+            cache_truncated: false,
+            yolo_safe: false,
+        };
+        let remote = row(7, HostKind::Ssh, Some("box.example"));
+        let older = skew_remediation(&remote, 9, 10);
+        assert!(
+            older.contains("update the farhelm binary on box.example"),
+            "{older}"
+        );
+        let newer = skew_remediation(&remote, 11, 10);
+        assert!(
+            newer.contains("box.example runs a newer farhelm"),
+            "{newer}"
+        );
+        assert!(newer.contains("update this helm"), "{newer}");
+        let local = row(1, HostKind::Local, None);
+        assert!(skew_remediation(&local, 11, 10).contains("update the helm"));
+        assert!(
+            skew_remediation(&local, 9, 10).contains("update the farhelm binary on this machine")
+        );
+    }
 
     /// Build a receiver whose changed bit represents a retarget already
     /// waiting at the settled-result boundary.

@@ -120,6 +120,7 @@ fn host_list_body() -> serde_json::Value {
                 identity: Some("identity1".to_string()),
                 build_version: "0.16.0".to_string(),
                 old_version: false,
+                newer_version: false,
                 refresh: RefreshView::Ok { sessions: 3 },
             },
         ),
@@ -187,6 +188,7 @@ fn host_list_body() -> serde_json::Value {
                 identity: None,
                 build_version: "0.15.0".to_string(),
                 old_version: true,
+                newer_version: false,
                 refresh: RefreshView::Failed {
                     error: "list failed".to_string(),
                 },
@@ -199,6 +201,7 @@ fn host_list_body() -> serde_json::Value {
                 identity: None,
                 build_version: "0.16.0".to_string(),
                 old_version: false,
+                newer_version: false,
                 refresh: RefreshView::Pending,
             },
         ),

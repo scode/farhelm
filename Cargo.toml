@@ -185,7 +185,7 @@ rusqlite = { version = "0.40", features = ["bundled", "hooks"] }
 # deletable one — and this predicate guards an `rm -rf` inside helm state, so
 # it uses the real grammar. Already in `Cargo.lock` transitively; this only
 # makes it a direct dependency.
-semver = "1"
+semver = "1.0.28"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Device credentials are stored as fixed-size SHA-256 digests, and both those

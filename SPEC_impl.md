@@ -415,17 +415,20 @@ Hosts use one permanently mounted list beside the session list, not a compact su
 Its one-row header gives the known host count, an unpersisted global details checkbox, and the secondary add control.
 Every row always shows its name, phase dot, and muted actions toggle in the same narrow trailing gutter as the
 session-row actions toggle; connected spends no visible word unless the helm marks a compatible older build, in which
-case the amber `old version` advisory is shown. Other phases use humanized prose and retain the stable wire token in
-their data attribute. A protocol-incompatible supervisor remains the red `needs update` case; an unparseable build
-leaves a connected host's age unknown and keeps the ordinary connected label. Each row's effective disclosure is the
-global checkbox OR that row's automatic update disclosure: the checkbox is the user's preference and no update writes
-it, while an update keeps its row folded during planning and execution, shows a pending status until a progress snapshot
-is available, and then publishes compact step/count/elapsed progress beside the row status. A failed run or unresolved
-diagnostic opens that row; authoritative success clears the automatic half for the exact tracked run. Provisioning
-commands live in the row menu, but setup's confirmation and active or retained progress stay under the row because that
-lifecycle owns more context than a floating menu can safely hold. Starting setup opens details before planning, while a
-running or failed retained run leaves one short trace when details are closed. The one exception is an update whose
-status is showing inline: the trace would only repeat it, so it is left out until that status clears.
+case the amber `old version` advisory is shown, or a newer one (`newer_version`), in which case the amber `too new`
+advisory is shown. A skew whose peer protocol is the higher one also reads `too new`, but keeps the red styling of every
+skew, since that host cannot be used until one side is updated. Either way the `too new` label's hover names both
+versions, and Update (and a rerun of a failed Update) is not offered. Other phases use humanized prose and retain the
+stable wire token in their data attribute. A protocol-incompatible supervisor remains the red `needs update` case; an
+unparseable build leaves a connected host's age unknown and keeps the ordinary connected label. Each row's effective
+disclosure is the global checkbox OR that row's automatic update disclosure: the checkbox is the user's preference and
+no update writes it, while an update keeps its row folded during planning and execution, shows a pending status until a
+progress snapshot is available, and then publishes compact step/count/elapsed progress beside the row status. A failed
+run or unresolved diagnostic opens that row; authoritative success clears the automatic half for the exact tracked run.
+Provisioning commands live in the row menu, but setup's confirmation and active or retained progress stay under the row
+because that lifecycle owns more context than a floating menu can safely hold. Starting setup opens details before
+planning, while a running or failed retained run leaves one short trace when details are closed. The one exception is an
+update whose status is showing inline: the trace would only repeat it, so it is left out until that status clears.
 
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel opens just beyond the sidebar's right edge, with its top aligned to
@@ -2899,12 +2902,15 @@ One version number across the workspace; the protocol hello carries protocol and
 with a clear error at the edge (helm↔supervisor connect, client↔helm load) per SPEC.md. Once a hello is compatible, the
 helm compares the peer and its own build strings as semantic versions for an advisory age signal: prerelease ordering
 applies, build metadata does not change precedence, and an unparsable value leaves age unknown and false. That signal
-adds `old_version` to the connected REST state, without changing the `connected` phase or operational routing; only the
-incompatible protocol case is displayed as `needs update`. Protocol version bumps with any incompatible change — which
-includes a field whose omission changes what the receiver DOES, not only changes to frames and message sets. A
-serde-additive field can still be semantically load-bearing: the non-displacing attach is the worked example (a peer
-that ignores it displaces a client it was asked to leave alone, silently, on both ends), and decode tolerance is why
-such a bump is required rather than why it is unnecessary.
+adds `old_version` and `newer_version` to the connected REST state, without changing the `connected` phase or
+operational routing; the incompatible protocol case is displayed as `needs update`, or `too new` when the peer's
+protocol is the higher one. A development helm (version `0.0.0` with a prerelease, what every build from source reports)
+never calls a connected peer newer and never refuses Update as a downgrade, since it sorts below every release; a skew
+is judged by protocol versions alone, so a skewed host with the higher protocol reads `too new` there too. Protocol
+version bumps with any incompatible change — which includes a field whose omission changes what the receiver DOES, not
+only changes to frames and message sets. A serde-additive field can still be semantically load-bearing: the
+non-displacing attach is the worked example (a peer that ignores it displaces a client it was asked to leave alone,
+silently, on both ends), and decode tolerance is why such a bump is required rather than why it is unnecessary.
 
 Outside the release commit a tag points at, that number is the fixed sentinel `0.0.0-unreleased`, and release commits
 never land on main. An untagged build therefore never claims to be a release: its version readout says so, and a

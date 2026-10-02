@@ -129,6 +129,12 @@ pub(crate) struct ProvisioningService {
     /// its actor is reconciled.
     #[cfg(test)]
     pub(super) registry_sync_gate: std::sync::Mutex<Option<Arc<RegistrySyncGate>>>,
+    /// Stands in for this helm's build in [`Self::helm_build`]: every test
+    /// binary is a development build (`0.0.0-unreleased`), for which
+    /// nothing is ever newer, so the downgrade refusal needs a release
+    /// build to compare against.
+    #[cfg(test)]
+    pub(super) helm_build_override: std::sync::Mutex<Option<String>>,
 }
 
 /// A one-shot hold on [`ProvisioningService::sync_registry`]; see
@@ -139,6 +145,28 @@ pub(super) struct RegistrySyncGate {
     pub(super) reached: tokio::sync::Notify,
     /// Notified by the test to let the reconcile run.
     pub(super) release: tokio::sync::Notify,
+}
+
+/// Why Update must not run against a host whose supervisor reports
+/// `host_build`, or `None` when it may.
+///
+/// Update installs this helm's own build, so on a host already running a
+/// newer one it is a downgrade (SPEC.md: Update never downgrades a host).
+/// That is not merely a step back: an older supervisor refuses a database
+/// written with a newer schema, its unit restarts on the failure, and the
+/// host stays unreachable until the newer build is reinstalled by hand.
+/// A build that does not parse as a version on either side leaves the order
+/// unknown, and Update stays allowed, as the host list's version advisories
+/// treat an unknown order.
+/// `helm_build` is this helm's own build ([`ProvisioningService::helm_build`]).
+fn downgrade_refusal(host_build: &str, helm_build: &str) -> Option<String> {
+    crate::hosts::build_is_newer(host_build, helm_build).then(|| {
+        format!(
+            "the host runs farhelm {host_build}, which is newer than this helm's {helm_build}; \
+             Update never installs an older version over a newer one, so update this helm \
+             instead"
+        )
+    })
 }
 
 impl ProvisioningService {
@@ -178,6 +206,8 @@ impl ProvisioningService {
                 fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(test)]
                 registry_sync_gate: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                helm_build_override: std::sync::Mutex::new(None),
             }));
         }
         // The directory a RELATIVE `--payload-dir` is spelled against
@@ -201,6 +231,8 @@ impl ProvisioningService {
             fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             registry_sync_gate: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            helm_build_override: std::sync::Mutex::new(None),
         }))
     }
 
@@ -227,6 +259,7 @@ impl ProvisioningService {
             progress_read_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_PROGRESS_READS),
             fail_registry_sync: std::sync::atomic::AtomicBool::new(false),
             registry_sync_gate: std::sync::Mutex::new(None),
+            helm_build_override: std::sync::Mutex::new(None),
         })
     }
 
@@ -615,6 +648,20 @@ impl ProvisioningService {
         Ok(host)
     }
 
+    /// This helm's own build, the version Update would install.
+    fn helm_build(&self) -> String {
+        #[cfg(test)]
+        if let Some(build) = self
+            .helm_build_override
+            .lock()
+            .expect("helm build override mutex poisoned")
+            .clone()
+        {
+            return build;
+        }
+        farhelm_proto::BUILD_VERSION.to_string()
+    }
+
     /// Reconcile durable registry changes with the actor set. The test seam
     /// exists to prove that a newly inserted row is rolled back when this
     /// post-commit step fails.
@@ -799,11 +846,16 @@ impl ProvisioningService {
         let mut expected_identity = row.host_identity.clone();
         let target = match observation {
             ProbeObservation::Supervisor {
+                build_version,
                 host_identity,
                 dial_farhelm,
                 dial_state_dir,
-                ..
             } => {
+                if let Some(refusal) = downgrade_refusal(&build_version, &self.helm_build()) {
+                    return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                        refusal,
+                    )));
+                }
                 if let (Some(recorded), Some(reported)) = (&row.host_identity, &host_identity)
                     && recorded != reported
                 {
@@ -837,10 +889,15 @@ impl ProvisioningService {
             // clicked. The dial coordinates resolve like the completed
             // hello's.
             ProbeObservation::SkewedSupervisor {
+                peer_build,
                 dial_farhelm,
                 dial_state_dir,
-                ..
             } => {
+                if let Some(refusal) = downgrade_refusal(&peer_build, &self.helm_build()) {
+                    return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                        refusal,
+                    )));
+                }
                 if row.kind.has_remote_install() {
                     effective_row.remote_farhelm = Some(path_text(&dial_farhelm)?);
                     effective_row.remote_state_dir =
@@ -1154,11 +1211,21 @@ impl ProvisioningService {
                 let observation = self.backend.probe(target).await?;
                 let (plan, discovered) = match observation {
                     ProbeObservation::Supervisor {
+                        build_version,
                         host_identity,
                         dial_farhelm,
                         dial_state_dir,
-                        ..
                     } => {
+                        // Rechecked here: the host may have been updated
+                        // by other means between planning and this
+                        // confirmation.
+                        if let Some(refusal) = downgrade_refusal(&build_version, &self.helm_build())
+                        {
+                            return Err(BackendFailure::new(
+                                "the host now runs a newer farhelm than this helm",
+                                refusal,
+                            ));
+                        }
                         if expected_identity.is_some() && &host_identity != expected_identity {
                             return Err(BackendFailure::new(
                                 "the supervisor identity changed after UPDATE planning",
@@ -1185,17 +1252,25 @@ impl ProvisioningService {
                     // reported), and the update proceeds: it is the only
                     // path that ever makes this host verifiable again.
                     ProbeObservation::SkewedSupervisor {
+                        peer_build,
                         dial_farhelm,
                         dial_state_dir,
-                        ..
-                    } => (
-                        None,
-                        Some(DiscoveredDial {
-                            farhelm: dial_farhelm,
-                            state_dir: dial_state_dir,
-                            identity: None,
-                        }),
-                    ),
+                    } => {
+                        if let Some(refusal) = downgrade_refusal(&peer_build, &self.helm_build()) {
+                            return Err(BackendFailure::new(
+                                "the host now runs a newer farhelm than this helm",
+                                refusal,
+                            ));
+                        }
+                        (
+                            None,
+                            Some(DiscoveredDial {
+                                farhelm: dial_farhelm,
+                                state_dir: dial_state_dir,
+                                identity: None,
+                            }),
+                        )
+                    }
                     ProbeObservation::Absent => (Some(&pending.plan), None),
                 };
                 self.register(registration, plan, discovered)

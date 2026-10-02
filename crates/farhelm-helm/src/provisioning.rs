@@ -1400,6 +1400,108 @@ mod tests {
         assert!(backend.operations.lock().unwrap().is_empty());
     }
 
+    /// Update refuses a host whose supervisor runs a newer farhelm than this
+    /// helm, at planning and again at confirmation, naming both versions.
+    ///
+    /// Why it matters: Update installs this helm's own build, so on a newer
+    /// host it was a downgrade. An older supervisor refuses a database written
+    /// with a newer schema and its unit keeps restarting, leaving the host
+    /// unreachable until the newer build is reinstalled by hand (SPEC.md:
+    /// Update never downgrades a host). Specified: a plan against a host
+    /// reporting a newer build, on the current protocol or a skewed one, is
+    /// refused with both versions in the message; a plan made while the
+    /// host was older is refused at confirmation if the host has meanwhile
+    /// become newer.
+    #[farhelm_testtrace::test]
+    async fn update_refuses_a_host_running_a_newer_farhelm() {
+        let newer = "999.0.0".to_string();
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "newer.example",
+                HostScript {
+                    identity: Some("recorded-identity".to_string()),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness
+            .await_refreshed_as(host, "recorded-identity", 0)
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::skewed(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        // A release helm: a development build never calls a host newer.
+        *service.helm_build_override.lock().unwrap() = Some("1.0.0".to_string());
+
+        for observation in [
+            ProbeObservation::Supervisor {
+                build_version: newer.clone(),
+                host_identity: Some("recorded-identity".to_string()),
+                dial_farhelm: root.path().join("farhelm"),
+                dial_state_dir: Some(root.path().join("state")),
+            },
+            ProbeObservation::SkewedSupervisor {
+                peer_build: newer.clone(),
+                dial_farhelm: root.path().join("farhelm"),
+                dial_state_dir: Some(root.path().join("state")),
+            },
+        ] {
+            *backend.probe.lock().unwrap() = Some(Ok(observation));
+            let refusal = service
+                .plan_update(host)
+                .await
+                .expect_err("a newer host must not be planned for update");
+            let text = format!("{refusal:#}");
+            assert!(
+                text.contains(&newer) && text.contains("1.0.0"),
+                "the refusal names both versions: {text}"
+            );
+            assert!(text.contains("never installs an older version"), "{text}");
+        }
+
+        // Planned while the host was older, confirmed after it became newer.
+        *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            peer_build: "0.9.0".to_string(),
+            dial_farhelm: root.path().join("farhelm"),
+            dial_state_dir: Some(root.path().join("state")),
+        }));
+        let preview = service
+            .plan_update(host)
+            .await
+            .expect("an older host plans");
+        *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            peer_build: newer.clone(),
+            dial_farhelm: root.path().join("farhelm"),
+            dial_state_dir: Some(root.path().join("state")),
+        }));
+        let accepted = service
+            .start_update(
+                host,
+                ProvisionRequest {
+                    probe_id: preview.probe_id,
+                },
+            )
+            .await
+            .expect("the confirmation is accepted and revalidated in the run");
+        let view = wait_finished(&service, accepted.host_id).await;
+        assert_eq!(
+            view.status,
+            RunStatus::Failed,
+            "the run refuses at revalidation"
+        );
+        let message = view.message.unwrap_or_default();
+        assert!(
+            message.contains(&newer) && message.contains("newer"),
+            "the run's failure says why: {message}"
+        );
+        assert!(
+            backend.operations.lock().unwrap().is_empty(),
+            "nothing was installed on the newer host"
+        );
+    }
+
     /// An update whose confirming request is dropped while it waits for the
     /// host's provisioning lock still runs, and does not leave the host busy.
     ///

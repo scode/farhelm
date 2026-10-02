@@ -5499,7 +5499,8 @@
   advisories) to say Update never downgrades a host, and that a host newer than the helm is shown as "too new". Add helm
   and UI tests for the refusal, the skipped "update all" row, and the displayed state. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `kkruwynrypom`, bookmark `triage-1001d/18-update-never-downgrades`, PR
+  https://github.com/scode/farhelm/pull/1418.
 
 ## confirmed-nothing-alive-prompt-kills-live-agent.md
 

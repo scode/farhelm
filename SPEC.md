@@ -89,24 +89,25 @@ privileges on a given host, provisioning says so and continues without it rather
 host for initial setup, the helm states exactly what it is about to do in concrete terms — the files it will place and
 where, the systemd units it will create, and that the supervisor will run persistently and start at boot — and proceeds
 only on confirmation. Remote updates use the same one-use plan mechanism behind the same authority, but the user's
-Update click is the authorization: no plan is shown for confirmation. While an update is running, its host row stays
-folded and shows `updating…` until a progress snapshot is available, then shows the current step, completed-step count,
-and client-measured elapsed time inline in the status spot; hovering that status shows the count, the elapsed time, and
-every step of the run with its status and the current one highlighted (in a window too short for the whole list, the
-list keeps the current step in view), since the sidebar is too narrow to show a long step name, let alone the rest of
-the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary upload appears as a
-separate step before installation, so the user can tell when network transfer is still underway. Success returns the
-status spot to its normal label and leaves the row folded unless global details are on. Failure or an uncertain outcome
-still expands the row so its step list and diagnostic remain visible. The Hosts header's `update all` action makes the
-same authorized Update request for each remote host whose individual Update action is available at the click. A host
-already busy with setup or another run is skipped rather than queued for a later update; the local host is excluded.
-Each remote host keeps its own validation, progress, and result, so one failure does not hide or delay the others. V1
-provisioning targets any Linux host with a usable systemd user manager, on the two architectures cross-compiled
-supervisor binaries exist for. The distribution is not a requirement — nothing provisioning does is
-distribution-specific — so the plan names whichever one it found rather than refusing; CI exercises Ubuntu. Everything
-else — no usable systemd user manager, or an architecture with no payload — falls back to the manual path (run the
-binary yourself), which always remains available, on the best-effort basis described in
-[Supported host setup](#supported-host-setup).
+Update click is the authorization: no plan is shown for confirmation. Update never downgrades a host: it installs the
+helm's own build, so a host whose supervisor reports a newer build is refused with both versions named, and the user
+updates the helm instead. While an update is running, its host row stays folded and shows `updating…` until a progress
+snapshot is available, then shows the current step, completed-step count, and client-measured elapsed time inline in the
+status spot; hovering that status shows the count, the elapsed time, and every step of the run with its status and the
+current one highlighted (in a window too short for the whole list, the list keeps the current step in view), since the
+sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings replace the
+animated indicator with a static one. Remote binary upload appears as a separate step before installation, so the user
+can tell when network transfer is still underway. Success returns the status spot to its normal label and leaves the row
+folded unless global details are on. Failure or an uncertain outcome still expands the row so its step list and
+diagnostic remain visible. The Hosts header's `update all` action makes the same authorized Update request for each
+remote host whose individual Update action is available at the click. A host already busy with setup or another run is
+skipped rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation,
+progress, and result, so one failure does not hide or delay the others. V1 provisioning targets any Linux host with a
+usable systemd user manager, on the two architectures cross-compiled supervisor binaries exist for. The distribution is
+not a requirement — nothing provisioning does is distribution-specific — so the plan names whichever one it found rather
+than refusing; CI exercises Ubuntu. Everything else — no usable systemd user manager, or an architecture with no payload
+— falls back to the manual path (run the binary yourself), which always remains available, on the best-effort basis
+described in [Supported host setup](#supported-host-setup).
 
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions
@@ -790,19 +791,22 @@ than here.
 Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
 it. A compatible supervisor whose build is older than the helm's is still connected and usable, but its row says
 `old
-version` as an advisory; an incompatible protocol handshake remains `needs update`. If either build string cannot
-be parsed as a semantic version, age is unknown and the row stays `connected`. The host count, its unpersisted details
-checkbox, and the secondary add action share one header row. Host actions open on demand from the row menu, and details
-reveals the version, identity, session count, remedies, diagnostics, and provisioning progress under every row. Profiles
-use the neutral secondary tier for routine row actions and the normal blue tier for popup affirmatives, while the host
-selector stays a native control; session creation remains the blue primary action. Destructive confirmations use the
-danger tier, and explicit menu, tab, and composer controls retain their purpose-built styling. Sessions on an
-unreachable host stay in the list from the helm's last-known knowledge (which survives helm restarts), clearly marked
-stale, rather than vanishing. Lifecycle operations against an unreachable host are refused with a clear error; nothing
-queues for later delivery in v1. Opening such a session shows its metadata — title, directory, last-known status —
-behind a clear host-unreachable notice; there is no terminal to show and no pretense of one. Changes made from any
-client — creates, renames, stops, deletes, status transitions — appear in all other connected clients automatically; the
-agent-spawn behavior below is one instance of this general rule, not a special case.
+version` as an advisory; an incompatible protocol handshake remains `needs update`. A host whose supervisor is
+newer than the helm (a newer build on the same protocol, or a higher protocol version) says `too new` instead, is not
+offered Update, and its hover names the host's version, the helm's, and their protocol versions. If either build string
+cannot be parsed as a semantic version, or the helm is an unreleased development build, age is unknown and the row stays
+`connected`. The host count, its unpersisted details checkbox, and the secondary add action share one header row. Host
+actions open on demand from the row menu, and details reveals the version, identity, session count, remedies,
+diagnostics, and provisioning progress under every row. Profiles use the neutral secondary tier for routine row actions
+and the normal blue tier for popup affirmatives, while the host selector stays a native control; session creation
+remains the blue primary action. Destructive confirmations use the danger tier, and explicit menu, tab, and composer
+controls retain their purpose-built styling. Sessions on an unreachable host stay in the list from the helm's last-known
+knowledge (which survives helm restarts), clearly marked stale, rather than vanishing. Lifecycle operations against an
+unreachable host are refused with a clear error; nothing queues for later delivery in v1. Opening such a session shows
+its metadata — title, directory, last-known status — behind a clear host-unreachable notice; there is no terminal to
+show and no pretense of one. Changes made from any client — creates, renames, stops, deletes, status transitions —
+appear in all other connected clients automatically; the agent-spawn behavior below is one instance of this general
+rule, not a special case.
 
 ### Status
 

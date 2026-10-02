@@ -147,6 +147,11 @@ pub(crate) fn phase_label(state: &HostPhase) -> &'static str {
 /// job: it should read as ordinary prose beside a status dot. Keeping this a
 /// total match makes a newly added phase choose both forms deliberately.
 pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
+    if runs_newer_version(state) {
+        // Before the phase's own words: a newer host is not one that needs
+        // an update or runs an old version, whatever else its phase says.
+        return "too new";
+    }
     match state {
         HostPhase::Connecting { .. } => "connecting",
         HostPhase::Unreachable { .. } => "unreachable, retrying",
@@ -163,12 +168,71 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
     }
 }
 
+/// Whether this host runs a newer farhelm than the helm: a connected host
+/// whose build the helm reports as newer, or a version-skewed one whose
+/// protocol is the higher of the two.
+///
+/// Such a host is labelled "too new" rather than "needs update" or "old
+/// version", and Update is not offered for it, alone or in "update all":
+/// Update installs the helm's own build, which here would be a downgrade
+/// (SPEC.md: Update never downgrades a host). The remedy is updating the
+/// helm, which the label's hover ([`too_new_title`]) says.
+pub(crate) fn runs_newer_version(state: &HostPhase) -> bool {
+    match state {
+        HostPhase::Connected { newer_version, .. } => *newer_version,
+        HostPhase::VersionSkew {
+            peer_protocol,
+            our_protocol,
+            ..
+        } => peer_protocol > our_protocol,
+        _ => false,
+    }
+}
+
+/// The hover text of a "too new" label, `None` for any other host.
+///
+/// The label stays two words for the host list's layout; this carries the
+/// rest: the host's build and protocol and the helm's, as far as the helm
+/// knows them, and the remedy. A connected host speaks the helm's own
+/// protocol, and the helm's build is this page's (the helm serves the page
+/// it was built with). A skewed host's versions come from its refusal.
+pub(crate) fn too_new_title(state: &HostPhase) -> Option<String> {
+    match state {
+        HostPhase::Connected {
+            newer_version: true,
+            build_version,
+            ..
+        } => Some(format!(
+            "this host runs farhelm {}, which is newer than this helm's {} (both speak protocol \
+             {}); update the helm",
+            display_peer(build_version),
+            crate::skew::CLIENT_BUILD,
+            farhelm_proto::PROTOCOL_VERSION,
+        )),
+        HostPhase::VersionSkew {
+            peer_protocol,
+            peer_build,
+            our_protocol,
+            our_build,
+            ..
+        } if peer_protocol > our_protocol => Some(format!(
+            "this host runs farhelm {} (protocol {peer_protocol}), which is newer than this \
+             helm's {} (protocol {our_protocol}); update the helm",
+            display_peer(peer_build),
+            display_peer(our_build),
+        )),
+        _ => None,
+    }
+}
+
 /// The CSS modifier the row status carries, grouping the phases by what a
 /// person watching the panel should do about them: nothing yet
 /// (`connecting`), nothing at all (`unreachable-reprobing` — it re-probes
 /// forever and recovers unaided), all is well (`connected`), a usable peer is
-/// older (`old-version`), or look at this (everything else, which stays
-/// exactly as it is until someone acts).
+/// older (`old-version`) or newer (`too-new`, whose remedy is updating the
+/// helm), or look at this (everything else, which stays exactly as it is
+/// until someone acts; a skewed host stays here even when it is the newer
+/// side, since it cannot be used until one side is updated).
 ///
 /// Deliberately coarser than [`phase_label`]: color is a category signal and
 /// eight colors would be noise, while the exact phase is right there in
@@ -178,6 +242,10 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
 /// and a retired row wants a retry.
 pub(crate) fn phase_class(state: &HostPhase) -> &'static str {
     match state {
+        HostPhase::Connected {
+            newer_version: true,
+            ..
+        } => "too-new",
         HostPhase::Connected {
             old_version: true, ..
         } => "old-version",
@@ -263,6 +331,7 @@ fn available_remote_updates(
         .iter()
         .filter(|host| {
             host.kind.updates_automatically()
+                && !runs_newer_version(&host.state)
                 && !busy_hosts.contains(&host.id)
                 && menus.get(&host.id).is_some_and(|state| state.update)
         })
@@ -2487,8 +2556,13 @@ fn HostRow(
                         None => rsx! {
                             if !is_connected(&host.state)
                                 || matches!(&host.state, HostPhase::Connected { old_version: true, .. })
+                                || runs_newer_version(&host.state)
                             {
-                                span { class: "host-status-label", "{phase_display_label(&host.state)}" }
+                                span {
+                                    class: "host-status-label",
+                                    title: too_new_title(&host.state),
+                                    "{phase_display_label(&host.state)}"
+                                }
                             }
                         },
                     }
@@ -3437,6 +3511,7 @@ mod tests {
                 identity: Some("sentinel-connected-identity".to_string()),
                 build_version: "sentinel-connected-build".to_string(),
                 old_version: false,
+                newer_version: false,
                 refresh: RefreshHealth::Ok { sessions: 4 },
             },
             HostPhase::VersionSkew {
@@ -3521,6 +3596,7 @@ mod tests {
                     identity: Some("sentinel-connected-identity".to_string()),
                     build_version: "sentinel-connected-build".to_string(),
                     old_version: false,
+                    newer_version: false,
                     refresh: RefreshHealth::Ok { sessions: 4 },
                 },
                 vec![
@@ -3975,6 +4051,7 @@ mod tests {
             identity: None,
             build_version: "0.1.0".to_string(),
             old_version: false,
+            newer_version: false,
             refresh: RefreshHealth::Pending,
         })]));
         assert!(!read.is_loading());
@@ -4123,6 +4200,7 @@ mod tests {
             identity: None,
             build_version: "0.13.0".to_string(),
             old_version: true,
+            newer_version: false,
             refresh: RefreshHealth::Pending,
         };
         assert_eq!(phase_label(&old), "connected");
@@ -4134,6 +4212,7 @@ mod tests {
             identity: None,
             build_version: "0.14.0-rc.2".to_string(),
             old_version: false,
+            newer_version: false,
             refresh: RefreshHealth::Pending,
         };
         assert_eq!(phase_display_label(&current), "connected");
@@ -4148,6 +4227,55 @@ mod tests {
         };
         assert_eq!(phase_display_label(&skew), "needs update");
         assert_eq!(phase_class(&skew), "needs-attention");
+        assert_eq!(too_new_title(&skew), None);
+    }
+
+    /// A host running a newer farhelm than the helm is labelled "too new",
+    /// connected or skewed, and the label's hover carries both versions.
+    ///
+    /// Why it matters: such a host used to read "needs update" (a skew) or
+    /// plain "connected", inviting an Update that would install the helm's
+    /// older build over it, and nothing said that the helm was the side
+    /// behind. Specified: a connected host the helm calls newer, and a
+    /// skewed host with the higher protocol, both read "too new", with a
+    /// hover naming the host's build, the helm's and the protocols; the
+    /// connected one keeps the amber advisory colour and stays connected.
+    #[farhelm_testtrace::test]
+    fn a_newer_host_reads_too_new_with_both_versions_on_hover() {
+        let connected = HostPhase::Connected {
+            identity: None,
+            build_version: "9.0.0".to_string(),
+            old_version: false,
+            newer_version: true,
+            refresh: RefreshHealth::Pending,
+        };
+        assert!(runs_newer_version(&connected));
+        assert_eq!(phase_display_label(&connected), "too new");
+        assert_eq!(phase_class(&connected), "too-new");
+        assert!(is_connected(&connected));
+        let hover = too_new_title(&connected).expect("a too-new host has a hover");
+        assert!(
+            hover.contains("9.0.0") && hover.contains(crate::skew::CLIENT_BUILD),
+            "{hover}"
+        );
+        assert!(hover.contains("update the helm"), "{hover}");
+
+        let skew = HostPhase::VersionSkew {
+            peer_protocol: 3,
+            peer_build: "9.0.0".to_string(),
+            our_protocol: 2,
+            our_build: "0.14.0".to_string(),
+            remediation: "update this helm".to_string(),
+        };
+        assert!(runs_newer_version(&skew));
+        assert_eq!(phase_display_label(&skew), "too new");
+        let hover = too_new_title(&skew).expect("a too-new skew has a hover");
+        for expected in ["9.0.0", "protocol 3", "0.14.0", "protocol 2"] {
+            assert!(
+                hover.contains(expected),
+                "{expected:?} missing from {hover:?}"
+            );
+        }
     }
 
     /// A connected host's row must report how its last cache refresh went,
@@ -4161,6 +4289,7 @@ mod tests {
             identity: None,
             build_version: "0.1.0".to_string(),
             old_version: false,
+            newer_version: false,
             refresh: RefreshHealth::Failed {
                 error: "list timed out".to_string(),
             },
@@ -4178,6 +4307,7 @@ mod tests {
             identity: Some("id".to_string()),
             build_version: "0.1.0".to_string(),
             old_version: false,
+            newer_version: false,
             refresh: RefreshHealth::Pending,
         }));
         assert!(pending.contains("still in flight"), "{pending}");
@@ -4234,6 +4364,7 @@ mod tests {
                 identity: Some("stable".to_string()),
                 build_version: "0.1.0".to_string(),
                 old_version: false,
+                newer_version: false,
                 refresh: RefreshHealth::Ok { sessions: 0 },
             },
             incarnation: 1,
@@ -4266,6 +4397,44 @@ mod tests {
         let busy_hosts = HashSet::from([2]);
 
         let requests = available_remote_updates(&hosts, &menus, &busy_hosts);
+        assert_eq!(requests.keys().copied().collect::<Vec<_>>(), vec![1]);
+    }
+
+    /// "Update all" skips a host running a newer farhelm than the helm,
+    /// even when its row's menu state would offer Update.
+    ///
+    /// Why it matters: "update all" took every eligible remote row, and an
+    /// Update on a newer host installs the helm's older build over it. The
+    /// row's own menu stops offering Update for such a host; this pins the
+    /// fleet action independently, since it reads published menu states
+    /// that can lag a host's state. Specified: of two eligible remote rows,
+    /// the one reporting a newer build is left out.
+    #[farhelm_testtrace::test]
+    fn update_all_skips_a_host_running_a_newer_farhelm() {
+        let current = row_specimen(1);
+        let mut newer = row_specimen(2);
+        newer.state = HostPhase::Connected {
+            identity: Some("stable".to_string()),
+            build_version: "9.0.0".to_string(),
+            old_version: false,
+            newer_version: true,
+            refresh: RefreshHealth::Ok { sessions: 0 },
+        };
+        let hosts = [current, newer];
+        let menus = hosts
+            .iter()
+            .map(|host| {
+                (
+                    host.id,
+                    ProvisioningMenuState {
+                        update: true,
+                        ..ProvisioningMenuState::default()
+                    },
+                )
+            })
+            .collect();
+
+        let requests = available_remote_updates(&hosts, &menus, &HashSet::new());
         assert_eq!(requests.keys().copied().collect::<Vec<_>>(), vec![1]);
     }
 

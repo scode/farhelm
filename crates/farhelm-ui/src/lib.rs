@@ -773,6 +773,13 @@ pub enum HostPhase {
         /// is unknown and must remain visually connected.
         #[serde(default)]
         old_version: bool,
+        /// Whether the connected peer's parseable build is NEWER than the
+        /// helm's: the host list labels it "too new" and Update is not
+        /// offered (SPEC.md, host version advisories; Update never
+        /// downgrades a host). Older helms omit this additive field, which
+        /// reads as not newer, as for `old_version`.
+        #[serde(default)]
+        newer_version: bool,
         refresh: RefreshHealth,
     },
     /// Refused at the hello. Both versions are named so the user can see
@@ -2191,6 +2198,7 @@ mod tests {
             &hosts[0].state,
             HostPhase::Connected {
                 old_version: false,
+                newer_version: false,
                 refresh: RefreshHealth::Ok { sessions: 3 },
                 ..
             }
@@ -2273,6 +2281,7 @@ mod tests {
             without_flag.state,
             HostPhase::Connected {
                 old_version: false,
+                newer_version: false,
                 ..
             }
         ));
@@ -2298,6 +2307,7 @@ mod tests {
             with_flag.state,
             HostPhase::Connected {
                 old_version: true,
+                newer_version: false,
                 ..
             }
         ));
