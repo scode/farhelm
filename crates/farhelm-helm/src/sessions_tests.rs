@@ -1775,6 +1775,106 @@ async fn spliced_replace_harness(
     (harness, local)
 }
 
+/// A replace whose request is dropped after its create reached the host still
+/// deletes the source.
+///
+/// Why it matters: axum drops a handler's future when the client goes away (a
+/// reload, a closed tab, the client's own request timeout on a slow create),
+/// and a replace is a create followed by a delete. Run on the request's task,
+/// a drop between the two left the new session created and the source never
+/// deleted, usually with no error anywhere (SPEC_impl.md "Who owns an
+/// accepted action"). Specified: once the create has been sent, dropping the
+/// request loses only the reply; the delete of the source still reaches the
+/// host.
+#[farhelm_testtrace::test]
+async fn a_replace_dropped_after_its_create_still_deletes_the_source() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(
+        client_side,
+        vec![rest_harness::session("sess-1", 1_700_000_000)],
+    )
+    .await;
+    let fleet = harness.fleet.clone();
+    let (create_seen_tx, create_seen_rx) = tokio::sync::oneshot::channel();
+    let (answer_tx, answer_rx) = tokio::sync::oneshot::channel::<()>();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        let _ = create_seen_tx.send(());
+        // Answered only once the request that asked for it is gone.
+        answer_rx.await.unwrap();
+        let created = SessionInfo {
+            id: "sess-2".into(),
+            ..rest_harness::session("sess-1", 1_700_000_500)
+        };
+        // Kept in step with the reply, as in the other replace tests (see
+        // `spliced_replace_harness`).
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
+        writer
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                notice: None,
+            })
+            .await
+            .unwrap();
+        session_id
+    });
+
+    harness.await_refreshed(local).await;
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/sessions/sess-1/replace")
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from("{}"))
+        .unwrap();
+    let call = tokio::spawn(tower::ServiceExt::oneshot(harness.router(), request));
+    tokio::time::timeout(std::time::Duration::from_secs(10), create_seen_rx)
+        .await
+        .expect("test premise: the replace must send its create")
+        .expect("test premise: the fake supervisor must still be running");
+    // The client goes away, which is axum dropping the handler's future.
+    call.abort();
+    let dropped = call.await;
+    assert!(
+        dropped.as_ref().is_err_and(|join| join.is_cancelled()),
+        "test premise: the request must still be in flight when it is dropped, got {dropped:?}"
+    );
+    answer_tx.send(()).unwrap();
+
+    let deleted = tokio::time::timeout(std::time::Duration::from_secs(10), peer)
+        .await
+        .expect("the source's delete must still be sent after the request is dropped")
+        .unwrap();
+    assert_eq!(deleted, "sess-1");
+}
+
 /// Spec: a plain Replace (no `with` body) of a session the host lists as a
 /// structured yolo launch with workspace trust records no remembered
 /// defaults and no recent setup.

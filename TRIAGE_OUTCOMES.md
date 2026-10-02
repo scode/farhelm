@@ -5213,7 +5213,8 @@
   only if they share the same small mechanism, otherwise bring them back to the user by listing them in the executing
   plan's final report, without blocking (user decision at planning time, 2026-10-01). Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `vyqppyozstpv`, bookmark `triage-1001d/08-replace-helm-owned`, PR
+  https://github.com/scode/farhelm/pull/1404.
 
 ## restart-can-still-deselect-session.md
 

@@ -1546,50 +1546,100 @@ pub(crate) async fn create_session(
     State(state): State<Arc<AppState>>,
     axum::Json(mut req): axum::Json<CreateReq>,
 ) -> impl IntoResponse {
-    // FIRST, before mode resolution or target routing: a fresh-checkout
-    // request's repository-text parse error must win over any
-    // selector-shape error a body might also carry (the user should hear
-    // about the repo they typed, not an unrelated field). The parse is
-    // sync; the config resolution needs the claim, so it re-runs below
-    // after routing — a fresh create resolves against the host it will
-    // actually land on.
-    if let Some(checkout) = req.github_checkout.as_ref()
-        && let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo)
-    {
-        return http_error(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: format!(
-                "invalid GitHub repository {:?}: {error}",
-                truncate_repo_text(&checkout.repo)
-            ),
-        }));
-    }
-    // Mode compilation consumes selector fields. Retain the original request
-    // first so later reconciliation does not depend on mutable catalogs.
-    let client_identity = fresh_create_request_identity(&req);
-    let ordinary_mode = if req.github_checkout.is_none() {
-        match resolve_create_mode(&state, &mut req).await {
-            Ok(mode) => Some(mode),
-            Err(e) => return http_error(e),
+    // Helm-owned (SPEC_impl.md "Who owns an accepted action"): the create
+    // is followed by recording the new session and, for a profile create,
+    // the remembered default; a dropped request must lose only the reply.
+    crate::run_owned(async move {
+        // FIRST, before mode resolution or target routing: a fresh-checkout
+        // request's repository-text parse error must win over any
+        // selector-shape error a body might also carry (the user should hear
+        // about the repo they typed, not an unrelated field). The parse is
+        // sync; the config resolution needs the claim, so it re-runs below
+        // after routing — a fresh create resolves against the host it will
+        // actually land on.
+        if let Some(checkout) = req.github_checkout.as_ref()
+            && let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo)
+        {
+            return http_error(anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
+                kind: ErrorKind::InvalidRequest,
+                message: format!(
+                    "invalid GitHub repository {:?}: {error}",
+                    truncate_repo_text(&checkout.repo)
+                ),
+            }));
         }
-    } else {
-        None
-    };
-    let (claim, client) = match create_target(&state, req.host) {
-        Ok(target) => target,
-        Err(e) => return http_error(e),
-    };
-    if req.github_checkout.is_some() {
-        let intent_key = req.intent_key.clone();
-        return match create_fresh_session(
+        // Mode compilation consumes selector fields. Retain the original request
+        // first so later reconciliation does not depend on mutable catalogs.
+        let client_identity = fresh_create_request_identity(&req);
+        let ordinary_mode = if req.github_checkout.is_none() {
+            match resolve_create_mode(&state, &mut req).await {
+                Ok(mode) => Some(mode),
+                Err(e) => return http_error(e),
+            }
+        } else {
+            None
+        };
+        let (claim, client) = match create_target(&state, req.host) {
+            Ok(target) => target,
+            Err(e) => return http_error(e),
+        };
+        if req.github_checkout.is_some() {
+            let intent_key = req.intent_key.clone();
+            return match create_fresh_session(
+                &state,
+                &claim,
+                &client,
+                req,
+                intent_key,
+                client_identity,
+                None,
+            )
+            .await
+            {
+                Ok(session) => match browser_session_ready(&session) {
+                    Ok(()) => axum::Json(session).into_response(),
+                    Err(error) => http_error(error),
+                },
+                Err(error) => http_error(error),
+            };
+        }
+        // Checked HERE, and once, because routing and claim-taking are one read
+        // for a create: `create_target` resolves the host, takes the connection,
+        // and mints the claim from the same borrow of the actor's status, so there
+        // is no interval between "which install" and "which connection" for
+        // anything to land in. The cache seed this create goes on to make
+        // revalidates the same claim under the host's write lock; the remembered
+        // default does not, by design: it is a helm-wide suggestion rather than
+        // a claim about the install currently behind this registry row.
+        if let Err(e) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
+            return http_error(e);
+        }
+        let mode =
+            ordinary_mode.expect("fresh requests returned through their shared admission path");
+        match do_create_session(
             &state,
             &claim,
             &client,
-            req,
-            intent_key,
-            client_identity,
-            None,
+            CreateSpec {
+                cwd: req.cwd,
+                mode,
+                title: req.title,
+                cols: req.cols,
+                rows: req.rows,
+                intent_key: req.intent_key,
+                agent_kind: req.agent_kind,
+                resume_template: req.resume_template,
+                origin: CreateOrigin::User,
+                // A REST create takes whatever session the target answers with,
+                // replays included: the client asked for a session on that host
+                // and the reply names one. Only the relay's clone has a result
+                // it must refuse.
+                accept_result: None,
+                github_checkout: None,
+                allow_yolo_on_sensitive_host: req.allow_yolo_on_sensitive_host,
+                settings_from_source: false,
+            },
         )
         .await
         {
@@ -1597,53 +1647,10 @@ pub(crate) async fn create_session(
                 Ok(()) => axum::Json(session).into_response(),
                 Err(error) => http_error(error),
             },
-            Err(error) => http_error(error),
-        };
-    }
-    // Checked HERE, and once, because routing and claim-taking are one read
-    // for a create: `create_target` resolves the host, takes the connection,
-    // and mints the claim from the same borrow of the actor's status, so there
-    // is no interval between "which install" and "which connection" for
-    // anything to land in. The cache seed this create goes on to make
-    // revalidates the same claim under the host's write lock; the remembered
-    // default does not, by design: it is a helm-wide suggestion rather than
-    // a claim about the install currently behind this registry row.
-    if let Err(e) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
-        return http_error(e);
-    }
-    let mode = ordinary_mode.expect("fresh requests returned through their shared admission path");
-    match do_create_session(
-        &state,
-        &claim,
-        &client,
-        CreateSpec {
-            cwd: req.cwd,
-            mode,
-            title: req.title,
-            cols: req.cols,
-            rows: req.rows,
-            intent_key: req.intent_key,
-            agent_kind: req.agent_kind,
-            resume_template: req.resume_template,
-            origin: CreateOrigin::User,
-            // A REST create takes whatever session the target answers with,
-            // replays included: the client asked for a session on that host
-            // and the reply names one. Only the relay's clone has a result
-            // it must refuse.
-            accept_result: None,
-            github_checkout: None,
-            allow_yolo_on_sensitive_host: req.allow_yolo_on_sensitive_host,
-            settings_from_source: false,
-        },
-    )
+            Err(e) => http_error(e),
+        }
+    })
     .await
-    {
-        Ok(session) => match browser_session_ready(&session) {
-            Ok(()) => axum::Json(session).into_response(),
-            Err(error) => http_error(error),
-        },
-        Err(e) => http_error(e),
-    }
 }
 
 /// One create, with its host and its mode already resolved — everything
@@ -2683,22 +2690,27 @@ pub(crate) async fn restart_session(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<RestartReq>,
 ) -> impl IntoResponse {
-    match do_restart_session(
-        &state,
-        &id,
-        req.mode,
-        req.stop_if_running,
-        req.with,
-        req.allow_yolo_on_sensitive_host,
-    )
+    // Helm-owned for the reason `create_session` is: the relaunch is
+    // followed by recording the session's new state.
+    crate::run_owned(async move {
+        match do_restart_session(
+            &state,
+            &id,
+            req.mode,
+            req.stop_if_running,
+            req.with,
+            req.allow_yolo_on_sensitive_host,
+        )
+        .await
+        {
+            Ok((_claim, session)) => match browser_session_ready(&session) {
+                Ok(()) => axum::Json(session).into_response(),
+                Err(error) => http_error(error),
+            },
+            Err(e) => http_error(e),
+        }
+    })
     .await
-    {
-        Ok((_claim, session)) => match browser_session_ready(&session) {
-            Ok(()) => axum::Json(session).into_response(),
-            Err(error) => http_error(error),
-        },
-        Err(e) => http_error(e),
-    }
 }
 
 /// Route, relaunch, enrich, and publish one session restart.
@@ -2805,13 +2817,18 @@ pub(crate) async fn rename_session(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<RenameReq>,
 ) -> impl IntoResponse {
-    match do_rename_session(&state, &id, &req.title, None).await {
-        Ok((_claim, session)) => match browser_session_ready(&session) {
-            Ok(()) => axum::Json(session).into_response(),
-            Err(error) => http_error(error),
-        },
-        Err(e) => http_error(e),
-    }
+    // Helm-owned for the reason `create_session` is: the rename is followed
+    // by recording the session's new title.
+    crate::run_owned(async move {
+        match do_rename_session(&state, &id, &req.title, None).await {
+            Ok((_claim, session)) => match browser_session_ready(&session) {
+                Ok(()) => axum::Json(session).into_response(),
+                Err(error) => http_error(error),
+            },
+            Err(e) => http_error(e),
+        }
+    })
+    .await
 }
 
 /// The query string of `DELETE /api/sessions/{id}`.
@@ -2862,33 +2879,40 @@ pub(crate) async fn delete_session(
     AxPath(id): AxPath<String>,
     Query(query): Query<DeleteQuery>,
 ) -> impl IntoResponse {
-    let (claim, client) = match route_session(&state, &id).await {
-        Ok(routed) => routed,
-        Err(e) => return http_error(e),
-    };
-    match client
-        .delete_session_with(&id, query.only_if_nothing_alive)
-        .await
-    {
-        Ok(notice) => {
-            if let Err(error) = state.store.clear_seen(&id).await {
-                warn!(
-                    session_id = manager::peer_text(&id).as_str(),
-                    error = %error,
-                    "could not clear the deleted session's seen state; a stray row may remain"
-                );
+    // Helm-owned for the reason `create_session` is: the delete is followed
+    // by dropping the session's seen state and its cached row.
+    crate::run_owned(async move {
+        let (claim, client) = match route_session(&state, &id).await {
+            Ok(routed) => routed,
+            Err(e) => return http_error(e),
+        };
+        match client
+            .delete_session_with(&id, query.only_if_nothing_alive)
+            .await
+        {
+            Ok(notice) => {
+                if let Err(error) = state.store.clear_seen(&id).await {
+                    warn!(
+                        session_id = manager::peer_text(&id).as_str(),
+                        error = %error,
+                        "could not clear the deleted session's seen state; a stray row may remain"
+                    );
+                }
+                forget_session(&state, &claim, &id).await;
+                match notice {
+                    // Passed through as the supervisor wrote it: the UI renders it
+                    // as peer text (`peer::PeerLine`), which is where display
+                    // escaping belongs, as for every other host-written string.
+                    Some(notice) => {
+                        axum::Json(serde_json::json!({ "notice": notice })).into_response()
+                    }
+                    None => axum::Json(serde_json::json!({})).into_response(),
+                }
             }
-            forget_session(&state, &claim, &id).await;
-            match notice {
-                // Passed through as the supervisor wrote it: the UI renders it
-                // as peer text (`peer::PeerLine`), which is where display
-                // escaping belongs, as for every other host-written string.
-                Some(notice) => axum::Json(serde_json::json!({ "notice": notice })).into_response(),
-                None => axum::Json(serde_json::json!({})).into_response(),
-            }
+            Err(e) => http_error(e),
         }
-        Err(e) => http_error(e),
-    }
+    })
+    .await
 }
 
 /// The body of `PUT /api/sessions/{id}/seen`: `Some(stamp)` marks the
@@ -2959,22 +2983,27 @@ pub(crate) async fn mark_seen(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<MarkSeenReq>,
 ) -> impl IntoResponse {
-    if let Err(e) = resolve_owner(&state, &id).await {
-        return http_error(e);
-    }
-    let changed = match req.seen_activity_at {
-        Some(activity_at) => state.store.mark_seen(&id, activity_at).await,
-        None => state.store.clear_seen(&id).await,
-    };
-    match changed {
-        Ok(changed) => {
-            if changed {
-                state.manager.events().bump();
-            }
-            axum::Json(serde_json::json!({})).into_response()
+    // Helm-owned for the reason `create_session` is: the store write is
+    // followed by the event that tells other open clients about it.
+    crate::run_owned(async move {
+        if let Err(e) = resolve_owner(&state, &id).await {
+            return http_error(e);
         }
-        Err(e) => http_error(e),
-    }
+        let changed = match req.seen_activity_at {
+            Some(activity_at) => state.store.mark_seen(&id, activity_at).await,
+            None => state.store.clear_seen(&id).await,
+        };
+        match changed {
+            Ok(changed) => {
+                if changed {
+                    state.manager.events().bump();
+                }
+                axum::Json(serde_json::json!({})).into_response()
+            }
+            Err(e) => http_error(e),
+        }
+    })
+    .await
 }
 
 /// The body of `POST /api/sessions/{id}/replace`: an optional idempotency
@@ -3501,25 +3530,32 @@ pub(crate) async fn replace_session(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<ReplaceReq>,
 ) -> impl IntoResponse {
-    match do_replace_session(
-        &state,
-        &id,
-        req.intent_key,
-        req.with,
-        req.only_if_nothing_alive,
-        req.allow_yolo_on_sensitive_host,
-    )
+    // Helm-owned (SPEC_impl.md "Who owns an accepted action"): a replace
+    // creates the new session and only then deletes the source, so a
+    // request dropped in between used to leave both behind, the source
+    // never deleted and usually no error shown.
+    crate::run_owned(async move {
+        match do_replace_session(
+            &state,
+            &id,
+            req.intent_key,
+            req.with,
+            req.only_if_nothing_alive,
+            req.allow_yolo_on_sensitive_host,
+        )
+        .await
+        {
+            Ok(Replaced {
+                session,
+                delete_notice,
+            }) => match browser_session_ready(&session) {
+                Ok(()) => replace_reply(&session, delete_notice).into_response(),
+                Err(error) => http_error(error),
+            },
+            Err(e) => http_error(e),
+        }
+    })
     .await
-    {
-        Ok(Replaced {
-            session,
-            delete_notice,
-        }) => match browser_session_ready(&session) {
-            Ok(()) => replace_reply(&session, delete_notice).into_response(),
-            Err(error) => http_error(error),
-        },
-        Err(e) => http_error(e),
-    }
 }
 
 /// The replace endpoint's success body: the new session's own JSON, plus a
