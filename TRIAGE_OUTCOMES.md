@@ -5530,7 +5530,8 @@
   a tabs-only warning sends the new one, a warning that the agent runs sends neither. It applies to header Delete as
   well. Accepted: a tab opened between the prompt and the click is still closed; naming the exact tabs shown is not
   required.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change zmnvlqmmpmus, bookmark `triage-1001e/01-confirm-binds-prompt`, PR
+  https://github.com/scode/farhelm/pull/1441.
 
 ## replace-with-kills-running-source-unwarned.md
 

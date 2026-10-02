@@ -11612,22 +11612,31 @@ impl Supervisor {
     /// tab a REPLY should offer. Teardown must not use this — it
     /// enumerates per-tab scopes and a hidden corpse still owns one; see
     /// [`Self::session_tabs_including_dead`].
-    /// What of this session is still alive right now, phrased as the reason
-    /// an unconfirmed delete refuses, or `None` when nothing is.
+    /// What of this session is still alive right now beyond what `guard`
+    /// allows a delete to stop, phrased as the reason the delete refuses, or
+    /// `None` when nothing is.
     ///
-    /// Serves `ControlMsg::DeleteSession::only_if_nothing_alive`. A live
-    /// agent here is a live pane owned by this session, or a launch not yet
-    /// confirmed that has no terminal to probe; unlike Restart, which asks
-    /// only about a working agent, an unconfirmed delete refuses on any of
-    /// them. Any open terminal tab counts too, because a
-    /// delete closes tabs and whatever runs in them. Every "cannot tell"
-    /// answers alive (a pane held by an unrecognized tmux session) or fails
-    /// (a tmux query error): the question exists to avoid killing something
-    /// nobody agreed to kill, so uncertainty must never read as "safe".
+    /// Serves `ControlMsg::DeleteSession`'s preconditions (see
+    /// `farhelm_proto::DeleteGuard`). A live agent here is a live pane owned
+    /// by this session, or a launch not yet confirmed that has no terminal to
+    /// probe; unlike Restart, which asks only about a working agent, a
+    /// guarded delete refuses on any of them. Under
+    /// [`DeleteGuard::NothingAlive`](farhelm_proto::DeleteGuard) any open
+    /// terminal tab counts too, because a delete closes tabs and whatever
+    /// runs in them; [`DeleteGuard::AgentEnded`](farhelm_proto::DeleteGuard)
+    /// asks only about the agent, and an unconditional delete asks nothing.
+    /// Every "cannot tell" answers alive (a pane held by an unrecognized tmux
+    /// session) or fails (a tmux query error): the question exists to avoid
+    /// killing something nobody agreed to kill, so uncertainty must never
+    /// read as "safe".
     pub(crate) async fn still_alive_for_delete(
         &self,
         entry: &SessionEntry,
+        guard: farhelm_proto::DeleteGuard,
     ) -> anyhow::Result<Option<String>> {
+        if guard == farhelm_proto::DeleteGuard::Unconditional {
+            return Ok(None);
+        }
         if terminal_less_launch_may_be_live(entry) {
             return Ok(Some(
                 "this session's launch was never confirmed and it has no known terminal, so its \
@@ -11657,6 +11666,9 @@ impl Supervisor {
                     ));
                 }
             }
+        }
+        if guard == farhelm_proto::DeleteGuard::AgentEnded {
+            return Ok(None);
         }
         // Markers read unconditionally, not through `session_tabs`: that
         // listing skips the marker read when no session has more than one
@@ -17246,7 +17258,10 @@ pub(crate) mod tests {
     /// session has more than one window, so with the agent's window gone a
     /// lone surviving tab was invisible and the guard let the delete kill
     /// it. Spec: with the agent pane gone and one live tab left as the
-    /// session's only window, `still_alive_for_delete` reports the tab.
+    /// session's only window, `still_alive_for_delete` reports the tab under
+    /// `DeleteGuard::NothingAlive`, and reports nothing under `AgentEnded`
+    /// (a prompt that warned about tabs covers closing this one) or
+    /// `Unconditional`.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {
         let state = StateDir::new();
@@ -17294,13 +17309,25 @@ pub(crate) mod tests {
         );
 
         let alive = sup
-            .still_alive_for_delete(&entry)
+            .still_alive_for_delete(&entry, farhelm_proto::DeleteGuard::NothingAlive)
             .await
             .expect("guard check");
         assert_eq!(
             alive.as_deref(),
             Some("this session has 1 terminal tab open")
         );
+        for guard in [
+            farhelm_proto::DeleteGuard::AgentEnded,
+            farhelm_proto::DeleteGuard::Unconditional,
+        ] {
+            assert_eq!(
+                sup.still_alive_for_delete(&entry, guard)
+                    .await
+                    .expect("guard check"),
+                None,
+                "{guard:?} covers a lone tab beside an ended agent"
+            );
+        }
     }
 
     /// Restart without consent is refused only while the agent is working.

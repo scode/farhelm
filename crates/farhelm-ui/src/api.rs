@@ -2612,21 +2612,23 @@ fn spawn_seen_writer(base: String, id: String) {
 /// and must be checked (the delete's own reply was lost) — see
 /// `do_replace_session`'s doc on the helm side for which is which.
 ///
-/// `only_if_nothing_alive` asks the helm to refuse the source's delete if
-/// anything of it turns out to be alive (see `crate::status::shows_nothing_alive`
-/// for when the UI sets it); the replacement is still created, and the
-/// refusal arrives as the usual "both sessions exist" error.
+/// `guard` asks the helm to refuse the source's delete if more of it turns
+/// out to be alive than the prompt the user answered covered (see
+/// `crate::status::delete_guard` for how the UI picks it); the replacement
+/// is still created, and the refusal arrives as the usual "both sessions
+/// exist" error.
 pub(crate) async fn replace_session(
     base: &str,
     id: &str,
-    only_if_nothing_alive: bool,
+    guard: crate::DeleteGuard,
     allow_yolo: bool,
 ) -> Result<(Session, Option<String>), ActionRefusal> {
     let intent_key = mint_intent_key().await?;
     let url = format!("{base}/api/sessions/{}/replace", encode_path_segment(id));
     let mut body = serde_json::json!({
         "intent_key": intent_key,
-        "only_if_nothing_alive": only_if_nothing_alive,
+        "only_if_nothing_alive": guard.only_if_nothing_alive(),
+        "only_if_agent_ended": guard.only_if_agent_ended(),
     });
     if allow_yolo {
         allow_yolo_on_sensitive_host(&mut body);
@@ -2642,10 +2644,11 @@ pub(crate) async fn replace_session(
 /// shape (including the body-read-failure context), different verb and
 /// endpoint.
 ///
-/// `only_if_nothing_alive` adds `?only_if_nothing_alive=true`: the delete
-/// the user was not asked to confirm, which the supervisor refuses with a
-/// conflict (surfaced as the ordinary error text) instead of killing an
-/// agent or tab that is alive after all.
+/// `guard` adds `?only_if_nothing_alive=true` or `?only_if_agent_ended=true`:
+/// the precondition the confirmation the user answered (or its absence)
+/// covered, which the supervisor enforces with a conflict (surfaced as the
+/// ordinary error text) instead of killing an agent or tab nobody was warned
+/// about.
 ///
 /// `Ok(Some(notice))` is a completed delete that left something the user
 /// must be told about, today a checkout the host could not archive and left
@@ -2657,9 +2660,9 @@ pub(crate) async fn replace_session(
 pub(crate) async fn delete_session(
     base: &str,
     id: &str,
-    only_if_nothing_alive: bool,
+    guard: crate::DeleteGuard,
 ) -> Result<Option<String>, String> {
-    let url = delete_url(base, id, only_if_nothing_alive);
+    let url = delete_url(base, id, guard);
     let resp = send(client().delete(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("DELETE", &url, resp).await);
@@ -2697,12 +2700,12 @@ struct DeleteReply {
 
 /// The URL [`delete_session`] sends, split out so the precondition's
 /// query string is checkable without a helm.
-fn delete_url(base: &str, id: &str, only_if_nothing_alive: bool) -> String {
+fn delete_url(base: &str, id: &str, guard: crate::DeleteGuard) -> String {
     let url = format!("{base}/api/sessions/{}", encode_path_segment(id));
-    if only_if_nothing_alive {
-        format!("{url}?only_if_nothing_alive=true")
-    } else {
-        url
+    match guard {
+        crate::DeleteGuard::NothingAlive => format!("{url}?only_if_nothing_alive=true"),
+        crate::DeleteGuard::AgentEnded => format!("{url}?only_if_agent_ended=true"),
+        crate::DeleteGuard::Unconditional => url,
     }
 }
 
@@ -3666,18 +3669,23 @@ mod tests {
         }
     }
 
-    /// Why this matters: the unconfirmed delete's whole safety net is the
+    /// Why this matters: a guarded delete's whole safety net is the
     /// precondition reaching the helm; a URL that dropped it would bring
-    /// back the silent kill of a row that was stale. Spec: set, the query
-    /// string asks for it; unset, the URL is the plain delete route.
+    /// back the silent kill of a row that was stale. Spec: each guarded
+    /// level adds its own query flag; the unconditional delete is the plain
+    /// route.
     #[farhelm_testtrace::test]
     fn delete_url_carries_the_precondition_only_when_asked() {
         assert_eq!(
-            delete_url("http://h", "a/b", true),
+            delete_url("http://h", "a/b", crate::DeleteGuard::NothingAlive),
             "http://h/api/sessions/a%2Fb?only_if_nothing_alive=true"
         );
         assert_eq!(
-            delete_url("http://h", "s1", false),
+            delete_url("http://h", "s1", crate::DeleteGuard::AgentEnded),
+            "http://h/api/sessions/s1?only_if_agent_ended=true"
+        );
+        assert_eq!(
+            delete_url("http://h", "s1", crate::DeleteGuard::Unconditional),
             "http://h/api/sessions/s1"
         );
     }

@@ -398,18 +398,18 @@ fn followed_title(selected: Option<&Session>, shown: &Session) -> Option<String>
 ///
 /// It carries what the Replace prompt the user confirmed was drawn from:
 /// the session snapshot (its host fields become the new session's, see
-/// `list::with_source_host`) and whether that prompt said nothing is alive,
-/// which decides the supervisor-side "only if nothing is alive" precondition
-/// on deleting the source. Both answers to the YOLO question send these
-/// stored values. Recomputed at answer time instead, a session restarted or
-/// given a tab while the question was open (from another window, an agent,
-/// or this view) dropped the precondition, and the delete killed processes
-/// after a prompt that said none were running.
+/// `list::with_source_host`) and the precondition that prompt covered
+/// (`status::delete_guard`), which the supervisor checks before deleting the
+/// source. Both answers to the YOLO question send these stored values.
+/// Recomputed at answer time instead, a session restarted or given a tab
+/// while the question was open (from another window, an agent, or this view)
+/// changed the precondition, and the delete could kill processes the prompt
+/// never mentioned.
 #[derive(Clone, PartialEq)]
 struct PendingYoloReplace {
     ask: crate::yolo_confirm::YoloAsk,
     source: Session,
-    only_if_nothing_alive: bool,
+    guard: crate::DeleteGuard,
 }
 
 #[component]
@@ -1312,14 +1312,14 @@ pub(crate) fn SessionView(
     // launches first; nothing is replaced if that fails. Taken from the
     // question the user answered. It only ever comes with `allow_yolo`.
     //
-    // `source` and `only_if_nothing_alive` are the snapshot the confirmed
-    // prompt was drawn from and whether it said nothing is alive; see
+    // `source` and `guard` are the snapshot the confirmed
+    // prompt was drawn from and the precondition that prompt covered; see
     // `PendingYoloReplace` for why they are passed in rather than read here.
     let replace = move |claim: OpGuard,
                         allow_yolo: bool,
                         stop_asking: Option<(crate::HostId, String)>,
                         source: Session,
-                        only_if_nothing_alive: bool| {
+                        guard: crate::DeleteGuard| {
         if replacing() {
             return;
         }
@@ -1338,7 +1338,7 @@ pub(crate) fn SessionView(
                 }
                 replace_yolo.set(None);
             }
-            match replace_session(&base, &id, only_if_nothing_alive, allow_yolo).await {
+            match replace_session(&base, &id, guard, allow_yolo).await {
                 Ok((new_session, notice)) => {
                     delete_notice.publish(notice);
                     let new_session = crate::list::with_source_host(new_session, &source);
@@ -1361,7 +1361,7 @@ pub(crate) fn SessionView(
                             ),
                         },
                         source: source.clone(),
-                        only_if_nothing_alive,
+                        guard,
                     }));
                 }
                 Err(error) => replace_error.set(Some(error.text)),
@@ -1708,6 +1708,16 @@ pub(crate) fn SessionView(
 
     let shown = current.read().clone();
     let confirms_restart = restart_needs_confirmation(&shown.status);
+    // Whether the restart prompt, as rendered by THIS pass, offered to stop
+    // a running agent: its confirm consents to exactly that and no more. A
+    // prompt that drifted to an ended status did not offer it, so an agent
+    // that started working again before the click is refused by the
+    // supervisor instead of stopped, and the next attempt asks (an idle,
+    // waiting or unknown agent is still stopped unasked, as for a Restart
+    // with no prompt; SPEC.md "Lifecycle operations"). "Restart with"
+    // captures its own dialog's warning from the same render, below.
+    let restart_prompt_stops = crate::status::restart_prompt_stops_agent(&shown.status);
+    let restart_with_stops_first = restart_needs_confirmation(&shown.status);
     let tabs = visible_tabs(&shown.tabs, &opened_tabs.read(), &closed_tabs.read());
     // Both of these are DERIVED rather than written back to their signals
     // when they go stale, and that is safe precisely because tab ids are
@@ -1787,25 +1797,24 @@ pub(crate) fn SessionView(
     // promise to `aria-label` and to the hover `title`, in front of the
     // further elaboration `offer_explanation` provides.
     let restart_label = restart_button_label(shown.restart_offer);
-    // Whether the header delete's prompt, as rendered by THIS pass, says
-    // nothing is alive, captured by its confirm handler. It must come from
-    // the same snapshot the consequence text is drawn from, not from a fresh
-    // read at click time: a detail refresh can land between the render and
-    // the click (another client restarted the session, say), and the click
-    // is still an answer to the prompt the user read. A prompt that said
-    // nothing is alive sends the supervisor-side precondition, so a stale
-    // header can never kill processes nobody was warned about. Every rerender
-    // redraws the text and replaces the handler together, so the two agree.
-    let header_delete_warned_nothing_alive =
-        crate::status::shows_nothing_alive(&shown.status, shown.tabs.len());
+    // The precondition the header delete's prompt, as rendered by THIS pass,
+    // covered, captured by its confirm handler. It must come from the same
+    // snapshot the consequence text is drawn from, not from a fresh read at
+    // click time: a detail refresh can land between the render and the click
+    // (another client restarted the session, say), and the click is still an
+    // answer to the prompt the user read. The supervisor then refuses
+    // whatever is alive beyond what the prompt said, so a stale header can
+    // never kill processes nobody was warned about. Every rerender redraws
+    // the text and replaces the handler together, so the two agree.
+    let header_delete_guard = crate::status::delete_guard(&shown.status, shown.tabs.len());
     // The same capture for both Replace prompts (the header's and the
     // interrupted card's), whose consequence text is drawn from `shown`: the
-    // snapshot the confirmed prompt showed and whether it said nothing is
-    // alive. A Replace that then meets the YOLO question carries both to its
-    // answer (`PendingYoloReplace`).
+    // snapshot the confirmed prompt showed and the precondition it covered.
+    // A Replace that then meets the YOLO question carries both to its answer
+    // (`PendingYoloReplace`).
     let header_replace_source = shown.clone();
     let card_replace_source = shown.clone();
-    let replace_prompt_warned_nothing_alive = header_delete_warned_nothing_alive;
+    let replace_prompt_guard = header_delete_guard;
     let header_deleting = deleting.read().contains(&shown.id);
     let with_reason = restart_with_reason(&shown);
     let restart_with_description = with_reason.clone().unwrap_or_else(|| {
@@ -2018,13 +2027,13 @@ pub(crate) fn SessionView(
                                             return;
                                         }
                                         confirming.set(false);
-                                        // Carries THIS click's consent onto
-                                        // the wire (Restart with sends it
-                                        // too, when the agent read working at
-                                        // submit), which the supervisor
-                                        // checks against the liveness and
-                                        // activity it reads itself.
-                                        confirm_restart(true, None, false, None);
+                                        // Carries THIS prompt's consent onto
+                                        // the wire (Restart with sends its
+                                        // dialog's, too), which the
+                                        // supervisor checks against the
+                                        // liveness and activity it reads
+                                        // itself.
+                                        confirm_restart(restart_prompt_stops, None, false, None);
                                     },
                                     "confirm restart"
                                 }
@@ -2115,7 +2124,7 @@ pub(crate) fn SessionView(
                                                 false,
                                                 None,
                                                 header_replace_source.clone(),
-                                                replace_prompt_warned_nothing_alive,
+                                                replace_prompt_guard,
                                             );
                                         }
                                     },
@@ -2192,7 +2201,7 @@ pub(crate) fn SessionView(
                                             drop(claim);
                                             header_delete.set(Some(crate::list::HeaderDeleteRequest {
                                                 id: id.clone(),
-                                                only_if_nothing_alive: header_delete_warned_nothing_alive,
+                                                guard: header_delete_guard,
                                             }));
                                         }
                                     },
@@ -2217,7 +2226,7 @@ pub(crate) fn SessionView(
                     error: restart_with_error(),
                     yolo_confirmation: restart_yolo(),
                     yolo_error: restart_yolo_error(),
-                    stop_first: restart_needs_confirmation(&shown.status),
+                    stop_first: restart_with_stops_first,
                     offer_label: restart_button_label(shown.restart_offer).to_string(),
                     on_cancel: move |_| {
                         if restarting() { return; }
@@ -2259,7 +2268,7 @@ pub(crate) fn SessionView(
                             return;
                         }
                         with_restart(
-                            restart_needs_confirmation(&current.read().status),
+                            restart_with_stops_first,
                             Some(selection),
                             allow_yolo,
                             stop_asking,
@@ -2306,7 +2315,7 @@ pub(crate) fn SessionView(
                                 true,
                                 None,
                                 pending.source,
-                                pending.only_if_nothing_alive,
+                                pending.guard,
                             );
                         }
                     },
@@ -2330,7 +2339,7 @@ pub(crate) fn SessionView(
                                 true,
                                 target,
                                 pending.source,
-                                pending.only_if_nothing_alive,
+                                pending.guard,
                             );
                         }
                     },
@@ -2455,7 +2464,7 @@ pub(crate) fn SessionView(
                                             false,
                                             None,
                                             card_replace_source.clone(),
-                                            replace_prompt_warned_nothing_alive,
+                                            replace_prompt_guard,
                                         );
                                     }
                                 },

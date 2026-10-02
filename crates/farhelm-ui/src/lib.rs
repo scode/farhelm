@@ -212,8 +212,8 @@ pub struct ApiBase(pub String);
 ///
 /// `TabInfo` keeps its UI name `Tab`: the tab strip calls it that throughout.
 pub use farhelm_proto::{
-    LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer, SessionStatus,
-    TabInfo as Tab,
+    DeleteGuard, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer,
+    SessionStatus, TabInfo as Tab,
 };
 
 /// Mirror of the helm's session JSON (farhelm-proto `SessionInfo`). Kept

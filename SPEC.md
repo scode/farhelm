@@ -660,6 +660,20 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   notice, which the delete itself causes, is held back meanwhile; if the delete fails, the row and header come back with
   the refusal shown, and a held notice appears.
 
+Confirmed 2026-10-01: a destructive confirmation authorizes only what the prompt the user answered said would happen.
+This covers every destructive confirmation (Delete, Restart, Restart with, Replace and Replace with), including a prompt
+that rewords itself while it is open because the session changed underneath it: the answer applies to the wording on
+screen at the click, never to a state the user was not shown. The request carries the matching precondition, and the
+supervisor refuses, at the moment it acts, when the session has more alive than that: a Delete or Replace whose prompt
+said nothing was alive (or that asked nothing, because the session showed nothing alive) is refused if the agent or any
+terminal tab is running; one whose prompt warned only about open terminal tabs is refused if the agent is running again;
+a Restart whose prompt did not say it stops a running agent is refused if the agent is working (as for a Restart with no
+prompt, an idle, waiting or unknown agent is still stopped unasked). A refusal deletes, replaces or stops nothing (a
+Replace has already created its new session, and reports both, as above), and the next attempt asks again from the
+current state. These races are reachable in ordinary use because the command line and agents act on sessions while a GUI
+is open (see One GUI at a time). Accepted: a terminal tab opened between a tabs-only prompt and the click is closed with
+the others; the prompt need not name the exact tabs it showed.
+
 Process-tree ownership is session-wide. Restart reaps any leftover descendants of the prior run before relaunching —
 never alongside them. Stop and delete reap everything the agent started. An agent exiting on its own does not trigger a
 hunt for daemonized survivors; the session's next restart or its teardown does. Operations that need the working

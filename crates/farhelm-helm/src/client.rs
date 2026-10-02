@@ -3052,21 +3052,23 @@ impl SupervisorClient {
     /// surfaced as a plain `anyhow::Error` rather than `SupervisorError`.
     /// Only `Ok` means the session and its state are actually gone.
     pub async fn delete_session(&self, id: &str) -> anyhow::Result<()> {
-        self.delete_session_with(id, false).await.map(|_notice| ())
+        self.delete_session_with(id, farhelm_proto::DeleteGuard::Unconditional)
+            .await
+            .map(|_notice| ())
     }
 
-    /// [`Self::delete_session`] with the precondition the browser's
-    /// unconfirmed delete sends: when `only_if_nothing_alive` is set, the
-    /// supervisor refuses with `Conflict` instead of deleting if the agent
-    /// or any tab is alive at handling time (see
-    /// `ControlMsg::DeleteSession::only_if_nothing_alive`).
+    /// [`Self::delete_session`] with the precondition the browser derived
+    /// from the confirmation it showed: under any guard but
+    /// `Unconditional`, the supervisor refuses with `Conflict` instead of
+    /// deleting if more is alive at handling time than the guard allows (see
+    /// `farhelm_proto::DeleteGuard`).
     ///
     /// `Ok(Some(notice))` is a completed delete that left something the user
     /// must be told about (`ControlMsg::SessionDeleted::notice`).
     pub async fn delete_session_with(
         &self,
         id: &str,
-        only_if_nothing_alive: bool,
+        guard: farhelm_proto::DeleteGuard,
     ) -> anyhow::Result<Option<String>> {
         let req_id = self.req_id();
         match self
@@ -3075,7 +3077,8 @@ impl SupervisorClient {
                 ControlMsg::DeleteSession {
                     req_id,
                     session_id: id.to_string(),
-                    only_if_nothing_alive,
+                    only_if_nothing_alive: guard.only_if_nothing_alive(),
+                    only_if_agent_ended: guard.only_if_agent_ended(),
                 },
             )
             .await?
