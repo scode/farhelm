@@ -5370,7 +5370,8 @@
   supervisor the user started; the message does not say "managed" when the app spawned no supervisor. Opening the window
   instead of failing is out of scope. Add a unit test alongside the existing timeout-text test. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `ltsploputryn`, bookmark `triage-1001d/14-desktop-refused-supervisor`, PR
+  https://github.com/scode/farhelm/pull/1410.
 
 ## terminal-tombstone-never-buried.md
 
