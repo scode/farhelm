@@ -20,3 +20,5 @@ One line per plan, in the order the plans are executed. This file must always ma
 - [pending] `triage-clipboard-terminal-limit.md` — execute the 2026-10-02 highest-priority triage outcomes (a bound on
   the desktop window's pending clipboard writes, a hard size limit on terminal data from a supervisor, and removing the
   deferred filesystem-fallback queue item).
+- [pending] `identity-report-wait-retry.md` — stop losing conversation-identity reports: no time limit on the
+  supervisor's lock wait, Claude's sender check before it, a 30 s hook budget with retries across a supervisor restart.
