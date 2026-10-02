@@ -4789,7 +4789,7 @@
   custom command lines is best effort: common shapes are covered, but arbitrary wrappers (scripts, `sh -c`, and the
   like) are not guaranteed to be detected; structured launches remain exact. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
 
 ## yolo-guard-fails-open-without-row.md
 
@@ -4813,7 +4813,7 @@
   helm gives for an unknown host, and correct the comment that claims routing refuses on its own. Add a unit test that a
   YOLO check against a host id with no registry row is refused. Do not add serialization between create and host
   removal. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
 
 ## sighup-skips-orderly-shutdown.md
 
@@ -4838,7 +4838,7 @@
   (optionally also start the desktop app's managed supervisor in its own group); correct `BUGS.md`'s description of
   which deaths skip the orderly path; add a focused test that a SIGHUP to the supervisor's process group runs the
   orderly shutdown. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
 
 ## header-replace-recomputes-alive.md
 
@@ -4866,7 +4866,7 @@
   (agents acting through fleet operations) are a fully supported primary surface alongside the UI, including
   concurrently with it; the spec must say so, and the best-effort qualifier applies only to several concurrent GUIs.
   Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
 
 ## sidebar-replace-recomputes-alive.md
 
@@ -4887,7 +4887,7 @@
   stop and return the item to the user. If the header item's execution has already added the single-GUI principle to
   SPEC.md, this item needs no further spec change; otherwise add it as described there. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
 
 ## yolo-guard-misses-codex-option-form.md
 
@@ -4910,7 +4910,7 @@
   either order, in the guard and the sidebar badge; include the `-c`/`--config` spellings (`approval_policy="never"`
   with `sandbox_mode="danger-full-access"`) if that comes cheaply. Add classifier tests for each spelling and a guard
   test refusing such a create on a sensitive host. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
 
 ## yolo-safe-survives-identity-adoption.md
 
@@ -4933,7 +4933,7 @@
   settings paragraph that adopting a new identity resets the host to asking before YOLO launches. Add a store test (mark
   safe, adopt a different identity, the row is no longer safe). Do not add an identity precondition to the setter or
   change first-contact recording. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
 
 ## yolo-guard-misses-equivalent-spellings.md
 
@@ -4968,7 +4968,7 @@
   name `agent` is not interpreted, and agents installed or launched under other names are not detected. OMP's
   `--auto-approve` and Grok's `--permission-mode bypassPermissions` are not part of this decision. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
 
 ## yolo-guard-skips-resume-template.md
 
@@ -4988,4 +4988,4 @@
   classified: a separate resume command is not checked, and a plain Resume or Restart that runs it is not asked. Keep it
   consistent with the best-effort wording from `yolo-guard-misses-env-prefix.md`. No code change. Remove this feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
