@@ -224,6 +224,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   pop-up menu, and as an opt-in option (off by default) when adding a host. Relatedly, adding a host should probe it
   once Farhelm's own installation there is complete.
 
+- **Make the host pop-up menu match the session pop-up menu.** Redesign the host pop-up menu so it looks and feels
+  exactly like the session pop-up menu: the same positioning, the same style, the same per-item descriptions, and so on.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
