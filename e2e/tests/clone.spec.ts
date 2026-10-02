@@ -398,7 +398,10 @@ test("a deliberately entered name field keeps focus through the late catalog ren
         status: 200,
         headers: { "content-type": "application/json", "x-farhelm-build": build },
         body: JSON.stringify([
-          { id: "deliberate-focus-codex", harness: "codex", efforts: ["high"] },
+          // `low` as well as the prefilled `high`: the row already shows
+          // the selected effort before any catalog arrives, so only an
+          // effort the draft does not hold can witness this reply rendering.
+          { id: "deliberate-focus-codex", harness: "codex", efforts: ["low", "high"] },
           { id: "deliberate-focus-claude", harness: "claude", efforts: ["low"] },
         ]),
       });
@@ -443,15 +446,20 @@ test("a deliberately entered name field keeps focus through the late catalog ren
       // Entered receipt: the page's catalog read is still held — no
       // catalog content could have rendered yet.
       await expect.poll(() => catalogGets).toBeGreaterThan(0);
-      const effortButtons = form.locator(".launch-composer-effort-choice").getByRole("button");
-      const effortsBefore = await effortButtons.count();
+      // `low` is offered only by the held fixture reply (the draft holds
+      // `high`, which the row shows before any catalog), so its button is
+      // absent now and appears exactly when that reply renders.
+      const fixtureOnlyEffort = form.locator(".launch-composer-effort-choice").getByRole("button", {
+        name: "low",
+        exact: true,
+      });
+      await expect(fixtureOnlyEffort).toHaveCount(0);
       catalogGate.release();
       // Consumption receipt: the held reply's vocabulary reached the
-      // rendered effort choice — its button set changes once the
-      // fixture-only catalog lands. (The prefilled model and summary
-      // do NOT change here: an unknown model is preserved as an
-      // arbitrary choice, so neither can witness the render.)
-      await expect.poll(() => effortButtons.count()).not.toBe(effortsBefore);
+      // rendered effort choice. (The prefilled model and summary do NOT
+      // change here: an unknown model is preserved as an arbitrary choice,
+      // so neither can witness the render.)
+      await expect(fixtureOnlyEffort).toHaveCount(1);
       // The deliberate field kept focus and text throughout, with no
       // refocus after release.
       await expect(name).toBeFocused();
@@ -1217,7 +1225,10 @@ async function openEffortClone(
  * The new-session dialog does not refuse a saved choice while its catalog is
  * still loading. It used to check an effort-bearing clone against an empty
  * stand-in list, which rejects every effort, and showed "no longer supported
- * by the current catalog" with Launch disabled until the read landed.
+ * by the current catalog" with Launch disabled until the read landed. The
+ * effort row shows the effort that will launch, selected: with no catalog it
+ * used to draw only `default`, leaving the prefilled `high` visible nowhere
+ * but the summary line.
  */
 test("a clone with an effort can launch while the catalog is still loading", async ({ page, request }) => {
   const gate = routeGate();
@@ -1233,15 +1244,27 @@ test("a clone with an effort can launch while the catalog is still loading", asy
       .toBeGreaterThan(0);
     await expect(clone.form.locator(".launch-composer-choice-error")).toHaveCount(0);
     await expect(clone.form.locator(".create-session-submit")).toBeEnabled();
+    await expectEffortShownSelected(clone.form, "high");
   } finally {
     await clone.done();
   }
 });
 
 /**
+ * Asserts the effort row draws `effort` as the selected choice and `default`
+ * as not selected: what the row says is what Launch would send.
+ */
+async function expectEffortShownSelected(form: Locator, effort: string) {
+  const row = form.locator(".launch-composer-effort-choice");
+  await expect(row.getByRole("button", { name: effort, exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(row.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "false");
+}
+
+/**
  * A failed catalog read refuses nothing either: it explains the empty model
  * list and offers to read again. Reopening the dialog used to be the only way
- * out, and that loses its draft.
+ * out, and that loses its draft. The effort row still shows the effort that
+ * will launch.
  */
 test("a failed catalog read shows a retry and leaves the clone launchable", async ({ page, request }) => {
   const clone = await openEffortClone(page, request, "clone-catalog-failed", async (get, route, build) => {
@@ -1260,6 +1283,7 @@ test("a failed catalog read shows a retry and leaves the clone launchable", asyn
     await expect(failure).toContainText("model catalog unavailable");
     await expect(clone.form.locator(".launch-composer-choice-error")).toHaveCount(0);
     await expect(clone.form.locator(".create-session-submit")).toBeEnabled();
+    await expectEffortShownSelected(clone.form, "high");
 
     await failure.getByRole("button", { name: "retry" }).click();
     await expect.poll(clone.gets, { message: "retry reads the catalog again" }).toBeGreaterThan(1);

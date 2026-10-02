@@ -1399,6 +1399,59 @@ pub(crate) fn compatible_efforts(
         .collect()
 }
 
+/// The effort buttons the launch controls render: the catalog's choices for
+/// this harness and model, plus the selected effort and the dialog's starting
+/// effort whenever the catalog does not list them.
+///
+/// The selected effort is what Launch would send, so the row must show it,
+/// selected. Without this, a dialog opened before the model list arrived (or
+/// after reading it failed) had only `default` to draw for an empty catalog,
+/// and a prefilled effort such as a cloned session's `high` appeared nowhere
+/// in the row even though it was going to launch. The same applies to a
+/// stored effort the arrived catalog no longer lists: other checks refuse that
+/// launch, but the row still says what the choice is rather than hiding it.
+///
+/// The starting effort (`baseline`, the stored choice "Restart with" opened
+/// from) stays for the same reason the selected one appears: once shown, a
+/// button that vanished when the user picked another effort would leave no
+/// way back to the stored choice, and could remove the button keyboard focus
+/// is still on when a WebKit click lands elsewhere without moving it
+/// (`restart_with.rs` explains why removing a focused control is a problem
+/// there). A dialog with no baseline, such as a clone,
+/// keeps only the selection, so there an unlisted effort's button lasts only
+/// while it is selected.
+///
+/// An added effort takes its place in the stable display order, which matters
+/// when an arrived catalog lists other efforts but not this one: appended, it
+/// would sit after efforts that rank above it. That relies on each catalog
+/// entry's own effort list being in display order, which the helm's catalog
+/// is today. A harness that takes no effort draws no row at all, and gets
+/// nothing added here either.
+pub(crate) fn displayed_efforts(
+    harness: LaunchHarness,
+    model: Option<&str>,
+    catalog: &[LaunchCatalogModel],
+    selected: Option<LaunchEffort>,
+    baseline: Option<LaunchEffort>,
+) -> Vec<LaunchEffort> {
+    let mut efforts = compatible_efforts(harness, model, catalog);
+    if !harness.offers_effort() {
+        return efforts;
+    }
+    let rank = |effort: &LaunchEffort| EFFORT_ORDER.iter().position(|e| e == effort);
+    for kept in [selected, baseline].into_iter().flatten() {
+        if efforts.contains(&kept) {
+            continue;
+        }
+        let at = efforts
+            .iter()
+            .position(|effort| rank(effort) > rank(&kept))
+            .unwrap_or(efforts.len());
+        efforts.insert(at, kept);
+    }
+    efforts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2538,6 +2591,65 @@ mod tests {
         assert_eq!(
             compatible_efforts(LaunchHarness::Codex, Some("custom"), &catalog),
             vec![LaunchEffort::Low, LaunchEffort::Medium, LaunchEffort::High]
+        );
+    }
+
+    /// Spec: the effort row always contains the effort Launch would send.
+    ///
+    /// While the model list is unknown (pending, or its read failed) the
+    /// dialogs pass an empty catalog, and the row used to draw only `default`
+    /// even with a prefilled `high` that was going to launch. The selected
+    /// effort, and the dialog's starting effort as the way back to it, are
+    /// added in display order; an effort the catalog already offers is not
+    /// duplicated, nothing is added with neither, and a harness that takes
+    /// no effort gets none.
+    #[test]
+    fn the_effort_row_always_shows_the_effort_that_would_launch() {
+        use LaunchEffort::{High, Low, Medium, Xhigh};
+        let codex = |catalog: &[LaunchCatalogModel], selected, baseline| {
+            displayed_efforts(
+                LaunchHarness::Codex,
+                Some("gpt-6.1-sol"),
+                catalog,
+                selected,
+                baseline,
+            )
+        };
+        assert_eq!(
+            codex(&[], Some(High), None),
+            vec![High],
+            "an unknown catalog still shows the prefilled effort"
+        );
+        assert!(codex(&[], None, None).is_empty());
+        assert!(
+            displayed_efforts(LaunchHarness::Cursor, None, &[], Some(High), Some(High)).is_empty(),
+            "a harness without an effort choice draws no row to add to"
+        );
+        assert_eq!(
+            codex(&[], None, Some(High)),
+            vec![High],
+            "a stored starting effort stays after the user picks default, as the way back"
+        );
+        assert_eq!(
+            codex(&[], Some(Low), Some(High)),
+            vec![Low, High],
+            "the selection and the starting effort both show, in display order"
+        );
+
+        let catalog = vec![LaunchCatalogModel {
+            id: "gpt-6.1-sol".into(),
+            harness: LaunchHarness::Codex,
+            efforts: vec![Low, High, Xhigh],
+        }];
+        assert_eq!(
+            codex(&catalog, Some(High), Some(High)),
+            vec![Low, High, Xhigh],
+            "an offered effort is not repeated"
+        );
+        assert_eq!(
+            codex(&catalog, Some(Medium), None),
+            vec![Low, Medium, High, Xhigh],
+            "an unlisted selection takes its place in display order"
         );
     }
 
