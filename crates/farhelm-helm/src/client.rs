@@ -886,8 +886,10 @@ pub struct SupervisorClient {
     /// This connection's identity, for the life of the process — see
     /// [`SupervisorClient::connection_id`].
     connection_id: u64,
-    /// Answering tasks this connection currently owns, so connection death
-    /// can end work being done on its behalf.
+    /// Read-only answering tasks this connection currently owns, so
+    /// connection death can end work being done only for its benefit. A
+    /// started mutation is never in here; see
+    /// [`SupervisorClient::abort_agent_tasks`].
     ///
     /// A `std::sync::Mutex` rather than the tokio one because every use is
     /// a push or a drain with no await inside — and because the pushing
@@ -954,13 +956,15 @@ impl Drop for SupervisorClient {
 /// The answering work one connection owns, plus the fact that decides
 /// whether any MORE of it may start.
 ///
-/// The flag is what makes "retirement cancels this connection's answering
-/// work" a property of the code rather than of the scheduler. Registration
-/// and the question "has this connection been retired?" have to be answered
-/// under ONE lock hold, because they are the two halves of a single
-/// decision: a task registered after the last drain would be a task nothing
-/// is left to abort, doing a fleet listing — or routing a mutation to
-/// another host — on behalf of a peer that is provably gone. See
+/// The flag is what makes "no answer starts after retirement, and no
+/// read-only answer escapes its abort" a property of the code rather than of
+/// the scheduler. Registration and the question "has this connection been
+/// retired?" have to be answered under ONE lock hold, because they are the
+/// two halves of a single decision: a listing registered after the last
+/// drain would be a task nothing is left to abort, and a mutation let
+/// through the gate after it would route to another host on behalf of a peer
+/// that is provably gone. (A mutation is never registered at all; for it the
+/// flag only decides whether it may start.) See
 /// [`SupervisorClient::spawn_agent_answer`] for the start gate that makes
 /// the decision reachable before the work has run.
 ///
@@ -968,7 +972,7 @@ impl Drop for SupervisorClient {
 /// manager builds a new one), so nothing ever clears the flag.
 #[derive(Default)]
 struct AgentTasks {
-    /// The WORK tasks' abort handles — not their owners'; see
+    /// The read-only WORK tasks' abort handles — not their owners'; see
     /// [`SupervisorClient::abort_agent_tasks`].
     handles: Vec<tokio::task::AbortHandle>,
     /// Whether [`SupervisorClient::abort_agent_tasks`] has run, i.e. this
@@ -1610,7 +1614,8 @@ impl SupervisorClient {
         self.abort_agent_tasks();
     }
 
-    /// Stop every answer this connection is assembling.
+    /// Stop every read-only answer this connection is assembling, and let
+    /// no further answer of any kind start.
     ///
     /// Shared by the two endings that must not leave one running: the
     /// connection dying ([`Self::fail_all`]) and the manager withdrawing
@@ -1623,19 +1628,13 @@ impl SupervisorClient {
     /// one termination that is deliberately not answered, because this is
     /// exactly the case where the peer is already gone.
     ///
-    /// ABORTING A MUTATION DOES NOT UNDO IT, and nothing here pretends
-    /// otherwise. A `Rename`/`Stop`/`Restart` task aborted at an await
-    /// point may already have sent its mutation to the TARGET host — a
-    /// different connection from this one, which this abort does not touch
-    /// — so the durable change can land after the asking side has been told
-    /// the request ended. There is no way to know from here which side of
-    /// that line an aborted task was on, so the honest vocabulary is
-    /// applied where the answer is reported instead: the supervisor's relay
-    /// gives a mutating verb whose connection died an "outcome unknown"
-    /// ending rather than a retry-safe one (`service::agent_relay`'s
-    /// `connection_lost_after_queueing`). Aborting anyway is still right —
-    /// the alternative is a listing being assembled for a peer that cannot
-    /// receive it — but it is a cancellation of the ANSWER, not of the act.
+    /// Only READ-ONLY answers are in the list. A mutation that has started
+    /// is deliberately absent and runs to completion: the helm owns an
+    /// accepted action, and stopping one at an arbitrary await would leave
+    /// it half done at its target host (see [`Self::spawn_agent_answer`],
+    /// "A started mutation belongs to the helm"). A mutation that has NOT
+    /// started is still covered, by the retired flag below rather than by
+    /// the list: it is aborted at its start gate and never runs.
     ///
     /// Marks the connection retired in the SAME lock hold that drains the
     /// handles, which is what closes the door behind it: an answer whose
@@ -1662,8 +1661,10 @@ impl SupervisorClient {
     /// the final `Arc` drop: callers may still own this obsolete client.
     /// It does exactly two things:
     ///
-    /// - aborts the answering tasks, which is what stops a fleet listing
-    ///   being assembled for a peer nobody will accept an answer from;
+    /// - aborts the read-only answering tasks, which is what stops a fleet
+    ///   listing being assembled for a peer nobody will accept an answer
+    ///   from, and keeps any mutation not yet started from starting (a
+    ///   started one runs on; see [`Self::abort_agent_tasks`]);
     /// - signals both background halves, which shuts the write half and
     ///   lets the transport (an ssh child, a socket) actually close.
     ///
@@ -2122,10 +2123,11 @@ impl SupervisorClient {
     ///
     /// ## Owned, not merely spawned — and SUPERVISED
     ///
-    /// The handle is retained so [`Self::fail_all`] can abort it. A
-    /// connection's death means nobody is left to receive the answer, and
-    /// an answer in progress is a database walk and a multi-megabyte
-    /// allocation being done for a dead peer.
+    /// A READ-ONLY answer's handle is retained so [`Self::fail_all`] can
+    /// abort it. A connection's death means nobody is left to receive the
+    /// answer, and an answer in progress is a database walk and a
+    /// multi-megabyte allocation being done for a dead peer. A mutation's is
+    /// not; see "A started mutation belongs to the helm" below.
     ///
     /// Two tasks rather than one: the work task computes an outcome, and a
     /// small owner task awaits it and is what actually sends. That shape
@@ -2151,17 +2153,43 @@ impl SupervisorClient {
     /// [`Self::abort_agent_tasks`] could drain an empty list and return,
     /// after which the handle was inserted into a connection that had
     /// already been torn down. The escaped task kept walking the database
-    /// for a peer nobody would accept an answer from, and a mutation whose
-    /// entry check had already passed kept routing to its target, both
-    /// outside the boundary these docs claim owns them.
+    /// for a peer nobody would accept an answer from, and a mutation could
+    /// START on the authority of a connection the manager had already
+    /// withdrawn.
     ///
     /// So the work task is spawned PARKED, behind a one-shot start gate, and
-    /// the gate is opened only after the handle is stored — under the same
-    /// lock hold that asks whether the connection has been retired (see
-    /// [`AgentTasks`]). Retired, and the task is aborted at the gate instead
-    /// of registered: nothing of the handler ever runs, and the owner
-    /// observes an ordinary cancellation. The ordering is then a property of
-    /// the code rather than of how the scheduler felt.
+    /// the gate is opened only after the retirement question is answered —
+    /// under the same lock hold that stores the handle (see [`AgentTasks`]).
+    /// Retired, and the task is aborted at the gate instead: nothing of the
+    /// handler ever runs, and the owner observes an ordinary cancellation.
+    /// The ordering is then a property of the code rather than of how the
+    /// scheduler felt. This applies to every verb, mutations included: a
+    /// request that arrived on a withdrawn connection was never accepted.
+    ///
+    /// ## A started mutation belongs to the helm
+    ///
+    /// Past the gate, a mutating verb's work task is NOT registered for
+    /// abort, so neither [`Self::fail_all`] nor [`Self::retire`] nor the
+    /// final drop can stop it. SPEC_impl.md's "Who owns an accepted action"
+    /// is the rule: a create, clone, rename, stop or restart is a sequence
+    /// of steps across the database and a TARGET host's connection (not
+    /// this one), and cancelling it at an arbitrary await leaves it half
+    /// done. A create cancelled after its target launched the session, for
+    /// example, skipped the helm's own handling of the result, so the session
+    /// stayed out of the list until the next refresh found it. Losing this
+    /// connection costs the asking agent its ANSWER only; the supervisor's
+    /// relay already reports a mutating verb whose connection died as
+    /// "outcome unknown" rather than as safe to retry
+    /// (`service::agent_relay`'s `connection_lost_after_queueing`), which is
+    /// exactly what happened. The reply the finished task then tries to queue
+    /// almost always goes nowhere: the writer half has shut down with the
+    /// rest of the connection. In the narrow window before the writer
+    /// notices, it may still be written, which is harmless, since it is the
+    /// asker's true answer.
+    ///
+    /// Read-only verbs stay registered, because for them the answer IS the
+    /// work: a listing assembled for a peer that cannot receive it is
+    /// wasted, and stopping it changes nothing durable.
     ///
     /// ## The origin is checked twice — but ONLY for a read-only verb
     ///
@@ -2328,7 +2356,14 @@ impl SupervisorClient {
             // cannot receive it, and the owner then observes the cancellation
             // and releases the admission slot. Storing the owner's instead
             // would leave the work running with nothing left to notice.
-            tasks.handles.push(abort);
+            //
+            // A mutation is not registered at all: once it has started, the
+            // helm owns carrying it out (see "A started mutation belongs to
+            // the helm" above), so nothing that ends this connection may
+            // stop it partway.
+            if !is_mutation {
+                tasks.handles.push(abort);
+            }
         }
         // Registered, so it may run. Nothing waits on this: the receiver is
         // held by a task that cannot have finished, so the send cannot fail.
@@ -7469,19 +7504,33 @@ mod tests {
     /// return — before the abort handle was stored. The handle then landed
     /// in a torn-down connection's list, and the escaped task kept walking
     /// the database for a peer nobody would accept an answer from; worse,
-    /// for a mutation whose entry check had already passed, it kept routing
-    /// a `stop` to its target on the authority of a connection the manager
-    /// had withdrawn. Every docstring in this file claims retirement OWNS
-    /// that work, and this is what makes the claim structural rather than a
-    /// statement about scheduling luck.
+    /// a mutation could START routing a `stop` to its target on the
+    /// authority of a connection the manager had already withdrawn. (A
+    /// mutation that started BEFORE the withdrawal is a different case and
+    /// runs on; see
+    /// `a_started_mutation_finishes_after_its_connection_is_retired`.) The
+    /// start gate is what makes "nothing starts after retirement" structural
+    /// rather than a statement about scheduling luck.
     ///
     /// The seam fires precisely between the spawn and the registration,
     /// which is the only place the race was ever reachable from; a refactor
     /// that reorders those two must move the seam with it or this test stops
-    /// pinning anything. `Stop` is the verb because a mutation escaping the
-    /// boundary is the consequential half — a listing merely wastes work.
+    /// pinning anything. Both kinds of verb are driven because each pins a
+    /// different half: `Stop`, because a mutation escaping the boundary is
+    /// the consequential case, and `Hosts`, because only a read-only answer
+    /// is ever registered for abort, so only it can show that nothing was
+    /// registered after the drain.
     #[farhelm_testtrace::test]
     async fn an_answer_spawned_into_a_retirement_never_runs() {
+        an_answer_spawned_into_a_retirement(farhelm_proto::AgentVerb::Stop { session_id: None })
+            .await;
+        an_answer_spawned_into_a_retirement(farhelm_proto::AgentVerb::Hosts {}).await;
+    }
+
+    /// One connection, retired by the spawn seam while answering `verb`;
+    /// asserts the handler never ran, nothing was registered, and the peer
+    /// saw the connection end without an answer.
+    async fn an_answer_spawned_into_a_retirement(verb: farhelm_proto::AgentVerb) {
         let entered = Arc::new(AtomicBool::new(false));
         let slot: crate::agent_requests::AgentRequestSlot =
             Arc::new(std::sync::OnceLock::from(Arc::new(RecordingHandler {
@@ -7501,15 +7550,14 @@ mod tests {
             }
         }));
 
-        peer.ask(1, farhelm_proto::AgentVerb::Stop { session_id: None })
-            .await;
+        peer.ask(1, verb.clone()).await;
         timeout(Duration::from_secs(5), client.closed())
             .await
             .expect("the seam's retirement never took effect");
 
         assert!(
             !entered.load(Ordering::SeqCst),
-            "the handler ran for a connection that had already been retired"
+            "the handler ran for a connection that had already been retired: {verb:?}"
         );
         assert!(
             client
@@ -7518,7 +7566,7 @@ mod tests {
                 .expect("agent task list poisoned")
                 .handles
                 .is_empty(),
-            "a retired connection must register nothing after its drain"
+            "a retired connection must register nothing after its drain: {verb:?}"
         );
         // Silence is the contract for a cancelled answer (see
         // `spawn_agent_answer`), so the peer sees the connection end rather
@@ -7532,6 +7580,97 @@ mod tests {
             "a cancelled answer must send nothing: {:?}",
             ending.map(|frame| parse_control(&frame))
         );
+    }
+
+    /// A handler that parks inside the call, as a mutation awaiting its
+    /// target host would, and announces when it has run to the end.
+    ///
+    /// `finished` is sent on only past the park point, so an abort while
+    /// parked means it never arrives; that is what lets a test tell "the work
+    /// was stopped" from "the work finished but its answer had nowhere to
+    /// go".
+    struct ParkedMutation {
+        entered: mpsc::Sender<()>,
+        release: Arc<Semaphore>,
+        finished: mpsc::Sender<()>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::agent_requests::AgentRequestHandler for ParkedMutation {
+        async fn handle(
+            &self,
+            _origin: crate::agent_requests::AgentOrigin,
+            _session_id: &str,
+            _verb: farhelm_proto::AgentVerb,
+        ) -> farhelm_proto::AgentOutcome {
+            let _ = self.entered.send(()).await;
+            let _permit = self
+                .release
+                .acquire()
+                .await
+                .expect("the gate is never closed");
+            let _ = self.finished.send(()).await;
+            farhelm_proto::AgentOutcome::Ok {
+                reply: farhelm_proto::AgentReply::Stopped {},
+            }
+        }
+    }
+
+    /// Spec: a mutating agent request that has started runs to completion
+    /// even when the connection it arrived on is retired midway; only its
+    /// answer is lost.
+    ///
+    /// SPEC_impl.md "Who owns an accepted action": the helm owns an action it
+    /// accepted, and the asking connection's handler only waits for the result.
+    /// A create, clone, rename, stop or restart is several steps across the
+    /// database and a TARGET host, so cancelling it when the asking
+    /// supervisor's connection is withdrawn (an ordinary reconnect, retarget or
+    /// adoption) used to leave it half done — a launched session missing from
+    /// the list until the next refresh, say. Retirement is the teardown this
+    /// pins because it is the one the manager triggers on its own; the
+    /// connection dying (`fail_all`) and the last handle dropping go through
+    /// the same abort list.
+    ///
+    /// The ending is checked before the handler is released, so the answer
+    /// cannot race onto the wire: the peer must see the connection end, and
+    /// only then does the parked work get to finish.
+    #[farhelm_testtrace::test]
+    async fn a_started_mutation_finishes_after_its_connection_is_retired() {
+        let (entered, mut calls) = mpsc::channel(8);
+        let release = Arc::new(Semaphore::new(0));
+        let (finished, mut completions) = mpsc::channel(8);
+        let slot: crate::agent_requests::AgentRequestSlot =
+            Arc::new(std::sync::OnceLock::from(Arc::new(ParkedMutation {
+                entered,
+                release: Arc::clone(&release),
+                finished,
+            })
+                as Arc<dyn crate::agent_requests::AgentRequestHandler>));
+        let (client, mut peer) = agent_connection(slot).await;
+
+        peer.ask(1, farhelm_proto::AgentVerb::Stop { session_id: None })
+            .await;
+        timeout(Duration::from_secs(5), calls.recv())
+            .await
+            .expect("the mutation's handler did not start")
+            .expect("the handler announcement channel closed");
+
+        client.retire();
+        let ending = timeout(Duration::from_secs(5), peer.reader.read_frame())
+            .await
+            .expect("the retired connection stayed open")
+            .expect("read the connection's ending");
+        assert!(
+            ending.is_none(),
+            "the retired connection must end, not answer: {:?}",
+            ending.map(|frame| parse_control(&frame))
+        );
+
+        release.add_permits(1);
+        timeout(Duration::from_secs(5), completions.recv())
+            .await
+            .expect("retiring the connection stopped a mutation that had already started")
+            .expect("the completion channel closed");
     }
 
     /// A handler whose ENTRY check would pass but whose EXIT check always
