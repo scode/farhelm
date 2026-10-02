@@ -4692,7 +4692,8 @@
   in brief, how sure we are (the reviewer's measurements; not reproduced in triage), and why it is not being fixed
   (bounded in practice, reset by any keystroke or reattach, and a fix would complicate the keystroke path). Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/triage-feed-sink-identity.md`.
+- Execution: complete: change `twknzzlmoozz`, bookmark `triage-1001b/03-bugs-input-clients`, PR
+  https://github.com/scode/farhelm/pull/1376.
 
 ## adopt-checks-current-row-not-dialed.md
 

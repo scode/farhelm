@@ -45,3 +45,30 @@ If you hit this, the signature is: all sessions gone at once, `no server running
 supervisor that restarts cleanly into an empty server with your sessions listed as exited. Reporting it upstream to tmux
 would need the crash site pinned first — running the server with `-vv` logging under the same kill-under-load recipe
 would capture the fatal message and call site.
+
+## A terminal left open for days without typing makes the tmux server grow
+
+If a terminal (a session's agent terminal or one of its tabs) stays open for a long time without anyone typing into it,
+the private tmux server on that host slowly uses more memory. Right after the first keystroke that follows the quiet
+stretch, typing in every terminal on that host can pause for a moment while the supervisor catches up. In practice
+nothing is lost; typing, or closing and reopening the terminal, resets it.
+
+Here's the TLDR of the mechanics. Every open terminal has a separate tmux connection that only carries keystrokes, and
+the supervisor reads from that connection only while it waits for tmux to confirm a keystroke. That connection is set up
+to receive no pane output, but tmux still sends it notifications about the whole server: another terminal attaching or
+detaching, a session being created or removed, a window being renamed or resized. While nobody types, nothing reads
+them. Once the connection's pipe is full (64 KiB), tmux keeps queueing the rest in its own memory, with no limit. The
+next keystroke itself reaches the agent at once, but the supervisor then reads through the whole backlog to find tmux's
+confirmation, and it does that while holding the lock every terminal on that host shares. A backlog too large to read
+within the supervisor's 10-second budget for one keystroke would fail that keystroke and close the terminal, though the
+measured growth makes that implausible.
+
+How sure we are: the mechanism is confirmed by reading the code (`crates/farhelm-supervisor/src/tmux/input.rs`). The
+numbers are from the code review that found it and were not reproduced in triage: about 5 KB of backlog per 20 rounds of
+ordinary churn, and one unread connection plus 80,000 rename notifications taking the tmux server from 1.7 MB to 8.2 MB
+on tmux 3.7c, against 3.4 MB for the same load with no such connection, which is tens of bytes per notification.
+
+Why we are not fixing it: in practice it stays small. Only a terminal that is open and untouched for a long time
+accumulates anything, any keystroke drains it, and reopening the terminal replaces the connection. The fix would be a
+background reader that drains the connection continuously and hands keystroke confirmations to the sender over a
+channel, which turns a deliberately simple, synchronous part of the keystroke path into a concurrent one.
