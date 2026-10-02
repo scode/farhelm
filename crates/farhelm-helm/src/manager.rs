@@ -988,6 +988,14 @@ pub struct ConnectionManager {
     /// a duplicate result; see [`DuplicateGateSlot`].
     #[cfg(test)]
     duplicate_gate: DuplicateGateSlot,
+    /// The test gate every actor of this manager checks before publishing a
+    /// refresh's result; see [`HostActor::before_refresh_publication`].
+    #[cfg(test)]
+    refresh_gate: DuplicateGateSlot,
+    /// The test gate every actor of this manager checks before a new
+    /// connection's first publish; see [`HostActor::before_connect_publication`].
+    #[cfg(test)]
+    connect_gate: DuplicateGateSlot,
     /// The fleet's "something changed" counter, shared with every actor
     /// this manager spawns and with the REST edge (see [`FleetEvents`]).
     ///
@@ -1270,6 +1278,10 @@ impl ConnectionManager {
             cadence,
             #[cfg(test)]
             duplicate_gate: DuplicateGateSlot::default(),
+            #[cfg(test)]
+            refresh_gate: DuplicateGateSlot::default(),
+            #[cfg(test)]
+            connect_gate: DuplicateGateSlot::default(),
             events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
@@ -1580,6 +1592,10 @@ impl ConnectionManager {
             status: Arc::clone(&status),
             #[cfg(test)]
             duplicate_gate: Arc::clone(&self.duplicate_gate),
+            #[cfg(test)]
+            refresh_gate: Arc::clone(&self.refresh_gate),
+            #[cfg(test)]
+            connect_gate: Arc::clone(&self.connect_gate),
             destination: Mutex::new(display_destination(&row)),
             cache_lock: Arc::clone(&cache_lock),
             seed_epoch: Arc::clone(&seed_epoch),
@@ -2728,6 +2744,14 @@ struct HostActor {
     /// This actor's manager's test gate; see [`DuplicateGateSlot`].
     #[cfg(test)]
     duplicate_gate: DuplicateGateSlot,
+    /// This actor's manager's refresh-publication gate; see
+    /// [`HostActor::before_refresh_publication`].
+    #[cfg(test)]
+    refresh_gate: DuplicateGateSlot,
+    /// This actor's manager's connect-publication gate; see
+    /// [`HostActor::before_connect_publication`].
+    #[cfg(test)]
+    connect_gate: DuplicateGateSlot,
     /// The destination this actor is currently working against, in display
     /// form, refreshed every time the row is reloaded.
     ///
@@ -2796,6 +2820,48 @@ async fn next_nudge(nudge: &mut watch::Receiver<Nudge>) -> Nudge {
     }
 }
 
+/// Whether [`HostActor::publish_refresh`] writes unconditionally, or only
+/// while no manager withdrawal (a retarget, an adoption) has happened since
+/// the actor last checked.
+///
+/// The actor checks for a pending retarget and then publishes as separate
+/// steps, and a publish of a connection after a withdrawal undoes it: the old
+/// destination's client becomes routable again, with a fresh connection
+/// token, until the actor's next pass notices. Both guarded variants decide
+/// inside the publish's own `send_modify`, the lock every withdrawal takes,
+/// so check and write cannot be split.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PublishGuard {
+    /// Publishes that put no connection in place (connecting, unreachable,
+    /// frozen states) and so cannot undo a withdrawal.
+    Always,
+    /// A refresh republishing the connection it ran on: written only while
+    /// that connection is still the published one.
+    WhileCurrent,
+    /// The first publish of a connection just dialed: written only while the
+    /// connection token is still the one the actor read before it reloaded
+    /// its row for this pass. A withdrawal before that read is visible to
+    /// the reload (the row commits first); one after it moves the token.
+    /// That holds when the reload succeeds; a failed reload keeps the row
+    /// the actor already had, a gap older than this guard.
+    WhileIncarnation(u64),
+}
+
+/// Hold the calling actor at `slot`'s gate, if one is installed for
+/// `destination`: report arrival, then wait for the test to release it.
+#[cfg(test)]
+async fn hold_at_gate(slot: &DuplicateGateSlot, destination: &str) {
+    let gate = slot
+        .lock()
+        .expect("publication gate mutex poisoned")
+        .clone();
+    let Some(gate) = gate.filter(|gate| gate.destination == destination) else {
+        return;
+    };
+    gate.reached.notify_one();
+    gate.release.notified().await;
+}
+
 /// Take a nudge that has ALREADY arrived, without waiting for one.
 ///
 /// The seam that keeps a state publication from crossing a
@@ -2814,10 +2880,12 @@ fn taken_nudge(nudge: &mut watch::Receiver<Nudge>) -> Option<Nudge> {
 }
 
 #[cfg(test)]
-/// Test-only gate for freezing the actor immediately before it publishes a
-/// duplicate result. The production state machine has no reason to pause at
-/// this boundary; the gate makes the retarget race deterministic without
-/// adding a runtime channel or lifecycle state.
+/// Test-only gate for freezing the actor immediately before one of its
+/// publications: a duplicate result, a new connection's first publish, or a
+/// refresh's result, each in its own slot on the manager. The production
+/// state machine has no reason to pause at these boundaries; the gate makes
+/// the retarget races deterministic without adding a runtime channel or
+/// lifecycle state.
 struct DuplicatePublicationGate {
     destination: String,
     reached: tokio::sync::Notify,
@@ -2900,17 +2968,27 @@ impl HostActor {
     /// published.
     #[cfg(test)]
     async fn before_duplicate_publication(&self) {
-        let destination = self.destination();
-        let gate = self
-            .duplicate_gate
-            .lock()
-            .expect("duplicate publication gate mutex poisoned")
-            .clone();
-        let Some(gate) = gate.filter(|gate| gate.destination == destination) else {
-            return;
-        };
-        gate.reached.notify_one();
-        gate.release.notified().await;
+        hold_at_gate(&self.duplicate_gate, &self.destination()).await;
+    }
+
+    /// Hold here if this actor's manager has a refresh-publication gate
+    /// installed for this actor's destination: the boundary after a refresh
+    /// has checked for a pending retarget and before it publishes. A
+    /// retarget landing in this interval is the race
+    /// [`PublishGuard::WhileCurrent`] closes, and a test cannot otherwise
+    /// time one into it.
+    #[cfg(test)]
+    async fn before_refresh_publication(&self) {
+        hold_at_gate(&self.refresh_gate, &self.destination()).await;
+    }
+
+    /// Hold here if this actor's manager has a connect-publication gate
+    /// installed for this actor's destination: the boundary after a dial has
+    /// settled and been checked for a pending retarget, before the new
+    /// connection's first publish ([`PublishGuard::WhileIncarnation`]).
+    #[cfg(test)]
+    async fn before_connect_publication(&self) {
+        hold_at_gate(&self.connect_gate, &self.destination()).await;
     }
 
     /// Run this host's connection until the task is aborted, or until this
@@ -2970,6 +3048,8 @@ impl HostActor {
     ) {
         let mut active = true;
         loop {
+            // Read BEFORE the reload: see `PublishGuard::WhileIncarnation`.
+            let incarnation = self.status.borrow().incarnation;
             match self.reload_row().await {
                 RowStatus::Present(fresh) => row = fresh,
                 RowStatus::Removed => {
@@ -3001,8 +3081,15 @@ impl HostActor {
                     identity,
                     build_version,
                 } => {
-                    self.serve(client, identity, build_version, &mut nudge, &mut refresh)
-                        .await;
+                    self.serve(
+                        client,
+                        identity,
+                        build_version,
+                        incarnation,
+                        &mut nudge,
+                        &mut refresh,
+                    )
+                    .await;
                     // A connection that WAS up and was lost earns a fresh
                     // active window: a supervisor restarted by hand is
                     // back within a second or two, and that is precisely
@@ -3479,6 +3566,7 @@ impl HostActor {
         client: Arc<SupervisorClient>,
         identity: Option<String>,
         build_version: String,
+        incarnation: u64,
         nudge: &mut watch::Receiver<Nudge>,
         refresh: &mut watch::Receiver<u64>,
     ) {
@@ -3500,7 +3588,14 @@ impl HostActor {
         } else {
             LiveSessions::Clear
         };
-        self.publish_with_live(
+        #[cfg(test)]
+        self.before_connect_publication().await;
+        // Guarded by the token read at the top of this pass: a retarget that
+        // landed after the dial's own check would otherwise be undone here,
+        // with a connection to the old destination that nothing has retired.
+        // A dropped publish is harmless: the retarget's nudge ends this
+        // connection on the loop's first wait.
+        self.publish_refresh(
             HostState::Connected {
                 identity: identity.clone(),
                 build_version: build_version.clone(),
@@ -3508,6 +3603,9 @@ impl HostActor {
             },
             Some(Arc::clone(&client)),
             live,
+            None,
+            None,
+            PublishGuard::WhileIncarnation(incarnation),
         );
         let mut ended = "the peer closed the connection";
         // Change hints (`ControlMsg::SessionsChanged`): the supervisor saying
@@ -3568,6 +3666,15 @@ impl HostActor {
             if answers_hint {
                 answered = hints_at_start;
             }
+            #[cfg(test)]
+            self.before_refresh_publication().await;
+            // Guarded rather than unconditional: the nudge check above and
+            // this publish are separate steps, and a retarget landing between
+            // them has already withdrawn this client. Republishing it would
+            // make the connection to the old destination routable again, and
+            // mint a fresh connection token for it, until the next pass saw
+            // the nudge. The guard decides inside the publish's own
+            // `send_modify`, the same lock the retarget's withdrawal takes.
             self.publish_refresh(
                 HostState::Connected {
                     identity: identity.clone(),
@@ -3578,6 +3685,7 @@ impl HostActor {
                 step.live,
                 step.contested,
                 step.truncated,
+                PublishGuard::WhileCurrent,
             );
             // AFTER the publish, so a client that re-reads on this
             // revision sees a hosts list and a session list that already
@@ -3990,7 +4098,7 @@ impl HostActor {
         client: Option<Arc<SupervisorClient>>,
         live: LiveSessions,
     ) {
-        self.publish_refresh(state, client, live, None, None);
+        self.publish_refresh(state, client, live, None, None, PublishGuard::Always);
     }
 
     /// [`Self::publish_with_live`] plus this refresh's contested set.
@@ -4035,16 +4143,10 @@ impl HostActor {
         live: LiveSessions,
         contested: Option<Arc<Vec<String>>>,
         truncated: Option<bool>,
+        guard: PublishGuard,
     ) {
         let previous = self.status.borrow().state.phase();
-        if previous != state.phase() {
-            info!(
-                from = previous,
-                to = state.phase(),
-                destination = %self.destination(),
-                "host connection phase changed"
-            );
-        }
+        let next = state.phase();
         // `send_replace`, never `send`: a `watch` send is a NO-OP when the
         // channel has no receivers, and this channel legitimately has none
         // most of the time — the manager holds the sender and only
@@ -4064,7 +4166,21 @@ impl HostActor {
         // retired below, outside the `send_modify`, since teardown must not
         // run under the watch's lock.
         let mut withdrawn: Option<Arc<SupervisorClient>> = None;
+        let mut applied = false;
         self.status.send_modify(|status| {
+            // A guarded publish that a withdrawal has overtaken is dropped
+            // whole. See `PublishGuard`.
+            let overtaken = match guard {
+                PublishGuard::Always => false,
+                PublishGuard::WhileCurrent => {
+                    !same_connection(status.client.as_ref(), client.as_ref())
+                }
+                PublishGuard::WhileIncarnation(expected) => status.incarnation != expected,
+            };
+            if overtaken {
+                return;
+            }
+            applied = true;
             // Captured BEFORE the match below, which `take`s on the retain
             // path: comparing against the field afterwards would see the
             // hole `take` left and call every retaining publish a change —
@@ -4140,6 +4256,16 @@ impl HostActor {
             status.live_sessions = live_sessions;
         });
         retire_withdrawn(withdrawn);
+        // Logged only for a publish that happened, so a dropped one cannot
+        // claim a transition for a destination the host no longer has.
+        if applied && previous != next {
+            info!(
+                from = previous,
+                to = next,
+                destination = %self.destination(),
+                "host connection phase changed"
+            );
+        }
         if observable_change {
             self.events.bump();
         }
@@ -4257,22 +4383,24 @@ mod tests {
         (sender, receiver)
     }
 
-    /// Install a one-shot gate at `manager`'s duplicate publication
-    /// boundary, for its actor working against `destination`.
-    fn install_duplicate_gate(
-        manager: &ConnectionManager,
-        destination: &str,
-    ) -> Arc<DuplicatePublicationGate> {
+    /// Install a one-shot gate in one of `manager`'s publication gate slots,
+    /// for its actor working against `destination`.
+    fn install_gate(slot: &DuplicateGateSlot, destination: &str) -> Arc<DuplicatePublicationGate> {
         let gate = Arc::new(DuplicatePublicationGate {
             destination: destination.to_string(),
             reached: tokio::sync::Notify::new(),
             release: tokio::sync::Notify::new(),
         });
-        *manager
-            .duplicate_gate
-            .lock()
-            .expect("duplicate publication gate mutex poisoned") = Some(Arc::clone(&gate));
+        *slot.lock().expect("publication gate mutex poisoned") = Some(Arc::clone(&gate));
         gate
+    }
+
+    /// [`install_gate`] at the duplicate publication boundary.
+    fn install_duplicate_gate(
+        manager: &ConnectionManager,
+        destination: &str,
+    ) -> Arc<DuplicatePublicationGate> {
+        install_gate(&manager.duplicate_gate, destination)
     }
 
     /// Remove the test gate before releasing the actor so a second loop pass
@@ -7627,6 +7755,169 @@ mod tests {
         );
     }
 
+    /// A refresh whose publish races a retarget does not republish the
+    /// connection the retarget withdrew.
+    ///
+    /// Why it matters: the refresh loop checks for a pending retarget and
+    /// then publishes as a separate step. A retarget landing between the two
+    /// had its withdrawal undone: the old connection was published again,
+    /// routable and with a fresh connection token, until the loop's next
+    /// pass noticed the retarget. A session operation sent in that interval
+    /// would reach the machine the user had just stopped pointing at.
+    /// Specified: with the refresh held after its check, a retarget withdraws
+    /// the client; once released, the connection token stays the one the
+    /// retarget minted until the new destination's dial settles (it fails
+    /// here, so no new connection mints another). The token is the detector:
+    /// the status channel only delivers its latest value, and the actor's
+    /// next pass overwrites a bad publish before this test runs again, so
+    /// the check that no delivered status carries the old client is only a
+    /// backstop.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_refresh_racing_a_retarget_cannot_republish_the_old_connection() {
+        let old_destination = "refresh-old.example";
+        let new_destination = "refresh-new.example";
+        let (fixture, gate) = fixture_before_start(
+            Cadence::default(),
+            |store, transport| async move {
+                let host = store
+                    .add_ssh_host(old_destination, None, None)
+                    .await
+                    .unwrap();
+                transport.set_script(host, Script::default());
+            },
+            |manager| install_gate(&manager.refresh_gate, old_destination),
+        )
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        let mut status = status_receiver(&fixture.manager, host);
+
+        gate.reached.notified().await;
+        let old_client = status_client(&fixture.manager, host)
+            .expect("test premise: the connection is published before its first refresh publishes");
+        fixture
+            .transport
+            .edit(host, |script| script.reachable = false);
+        fixture
+            .store
+            .update_ssh_destination(host, new_destination)
+            .await
+            .expect("retarget the host");
+        fixture.manager.sync_registry().await.unwrap();
+        let after_retarget = {
+            let published = status.borrow_and_update();
+            assert!(
+                published.client.is_none(),
+                "test premise: the retarget withdrew the published client"
+            );
+            published.incarnation
+        };
+        *fixture
+            .manager
+            .refresh_gate
+            .lock()
+            .expect("publication gate mutex poisoned") = None;
+        gate.release.notify_one();
+
+        loop {
+            status
+                .changed()
+                .await
+                .expect("the retargeted actor is still running");
+            let published = status.borrow().clone();
+            assert!(
+                !published
+                    .client
+                    .as_ref()
+                    .is_some_and(|client| Arc::ptr_eq(client, &old_client)),
+                "the withdrawn connection must not be published again"
+            );
+            assert_eq!(
+                published.incarnation, after_retarget,
+                "no publish after the retarget may mint a connection token"
+            );
+            if matches!(published.state, HostState::Unreachable { .. }) {
+                break;
+            }
+        }
+    }
+
+    /// A new connection's first publish that races a retarget does not make
+    /// the old destination's connection routable.
+    ///
+    /// Why it matters: the actor checks a settled dial for a pending retarget
+    /// and then publishes the new connection as a separate step. A retarget
+    /// landing between them was overwritten by a connection to the old
+    /// destination that nothing had retired, so a session operation in that
+    /// interval reached the machine the user had stopped pointing at.
+    /// Specified: with the actor held after the dial's check, a retarget's
+    /// token stays the published one, and no client is published, until the
+    /// new destination's dial settles (it fails here).
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_connect_racing_a_retarget_cannot_publish_the_old_connection() {
+        let old_destination = "connect-old.example";
+        let new_destination = "connect-new.example";
+        let (fixture, gate) = fixture_before_start(
+            Cadence::default(),
+            |store, transport| async move {
+                let host = store
+                    .add_ssh_host(old_destination, None, None)
+                    .await
+                    .unwrap();
+                transport.set_script(host, Script::default());
+            },
+            |manager| install_gate(&manager.connect_gate, old_destination),
+        )
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        let mut status = status_receiver(&fixture.manager, host);
+
+        gate.reached.notified().await;
+        fixture
+            .transport
+            .edit(host, |script| script.reachable = false);
+        fixture
+            .store
+            .update_ssh_destination(host, new_destination)
+            .await
+            .expect("retarget the host");
+        fixture.manager.sync_registry().await.unwrap();
+        let after_retarget = {
+            let published = status.borrow_and_update();
+            assert!(
+                published.client.is_none(),
+                "test premise: no connection is published while the actor is held"
+            );
+            published.incarnation
+        };
+        *fixture
+            .manager
+            .connect_gate
+            .lock()
+            .expect("publication gate mutex poisoned") = None;
+        gate.release.notify_one();
+
+        loop {
+            status
+                .changed()
+                .await
+                .expect("the retargeted actor is still running");
+            let published = status.borrow().clone();
+            assert_eq!(
+                published.incarnation, after_retarget,
+                "the old destination's connection must not be published over the retarget"
+            );
+            // A backstop like the refresh test's: a short-lived publish is
+            // overwritten before this sees it, and the token is the detector.
+            assert!(
+                published.client.is_none(),
+                "no connection may be published before the new destination answers"
+            );
+            if matches!(published.state, HostState::Unreachable { .. }) {
+                break;
+            }
+        }
+    }
+
     // ---- Session refresh ----------------------------------------------
 
     /// A refresh takes the supervisor's whole list in one reply and
@@ -8963,6 +9254,8 @@ mod tests {
             transport: ScriptedTransport::new(),
             cadence: Cadence::default(),
             duplicate_gate: DuplicateGateSlot::default(),
+            refresh_gate: DuplicateGateSlot::default(),
+            connect_gate: DuplicateGateSlot::default(),
             events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),

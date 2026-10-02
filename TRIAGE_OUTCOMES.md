@@ -5323,7 +5323,8 @@
   (inside the same `send_modify` or equivalent). Add a deterministic regression using a gate seam like the existing
   `DuplicatePublicationGate` that lands a retarget between the refresh's check and its publish. Remove this feedback
   file and its index entry.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `quvqzsxprssm`, bookmark `triage-1001d/12-retarget-race`, PR
+  https://github.com/scode/farhelm/pull/1408.
 
 ## probe-register-not-helm-owned.md
 
