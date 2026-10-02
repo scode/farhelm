@@ -751,6 +751,198 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
   }
 });
 
+/**
+ * Divert this page's AGENT terminal sockets to a route the helm does not
+ * serve, leaving tab sockets alone: the agent's recovery keeps failing (so
+ * the view never hears about a takeover) while a tab's own first attach
+ * still reaches the helm, which is the attach under test below.
+ */
+async function withholdAgentSockets(page: Page) {
+  await page.evaluate(() => {
+    const Real = (window as any).WebSocket;
+    const Withheld: any = function (url: string, protocols?: any) {
+      const agent = String(url).includes("/term") && !String(url).includes("tab=");
+      return new Real(agent ? `ws://${location.host}/api/farhelm-no-such-socket` : url, protocols);
+    };
+    for (const state of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) {
+      Withheld[state] = Real[state];
+    }
+    (window as any).WebSocket = Withheld;
+  });
+}
+
+/**
+ * The shared check of the two tests below: the loser's new tab ends in the
+ * take-control state, and the winner keeps both of its terminals.
+ */
+async function expectNewTabDidNotDisplaceTheWinner(
+  page: Page,
+  page2: Page,
+  tabId: string,
+) {
+  await expect(
+    page.locator(`.terminal-pane[data-terminal="${tabId}"] .banner`),
+    "the loser's new tab is refused into the take-control state",
+  ).toContainText("Detached", { timeout: 20_000 });
+  await expect(
+    page.locator(`.terminal-pane[data-terminal="${tabId}"] .banner-reclaim`),
+    "with the way back offered",
+  ).toHaveCount(1);
+  // A refused terminal keeps its (empty) screen under the banner, as any
+  // displaced terminal does, but its socket closes: no attachment. Polled,
+  // since the helm closes it only after sending the refusal.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          (el) => (window as any).__farhelmIslands?.[el]?.ws?.readyState ?? WebSocket.CLOSED,
+          `terminal-${tabId}`,
+        ),
+      { message: "the loser holds no attachment for the new tab" },
+    )
+    .toBe(3);
+  // The winner may have the new tab selected, which hides the agent's pane.
+  await selectTerminal(page2, "agent");
+  await page2.locator("#terminal").click();
+  const typed = `winner-agent-${Date.now()}`;
+  await page2.keyboard.type(typed);
+  await page2.keyboard.press("Enter");
+  await waitForTermText(page2, `echo:${typed}`, 15_000);
+  await expect(page2.locator('.terminal-pane[data-terminal="agent"] .banner')).toBeHidden();
+  await expect(page2.locator(`.terminal-pane[data-terminal="${tabId}"] .banner`)).not.toContainText(
+    "Detached",
+  );
+}
+
+// A view recovering from a dropped connection (a laptop asleep, say) while
+// the user took over on another device and opened a tab there must not take
+// the session back when it first sees that tab.
+//
+// The view learns of a takeover only on a live socket, and this one has
+// none, so its own reconnects are what carry the refusal (`if_unowned`).
+// The new tab's first attach used the displacing route, though, and
+// silently evicted the device in use. Only the agent's sockets are withheld
+// here, so the agent keeps recovering without ever hearing of the takeover,
+// while the tab's first attach is free to reach the helm.
+test("a-recovering-view-does-not-take-the-session-back-for-a-new-tab", async ({
+  browser,
+  timeline,
+  page,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  await reconnectTimingsFromNextLoad(page, {
+    delaysMs: [1_000, 1_000, 1_000, 1_000, 1_000, 1_000],
+    probeIntervalMs: 1_000,
+  });
+  let ownId: string | undefined;
+  try {
+    const own = await openOwnTerminal(page, request, `recovering-view-new-tab-${Date.now()}`);
+    ownId = own.id;
+    await withholdAgentSockets(page);
+    await page.evaluate(() => (window as any).__farhelmIslands["terminal"].ws.close());
+    await expect(page.locator(".terminal-reconnect-now")).toBeVisible();
+
+    const second = await newObservedContext(browser, timeline);
+    const page2 = await second.newPage();
+    try {
+      await openSessionTerminal(page2, ownId!);
+      // Premise, checked before the tab exists: the recovering view has not
+      // heard of the takeover. Latched, it would show the new tab as
+      // detached without ever attaching it, and the checks below would pass
+      // without exercising the attach. (Once the tab exists, its refusal is
+      // what latches the view, so this cannot be checked later.)
+      await expect(page.locator("#term-banner")).not.toContainText("Detached");
+      await expect(page.locator(".terminal-reconnect-now")).toBeVisible();
+      const tabId = await addTab(page2, 0);
+      await waitForSessionMounted(page2, ownId!, { tabId });
+      // The recovering view sees the winner's tab: its poll still works.
+      await expect(page.locator(".tab-slot")).toHaveCount(1, { timeout: 20_000 });
+
+      await expectNewTabDidNotDisplaceTheWinner(page, page2, tabId);
+    } finally {
+      await second.close();
+    }
+  } finally {
+    if (ownId) await cleanupSession(request, ownId);
+  }
+});
+
+// A tab that starts attaching in the moment after another window took the
+// session over must not take it back.
+//
+// A view learns of a takeover from the notice on its live socket, and a tab
+// that starts attaching within about one round trip of the takeover has not
+// heard it yet. Its first attach used the displacing route and evicted the
+// window that had just taken control. The notice to this page's agent
+// terminal is dropped in the page here, and its reconnects are slowed to
+// half a minute, so the view stays unaware of the takeover for as long as
+// the test needs; it then opens a tab itself.
+test("a-tab-opened-unaware-of-a-takeover-does-not-take-the-session-back", async ({
+  browser,
+  timeline,
+  page,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  await reconnectTimingsFromNextLoad(page, {
+    delaysMs: [30_000, 30_000, 30_000, 30_000, 30_000, 30_000],
+    probeIntervalMs: 30_000,
+  });
+  // Installed before the page loads so the agent's very first socket is
+  // covered: its takeover notice never reaches the view.
+  await page.addInitScript(() => {
+    const Real = (window as any).WebSocket;
+    const Deaf: any = function (url: string, protocols?: any) {
+      const ws = new Real(url, protocols);
+      const agent = String(url).includes("/term") && !String(url).includes("tab=");
+      if (!agent) return ws;
+      let handler: any = null;
+      Object.defineProperty(ws, "onmessage", {
+        get: () => handler,
+        set: (fn) => {
+          handler = fn;
+          ws.addEventListener("message", (event: MessageEvent) => {
+            if (typeof event.data === "string" && event.data.includes('"detached"')) return;
+            if (handler) handler.call(ws, event);
+          });
+        },
+        configurable: true,
+      });
+      return ws;
+    };
+    for (const state of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) {
+      Deaf[state] = Real[state];
+    }
+    (window as any).WebSocket = Deaf;
+  });
+  let ownId: string | undefined;
+  try {
+    const own = await openOwnTerminal(page, request, `tab-unaware-of-takeover-${Date.now()}`);
+    ownId = own.id;
+
+    const second = await newObservedContext(browser, timeline);
+    const page2 = await second.newPage();
+    try {
+      await openSessionTerminal(page2, ownId!);
+      // Premise: the takeover happened, and this view did not hear of it.
+      await expect
+        .poll(() =>
+          page.evaluate(() => (window as any).__farhelmIslands?.["terminal"]?.ws?.readyState),
+        )
+        .not.toBe(1); // WebSocket.OPEN
+      await expect(page.locator("#term-banner")).not.toContainText("Detached");
+
+      const tabId = await addTab(page, 0);
+      await expectNewTabDidNotDisplaceTheWinner(page, page2, tabId);
+    } finally {
+      await second.close();
+    }
+  } finally {
+    if (ownId) await cleanupSession(request, ownId);
+  }
+});
+
 // Background probes recover WITHOUT anyone pressing anything — the
 // overnight promise in SPEC.md's Errors section, and the half
 // `retry-exhaustion-shows-reprobe-phase` cannot prove because it clicks.

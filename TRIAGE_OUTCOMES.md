@@ -5450,7 +5450,8 @@
   pending mount cancelled by the latch. Add browser regressions on Chromium and WebKit using the existing two-client
   takeover setup for a tab attaching during another window's takeover. One PR together with
   `new-tab-mount-displaces-owner-during-recovery.md`, removing both feedback files and index entries.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `pxrpnmmqvplq`, bookmark `triage-1001d/17-tab-attach-respects-takeover`, PR
+  https://github.com/scode/farhelm/pull/1414.
 
 ## new-tab-mount-displaces-owner-during-recovery.md
 
@@ -5468,7 +5469,8 @@
 - Completion criteria: as for `takeover-latch-misses-attaching-tabs.md`, plus a browser regression where a view
   recovering from a dropped connection sees a tab created by the client that took over and does not displace it. Same PR
   as that item.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `pxrpnmmqvplq`, bookmark `triage-1001d/17-tab-attach-respects-takeover`, PR
+  https://github.com/scode/farhelm/pull/1414.
 
 ## update-silently-downgrades-newer-hosts.md
 
