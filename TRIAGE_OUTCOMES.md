@@ -4521,7 +4521,9 @@
 - Decision: covered by the slow-host principle recorded for `checkout-preview-blocks-read-loop.md`.
 - Completion criteria: if that item's spec change has landed, confirm it covers this case. Otherwise land the principle
   here. Remove this feedback file and its index entry, with no code change.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `yppsqvpowlqk`, bookmark `triage-1001/13-repo-search-covered`, PR
+  https://github.com/scode/farhelm/pull/1369. No spec text needed and no review gate: the Slow hosts section added by PR
+  1368 names repository search and covers the finding.
 
 ## delete-holds-attachments-lock-through-archive.md
 
