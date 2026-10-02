@@ -4789,7 +4789,8 @@
   custom command lines is best effort: common shapes are covered, but arbitrary wrappers (scripts, `sh -c`, and the
   like) are not guaranteed to be detected; structured launches remain exact. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
+- Execution: complete: change `zmlxvrokvtll`, bookmark `triage-1001c/01-yolo-env-prefix`, PR
+  https://github.com/scode/farhelm/pull/1384.
 
 ## yolo-guard-fails-open-without-row.md
 

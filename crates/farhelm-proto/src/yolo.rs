@@ -8,7 +8,11 @@
 //! YOLO). A raw command line or profile invocation carries only argv, so it
 //! is YOLO when its program is a recognized vendor CLI and a leading switch
 //! is one of that vendor's permission-bypass flags, or when its program is
-//! one whose only mode is YOLO.
+//! one whose only mode is YOLO. Recognition of raw command lines is best
+//! effort (SPEC.md, the YOLO-launch paragraph): it covers the documented
+//! shapes, including a program behind a simple `env NAME=value` prefix
+//! ([`effective_program_index`]), but no argv classifier can see through an
+//! arbitrary wrapper such as a script or `sh -c`.
 //!
 //! The raw recognition is shared with the browser's session row, which
 //! badges the same flags; keeping one table here is what stops the badge and
@@ -139,17 +143,87 @@ const SOLE_YOLO_PROGRAMS: &[&str] = &["pi"];
 /// token after its last `/`, or the whole token when that is empty (a
 /// program spelled `/usr/bin/` has no basename to take).
 pub fn program_basename(argv: &[String]) -> Option<&str> {
-    let program = argv.first()?;
-    Some(match program.rsplit('/').next() {
+    argv.first().map(|program| word_basename(program))
+}
+
+/// [`program_basename`]'s rule for a single word.
+fn word_basename(word: &str) -> &str {
+    match word.rsplit('/').next() {
         Some(name) if !name.is_empty() => name,
-        _ => program.as_str(),
-    })
+        _ => word,
+    }
+}
+
+/// Locate the program behind a leading simple `env NAME=value …` prefix:
+/// index 0 when argv does not start with `env`, the first word after the
+/// `NAME=value` assignments when it does, and `None` when there is no such
+/// word or `env` is given an option (`env -i`, `env -u NAME`).
+///
+/// This is the one copy of the rule, shared by the supervisor (which looks
+/// past the prefix to inject hooks and build resume commands, and wraps
+/// Goose, Pi and OMP launches in exactly this shape to pass their reporter
+/// controls) and the YOLO classifier below, so the program the supervisor
+/// integrates as an agent is the program the sensitive-host guard checks.
+/// Option-bearing `env` commands have parsing rules of their own and are
+/// deliberately not interpreted: callers decide what an unknown shape means
+/// for them. `env` is recognized by [`is_env_program`].
+pub fn effective_program_index(argv: &[String]) -> Option<usize> {
+    std::path::Path::new(argv.first()?).file_name()?;
+    if !is_env_program(&argv[0]) {
+        return Some(0);
+    }
+    for (index, argument) in argv.iter().enumerate().skip(1) {
+        if argument.starts_with('-') {
+            return None;
+        }
+        if argument.contains('=') {
+            continue;
+        }
+        return Some(index);
+    }
+    None
+}
+
+/// Whether `program` is `env`, judged by its file name as `Path` reads it.
+///
+/// The one test for `env` that the supervisor (which wraps launches in an
+/// `env` prefix and looks past one) and the classifier share. It differs
+/// from [`program_basename`] only for a token ending in `/`, where `Path`
+/// takes the last directory name; the supervisor's behavior depends on
+/// `Path`'s reading, so this keeps it.
+pub fn is_env_program(program: &str) -> bool {
+    std::path::Path::new(program)
+        .file_name()
+        .is_some_and(|name| name == "env")
+}
+
+/// Whether `name` is a program some table in this module classifies, the
+/// set the guard falls back on for an `env` command it does not interpret.
+/// Derived from the tables themselves so a program added to one of them is
+/// covered here without a second list to keep in step.
+fn is_classified_program(name: &str) -> bool {
+    INVOCATION_MARKERS
+        .iter()
+        .any(|(program, _)| *program == name)
+        || YOLO_OPTION_VALUES
+            .iter()
+            .any(|(program, _, _)| *program == name)
+        || GUARD_ONLY_YOLO_FLAGS
+            .iter()
+            .any(|(program, _)| *program == name)
+        || SOLE_YOLO_PROGRAMS.contains(&name)
 }
 
 /// The first recognized permission flag among argv's leading switches, in
 /// the program's own precedence order, or `None` for an unrecognized
 /// program or no recognized flag.
+///
+/// The program is the one behind a simple `env NAME=value` prefix, if any
+/// ([`effective_program_index`]). An `env` given an option earns no marker:
+/// the badge labels only a flag it actually recognizes, unlike the guard's
+/// [`argv_is_yolo`], which errs toward asking.
 pub fn invocation_marker(argv: &[String]) -> Option<InvocationMarker> {
+    let argv = &argv[effective_program_index(argv)?..];
     let basename = program_basename(argv)?;
     let (_, flags) = INVOCATION_MARKERS
         .iter()
@@ -172,7 +246,31 @@ pub fn invocation_marker(argv: &[String]) -> Option<InvocationMarker> {
 /// it. The cost runs the other way here. A flag spelling that is really some
 /// other option's value (`codex -c --yolo`) is counted too, which only asks
 /// the user a question; a miss would start a YOLO session nobody confirmed.
+///
+/// A simple `env NAME=value` prefix is looked past to the program behind it
+/// ([`effective_program_index`]), and the program found there is classified
+/// the same way again, so a second `env` behind the first gets the same
+/// treatment. An `env` given an option is not interpreted; the launch counts
+/// as YOLO when any later word, or any piece of one split at whitespace or
+/// `=` (`env -S 'claude …'` and `--split-string=…` hand `env` the whole
+/// command as one word), has a basename that is a program these tables
+/// classify. That asks about anything that might start a known agent while
+/// leaving `env -u FOO ./build.sh` alone.
 pub fn argv_is_yolo(argv: &[String]) -> bool {
+    match effective_program_index(argv) {
+        Some(0) => program_argv_is_yolo(argv),
+        // The slice is strictly shorter, so this recursion ends.
+        Some(program) => argv_is_yolo(&argv[program..]),
+        None if argv.first().is_some_and(|program| is_env_program(program)) => argv[1..]
+            .iter()
+            .flat_map(|word| word.split(|c: char| c.is_whitespace() || c == '='))
+            .any(|piece| is_classified_program(word_basename(piece))),
+        None => false,
+    }
+}
+
+/// [`argv_is_yolo`] for an argv whose first word is the program itself.
+fn program_argv_is_yolo(argv: &[String]) -> bool {
     let Some(basename) = program_basename(argv) else {
         return false;
     };
@@ -356,6 +454,87 @@ mod tests {
             invocation_marker(&argv("codex --full-auto")),
             Some(InvocationMarker::FullAuto)
         );
+    }
+
+    /// Spec: the classifier looks past a leading simple `env NAME=value`
+    /// prefix to the program behind it, by full path or bare name, for both
+    /// the guard and the badge, and through a second `env` behind the first.
+    /// An `env` given an option is not interpreted: the guard counts it as
+    /// YOLO when a later word, or a whitespace- or `=`-separated piece of one
+    /// (`env -S`), names a program the classifier knows, and as not YOLO
+    /// otherwise, and the badge shows nothing for it.
+    ///
+    /// Why: an env prefix is an ordinary way to set an API key or config
+    /// directory, and the supervisor already integrates the program behind it
+    /// as that agent. Before this, the first word `env` matched no vendor, so
+    /// the sensitive-host guard let `env A=1 claude
+    /// --dangerously-skip-permissions` start without asking and the sidebar
+    /// showed no badge.
+    #[test]
+    fn an_env_prefix_does_not_hide_the_program_behind_it() {
+        for yolo in [
+            "env A=1 claude --dangerously-skip-permissions",
+            "/usr/bin/env A=1 codex --yolo",
+            "env A=b pi",
+            "env A=1 B=2 omp --approval-mode yolo",
+            "env -i HOME=/h claude --dangerously-skip-permissions",
+            "env -u FOO codex",
+            "env -S 'claude --dangerously-skip-permissions'",
+            "env '--split-string=/usr/bin/claude --dangerously-skip-permissions'",
+            "env A=1 env B=2 claude --dangerously-skip-permissions",
+            "env A=1 env -i claude --dangerously-skip-permissions",
+        ] {
+            assert!(argv_is_yolo(&argv(yolo)), "{yolo}");
+        }
+        for not_yolo in [
+            "env A=1 claude",
+            "env A=1 codex --full-auto",
+            "env -u FOO ./build.sh",
+            "env -i ls -l",
+            "env A=1",
+            "env",
+            "env A=1 echo --yolo",
+            "env A=1 env B=2 claude",
+            "env -S './build.sh --fast'",
+        ] {
+            assert!(!argv_is_yolo(&argv(not_yolo)), "{not_yolo}");
+        }
+        assert_eq!(
+            invocation_marker(&argv("env A=1 claude --dangerously-skip-permissions")),
+            Some(InvocationMarker::SkipPerms)
+        );
+        assert_eq!(
+            invocation_marker(&argv("/usr/bin/env A=1 codex --yolo")),
+            Some(InvocationMarker::Yolo)
+        );
+        assert_eq!(
+            invocation_marker(&argv("env -i claude --dangerously-skip-permissions")),
+            None,
+            "the badge labels only what it recognizes, not an uninterpreted env"
+        );
+    }
+
+    /// Spec: the shared program locator returns 0 for a command without an
+    /// `env` prefix, the first non-assignment word after a simple prefix, and
+    /// `None` for an option-bearing `env` or a prefix with no program.
+    ///
+    /// Why: the supervisor's hook injection and resume building use this same
+    /// function, so its contract is what keeps them and the YOLO guard
+    /// looking at the same program.
+    #[test]
+    fn effective_program_index_finds_the_program_behind_a_simple_env_prefix() {
+        assert_eq!(effective_program_index(&argv("claude --x")), Some(0));
+        assert_eq!(
+            effective_program_index(&argv("env A=1 B=2 goose run")),
+            Some(3)
+        );
+        assert_eq!(
+            effective_program_index(&argv("/usr/bin/env A=1 pi")),
+            Some(2)
+        );
+        assert_eq!(effective_program_index(&argv("env -i pi")), None);
+        assert_eq!(effective_program_index(&argv("env A=1")), None);
+        assert_eq!(effective_program_index(&[]), None);
     }
 
     /// Spec: a structured launch is YOLO when its permission choice is YOLO,
