@@ -89,8 +89,6 @@ One line per open item. This file must always match the feedback files in this d
   session but skips launch history and gets no answer.
 - `stop-restart-panic-no-reply.md` — a panicking stop or restart task sends no reply, leaving the UI or `farhelm agent`
   waiting until the connection drops.
-- `claude-capture-warns-forever.md` — an exited Claude session whose transcript was deleted logs a WARN every capture
-  pass, indefinitely and across restarts.
 - `tab-reap-budget-starved-by-failures.md` — failed tab closes spend the per-tick reap budget, so a few persistent
   failures stop exited tabs from being reaped host-wide.
 - `profile-body-accepts-unknown-fields.md` — a profile create/update with a misspelled or stray field is accepted and
