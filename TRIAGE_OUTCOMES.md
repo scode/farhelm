@@ -4372,7 +4372,8 @@
 - Decision: under the sign-in principle, recovery must never crash the window. The fix is small.
 - Completion criteria: make the report tolerate a dropped signal (`try_write()` and drop the update), and document on
   the report type that a report can run after its caller unmounted. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-signin-status-paths.md`.
+- Execution: complete: change `ymzupppnnrmx`, bookmark `triage-1001/03-seen-toggle-no-panic`, PR
+  https://github.com/scode/farhelm/pull/1359.
 
 ## hosts-panel-leaks-page-lock.md
 

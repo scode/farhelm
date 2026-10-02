@@ -120,8 +120,6 @@ One line per open item. This file must always match the feedback files in this d
   view, leaving a blank pane and leaking memory.
 - `checkout-retry-raw-device-check.md` — a create retried after a reboot or remount that renumbered the device is
   refused as "folder replaced" and never retried.
-- `seen-toggle-report-panics-after-unmount.md` — the manual read/unread toggle's completion handler panics if the
-  session list unmounted (desktop re-auth, browser 401).
 - `takeover-latch-misses-attaching-tabs.md` — a tab still attaching when another window takes over evicts the winner, so
   the two windows displace each other.
 - `claude-last-option-reads-idle.md` — a Claude multiple-choice question with the last option highlighted is mistaken

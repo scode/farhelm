@@ -2639,21 +2639,11 @@ pub(crate) fn ListView(
         if menu_open.peek().as_deref() == Some(id.as_str()) {
             menu_open.set(None);
         }
-        let report_id = id.clone();
         queue_seen_write(
             &mark_seen_base,
             &id,
             seen_activity_at,
-            move |result| match result {
-                Ok(()) => {
-                    errors.write().remove(&report_id);
-                }
-                Err(error) => {
-                    errors
-                        .write()
-                        .insert(report_id.clone(), format!("seen: {error}"));
-                }
-            },
+            seen_toggle_report(errors, id.clone()),
         );
     };
     let on_mark_seen = use_callback(on_mark_seen);
@@ -3357,9 +3347,102 @@ fn mirror_submitted_launch(
     }
 }
 
+/// The manual read/unread toggle's report: the settled save's outcome on
+/// the row's error line, like every other row operation.
+///
+/// The report runs from a writer task that outlives this list (see
+/// `api::SeenWriteReport`), and the list may be gone by the time the helm
+/// answers, for example behind the browser's token prompt. Every access to
+/// `errors` therefore goes through `try_write`: the panicking accessors
+/// (`write`, `set`, `read` and the rest) would take the window down with
+/// them on a dropped signal, and with no row left to show the result on,
+/// dropping it is all there is to do.
+fn seen_toggle_report(
+    mut errors: Signal<HashMap<String, String>>,
+    id: String,
+) -> impl FnOnce(Result<(), String>) {
+    move |result| {
+        let Ok(mut errors) = errors.try_write() else {
+            return;
+        };
+        match result {
+            Ok(()) => {
+                errors.remove(&id);
+            }
+            Err(error) => {
+                errors.insert(id, format!("seen: {error}"));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A read/unread toggle's report must not panic when the list that
+    /// queued it has unmounted. Its writer deliberately outlives the list,
+    /// and the browser's token prompt (or a failed desktop sign-in) can
+    /// unmount the list while a save is in flight; a panicking report
+    /// crashed the window (SPEC.md "Signing in again"). Spec: while the list
+    /// is mounted, a failure lands on the row's error line and a success
+    /// clears it; once the list is gone, either outcome is dropped quietly.
+    #[farhelm_testtrace::test]
+    fn seen_toggle_report_tolerates_an_unmounted_list() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static SHOW: Cell<bool> = const { Cell::new(true) };
+            static ERRORS: Cell<Option<Signal<HashMap<String, String>>>> =
+                const { Cell::new(None) };
+        }
+
+        #[component]
+        fn List() -> Element {
+            let errors = use_signal(HashMap::<String, String>::new);
+            ERRORS.with(|slot| slot.set(Some(errors)));
+            rsx! {}
+        }
+
+        fn app() -> Element {
+            let show = SHOW.with(Cell::get);
+            rsx! {
+                if show {
+                    List {}
+                }
+            }
+        }
+
+        let rerender = |dom: &mut VirtualDom| {
+            dom.mark_dirty(dioxus::core::ScopeId::APP);
+            dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        };
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let errors = ERRORS.with(Cell::get).expect("the list mounted");
+
+        dom.in_runtime(|| seen_toggle_report(errors, "s1".to_string())(Err("refused".into())));
+        dom.in_runtime(|| {
+            assert_eq!(
+                errors.peek().get("s1").map(String::as_str),
+                Some("seen: refused"),
+                "a mounted list shows the failure on the row"
+            );
+        });
+        dom.in_runtime(|| seen_toggle_report(errors, "s1".to_string())(Ok(())));
+        dom.in_runtime(|| assert!(errors.peek().get("s1").is_none(), "a success clears it"));
+
+        SHOW.with(|show| show.set(false));
+        rerender(&mut dom);
+        rerender(&mut dom);
+        dom.in_runtime(|| {
+            assert!(
+                errors.try_peek().is_err(),
+                "the list's signal is gone with it"
+            );
+            seen_toggle_report(errors, "s1".to_string())(Err("refused".into()));
+            seen_toggle_report(errors, "s1".to_string())(Ok(()));
+        });
+    }
 
     /// Only a complete fleet-wide listing may change rename availability.
     ///

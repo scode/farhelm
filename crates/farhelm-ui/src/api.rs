@@ -2368,10 +2368,18 @@ struct SeenWriteSlot {
 /// caller decides how to show it" contract (see the module doc) — the
 /// caller's closure is free to capture whatever reactive state it needs.
 ///
+/// A report can run after the component that queued it has unmounted: the
+/// writer is a `spawn_forever` task precisely so that leaving a view does
+/// not cancel its write (see [`spawn_seen_writer`]), and its report runs
+/// whenever the helm answers. A report that touches component state must
+/// therefore tolerate that state being gone, through the `try_*` accessors
+/// (`try_write`, `try_read`, `try_peek`) rather than `write`, `read`, `set`
+/// and the rest, which panic on a dropped signal.
+///
 /// `FnOnce`, not `Fn`: it is called at most once (the final settle of one
 /// write chain) and never again, so there is no reason to demand repeat-
 /// callable captures — a caller whose report needs `&mut` access to what
-/// it captured (`Signal::write`, for one) would otherwise be forced into
+/// it captured (`Signal::try_write`, for one) would otherwise be forced into
 /// interior mutability for no benefit. No `Send` bound, deliberately: a
 /// `Signal` capture is not `Send` (see [`SEEN_WRITES`]'s own doc), and this
 /// queue's `thread_local!` storage is what makes that fine to require.
