@@ -5063,7 +5063,8 @@
   stripped, while the code also strips Pi's.
 - Decision: discard; the trigger is unrealistic and Pi support is intentionally partial.
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/triage-restart-takeover-update.md`.
+- Execution: complete: change `puowvnppqvtk`, bookmark `triage-1001d/02-discard-pi-selector`, PR
+  https://github.com/scode/farhelm/pull/1398.
 
 ## provisioning-child-output-drain-deadline.md
 
