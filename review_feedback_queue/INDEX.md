@@ -56,11 +56,7 @@ One line per open item. This file must always match the feedback files in this d
   output pipe.
 - `clipboard-writes-unbounded-blocking-admission.md` — OSC 52 clipboard bursts can fill the shared blocking pool behind
   a stalled native sink.
-- `tmux-capture-tail-deadline.md` — pane capture stops applying its deadline after stdout closes, so periodic sampling
-  can hang.
 
-- `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
-  to read.
 - `session-view-leaks-page-lock.md` — the session view's restart/replace claim is not released on unmount, leaving every
   page action disabled until reload.
 - `row-menu-drifts-on-row-height-change.md` — an open row menu can float over a different row when a row above gains a
@@ -73,8 +69,6 @@ One line per open item. This file must always match the feedback files in this d
   session; #1310 removed only one trigger.
 - `create-dialog-empty-catalog-refuses.md` — when the model catalog fails to load or is still loading,
   clone/replace-with/recent setups are refused as "no longer supported".
-- `stop-terminalless-records-plain-exit.md` — Stop on an ambiguous, terminal-less launch records a plain exit before
-  sweeping, losing the stop note and later Restart's consent check.
 - `probe-drops-add-busy-claim.md` — a probe during a rerun of a failed ADD can drop the busy claim, letting a second
   install run back to back.
 - `retarget-race-republishes-old-client.md` — a refresh finishing during a retarget can republish the old connection,

@@ -4989,3 +4989,482 @@
   consistent with the best-effort wording from `yolo-guard-misses-env-prefix.md`. No code change. Remove this feedback
   file and its index entry.
 - Execution: planned in `plans/triage-yolo-sighup-replace.md`.
+
+## codex-resume-template-duplicates-selector.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection at 0db9621 and a local parse check. Codex's derived resume template
+  (`default_resume_template` for Codex in `crates/farhelm-supervisor/src/agent_kind/mod.rs`) copies the original argv
+  and appends `resume {conversation}`, and its `ambiguous_derived_resume` always returns `None`, so a session launched
+  as `codex resume <old-id>` restarts as `codex resume <old-id> resume <captured-id>`. Codex 0.159.3 rejects that at
+  argument parsing (`unexpected argument '<uuid>' found`), so Restart or Resume of such a session exits with an error
+  instead of continuing the conversation; the conversation on disk is unharmed and Restart with an explicit command
+  still works. SPEC.md's derived-resume paragraph states the assumption that the launch has no launch-only option and
+  defers the general separation; TODO.md's `Maybe later` entry on separating common, launch, and resume arguments names
+  the selector collision, but neither is a `Planned` item or an explicit acceptance, so the item was not auto-skipped.
+  The sibling Claude finding `claude-resume-template-selector-collision.md` (highest bucket, untriaged at the time) has
+  the same shape.
+- Decision: fix it the way Grok already handles the same risk, and also add this case as a second example to TODO.md's
+  `Near term` entry "Re-examine and simplify how launches are represented", which already uses
+  `yolo-guard-skips-resume-template.md` as its example of the complexity.
+- Completion criteria: Codex's `ambiguous_derived_resume` refuses a derived template when the retained argv already
+  carries a session selector (the `resume` or `fork` subcommand), so the create fails with a clear message unless an
+  explicit resume template is supplied, mirroring `GrokAmbiguousResumeBoundary`. Amend SPEC.md's derived-resume
+  paragraph to list Codex beside Grok as refusing derivation in that case. Add a regression covering an original
+  `codex resume <id>` launch with and without an explicit template. Add the Codex resume-selector collision as an
+  example to the TODO.md `Near term` entry "Re-examine and simplify how launches are represented". Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## tmux-capture-tail-deadline.md
+
+- Outcome: `other`.
+- Assessment: confirmed in code at 0db9621. The supervisor's pane-capture helper in
+  `crates/farhelm-supervisor/src/tmux.rs` bounds only the stdout read loop; once stdout closes, the waits for stderr and
+  for the tmux process to exit have no deadline, and the timeout path's stderr wait is likewise unbounded. Because the
+  status sampler captures panes one at a time, a capture that never finishes stops status sampling on that host until
+  the supervisor restarts. A real tmux `capture-pane` client starts no children and closes stdout as it exits, so the
+  trigger needs a configured tmux program that does not behave like tmux (for example a wrapper that backgrounds
+  something holding stderr). The match is FILTER.md filter "A hung private tmux server or systemd user manager": the
+  trigger is a tmux program that never exits instead of behaving like tmux, and the whole consequence stays on the
+  affected host (its sampler stalls until the supervisor restarts), with no helm, cross-host, durable, data-loss or
+  security consequence. Prior ledger entries `tmux-run-bytes-unbounded-under-lock.md`,
+  `tmux-kill-runs-unbounded-under-global-lock.md` and `startup-tmux-version-check-unbounded.md` were closed under the
+  same filter.
+- Decision: skipped under the triage rule for findings covered by a review filter.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## pi-resume-selector-option-boundaries.md
+
+- Outcome: `discard`.
+- Assessment: confirmed in code at 0db9621. The value-taking option table that Pi's resume selector stripper uses
+  (`strip_pi_selectors` in `crates/farhelm-supervisor/src/agent_kind/mod.rs`) lacks a dozen options that Pi's launch
+  parser (`crates/farhelm-supervisor/src/agent_kind/pi.rs`) treats as value-taking, among them `--name`/`-n`,
+  `--api-key`, `-t`, `-xt`, `--models`, `--mode`, `--skill`, `--prompt-template`, `--theme`, `--use-theme` and
+  `--tui-mode`. An original launch such as `pi --name --resume` therefore has its option value stripped as a selector,
+  and the appended `--session <file>` would likely be read as the name, starting a fresh conversation with the file path
+  as the prompt. Unverified: Pi's own parsing of a dash-prefixed option value (inferred from Farhelm's launch-side
+  parser). Trigger is negligible in practice: an option value literally spelled like a Pi session selector. Borderline
+  on FILTER.md "Rare edge cases in harnesses without first-class support" (a fresh-start Resume is more than a missing
+  offer), so brought to the user. Side observation: SPEC.md's derived-resume paragraph says only OMP's selectors are
+  stripped, while the code also strips Pi's.
+- Decision: discard; the trigger is unrealistic and Pi support is intentionally partial.
+- Completion criteria: remove the feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## provisioning-child-output-drain-deadline.md
+
+- Outcome: `other`.
+- Assessment: confirmed in code at 0db9621; no realistic trigger found. A provisioning step's deadline covers only the
+  wait for the direct child (the local `ssh` or `sh`) to exit (`crates/farhelm-helm/src/provisioning/backend.rs`, around
+  the child wait); the following drain of its stdout and stderr readers has no deadline, and the payload-transfer path
+  shares it. If a process on the helm machine inherited the pipe's write end and outlives the child, the run never
+  finishes: the host stays installing or updating until the helm restarts, rename and retarget on it wait on its lock,
+  remove is refused as busy, and one of the four run slots stays held. Remote-side background work cannot cause this: it
+  keeps `ssh` from exiting, which the existing deadline already covers. Farhelm's own provisioning scripts start no
+  background children. A local check with OpenSSH 9.6p1 showed a ControlPersist master staying alive after the command
+  while the output pipe reached EOF in about 0.5 s, so the connection master does not hold the pipe on current OpenSSH
+  (older releases were not checked). The remaining trigger is a user's ssh `ProxyCommand` (or similar local helper) that
+  leaves a child holding stderr, which nobody has observed. The finding's secondary claim, that cleanup reads the
+  process-group id after reaping, is not a current bug; it constrains a future fix only. Not covered by the spec,
+  `Planned`, `BUGS.md`, filters or the ledger.
+- Decision: do not fix; record it in root `BUGS.md` as a known issue we do not plan to fix.
+- Completion criteria: add a `BUGS.md` entry in that file's style: a host install or update can hang until the helm
+  restarts if a local process started by the ssh invocation (for example a `ProxyCommand` helper that forks a lingering
+  child) keeps the step's output pipe open after `ssh` exits, with the symptoms above, how sure we are (code reading
+  plus the OpenSSH 9.6 ControlPersist check; no observed trigger), and why it is not being fixed (no realistic trigger
+  on current OpenSSH; the fix would extend one deadline over exit, both output drains and process-group cleanup). Remove
+  the feedback file and its index entry. No code or spec change.
+- Execution: `pending`.
+
+## clipboard-writes-unbounded-blocking-admission.md
+
+- Outcome: `fix spec+code`.
+- Assessment: partly correct at 0db9621. The missing admission bound is real: `post_clipboard`
+  (`crates/farhelm-helm/src/clipboard.rs`) starts one `spawn_blocking` task per request with no limit, and the desktop's
+  native writer serializes writes behind one lock, so a hung native clipboard makes every further copy park another
+  blocking-pool thread; the helm's database work shares that pool. The stated consequence is overstated: other work only
+  suffers once the backlog passes tokio's default blocking-thread ceiling (512), and the webview keeps only a few
+  requests to one origin in flight (unverified: whether WebKit times these fetches out and whether the server drops the
+  handler on client disconnect). The real trigger is a hung or very slow OS clipboard, not a program writing often; a
+  working clipboard never builds a backlog. Follow-on to `clipboard-sink-blocks-async-worker.md` (fixed in #1166), not a
+  repeat. Not covered by the spec, `Planned`, `BUGS.md`, filters or the ledger.
+- Decision: fix it, because the fix is very small, and state in the spec that Farhelm assumes the host system's
+  clipboard works: a broken, hung or slow clipboard is not something Farhelm adds complexity to support well.
+- Completion criteria: bound in-flight native clipboard writes in the helm with a small fixed cap (try-acquire on a
+  semaphore held in the helm's shared state; the permit moves into the blocking task), and when the cap is full, drop
+  the write silently under the existing best-effort contract (log at most once per episode rather than per request). Add
+  a test with a sink that blocks showing that writes beyond the cap return without starting blocking work and that a
+  write succeeds again once the sink unblocks. Amend SPEC.md's clipboard best-effort text (Terminal experience) to say
+  Farhelm assumes the host's system clipboard is functioning, and that a broken, hung or slow clipboard is outside what
+  Farhelm adds complexity to support: copies may be dropped then, but the rest of Farhelm must not stall. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## session-view-leaks-page-lock.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct at 0db9621. The two Replace sites were already fixed by #1153 (`620f6897`): header Replace
+  and the interrupted card's Replace hold a self-releasing guard in a confirmation slot that is dropped when the view
+  unmounts. Still present: header Restart (`lifecycle.claim()` in `crates/farhelm-ui/src/session_view.rs`, released only
+  by Cancel or at the end of the restart task), "Restart with" (claimed when the dialog opens; released only by the
+  dialog's Cancel or a successful restart, and deliberately kept after a failed attempt), and the interrupted card's
+  Restart (held through the in-flight request). The session view's `use_drop` unmounts terminals but releases nothing,
+  and the claim lives on the top-level UI component (`crates/farhelm-ui/src/lib.rs`), so it outlives the view. If the
+  view unmounts while one of those claims is held (another client deletes the session, the browser build's token prompt
+  replaces the panes on a 401, or likely the restart deselect race in `restart-can-still-deselect-session.md`), every
+  write action in that browser tab or desktop window stays disabled, including opening another session from the sidebar
+  (`guarded_open` in `crates/farhelm-ui/src/list/view.rs`), until that tab or window is reloaded. Additional residual
+  found in triage: if another client restarts the session while the interrupted card's Replace prompt is open, the card
+  stops rendering while the view stays mounted, nothing clears the prompt, and its claim stays held with the same stuck
+  result. Not covered by the spec, `Planned`, `BUGS.md`, filters or the ledger; the related
+  `header-replace-confirm-ignores-cancel.md` fix deliberately left the Restart sites on hand-written claims.
+- Decision: fix the code.
+- Completion criteria: no session-view claim of the UI's operation lock can outlive the session view or the UI element
+  that owns it: header Restart, "Restart with" (including after a failed attempt) and the interrupted card's Restart use
+  a self-releasing guard like #1153's Replace sites, or the view releases any claim it holds on unmount; and the
+  interrupted card's Replace prompt (and its claim) is cleared when the card stops rendering. Add regressions covering
+  unmount while a Restart confirmation, an open "Restart with" dialog, and an in-flight Restart hold the claim, and the
+  hidden interrupted-card prompt. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## row-menu-drifts-on-row-height-change.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at 0db9621; the consequence is mostly visual. The sidebar row menu's panel is placed at
+  coordinates measured when it opens, and the list closes it on scroll or resize, the create form opening, the host
+  list's shape changing, or an index reorder (`crates/farhelm-ui/src/list/view.rs`, `rows::menu_row_reordered`). A row
+  above the open one that gains or loses its detail line (session ended or stale; compact mode is off by default) keeps
+  its index, so none of those trip and the panel ends up beside the next row down. The order hold while a menu is open
+  makes a same-index change above more likely. Actions still target the session the menu was opened on; the panel header
+  names it, delete and replace confirmations quote its title, and the row tint stays on the correct row. The code
+  comment above the close effect knowingly accepts this residual, contradicting SPEC_impl.md's row-menu rule that the
+  menu closes on any layout change that could have moved its row. Not covered by `Planned`, `BUGS.md`, filters or the
+  ledger; the sibling `row-menu-drifts-after-own-delete.md` was decided `fix code` (#1154).
+- Decision: fix the code, consistent with the sibling decision.
+- Completion criteria: an open session row menu closes when a row above it changes height in a way that moves the open
+  row (gaining or losing its ended, stale or error detail line), and the code comment that accepts this residual is
+  updated to match SPEC_impl.md. Decide during execution whether the host row's identical accepted residual (noted in
+  the same comment) is covered by the same mechanism cheaply; if not, leave it and say so. Add a unit test alongside the
+  existing `rows.rs` ones covering a height change above the open row (closes) and below it (stays open). Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## uploads-aborted-silently-on-remount.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed (both parts) at 0db9621. A terminal reconnect (`runReconnect`) or session restart unmounts the
+  terminal, and unmount disposes its attachment handler (`crates/farhelm-ui/assets/terminal.js`), which aborts every
+  in-flight upload and blob read and deliberately blanks the pane's status line; a later `send()` returns silently once
+  disposed, so no path is inserted and no error is shown. A "landed at <path>" or "attaching X failed" message produced
+  by the same outage is erased when the first automatic reconnect (500 ms after the socket dies) remounts the terminal,
+  and the new mount starts with an empty message list. If the abort lands during final publication, a complete
+  attachment may exist on the host with no path inserted and no message. This contradicts SPEC.md's Attachments rule
+  that upload failures must be visible and an attachment must never disappear silently. Not covered by `Planned`,
+  `BUGS.md`, filters or the ledger; the rare-glitch filter does not apply because nothing tells the user to retry.
+- Decision: fix the code.
+- Completion criteria: a terminal pane's upload status and failure messages survive a reconnect or restart remount (the
+  new mount repaints them), and an upload aborted by a remount leaves a visible message naming the file and saying it
+  was interrupted, distinguishing "may have been published" when the abort could have landed during publication, per
+  SPEC.md's failure-response rule. Clearing stale "attaching…" text on remount stays correct for an upload that is no
+  longer running. Add a JS or browser test covering an upload interrupted by a remount and a failure message present
+  across one. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## replace-drop-skips-source-delete.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at 0db9621. The helm's replace handler (`replace_session` in
+  `crates/farhelm-helm/src/sessions.rs`) runs the whole create-then-delete sequence (`do_replace_session`,
+  `finish_replacement`) on the HTTP request's own task rather than a helm-owned one, so a client that goes away after
+  the create was sent and before the delete (reload or tab close, desktop Quit, the browser build's 401 token-prompt
+  swap, or the client's 60 s request timeout on a slow fresh-checkout clone) leaves the new session created and the
+  original never deleted, usually with no error. The helm already has a helper for running work on a helm-owned task
+  (`lib.rs`), used by the host routes but not the session routes. This violates SPEC_impl.md "Who owns an accepted
+  action". Two report details are wrong without changing the conclusion: switching sessions mid-Replace is refused by
+  the UI's operation lock, and desktop re-sign-in does not remount the app. Unverified: that the web server drops the
+  handler promptly on client abort (the spec and the helper's existing test assume it), and that a clone can exceed the
+  60 s client deadline. Not covered by `Planned` (the create read-loop item is about the supervisor), `BUGS.md`, filters
+  or the ledger; the recent Replace decisions concern the "nothing alive" recheck and do not overlap.
+- Decision: fix the code by moving the replace body onto a helm-owned task.
+- Completion criteria: the helm runs Replace and Replace with on a helm-owned task, so a client that disconnects or is
+  cancelled loses only the reply; add a regression that drops the request after the create is sent and asserts the
+  source delete still happens. During execution, check the helm's other session routes (create, delete, restart and
+  similar) against the same SPEC_impl.md rule and report any that are also request-task-bound; fix them in this change
+  only if they share the same small mechanism, otherwise bring them back to the user. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## restart-can-still-deselect-session.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading at 0db9621; frequency not measured. During a restart the supervisor removes the
+  session from its in-memory session map for the whole relaunch (`crates/farhelm-supervisor/src/service/core.rs`, the
+  "Off the map for the duration" block before `relaunch_into_terminal`), a window covering the old terminal's detach and
+  the full relaunch's tmux calls and database work, longer than the "couple of tmux round trips" its comment assumes.
+  #1310 (`eb319780`) stopped the restart from hinting at the window's start, but other listings still land inside it:
+  the helm's 3 s background refresh, the stop that precedes restarting a running agent (its requested and completed
+  records each hint, rate-limited to one per 200 ms, so one can land inside the window), and any other change on that
+  host. A complete listing without the session makes the UI deselect it (`crates/farhelm-ui/src/list/view.rs`,
+  `selected_vanished`), and nothing re-selects it when it reappears. Likely the everyday trigger for
+  `session-view-leaks-page-lock.md`. Only a code comment accepts the omission; not covered by the spec, `Planned`,
+  `BUGS.md`, filters or the ledger.
+- Decision: fix the code at the source, option (a): the supervisor keeps a restarting session listed rather than
+  omitting it, instead of making the UI's deselect rule more tolerant.
+- Completion criteria: a `ListSessions` taken while a session is mid-restart still includes that session (for example
+  with a relaunching marker or its pre-restart state), while stop, delete and attachment installs stay excluded from the
+  window as they are today; the UI therefore keeps the session selected through a restart. Update the code comment that
+  accepts the omission. Add a regression that forces a listing into the relaunch window and asserts the session is
+  present. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## create-dialog-empty-catalog-refuses.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at 0db9621. The new-session dialog fetches the launch catalog once
+  (`crates/farhelm-ui/src/list/create_form.rs`, `launch_catalog` resource) and turns a failed or still-pending fetch
+  into an empty model list (`unwrap_or_default`); with an empty list `launch_composer::selection_is_compatible` rejects
+  any selection that names an effort, so New, Clone, Replace with and recent setups show "this saved choice is no longer
+  supported by the current catalog" and disable Launch. The pending case corrects itself when the fetch lands; the
+  failed case persists until the dialog is reopened (losing its draft) or the effort is cleared. "Restart with"
+  (`crates/farhelm-ui/src/restart_with.rs`) already treats a failed fetch as compatible because "an outage cannot
+  establish that a stored selection became invalid", though it too treats a pending fetch as incompatible. The trigger
+  is rare (a network or sign-in hiccup when the dialog opens). Borderline on FILTER.md "Rare, self-correcting glitches
+  and imprecise diagnostics" because reopening loses the dialog's draft; brought to the user rather than filtered.
+- Decision: fix the code.
+- Completion criteria: in the new-session dialog, a failed or still-pending catalog fetch never marks a selection
+  incompatible; a failed fetch shows its error with a way to retry, and the helm's own validation of the final request
+  stays the authority. Apply the pending-fetch half to "Restart with" too, so both dialogs share one rule. Add a test
+  covering a failed and a pending catalog with an effort-bearing prefilled selection. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## stop-terminalless-records-plain-exit.md
+
+- Outcome: `other`.
+- Assessment: partly correct at 0db9621. Stop on a terminal-less (ambiguous-create) session takes the "already dead or
+  absent" path in `crates/farhelm-supervisor/src/service/handlers.rs` and records a plain exit, without the stop note,
+  before running the process cleanup, so a failed cleanup reports an error while the session already shows as exited.
+  The finding's Restart half is obsolete: #1325 (`4a683aa4`) made Restart of an unknown-status agent proceed without a
+  consent prompt per SPEC.md "Lifecycle operations", so losing the possibly-live marking no longer changes Restart. The
+  remaining residual is that, after such a failed Stop, Delete no longer treats the session as possibly alive and so
+  would not show SPEC.md's "anything still alive" confirmation before killing survivors. The rest matches FILTER.md
+  filter "Session status and history after a crash or a partly failed operation", and the same finding from an earlier
+  review was closed under it as `stop-terminal-less-records-exit-before-kill.md`.
+- Decision: the user agreed the Delete residual does not take this out of the filter: the processes are ones the user
+  just asked Stop to kill, so a Delete without the alive confirmation is not a meaningful loss of consent. Closed under
+  the filter, consistent with the earlier duplicate.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry during triage.
+
+## probe-drops-add-busy-claim.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed in code at 0db9621; practically unreachable. Confirming a rerun of a failed ADD marks the host
+  busy (`crates/farhelm-helm/src/provisioning/service.rs`), re-registers it with database awaits, and only then installs
+  the new run's progress view. A probe that finds a live supervisor in that gap goes through
+  `resolve_failed_add_discovery`, which clears the busy marker unconditionally, although every failure path already
+  clears it itself, so that removal only matters when another operation holds the claim. A second install or update
+  could then be accepted instead of refused as busy, and the two runs would overwrite each other's progress display.
+  Milder than reported: the first install adopts the live supervisor and finishes in seconds, a second update is one a
+  user explicitly confirmed, and nothing persists. The trigger needs a second window (the panel's own guard prevents
+  overlap within one), a supervisor that starts answering right after the rerun's own probe, a probe landing within a
+  few milliseconds, and a further confirmation. Fits FILTER.md "Races a person would have to win inside a sub-second
+  window" except that the operation not being refused is slightly outside its "recoverable through ordinary use"
+  wording, so brought to the user.
+- Decision: fix the code because the fix is a one-line removal.
+- Completion criteria: `resolve_failed_add_discovery` no longer clears a busy marker it does not own (remove the
+  redundant unconditional removal, keeping every failure path's own release); add a test showing a probe during a held
+  ADD claim leaves the host busy so a second install or update is refused. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## retarget-race-republishes-old-client.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed for the republish at 0db9621; a wrong-machine consequence is possible but extremely unlikely.
+  The host actor's refresh loop (`crates/farhelm-helm/src/manager.rs`) checks for a pending retarget and then publishes
+  its refresh unconditionally (`publish_refresh`), which can republish the connection the retarget just withdrew (and
+  mint a fresh connection generation for it). The loop's next iteration sees the retarget and publishes "connecting", so
+  the bad state lasts microseconds, and the old connection is already retired: its writer stops sending once it observes
+  the shutdown. A frame reaches the old machine only if the writer has not run since the retire, a request arrives in
+  that window, and the writer's unbiased select picks the frame over the shutdown. The retarget's own comment states the
+  invariant this breaks (the old client "must not remain routable for even the interval"). The same finding from an
+  earlier review, `refresh-publish-races-retarget-in-check-then-act-gap.md`, was closed as `other` under the rare-glitch
+  filter without re-verification; verified now, no filter strictly applies because each excludes acting on the wrong
+  machine. Not covered by the spec, `Planned` or `BUGS.md`.
+- Decision: fix the code.
+- Completion criteria: a refresh publication cannot republish a connection that a retarget has withdrawn: the publish
+  writes only if the published connection is still this actor's own, decided atomically with the retarget's withdrawal
+  (inside the same `send_modify` or equivalent). Add a deterministic regression using a gate seam like the existing
+  `DuplicatePublicationGate` that lands a retarget between the refresh's check and its publish. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## probe-register-not-helm-owned.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at 0db9621. The hosts panel's probe (`probe_host` in
+  `crates/farhelm-helm/src/provisioning/http.rs`) runs on the request's own task, and when it finds a live supervisor,
+  `register` (`provisioning/service.rs`) saves the host and then reconciles and dials it, rolling back only on a
+  reconcile error; nothing on the probe path uses the helm's owned-task helper (`run_owned`), which only Update uses
+  there. A request dropped between the save and the reconcile (reload, tab close, desktop Quit) leaves a saved host with
+  no running actor, so it is absent from the hosts list (built from running actors) and never dialed; for an
+  already-registered host whose paths the probe updated, the running actor keeps the old paths. Either lasts until
+  something re-reads the host list (helm restart, a host edit, or another probe). Milder than reported: the UI adds
+  hosts only through the probe, and re-probing the same destination updates the existing row rather than refusing it as
+  a duplicate, so re-adding the host repairs it. The route comment in `lib.rs` still calls the probe non-mutating.
+  Violates SPEC_impl.md "Who owns an accepted action"; the ledger's `host-edits-not-cancellation-safe.md` (#1196) fixed
+  add, retarget, remove and adopt but not the probe. Not covered by `Planned`, `BUGS.md` or filters.
+- Decision: fix the code.
+- Completion criteria: the probe's post-discovery registration (`register` together with `resolve_failed_add_discovery`)
+  runs on a helm-owned task, as #1196 did for the other host edits, so a dropped probe request loses only the reply;
+  correct the route comment that calls the probe non-mutating. Add a regression that drops the request after the save
+  and asserts the host is registered and dialed. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## desktop-start-fails-on-skewed-supervisor.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at 0db9621. On launch the desktop app treats any supervisor answering in its state directory as
+  already running, including one on another protocol version (`crates/farhelm-helm/src/provisioning/backend.rs`), so it
+  spawns nothing (`crates/farhelm-ui/src/desktop.rs`); its startup wait then accepts only a Connected local host and
+  runs to its 30 s limit, failing with "managed local supervisor did not connect within 30 seconds". The message names
+  neither the version mismatch nor the hand-started supervisor, says "managed" though the app spawned nothing, and the
+  window that would show the mismatch never opens, so every launch fails the same way until the user stops that
+  supervisor. Identity-mismatch and unverifiable-identity states behave the same. The app already receives those states
+  from the helm. The app shares the default state directory with a hand-run `farhelm supervisor run`; its own supervisor
+  exits with the app, so the trigger is a hand-started supervisor left running across a protocol-changing upgrade.
+  SPEC.md "Supported host setup" makes hand-started supervisors best-effort but says refusing with a clear message is
+  enough, and incompatible versions must refuse with a clear, actionable error; neither holds. Not covered by `Planned`,
+  `BUGS.md`, filters or the ledger.
+- Decision: fix the code.
+- Completion criteria: the desktop startup wait stops as soon as the local host reports a version mismatch or an
+  identity mismatch or unverifiable identity, and fails with that state's details and an instruction to stop the
+  supervisor the user started; the message does not say "managed" when the app spawned no supervisor. Opening the window
+  instead of failing is out of scope. Add a unit test alongside the existing timeout-text test. Remove this feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## terminal-tombstone-never-buried.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at 0db9621. `sync()`'s departure and identity-change loop in
+  `crates/farhelm-ui/assets/terminal.js` iterates islands, pending mounts and reconnects but not tombstones (the frozen
+  post-takeover or post-stall screens created by `cancelReconnect(…, "restore")`), so a tombstoned terminal that leaves
+  the desired set (its tab closes, or a stale host empties the session view) is never buried, contrary to the
+  `tombstones` map's own comment that "a departed terminal takes its tombstone with it". Only full teardown and take
+  control clear them. When the host returns, the recreated agent terminal has the same identity and is skipped as
+  tombstoned before the Detached notice is painted, leaving a blank pane with no take-control action until the user
+  leaves and reopens the session; each stranded tombstone also retains a live xterm instance for the life of the view.
+  Not covered by the spec, `Planned`, `BUGS.md`, filters or the ledger.
+- Decision: fix the code.
+- Completion criteria: a tombstoned terminal that departs the desired set is buried (its xterm disposed and its map
+  entry removed), with the identity lookup falling back to the tombstone so a departed tombstone is handled without
+  error; a terminal that returns after its tombstone was buried mounts or shows its Detached notice normally. Add a JS
+  or browser test covering departure and return of a tombstoned terminal. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## checkout-retry-raw-device-check.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed at 0db9621. A fresh-checkout create retried with the same idempotency key accepts the allocated
+  folder through the remount-tolerant identity rule #1200 added (`working_copies::same_directory` via `verify_identity`
+  in `crates/farhelm-supervisor/src/working_copies.rs`: the device number is required only when no birth time was
+  recorded; otherwise inode plus birth time decide), but then hands the in-terminal launcher the stored original
+  `(device, inode)` pair (`path_identity` in `crates/farhelm-supervisor/src/service/core.rs`), and the launcher's
+  preparation check (`crates/farhelm-supervisor/src/launch.rs`) compares that pair raw. After a reboot or remount that
+  renumbered the device (btrfs, NFS, overlayfs), the retry is refused as "the directory … was replaced since it was
+  allocated", records Failed (overwriting even an intact Ready record, before taking the lock), and can never succeed;
+  the user must start a new session and an orphan checkout folder remains. Only create builds the launcher's preparation
+  input, so Restart is unaffected. This is an ownership check #1200 (`unstable-device-number-blocks-delete.md`) missed.
+  The trigger is very rare. Not covered by `Planned`, `BUGS.md` or filters; the #1200 decision that these setups must
+  not break argues for the fix.
+- Decision: fix the code the way #1200 did, and state in SPEC.md that this is how Farhelm identifies directories, so no
+  future check relies on device numbers. The user chose `fix code`; recorded as `fix spec+code` because the agreed scope
+  includes the spec change.
+- Completion criteria: the launcher's preparation check uses the same identity rule as `same_directory` (inode plus
+  birth time, device number only when no birth time was recorded), either by carrying the birth time to the launcher or
+  by handing it the folder's currently observed identity once `verify_identity` has accepted it; a replaced folder is
+  still refused. Add a focused regression covering a retried create after a device-number change. Amend SPEC.md's
+  managed-checkout section (beside "durable identity capture") to say that Farhelm identifies a directory it created by
+  inode number plus creation time, using the device number only where no creation time is available, and explain why: on
+  supported setups such as btrfs subvolumes (Fedora's default `/home`), NFS, overlayfs and some device-mapper
+  configurations, the device number is assigned at mount time and can change across an ordinary reboot or remount while
+  the folder is untouched, so a check that compares device numbers refuses the user's own folder as "replaced" and
+  permanently breaks the operation guarding it, while inode plus creation time still detects a folder actually replaced
+  at the same path, which is what these checks exist for. New ownership or identity checks must follow that rule rather
+  than compare device numbers. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## takeover-latch-misses-attaching-tabs.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection at 0db9621 (not reproduced in a browser). `sync()` in
+  `crates/farhelm-ui/assets/terminal.js` mounts newly seen tabs on the displacing attach route (`spec.path`, not the
+  refuse-if-owned variant), and `mountWhenReady` usually mounts synchronously, so a tab whose socket is still connecting
+  is a live island, not a pending mount; `latchTakeover` unmounts only pending mounts and reconnecting terminals, so
+  that tab's displacing attach still reaches the supervisor, which treats any attach with a different lease as a
+  takeover (`crates/farhelm-supervisor/src/service/terminals.rs`, `service/handlers.rs`) and evicts the window that just
+  took over. A cancelled pending mount is also left blank with no banner until the desired terminal set changes.
+  Unmounting at latch time alone only narrows the window. Contradicts SPEC.md's one-attached-client rule, the displaced
+  client's snapshot and take-control action, and the rule that a self-recovering terminal never takes the session.
+  Trigger: a tab starting to attach within about one round trip of another window's takeover (a person opening a tab, or
+  the 3 s poll finding a tab another actor created). Not covered by the spec, `Planned`, `BUGS.md` or filters; the
+  planned "concurrent GUIs are best effort" principle (`header-replace-recomputes-alive.md`) keeps the takeover rules.
+  Shares its root cause with `new-tab-mount-displaces-owner-during-recovery.md`.
+- Decision: fix the code with one shared fix for this item and `new-tab-mount-displaces-owner-during-recovery.md`, in a
+  single PR covering both.
+- Completion criteria: after a session view's initial open, every newly seen tab attaches on the route that is refused
+  when another client holds the session; only opening the session and an explicit take-control or reconnect action use
+  the displacing route, and a refusal lands in the normal latched "Detached … take control" state, including for a
+  pending mount cancelled by the latch. Add browser regressions on Chromium and WebKit using the existing two-client
+  takeover setup for a tab attaching during another window's takeover. One PR together with
+  `new-tab-mount-displaces-owner-during-recovery.md`, removing both feedback files and index entries.
+- Execution: `pending`.
+
+## new-tab-mount-displaces-owner-during-recovery.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection at 0db9621 (not reproduced in a browser). The takeover latch in
+  `crates/farhelm-ui/assets/terminal.js` is set only when a takeover notice arrives on a live socket, and `sync()` skips
+  only reconnecting or latched elements, so a tab first seen while the view is recovering from a dropped connection
+  (laptop sleep or network loss, while the user took over on another device and opened a tab there) mounts on the
+  displacing route and silently evicts the device in use; the view's own later reconnect attempts then succeed under the
+  same lease. After a long outage the 3 s fallback poll almost surely sees the tab first; after a wake it races the
+  first 500 ms reconnect attempt. The extra triggers the reviewer mentioned (32-terminal cap, a remounted tombstone)
+  were not traced. Contradicts the same SPEC.md takeover rules as `takeover-latch-misses-attaching-tabs.md`, with which
+  it shares its root cause. Not covered by the spec, `Planned`, `BUGS.md` or filters.
+- Decision: fix the code with the shared fix described under `takeover-latch-misses-attaching-tabs.md`, in the same PR.
+- Completion criteria: as for `takeover-latch-misses-attaching-tabs.md`, plus a browser regression where a view
+  recovering from a dropped connection sees a tab created by the client that took over and does not displace it. Same PR
+  as that item.
+- Execution: `pending`.
+
+## update-silently-downgrades-newer-hosts.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code inspection at 0db9621 (not reproduced). Update's planning and revalidation
+  (`plan_update_unguarded` and the revalidation in `crates/farhelm-helm/src/provisioning/service.rs`) ignore the host's
+  probed build version; the UI offers Update on any provisionable remote row and "update all" takes every such row
+  (`crates/farhelm-ui/src/provisioning.rs`, `crates/farhelm-ui/src/hosts.rs`); the binary is replaced in place (`mv -f`
+  in `provisioning/backend.rs`), keeping no copy of the newer one. An older supervisor refuses a database with a newer
+  schema (`crates/farhelm-supervisor/src/store.rs`) and its unit restarts on failure, so a downgrade across a schema
+  change leaves the host unreachable and unmanaged (its agents keep running) until the newer build is reinstalled; the
+  run fails after the 30 s attach timeout. The helm already computes "host older than me" for the `old version`
+  advisory, so the reverse comparison is cheap. Inferred from SPEC_impl.md and not traced in code: a protocol skew shows
+  "needs update" whichever side is newer, which invites the downgrade. Realistic triggers: a rolled-back helm, a host
+  updated by its own installer, switching between RC/dev and stable helms, or two helms of different versions used in
+  turn. SPEC.md's one-helm-at-a-time rule covers only concurrent helms; TODO.md's pre-upgrade backup (`Maybe later`) and
+  multi-helm (`Unbucketized`) entries name the risk but are not `Planned`.
+- Decision: fix the code and the spec. The host list must not merely stop showing "needs update" or "old version" for
+  such a host: it must say the host runs a future (newer) version than the helm, so the user can tell something is off.
+- Completion criteria: the helm refuses Update of a host whose probed build is newer than its own with a clear error
+  naming both versions; the hosts panel hides Update on such rows and "update all" skips them; the host list shows an
+  explicit "newer than this helm" (future version) state for such a host instead of "needs update" or "old version",
+  including when the newer version also differs in protocol. Amend SPEC.md (the Update authorization text and the host
+  version advisories) to say Update never downgrades a host, and that a host newer than the helm is shown as such. Add
+  helm and UI tests for the refusal, the skipped "update all" row, and the displayed state. Remove this feedback file
+  and its index entry.
+- Execution: `pending`.
