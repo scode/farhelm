@@ -4274,6 +4274,309 @@ mod tests {
         assert!(service.consume_plan(ids.last().unwrap()).await.is_ok());
     }
 
+    /// A stand-in for the `farhelm` a local probe runs: a shell script that
+    /// records its own pid (the id of the process group the probe isolates
+    /// it in), starts a five-minute helper in that group and records the
+    /// helper's pid, then runs `tail`. The helper's stdin and stdout are
+    /// detached and its stderr is kept, as a lingering ssh `ProxyCommand`
+    /// would keep the probe's stderr pipe.
+    #[cfg(unix)]
+    fn stand_in_farhelm(root: &Path, tail: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = root.display().to_string();
+        let script = root.join("farhelm");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\n\
+                 echo $$ > '{dir}/group.tmp' && mv '{dir}/group.tmp' '{dir}/group.pid'\n\
+                 sleep 300 </dev/null >/dev/null &\n\
+                 echo $! > '{dir}/helper.tmp' && mv '{dir}/helper.tmp' '{dir}/helper.pid'\n\
+                 {tail}\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script
+    }
+
+    /// Kills a stand-in's whole process group when dropped, so a failing run
+    /// leaves none of its five-minute sleeps behind. Forgotten once a test
+    /// has seen the group die, since its id may then belong to someone else.
+    #[cfg(unix)]
+    struct KillGroupOnDrop(i32);
+
+    #[cfg(unix)]
+    impl Drop for KillGroupOnDrop {
+        fn drop(&mut self) {
+            // SAFETY: signal delivery to a process group this test started.
+            unsafe {
+                libc::kill(-self.0, libc::SIGKILL);
+            }
+        }
+    }
+
+    /// Read one pid the stand-in recorded, once it exists.
+    #[cfg(unix)]
+    async fn stand_in_pid(path: &Path, what: &str) -> i32 {
+        assert!(
+            wait_for_fixture_file(path, Duration::from_secs(10)).await,
+            "fixture premise: the stand-in recorded {what}"
+        );
+        std::fs::read_to_string(path)
+            .unwrap()
+            .trim()
+            .parse::<i32>()
+            .unwrap_or_else(|_| panic!("{what} is a pid"))
+    }
+
+    /// Whether `target` (a pid, or a negated process-group id) still names
+    /// a live process.
+    #[cfg(unix)]
+    fn alive(target: i32) -> bool {
+        // SAFETY: signal 0 only checks that the target exists.
+        unsafe { libc::kill(target, 0) == 0 }
+    }
+
+    /// Wait until `target` (a pid, or a negated process-group id) no longer
+    /// names any process, or fail with `why`.
+    #[cfg(unix)]
+    async fn wait_for_exit(target: i32, why: &str) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while alive(target) {
+                // sleep-ok: polling pace behind the pid's liveness, which alone decides the outcome
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{why}"));
+    }
+
+    /// Spec: a probe whose HTTP request is dropped mid-probe still runs to its
+    /// end, including the backend's cleanup of the probe's process group, so
+    /// a helper the probed program started does not outlive the probe.
+    ///
+    /// Why: the backend starts the probe in its own process group and kills
+    /// that group only on its own exit paths. Run on the request's task, a
+    /// page closed or reloaded during a probe dropped those paths; only the
+    /// direct child was killed, and a helper it started (an ssh
+    /// `ProxyCommand`, say) kept running. The stand-in waits until the test
+    /// has dropped the request, then closes its output without exiting: the
+    /// backend's path for a probe that went quiet without a hello, which
+    /// kills the group about two seconds later. The helper is checked alive
+    /// before the drop and the whole group checked gone after, so the test
+    /// cannot pass on a helper that never ran.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn a_dropped_probe_request_still_reaps_its_process_group() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let go = root.path().join("go");
+        let farhelm = stand_in_farhelm(
+            root.path(),
+            &format!(
+                "while [ ! -e '{}' ]; do sleep 0.02; done\nexec >&-\nsleep 300",
+                go.display()
+            ),
+        );
+        let service = ProvisioningService::injected(
+            harness.store.clone(),
+            Arc::clone(&harness.manager),
+            Arc::new(test_system_backend(root.path())),
+            Arc::new(NoPayloads),
+            layout(root.path()),
+            farhelm,
+        );
+        let request = tokio::spawn(async move {
+            service
+                .probe(ProbeRequest {
+                    target: ProbeDestination::Local,
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                })
+                .await
+        });
+        let group =
+            KillGroupOnDrop(stand_in_pid(&root.path().join("group.pid"), "its group").await);
+        let helper = stand_in_pid(&root.path().join("helper.pid"), "its helper").await;
+        assert!(alive(helper), "fixture premise: the helper is running");
+        assert!(
+            !request.is_finished(),
+            "fixture premise: the probe is still waiting on the stand-in when its request is dropped"
+        );
+
+        // What axum does to a handler whose client went away.
+        request.abort();
+        let _ = request.await;
+        std::fs::write(&go, b"").unwrap();
+
+        wait_for_exit(
+            -group.0,
+            "the probe's process group must be reaped even though its request was dropped",
+        )
+        .await;
+        std::mem::forget(group);
+    }
+
+    /// Spec: a probe whose program exits without a hello returns within its
+    /// stderr bound even when a helper outside its process group holds the
+    /// probe's stderr open.
+    ///
+    /// Why: the group kill cannot reach a helper that started its own session,
+    /// and the probe runs on a helm-owned task that nothing cancels, so an
+    /// unbounded wait on stderr there would hold a planning slot until the
+    /// helm restarted. Linux only: the fixture leaves the group with util-linux
+    /// `setsid`. The helper is checked still alive afterwards, which is what
+    /// shows it held stderr past the bound rather than dying with the group.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn a_helper_outside_the_group_cannot_hold_an_exited_probe() {
+        /// Kills the outside helper whatever the outcome; it outlives the
+        /// probe by design, so it is still this test's process when dropped.
+        struct KillOnDrop(i32);
+        impl Drop for KillOnDrop {
+            fn drop(&mut self) {
+                // SAFETY: signal delivery to a pid this test started.
+                unsafe {
+                    libc::kill(self.0, libc::SIGKILL);
+                }
+            }
+        }
+
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let go = root.path().join("go");
+        let farhelm = stand_in_farhelm(
+            root.path(),
+            &format!(
+                "while [ ! -e '{}' ]; do sleep 0.02; done\nexit 3",
+                go.display()
+            ),
+        );
+        // Replace the in-group helper with one in its own session that keeps
+        // stderr; its pid is what `$!` names, since `setsid` execs `sleep`.
+        let script = std::fs::read_to_string(&farhelm).unwrap().replace(
+            "sleep 300 </dev/null >/dev/null &",
+            "setsid sleep 300 </dev/null >/dev/null &",
+        );
+        assert!(
+            script.contains("setsid sleep 300"),
+            "fixture premise: the helper is started in its own session"
+        );
+        std::fs::write(&farhelm, script).unwrap();
+        let service = ProvisioningService::injected(
+            harness.store.clone(),
+            Arc::clone(&harness.manager),
+            Arc::new(test_system_backend(root.path())),
+            Arc::new(NoPayloads),
+            layout(root.path()),
+            farhelm,
+        );
+        let probe = tokio::spawn(async move {
+            service
+                .probe(ProbeRequest {
+                    target: ProbeDestination::Local,
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                })
+                .await
+        });
+        let group = stand_in_pid(&root.path().join("group.pid"), "its group").await;
+        let helper = KillOnDrop(stand_in_pid(&root.path().join("helper.pid"), "its helper").await);
+        // `setsid` runs after the fork that `$!` names, so wait until the
+        // helper has really left the group before letting the stand-in exit.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            // SAFETY: getpgid only reads the target's process-group id.
+            while unsafe { libc::getpgid(helper.0) } == group {
+                // sleep-ok: polling pace behind the helper's process group, which alone decides readiness
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("fixture premise: the helper left the probe's process group");
+        assert!(
+            alive(helper.0),
+            "fixture premise: the outside helper is running"
+        );
+        std::fs::write(&go, b"").unwrap();
+
+        let outcome = tokio::time::timeout(Duration::from_secs(10), probe)
+            .await
+            .expect("a helper outside the group must not hold the probe past its bound")
+            .expect("the probe task does not panic");
+        assert!(
+            outcome.is_err(),
+            "a child that exits without a hello is a failed probe"
+        );
+        assert!(
+            alive(helper.0),
+            "fixture premise: the outside helper survived the group kill and so held stderr"
+        );
+    }
+
+    /// Spec: when the probed program exits without a hello while a helper it
+    /// started lives on, the probe kills the helper's process group and still
+    /// returns promptly.
+    ///
+    /// Why: that exit path only reaped the child and then waited, without a
+    /// limit, for the child's stderr to close, which the surviving helper (an
+    /// ssh `ProxyCommand`, say) held open. Since the probe runs on a
+    /// helm-owned task that nothing cancels, such a probe would hold one of
+    /// the four planning slots until the helm restarted. The stand-in exits
+    /// only once the test has seen its helper alive, and the whole group is
+    /// checked gone afterwards.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn a_probe_child_that_exits_takes_its_helpers_with_it() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let go = root.path().join("go");
+        let farhelm = stand_in_farhelm(
+            root.path(),
+            &format!(
+                "while [ ! -e '{}' ]; do sleep 0.02; done\nexit 3",
+                go.display()
+            ),
+        );
+        let service = ProvisioningService::injected(
+            harness.store.clone(),
+            Arc::clone(&harness.manager),
+            Arc::new(test_system_backend(root.path())),
+            Arc::new(NoPayloads),
+            layout(root.path()),
+            farhelm,
+        );
+        let probe = tokio::spawn(async move {
+            service
+                .probe(ProbeRequest {
+                    target: ProbeDestination::Local,
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                })
+                .await
+        });
+        let group =
+            KillGroupOnDrop(stand_in_pid(&root.path().join("group.pid"), "its group").await);
+        let helper = stand_in_pid(&root.path().join("helper.pid"), "its helper").await;
+        assert!(alive(helper), "fixture premise: the helper is running");
+        std::fs::write(&go, b"").unwrap();
+
+        let outcome = tokio::time::timeout(Duration::from_secs(10), probe)
+            .await
+            .expect("a probe whose child exited must not wait on a helper's stderr")
+            .expect("the probe task does not panic");
+        assert!(
+            outcome.is_err(),
+            "a child that exits without a hello is a failed probe"
+        );
+        wait_for_exit(
+            -group.0,
+            "the exited probe child's helper must be killed with its group",
+        )
+        .await;
+        std::mem::forget(group);
+    }
+
     /// A supervisor unit on the helm's own machine that runs this farhelm
     /// belongs to whoever wrote it, and the panel says so with the
     /// remedy that fits (D9). Both wordings are asserted whole because

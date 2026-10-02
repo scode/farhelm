@@ -1699,6 +1699,9 @@ fn handshake_io_failure(error: &std::io::Error) -> bool {
 impl ProvisioningBackend for SystemBackend {
     async fn probe(&self, target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure> {
         let (mut child, remote) = self.spawn_probe(target).await?;
+        // The probe's process group, kept for the path below where the child
+        // has already been reaped and `child.id()` no longer answers.
+        let group = child.id();
         let stdout = child.stdout.take().expect("piped probe stdout");
         let stdin = child.stdin.take().expect("piped probe stdin");
         let stderr = child.stderr.take().expect("piped probe stderr");
@@ -1870,6 +1873,20 @@ impl ProvisioningBackend for SystemBackend {
                         ));
                     }
                 };
+                // The child is gone but a helper it started (an ssh
+                // `ProxyCommand`, say) may not be, and it would hold the
+                // stderr pipe the wait below needs closed: kill the rest of
+                // the group now. The group id cannot have been reused while
+                // any such member is alive, which is the only case the kill
+                // is for.
+                #[cfg(unix)]
+                if let Some(pid) = group {
+                    // SAFETY: `spawn_probe` isolated the child in its own
+                    // process group, whose id is the child's pid.
+                    unsafe {
+                        libc::kill(-(pid as i32), libc::SIGKILL);
+                    }
+                }
                 // A child can close stdin after writing stdout, so the
                 // handshake writer may report BrokenPipe before its reader
                 // has been polled. Drain one frame after exit to distinguish
@@ -1883,7 +1900,21 @@ impl ProvisioningBackend for SystemBackend {
                 } else {
                     false
                 };
-                let stderr = stderr_task.await.unwrap_or_default();
+                // Bounded even so, because this probe runs on a helm-owned
+                // task that nothing cancels: a helper that left the group (one
+                // that started its own session or process group) could
+                // otherwise hold stderr open. The
+                // other exit paths kill the group and then wait on stderr
+                // unbounded, as before; only this one waited without killing.
+                let mut stderr_task = stderr_task;
+                let stderr =
+                    match tokio::time::timeout(Duration::from_secs(2), &mut stderr_task).await {
+                        Ok(joined) => joined.unwrap_or_default(),
+                        Err(_) => {
+                            stderr_task.abort();
+                            ProbeStderr::default()
+                        }
+                    };
                 if let Ok(failure) = stderr_signal_rx.try_recv() {
                     return Err(BackendFailure::new(
                         format!(

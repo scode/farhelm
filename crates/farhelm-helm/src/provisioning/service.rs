@@ -369,8 +369,27 @@ impl ProvisioningService {
 
     /// Complete discovery before either registering an answer or retaining a
     /// non-mutating plan for later confirmation.
+    ///
+    /// On a helm-owned task (see `crate::run_owned`): the backend's probe
+    /// starts a child in its own process group and kills that group only on
+    /// its own exit paths, so a request dropped mid-probe (a page closed or
+    /// reloaded during a probe of up to `PROBE_TIMEOUT`) killed only the
+    /// direct child and could leave helpers it started, such as a
+    /// user-configured ssh `ProxyCommand`, running. A dropped request now
+    /// loses only the reply. The probe then runs to its end, so one that
+    /// finds a running supervisor still registers the host, as the
+    /// registration step already did on its own.
     pub(super) async fn probe(
         self: &Arc<Self>,
+        request: ProbeRequest,
+    ) -> anyhow::Result<ProbeResponse> {
+        let service = Arc::clone(self);
+        crate::run_owned(async move { service.probe_owned(request).await }).await
+    }
+
+    /// The body of [`Self::probe`], run on a helm-owned task.
+    async fn probe_owned(
+        self: Arc<Self>,
         mut request: ProbeRequest,
     ) -> anyhow::Result<ProbeResponse> {
         let _slot = self
@@ -556,7 +575,10 @@ impl ProvisioningService {
     /// steps (a reload, a closed tab) left a saved host with no actor: absent
     /// from the host list and never dialed, or for a re-probed host, still
     /// dialing its old paths, until something unrelated re-read the
-    /// registry. A dropped request now loses only the reply.
+    /// registry. A dropped request now loses only the reply. The probe that
+    /// calls this now runs on a helm-owned task itself, so this inner one is
+    /// belt and braces: it keeps registration owned if another caller
+    /// appears.
     async fn register_discovered(
         self: &Arc<Self>,
         registration: ProbeRegistration,
