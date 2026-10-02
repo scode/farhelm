@@ -1135,3 +1135,138 @@ test("closing a clone without submitting, or submitting it, both leave the next 
     if (session) await cleanupSession(request, session.id);
   }
 });
+
+/**
+ * Opens a structured clone of a fresh Codex session that names an effort,
+ * with the dialog's launch-catalog read answered by `catalog` (each GET in
+ * order). Returns the open form, the GET count and the cleanup to run.
+ *
+ * An effort is what made the old rule refuse: checked against an empty
+ * stand-in list, every effort is unsupported.
+ */
+async function openEffortClone(
+  page: Page,
+  request: import("@playwright/test").APIRequestContext,
+  label: string,
+  catalog: (get: number, route: import("@playwright/test").Route, build: string) => Promise<void>,
+  // Runs first in every cleanup, so a caller holding catalog replies can let
+  // them go before the cleanup waits for them to finish.
+  releaseHeld: () => void = () => {},
+): Promise<{ form: Locator; gets: () => number; done: () => Promise<void> }> {
+  const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(build, "fabricated catalog replies must retain the helm build stamp").toBeTruthy();
+  const created = await request.post("/api/sessions", {
+    data: {
+      cwd: stackScratchDir(`${label}-`),
+      title: `${label}-${Date.now()}`,
+      host: await localHostId(request),
+      launch: { harness: "codex", model: "gpt-6-astra", effort: "high" },
+    },
+  });
+  expect(created.ok(), `creating structured source: ${await created.text()}`).toBe(true);
+  const sourceId = (await created.json()).id as string;
+  let gets = 0;
+  const inFlight = new Set<Promise<void>>();
+  const matcher = (url: URL) => url.pathname === "/api/launch-catalog";
+  const handler = async (route: import("@playwright/test").Route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    gets += 1;
+    const run = catalog(gets, route, build);
+    const tracked = run.catch(() => {});
+    inFlight.add(tracked);
+    try {
+      await run;
+    } finally {
+      inFlight.delete(tracked);
+    }
+  };
+  const cleanup = async () => {
+    releaseHeld();
+    await page.unroute(matcher, handler);
+    await Promise.allSettled([...inFlight]);
+    await cleanupSession(request, sourceId);
+  };
+  await page.route(matcher, handler);
+  try {
+    await page.goto("/");
+    const sourceRow = row(page, sourceId);
+    await expect(sourceRow).toBeVisible({ timeout: 20_000 });
+    await attachSession(page, sourceId);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(page.locator(".hosts-status", { hasText: "loading hosts" })).toHaveCount(0, { timeout: 20_000 });
+    await openRowMenu(sourceRow);
+    await sourceRow.locator(".session-row-clone").click();
+    const form = page.locator('.create-session-form[role="dialog"]');
+    await expect(form).toBeVisible();
+    // Premise: the draft carries the effort. The summary shows it even while
+    // the catalog is unknown, and without it neither test exercises the fix.
+    await expect(form.locator(".launch-composer-summary"), "premise: the clone's draft names an effort")
+      .toContainText("effort: high");
+    return { form, gets: () => gets, done: cleanup };
+  } catch (error) {
+    // Setup failed before the caller's `finally` could own the cleanup.
+    await cleanup();
+    throw error;
+  }
+}
+
+/**
+ * The new-session dialog does not refuse a saved choice while its catalog is
+ * still loading. It used to check an effort-bearing clone against an empty
+ * stand-in list, which rejects every effort, and showed "no longer supported
+ * by the current catalog" with Launch disabled until the read landed.
+ */
+test("a clone with an effort can launch while the catalog is still loading", async ({ page, request }) => {
+  const gate = routeGate();
+  const hold = async (_get: number, route: import("@playwright/test").Route) => {
+    await gate.wait();
+    // Released during cleanup, when the page may already have dropped the
+    // request; only the held phase matters to this test.
+    await route.continue().catch(() => {});
+  };
+  const clone = await openEffortClone(page, request, "clone-catalog-pending", hold, () => gate.release());
+  try {
+    await expect.poll(clone.gets, { message: "premise: the dialog's catalog read is out and held" })
+      .toBeGreaterThan(0);
+    await expect(clone.form.locator(".launch-composer-choice-error")).toHaveCount(0);
+    await expect(clone.form.locator(".create-session-submit")).toBeEnabled();
+  } finally {
+    await clone.done();
+  }
+});
+
+/**
+ * A failed catalog read refuses nothing either: it explains the empty model
+ * list and offers to read again. Reopening the dialog used to be the only way
+ * out, and that loses its draft.
+ */
+test("a failed catalog read shows a retry and leaves the clone launchable", async ({ page, request }) => {
+  const clone = await openEffortClone(page, request, "clone-catalog-failed", async (get, route, build) => {
+    if (get === 1) {
+      await route.fulfill({
+        status: 503,
+        headers: { "content-type": "text/plain", "x-farhelm-build": build },
+        body: "catalog unavailable for this test",
+      });
+    } else {
+      await route.continue();
+    }
+  });
+  try {
+    const failure = clone.form.locator(".create-catalog-error");
+    await expect(failure).toContainText("model catalog unavailable");
+    await expect(clone.form.locator(".launch-composer-choice-error")).toHaveCount(0);
+    await expect(clone.form.locator(".create-session-submit")).toBeEnabled();
+
+    await failure.getByRole("button", { name: "retry" }).click();
+    await expect.poll(clone.gets, { message: "retry reads the catalog again" }).toBeGreaterThan(1);
+    await expect(failure).toHaveCount(0);
+    await expect(clone.form.locator(".launch-composer-choice-error")).toHaveCount(0);
+    await expect(clone.form.locator(".create-session-submit")).toBeEnabled();
+  } finally {
+    await clone.done();
+  }
+});
