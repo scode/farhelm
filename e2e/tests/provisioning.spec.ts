@@ -126,6 +126,74 @@ async function hosts(request: APIRequestContext): Promise<Host[]> {
 let baselineHostIds: ReadonlySet<number>;
 
 /**
+ * How long cleanup waits for a released run to let go of its host.
+ *
+ * A released run ends within milliseconds under the injected backend; the
+ * bound is only there so one that never ends fails cleanup instead of hanging.
+ */
+const RUN_SETTLE_TIMEOUT_MS = 30_000;
+
+/**
+ * Remove one host, waiting first for any setup or update still running on it.
+ *
+ * Removal never waits for a run: while one holds the host, the helm refuses at
+ * once with 409 "busy with a setup or update" (`hosts::remove_host`, SPEC.md
+ * "Waiting between operations on one host"). Cleanup reaches here right after
+ * `configureBackend()` releases whatever action a test left held, and the run
+ * behind it is still finishing at that moment. Deleting straight away lost
+ * that race in a different handful of tests on every full run of this spec,
+ * on both engines, each failing its cleanup with that 409 although its own
+ * assertions had passed.
+ *
+ * So the busy refusal, and only that one, is retried until the run lets go.
+ * The delete's own answer is the readiness oracle: a run records its final
+ * status before it releases the host, so waiting for the progress view to
+ * settle would still race the same lock. Any other refusal ends the wait and
+ * is returned, an error from the request itself is rethrown, and a host still
+ * busy when the wait ends is reported with its run's status, so a run that
+ * never lets go still fails the test rather than passing as "eventually
+ * removed". Returns `null` once the host is gone.
+ */
+async function removeHostOnceIdle(request: APIRequestContext, id: number): Promise<string | null> {
+  // An object rather than a `let`: TypeScript does not see assignments made
+  // inside the poll callback, and would narrow a `let` to its initial value.
+  const last: { state: "removed" | "busy" | "refused" | "unasked"; body: string } = {
+    state: "unasked",
+    body: "",
+  };
+  try {
+    await expect
+      .poll(
+        async () => {
+          // Reset first, so a request that throws after an earlier busy
+          // answer is rethrown below instead of reported as still busy.
+          last.state = "unasked";
+          const response = await request.delete(`/api/hosts/${id}`);
+          last.body = response.ok() ? "" : await responseBody(response);
+          last.state = response.ok()
+            ? "removed"
+            : response.status() === 409 && last.body.includes("busy with a setup or update")
+            ? "busy"
+            : "refused";
+          return last.state;
+        },
+        { timeout: RUN_SETTLE_TIMEOUT_MS },
+      )
+      .not.toBe("busy");
+  } catch (error) {
+    if (last.state !== "busy") throw error;
+    let run = "unknown";
+    try {
+      run = (await progress(request, id)).status;
+    } catch {
+      // The run's status is diagnostic only; the busy refusal is the finding.
+    }
+    return `still busy when the wait ended (run status: ${run}): ${last.body}`;
+  }
+  return last.state === "refused" ? last.body : null;
+}
+
+/**
  * Restore the host registry this project inherited before provisioning ran.
  *
  * These tests exercise real registration, so a failed assertion can leave a
@@ -137,8 +205,8 @@ async function removeHostsBeyondBaseline(request: APIRequestContext): Promise<vo
   const added = (await hosts(request)).filter((host) => !baselineHostIds.has(host.id));
   const failures: string[] = [];
   for (const host of added) {
-    const response = await request.delete(`/api/hosts/${host.id}`);
-    if (!response.ok()) failures.push(`${host.id}: ${await responseBody(response)}`);
+    const refusal = await removeHostOnceIdle(request, host.id);
+    if (refusal) failures.push(`${host.id}: ${refusal}`);
   }
 
   expect(failures, "every host registered by a provisioning test must be removable").toEqual([]);
@@ -3139,6 +3207,13 @@ test("a competing run during retry planning preserves the sticky update warning"
   const retryPlanGate = new Promise<void>((resolve) => {
     releaseRetryPlan = resolve;
   });
+  // The last attempt's plan is held too. Its injected inspection error
+  // answers in a few milliseconds, so without a gate the planning indicator
+  // can come and go before the assertion that it was shown gets to look.
+  let releaseFailedPlan!: () => void;
+  const failedPlanGate = new Promise<void>((resolve) => {
+    releaseFailedPlan = resolve;
+  });
   await page.route(`**/api/hosts/${accepted.host_id}/update`, async (route) => {
     if (route.request().postData()) {
       submissions += 1;
@@ -3156,6 +3231,9 @@ test("a competing run during retry planning preserves the sticky update warning"
     plans += 1;
     if (plans === 2) {
       await retryPlanGate;
+    }
+    if (plans === 3) {
+      await failedPlanGate;
     }
     await route.continue();
   });
@@ -3286,9 +3364,16 @@ test("a competing run during retry planning preserves the sticky update warning"
       [target(remote)]: { inspect: "error", message: "retry inspection refused" },
     },
   });
+  const failedPlanReply = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === `/api/hosts/${accepted.host_id}/update`
+    && response.request().method() === "POST"
+    && !response.request().postData()
+  );
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
   await expect(row.locator(".provisioning-planning")).toBeVisible();
+  releaseFailedPlan();
+  await failedPlanReply;
   await expect(row.locator(".provisioning-planning")).toHaveCount(0);
   await expect(row.locator(".provisioning-warning")).toContainText("accepted the update");
   await expect(row.locator(".host-detail")).toBeVisible();
