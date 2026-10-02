@@ -5928,3 +5928,90 @@
 - Decision: discard (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
 - Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+
+## desktop-clipboard-fetch-backlog.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed at 73029557. Every OSC 52 write a remote program emits becomes one fire-and-forget `fetch` to
+  the embedded helm's `POST /api/clipboard` (`arm_native_clipboard_script`, `crates/farhelm-ui/src/auth.rs`), called
+  from terminal.js's clipboard provider, which returns immediately so the parser never waits. Nothing bounds outstanding
+  submissions or replaces obsolete pending values; the webview caps concurrent connections, not queued requests. A
+  working clipboard does not prevent the backlog: a loop of tiny OSC 52 sequences outruns a loopback round trip plus a
+  serialized native write, and each pending request retains its text (up to the 256 KiB the endpoint accepts). Queued
+  stale writes can also land after the user copied something newer. Actual memory growth or a webview crash was not
+  measured. In scope through SPEC.md's "Local authority and trust between hosts": OSC 52 writes are an "explicitly
+  allowed, bounded effect", and remote malicious behavior must not disrupt ordinary GUI controls. Not covered:
+  `clipboard-writes-unbounded-blocking-admission.md` (planned in `plans/triage-restart-takeover-update.md`) caps native
+  writes inside the helm for a hung clipboard, which speeds draining but does not bound the page-side queue; nothing in
+  `Planned`, `BUGS.md` or the filters applies. Bucket `highest` (availability across the remote-host trust boundary, the
+  same class as the hint-flood item); no data or credential loss.
+- Decision: fix code (user, 2026-10-02).
+- Completion criteria: bound the page-side clipboard bridge to at most one in-flight write plus one replaceable latest
+  pending value, so the newest write wins and stale values never land after a newer one. Keep terminal parsing
+  nonblocking and failures silent per the best-effort contract. Prefer placing the coalescing where it also covers the
+  browser's `navigator.clipboard` path (terminal.js's provider) if that stays simple. Add a test that bursts writes
+  against a write that never settles and asserts retained and submitted work stays bounded, and that the latest value is
+  the one written once the write settles. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## desktop-protocol-filesystem-fallback.md
+
+- Outcome: `other` (supersedes an earlier `fix code` decision the same day; see Decision).
+- Assessment: confirmed by source trace at 73029557; not reproduced at runtime. Farhelm's desktop asset handler claims
+  only the `assets` path segment (`crates/farhelm-ui/src/desktop/assets.rs`), and the window config installs no
+  catch-all, CSP or custom protocol. Every other `dioxus://` path goes to the pinned dioxus-desktop 0.7.10 default
+  (`protocol.rs`), whose dioxus-asset-resolver percent-decodes it, uses an existing absolute path as is, reads it with
+  `std::fs::read`, and answers 200 with `Access-Control-Allow-Origin: *`; the page is itself served from
+  `dioxus://index.html/`, so such a fetch is same-origin. Page script could therefore read any file the desktop process
+  can. No script-injection path was found (no `innerHTML`/`dangerous_inner_html`, terminal links limited to http(s),
+  Rust-built page script interpolates only JSON-serialized values), and injected script would already hold the device
+  secret and full helm API access, so the added reach is modest. Unverified side finding: the resolver `.expect()`s
+  UTF-8 on the decoded path, so a request like `dioxus://index.html/%ff` likely panics in the protocol callback and may
+  abort the desktop app. In scope per SPEC.md "Client hardening" (the native app's higher bar for proportionate
+  hardening against hypothetical flaws). SPEC_impl.md's "no bundle-directory fallback at all" is accurate only under
+  `/assets/`. Not covered by `Planned`, `BUGS.md`, filters, the ledger or plans/.
+- Decision: initially fix code (user, 2026-10-02), with a very clear comment at the fix explaining why it exists and
+  stating plainly that it is hardening only: no known exploitable bug motivated it. Superseded the same day once it was
+  clear that every complete fix needs the repo's first patched Rust dependency (a `[patch.crates-io]` fork of
+  dioxus-desktop or dioxus-asset-resolver) or an upstream Dioxus change, and that nothing known today can exercise the
+  fallback (only Farhelm's embedded script runs in the window, navigation away is blocked, and untrusted data is
+  rendered as text). Revised decision: record it as a TODO.md `Maybe later` entry that keeps clear that it is hardening
+  only, the trusted versus untrusted story, and that a fix currently seems to need patching Dioxus or an upstream
+  change.
+- Completion criteria: the TODO.md `Maybe later` entry "Close the desktop window's filesystem read fallback (hardening
+  only)" exists (recorded during triage). Remove the feedback file and its index entry, without code or spec changes.
+- Execution: pending. The TODO.md entry was recorded during triage.
+
+## terminal-output-queue-missing-byte-budget.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by source trace at 73029557; actual memory pressure, swapping or OOM not reproduced. The only
+  size cap on incoming terminal data is the protocol-wide `MAX_FRAME_LEN` of 8 MiB (`crates/farhelm-proto/src/lib.rs`);
+  the helm queues each data frame unchanged (`crates/farhelm-helm/src/client.rs`, `dispatch` and `route_terminal_event`)
+  into a per-attachment queue bounded at 256 events (`TERM_EVENT_QUEUE`), with no byte limit per connection, host or
+  reader. The queue is registered before the attach request is sent but its receiver is handed out only after
+  `Attached`, so a supervisor can send 256 × ~8 MiB before replying successfully; after attach, a supervisor that
+  ignores the browser's pause can fill it too. That is about 2 GiB per opened terminal, held in the helm that serves
+  every host and runs inside the desktop app. Only a hostile or compromised supervisor can trigger it: the honest one
+  sends terminal data through a single path chunked at `REPLAY_CHUNK` (32 KiB,
+  `crates/farhelm-supervisor/src/service/connection.rs`), a supervisor-private constant for progressive replay and pause
+  granularity that is in neither the protocol nor the specs, and unchanged since #5. `TERM_EVENT_QUEUE`'s own comment
+  admits it bounds events, not bytes, and skips a byte bound on the assumption that upstream flow control holds, which a
+  hostile supervisor does not honor. In scope per SPEC.md "Local authority and trust between hosts" (supervisor messages
+  are untrusted; a remote host must not disrupt unrelated hosts or ordinary helm/GUI controls; proportionate remedies).
+  Not covered: SPEC_impl.md's "Supervisor metadata retention and nonresponse" concerns nonresponse and metadata, and the
+  `sessions-changed-hint-unthrottled.md` decision accepts availability degradation only when not easily avoided; nothing
+  in `Planned`, `BUGS.md` or the filters applies.
+- Decision: fix code with a simple fix and a hard limit (user, 2026-10-02). The limit's relationship to `REPLAY_CHUNK`
+  must be explained clearly, and a test must tie the two together so that growing `REPLAY_CHUNK` cannot silently outgrow
+  the limit.
+- Completion criteria: add a hard maximum terminal data chunk as a shared constant in `farhelm-proto` with headroom
+  above today's 32 KiB (64 KiB was discussed), and have the helm refuse any incoming terminal data frame larger than it
+  on receipt, including frames that arrive before `Attached`, by the simplest visible failure (detaching that terminal,
+  or treating it as a protocol violation like other decode errors). Document on both the new constant and `REPLAY_CHUNK`
+  that the supervisor's chunk must not exceed the limit, why, and that older helms enforce the limit, so raising it
+  needs care. Add a test that fails if `REPLAY_CHUNK` exceeds the limit. Add a controlled-peer regression that sends one
+  oversized data frame before `Attached` and shows it is refused, without a multi-gigabyte fixture. Rewrite
+  `TERM_EVENT_QUEUE`'s comment so the memory bound it now implies (256 × the limit) is stated rather than disclaimed.
+  Remove the feedback file and its index entry.
+- Execution: pending.
