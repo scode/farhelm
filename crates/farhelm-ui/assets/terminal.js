@@ -1702,6 +1702,14 @@
   }
 
   /**
+   * The property on a pane's attachment status element that carries its
+   * upload messages from one mount of the pane's terminal to the next (see
+   * `installAttachments`). An expando rather than a `data-` attribute so the
+   * messages stay an array of strings instead of being serialized.
+   */
+  const ATTACH_STORE_KEY = "__farhelmAttachStore";
+
+  /**
    * Register one island's paste/drop interception on its own element and
    * return the handle `unmount()` uses to take it all back down, or `null`
    * when there is nothing to install (no policy, or the element is gone).
@@ -1710,8 +1718,10 @@
    * into; `policy` is `attachments::attachment_policy`'s JSON;
    * `isConnected` reports whether this island's socket is open right now.
    * Everything below is scoped to this one island: its own listeners, its
-   * own in-flight set, its own `AbortController`, its own readers, its own
-   * error list.
+   * own in-flight and queued uploads, its own `AbortController`, its own
+   * readers. The one exception is the list of messages on the status line,
+   * which lives on the pane's status element so that it outlives the island
+   * (see `ATTACH_STORE_KEY`).
    *
    * ## What is deliberate here
    *
@@ -1765,7 +1775,9 @@
     // then try to paste into a disposed xterm instance.
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     // The uploads this island has in flight, keyed by a token minted per
-    // FILE rather than counted.
+    // FILE rather than counted. Each value is `{ name, sent }`: `sent` turns
+    // true when the upload's request starts, which is what decides how an
+    // upload cut short by `dispose()` is reported (see there).
     //
     // A count plus a "most recent name" cannot describe the indicator
     // correctly: finish the second of two uploads and the count says one
@@ -1775,11 +1787,36 @@
     // about what is left, not a memory of what started last.
     const active = new Map();
     let nextToken = 0;
+    // The files a payload has queued behind the one uploading now (uploads
+    // run one at a time, see above), as the same `{ name, sent }` entries
+    // `active` holds. Kept so that `dispose()` can report them too: a drop
+    // of three files cut off during the first would otherwise lose the
+    // other two without a word, and the busy line only ever named the
+    // first.
+    const queued = new Set();
     // The readability probes in flight, so disposal can abort them: a
     // `FileReader` is not covered by the fetch `AbortController` and would
     // otherwise keep a stuck read (and its timer) alive past the island.
     const readers = new Set();
-    let errors = [];
+    // The failure and "landed" messages on screen, which must survive this
+    // island. A reconnect or a restart disposes the island and mounts a
+    // fresh one into the same pane, and SPEC.md's "upload failures must be
+    // visible" would be broken if the new mount started blank, so the list
+    // lives on the pane's status element instead: the element lasts exactly
+    // as long as the pane, so nothing has to clean the list up when a tab
+    // closes. It is tagged with whose it is (`owner`), because the agent
+    // pane's element keeps one id for every session: a mount for a
+    // DIFFERENT session or terminal starts a fresh list rather than
+    // repainting another session's messages. Both islands of a remount hold
+    // the same array, whichever of them happens to run first.
+    const owner = policy.upload + "#" + spec.el;
+    const statusNode = document.getElementById(spec.status);
+    let store = statusNode && statusNode[ATTACH_STORE_KEY];
+    if (!store || store.owner !== owner) {
+      store = { owner, errors: [] };
+      if (statusNode) statusNode[ATTACH_STORE_KEY] = store;
+    }
+    const errors = store.errors;
     let disposed = false;
 
     /**
@@ -1792,12 +1829,20 @@
      */
     function render() {
       if (disposed) return;
+      paint();
+    }
+
+    /**
+     * Draw the status line, disposed or not. `render` is the ordinary
+     * caller; `dispose` calls this directly for its one last paint.
+     */
+    function paint() {
       const node = document.getElementById(spec.status);
       if (!node) return;
       node.textContent = "";
       const lines = [];
       if (active.size === 1) {
-        const [name] = active.values();
+        const [{ name }] = active.values();
         lines.push(["attach-busy", fillTemplate(messages.busyOne, { name })]);
       } else if (active.size > 1) {
         lines.push(["attach-busy", fillTemplate(messages.busyMany, { count: active.size })]);
@@ -2174,12 +2219,17 @@
      * pasting it, for the same reason: `term.paste()` would drop it.
      */
     async function send(queue) {
-      for (const item of queue) {
+      const entries = queue.map((item) => ({ name: item.name, sent: false }));
+      for (const entry of entries) queued.add(entry);
+      for (const [index, item] of queue.entries()) {
         const token = nextToken++;
-        active.set(token, item.name);
+        const entry = entries[index];
+        queued.delete(entry);
+        active.set(token, entry);
         render();
         try {
           await probe(item.file);
+          entry.sent = true;
           const path = await upload(item.file, item.name);
           if (disposed) return;
           if (isConnected()) {
@@ -2215,11 +2265,11 @@
      */
     function accept(payload, flavor) {
       if (!isConnected()) {
-        errors = [];
+        errors.length = 0;
         fail(fillTemplate(messages.detached, {}));
         return;
       }
-      errors = [];
+      errors.length = 0;
       for (const name of payload.directories) {
         fail(fillTemplate(messages.directory, { name }));
       }
@@ -2274,7 +2324,7 @@
       if (flavor === "none") return;
       if (flavor === "text") {
         if (!isConnected()) {
-          errors = [];
+          errors.length = 0;
           fail(fillTemplate(messages.detached, {}));
           return;
         }
@@ -2295,6 +2345,10 @@
     el.addEventListener("paste", onPaste, true);
     el.addEventListener("drop", onDrop, true);
     el.addEventListener("dragover", onDragOver, true);
+    // Show what an earlier mount of this pane left (a failure, a path that
+    // could not be inserted, an upload a reconnect interrupted), or clear
+    // what an earlier mount for another session or terminal left behind.
+    render();
 
     return {
       dispose() {
@@ -2315,16 +2369,39 @@
           }
         }
         readers.clear();
-        // The status element belongs to the PANE, which for the agent
-        // terminal outlives every remount and for a tab lives until that
-        // tab leaves the strip — so a stale "attaching…" or a failure from
-        // the attachment that just went away has to be cleared here or it
-        // would sit over the next one.
-        const node = document.getElementById(spec.status);
-        if (node) {
-          node.textContent = "";
-          node.style.display = "";
+        // Every upload still running was just cut off, and none of them
+        // can report anything any more (each one's own handler sees
+        // `disposed` and returns), so each gets its message here, naming
+        // the file. Which message depends on how far it got. One stopped
+        // before its request started was never sent, so nothing was
+        // published. Once the request started, the helm may already have
+        // published the file when the abort lands, and this side cannot
+        // tell (SPEC.md, Attachments: a failure must tell "definitely
+        // unpublished" apart from "outcome unknown").
+        for (const { name, sent } of [...active.values(), ...queued]) {
+          errors.push(
+            fillTemplate(sent ? messages.interruptedUnknown : messages.interruptedUnsent, { name }),
+          );
         }
+        queued.clear();
+        // The one message that must NOT outlive this island: "this terminal
+        // is not connected" is a statement about the socket that is going
+        // away, and the remount is the reconnect it asks for. Carried over,
+        // it would sit on a working terminal until the next drop or paste.
+        // Nothing was uploaded for it, so nothing is lost by dropping it.
+        const detached = fillTemplate(messages.detached, {});
+        for (let i = errors.length - 1; i >= 0; i--) {
+          if (errors[i] === detached) errors.splice(i, 1);
+        }
+        // The "attaching…" line goes with the uploads it described; the
+        // messages stay, on the pane's status element, for the next mount
+        // to keep showing. Painted only while the element still holds THIS
+        // island's list: a mount for another session or terminal that ran
+        // before this teardown has already replaced it, and its pane must
+        // not show this one's messages.
+        active.clear();
+        const node = document.getElementById(spec.status);
+        if (node && node[ATTACH_STORE_KEY] === store) paint();
       },
     };
   }
