@@ -1143,6 +1143,19 @@ pub(crate) fn default_rows() -> u16 {
     24
 }
 
+/// The helm's refusal of a launch to a host it has no entry for: a
+/// not-found error saying "no such host". One constructor so every launch
+/// path that meets an unknown host (routing here, and the YOLO guard's
+/// missing-row case in `yolo_guard`) shows the browser, the command line and
+/// agents the same text.
+pub(crate) fn no_such_host(host: store::HostId) -> anyhow::Error {
+    anyhow::Error::new(SupervisorError {
+        origin: crate::client::ErrorOrigin::Helm,
+        kind: ErrorKind::NotFound,
+        message: format!("no such host: {host}"),
+    })
+}
+
 /// The live connection for one NAMED host, plus the claim that pins WHICH
 /// connection it was — or a refusal naming the state that host is in.
 ///
@@ -1171,13 +1184,10 @@ pub(crate) fn host_client(
     state: &AppState,
     host: store::HostId,
 ) -> anyhow::Result<(manager::SessionClaim, Arc<SupervisorClient>)> {
-    let status = state.manager.status(host).ok_or_else(|| {
-        anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::NotFound,
-            message: format!("no such host: {host}"),
-        })
-    })?;
+    let status = state
+        .manager
+        .status(host)
+        .ok_or_else(|| no_such_host(host))?;
     // The claim is taken from the SAME read that produced the client, so
     // the seed that follows can prove it is still talking about this
     // connection — see `manager::SessionClaim`.

@@ -4814,7 +4814,8 @@
   helm gives for an unknown host, and correct the comment that claims routing refuses on its own. Add a unit test that a
   YOLO check against a host id with no registry row is refused. Do not add serialization between create and host
   removal. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-yolo-sighup-replace.md`.
+- Execution: complete: change `lswtswtnqnlv`, bookmark `triage-1001c/05-yolo-guard-missing-host`, PR
+  https://github.com/scode/farhelm/pull/1390.
 
 ## sighup-skips-orderly-shutdown.md
 
