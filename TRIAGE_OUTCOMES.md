@@ -5933,7 +5933,8 @@
   stops, then correct themselves, while the host reads healthy.
 - Decision: discard (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `pypvuppx`, bookmark `triage-1001e/20-refresh-seeds`, PR
+  https://github.com/scode/farhelm/pull/1462.
 
 ## env-wrapper-hides-command-not-found.md
 
