@@ -130,7 +130,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   refuses with "this is the helm's own machine; run farhelm helm setup here instead of provisioning from the panel"
   (`crates/farhelm-helm/src/provisioning.rs`), and that error then sticks under the host's row with no way to dismiss
   it. The message is also wrong for the case. The update action should be greyed out for this machine, in the host's
-  pop-up menu and in the inline update button on host rows, so the refusal is never reached.
+  pop-up menu and in the inline update button on host rows, so the refusal is never reached. Plan:
+  `plans/queue/local-update-disabled.md`.
 
 - **Update Farhelm while it runs.** On a Mac, updating while Farhelm is open breaks session starts, agent reports and
   `farhelm spawn` until Farhelm is restarted, because the running Farhelm keeps starting the program the installer just
