@@ -31,8 +31,6 @@ One line per open item. This file must always match the feedback files in this d
   waiting until the connection drops.
 - `tab-reap-budget-starved-by-failures.md` — failed tab closes spend the per-tick reap budget, so a few persistent
   failures stop exited tabs from being reaped host-wide.
-- `profile-body-accepts-unknown-fields.md` — a profile create/update with a misspelled or stray field is accepted and
-  silently clears the stored resume template.
 - `escape-token-clamp-too-short.md` — the 64-character host label clamp can cut a `<U+E00xx>` escape token in half.
 - `tmux-build-script-bash32.md` — build-private-tmux.sh's macOS branch aborts under bash 3.2 because of empty arrays
   under `set -u`.
