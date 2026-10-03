@@ -916,7 +916,11 @@ async fn a_raw_http_fresh_checkout_completes_the_real_clone_hook_and_agent() {
 ///
 /// The first replies are never read. After server-side readiness, root and hook
 /// change, the helm is reaped and restarted, and byte-identical bodies retry.
-/// A stale key is refused, while a fresh preview and key allocate under B.
+/// A never-accepted key with stale settings is refused, while a fresh preview
+/// and key allocate under B. Only that never-accepted request is rebound to
+/// the restarted helm's connection: connection numbers no longer repeat after
+/// restart (#1455), and a stale connection would refuse before the settings
+/// check this step exists to exercise. Accepted retries keep their exact bytes.
 #[farhelm_testtrace::test]
 async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_restart() {
     let mut stack = CheckoutStack::start().await;
@@ -1006,6 +1010,10 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
 
     let mut stale: Value = serde_json::from_slice(&cases[0].body).unwrap();
     stale["intent_key"] = json!("never-accepted-after-change");
+    // Keep the old configuration revision while satisfying the independent
+    // connection fence, so this refusal specifically proves settings staleness.
+    stale["expected_incarnation"] = json!(stack.claim.incarnation);
+    stale["github_checkout"]["preview"]["incarnation"] = json!(stack.claim.incarnation);
     let response = post_exact_body(
         &stack.client,
         &stack.helm().base,
