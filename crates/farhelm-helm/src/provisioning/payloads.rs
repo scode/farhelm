@@ -1,8 +1,10 @@
 //! Host-architecture-specific payload sources own release retrieval and
 //! materialization so the provisioning executor does not.
 //!
-//! Three sources exist: [`NoPayloads`] for an ordinary developer build
-//! (D13), [`DirectoryPayloads`] for an operator-staged directory
+//! Four sources exist: [`NoPayloads`] for an ordinary developer build
+//! (D13), [`UnreleasedPayloads`] for a release-shaped build of main, which
+//! has no release to download (SPEC_impl.md "Version and skew"),
+//! [`DirectoryPayloads`] for an operator-staged directory
 //! (`--payload-dir`), and [`ReleasePayloadSource`] — a verified download
 //! over HTTP, which is what a release build uses by default (D2).
 //! [`production_payloads`] is the one place that turns a
@@ -83,7 +85,8 @@ pub trait PayloadSource: std::fmt::Debug + Send + Sync {
 pub enum PayloadSelection {
     /// Neither flag was given: `production_payloads` picks the default for
     /// this build (D13 — a release-shaped build downloads, a developer
-    /// build carries nothing).
+    /// build carries nothing, and a release-shaped build of main refuses,
+    /// since no release carries its version; see [`UnreleasedPayloads`]).
     Default,
     /// `--payload-dir`: read published release files staged in this
     /// directory, verifying nothing (D3, operator-trusted).
@@ -108,6 +111,37 @@ impl PayloadSource for NoPayloads {
             "this farhelm was built from source and carries no provisioning payloads; pass \
              --payload-dir <dir> holding the release files, or install a release build (see \
              README, \"Install\")"
+        )
+    }
+}
+
+/// A release-shaped build of main (a development version such as
+/// `0.0.0-unreleased`) has no release to download from by default.
+///
+/// No published release will ever carry a development version, so the
+/// default download would only reach a 404 whose message (D17, shared with
+/// `install.sh`) says the release may still be publishing and to retry,
+/// which never helps. This refuses before any request with what does help:
+/// payloads built from the same commit, staged with `--payload-dir`. A
+/// published release's files are not the answer, because they are exactly
+/// the older-protocol payloads the helm would then refuse at the hello
+/// gate. The refusal is lazy, in `path()`, like [`NoPayloads`]: refusing in
+/// `production_payloads` would stop every such helm, the desktop app
+/// included, from starting at all.
+#[derive(Debug)]
+pub(super) struct UnreleasedPayloads {
+    /// This helm's development version, named in the refusal.
+    version: String,
+}
+
+#[async_trait]
+impl PayloadSource for UnreleasedPayloads {
+    async fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+        bail!(
+            "this farhelm is an unreleased build (version {}), so no published release carries \
+             its provisioning payloads; pass --payload-dir <dir> holding payloads built from the \
+             same commit",
+            self.version
         )
     }
 }
@@ -929,16 +963,17 @@ fn remove_leftover_embedded_payloads(
 /// command line says otherwise: the GitHub release tagged with this build's
 /// own version (D2).
 ///
-/// Built from `CARGO_PKG_VERSION` rather than written out, so a version bump
-/// cannot leave the default pointing at the previous release's assets — the
-/// failure that would silently provision hosts with a mismatched binary.
+/// Built from the version `production_payloads_with_key` is given, which in
+/// production is this build's own `CARGO_PKG_VERSION`, rather than written
+/// out, so a version bump cannot leave the default pointing at the previous
+/// release's assets — the failure that would silently provision hosts with a
+/// mismatched binary. Taking it as an argument lets a test name a real
+/// version even though every test build carries the development sentinel.
 ///
-/// A build of main carries `0.0.0-unreleased` (root Cargo.toml), so a
-/// release-shaped build that is not a tagged release points at a release that
-/// does not exist and its download fails, rather than fetching some real
-/// release's payloads that do not match the running helm.
-fn default_release_base_url() -> anyhow::Result<url::Url> {
-    let version = env!("CARGO_PKG_VERSION");
+/// Never reached for a development version: that build refuses first
+/// ([`UnreleasedPayloads`]) rather than asking for a release that does not
+/// exist.
+fn default_release_base_url(version: &str) -> anyhow::Result<url::Url> {
     url::Url::parse(&format!(
         "https://github.com/scode/farhelm/releases/download/v{version}/"
     ))
@@ -1062,8 +1097,10 @@ pub(super) fn release_client() -> anyhow::Result<reqwest::Client> {
 /// Select the payload source production wiring builds, from a
 /// [`PayloadSelection`] and D13's release-build fact.
 ///
-/// This function IS the policy (D13): a release-shaped build downloads by
-/// default and a developer build refuses by default, while
+/// This function IS the policy (D13): a release-shaped build downloads its
+/// own release by default, unless its version is a development version,
+/// which no release carries ([`UnreleasedPayloads`]); a developer build
+/// refuses by default; while
 /// `--release-base-url` selects a download source on either kind of build
 /// so tests, mirrors, and prerelease checks have a way in that does not
 /// require faking a release build.
@@ -1135,6 +1172,7 @@ pub(super) fn production_payloads_with_key(
     pubkey: &'static str,
     client: reqwest::Client,
 ) -> anyhow::Result<Arc<dyn PayloadSource>> {
+    let version = version.into();
     // Only `Directory` can collide with the retired embedded-payloads cache,
     // and the guard needs the exact directory to compare against — see
     // [`remove_leftover_embedded_payloads`] for why deleting staged release
@@ -1156,7 +1194,7 @@ pub(super) fn production_payloads_with_key(
              starting anyway"
         );
     }
-    // The two selections that never download are answered first; what
+    // The arms that never download are answered first; what
     // remains differs only in WHICH base URL to read, so the release source
     // is constructed exactly once and a future change to its constructor has
     // one call site to keep right.
@@ -1168,8 +1206,13 @@ pub(super) fn production_payloads_with_key(
             )));
         }
         PayloadSelection::Default if !release_build => return Ok(Arc::new(NoPayloads)),
+        // `--release-base-url` is never refused this way (D18: selectable on
+        // any build); only the default, which names this version's release.
+        PayloadSelection::Default if crate::hosts::is_development_build(&version) => {
+            return Ok(Arc::new(UnreleasedPayloads { version }));
+        }
         PayloadSelection::Release { base_url } => base_url,
-        PayloadSelection::Default => default_release_base_url()?,
+        PayloadSelection::Default => default_release_base_url(&version)?,
     };
     // All release sources share one cache parent; `ReleasePayloadSource`
     // then keys a directory below it by version and base URL, so a fixture

@@ -8164,7 +8164,16 @@ mod tests {
     /// on a developer build as much as on a release build; `Default` splits
     /// on `release_build`, downloading from this build's own GitHub release
     /// when it is set and refusing with the `NoPayloads` message when it is
-    /// not.
+    /// not, except that a release-shaped development build (version `0.0.0`
+    /// with a prerelease) refuses with the `UnreleasedPayloads` message,
+    /// since no release will ever carry its version.
+    ///
+    /// The `Default` × release-shaped leg is driven through
+    /// `production_payloads_with_key` with explicit versions, because its
+    /// outcome depends on the version and every test build carries the
+    /// development sentinel while the release gate runs on a real version.
+    /// One more leg drives `production_payloads` itself and expects
+    /// whichever outcome this build's own version calls for.
     ///
     /// This wiring is the one place D13's policy is expressed, and getting
     /// it wrong is silent: a release build that fell back to `NoPayloads`
@@ -8201,14 +8210,27 @@ mod tests {
             "a developer build must refuse rather than download: {error:#}"
         );
 
-        let state_dir = tempfile::tempdir().unwrap();
-        let payloads = production_payloads(
-            PayloadSelection::Default,
-            state_dir.path(),
-            true,
-            state_dir.path(),
-        )
-        .unwrap();
+        // A release-shaped build's default depends on its version, so the
+        // version is named explicitly: every test build carries the
+        // development sentinel, while the release gate runs on a real one.
+        let release_default = |version: &'static str| {
+            let state_dir = tempfile::tempdir().unwrap();
+            let payloads = production_payloads_with_key(
+                PayloadSelection::Default,
+                state_dir.path(),
+                true,
+                state_dir.path(),
+                version,
+                super::release_payloads::test_support::test_pubkey(),
+                super::release_payloads::test_support::test_client(),
+            )
+            .unwrap();
+            (state_dir, payloads)
+        };
+        let real = super::release_payloads::test_support::FIXTURE_VERSION;
+        // Premise: the fixture version is a real one, not a development build.
+        assert!(!crate::hosts::is_development_build(real), "{real}");
+        let (_state, payloads) = release_default(real);
         let described = format!("{payloads:?}");
         assert!(
             described.starts_with("ReleasePayloadSource"),
@@ -8216,10 +8238,49 @@ mod tests {
         );
         assert!(
             described.contains(&format!(
-                "https://github.com/scode/farhelm/releases/download/v{}/",
-                env!("CARGO_PKG_VERSION")
+                "https://github.com/scode/farhelm/releases/download/v{real}/"
             )),
             "the default source must name THIS build's release: {described}"
+        );
+
+        // A release-shaped build of main has no release to download: it
+        // refuses before any request, naming --payload-dir and payloads
+        // from the same commit rather than a release's files.
+        let (_state, payloads) = release_default("0.0.0-unreleased");
+        assert!(
+            format!("{payloads:?}").starts_with("UnreleasedPayloads"),
+            "{payloads:?}"
+        );
+        // The production wiring itself, on whatever version this build
+        // carries: the sentinel in an ordinary test build, a real version
+        // on the release gate.
+        let production_state = tempfile::tempdir().unwrap();
+        let production = production_payloads(
+            PayloadSelection::Default,
+            production_state.path(),
+            true,
+            production_state.path(),
+        )
+        .unwrap();
+        let expected = if crate::hosts::is_development_build(super::release_payloads::VERSION) {
+            "UnreleasedPayloads"
+        } else {
+            "ReleasePayloadSource"
+        };
+        assert!(
+            format!("{production:?}").starts_with(expected),
+            "{production:?}"
+        );
+
+        let error = payloads
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "this farhelm is an unreleased build (version 0.0.0-unreleased), so no published \
+             release carries its provisioning payloads; pass --payload-dir <dir> holding payloads \
+             built from the same commit"
         );
 
         // Both `release_build` values for `Directory`, because the case that

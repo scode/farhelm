@@ -52,7 +52,8 @@ default-members = [
 # labeling: a release-shaped helm downloads its provisioning payloads from
 # the GitHub release named by this number (`payloads.rs`), so an untagged
 # build carrying a real release's number would push that release's binaries
-# to remote hosts. With the sentinel it finds no such release and fails.
+# to remote hosts. With the sentinel it refuses its default download, naming
+# --payload-dir and payloads built from the same commit.
 # Release bumps used to merge into main. Once they stopped (#858 moved stable
 # releases onto release branches), main kept whatever number last reached it,
 # 0.14.0-rc.2 from a bump that rode along with an unrelated fix (#879), while
