@@ -105,7 +105,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   with nothing listening, nothing else on the machine can reach the desktop's API, and neither the port nor the origin
   exemption is needed. The hard part is streaming: wry's custom-scheme handler answers each request with one complete
   response, so terminal output and the event feed would have to travel over the webview's IPC channel, and the UI's
-  network layer would need a second transport beside HTTP.
+  network layer would need a second transport beside HTTP. Plan: `plans/queue/desktop-internal-helm.md`.
 
 - **Audio signal when an agent is waiting on input.** Play a sound when a session's agent gets stuck waiting for the
   user (a question, an approval prompt), so a user looking at something else notices without watching the sidebar.
@@ -149,7 +149,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   future" to the add-host dialog and "remove, and don't ask again" to the remove-host dialog, both kept as helm
   preferences shared by every client, but no way in the UI to undo either answer: decided 2026-10-02 to leave that out
   of the plan and add it later. Farhelm has no app-wide settings screen to put it in, so where the switch lives is the
-  first question.
+  first question. Plan: `plans/queue/host-confirmations-toggle.md`.
 
 - **Install Claude and Codex on a host for the user.** Offer to install Claude Code and Codex (only those two) on a host
   on the user's behalf, always through each vendor's one-line curl installer, and optionally copy the user's credentials
