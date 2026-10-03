@@ -8,6 +8,7 @@ use crate::conversation_identity_capture::{
     capture_harness, marker_value, provoke_record, record_session, settle_past_horizon,
     snapshot_of, test_capture_bounds,
 };
+use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::structured_launches::{FakeHarness, fake_harness, observed_argv};
 
 /// Give compiled vendor names an owned executable and a private capture home.
@@ -278,6 +279,131 @@ async fn restart_with_refuses_a_non_resume_offer_without_changing_settings() {
     let mut yolo = session.launch.clone().expect("structured premise");
     yolo.permissions = Some(farhelm_proto::LaunchPermission::Yolo);
     assert_restart_with_refused(&h, &session, farhelm_proto::RestartMode::Resume, yolo).await;
+}
+
+/// Send one restart-with bundle exactly as given, over a connection of its
+/// own, and return the supervisor's answer.
+///
+/// The helm compiles every bundle it sends from a catalog selection, so it
+/// cannot produce the malformed bundles a broken or hostile client could;
+/// this writes the `RestartSession` frame directly, the way the rename
+/// tests drive their verb.
+async fn raw_restart_with(
+    sup: &Arc<Supervisor>,
+    session_id: &str,
+    invocation: &str,
+    launch: farhelm_proto::LaunchSelection,
+    resume_template: Option<Vec<String>>,
+) -> ControlMsg {
+    let (client_side, server_side) = tokio::io::duplex(1 << 20);
+    let sup = Arc::clone(sup);
+    tokio::spawn(async move {
+        let _ = handle_connection(sup, server_side, None).await;
+    });
+    let (read_half, write_half) = tokio::io::split(client_side);
+    let mut reader = FrameReader::new(read_half);
+    let mut writer = FrameWriter::new(write_half);
+    handshake(&mut reader, &mut writer, "helm")
+        .await
+        .expect("handshake");
+    writer
+        .write_control(&ControlMsg::RestartSession {
+            req_id: 1,
+            session_id: session_id.to_string(),
+            mode: farhelm_proto::RestartMode::Resume,
+            stop_if_running: true,
+            invocation: Some(invocation.to_string()),
+            launch: Some(launch),
+            resume_template,
+        })
+        .await
+        .expect("write restart-with");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let frame = tokio::time::timeout(remaining, reader.read_frame())
+            .await
+            .expect("timed out waiting for the restart-with reply")
+            .expect("read frame")
+            .expect("connection closed before the restart-with was answered");
+        if frame.kind == FrameKind::Control {
+            return parse_control(&frame).expect("parse control");
+        }
+    }
+}
+
+/// Why: restart-with saved its new bundle without create's checks, while
+/// loading refuses a row that fails them, so one bad bundle would have left
+/// the supervisor unable to load its sessions after its next restart.
+/// Spec (SPEC_impl.md "Restart-with backend wire and persistence"): on a
+/// session where restart-with is otherwise allowed (structured, same
+/// harness, Resume offer with a captured conversation), a bundle whose
+/// supplied template, or the template the kind derives from its
+/// invocation, has `{conversation}` as its program is refused as
+/// `InvalidRequest`; the running agent is not stopped, the stored bundle is
+/// unchanged, and a fresh supervisor over the same state loads the session.
+#[farhelm_testtrace::test]
+async fn restart_with_refuses_a_bundle_loading_would_refuse_and_stops_nothing() {
+    let (h, fixture) = restart_with_harness().await;
+    let session = structured_claude_session(&h, &fixture).await;
+    captured_claude_conversation(&h, &session).await;
+    let before = durable_launch_bundle(&h, &session.id).await;
+    let launch = session.launch.clone().expect("structured premise");
+    let refused = format!(
+        "resume template's first element is {}",
+        farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER
+    );
+    for (invocation, template) in [
+        // A supplied template with the placeholder as its program.
+        (
+            "claude",
+            Some(vec![
+                farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                "--resume".to_string(),
+            ]),
+        ),
+        // No template: Claude derives one from the invocation's program.
+        (
+            farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER,
+            None,
+        ),
+    ] {
+        match raw_restart_with(&h.sup, &session.id, invocation, launch.clone(), template).await {
+            ControlMsg::Error { kind, message, .. } => {
+                assert_eq!(kind, ErrorKind::InvalidRequest, "{invocation}: {message}");
+                assert!(message.contains(&refused), "{invocation}: {message}");
+            }
+            other => panic!("{invocation}: expected a refusal, got {other:?}"),
+        }
+        assert_eq!(
+            durable_launch_bundle(&h, &session.id).await,
+            before,
+            "{invocation}: the stored bundle is unchanged"
+        );
+        let live = listed(&h.client, &session.id).await;
+        assert!(live.status.is_live(), "{invocation}: nothing was stopped");
+        assert_eq!(live.restart_offer, farhelm_proto::RestartOffer::Resume);
+    }
+
+    let Harness {
+        client,
+        sup,
+        _tmux,
+        state,
+        _slot,
+    } = h;
+    let replacement = handoff_to_new_supervisor(state.path(), sup, client).await;
+    let reopened = connect_client(&replacement).await;
+    assert!(
+        reopened
+            .list_sessions()
+            .await
+            .expect("the fresh supervisor lists its sessions")
+            .sessions
+            .iter()
+            .any(|listed| listed.id == session.id),
+        "the fresh supervisor loads the session"
+    );
 }
 
 /// Release connection-owned supervisor references before reopening its durable state.
