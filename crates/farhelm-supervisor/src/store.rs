@@ -2765,6 +2765,51 @@ fn read_reservation(conn: &Connection, intent_key: &str) -> anyhow::Result<Optio
     }))
 }
 
+/// Decode one durable row while the caller owns the connection lock.
+///
+/// Keeping decoding shared preserves the same corruption refusal for ordinary
+/// reads and preparation observation. Splitting raw SQLite decoding from outcome
+/// validation retains the specific diagnostic for a corrupt stored outcome.
+fn read_session(conn: &Connection, id: &str) -> anyhow::Result<Option<StoredSession>> {
+    let raw = conn
+        .query_row(
+            &format!("SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1"),
+            [id],
+            read_session_columns,
+        )
+        .optional()
+        .context("reading a session row")?;
+    raw.map(decode_session_row).transpose()
+}
+
+/// Check independent fresh-create provenance against the checkout registry.
+///
+/// Mutation and recovery callers fail closed even if the session is absent:
+/// an origin registry row alone cannot authorize another launch. Observers may
+/// first establish that a current accepted session exists under the same lock.
+fn read_origin_working_copy(
+    conn: &Connection,
+    session_id: &str,
+) -> anyhow::Result<Option<crate::working_copies::WorkingCopyRow>> {
+    let recorded: Option<String> = conn
+        .query_row(
+            "SELECT fresh_checkout_id FROM sessions WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    let origin = crate::working_copies::origin_working_copy(conn, session_id)
+        .context("reading the session's original checkout")?;
+    match (recorded, origin) {
+        (None, None) => Ok(None),
+        (Some(id), Some(origin)) if id == origin.id => Ok(Some(origin)),
+        _ => anyhow::bail!(
+            "the session's fresh-checkout provenance does not match its registry evidence"
+        ),
+    }
+}
+
 impl SessionStore {
     /// Open (or create) the database at `path`, applying the schema if it
     /// is fresh.
@@ -2985,26 +3030,39 @@ impl SessionStore {
         session_id: &str,
     ) -> anyhow::Result<Option<crate::working_copies::WorkingCopyRow>> {
         let session_id = session_id.to_string();
-        self.conn.call("working-copy origin read task panicked", move |conn: &mut Connection| {
-            let recorded: Option<String> = conn
-                .query_row(
-                    "SELECT fresh_checkout_id FROM sessions WHERE id = ?1",
-                    [&session_id],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .flatten();
-            let origin = crate::working_copies::origin_working_copy(conn, &session_id)
-                .context("reading the session's original checkout")?;
-            match (recorded, origin) {
-                (None, None) => Ok(None),
-                (Some(id), Some(origin)) if id == origin.id => Ok(Some(origin)),
-                _ => anyhow::bail!(
-                    "the session's fresh-checkout provenance does not match its registry evidence"
-                ),
-            }
-        })
-.await
+        self.conn
+            .call("working-copy origin read task panicked", move |conn| {
+                read_origin_working_copy(conn, &session_id)
+            })
+            .await
+    }
+
+    /// Preparation provenance for a still-current accepted terminal.
+    ///
+    /// List refresh and startup observation can race Delete. Read the session
+    /// and its origin under one connection lock: Delete may retain an origin
+    /// registry row for borrowers after removing the session, which the strict
+    /// mutation reader correctly treats as a mismatch. An observer instead has
+    /// nothing to classify once the session is gone. Stale generations and rows
+    /// without an accepted pane also supply no preparation evidence; genuine
+    /// provenance damage on a current accepted row remains an error.
+    pub(crate) async fn preparation_origin(
+        &self,
+        session_id: &str,
+        generation: i64,
+    ) -> anyhow::Result<Option<crate::working_copies::WorkingCopyRow>> {
+        let session_id = session_id.to_string();
+        self.conn
+            .call("preparation origin read task panicked", move |conn| {
+                let Some(row) = read_session(conn, &session_id)? else {
+                    return Ok(None);
+                };
+                if row.generation != generation || row.pane.is_empty() {
+                    return Ok(None);
+                }
+                read_origin_working_copy(conn, &session_id)
+            })
+            .await
     }
 
     /// Claim the only initial preparation publication before touching its
@@ -4222,18 +4280,7 @@ impl SessionStore {
             .call(
                 "session read task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<Option<StoredSession>> {
-                    // Two stages for the same reason `load_all` uses them: a
-                    // corrupt outcome must be refused with its own message rather
-                    // than flattened into a rusqlite decode failure.
-                    let raw = conn
-                        .query_row(
-                            &format!("SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1"),
-                            rusqlite::params![id],
-                            read_session_columns,
-                        )
-                        .optional()
-                        .context("reading a session row")?;
-                    raw.map(decode_session_row).transpose()
+                    read_session(conn, &id)
                 },
             )
             .await
@@ -9437,6 +9484,145 @@ mod tests {
             1
         );
         allocated.canonical_path.to_str().unwrap().to_owned()
+    }
+
+    /// Delete may leave the checkout registry alive for a borrower after its
+    /// origin session is gone. This orders the old observer's two reads around
+    /// the real Delete commit, without depending on a scheduler race.
+    #[farhelm_testtrace::test]
+    async fn preparation_observation_tolerates_a_deleted_origin() {
+        let (dir, store) = fresh_store().await;
+        let cwd = allocated_membership_fixture(&store, dir.path()).await;
+        let mut borrower = launching_row("borrower");
+        borrower.cwd = cwd.clone();
+        borrower.canonical_cwd = Some(cwd);
+        store.insert_session(borrower, None).await.unwrap();
+        {
+            let conn = store.conn.lock();
+            conn.execute("UPDATE sessions SET pane = '%7' WHERE id = 'origin'", [])
+                .unwrap();
+        }
+        let observed = store.session("origin").await.unwrap().unwrap();
+        assert!(!observed.pane.is_empty(), "premise: an accepted terminal");
+        assert_eq!(
+            store.working_copy_member_count("checkout").await.unwrap(),
+            2
+        );
+        assert_eq!(
+            store
+                .origin_working_copy("origin")
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            "checkout"
+        );
+
+        store
+            .delete_session_archiving_memberships("origin", &[])
+            .await
+            .unwrap();
+        assert!(store.session("origin").await.unwrap().is_none());
+        let registry = store.working_copy_rows().await.unwrap();
+        assert_eq!(registry.len(), 1, "the borrower keeps the registry alive");
+        assert_eq!(registry[0].origin_session_id, "origin");
+        assert_eq!(
+            store.working_copy_member_count("checkout").await.unwrap(),
+            1
+        );
+
+        // The strict mutation reader still rejects this shape. The old
+        // observer called it after its earlier row read and failed here too.
+        let error = store.origin_working_copy("origin").await.unwrap_err();
+        assert!(error.to_string().contains("provenance does not match"));
+        assert!(
+            store
+                .preparation_origin("origin", observed.generation)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// Only the current accepted origin carries preparation duty. Damage on
+    /// that row must still fail observation, while borrowers, a pending create
+    /// and a stale generation must not acquire another launch's duty.
+    #[farhelm_testtrace::test]
+    async fn preparation_observation_keeps_acceptance_and_provenance_checks() {
+        let (dir, store) = fresh_store().await;
+        let cwd = allocated_membership_fixture(&store, dir.path()).await;
+        let row = store.session("origin").await.unwrap().unwrap();
+        assert!(
+            row.pane.is_empty(),
+            "fixture starts before terminal acceptance"
+        );
+        assert!(
+            store
+                .preparation_origin("origin", row.generation)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        {
+            let conn = store.conn.lock();
+            conn.execute("UPDATE sessions SET pane = '%7' WHERE id = 'origin'", [])
+                .unwrap();
+        }
+        assert_eq!(
+            store
+                .preparation_origin("origin", row.generation)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            "checkout"
+        );
+
+        let mut borrower = launching_row("borrower");
+        borrower.cwd = cwd.clone();
+        borrower.canonical_cwd = Some(cwd);
+        borrower.pane = "%8".into();
+        store.insert_session(borrower, None).await.unwrap();
+        let borrower = store.session("borrower").await.unwrap().unwrap();
+        assert!(
+            !borrower.pane.is_empty(),
+            "borrower has an accepted terminal"
+        );
+        assert_eq!(
+            store.working_copy_member_count("checkout").await.unwrap(),
+            2
+        );
+        assert!(
+            store
+                .preparation_origin("borrower", borrower.generation)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // This is actual corruption, unlike the retained registry after
+        // Delete. Neither the observer nor mutation callers may ignore it.
+        {
+            let conn = store.conn.lock();
+            conn.execute(
+                "UPDATE sessions SET fresh_checkout_id = 'wrong' WHERE id = 'origin'",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(
+            store
+                .preparation_origin("origin", row.generation + 1)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let error = store
+            .preparation_origin("origin", row.generation)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("provenance does not match"));
+        assert!(store.origin_working_copy("origin").await.is_err());
     }
 
     /// A rejected membership insert must roll back the session and its intent

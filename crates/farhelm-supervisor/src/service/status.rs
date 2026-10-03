@@ -576,20 +576,16 @@ pub(crate) struct EntryObservation {
 /// its preparation has not run yet. Membership alone gives no setup duty:
 /// borrowers deliberately use the checkout's current contents.
 /// Generation matching also prevents a stale polling entry from borrowing a
-/// newer restart's accepted pane as evidence about the old launch.
+/// newer restart's accepted pane as evidence about the old launch. The store
+/// reads acceptance and provenance together, so concurrent Delete cannot leave
+/// this observer comparing a removed session against its retained origin row.
 pub(crate) async fn interrupted_preparation_detail(
     state_dir: &Path,
     store: &SessionStore,
     session_id: &str,
     generation: i64,
 ) -> anyhow::Result<Option<String>> {
-    let Some(row) = store.session(session_id).await? else {
-        return Ok(None);
-    };
-    if row.generation != generation || row.pane.is_empty() {
-        return Ok(None);
-    }
-    let Some(origin) = store.origin_working_copy(session_id).await? else {
+    let Some(origin) = store.preparation_origin(session_id, generation).await? else {
         return Ok(None);
     };
     let path = crate::launch::preparation_state_path(state_dir, &origin.id);
