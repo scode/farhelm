@@ -1,8 +1,8 @@
-//! The sticky sidebar bar (wordmark and build identity) and the session-list
+//! The sticky sidebar bar (wordmark, build identity and helm settings) and the session-list
 //! profile control.
 //!
 //! The helm's reported build is available through the existing skew latch, so
-//! this surface stays a read-only view of that signal. It deliberately shows
+//! the version stays a read-only view of that signal. It deliberately shows
 //! the client build until a reported mismatch gives it a more useful helm
 //! value; a page never needs a loading placeholder to identify its bundle.
 
@@ -355,9 +355,15 @@ async fn settled_profile_focus(focus: FocusCoordinator, trusted_outside: bool) -
 const WORDMARK_SVG: &str = include_str!("../../../packaging/farhelm-desktop/wordmark-dark.svg");
 
 /// Render the sticky sidebar bar: the Farhelm wordmark at the window's top
-/// left, then the build identity.
+/// left, then the build identity and the helm-wide settings gear.
+/// The modal is a sibling so the sticky bar cannot cap its stacking order.
 #[component]
 pub(crate) fn AppBar() -> Element {
+    let mut settings_open = use_signal(|| false);
+    let close_settings = move |_| {
+        crate::settings::return_focus_to_gear();
+        settings_open.set(false);
+    };
     let skew = skew::HELM_BUILD_SKEW.read();
     // A reported stamp is text the helm sent, so it goes through the same
     // display boundary every relayed value does (`peer.rs`): invisible and
@@ -378,6 +384,18 @@ pub(crate) fn AppBar() -> Element {
                 title: "this client was built as farhelm {skew::CLIENT_BUILD}",
                 "{version}"
             }
+            button {
+                r#type: "button",
+                class: "btn btn-neutral app-settings-toggle",
+                aria_label: "settings",
+                title: "settings",
+                aria_haspopup: "dialog",
+                onclick: move |_| settings_open.set(true),
+                crate::icons::SettingsIcon {}
+            }
+        }
+        if settings_open() {
+            crate::settings::SettingsDialog { on_close: close_settings }
         }
     }
 }

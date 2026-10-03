@@ -159,6 +159,7 @@ mod rename;
 mod restart_with;
 mod rows;
 mod session_view;
+mod settings;
 mod skew;
 mod status;
 mod tabs;

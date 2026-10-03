@@ -723,6 +723,17 @@ samp {
   font-size: 12px;
 }
 
+/* The gear owns fixed space; a long version gives way before either icon.
+   It stays outside the macOS drag spacer and the bar retains one row. */
+.app-bar .app-settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 2px;
+}
+
 /* The count remains its own element for the committed-list contract. Count,
    compact choice, and the header actions describe the same list, so they
    share one compact heading rather than spending a row each. */
@@ -2222,7 +2233,8 @@ samp {
   overflow: auto;
   background: var(--scrim-dialog);
 }
-.host-settings-dialog {
+.host-settings-dialog,
+.app-settings-dialog {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2236,6 +2248,28 @@ samp {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-dialog);
 }
+.app-settings-dialog > .host-settings-help {
+  margin: 0;
+}
+.app-settings-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-0);
+}
+/* The hint belongs to the permanent answer, including when actions wrap. */
+.host-permanent-answer {
+  flex: 1 1 180px;
+  max-width: 260px;
+}
+.host-permanent-answer .host-settings-help {
+  margin: 6px 0 0;
+}
+.host-remove-actions,
+.add-host-confirm-actions {
+  align-items: flex-start;
+}
+
 .host-add-dialog {
   width: min(560px, 100%);
 }

@@ -699,7 +699,8 @@ pub(crate) fn PlanConfirmation(
 ///
 /// The helm supplies the text; this component owns only the shared button
 /// wording and tiering so the initial add dialog and a failed-add rerun ask
-/// the same question.
+/// the same question. The permanent answer points back to the app-wide settings
+/// gear, where its preference can be reversed.
 ///
 /// `busy` disables only the two answers that would submit. Cancel stays
 /// live: this renders inside a modal, and a modal must never hold the user
@@ -721,12 +722,18 @@ pub(crate) fn SetupPlanConfirmation(
                 onclick: move |_| on_confirm.call(false),
                 "yes"
             }
-            button {
-                r#type: "button",
-                class: "btn btn-primary btn-outline",
-                disabled: busy,
-                onclick: move |_| on_confirm.call(true),
-                "yes, and don't ask in the future"
+            div { class: "host-permanent-answer",
+                button {
+                    r#type: "button",
+                    class: "btn btn-primary btn-outline",
+                    aria_describedby: "host-setup-permanent-hint",
+                    disabled: busy,
+                    onclick: move |_| on_confirm.call(true),
+                    "yes, and don't ask in the future"
+                }
+                p { id: "host-setup-permanent-hint", class: "host-settings-help",
+                    "You can turn this back on with the gear at the top of the sidebar."
+                }
             }
             button {
                 r#type: "button",
