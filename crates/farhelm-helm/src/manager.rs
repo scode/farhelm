@@ -777,6 +777,14 @@ pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<Session
 /// `ConnectionManager::provision_locks`.
 type ProvisionLocks = HashMap<HostId, Arc<tokio::sync::Mutex<()>>>;
 
+/// The cache-write locks shared by every actor incarnation for a host.
+///
+/// Unlike provisioning locks, these entries are created only for registered
+/// hosts with actors and are removed when the host leaves the registry. The
+/// map keeps a worker replacement from handing out a fresh mutex while a
+/// handler still holds the previous lock across a host edit or cache write.
+type CacheLocks = HashMap<HostId, Arc<tokio::sync::Mutex<()>>>;
+
 /// A held per-host provisioning lock (`ConnectionManager::host_provision_lock`).
 ///
 /// Releasing it also drops the host's map entry when nothing else holds or
@@ -1015,7 +1023,9 @@ struct ActorHandle {
     /// which is what makes losing a slot arbitration free of side effects.
     start: Option<tokio::sync::oneshot::Sender<()>>,
     /// Serializes this host's cache WRITES — the actor's wholesale refresh
-    /// against a create's single-row seed.
+    /// against a create's single-row seed. This is the same Arc as the host's
+    /// entry in [`ConnectionManager::cache_locks`], so handle replacement
+    /// preserves exclusion with writers that already acquired the lock.
     ///
     /// The two are otherwise a lost-update race with a wide window: a
     /// refresh drains a host's whole list (a network round trip, possibly
@@ -1110,6 +1120,11 @@ pub struct ConnectionManager {
     /// exists, so a map that kept every requested id would grow with
     /// whatever ids an authenticated client chose to ask about.
     provision_locks: Arc<Mutex<ProvisionLocks>>,
+    /// Per-host cache-write locks shared by every actor incarnation. Keeping
+    /// these outside the actor handles preserves write serialization while a
+    /// dead connection worker is replaced. Spawning takes the actor-map mutex
+    /// before this map's mutex; never acquire them in the opposite order.
+    cache_locks: Mutex<CacheLocks>,
     /// Serializes [`Self::sync_registry`] end to end — the registry READ
     /// included, which is why it cannot be the actor-map mutex (that one is
     /// std, and is deliberately never held across an await).
@@ -1386,6 +1401,7 @@ impl ConnectionManager {
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
             provision_locks: Arc::new(Mutex::new(HashMap::new())),
+            cache_locks: Mutex::new(HashMap::new()),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         })
     }
@@ -1683,7 +1699,7 @@ impl ConnectionManager {
         // makes "reserve the slot, then release" a real ordering rather
         // than a hopeful one.
         let (gate_tx, gate_rx) = tokio::sync::oneshot::channel::<()>();
-        let cache_lock = Arc::new(tokio::sync::Mutex::new(()));
+        let cache_lock = self.cache_lock_entry(row.id);
         let seed_epoch = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let actor = HostActor {
             id: row.id,
@@ -2198,19 +2214,42 @@ impl ConnectionManager {
     /// host's session list. Provisioning runs use
     /// [`Self::host_provision_lock`] instead, which registry edits take first.
     ///
-    /// `None` for a host with no actor — nothing can be recording anything
-    /// for an id the map does not hold, so there is nothing to serialize
-    /// against. The guard is OWNED so a caller can hold it across the awaits
-    /// its own transaction needs.
+    /// `None` until a host has had an actor, or after its removal. A stopped
+    /// actor does not discard the lock: a later replacement must still wait
+    /// for existing writers. The guard is OWNED so a caller can hold it
+    /// across the awaits its own transaction needs.
     ///
     /// Safe to hold across [`Self::sync_registry`]: reconciling takes the
     /// reconcile lock and the actor map, never this one.
     pub async fn host_write_lock(&self, host: HostId) -> Option<tokio::sync::OwnedMutexGuard<()>> {
-        let cache_lock = {
-            let map = self.actors.lock().expect("actor map mutex poisoned");
-            Arc::clone(&map.actors.get(&host)?.cache_lock)
-        };
+        let cache_lock = self
+            .cache_locks
+            .lock()
+            .expect("cache lock map mutex poisoned")
+            .get(&host)
+            .cloned()?;
         Some(cache_lock.lock_owned().await)
+    }
+
+    /// Return the cache-write lock for a host, creating it on the first actor
+    /// incarnation and reusing it across every later replacement.
+    fn cache_lock_entry(&self, host: HostId) -> Arc<tokio::sync::Mutex<()>> {
+        self.cache_locks
+            .lock()
+            .expect("cache lock map mutex poisoned")
+            .entry(host)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    }
+
+    /// Forget a removed host's lock after `stop_actor` has serialized with
+    /// every possible replacement. Call only after the registry deletion
+    /// succeeded; stopping a still-registered actor must retain its lock.
+    pub(crate) fn forget_cache_lock(&self, host: HostId) {
+        self.cache_locks
+            .lock()
+            .expect("cache lock map mutex poisoned")
+            .remove(&host);
     }
 
     /// Hold this host's provisioning lock: a confirmed install or update
@@ -2923,7 +2962,8 @@ struct HostActor {
     /// [`Self::run`]'s stack and the logging happens several frames down.
     destination: Mutex<String>,
     /// Shared with the manager: held across every cache write so a refresh
-    /// and a create's seed cannot interleave. See [`ActorHandle::cache_lock`].
+    /// and a create's seed cannot interleave. See
+    /// [`ConnectionManager::cache_locks`].
     cache_lock: Arc<tokio::sync::Mutex<()>>,
     /// Shared with the manager: sampled before a drain and re-read under
     /// the lock, so a replacement built from a pre-seed snapshot is skipped
@@ -6945,6 +6985,67 @@ mod tests {
             .expect("the released provisioning lock is acquired");
     }
 
+    /// A cache-write lock remains shared when a host's connection actor is
+    /// replaced while the registry row still exists.
+    ///
+    /// Why: refreshes and session mutations use this lock to serialize cache
+    /// writes. If a respawn created a new mutex, the replacement's refresh
+    /// could write underneath a handler that still holds the old lock.
+    #[farhelm_testtrace::test]
+    async fn the_cache_write_lock_survives_actor_replacement() {
+        let fixture = fixture(
+            Cadence {
+                refresh: Duration::from_secs(3600),
+                ..Cadence::default()
+            },
+            |store, transport| async move {
+                let host = store
+                    .add_ssh_host("cache-lock.example", None, None)
+                    .await
+                    .unwrap();
+                transport.set_script(host, Script::default());
+            },
+        )
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        let run = fixture
+            .manager
+            .host_write_lock(host)
+            .await
+            .expect("the registered host has a cache-write lock");
+        assert!(
+            fixture.manager.stop_actor(host).await,
+            "test premise: the host had an actor"
+        );
+        fixture.manager.sync_registry().await.unwrap();
+        assert!(
+            fixture.manager.status(host).is_some(),
+            "test premise: reconciling respawned the host's actor"
+        );
+
+        {
+            let map = fixture.manager.actors.lock().unwrap();
+            assert!(
+                map.actors[&host].cache_lock.try_lock().is_err(),
+                "the replacement actor's own writers share the held lock"
+            );
+        }
+
+        let mut second = std::pin::pin!(fixture.manager.host_write_lock(host));
+        // `host_write_lock` is an async function, so poll its future directly
+        // to prove that a later caller waits on the pre-replacement guard.
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(
+            second.as_mut().poll(&mut cx).is_pending(),
+            "a replacement actor must wait for the existing cache writer"
+        );
+        drop(run);
+        tokio::time::timeout(Duration::from_secs(10), second)
+            .await
+            .expect("the released cache-write lock is acquired")
+            .expect("the replacement host still has a cache-write lock");
+    }
+
     /// Why: provisioning locks are taken before the store says whether the
     /// host exists, and the map used to keep an entry for every id ever
     /// requested, so an authenticated client could grow it without bound.
@@ -10059,6 +10160,7 @@ mod tests {
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
             provision_locks: Arc::new(Mutex::new(HashMap::new())),
+            cache_locks: Mutex::new(HashMap::new()),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         };
         let revision = manager.events().revision();

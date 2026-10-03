@@ -6473,4 +6473,6 @@
   `spawn_actor` and `host_write_lock` share one lock per host across actor replacement; test it the way the provisioning
   lock is tested. Note in the PR that the finding's text predates #1165 and #1167. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/triage-crash-replies-and-locks.md`.
+- Execution: complete — change `ntqlspozlulspqxstoszrpvkqumkvkor`, bookmark
+  `plan/triage-crash-replies-and-locks/04-cache-lock-respawn`, PR
+  [#1515](https://github.com/scode/farhelm/pull/1515/changes).

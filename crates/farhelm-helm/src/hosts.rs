@@ -631,6 +631,7 @@ async fn add_host_owned(state: Arc<AppState>, spec: HostSpec) -> axum::response:
                 // the row is gone. Provisioning's rollback stops its actor
                 // for the same reason.
                 state.manager.stop_actor(host).await;
+                state.manager.forget_cache_lock(host);
                 http_error(reconcile.context(
                     "the host was not registered: its actor could not be started, so the registry \
                      entry was rolled back",
@@ -855,6 +856,7 @@ async fn remove_host_owned(state: Arc<AppState>, host: HostId) -> axum::response
     }
     state.provisioning.forget_host(host).await;
     let stopped = state.manager.stop_actor(host).await;
+    state.manager.forget_cache_lock(host);
     drop(serialized);
     drop(provisioning);
     tracing::info!(
@@ -1511,7 +1513,8 @@ mod tests {
     ///
     /// The cache half is the part worth asserting: a removal that dropped
     /// the registry row but left cache rows behind would leave sessions in
-    /// the merged list with no host to name.
+    /// the merged list with no host to name. The manager's write-lock entry
+    /// must go too: repeated add/remove cycles must not retain one per old id.
     #[farhelm_testtrace::test]
     async fn removing_a_host_forgets_it_and_its_cached_sessions() {
         let harness = lone_local_helm().await;
@@ -1541,8 +1544,16 @@ mod tests {
         let (_, sessions, _) = call(&harness, "GET", "/api/sessions", None).await;
         assert_eq!(sessions["total"], 1, "the host's session is listed first");
 
+        assert!(
+            harness.manager.host_write_lock(host).await.is_some(),
+            "test premise: the registered host has a cache-write lock"
+        );
         let (status, _, text) = call(&harness, "DELETE", &format!("/api/hosts/{host}"), None).await;
         assert_eq!(status, StatusCode::OK, "{text}");
+        assert!(
+            harness.manager.host_write_lock(host).await.is_none(),
+            "removal forgets the host's cache-write lock without a later reconcile"
+        );
 
         let (_, hosts, _) = call(&harness, "GET", "/api/hosts", None).await;
         assert_eq!(
