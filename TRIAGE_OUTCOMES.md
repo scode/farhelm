@@ -6096,7 +6096,7 @@
 - Completion criteria: the TODO.md entry "Require a systemd user manager on Linux, with no fallback" records the
   decision and names this case (done during triage). Remove the feedback file and its index entry, with no code or spec
   change.
-- Execution: `pending`. The TODO.md change was made during triage.
+- Execution: planned in `plans/queue/triage-crash-replies-and-locks.md`.
 
 ## create-rollback-orphans-unconfirmed-scope.md
 
@@ -6117,7 +6117,7 @@
   TODO.md entry asks the rollback to keep the session when the scope kill is unconfirmed.
 - Completion criteria: the TODO.md entry names this case and that the rollback must fail visibly and keep the session
   (done during triage). Remove the feedback file and its index entry, with no code or spec change.
-- Execution: `pending`. The TODO.md change was made during triage.
+- Execution: planned in `plans/queue/triage-crash-replies-and-locks.md`.
 
 ## desktop-auth-ready-with-stale-webview-credential.md
 
@@ -6137,7 +6137,7 @@
   rotation or evicted by the client cap, and drop the desktop re-sign-in requirement; the code matches, and no ordinary
   operation leaves the desktop window running with a credential the helm has revoked. Keep or remove the existing
   recovery machinery as the simplest correct design requires. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-signin-recovery.md`.
 
 ## desktop-reauth-failure-loses-action-outcomes.md
 
@@ -6153,7 +6153,7 @@
 - Completion criteria: as for `desktop-auth-ready-with-stale-webview-credential.md`; once desktop re-authentication no
   longer occurs in ordinary operation, a pending desktop action cannot be unmounted by it. Remove the feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-signin-recovery.md`.
 
 ## dropped-create-skips-bookkeeping.md
 
@@ -6220,7 +6220,7 @@
   enforces waiting with one where the slots are saturated, the request is refused, and terminal input to another session
   still reaches its pane. The four admission items share this change: whichever executes first introduces it, and the
   others apply it to their call site. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-busy-host-refusal.md`.
 
 ## restart-admission-blocks-terminal-reader.md
 
@@ -6234,7 +6234,7 @@
 - Completion criteria: Restart uses the shared non-waiting admission step described under
   `stop-admission-blocks-terminal-reader.md`, with a saturated-restart test showing the refusal and that input to
   another session progresses. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-busy-host-refusal.md`.
 
 ## rename-admission-blocks-terminal-reader.md
 
@@ -6246,7 +6246,7 @@
 - Completion criteria: Rename uses the shared non-waiting admission step, keeping its single-permit handoff, with a
   saturated-rename test showing the refusal and that input to another session progresses. Remove the feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-busy-host-refusal.md`.
 
 ## list-admission-blocks-terminal-reader.md
 
@@ -6264,7 +6264,7 @@
   bound, documented with the reason, caps concurrent list work. Test: all management slots held by controlled lifecycle
   operations, then a list request and terminal input on the same connection both progress. Remove the feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-busy-host-refusal.md`.
 
 ## checkout-reconciliation-blocks-terminal-reader.md
 
@@ -6296,7 +6296,7 @@
   lines of: in the browser, an action still pending when the token prompt opens may lose its report; the helm still
   carries it out, and the list shows the result after sign-in. The desktop guarantee stays as specified (see the desktop
   credential decisions above). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-signin-recovery.md`.
 
 ## list-ingress-id-validation-gap.md
 
@@ -6313,7 +6313,7 @@
   refused whole, keeping the previous cache, as oversized and duplicate ids already are. On the UI side, correct the
   encoder's doc and test comment only; the helm check is the boundary. Fix `created_session_from`'s doc. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-boundary-checks.md`.
 
 ## profile-body-accepts-unknown-fields.md
 
@@ -6326,7 +6326,7 @@
 - Completion criteria: `#[serde(deny_unknown_fields)]` on `ProfileSpec`, with `resume_template` still optional, and a
   REST test showing a misspelled key is refused and the stored profile is unchanged. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-boundary-checks.md`.
 
 ## provision-lock-map-grows-per-requested-id.md
 
@@ -6340,7 +6340,7 @@
   under the map's mutex), bounding the map to locks in use without a store read and without changing callers. Correct
   the doc comment and add a test that requests many unregistered ids and checks the map's size. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-boundary-checks.md`.
 
 ## restart-with-skips-create-validation.md
 
@@ -6357,7 +6357,7 @@
   `InvalidRequest`, plus create's template element cap. Test that a bundle with `{conversation}` as the template's
   program is refused, the row is unchanged, and a fresh supervisor still starts. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-boundary-checks.md`.
 
 ## escape-token-clamp-too-short.md
 
@@ -6370,7 +6370,7 @@
 - Completion criteria: look back far enough for the longest token and back off to the nearest `<` (nearest matters: a
   complete token followed by a lone `<` must not match the earlier token), fix both doc comments, and test a cut inside
   a `<U+E00xx>` token. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-boundary-checks.md`.
 
 ## opencode-bare-model-rejected.md
 
@@ -6396,7 +6396,7 @@
   unselected harness, and the existing test asserting a typed Codex-to-Claude switch is reversed. Tests cover both
   spellings of the overlapping names under OpenCode on the server and on Enter. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-opencode-model-names.md`.
 
 ## opencode-bare-model-switches-harness.md
 
@@ -6410,7 +6410,7 @@
   the no-switch rule; the two halves cannot be fixed separately.
 - Completion criteria: that item's change lands. Remove the feedback file and its index entry in the same PR as that
   change, or in its own bookkeeping PR immediately after it.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-opencode-model-names.md`.
 
 ## stop-restart-panic-no-reply.md
 
@@ -6423,7 +6423,7 @@
   Delete) and consistent with the helm's own rule that a panicking handler still answers.
 - Completion criteria: the Stop and Restart waiters send an `Internal` error on a panicked join, Restart's saying the
   outcome is unknown, with a test for each. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-crash-replies-and-locks.md`.
 
 ## host-write-lock-split-on-actor-respawn.md
 
@@ -6442,4 +6442,4 @@
   `spawn_actor` and `host_write_lock` share one lock per host across actor replacement; test it the way the provisioning
   lock is tested. Note in the PR that the finding's text predates #1165 and #1167. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-crash-replies-and-locks.md`.
