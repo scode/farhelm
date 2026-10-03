@@ -191,8 +191,9 @@ OpenCode is a structured harness, not a built-in profile. Its model is optional 
 when omitted. For an explicit choice, Farhelm suggests `opencode/glm-5.3-flash`, `opencode/grok-4.5`,
 `opencode/grok-4.6`, `opencode/glm-5.3`, `opencode/gpt-6-luna`, `opencode/gpt-5.6-terra`, `opencode/gpt-6.1-sol`, and
 `opencode/gpt-6-astra`. The custom-model field also accepts a bare Zen model name or an `opencode/<model>` value. A bare
-value is passed as `opencode/<model>`; another provider prefix is refused. OpenCode has no offered effort choices. Its
-default permission mode adds no flag, and YOLO uses OpenCode's `--auto`, which auto-approves only permissions not
+value is passed as `opencode/<model>`, and either spelling of a suggested model is that OpenCode model even where
+another harness offers the same bare name; another provider prefix is refused. OpenCode has no offered effort choices.
+Its default permission mode adds no flag, and YOLO uses OpenCode's `--auto`, which auto-approves only permissions not
 explicitly denied. OpenCode uses generic activity status with no hooks, conversation capture/resume, or waiting-state
 recognition.
 
@@ -388,10 +389,13 @@ checkout; the agent choice is independent of that destination:
   Absent optional choices mean the selected harness's defaults and omit their flags, except an omitted Pi permission
   means its mandatory YOLO mode. Model selection is optional for every harness; OpenCode, Cursor, and Grok offer no
   effort choice, and Grok accepts no model choice. The helm owns the released model catalog and validates every
-  structured choice, so the browser never turns a model identifier into an argv fragment. A known model identifies its
-  owning harness; a custom model needs an explicit harness. A shared known model retains a selected owning harness,
-  while an unselected ambiguous id asks for one. Replacing a harness clears only choices that are incompatible with it.
-  An invalid combination cannot launch. New normally preselects no harness or model. The permissions mode remembers the
+  structured choice, so the browser never turns a model identifier into an argv fragment. Typing a model never changes a
+  selected harness: the typed id is read as that harness spells it (for OpenCode, a bare Zen name means
+  `opencode/<model>`), a model only other harnesses offer is refused with a message naming them, and choosing another
+  harness's model from the full model list switches the harness on purpose. With no harness selected yet, a typed known
+  model fills in its owning harness (a bare `gpt-6-luna` picks Codex); a custom model needs an explicit harness, and an
+  id several harnesses offer asks for one. Replacing a harness clears only choices that are incompatible with it. An
+  invalid combination cannot launch. New normally preselects no harness or model. The permissions mode remembers the
   last successful structured launch, helm-wide across every client; an explicit workspace-trust choice on Codex, Muse,
   or Pi is remembered separately after a successful user launch. `trust:true` and `trust:false` are single search
   actions on those harnesses. Codex true and false set that launch's exact working directory to `trusted` and

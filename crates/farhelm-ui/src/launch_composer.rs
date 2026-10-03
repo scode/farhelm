@@ -305,15 +305,35 @@ pub(crate) enum ModelOption {
 pub(crate) enum ModelEnterTarget {
     Nothing,
     Option(ModelOption),
-    Custom { id: String, harness: LaunchHarness },
+    Custom {
+        id: String,
+        harness: LaunchHarness,
+    },
     NeedsHarness(String),
+    /// The typed id is a catalog model of other harnesses only, while a
+    /// harness is selected. Typing never switches a selected harness, and
+    /// keeping the id under this one would be refused by the helm, so the
+    /// renderer reports which harnesses offer it and changes nothing.
+    OwnedElsewhere {
+        id: String,
+        owners: Vec<LaunchHarness>,
+    },
 }
 
 /// Resolve Enter against the current options and catalog.
 ///
 /// Arrow navigation takes precedence over text. Without navigation, an empty
-/// draft does nothing, an exact known id carries its catalog owner, and only
-/// an unknown id depends on an explicitly selected harness.
+/// draft does nothing. With a harness selected, typing never switches it
+/// (an explicit pick of another harness's row in "Show all" still does):
+/// the draft is looked up in that harness's own catalog spelling
+/// ([`LaunchHarness::catalog_model_id`]), so a bare OpenCode name such as
+/// `gpt-6-luna` is OpenCode's model rather than Codex's. A known id typed
+/// exactly is canonicalized to its catalog row; a known id typed in the
+/// harness's other spelling keeps the typed text; an id only other
+/// harnesses offer is [`ModelEnterTarget::OwnedElsewhere`]; anything else
+/// is a custom id. With no harness selected, an exact known id carries its
+/// catalog owner (a bare `gpt-6-luna` picks Codex, the primary harness), and
+/// an unknown or ambiguous one asks for a harness.
 pub(crate) fn model_enter_target(
     options: &[ModelOption],
     active: Option<usize>,
@@ -337,34 +357,63 @@ pub(crate) fn model_enter_target(
     if draft.trim().is_empty() {
         return ModelEnterTarget::Nothing;
     }
+    if let Some(current) = harness {
+        let catalog_id = current.catalog_model_id(draft);
+        let owners = catalog
+            .iter()
+            .filter(|model| model.id.eq_ignore_ascii_case(&catalog_id))
+            .collect::<Vec<_>>();
+        return match owners.iter().find(|model| model.harness == current) {
+            // The harness's other spelling of a known model, typed exactly (a
+            // bare OpenCode name): the typed text is the selection, as for a
+            // custom id, and every catalog check reads it through the same
+            // spelling.
+            Some(known) if !known.id.eq_ignore_ascii_case(draft) && known.id == *catalog_id => {
+                ModelEnterTarget::Custom {
+                    id: draft.to_string(),
+                    harness: current,
+                }
+            }
+            // Anything else that matched is canonicalized to the catalog row,
+            // case included, as every harness's exact ids are: the helm
+            // compares spellings exactly, so `GPT-6-LUNA` under OpenCode
+            // would otherwise launch as an unknown `opencode/GPT-6-LUNA`.
+            Some(known) => ModelEnterTarget::Option(ModelOption::Model {
+                id: known.id.clone(),
+                harness: current,
+            }),
+            None if !owners.is_empty() => ModelEnterTarget::OwnedElsewhere {
+                id: draft.to_string(),
+                owners: owners.iter().map(|model| model.harness).collect(),
+            },
+            None => ModelEnterTarget::Custom {
+                id: draft.to_string(),
+                harness: current,
+            },
+        };
+    }
     let owners = catalog
         .iter()
         .filter(|model| model.id.eq_ignore_ascii_case(draft))
         .collect::<Vec<_>>();
-    if let Some(current) =
-        harness.filter(|current| owners.iter().any(|model| model.harness == *current))
-    {
-        return ModelEnterTarget::Option(ModelOption::Model {
-            id: owners[0].id.clone(),
-            harness: current,
-        });
-    }
     if owners.len() == 1 {
         return ModelEnterTarget::Option(ModelOption::Model {
             id: owners[0].id.clone(),
             harness: owners[0].harness,
         });
     }
-    if !owners.is_empty() {
-        return ModelEnterTarget::NeedsHarness(draft.to_string());
-    }
-    match harness {
-        Some(harness) => ModelEnterTarget::Custom {
-            id: draft.to_string(),
-            harness,
-        },
-        None => ModelEnterTarget::NeedsHarness(draft.to_string()),
-    }
+    ModelEnterTarget::NeedsHarness(draft.to_string())
+}
+
+/// The inline error for [`ModelEnterTarget::OwnedElsewhere`]: which harness
+/// offers the typed model, so the person can pick it there on purpose.
+pub(crate) fn owned_elsewhere_message(id: &str, owners: &[LaunchHarness]) -> String {
+    let labels = owners
+        .iter()
+        .map(|owner| harness_label(*owner))
+        .collect::<Vec<_>>()
+        .join(" or ");
+    format!("{id} is offered by {labels}; choose {labels} to use it")
 }
 
 /// Return the bounded, filtered model choices for the launch combobox.
@@ -752,8 +801,13 @@ pub(crate) fn search_results(
             if harness.is_some_and(|selected| selected != launch.selection.harness) {
                 continue;
             }
+            // A remembered id that is a catalog model of its own harness,
+            // in either spelling, is already listed above.
+            let catalog_id = launch.selection.harness.catalog_model_id(id);
             if (!query.is_empty() && !id.to_ascii_lowercase().contains(&folded_query))
-                || catalog.iter().any(|model| model.id == *id)
+                || catalog.iter().any(|model| {
+                    model.id == catalog_id && model.harness == launch.selection.harness
+                })
                 || results.iter().any(|result| {
                     matches!(
                         result,
@@ -1161,10 +1215,13 @@ pub(crate) fn selection_is_compatible(
     {
         return false;
     }
+    // Read through the harness's catalog spelling, as the helm does: a bare
+    // OpenCode name is OpenCode's model, not the same-named Codex entry.
     let known_models = selection.model.as_ref().map(|model| {
+        let catalog_id = selection.harness.catalog_model_id(model);
         catalog
             .iter()
-            .filter(|candidate| candidate.id == *model)
+            .filter(|candidate| candidate.id == catalog_id)
             .collect::<Vec<_>>()
     });
     if known_models.as_ref().is_some_and(|models| {
@@ -1235,6 +1292,27 @@ pub(crate) fn selection_fits_catalog(
     }
 }
 
+/// The harness that owns a stored selection's model as a custom id: its own
+/// harness when the model is not that harness's catalog model in either
+/// spelling ([`LaunchHarness::catalog_model_id`]), `None` for a catalog
+/// model or no model.
+///
+/// Applying a recent setup records this owner for the later harness-switch
+/// reconciliation. The new-session dialog reaches a recent both by pointer
+/// and through search, and both paths must record the same owner, or the
+/// same recent would reconcile differently depending on how it was chosen.
+pub(crate) fn custom_model_owner(
+    selection: &LaunchSelection,
+    catalog: &[LaunchCatalogModel],
+) -> Option<LaunchHarness> {
+    let model = selection.model.as_deref()?;
+    let catalog_id = selection.harness.catalog_model_id(model);
+    (!catalog
+        .iter()
+        .any(|candidate| candidate.harness == selection.harness && candidate.id == catalog_id))
+    .then_some(selection.harness)
+}
+
 /// [`reconcile_harness_selection`] against what a dialog knows about the
 /// catalog, `None` while its read is pending or after it failed.
 ///
@@ -1281,6 +1359,7 @@ pub(crate) fn reconcile_harness_selection(
     harness: LaunchHarness,
     catalog: &[LaunchCatalogModel],
 ) -> (LaunchSelection, Option<LaunchHarness>) {
+    let source = selection.harness;
     selection.harness = harness;
     if !harness.offers_model() {
         // Grok exposes neither field. Clear retained values at the harness
@@ -1291,10 +1370,22 @@ pub(crate) fn reconcile_harness_selection(
         selection.permissions = normalized_permissions(harness, selection.permissions);
         return (selection, None);
     }
+    // Ownership is read in both harnesses' catalog spellings
+    // (`LaunchHarness::catalog_model_id`). The destination's spelling keeps
+    // a bare `gpt-6-luna` moved to OpenCode as OpenCode's model; the
+    // source's spelling still recognizes a model the source harness owns,
+    // so Claude's `claude-fable-5` moved to OpenCode (where it reads as an
+    // unknown `opencode/claude-fable-5`) is cleared rather than kept as a
+    // custom OpenCode id.
     let known_owners = selection.model.as_ref().map(|model| {
+        let in_destination = harness.catalog_model_id(model);
+        let in_source = source.catalog_model_id(model);
         catalog
             .iter()
-            .filter(|candidate| candidate.id == *model)
+            .filter(|candidate| {
+                candidate.id == in_destination
+                    || (candidate.harness == source && candidate.id == in_source)
+            })
             .map(|candidate| candidate.harness)
             .collect::<Vec<_>>()
     });
@@ -1380,7 +1471,7 @@ pub(crate) fn compatible_efforts(
     model: Option<&str>,
     catalog: &[LaunchCatalogModel],
 ) -> Vec<LaunchEffort> {
-    if let Some(model) = model
+    if let Some(model) = model.map(|model| harness.catalog_model_id(model))
         && let Some(entry) = catalog
             .iter()
             .find(|entry| entry.harness == harness && entry.id == model)
@@ -2195,8 +2286,10 @@ mod tests {
 
     /// Enter must apply only an explicitly navigated row or the draft's own
     /// meaning, because defaulting to row zero can erase a valid selection.
-    /// Exact catalog ids canonicalize and carry ownership, while unknown ids
-    /// remain byte-preserving custom drafts that require a harness.
+    /// Exact catalog ids canonicalize and carry ownership, unknown ids remain
+    /// byte-preserving custom drafts that require a harness, and a typed id
+    /// never switches a selected harness (triage decision, 2026-10-02): only
+    /// with no harness selected does a known id fill in its owner.
     #[test]
     fn model_enter_target_distinguishes_navigation_and_draft_semantics() {
         let catalog = vec![
@@ -2240,11 +2333,19 @@ mod tests {
                 &catalog,
                 Some(LaunchHarness::Codex),
             ),
+            ModelEnterTarget::OwnedElsewhere {
+                id: "CLAUDE-FAST".into(),
+                owners: vec![LaunchHarness::Claude],
+            },
+            "typing another harness's model must not switch the selected harness"
+        );
+        assert_eq!(
+            model_enter_target(&options, None, "CLAUDE-FAST", &catalog, None),
             ModelEnterTarget::Option(ModelOption::Model {
                 id: "claude-fast".into(),
                 harness: LaunchHarness::Claude,
             }),
-            "a known id must use its canonical catalog owner"
+            "with no harness selected, a known id fills in its canonical catalog owner"
         );
         assert_eq!(
             model_enter_target(
@@ -2685,6 +2786,160 @@ mod tests {
                 id: "x-ai/grok-4.6".into(),
                 harness: LaunchHarness::Pi
             })
+        );
+    }
+
+    /// Why: OpenCode accepts bare Zen names, but some of them (`gpt-6-luna`)
+    /// are also Codex catalog ids, and comparing the typed text made Enter
+    /// switch an OpenCode draft to Codex and the compatibility check refuse
+    /// the OpenCode selection. Spec: under OpenCode both spellings are
+    /// OpenCode's model on Enter (the exact catalog spelling canonicalized,
+    /// the bare one kept as typed), both are compatible with their effort
+    /// offering read from the OpenCode entry, moving a bare name to OpenCode
+    /// keeps it, and with no harness selected the bare name still picks
+    /// Codex, the primary harness.
+    #[test]
+    fn bare_opencode_names_stay_opencode_models() {
+        let catalog = vec![
+            LaunchCatalogModel {
+                id: "gpt-6-luna".into(),
+                harness: LaunchHarness::Codex,
+                efforts: vec![LaunchEffort::High],
+            },
+            // Synthetic efforts (the real OpenCode entries offer none): two
+            // different lists make the per-model lookup distinguishable from
+            // the harness-wide union a raw-id lookup would fall back to.
+            LaunchCatalogModel {
+                id: "opencode/gpt-6-luna".into(),
+                harness: LaunchHarness::OpenCode,
+                efforts: vec![LaunchEffort::High],
+            },
+            LaunchCatalogModel {
+                id: "opencode/glm-5.3".into(),
+                harness: LaunchHarness::OpenCode,
+                efforts: vec![LaunchEffort::Low],
+            },
+            LaunchCatalogModel {
+                id: "claude-fable-5".into(),
+                harness: LaunchHarness::Claude,
+                efforts: vec![LaunchEffort::High],
+            },
+        ];
+        let opencode = Some(LaunchHarness::OpenCode);
+        assert_eq!(
+            model_enter_target(&[], None, "gpt-6-luna", &catalog, opencode),
+            ModelEnterTarget::Custom {
+                id: "gpt-6-luna".into(),
+                harness: LaunchHarness::OpenCode,
+            },
+            "the bare spelling is OpenCode's model and keeps the typed text"
+        );
+        assert_eq!(
+            model_enter_target(&[], None, "OpenCode/GPT-6-Luna", &catalog, opencode),
+            ModelEnterTarget::Option(ModelOption::Model {
+                id: "opencode/gpt-6-luna".into(),
+                harness: LaunchHarness::OpenCode,
+            }),
+            "the catalog spelling canonicalizes to its row"
+        );
+        assert_eq!(
+            model_enter_target(&[], None, "gpt-6-luna", &catalog, None),
+            ModelEnterTarget::Option(ModelOption::Model {
+                id: "gpt-6-luna".into(),
+                harness: LaunchHarness::Codex,
+            }),
+            "with no harness selected the bare name picks Codex"
+        );
+        assert_eq!(
+            model_enter_target(
+                &[],
+                None,
+                "opencode/gpt-6-luna",
+                &catalog,
+                Some(LaunchHarness::Codex)
+            ),
+            ModelEnterTarget::OwnedElsewhere {
+                id: "opencode/gpt-6-luna".into(),
+                owners: vec![LaunchHarness::OpenCode],
+            },
+            "OpenCode's qualified id does not switch a Codex draft"
+        );
+        assert_eq!(
+            owned_elsewhere_message("opencode/gpt-6-luna", &[LaunchHarness::OpenCode]),
+            "opencode/gpt-6-luna is offered by OpenCode; choose OpenCode to use it"
+        );
+
+        for typed in ["gpt-6-luna", "opencode/gpt-6-luna"] {
+            let selection = LaunchSelection {
+                harness: LaunchHarness::OpenCode,
+                model: Some(typed.into()),
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+            };
+            assert!(selection_is_compatible(&selection, &catalog), "{typed}");
+            assert_eq!(
+                compatible_efforts(LaunchHarness::OpenCode, Some(typed), &catalog),
+                vec![LaunchEffort::High],
+                "{typed} reads its own entry, not OpenCode's union [Low, High]"
+            );
+        }
+        assert_eq!(
+            model_enter_target(&[], None, "GPT-6-LUNA", &catalog, opencode),
+            ModelEnterTarget::Option(ModelOption::Model {
+                id: "opencode/gpt-6-luna".into(),
+                harness: LaunchHarness::OpenCode,
+            }),
+            "a bare name in another case canonicalizes, as exact ids do"
+        );
+        let moved = reconcile_harness_selection(
+            LaunchSelection {
+                harness: LaunchHarness::Codex,
+                model: Some("gpt-6-luna".into()),
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+            },
+            None,
+            LaunchHarness::OpenCode,
+            &catalog,
+        );
+        assert_eq!(moved.0.model.as_deref(), Some("gpt-6-luna"));
+        assert_eq!(moved.1, Some(LaunchHarness::OpenCode));
+
+        // A model the source harness owns is not kept as a custom id of the
+        // destination merely because the destination's spelling is unknown.
+        let from_claude = reconcile_harness_selection(
+            LaunchSelection {
+                harness: LaunchHarness::Claude,
+                model: Some("claude-fable-5".into()),
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+            },
+            None,
+            LaunchHarness::OpenCode,
+            &catalog,
+        );
+        assert_eq!(from_claude.0.model, None, "Claude's model is cleared");
+        let bare_glm = LaunchSelection {
+            harness: LaunchHarness::OpenCode,
+            model: Some("glm-5.3".into()),
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        };
+        assert_eq!(
+            custom_model_owner(&bare_glm, &catalog),
+            None,
+            "a bare OpenCode catalog name is a catalog model, not a custom id"
+        );
+        assert_eq!(
+            reconcile_harness_selection(bare_glm, None, LaunchHarness::Codex, &catalog)
+                .0
+                .model,
+            None,
+            "OpenCode's bare catalog model is cleared on a move to Codex"
         );
     }
 

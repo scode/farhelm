@@ -6374,17 +6374,17 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await form.getByRole("button", { name: "reset choices", exact: true }).click();
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await expect(status).toHaveCount(0);
-  // A typed id that names a KNOWN model is not a custom id: it identifies
-  // its owner (SPEC.md), so Enter switches the harness to Muse rather than
-  // leaving an incompatible Codex draft that could never launch. Nothing was
-  // cleared by that switch, so no reset notice may appear.
+  // A typed id that names another harness's KNOWN model never switches the
+  // selected harness (triage decision, 2026-10-02): Enter refuses it with the
+  // owner named and leaves the Codex draft as it was. Nothing was cleared,
+  // so no reset notice may appear either.
   await custom.fill("fixture-muse-owned");
   await custom.press("Enter");
-  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(custom).toHaveValue("fixture-muse-owned");
-  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator("button[type=submit]"), "a known model carried to its owner harness is launchable").toBeEnabled();
-  await expect(status, "an absent effort must not invent an effort-reset notice when the harness follows a known model").toHaveCount(0);
+  await expect(form.locator(".launch-composer-choice-error")).toHaveText(
+    "fixture-muse-owned is offered by Muse; choose Muse to use it",
+  );
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(status, "a refused model must not invent a reset notice").toHaveCount(0);
 
   await refill();
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true }).click();
@@ -6410,7 +6410,8 @@ test("composer reset notices follow every restored-choice transition", async ({ 
  * A model query must narrow the selected harness's offered vocabulary without
  * making selection depend on a pointer. Arrow navigation, rather than typing,
  * makes the highlighted row active; without navigation, Enter must preserve an
- * empty selection draft or apply the canonical owner of an exact catalog id.
+ * empty selection draft, canonicalize an exact id of the selected harness, and
+ * refuse (never switch to) another harness's id.
  */
 test("composer model combobox filters the chosen harness's catalog and applies with Enter", async ({ page, request }) => {
   await installComposerChoices(page, request, [], [
@@ -6447,10 +6448,22 @@ test("composer model combobox filters the chosen harness's catalog and applies w
   await expect(form.locator("#launch-composer-model-results")).toHaveCount(0);
   await expect(model, "an empty draft must not clear the chosen model").toHaveValue("codex-alpha");
 
+  // Typing another harness's exact id never switches the selected harness
+  // (triage decision, 2026-10-02): it is refused with the owner named, and
+  // the chosen model stays.
   await model.fill("CLAUDE-ALPHA");
   await model.press("Enter");
-  await expect(model).toHaveValue("claude-alpha");
-  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-choice-error")).toHaveText(
+    "CLAUDE-ALPHA is offered by Claude; choose Claude to use it",
+  );
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-summary")).toContainText("model: codex-alpha");
+
+  // With the harness's own id in any case, Enter canonicalizes to the row.
+  await model.fill("CODEX-BETA");
+  await model.press("Enter");
+  await expect(model).toHaveValue("codex-beta");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
 });
 
 /**

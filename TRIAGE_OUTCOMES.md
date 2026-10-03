@@ -6410,7 +6410,8 @@
   unselected harness, and the existing test asserting a typed Codex-to-Claude switch is reversed. Tests cover both
   spellings of the overlapping names under OpenCode on the server and on Enter. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/triage-opencode-model-names.md`.
+- Execution: complete: change `rqqozxulsylw`, bookmark `plan/triage-opencode-model-names/01-bare-model-names`, PR
+  https://github.com/scode/farhelm/pull/1484.
 
 ## opencode-bare-model-switches-harness.md
 

@@ -9,6 +9,8 @@
 //! and history can describe what the user chose without attempting to parse a
 //! command line back into a structured launch.
 
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 
 crate::enum_with_all! {
@@ -137,6 +139,37 @@ impl LaunchHarness {
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode => true,
             LaunchHarness::Grok => false,
+        }
+    }
+
+    /// The release catalog's spelling of a model typed for this harness: the
+    /// form every catalog lookup (ownership, effort offering) must compare,
+    /// while the selection keeps the text the user typed.
+    ///
+    /// OpenCode accepts a bare Zen model name as well as its `opencode/`
+    /// spelling (SPEC.md), but its catalog entries are listed only under the
+    /// provider-qualified form. Several bare Zen names (`gpt-6-luna`, for
+    /// one) are also catalog entries of another harness, so comparing the
+    /// typed text read an OpenCode launch of `gpt-6-luna` as a Codex model:
+    /// the helm refused it and the browser switched the harness to Codex. A
+    /// value that already names a provider is returned unchanged; whether
+    /// that provider is allowed is the helm's argv compiler's decision, not
+    /// this spelling's. Every other harness's catalog ids are exactly what
+    /// the user types.
+    pub fn catalog_model_id(self, model: &str) -> Cow<'_, str> {
+        match self {
+            LaunchHarness::OpenCode if !model.contains('/') => {
+                Cow::Owned(format!("opencode/{model}"))
+            }
+            LaunchHarness::OpenCode
+            | LaunchHarness::Cursor
+            | LaunchHarness::Codex
+            | LaunchHarness::Claude
+            | LaunchHarness::Muse
+            | LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::Omp
+            | LaunchHarness::Grok => Cow::Borrowed(model),
         }
     }
 
