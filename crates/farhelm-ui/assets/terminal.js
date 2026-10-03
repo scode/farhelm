@@ -2544,6 +2544,86 @@
     banner.style.display = "block";
   }
 
+  /**
+   * Whether the browser's own drop handling is wanted for this drag: text
+   * (no files) over a text field or an editable region, where dropping text
+   * inserts it. A FILE dragged over a text field is not: some engines open a
+   * file dropped on a text input exactly as they would anywhere else.
+   */
+  function browserHandlesDrop(ev) {
+    const types = ev.dataTransfer && ev.dataTransfer.types ? Array.from(ev.dataTransfer.types) : [];
+    if (types.includes("Files")) return false;
+    const target = ev.target;
+    return Boolean(
+      target &&
+        typeof target.closest === "function" &&
+        target.closest('input, textarea, [contenteditable=""], [contenteditable="true"]'),
+    );
+  }
+
+  /** The terminal pane a drag event is over, if any. */
+  function dropPane(ev) {
+    return ev.target && typeof ev.target.closest === "function"
+      ? ev.target.closest(".terminal-pane")
+      : null;
+  }
+
+  /**
+   * Remove the page-wide guard's "not connected" refusal from one pane's
+   * status line, called when that pane's terminal is revealed: the refusal
+   * describes a terminal that was not taking drops, and left in place it
+   * would sit on a working terminal. Lines a terminal painted itself are
+   * left alone.
+   */
+  function clearDropRefusals(statusId) {
+    const node = document.getElementById(statusId);
+    if (!node) return;
+    for (const line of node.querySelectorAll(".drop-refusal")) line.remove();
+    if (!node.childElementCount) node.style.display = "";
+  }
+
+  // The page-wide drop guard. A live terminal handles its own drops (see
+  // `installAttachments`), but its element is hidden while it catches up or
+  // reconnects, a pane may have no terminal at all, and a drop can land
+  // anywhere else on the page. Nothing cancelled the browser's default
+  // there, and a web page's default for a dropped file is to navigate to
+  // it: the app, every attached terminal and every upload in flight went
+  // with it. Bubble phase, after the terminal's own capture-phase handler,
+  // so a drop a live terminal accepted (and cancelled) is left alone.
+  // Installed once per page; this file runs once.
+  // Over a terminal pane the drop is ALLOWED ("copy"), or the engine would
+  // never deliver it and the pane could not say why nothing was attached;
+  // anywhere else it is refused ("none"), which also cancels the drag
+  // without a drop event at all.
+  document.addEventListener("dragover", (ev) => {
+    if (ev.defaultPrevented || browserHandlesDrop(ev)) return;
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = dropPane(ev) ? "copy" : "none";
+  });
+  document.addEventListener("drop", (ev) => {
+    if (ev.defaultPrevented || browserHandlesDrop(ev)) return;
+    ev.preventDefault();
+    // A drop on a terminal pane that no live terminal took gets the same
+    // answer a disconnected terminal gives (SPEC.md "Attachments": a drop
+    // is never silently lost). The text comes from Rust on the panes
+    // container, so there is one copy of it. It is added beside whatever the
+    // terminal already shows there (an upload's outcome, say), replacing
+    // only an earlier refusal, and it goes when the pane's terminal is
+    // revealed (`clearDropRefusals`) or paints its own status. A pane past
+    // the mounted-tab limit has a status line for this alone.
+    const pane = dropPane(ev);
+    const container = pane ? pane.closest(".terminal-panes") : null;
+    const status = pane ? pane.querySelector(".attach-status") : null;
+    const refusal = container ? container.dataset.dropRefusal : "";
+    if (!status || !refusal) return;
+    for (const earlier of status.querySelectorAll(".drop-refusal")) earlier.remove();
+    const line = document.createElement("div");
+    line.className = "attach-error drop-refusal";
+    line.textContent = refusal;
+    status.appendChild(line);
+    status.style.display = "block";
+  });
+
   window.farhelmTerm = {
     /**
      * Reconcile the mounted terminals against `specs`, the FULL set the
@@ -4005,6 +4085,7 @@
           testHook.replay.revealedInWriteCallback = !!fromWriteCallback;
           testHook.replay.viewportAtTailOnReveal = buffer.viewportY === buffer.baseY;
           showTerminal(el, spec.connecting);
+          clearDropRefusals(spec.status);
           if (takesFocus()) {
             term.focus();
           }

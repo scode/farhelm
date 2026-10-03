@@ -5750,7 +5750,8 @@
   app; a drop on a pane with no live terminal shows the "not connected" outcome SPEC.md implies rather than nothing. Add
   a browser regression. Remove this feedback file and its index entry. Stop and ask before implementing if this needs
   significant new complexity or a refactor.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `qrutwxmx`, bookmark `triage-1001e/11-stray-drop-guard`, PR
+  https://github.com/scode/farhelm/pull/1453.
 
 ## partial-release-download-left-behind.md
 

@@ -108,8 +108,6 @@ One line per open item. This file must always match the feedback files in this d
   row, leaving processes nothing can reach.
 - `provisioning-update-replaces-binary-before-setup-guard.md` — remote UPDATE replaces the farhelm binary before
   checking whether `farhelm helm setup` took the host over.
-- `drop-on-hidden-terminal-navigates-away.md` — a file dropped on a terminal that is catching up or reconnecting can
-  navigate the browser page away.
 
 - `codex-draft-mistaken-for-question.md` — Pasting question-shaped diagnostics into an unsent Codex draft can make the
   sidebar say the agent needs an answer when it is idle.
