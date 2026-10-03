@@ -326,7 +326,9 @@ pub(crate) fn RestartWithDialog(
                             ModelEnterTarget::Custom { id, harness } if harness == baseline.harness => {
                                 apply_option.call(ModelOption::Model { id, harness });
                             }
-                            ModelEnterTarget::Custom { .. } | ModelEnterTarget::NeedsHarness(_) => {
+                            ModelEnterTarget::Custom { .. }
+                            | ModelEnterTarget::NeedsHarness(_)
+                            | ModelEnterTarget::OwnedElsewhere { .. } => {
                                 model_error.set(Some("choose a model for this harness".to_string()));
                             }
                         }

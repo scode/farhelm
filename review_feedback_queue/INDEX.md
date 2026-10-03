@@ -9,8 +9,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## High priority: material UX degradation
 
-- `opencode-bare-model-rejected.md` — Some documented bare OpenCode model names fail to launch, even though the same
-  model works with an opencode/ prefix.
 - `opencode-bare-model-switches-harness.md` — Pressing Enter on a supported bare OpenCode model can silently select
   Codex, so the session starts with a different agent and configuration.
 - `tab-cleanup-blocks-status-sampling.md` — Automatic cleanup of an exited terminal tab can leave every session on that

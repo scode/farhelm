@@ -512,9 +512,14 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
         if selection.harness == LaunchHarness::OpenCode {
             opencode_model_argument(model)?;
         }
+        // Ownership and effort are the catalog's facts about the harness's
+        // own spelling of the model, not the raw text: a bare OpenCode name
+        // can equal another harness's catalog id (`LaunchHarness::
+        // catalog_model_id`). The messages below keep the text as typed.
+        let catalog_id = selection.harness.catalog_model_id(model);
         let known = CATALOG
             .iter()
-            .filter(|entry| entry.id == model)
+            .filter(|entry| entry.id == catalog_id)
             .collect::<Vec<_>>();
         if !known.is_empty() {
             if !known.iter().any(|entry| entry.harness == selection.harness) {
@@ -563,7 +568,7 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
 /// names a provider and must be OpenCode itself.
 fn opencode_model_argument(model: &str) -> Result<String, String> {
     match model.split_once('/') {
-        None => Ok(format!("opencode/{model}")),
+        None => Ok(LaunchHarness::OpenCode.catalog_model_id(model).into_owned()),
         Some(("opencode", suffix)) if !suffix.is_empty() => Ok(model.to_string()),
         Some((provider, _)) => Err(format!(
             "OpenCode model {model:?} names provider {provider:?}; only the opencode provider is supported"
@@ -606,7 +611,7 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
 
 #[cfg(test)]
 mod tests {
-    use super::{compile, normalize_selection};
+    use super::{CATALOG, compile, normalize_selection};
     use farhelm_proto::{
         AgentKind,
         launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection},
@@ -822,6 +827,65 @@ mod tests {
                 .unwrap_err()
                 .contains("only the opencode provider")
         );
+    }
+
+    /// Why: several bare Zen names are also another harness's catalog ids,
+    /// and comparing the typed text refused an OpenCode launch of
+    /// `gpt-6-luna` as "a different harness" although `opencode/gpt-6-luna`
+    /// worked. Spec (SPEC.md, OpenCode's bare-name contract): every catalog
+    /// OpenCode model launches under either spelling, the selection keeps
+    /// the spelling typed, and the argv is provider-qualified. The same bare
+    /// name stays its own harness's model for that harness, and a qualified
+    /// OpenCode id still belongs to OpenCode only.
+    #[test]
+    fn opencode_accepts_both_spellings_of_names_other_harnesses_also_list() {
+        let overlapping = CATALOG
+            .iter()
+            .filter(|entry| entry.harness == LaunchHarness::OpenCode)
+            .filter_map(|entry| entry.id.strip_prefix("opencode/"))
+            .filter(|bare| CATALOG.iter().any(|entry| entry.id == *bare))
+            .collect::<Vec<_>>();
+        // Premise: the catalog still has the collisions this test is about.
+        assert!(overlapping.contains(&"gpt-6-luna"), "{overlapping:?}");
+        for bare in overlapping {
+            for typed in [bare.to_string(), format!("opencode/{bare}")] {
+                let opencode = LaunchSelection {
+                    harness: LaunchHarness::OpenCode,
+                    model: Some(typed.clone()),
+                    effort: None,
+                    permissions: None,
+                    workspace_trust: None,
+                };
+                let compiled = compile(opencode.clone())
+                    .unwrap_or_else(|error| panic!("OpenCode {typed}: {error}"));
+                assert_eq!(compiled.selection, opencode, "typed intent kept");
+                assert_eq!(
+                    shell_words::split(&compiled.invocation).unwrap(),
+                    ["opencode", "--model", &format!("opencode/{bare}")]
+                );
+            }
+            let owner = CATALOG
+                .iter()
+                .find(|entry| entry.id == bare)
+                .expect("overlap")
+                .harness;
+            assert!(
+                compile(LaunchSelection {
+                    model: Some(bare.to_string()),
+                    ..selection(owner)
+                })
+                .is_ok(),
+                "{bare} stays a {owner:?} model"
+            );
+            assert!(
+                compile(LaunchSelection {
+                    model: Some(format!("opencode/{bare}")),
+                    ..selection(owner)
+                })
+                .unwrap_err()
+                .contains("belongs to a different harness")
+            );
+        }
     }
 
     /// The OpenCode CLI's `--auto` option is a permission policy, not an

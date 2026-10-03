@@ -373,10 +373,7 @@ fn apply_composer_search_result(
                 selection.harness,
                 selection.workspace_trust,
             );
-            let owner = selection.model.as_ref().and_then(|model| {
-                (!catalog.iter().any(|candidate| candidate.id == *model))
-                    .then_some(selection.harness)
-            });
+            let owner = crate::launch_composer::custom_model_owner(&selection, catalog);
             structured_harness.set(Some(selection.harness));
             structured_model_raw_seed.set(selection.model.clone());
             structured_model_edited.set(false);
@@ -2645,10 +2642,10 @@ pub(super) fn CreateSessionForm(
             structured_model_raw_seed.set(selection.model.clone());
             structured_model_edited.set(false);
             structured_model.set(selection.model);
-            custom_model_harness.set(entry.selection.model.as_ref().and_then(|model| {
-                (!catalog.iter().any(|candidate| candidate.id == *model))
-                    .then_some(entry.selection.harness)
-            }));
+            custom_model_harness.set(crate::launch_composer::custom_model_owner(
+                &entry.selection,
+                &catalog,
+            ));
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
             structured_workspace_trust.set(selection.workspace_trust);
@@ -4889,6 +4886,14 @@ pub(super) fn CreateSessionForm(
                                                     "choose a harness before a custom model id".to_string(),
                                                 ));
                                                 intent_key.set(None);
+                                            }
+                                            // Typing never switches a selected harness: the
+                                            // draft stays for the person to correct, and the
+                                            // selection is untouched.
+                                            crate::launch_composer::ModelEnterTarget::OwnedElsewhere { id, owners } => {
+                                                model_draft_error.set(Some(
+                                                    crate::launch_composer::owned_elsewhere_message(&id, &owners),
+                                                ));
                                             }
                                         }
                                     }
