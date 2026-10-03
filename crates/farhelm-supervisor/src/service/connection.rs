@@ -1006,33 +1006,83 @@ pub(crate) fn notify_detached(
     }
 }
 
-/// Acquire an admission permit and spawn `future` onto `tasks`, holding
-/// the permit for the future's entire lifetime — the one, shared
-/// implementation of the admission-then-spawn pattern used by the slow
-/// `handle_control` arms that do not need to wait on a retained agent fence.
-/// Delete has a documented fence-before-admission exception in its handler.
+/// Take a management slot for one request without waiting, or refuse the
+/// request with [`farhelm_proto::HOST_BUSY_REFUSAL`] and return `None`.
 ///
-/// The permit is acquired HERE, in THIS function's own await — which
-/// means in the CALLER's await point, since this is not itself spawned —
-/// not inside `future` once it is already running as its own task. That
-/// ordering is the entire point: every real caller is `handle_control`,
-/// invoked directly from `handle_connection`'s read loop, so an
-/// admission-exhausted flood of slow requests blocks THAT loop right
-/// here, before a task (or a `JoinSet` entry for it) exists at all —
-/// rather than spawning and tracking an unbounded number of not-yet-
-/// admitted tasks that all sit parked on the semaphore. See
-/// `HANDLER_ADMISSION_PERMITS`'s docs for why that distinction matters.
-pub(crate) async fn spawn_admitted<F>(
+/// The admission step Stop and the requests admitted through
+/// [`spawn_admitted`] take in a connection's read loop, so that loop never
+/// waits for their slot. Waiting there is what this replaced, and it was
+/// wrong: the same loop delivers every keystroke, resize and detach for
+/// every session on the connection, so a request parked on a full
+/// semaphore froze typing on the whole host until one of the eight
+/// operations holding the slots finished (later, if Deletes were already
+/// queued for a slot), which for a Stop or Delete can mean waiting out a
+/// kill grace period. SPEC.md "Waiting between operations on one host"
+/// forbids that.
+/// Refusing promptly is the chosen response, rather than queueing the
+/// request somewhere off the loop: a queue would keep the wait away from
+/// the input path too, but it is a second mechanism to bound and drain, and
+/// a "try again" costs the user one click.
+///
+/// The refusal is `ErrorKind::Unavailable`, the kind that already means
+/// "nothing happened, the same request works later"; the helm turns it
+/// into a 503 and the UI shows the message on the action. It is sent
+/// before anything about the request has been looked at or changed, which
+/// is what makes a retry safe. Sending it awaits the bounded writer queue,
+/// like every other reply the read loop sends inline; that wait is on the
+/// peer reading its own replies, not on management work.
+pub(crate) async fn admit_or_refuse(
+    admission: &Arc<tokio::sync::Semaphore>,
+    tx: &mpsc::Sender<Frame>,
+    req_id: u64,
+) -> Option<tokio::sync::OwnedSemaphorePermit> {
+    match Arc::clone(admission).try_acquire_owned() {
+        Ok(permit) => Some(permit),
+        Err(tokio::sync::TryAcquireError::NoPermits) => {
+            send_reply(
+                tx,
+                &ControlMsg::Error {
+                    req_id,
+                    kind: ErrorKind::Unavailable,
+                    message: farhelm_proto::HOST_BUSY_REFUSAL.to_string(),
+                },
+            )
+            .await;
+            None
+        }
+        Err(tokio::sync::TryAcquireError::Closed) => {
+            unreachable!("admission semaphore is never closed")
+        }
+    }
+}
+
+/// Admit one management request through [`admit_or_refuse`] and, if a slot
+/// was free, spawn the future `work` builds onto `tasks` holding it for the
+/// future's whole lifetime. `work` is handed its own sender for the reply,
+/// and is only called once the request is admitted: the shared admission-then-spawn shape of the management
+/// requests whose work all happens on the connection's tracked task
+/// (directory browse, repository search, tab open and close). Stop takes
+/// its slot through `admit_or_refuse` directly, because its work is owned
+/// by the supervisor rather than the connection, and Delete waits for its
+/// slot inside its own task after its agent-request fence; see their
+/// handlers.
+///
+/// Admission still happens BEFORE the spawn, so a refused request leaves
+/// no task behind and an admitted one never exists without its slot.
+pub(crate) async fn spawn_admitted<F, Fut>(
     admission: &Arc<tokio::sync::Semaphore>,
     tasks: &mut tokio::task::JoinSet<()>,
-    future: F,
+    tx: &mpsc::Sender<Frame>,
+    req_id: u64,
+    work: F,
 ) where
-    F: std::future::Future<Output = ()> + Send + 'static,
+    F: FnOnce(mpsc::Sender<Frame>) -> Fut,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
 {
-    let permit = Arc::clone(admission)
-        .acquire_owned()
-        .await
-        .expect("admission semaphore is never closed");
+    let Some(permit) = admit_or_refuse(admission, tx, req_id).await else {
+        return;
+    };
+    let future = work(tx.clone());
     tasks.spawn(async move {
         let _permit = permit;
         future.await;
@@ -2787,98 +2837,89 @@ mod tests {
         }
     }
 
-    /// `spawn_admitted`'s entire contract (see its own docs): the permit
-    /// is acquired in the CALLER's own await, before the task is ever
-    /// spawned — not inside the spawned future. Proven with a 2-permit
-    /// semaphore and manually-controlled tasks (a `Notify`, not real
-    /// timing) rather than routing through real `StopSession`/tmux, which
-    /// would make "has the Nth task started running yet" unobservable
-    /// without racing real kill-sweep durations — exactly the flakiness
-    /// this test is designed to avoid.
+    /// Spec: `spawn_admitted` never waits for a slot. With every permit
+    /// held, a further request is answered at once with
+    /// `ErrorKind::Unavailable` and [`farhelm_proto::HOST_BUSY_REFUSAL`] under its own
+    /// `req_id`, and nothing is spawned for it; once a permit frees, the
+    /// next request is admitted and runs.
     ///
-    /// A regression that moved `acquire_owned().await` to INSIDE the
-    /// spawned task (permit acquired AFTER `tasks.spawn`, not before)
-    /// would make the third `spawn_admitted` call below return
-    /// immediately regardless of how many permits are free, since nothing
-    /// would then block spawning it — the bounded-timeout assertion in
-    /// the middle of this test is exactly what catches that.
+    /// Why: the caller is the connection's read loop, which also delivers
+    /// every keystroke on the connection. The helper used to wait for a
+    /// permit there, which froze typing on the whole host while eight
+    /// management operations held the slots. This pins the replacement at
+    /// the helper itself, with a 2-permit semaphore and tasks held by a
+    /// `Notify`, so no real tmux or timing decides the outcome. A
+    /// regression back to waiting makes the third call below not complete
+    /// at all, which the bounded await turns into a failure.
     #[farhelm_testtrace::test]
-    async fn spawn_admitted_acquires_the_permit_before_spawning_not_inside_the_task() {
+    async fn spawn_admitted_refuses_at_once_when_every_slot_is_taken() {
         let admission = Arc::new(tokio::sync::Semaphore::new(2));
         let mut tasks = tokio::task::JoinSet::new();
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let release = Arc::new(tokio::sync::Notify::new());
         let started = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-
-        // Claim both permits with two tasks that run and then block on
-        // `release`, so they stay "in flight" (holding their permits)
-        // until this test lets them go.
-        for _ in 0..2 {
-            let started = Arc::clone(&started);
+        let held_task = |started: &Arc<std::sync::atomic::AtomicUsize>| {
+            let started = Arc::clone(started);
             let release = Arc::clone(&release);
-            spawn_admitted(&admission, &mut tasks, async move {
+            async move {
                 started.fetch_add(1, Ordering::SeqCst);
                 release.notified().await;
-            })
-            .await;
+            }
+        };
+
+        for req_id in 1..=2 {
+            spawn_admitted(&admission, &mut tasks, &tx, req_id, |_| held_task(&started)).await;
         }
-        // `tasks.spawn` only SCHEDULES the task; it does not run until
-        // this task yields to the executor. Neither does
-        // `spawn_admitted`'s own `acquire_owned().await` necessarily
-        // yield — an uncontended semaphore can resolve without ever
-        // suspending. `yield_now` is what actually lets the two spawned
-        // tasks run up to their own first await point (`notified()`).
+        assert_eq!(
+            admission.available_permits(),
+            0,
+            "fixture premise: the first two requests hold both permits"
+        );
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            spawn_admitted(&admission, &mut tasks, &tx, 3, |_| held_task(&started)),
+        )
+        .await
+        .expect("spawn_admitted must answer a request at once when no permit is free");
+        let refusal = parse_control(&rx.try_recv().expect("the refusal must already be queued"))
+            .expect("decode the refusal");
+        assert_eq!(
+            refusal,
+            ControlMsg::Error {
+                req_id: 3,
+                kind: ErrorKind::Unavailable,
+                message: farhelm_proto::HOST_BUSY_REFUSAL.to_string(),
+            }
+        );
+        assert_eq!(
+            tasks.len(),
+            2,
+            "a refused request must not leave a task behind"
+        );
+
+        // Free exactly one permit: one held task finishes and is reaped,
+        // and the next request is admitted rather than refused.
+        release.notify_one();
+        tasks
+            .join_next()
+            .await
+            .expect("a held task")
+            .expect("held task must not panic");
+        spawn_admitted(&admission, &mut tasks, &tx, 4, |_| held_task(&started)).await;
+        assert!(
+            rx.try_recv().is_err(),
+            "an admitted request must not be refused"
+        );
+        // `tasks.spawn` only schedules; yielding lets the new task run up
+        // to its first await, where it records that it started.
         tokio::task::yield_now().await;
         assert_eq!(
             started.load(Ordering::SeqCst),
-            2,
-            "both permits must have been claimed by two running tasks"
+            3,
+            "the two held tasks and the admitted fourth ran; the refused third never did"
         );
 
-        // A third admission call, with both permits still held, must not
-        // resolve at all yet. Scoped in its own block: `tokio::pin!`'s
-        // hidden storage borrows `tasks` for the rest of ITS enclosing
-        // scope regardless of when the `Pin<&mut _>` handle itself is
-        // dropped, so the block boundary — not a manual `drop` — is what
-        // releases that borrow before `tasks` is touched again below.
-        {
-            let started3 = Arc::clone(&started);
-            let release3 = Arc::clone(&release);
-            let third = spawn_admitted(&admission, &mut tasks, async move {
-                started3.fetch_add(1, Ordering::SeqCst);
-                release3.notified().await;
-            });
-            tokio::pin!(third);
-            assert!(
-                tokio::time::timeout(Duration::from_millis(50), &mut third)
-                    .await
-                    .is_err(),
-                "spawn_admitted must block acquiring a permit while both are held, not spawn \
-                 (and run) immediately"
-            );
-            assert_eq!(
-                started.load(Ordering::SeqCst),
-                2,
-                "the third task must not have started running while its spawn_admitted call \
-                 is still blocked on admission"
-            );
-
-            // Free exactly one permit: wakes one of the first two tasks,
-            // which finishes and drops its permit, which is what lets the
-            // third admission proceed.
-            release.notify_one();
-            tokio::time::timeout(Duration::from_secs(5), &mut third)
-                .await
-                .expect("spawn_admitted must proceed once a permit frees");
-            // `third` resolving only proves the permit was acquired and
-            // the task was handed to `tasks.spawn` — not that the newly
-            // spawned task has been polled yet (the same
-            // spawn-schedules-but-does-not-run distinction as the first
-            // `yield_now` above).
-            tokio::task::yield_now().await;
-            assert_eq!(started.load(Ordering::SeqCst), 3);
-        }
-
-        // Let every remaining task finish and reap them all.
         release.notify_waiters();
         while tasks.join_next().await.is_some() {}
     }

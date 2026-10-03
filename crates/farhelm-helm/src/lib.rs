@@ -1875,10 +1875,11 @@ pub(crate) async fn run_owned<T: Send + 'static>(
 /// Render an error as an HTTP response whose body is the error chain in
 /// full and whose status is [`error_kind`]'s classification, mapped onto
 /// the closest HTTP status for each kind (`Unavailable`→503,
-/// `Timeout`→504 — neither reachable from a REST call today, since both
-/// belong to the agent relay's own request/reply pair, but mapped rather
-/// than lumped into `Internal` so a future path that does carry one here
-/// arrives as the gateway-shaped status it actually is).
+/// `Timeout`→504, both gateway-shaped rather than lumped into `Internal`).
+/// Both were born for the agent relay's own request/reply pair; a REST call
+/// meets `Unavailable` when a supervisor refuses a management request
+/// because every one of its management slots is taken, and the UI shows
+/// that refusal's text on the action like any other error.
 ///
 /// The body itself is deliberately unsanitized regardless of status:
 /// SPEC.md requires concrete, actionable errors in the client, and the
@@ -2007,7 +2008,10 @@ fn supervisor_reply_status(kind: ErrorKind) -> axum::http::StatusCode {
         // lying about it can only cause a duplicate attempt on itself.
         ErrorKind::CheckoutConflict => axum::http::StatusCode::CONFLICT,
         // Clients display these without acting on the status, and each
-        // already describes a failure upstream of the helm.
+        // already describes a failure upstream of the helm. `Unavailable`
+        // is how a busy supervisor refuses a management request ("try
+        // again"); a supervisor lying with it can only make its own host's
+        // actions show an error.
         ErrorKind::Internal => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
         ErrorKind::Unavailable => axum::http::StatusCode::SERVICE_UNAVAILABLE,
         ErrorKind::Timeout => axum::http::StatusCode::GATEWAY_TIMEOUT,

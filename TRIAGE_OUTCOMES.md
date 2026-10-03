@@ -6223,7 +6223,8 @@
   enforces waiting with one where the slots are saturated, the request is refused, and terminal input to another session
   still reaches its pane. The four admission items share this change: whichever executes first introduces it, and the
   others apply it to their call site. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-busy-host-refusal.md`.
+- Execution: complete: change `pmmvrrnw`, bookmark `plan/triage-busy-host-refusal/02-refuse-when-busy`, PR
+  https://github.com/scode/farhelm/pull/1486.
 
 ## restart-admission-blocks-terminal-reader.md
 

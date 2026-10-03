@@ -10436,3 +10436,53 @@ async fn a_preview_with_a_stale_incarnation_is_refused_before_any_frame() {
     finished_tx.send(()).expect("preview peer must remain live");
     peer.await.expect("preview peer must observe no frame");
 }
+
+/// Spec: a repository search the supervisor refused as busy shows the shared
+/// busy sentence; every other failure, including an `Unavailable` the helm
+/// decided itself, keeps the Git and checkout-root hint.
+///
+/// Why: the helm never passes a supervisor's error text through for this
+/// route, so before the busy case was recognised a search refused on a busy
+/// host told the user to check their Git install. Reading only the kind of a
+/// supervisor reply, never its text, is what keeps the route's rule against
+/// remote text intact.
+#[farhelm_testtrace::test]
+fn repository_discovery_failure_names_a_busy_host_and_nothing_else() {
+    let reply = |origin, kind| {
+        anyhow::Error::new(crate::SupervisorError {
+            origin,
+            kind,
+            message: "remote text that must never be shown".to_string(),
+        })
+        .context("searching repositories on host builder")
+    };
+    let git_hint = "repository discovery is unavailable on this host; verify Git and the configured checkout root";
+
+    assert_eq!(
+        super::repository_discovery_failure(&reply(
+            crate::client::ErrorOrigin::SupervisorReply,
+            farhelm_proto::ErrorKind::Unavailable
+        )),
+        farhelm_proto::HOST_BUSY_REFUSAL
+    );
+    for (origin, kind) in [
+        (
+            crate::client::ErrorOrigin::SupervisorReply,
+            farhelm_proto::ErrorKind::Internal,
+        ),
+        (
+            crate::client::ErrorOrigin::Helm,
+            farhelm_proto::ErrorKind::Unavailable,
+        ),
+    ] {
+        assert_eq!(
+            super::repository_discovery_failure(&reply(origin, kind)),
+            git_hint,
+            "{origin:?} {kind:?} is not a busy supervisor"
+        );
+    }
+    assert_eq!(
+        super::repository_discovery_failure(&anyhow::anyhow!("connection lost")),
+        git_hint
+    );
+}
