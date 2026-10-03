@@ -863,7 +863,7 @@ pub(super) mod tests {
                 reported: "install-8".to_string(),
             },
             incarnation: 3,
-            yolo_safe: false,
+            yolo_without_asking: false,
         }];
         let options = host_options(&catalog);
         assert_eq!(options[0].id, 7);
@@ -998,7 +998,7 @@ pub(super) mod tests {
                 refresh: crate::RefreshHealth::Pending,
             },
             incarnation: 1,
-            yolo_safe: false,
+            yolo_without_asking: false,
         }
     }
 

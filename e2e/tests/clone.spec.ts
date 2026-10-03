@@ -19,7 +19,7 @@ import {
   listProfiles,
   localHostId,
   openRowMenu,
-  setLocalYoloSafe,
+  setLocalYoloWithoutAsking,
   type SessionRow,
 } from "./helpers/fleet";
 import {
@@ -105,9 +105,9 @@ test("a structured GUI clone pre-fills without launching, then starts its ready 
   let parentId: string | undefined;
   let childId: string | undefined;
   // Both the parent and its GUI clone are YOLO launches on the suite's
-  // sensitive-by-default host; the guard itself is yolo-guard.spec.ts's
+  // ask-first host; the guard itself is yolo-guard.spec.ts's
   // subject, so this test marks the host safe and puts it back.
-  await setLocalYoloSafe(request, true);
+  await setLocalYoloWithoutAsking(request, true);
   try {
     const created = await request.post("/api/sessions", {
       data: { cwd, title, host: local, launch: selection },
@@ -178,7 +178,7 @@ test("a structured GUI clone pre-fills without launching, then starts its ready 
     expect(output).toContain("--yolo");
     await waitForTermText(page, "FAKE-AGENT READY", 20_000);
   } finally {
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     if (childId) await cleanupSession(request, childId);
     if (parentId) await cleanupSession(request, parentId);
   }
@@ -279,9 +279,9 @@ test("opening a clone from the keyboard focuses search before any typing", async
       title,
       host: local,
       launch: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "yolo" },
-      // A YOLO fixture on the suite's sensitive-by-default host; the guard
+      // A YOLO fixture on the suite's ask-first host; the guard
       // itself is yolo-guard.spec.ts's subject.
-      allow_yolo_on_sensitive_host: true,
+      confirm_yolo: true,
     },
   });
   expect(created.ok(), `creating structured source: ${await created.text()}`).toBe(true);

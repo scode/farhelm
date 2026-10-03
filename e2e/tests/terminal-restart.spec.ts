@@ -285,7 +285,7 @@ test("Replace confirms inline, can cancel, selects the fresh session, and surfac
 
 /**
  * Inject one interrupted session whose launch is YOLO on the local host, and
- * mock its Replace and the local host's YOLO-safe write: a Replace without the
+ * mock its Replace and the local host's YOLO confirmation-setting write: a Replace without the
  * override is refused with the helm's YOLO header, one with it succeeds and
  * the replacement joins the listing; the host write is refused while
  * `control.refuseMark` is set and succeeds otherwise. Every
@@ -344,12 +344,12 @@ async function injectYoloReplaceSession(
   await page.route(`**/api/sessions/${sessionId}/replace`, async (route) => {
     const body = route.request().postDataJSON();
     replaceBodies.push(body);
-    sequence.push(body.allow_yolo_on_sensitive_host ? "replace+override" : "replace");
-    if (!body.allow_yolo_on_sensitive_host) {
+    sequence.push(body.confirm_yolo ? "replace+override" : "replace");
+    if (!body.confirm_yolo) {
       await fulfillAsHelm(route, {
         status: 409,
         contentType: "text/plain",
-        headers: { "x-farhelm-yolo-confirmation": "sensitive-host" },
+        headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
         body: "this machine asks before YOLO launches; confirm with --confirm-yolo",
       });
       return;
@@ -359,7 +359,7 @@ async function injectYoloReplaceSession(
   });
   const marks: unknown[] = [];
   const control = { refuseMark: false };
-  await page.route(`**/api/hosts/${local}/yolo-safe`, async (route) => {
+  await page.route(`**/api/hosts/${local}/yolo-without-asking`, async (route) => {
     marks.push(route.request().postDataJSON());
     sequence.push("mark");
     if (control.refuseMark) {
@@ -416,7 +416,7 @@ test("don't ask again on a refused YOLO replace marks the host, then replaces wi
     "mark",
     "replace+override",
   ]);
-  expect(marks).toEqual([{ yolo_safe: true }, { yolo_safe: true }]);
+  expect(marks).toEqual([{ yolo_without_asking: true }, { yolo_without_asking: true }]);
   expect(replaceBodies).toHaveLength(2);
 });
 
@@ -456,7 +456,7 @@ test("don't ask again on a refused YOLO replace from the row menu marks the host
   await confirmation.locator(".yolo-confirm-stop-asking").click();
   await expect.poll(() => sequence).toEqual(["replace", "mark", "mark", "replace+override"]);
   await expect(confirmation).toHaveCount(0);
-  expect(marks).toEqual([{ yolo_safe: true }, { yolo_safe: true }]);
+  expect(marks).toEqual([{ yolo_without_asking: true }, { yolo_without_asking: true }]);
   expect(replaceBodies).toHaveLength(2);
 });
 

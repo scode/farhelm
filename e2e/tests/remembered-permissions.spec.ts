@@ -11,7 +11,7 @@
 // across two real launches — reads clearest as its own linear story with
 // the shared stack's memory cleared at its own start.
 import { expect, test } from "./helpers/evidence";
-import { FAKE_AGENT, cleanupSession, patchPreferences, readPreferences, setLocalYoloSafe } from "./helpers/fleet";
+import { FAKE_AGENT, cleanupSession, patchPreferences, readPreferences, setLocalYoloWithoutAsking } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 
 test("the remembered structured-launch permissions mode survives an open, a reset, and a later default launch", async ({
@@ -20,10 +20,10 @@ test("the remembered structured-launch permissions mode survives an open, a rese
 }) => {
   const cwd = stackScratchDir("remembered-permissions-");
   const created: string[] = [];
-  // This test's first launch is a real YOLO launch on the suite's
-  // sensitive-by-default host; the guard itself is yolo-guard.spec.ts's
-  // subject, so the host is marked safe here and put back afterwards.
-  await setLocalYoloSafe(request, true);
+  // This test's first launch is a real YOLO launch on the suite's ask-first host; the guard
+  // itself is yolo-guard.spec.ts's subject, so the host allows YOLO without asking here and
+  // put back afterwards.
+  await setLocalYoloWithoutAsking(request, true);
   try {
     // Premise, MADE true rather than assumed: every project of one
     // `playwright test` invocation shares one helm, so an earlier spec's
@@ -123,7 +123,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
       "true",
     );
   } finally {
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     for (const id of created) await cleanupSession(request, id);
   }
 });

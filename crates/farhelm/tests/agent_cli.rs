@@ -1562,7 +1562,7 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
                 invocation: None,
                 title: Some("over there".to_string()),
                 intent_key: Some("key-1".to_string()),
-                allow_yolo_on_sensitive_host: false,
+                confirm_yolo: false,
             }
         );
         Some(ControlMsg::AgentResponse {
@@ -1681,7 +1681,7 @@ fn a_clone_sends_every_option_and_escapes_control_characters_in_its_confirmation
                 cwd: Some("/srv/elsewhere".to_string()),
                 title: Some("the copy".to_string()),
                 intent_key: Some("-leading-hyphen-key".to_string()),
-                allow_yolo_on_sensitive_host: false,
+                confirm_yolo: false,
             }
         );
         Some(ControlMsg::AgentResponse {
@@ -1837,7 +1837,7 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
             invocation,
             title,
             intent_key,
-            allow_yolo_on_sensitive_host: _,
+            confirm_yolo: _,
             profile_name,
             profile_id,
         } = request

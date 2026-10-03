@@ -909,11 +909,11 @@ pub(crate) struct CreateReq {
     /// existing resolved invocation before contacting a supervisor, so the
     /// supervisor never needs a vendor catalog or a command parser.
     launch: Option<farhelm_proto::LaunchSelection>,
-    /// Start a YOLO launch even though its host is marked sensitive. The
-    /// browser sets it only after the user confirms the refusal it got
-    /// without it (`farhelm_proto::http::YOLO_CONFIRMATION_HEADER`).
+    /// Start a YOLO launch even though its host asks before YOLO launches. The browser sets
+    /// it only after the user confirms the refusal it got without it
+    /// (`farhelm_proto::http::YOLO_CONFIRMATION_HEADER`).
     #[serde(default)]
-    allow_yolo_on_sensitive_host: bool,
+    confirm_yolo: bool,
     title: Option<String>,
     /// Which registered host to create on — a `HostView::id` from
     /// `GET /api/hosts` (PLAN_M6.md item 5).
@@ -1659,7 +1659,7 @@ pub(crate) async fn create_session(
                 // it must refuse.
                 accept_result: None,
                 github_checkout: None,
-                allow_yolo_on_sensitive_host: req.allow_yolo_on_sensitive_host,
+                confirm_yolo: req.confirm_yolo,
                 settings_from_source: false,
             },
         )
@@ -1731,7 +1731,7 @@ pub(crate) async fn do_create_session(
     let CreateSpec {
         cwd,
         mode,
-        allow_yolo_on_sensitive_host,
+        confirm_yolo,
         title,
         cols,
         rows,
@@ -1747,10 +1747,10 @@ pub(crate) async fn do_create_session(
     // is launched: checking one read and dispatching from another would let
     // a concurrent profile edit turn an admitted plain launch into a YOLO one.
     let mode = resolve_profile_id(state, mode).await?;
-    // Before any bookkeeping or dispatch: a YOLO launch on a host marked
-    // sensitive is refused unless the caller confirmed it (see `yolo_guard`).
+    // Before any bookkeeping or dispatch: a YOLO launch on a host that asks before YOLO
+    // launches is refused unless the caller confirmed it (see `yolo_guard`).
     let is_yolo = crate::yolo_guard::create_is_yolo(&mode);
-    crate::yolo_guard::check(state, claim.host, is_yolo, allow_yolo_on_sensitive_host).await?;
+    crate::yolo_guard::check(state, claim.host, is_yolo, confirm_yolo).await?;
     // REST carries the displayed preview cwd as part of the retained client
     // request identity. The supervisor's fresh-create destination instead
     // comes exclusively from the resolved binding; its ordinary cwd input
@@ -2014,10 +2014,10 @@ pub(crate) struct CreateSpec {
     /// be the ASKING session; see [`do_create_session`]'s "Two phases" note
     /// for why the check cannot simply run at the call site afterwards.
     pub(crate) accept_result: Option<CreatedSessionCheck>,
-    /// Start a YOLO launch even though its host is marked sensitive: the
-    /// caller confirmed it explicitly (the browser's confirmation, the
-    /// command line's flag). See `yolo_guard`.
-    pub(crate) allow_yolo_on_sensitive_host: bool,
+    /// Start a YOLO launch even though its host asks before YOLO launches: the caller
+    /// confirmed it explicitly (the browser's confirmation, the command line's flag). See
+    /// `yolo_guard`.
+    pub(crate) confirm_yolo: bool,
     /// The mode and settings were copied from a listed session row (a plain
     /// Replace) rather than chosen in the GUI for this create.
     ///
@@ -2293,7 +2293,7 @@ async fn create_fresh_session(
             github_checkout,
             origin: CreateOrigin::User,
             accept_result: acceptance.accept_result,
-            allow_yolo_on_sensitive_host: req.allow_yolo_on_sensitive_host,
+            confirm_yolo: req.confirm_yolo,
             settings_from_source: false,
         },
     )
@@ -2686,10 +2686,10 @@ pub(crate) struct RestartReq {
     stop_if_running: bool,
     #[serde(default)]
     with: Option<farhelm_proto::LaunchSelection>,
-    /// Restart with a YOLO selection even though the host is marked
-    /// sensitive; see [`CreateReq`]'s field of the same name.
+    /// Restart with a YOLO selection even though the host asks before YOLO launches; see
+    /// [`CreateReq`]'s field of the same name.
     #[serde(default)]
-    allow_yolo_on_sensitive_host: bool,
+    confirm_yolo: bool,
 }
 
 /// `POST /api/sessions/{id}/restart` — relaunch the session's agent
@@ -2721,7 +2721,7 @@ pub(crate) async fn restart_session(
             req.mode,
             req.stop_if_running,
             req.with,
-            req.allow_yolo_on_sensitive_host,
+            req.confirm_yolo,
         )
         .await
         {
@@ -2750,7 +2750,7 @@ pub(crate) async fn do_restart_session(
     mode: farhelm_proto::RestartMode,
     stop_if_running: bool,
     with: Option<farhelm_proto::LaunchSelection>,
-    allow_yolo_on_sensitive_host: bool,
+    confirm_yolo: bool,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
     let (claim, client) = route_session(state, id).await?;
     // Restart WITH a new selection is a new launch choice, so it gets the
@@ -2759,7 +2759,7 @@ pub(crate) async fn do_restart_session(
     let is_yolo = with
         .as_ref()
         .is_some_and(farhelm_proto::yolo::selection_is_yolo);
-    crate::yolo_guard::check(state, claim.host, is_yolo, allow_yolo_on_sensitive_host).await?;
+    crate::yolo_guard::check(state, claim.host, is_yolo, confirm_yolo).await?;
     let profile_names = load_profile_name_index(&state.store).await?;
     let mut session = client
         .restart_session_with(id, mode, stop_if_running, with)
@@ -3051,10 +3051,10 @@ pub(crate) async fn mark_seen(
 #[derive(Deserialize)]
 pub(crate) struct ReplaceReq {
     intent_key: Option<String>,
-    /// Start a YOLO replacement even though its host is marked sensitive;
-    /// see [`CreateReq`]'s field of the same name.
+    /// Start a YOLO replacement even though its host asks before YOLO launches; see
+    /// [`CreateReq`]'s field of the same name.
     #[serde(default)]
-    allow_yolo_on_sensitive_host: bool,
+    confirm_yolo: bool,
     /// "Replace with"'s editable form, reusing [`CreateReq`] verbatim rather
     /// than inventing a parallel override type: a replace-with body IS an
     /// ordinary create body in every field that matters to a create, and a
@@ -3173,16 +3173,13 @@ pub(crate) async fn do_replace_session(
     intent_key: Option<String>,
     with: Option<CreateReq>,
     guard: farhelm_proto::DeleteGuard,
-    allow_yolo_on_sensitive_host: bool,
+    confirm_yolo: bool,
 ) -> anyhow::Result<Replaced> {
     // A replace-with body may carry the confirmation itself (it is an
     // ordinary create body); either place counts.
-    let allow_yolo_on_sensitive_host = allow_yolo_on_sensitive_host
-        || with
-            .as_ref()
-            .is_some_and(|with| with.allow_yolo_on_sensitive_host);
+    let confirm_yolo = confirm_yolo || with.as_ref().is_some_and(|with| with.confirm_yolo);
     let with = with.map(|mut with| {
-        with.allow_yolo_on_sensitive_host = allow_yolo_on_sensitive_host;
+        with.confirm_yolo = confirm_yolo;
         with
     });
     // Ordinary body-shape refusals, checked before anything touches the network —
@@ -3384,7 +3381,7 @@ pub(crate) async fn do_replace_session(
             // `clone_for_agent`'s identical veto, which this mirrors for the
             // identical reason.
             accept_result: Some(replacement_result_check(id)),
-            allow_yolo_on_sensitive_host,
+            confirm_yolo,
             settings_from_source,
         },
     )
@@ -3581,7 +3578,7 @@ pub(crate) async fn replace_session(
                 req.only_if_nothing_alive,
                 req.only_if_agent_ended,
             ),
-            req.allow_yolo_on_sensitive_host,
+            req.confirm_yolo,
         )
         .await
         {

@@ -1575,7 +1575,7 @@ pub(crate) async fn create_session(
     let url = format!("{base}/api/sessions");
     let mut body = create_body(cwd, agent, title, intent_key, host, expected_incarnation);
     if allow_yolo {
-        allow_yolo_on_sensitive_host(&mut body);
+        confirm_yolo(&mut body);
     }
     let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
@@ -1596,9 +1596,9 @@ pub(crate) async fn create_session(
 #[derive(Debug)]
 pub(crate) struct CreateRefusal {
     pub(crate) stale: bool,
-    /// The helm refused a YOLO launch on a host marked sensitive and will
-    /// accept it again only with an explicit confirmation
-    /// ([`asks_yolo_confirmation`]). Nothing was created.
+    /// The helm refused a YOLO launch on a host that asks before YOLO launches and will
+    /// accept it again only with an explicit confirmation ([`asks_yolo_confirmation`]).
+    /// Nothing was created.
     pub(crate) yolo_confirmation: bool,
     pub(crate) text: String,
 }
@@ -1652,22 +1652,21 @@ impl ActionRefusal {
     }
 }
 
-/// Whether a refusal is the helm's own request for an explicit YOLO
-/// confirmation (a YOLO launch on a host marked sensitive).
+/// Whether a refusal is the helm's own request for an explicit YOLO confirmation (a YOLO
+/// launch on a host that asks before YOLO launches).
 ///
-/// Read from the header, never from the text: the text can quote a remote
-/// supervisor, and a supervisor must not be able to make this UI offer to
-/// start a YOLO session.
+/// Read from the header, never from the text: the text can quote a remote supervisor, and a
+/// supervisor must not be able to make this UI offer to start a YOLO session.
 pub(crate) fn asks_yolo_confirmation(headers: &reqwest::header::HeaderMap) -> bool {
     headers
         .get(farhelm_proto::http::YOLO_CONFIRMATION_HEADER)
-        .is_some_and(|value| value == farhelm_proto::http::YOLO_CONFIRMATION_SENSITIVE_HOST)
+        .is_some_and(|value| value == farhelm_proto::http::YOLO_CONFIRMATION_REQUIRED)
 }
 
-/// Mark a create, replace, or restart body as the user's explicit
-/// confirmation of a YOLO launch on a host marked sensitive.
-pub(crate) fn allow_yolo_on_sensitive_host(body: &mut serde_json::Value) {
-    body["allow_yolo_on_sensitive_host"] = serde_json::json!(true);
+/// Mark a create, replace, or restart body as the user's explicit confirmation of a YOLO
+/// launch on a host that asks before YOLO launches.
+pub(crate) fn confirm_yolo(body: &mut serde_json::Value) {
+    body["confirm_yolo"] = serde_json::json!(true);
 }
 
 /// Whether a refusal carries the helm's stale-connection precondition.
@@ -1726,7 +1725,7 @@ pub(crate) async fn replace_session_with(
 ) -> Result<(Session, Option<String>), CreateRefusal> {
     let mut with_body = create_body(cwd, agent, title, intent_key, host, expected_incarnation);
     if allow_yolo {
-        allow_yolo_on_sensitive_host(&mut with_body);
+        confirm_yolo(&mut with_body);
     }
     let url = format!(
         "{base}/api/sessions/{}/replace",
@@ -2154,7 +2153,7 @@ pub(crate) async fn restart_session(
     let url = format!("{base}/api/sessions/{}/restart", encode_path_segment(id));
     let mut body = restart_request_body(mode, stop_if_running, with);
     if allow_yolo {
-        allow_yolo_on_sensitive_host(&mut body);
+        confirm_yolo(&mut body);
     }
     let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
@@ -2532,7 +2531,7 @@ pub(crate) async fn replace_session(
         "only_if_agent_ended": guard.only_if_agent_ended(),
     });
     if allow_yolo {
-        allow_yolo_on_sensitive_host(&mut body);
+        confirm_yolo(&mut body);
     }
     let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
@@ -3249,18 +3248,18 @@ pub(crate) async fn set_alias(
     Ok(commit_of::<Host>(resp, "the hosts list below").await)
 }
 
-/// Mark a host safe or sensitive for YOLO launches
-/// (`POST /api/hosts/{id}/yolo-safe`).
-pub(crate) async fn set_yolo_safe(
+/// Set whether a host asks before YOLO launches. (`POST
+/// /api/hosts/{id}/yolo-without-asking`).
+pub(crate) async fn set_yolo_without_asking(
     base: &str,
     host: HostId,
-    yolo_safe: bool,
+    yolo_without_asking: bool,
 ) -> Result<Commit, String> {
-    let url = format!("{base}/api/hosts/{host}/yolo-safe");
+    let url = format!("{base}/api/hosts/{host}/yolo-without-asking");
     let resp = send(
         client()
             .post(&url)
-            .json(&serde_json::json!({ "yolo_safe": yolo_safe })),
+            .json(&serde_json::json!({ "yolo_without_asking": yolo_without_asking })),
     )
     .await?;
     if !resp.status().is_success() {
@@ -4003,17 +4002,14 @@ mod tests {
         headers.insert(
             farhelm_proto::http::YOLO_CONFIRMATION_HEADER,
             reqwest::header::HeaderValue::from_static(
-                farhelm_proto::http::YOLO_CONFIRMATION_SENSITIVE_HOST,
+                farhelm_proto::http::YOLO_CONFIRMATION_REQUIRED,
             ),
         );
         assert!(asks_yolo_confirmation(&headers));
 
         let mut body = restart_request_body("fresh", false, None);
-        allow_yolo_on_sensitive_host(&mut body);
-        assert_eq!(
-            body["allow_yolo_on_sensitive_host"],
-            serde_json::json!(true)
-        );
+        confirm_yolo(&mut body);
+        assert_eq!(body["confirm_yolo"], serde_json::json!(true));
     }
 
     /// An edit sends the profile's WHOLE definition, every field present.

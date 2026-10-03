@@ -1329,7 +1329,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
-                 ALTER TABLE hosts DROP COLUMN yolo_safe;
+                 ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  PRAGMA user_version = 26;",
             )
             .unwrap();

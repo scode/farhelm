@@ -1,8 +1,8 @@
-// The GUI half of the YOLO guard (SPEC.md, Sessions → Creation): a YOLO
-// launch on a host marked sensitive is refused by the helm, the create form
-// answers the refusal with a confirmation instead of an error, cancelling
-// starts nothing, and confirming retries the same launch with the override.
-// A host marked safe launches without asking.
+// The GUI half of the YOLO guard (SPEC.md, Sessions → Creation): a YOLO launch on a host
+// that asks before YOLO launches is refused by the helm, the create form answers the
+// refusal with a confirmation instead of an error, cancelling starts nothing, and
+// confirming retries the same launch with the override. A host set to allow YOLO without
+// asking launches without asking.
 //
 // The helm's own tests pin the refusal and the override on the wire. What
 // only a browser can show is that the page reads the refusal as a question
@@ -19,7 +19,7 @@ import {
   localHostId,
   openRowMenu,
   patchPreferences,
-  setLocalYoloSafe,
+  setLocalYoloWithoutAsking,
   stopSession,
 } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
@@ -36,13 +36,13 @@ async function openYoloLaunch(page: Page, cwd: string): Promise<Locator> {
   return form;
 }
 
-test("a YOLO launch on a sensitive host asks first, and starts only when confirmed", async ({ page, request }) => {
+test("a YOLO launch asks first and starts only when confirmed", async ({ page, request }) => {
   const cwd = stackScratchDir("yolo-guard-");
   const created: string[] = [];
   try {
     // Premise, made true rather than assumed: the suite shares one helm,
     // and a spec that marks the host safe puts it back, but say so here.
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     await page.goto("/");
     const form = page.locator(".create-session-form");
     const confirmation = form.locator(".yolo-confirmation");
@@ -66,7 +66,7 @@ test("a YOLO launch on a sensitive host asks first, and starts only when confirm
       ),
       form.locator(".create-session-submit").click(),
     ]);
-    expect(refused.status(), "the helm must refuse a YOLO launch on a sensitive host").toBe(409);
+    expect(refused.status(), "the helm must refuse a YOLO launch on a host that asks before YOLO launches").toBe(409);
     await expect(confirmation).toBeVisible();
     // The GUI's own explanation: what YOLO means, why this launch is one,
     // and that nothing started. The helm's sentence is for the command line
@@ -117,10 +117,10 @@ test("a YOLO launch on a sensitive host asks first, and starts only when confirm
     expect(session.launch).toMatchObject({ harness: "codex", permissions: "yolo" });
     await expect(form, "a successful launch closes the composer").toHaveCount(0);
     const bodies = createPosts.map((body) => JSON.parse(body));
-    expect(bodies.map((body) => body.allow_yolo_on_sensitive_host ?? false)).toEqual([false, false, false, true]);
+    expect(bodies.map((body) => body.confirm_yolo ?? false)).toEqual([false, false, false, true]);
 
-    // Once the host is marked safe, the same launch does not ask.
-    await setLocalYoloSafe(request, true);
+    // Once the host allows YOLO without asking, the same launch does not ask.
+    await setLocalYoloWithoutAsking(request, true);
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
     await form.getByLabel("folder", { exact: true }).fill(cwd);
@@ -136,7 +136,7 @@ test("a YOLO launch on a sensitive host asks first, and starts only when confirm
     created.push((await safe.json()).id);
     await expect(form).toHaveCount(0);
   } finally {
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     // The confirmed launches leave YOLO remembered helm-wide; later specs
     // on the shared helm expect a fresh composer to start on "default".
     await patchPreferences(request, { remembered_permissions: null });
@@ -145,7 +145,7 @@ test("a YOLO launch on a sensitive host asks first, and starts only when confirm
 });
 
 /**
- * "Start, and don't ask again on this host" marks the host safe for YOLO
+ * "Start, and don't ask again on this host" lets the host start YOLO
  * launches and then starts the launch, and when marking fails it starts
  * nothing. Why: the button turns a safety question off for good, so the
  * order matters. A launch that went out before (or without) the host being
@@ -164,7 +164,7 @@ test("don't ask again marks the host safe before launching, and a failed mark la
   const cwd = stackScratchDir("yolo-stop-asking-");
   const created: string[] = [];
   try {
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     const local = await localHostId(request);
     const createPosts: string[] = [];
     page.on("request", (candidate) => {
@@ -175,7 +175,7 @@ test("don't ask again marks the host safe before launching, and a failed mark la
     // The first mark is refused by the route, the second reaches the helm.
     let refuseMark = true;
     const markPosts: unknown[] = [];
-    await page.route(`**/api/hosts/${local}/yolo-safe`, async (route) => {
+    await page.route(`**/api/hosts/${local}/yolo-without-asking`, async (route) => {
       markPosts.push(route.request().postDataJSON());
       if (refuseMark) {
         await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: "held by the test" });
@@ -198,9 +198,9 @@ test("don't ask again marks the host safe before launching, and a failed mark la
     await confirmation.locator(".yolo-confirm-stop-asking").click();
     await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("could not stop asking for");
     await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("held by the test");
-    expect(markPosts).toEqual([{ yolo_safe: true }]);
+    expect(markPosts).toEqual([{ yolo_without_asking: true }]);
     expect(createPosts, "a failed mark sends no create").toHaveLength(1);
-    expect((await listHosts(request)).find((host) => host.id === local)?.yolo_safe).toBe(false);
+    expect((await listHosts(request)).find((host) => host.id === local)?.yolo_without_asking).toBe(false);
     // The pressed button was disabled while the mark ran; focus comes back
     // to the question's safe answer rather than staying lost.
     await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
@@ -224,11 +224,11 @@ test("don't ask again marks the host safe before launching, and a failed mark la
     created.push((await launched.json()).id);
     await expect(form, "a successful launch closes the composer").toHaveCount(0);
     expect(markPosts).toHaveLength(2);
-    expect((await listHosts(request)).find((host) => host.id === local)?.yolo_safe).toBe(true);
+    expect((await listHosts(request)).find((host) => host.id === local)?.yolo_without_asking).toBe(true);
     const bodies = createPosts.map((body) => JSON.parse(body));
-    expect(bodies.map((body) => body.allow_yolo_on_sensitive_host ?? false)).toEqual([false, false, true]);
+    expect(bodies.map((body) => body.confirm_yolo ?? false)).toEqual([false, false, true]);
   } finally {
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     await patchPreferences(request, { remembered_permissions: null });
     for (const id of created) await cleanupSession(request, id);
   }
@@ -251,15 +251,15 @@ async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, 
       title: `yolo-header-replace-${Date.now()}`,
       host: local,
       launch: { harness: "codex", permissions: "yolo" },
-      // The fixture itself is a YOLO launch on the sensitive-by-default host;
+      // The fixture itself is a YOLO launch on the ask-first host;
       // the question under test is the Replace's, not this create's.
-      allow_yolo_on_sensitive_host: true,
+      confirm_yolo: true,
     },
   });
   expect(created.ok(), `creating the YOLO source: ${await created.text()}`).toBe(true);
   const sourceId = (await created.json()).id as string;
   try {
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     await stopSession(request, sourceId);
     await page.goto("/");
     await page.locator(`.session-row[data-session-id="${sourceId}"]`).click();
@@ -280,7 +280,7 @@ async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, 
       ),
       header.locator(".header-replace-confirm .btn-danger").click(),
     ]);
-    expect(refused.status(), "the replace is refused as a YOLO launch on a sensitive host").toBe(409);
+    expect(refused.status(), "the replace is refused as a YOLO launch on a host that asks before YOLO launches").toBe(409);
     const confirmation = page.locator(".yolo-confirmation");
     await expect(confirmation).toBeVisible();
 
@@ -304,7 +304,7 @@ async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, 
     ]);
     const body = JSON.parse(answered.postData() ?? "{}");
     expect(body.only_if_nothing_alive, "the confirmed prompt said nothing was alive").toBe(true);
-    expect(body.allow_yolo_on_sensitive_host, "the answer carries the YOLO override").toBe(true);
+    expect(body.confirm_yolo, "the answer carries the YOLO override").toBe(true);
     // The precondition refuses the source delete: the replacement is made,
     // the restarted source is kept, and the page says both exist.
     const reply = await answered.response();
@@ -313,7 +313,7 @@ async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, 
     await expect(page.locator(".replace-error")).toContainText("both sessions still exist");
     expect((await listSessions(request)).sessions.some((row) => row.id === sourceId)).toBe(true);
   } finally {
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     await patchPreferences(request, { remembered_permissions: null });
     for (const row of (await listSessions(request)).sessions.filter((candidate) => candidate.cwd === cwd)) {
       await cleanupSession(request, row.id);
@@ -364,15 +364,15 @@ async function sidebarReplaceKeepsAnswer(page: Page, request: APIRequestContext,
       title: `yolo-sidebar-replace-${Date.now()}`,
       host: local,
       launch: { harness: "codex", permissions: "yolo" },
-      // The fixture itself is a YOLO launch on the sensitive-by-default host;
+      // The fixture itself is a YOLO launch on the ask-first host;
       // the question under test is the Replace's, not this create's.
-      allow_yolo_on_sensitive_host: true,
+      confirm_yolo: true,
     },
   });
   expect(created.ok(), `creating the YOLO source: ${await created.text()}`).toBe(true);
   const sourceId = (await created.json()).id as string;
   try {
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     await stopSession(request, sourceId);
     await page.goto("/");
     const sourceRow = page.locator(`.session-row[data-session-id="${sourceId}"]`);
@@ -392,7 +392,7 @@ async function sidebarReplaceKeepsAnswer(page: Page, request: APIRequestContext,
       ),
       sourceRow.locator(".confirm-replace").click(),
     ]);
-    expect(refused.status(), "the replace is refused as a YOLO launch on a sensitive host").toBe(409);
+    expect(refused.status(), "the replace is refused as a YOLO launch on a host that asks before YOLO launches").toBe(409);
     const confirmation = page.locator(".yolo-confirmation");
     await expect(confirmation).toBeVisible();
 
@@ -414,14 +414,14 @@ async function sidebarReplaceKeepsAnswer(page: Page, request: APIRequestContext,
     ]);
     const body = JSON.parse(answered.postData() ?? "{}");
     expect(body.only_if_nothing_alive, "the confirmed prompt said nothing was alive").toBe(true);
-    expect(body.allow_yolo_on_sensitive_host, "the answer carries the YOLO override").toBe(true);
+    expect(body.confirm_yolo, "the answer carries the YOLO override").toBe(true);
     const reply = await answered.response();
     expect(reply?.ok(), "the precondition refuses the source delete").toBe(false);
     expect(await reply?.text()).toContain("both sessions still exist");
     await expect(sourceRow.locator(".action-error")).toContainText("both sessions still exist");
     expect((await listSessions(request)).sessions.some((row) => row.id === sourceId)).toBe(true);
   } finally {
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     await patchPreferences(request, { remembered_permissions: null });
     for (const row of (await listSessions(request)).sessions.filter((candidate) => candidate.cwd === cwd)) {
       await cleanupSession(request, row.id);

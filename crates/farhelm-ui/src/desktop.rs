@@ -1196,7 +1196,7 @@ mod tests {
             remote_state_dir: None,
             state,
             incarnation: 1,
-            yolo_safe: false,
+            yolo_without_asking: false,
         };
         let skew = crate::HostPhase::VersionSkew {
             peer_protocol: 9,

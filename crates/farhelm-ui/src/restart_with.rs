@@ -151,14 +151,13 @@ fn focus_restart_with_cancel() {
 /// this dialog is mounted. The parent rechecks live availability before it
 /// sends a request, and passes a refusal back through `error`.
 ///
-/// `yolo_confirmation` is what the confirmation for the helm's refusal of a
-/// YOLO restart on a host marked sensitive explains, and `yolo_error` why a
-/// "don't ask again" failed at its first step. It is shown inside the dialog
-/// because the dialog is modal: anything rendered beside it is inert.
-/// Confirming resubmits what the dialog shows NOW, with the override
-/// (`on_submit`'s second element), so the answer always applies to the
-/// settings on screen rather than to a snapshot the user may have edited
-/// since. The third element asks the parent to mark the host safe first.
+/// `yolo_confirmation` is what the confirmation for the helm's refusal of a YOLO restart on
+/// a host that asks before YOLO launches explains, and `yolo_error` why a "don't ask again"
+/// failed at its first step. It is shown inside the dialog because the dialog is modal:
+/// anything rendered beside it is inert. Confirming resubmits what the dialog shows NOW,
+/// with the override (`on_submit`'s second element), so the answer always applies to the
+/// settings on screen rather than to a snapshot the user may have edited since. The third
+/// element asks the parent to mark the host safe first.
 #[component]
 pub(crate) fn RestartWithDialog(
     session: Session,

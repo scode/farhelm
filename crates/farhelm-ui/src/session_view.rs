@@ -490,7 +490,7 @@ pub(crate) fn SessionView(
     // change the current offer, but they must not rewrite a draft in progress.
     let mut restart_with_open = use_signal(|| None::<Session>);
     let mut restart_with_error = use_signal(|| None::<String>);
-    // A restart-with the helm refused as a YOLO launch on a sensitive host:
+    // A restart-with the helm refused as a YOLO launch on a host that asks before YOLO launches:
     // what the restart-with dialog's confirmation explains (see
     // `yolo_confirm`). Confirming resubmits the dialog's current settings.
     // `restart_yolo_error` is why a "don't ask again" failed at its first
@@ -517,7 +517,7 @@ pub(crate) fn SessionView(
     // confirmed delete into a silent no-op.
     let mut confirming_header_delete: ConfirmSlot<(), OpGuard> = use_confirm_slot();
     let mut replace_error = use_signal(|| None::<String>);
-    // A replace the helm refused as a YOLO launch on a sensitive host, and
+    // A replace the helm refused as a YOLO launch on a host that asks before YOLO launches, and
     // why a "don't ask again" on it failed at its first step, if it did.
     let mut replace_yolo = use_signal(|| None::<PendingYoloReplace>);
     let mut replace_yolo_error = use_signal(|| None::<String>);

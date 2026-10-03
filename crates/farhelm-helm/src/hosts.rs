@@ -73,10 +73,10 @@ pub(crate) struct HostView {
     pub(crate) identity: Option<String>,
     pub(crate) remote_farhelm: Option<String>,
     pub(crate) remote_state_dir: Option<String>,
-    /// Whether the user marked this host safe for YOLO launches; `false`
-    /// (sensitive) until they do. A row missing from the registry read
-    /// reports sensitive.
-    pub(crate) yolo_safe: bool,
+    /// Whether the host starts YOLO sessions without asking; `false` (ask first) until the
+    /// user changes it. A row missing from the registry read reports that confirmation is
+    /// required.
+    pub(crate) yolo_without_asking: bool,
     pub(crate) state: HostStateView,
     /// Which CONNECTION this host is on — an opaque, monotonic token that
     /// changes whenever the host's client does, including when it goes away
@@ -423,7 +423,7 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                 identity: registry.and_then(|row| row.host_identity.clone()),
                 remote_farhelm: registry.and_then(|row| row.remote_farhelm.clone()),
                 remote_state_dir: registry.and_then(|row| row.remote_state_dir.clone()),
-                yolo_safe: registry.is_some_and(|row| row.yolo_safe),
+                yolo_without_asking: registry.is_some_and(|row| row.yolo_without_asking),
                 state: (&snapshot.state).into(),
                 incarnation: snapshot.incarnation,
             }
@@ -480,17 +480,17 @@ pub(crate) struct HostSpec {
     pub(crate) remote_state_dir: Option<String>,
 }
 
-/// The body of `POST /api/hosts/{id}/yolo-safe`: the new setting, required.
+/// The body of `POST /api/hosts/{id}/yolo-without-asking`: the new setting, required.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct YoloSafeSpec {
-    pub(crate) yolo_safe: bool,
+pub(crate) struct YoloWithoutAskingSpec {
+    pub(crate) yolo_without_asking: bool,
 }
 
-/// `POST /api/hosts/{id}/yolo-safe` — mark a host safe or sensitive for YOLO
+/// `POST /api/hosts/{id}/yolo-without-asking` — set whether a host asks before YOLO
 /// launches, answering with the updated host view.
 ///
-/// Any host, the local one included: sensitivity describes the machine, not
+/// Any host, the local one included: the setting belongs to the machine, not
 /// how it is registered. Serialized with the host's cache writes through the
 /// host write lock, but deliberately not with provisioning: unlike an alias,
 /// retarget or removal, it does not take the host's provisioning lock, since
@@ -500,26 +500,30 @@ pub(crate) struct YoloSafeSpec {
 /// follows, because the connection actors do not read this flag; a change
 /// bumps the event feed directly instead, so other open clients re-read the
 /// host list.
-pub(crate) async fn set_yolo_safe(
+pub(crate) async fn set_yolo_without_asking(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
-    axum::Json(spec): axum::Json<YoloSafeSpec>,
+    axum::Json(spec): axum::Json<YoloWithoutAskingSpec>,
 ) -> impl IntoResponse {
     // Save, then announce: helm-owned for the reason `add_host` is. A
     // request dropped between the two would leave the setting saved but
     // every other open client showing the old one, and nothing later
     // re-announces it (the registry reconcile does not compare this flag).
-    crate::run_owned(set_yolo_safe_owned(state, host, spec)).await
+    crate::run_owned(set_yolo_without_asking_owned(state, host, spec)).await
 }
 
-/// [`set_yolo_safe`]'s body, run on a helm-owned task.
-async fn set_yolo_safe_owned(
+/// [`set_yolo_without_asking`]'s body, run on a helm-owned task.
+async fn set_yolo_without_asking_owned(
     state: Arc<AppState>,
     host: HostId,
-    spec: YoloSafeSpec,
+    spec: YoloWithoutAskingSpec,
 ) -> axum::response::Response {
     let serialized = state.manager.host_write_lock(host).await;
-    let changed = match state.store.set_yolo_safe(host, spec.yolo_safe).await {
+    let changed = match state
+        .store
+        .set_yolo_without_asking(host, spec.yolo_without_asking)
+        .await
+    {
         Ok(changed) => changed,
         Err(error) => return http_error(error),
     };
@@ -531,8 +535,8 @@ async fn set_yolo_safe_owned(
     drop(serialized);
     tracing::info!(
         host,
-        yolo_safe = spec.yolo_safe,
-        "host yolo-safe setting changed"
+        yolo_without_asking = spec.yolo_without_asking,
+        "host yolo-without-asking setting changed"
     );
     match host_view(&state, host).await {
         Ok(view) => axum::Json(view).into_response(),
@@ -1742,15 +1746,15 @@ mod tests {
         );
     }
 
-    /// Spec: `POST /api/hosts/{id}/yolo-safe` stores the setting, answers
+    /// Spec: `POST /api/hosts/{id}/yolo-without-asking` stores the setting, answers
     /// with the host view carrying it, bumps the fleet's revision on a real
     /// change, and stays silent on a repeat of the same value.
     ///
-    /// Why: the event feed is how every other open client learns to re-read
-    /// the host list; a change that did not bump it would leave another
-    /// window showing a host as sensitive (or safe) after it stopped being so.
+    /// Why: the event feed is how every other open client learns to re-read the host list;
+    /// a change that did not bump it would leave another window showing an outdated YOLO
+    /// confirmation setting.
     #[farhelm_testtrace::test]
-    async fn setting_yolo_safe_stores_it_and_bumps_the_revision_only_on_a_real_change() {
+    async fn setting_yolo_without_asking_stores_it_and_bumps_the_revision_only_on_a_real_change() {
         let harness = lone_local_helm().await;
         let (_, added, _) = call(
             &harness,
@@ -1761,27 +1765,30 @@ mod tests {
         .await;
         let host = added["id"].as_i64().unwrap();
         harness.await_refreshed(host).await;
-        assert_eq!(added["yolo_safe"], false, "a new host starts sensitive");
+        assert_eq!(
+            added["yolo_without_asking"], false,
+            "a new host starts asking before YOLO launches"
+        );
 
         let events = Arc::clone(harness.manager.events());
         let before = events.revision();
         let (status, view, _) = call(
             &harness,
             "POST",
-            &format!("/api/hosts/{host}/yolo-safe"),
-            Some(serde_json::json!({ "yolo_safe": true })),
+            &format!("/api/hosts/{host}/yolo-without-asking"),
+            Some(serde_json::json!({ "yolo_without_asking": true })),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(view["yolo_safe"], true);
+        assert_eq!(view["yolo_without_asking"], true);
         let after_set = events.revision();
         assert!(after_set > before, "a real change must bump the revision");
 
         call(
             &harness,
             "POST",
-            &format!("/api/hosts/{host}/yolo-safe"),
-            Some(serde_json::json!({ "yolo_safe": true })),
+            &format!("/api/hosts/{host}/yolo-without-asking"),
+            Some(serde_json::json!({ "yolo_without_asking": true })),
         )
         .await;
         assert_eq!(events.revision(), after_set, "a repeat must not bump again");

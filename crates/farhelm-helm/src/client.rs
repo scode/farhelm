@@ -2688,7 +2688,7 @@ impl SupervisorClient {
                     intent_key: extras.intent_key,
                     // The helm checks a YOLO launch itself before sending
                     // (`yolo_guard`); the field is for a spawn's own lookup.
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                     agent_kind: extras.agent_kind,
                     resume_template: extras.resume_template,
                     source_profile: extras.source_profile,
@@ -7939,7 +7939,7 @@ mod tests {
                     invocation: Some("sh".to_string()),
                     title: None,
                     intent_key: None,
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
                 farhelm_proto::AgentReply::Created {
                     session: renamed("created-1"),
@@ -7952,7 +7952,7 @@ mod tests {
                     cwd: None,
                     title: None,
                     intent_key: None,
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
                 farhelm_proto::AgentReply::Created {
                     session: renamed("created-2"),

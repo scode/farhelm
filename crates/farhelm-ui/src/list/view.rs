@@ -2029,7 +2029,7 @@ pub(crate) fn ListView(
     // does not do for a client that already has a page open.
     let replace_base = base.clone();
     let replace_refresh = request_listing.clone();
-    // A replace the helm refused as a YOLO launch on a sensitive host
+    // A replace the helm refused as a YOLO launch on a host that asks before YOLO launches
     // (`PendingYoloReplace`: the question, and the row snapshot and answer
     // it continues), shown as the loud confirmation above the list until the
     // user confirms or cancels (see `yolo_confirm`). `yolo_replace_error` is why a

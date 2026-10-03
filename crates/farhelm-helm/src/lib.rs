@@ -180,7 +180,7 @@ pub mod session_cache;
 /// The session REST surface — the list, the owner-lookup routing behind
 /// every operation on one session, and the handlers themselves.
 mod sessions;
-/// The refusal of a YOLO launch on a sensitive host (see its own docs).
+/// The refusal of a YOLO launch on a host that asks before YOLO launches (see its own docs).
 mod yolo_guard;
 
 /// The ssh argv the remote transport is built out of, and the handshake
@@ -652,8 +652,8 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(hosts::set_alias),
         )
         .route(
-            "/api/hosts/{id}/yolo-safe",
-            axum::routing::post(hosts::set_yolo_safe),
+            "/api/hosts/{id}/yolo-without-asking",
+            axum::routing::post(hosts::set_yolo_without_asking),
         )
         .route(
             "/api/hosts/{id}/adopt",
@@ -1810,7 +1810,7 @@ const BUILD_STAMP_HEADER: &str = farhelm_proto::http::BUILD_STAMP_HEADER;
 /// REST caller keeps the `Internal` it has always produced, since a
 /// browser's retry decision is the user's own.
 fn error_kind(e: &anyhow::Error) -> ErrorKind {
-    if find_cause::<yolo_guard::YoloOnSensitiveHost>(e).is_some() {
+    if find_cause::<yolo_guard::YoloNeedsConfirmation>(e).is_some() {
         return ErrorKind::Conflict;
     }
     if let Some(refusal) = find_cause::<store::HostStoreError>(e) {
@@ -1918,7 +1918,7 @@ pub(crate) async fn run_owned<T: Send + 'static>(
 /// supervisor's message safe to pass through verbatim.
 fn http_error(e: anyhow::Error) -> axum::response::Response {
     let kind = error_kind(&e);
-    let yolo_refused = find_cause::<yolo_guard::YoloOnSensitiveHost>(&e).is_some();
+    let yolo_refused = find_cause::<yolo_guard::YoloNeedsConfirmation>(&e).is_some();
     let unaccepted = e.downcast_ref::<FreshCreateUnaccepted>().is_some()
         || kind == ErrorKind::CheckoutConflict
         || yolo_refused;
@@ -1945,9 +1945,7 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
     if yolo_refused {
         response.headers_mut().insert(
             farhelm_proto::http::YOLO_CONFIRMATION_HEADER,
-            axum::http::HeaderValue::from_static(
-                farhelm_proto::http::YOLO_CONFIRMATION_SENSITIVE_HOST,
-            ),
+            axum::http::HeaderValue::from_static(farhelm_proto::http::YOLO_CONFIRMATION_REQUIRED),
         );
     }
     if unaccepted {
@@ -2143,7 +2141,7 @@ mod tests {
             "ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
             ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
             ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
-            ALTER TABLE hosts DROP COLUMN yolo_safe;
+            ALTER TABLE hosts DROP COLUMN yolo_without_asking;
              PRAGMA user_version = 29;",
         )
         .unwrap();

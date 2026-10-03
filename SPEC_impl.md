@@ -2162,14 +2162,14 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   lifecycle contract. Cursor likewise maps its structured harness to the existing Generic kind, with no resume template
   or capture machinery. Its two release-owned profiles invoke `cursor-agent` and `cursor-agent --force`, and the
   structured harness launches `cursor-agent` too: the YOLO classifier ignores the generic name `agent`, so a built-in
-  launched as `agent --force` would escape the sensitive-host guard. Models use `--model`, with no separate effort flag.
-  The UI preserves its harness in launch intent while explicitly disclosing the lack of tracking and Resume. Protocol 27
-  adds the Cursor harness variant, not a new runtime integration kind. Protocol 29 adds Grok as both a structured
-  harness and a durable agent kind. Its compiler emits `grok --no-leader`, maps YOLO to `--always-approve`, refuses
-  model and effort choices, and stores `grok --no-leader [--always-approve] --resume {conversation}` as argv elements.
-  The dedicated kind preserves the ownership policy across helm and supervisor storage. It uses the generic activity
-  classifier while the manually configured reporter supplies ownership-proven conversation capture. OMP is also a
-  structured harness only at launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model
+  launched as `agent --force` would escape the YOLO confirmation guard. Models use `--model`, with no separate effort
+  flag. The UI preserves its harness in launch intent while explicitly disclosing the lack of tracking and Resume.
+  Protocol 27 adds the Cursor harness variant, not a new runtime integration kind. Protocol 29 adds Grok as both a
+  structured harness and a durable agent kind. Its compiler emits `grok --no-leader`, maps YOLO to `--always-approve`,
+  refuses model and effort choices, and stores `grok --no-leader [--always-approve] --resume {conversation}` as argv
+  elements. The dedicated kind preserves the ownership policy across helm and supervisor storage. It uses the generic
+  activity classifier while the manually configured reporter supplies ownership-proven conversation capture. OMP is also
+  a structured harness only at launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model
   and provider flags for the harness default, and compiles an explicit model as `omp --provider openrouter --model <id>`
   (provider intent explicit; a literal custom id stays one argv element and is stored verbatim — provider qualification
   is not a promise of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and

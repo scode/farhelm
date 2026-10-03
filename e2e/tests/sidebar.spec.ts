@@ -58,7 +58,7 @@ import {
   readPreferences,
   renameSession,
   SESSION_LISTING,
-  setLocalYoloSafe,
+  setLocalYoloWithoutAsking,
   stopSession,
   stubFeed,
 } from "./helpers/fleet";
@@ -5005,10 +5005,10 @@ test("composer holds offered history steady until destination and search promoti
 
   let second: import("@playwright/test").BrowserContext | undefined;
   let secondClientSession: { id: string } | undefined;
-  // A real YOLO launch on the suite's sensitive-by-default host; the guard
-  // itself is yolo-guard.spec.ts's subject, so the host is marked safe here
-  // and put back afterwards.
-  await setLocalYoloSafe(request, true);
+  // A real YOLO launch on the suite's ask-first host; the guard itself is
+  // yolo-guard.spec.ts's subject, so the host allows YOLO without asking here and put back
+  // afterwards.
+  await setLocalYoloWithoutAsking(request, true);
   try {
     await page.goto("/");
     const form = page.locator(".create-session-form");
@@ -5087,7 +5087,7 @@ test("composer holds offered history steady until destination and search promoti
     await freshFolder.click();
     await expect(form.getByLabel("folder", { exact: true }), "the ordinary destination control must apply the fresh folder it made available").toHaveValue("/offered-history/folder-new");
   } finally {
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     await second?.close();
     if (secondClientSession) await cleanupSession(request, secondClientSession.id);
   }
@@ -6014,10 +6014,10 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     posts.push(route.request().postDataJSON());
     await route.continue();
   });
-  // A real YOLO launch on the suite's sensitive-by-default host; the guard
-  // itself is yolo-guard.spec.ts's subject, so the host is marked safe here
-  // and put back afterwards.
-  await setLocalYoloSafe(request, true);
+  // A real YOLO launch on the suite's ask-first host; the guard itself is
+  // yolo-guard.spec.ts's subject, so the host allows YOLO without asking here and put back
+  // afterwards.
+  await setLocalYoloWithoutAsking(request, true);
   try {
     await page.goto("/");
     await page.locator(".new-session-button").click();
@@ -6061,7 +6061,7 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     expect(posts[0]).not.toHaveProperty("invocation");
     expect(posts[0]).not.toHaveProperty("profile_id");
   } finally {
-    await setLocalYoloSafe(request, false);
+    await setLocalYoloWithoutAsking(request, false);
     for (const id of created) await cleanupSession(request, id);
   }
 });
@@ -6776,7 +6776,7 @@ test("composer name field reaches the create request; an empty name sends none",
 
   // Premise, made true rather than assumed: an earlier spec's YOLO launch
   // leaves YOLO remembered helm-wide, and the composer would preselect it;
-  // on the suite's sensitive-by-default host that launch would then stop at
+  // on the suite's ask-first host that launch would then stop at
   // the YOLO confirmation, which is not what this test is about.
   await patchPreferences(request, { remembered_permissions: null });
   try {

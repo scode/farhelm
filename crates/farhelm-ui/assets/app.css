@@ -2284,7 +2284,7 @@ samp {
   gap: 6px;
   padding-top: 14px;
 }
-.host-yolo-safe {
+.host-yolo-without-asking {
   align-items: center;
   color: var(--fg-0);
   display: flex;
@@ -5672,7 +5672,7 @@ samp {
 .status.error {
   color: var(--danger);
 }
-/* The confirmation a YOLO launch on a sensitive host asks for
+/* The confirmation required before starting a YOLO launch
    (`yolo_confirm`). Deliberately loud: accidental YOLO launches on the wrong
    machine are what it exists to stop, and a prompt that looks like every
    other line of text gets clicked through. A thick danger border and tint,

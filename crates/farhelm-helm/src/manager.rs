@@ -4762,7 +4762,7 @@ mod tests {
             remote_state_dir: None,
             host_identity: None,
             cache_truncated: false,
-            yolo_safe: false,
+            yolo_without_asking: false,
         };
         let remote = row(7, HostKind::Ssh, Some("box.example"));
         let older = skew_remediation(&remote, 9, 10);
@@ -10625,7 +10625,7 @@ mod tests {
             remote_state_dir: None,
             host_identity: None,
             cache_truncated: false,
-            yolo_safe: false,
+            yolo_without_asking: false,
         };
         let cases = [
             (
@@ -10678,7 +10678,7 @@ mod tests {
             remote_state_dir: None,
             host_identity: None,
             cache_truncated: false,
-            yolo_safe: false,
+            yolo_without_asking: false,
         };
         let error = classify_local_dial(anyhow::Error::new(std::io::Error::new(
             std::io::ErrorKind::ConnectionRefused,
