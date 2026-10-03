@@ -398,7 +398,7 @@ fn abbreviate_home(cwd: &str) -> String {
 }
 
 /// The row's parsed view of a launch command: the program's basename to
-/// show, plus an optional marker for a recognized unattended-mode flag.
+/// show, plus a YOLO mark when the shared classifier recognizes a bypass.
 ///
 /// Two fields rather than one formatted string, because the row renders
 /// each into its own bidi-isolated span (see `SessionRow`'s rsx and
@@ -445,7 +445,6 @@ fn known_harness(program: &str) -> HarnessGlyph {
 fn permission_description(permission: PermissionGlyph) -> &'static str {
     match permission {
         PermissionGlyph::Yolo => "YOLO permission bypass",
-        PermissionGlyph::FullAuto => "sandboxed full-auto",
         PermissionGlyph::Approve => "approve permission mode",
         PermissionGlyph::SmartApprove => "smart approve permission mode",
         PermissionGlyph::Chat => "chat permission mode",
@@ -471,17 +470,18 @@ fn agent_badge(session: &Session) -> AgentBadge {
             LaunchHarness::Grok => HarnessGlyph::Grok,
             LaunchHarness::OpenCode => HarnessGlyph::OpenCode,
         };
-        // Pi is the compatibility rewrite: an omitted permission from an
-        // older snapshot MEANS its mandatory YOLO mode, so the row displays
-        // that. OMP has a real harness default, so an omitted permission is
-        // displayed as absent — the actual selection, never an invented YOLO.
-        let effective_permission = launch.harness.sole_permission().or(launch.permissions);
-        let permission = effective_permission.map(|permission| match permission {
-            crate::LaunchPermission::Yolo => PermissionGlyph::Yolo,
-            crate::LaunchPermission::Approve => PermissionGlyph::Approve,
-            crate::LaunchPermission::SmartApprove => PermissionGlyph::SmartApprove,
-            crate::LaunchPermission::Chat => PermissionGlyph::Chat,
-        });
+        // The shared classifier owns the YOLO decision; other marks describe
+        // the recorded approval mode without inferring another bypass rule.
+        let permission = if farhelm_proto::yolo::selection_is_yolo(launch) {
+            Some(PermissionGlyph::Yolo)
+        } else {
+            launch.permissions.map(|permission| match permission {
+                crate::LaunchPermission::Yolo => unreachable!("the shared classifier handled YOLO"),
+                crate::LaunchPermission::Approve => PermissionGlyph::Approve,
+                crate::LaunchPermission::SmartApprove => PermissionGlyph::SmartApprove,
+                crate::LaunchPermission::Chat => PermissionGlyph::Chat,
+            })
+        };
         let mut description = match harness {
             HarnessGlyph::Codex => "Codex".to_string(),
             HarnessGlyph::Claude => "Claude Code".to_string(),
@@ -527,14 +527,12 @@ fn agent_badge(session: &Session) -> AgentBadge {
 }
 
 /// The row's one-glance parse of a launch command: the program's basename,
-/// plus a marker for a recognized unattended-mode flag when its vendor's
-/// program is the one being run.
+/// plus a YOLO mark only when the shared classifier recognizes an approval-free
+/// launch. Unknown and sandboxed command lines remain unmarked.
 ///
-/// `claude --dangerously-skip-permissions --model opus` parses to
-/// `claude` + `skip-perms`; `/usr/bin/codex --yolo` to `codex` + `yolo`;
-/// `sleep 300` to `sleep` + no marker. See [`INVOCATION_MARKERS`] for the
-/// flags that earn a marker, which programs they are tied to, and why the
-/// rest are dropped.
+/// `claude --dangerously-skip-permissions --model opus` gets a YOLO mark;
+/// `/usr/bin/codex --full-auto` and `sleep 300` remain unmarked. The proto
+/// classifier owns the vendor-specific flag tables.
 ///
 /// Argv is real shell-word splitting (`shell_words::split`), the same
 /// parser `farhelm-supervisor` uses to turn a profile's invocation string
@@ -574,15 +572,11 @@ fn compact_invocation(invocation: &str) -> CompactInvocation {
         _ => program.clone(),
     };
     let harness = known_harness(&basename);
-    // The recognition table is shared with the helm's YOLO-launch guard
-    // (`farhelm_proto::yolo`), so the badge and the refusal agree.
-    let permission = farhelm_proto::yolo::invocation_marker(&argv).map(|marker| {
-        if marker.is_yolo() {
-            PermissionGlyph::Yolo
-        } else {
-            PermissionGlyph::FullAuto
-        }
-    });
+    // The same classifier guards the launch on the helm, so an inferred YOLO
+    // mark can never disagree with the confirmation decision. Unknown and
+    // sandboxed command lines deliberately carry no permission mark.
+    let permission =
+        farhelm_proto::yolo::invocation_is_yolo(invocation).then_some(PermissionGlyph::Yolo);
     CompactInvocation {
         basename,
         harness,
@@ -2905,8 +2899,7 @@ mod tests {
     }
 
     /// The invocation badge is the program's basename plus, at most, one
-    /// unattended-mode marker — and the marker table's ORDER decides which
-    /// one when several apply.
+    /// YOLO mark, regardless of how many bypass flags the command carries.
     ///
     /// Worth pinning because the badge is all the row shows of a command
     /// line the user may have spent real thought on: a regression that
@@ -2938,7 +2931,7 @@ mod tests {
         assert_eq!(
             compact_invocation("codex --full-auto --yolo"),
             badge("codex", HarnessGlyph::Codex, Some(PermissionGlyph::Yolo)),
-            "the table's order, not the command line's, picks the marker"
+            "multiple flags still produce one YOLO mark"
         );
         // A flag is only a marker as a whole token: substring matching
         // would badge an unrelated argument that merely contains one.
@@ -2948,10 +2941,8 @@ mod tests {
         );
     }
 
-    /// Codex's two OTHER markers, each pinned on its own: the table test
-    /// above only ever exercises `--yolo` directly, and a regression that
-    /// broke either of these while leaving `--yolo` intact would pass every
-    /// other test in this file.
+    /// The long bypass spelling must work independently of Codex's short
+    /// alias; both remove the sandbox as well as approval prompts.
     #[farhelm_testtrace::test]
     fn the_no_sandbox_flag_earns_its_own_marker() {
         assert_eq!(
@@ -2960,37 +2951,29 @@ mod tests {
         );
     }
 
+    /// Sandboxed auto-approval must not be confused with a full bypass.
     #[farhelm_testtrace::test]
-    fn the_full_auto_flag_earns_its_own_marker() {
+    fn the_full_auto_flag_stays_unmarked() {
         assert_eq!(
             compact_invocation("codex --full-auto"),
-            badge(
-                "codex",
-                HarnessGlyph::Codex,
-                Some(PermissionGlyph::FullAuto)
-            )
+            badge("codex", HarnessGlyph::Codex, None)
         );
     }
 
-    /// Permission-looking option values must not claim an unsafe launch mode.
-    /// Known option arity permits later real switches; unknown syntax ends
-    /// inference because a later token may belong to that option or subcommand.
+    /// The row uses the shared guard classifier, whose conservative rule is
+    /// to ask whenever a recognized YOLO spelling appears before `--`, even
+    /// when an unknown option might have consumed that word as its value.
     #[farhelm_testtrace::test]
-    fn permission_markers_require_switch_position() {
+    fn shared_classifier_semantics_drive_the_row_mark() {
         for command in [
             "codex -c '--yolo'",
-            "codex -c '--full-auto'",
-            "codex --config=--yolo",
             "codex --unknown '--yolo'",
-            "codex exec --yolo",
-            "codex -- --yolo",
-            "codex -c -- --yolo",
-        ] {
-            assert_eq!(compact_invocation(command).permission, None, "{command}");
-        }
-        for command in [
+            "env -u FOO codex",
             "codex -c '--full-auto' '--yolo'",
             "codex --model=example --yolo",
+            "claude --model '--dangerously-skip-permissions'",
+            "muse --model '--yolo'",
+            "opencode --model '--auto'",
         ] {
             assert_eq!(
                 compact_invocation(command).permission,
@@ -2998,15 +2981,14 @@ mod tests {
                 "{command}"
             );
         }
-        assert_eq!(
-            compact_invocation("claude --model '--dangerously-skip-permissions'").permission,
-            None
-        );
-        assert_eq!(compact_invocation("muse --model '--yolo'").permission, None);
-        assert_eq!(
-            compact_invocation("opencode --model '--auto'").permission,
-            None
-        );
+        for command in [
+            "codex -c '--full-auto'",
+            "codex --config=--yolo",
+            "codex -- --yolo",
+            "codex -c -- --yolo",
+        ] {
+            assert_eq!(compact_invocation(command).permission, None, "{command}");
+        }
     }
 
     /// Harness recognition is deliberately bounded to executable evidence:
@@ -3132,7 +3114,7 @@ mod tests {
     /// could not be told apart from ordinary text.
     ///
     /// A corrupted basename can never accidentally ACQUIRE a marker it does
-    /// not legitimately have, either: [`INVOCATION_MARKERS`] matches by
+    /// not legitimately have, either: the shared classifier matches by
     /// EXACT string equality against the basename, so `\u{202E}codex` is
     /// simply not `codex` and earns no marker — one more reason the row's
     /// two-span rendering (basename, marker) is a real structural split and
@@ -3207,11 +3189,7 @@ mod tests {
         // Single quotes behave exactly like double quotes for this parser.
         assert_eq!(
             compact_invocation("'codex' --full-auto"),
-            badge(
-                "codex",
-                HarnessGlyph::Codex,
-                Some(PermissionGlyph::FullAuto)
-            )
+            badge("codex", HarnessGlyph::Codex, None)
         );
     }
 

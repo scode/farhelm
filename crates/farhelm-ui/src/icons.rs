@@ -72,7 +72,6 @@ pub(crate) enum HarnessGlyph {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PermissionGlyph {
     Yolo,
-    FullAuto,
     Approve,
     SmartApprove,
     Chat,
@@ -238,7 +237,6 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
 pub(crate) fn PermissionIcon(glyph: PermissionGlyph) -> Element {
     let (token, closed) = match glyph {
         PermissionGlyph::Yolo => ("yolo", false),
-        PermissionGlyph::FullAuto => ("full-auto", true),
         PermissionGlyph::Approve => ("approve", true),
         PermissionGlyph::SmartApprove => ("smart-approve", true),
         PermissionGlyph::Chat => ("chat", true),
