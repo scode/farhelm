@@ -1141,7 +1141,7 @@ pub(crate) fn install_row_menu_outside_dismiss() {
 /// are expected to run it through [`display_peer`](crate::peer::display_peer)
 /// FIRST, so this clamp routinely sees `<U+XXXX>` escape tokens rather than
 /// the live control characters they stand for. The naive char-count cut
-/// point can land inside one of those eight-character tokens — the
+/// point can land inside one of those tokens (eight to ten characters) — the
 /// character-boundary safety above says nothing about TOKEN boundaries — so
 /// [`back_off_from_split_escape`] nudges the cut point left, out of any
 /// token it would otherwise bisect, before truncating. A clamped title that
@@ -1169,10 +1169,17 @@ pub(crate) fn clamp_title(title: &str) -> String {
 /// shorter escape, it is meaningless literal text: the reader can no longer
 /// tell it apart from four random characters the peer actually sent, which
 /// is the opposite of what the token exists to communicate. An escape token
-/// is always exactly eight ASCII bytes (`<`, `U`, `+`, four hex digits,
-/// `>`), so the search window this needs is bounded regardless of how long
-/// `s` is, and — being pure ASCII — every byte in it is also a valid char
-/// boundary, so slicing on the offsets found here can never panic.
+/// is `<`, `U`, `+`, four to six hex digits and `>`: eight ASCII bytes for
+/// most characters, nine for the tag characters U+E0000–U+E007F
+/// (`<U+E0041>`), ten at most (`<U+10FFFF>`). So the search window this
+/// needs is bounded regardless of how long `s` is, and — being pure ASCII
+/// — every byte in a token is also a valid char boundary, so slicing on
+/// the offsets found here can never panic.
+///
+/// The `<` that matters is the NEAREST one before `cut`: a window long
+/// enough for a ten-character token can also hold the `<` of a complete
+/// shorter token before it, and matching that one would read the later,
+/// partial token as already closed.
 ///
 /// Walks CHARACTERS rather than raw bytes for that search: a multi-byte
 /// character elsewhere in `s` (an ordinary non-ASCII name, say) has no byte
@@ -1180,13 +1187,15 @@ pub(crate) fn clamp_title(title: &str) -> String {
 /// land `window_start` inside one, which `str` indexing then panics on.
 /// `char_indices` never produces a non-boundary offset in the first place.
 fn back_off_from_split_escape(s: &str, cut: usize) -> usize {
-    /// `<U+XXXX>`: three literal characters, four hex digits, one literal
-    /// character.
-    const TOKEN_LEN: usize = 8;
-    let mut before: Vec<(usize, char)> =
-        s[..cut].char_indices().rev().take(TOKEN_LEN - 1).collect();
-    before.reverse();
-    let Some(&(open, _)) = before.iter().find(|(_, ch)| *ch == '<') else {
+    /// The longest token, `<U+10FFFF>`: three literal characters, six hex
+    /// digits, one literal character.
+    const MAX_TOKEN_LEN: usize = 10;
+    let Some((open, _)) = s[..cut]
+        .char_indices()
+        .rev()
+        .take(MAX_TOKEN_LEN - 1)
+        .find(|(_, ch)| *ch == '<')
+    else {
         // No `<` in the trailing window at all, so `cut` cannot be inside a
         // token — either there is no token nearby, or a complete one
         // already ended before `cut`.
@@ -2053,8 +2062,8 @@ mod tests {
 
     /// A clamp applied to `display_peer`'s output must never bisect one of
     /// its `<U+XXXX>` escape tokens — a truncated token such as `<U+206`
-    /// with no closing `>` is not a shorter escape, it is eight characters
-    /// of meaningless literal text indistinguishable from something the
+    /// with no closing `>` is not a shorter escape, it is meaningless
+    /// literal text indistinguishable from something the
     /// peer actually sent (`hosts::host_menu_label` is the real caller this
     /// protects: an ssh destination escaped by `display_peer` before being
     /// clamped for a menu's `aria-label`).
@@ -2067,6 +2076,7 @@ mod tests {
     /// multibyte cases above.
     #[farhelm_testtrace::test]
     fn clamp_title_never_bisects_an_escape_token() {
+        // Covered separately below: tokens longer than eight characters.
         let token = "<U+2066>";
         let long = format!("AB{}", token.repeat(9));
         let clamped = clamp_title(&long);
@@ -2075,6 +2085,42 @@ mod tests {
             format!("AB{}…", token.repeat(7)),
             "the eighth (partial) token is dropped whole rather than cut in half: {clamped:?}"
         );
+    }
+
+    /// Why: the back-off assumed every escape token is eight characters,
+    /// but tag characters U+E0000–U+E007F escape to nine (`<U+E0041>`), so a
+    /// cut one character before such a token's `>` left a broken marker in
+    /// the host menu's accessible label. Spec: a cut anywhere inside a nine-
+    /// or ten-character token drops the whole token, and a complete token
+    /// followed by a lone `<` is not mistaken for the token still open.
+    #[farhelm_testtrace::test]
+    fn the_back_off_handles_tokens_longer_than_eight_characters() {
+        let tag = "<U+E0041>";
+        let long = format!("AB{}", tag.repeat(8));
+        // Premise: the naive cut at 64 characters lands one character
+        // before the seventh token's `>`.
+        assert_eq!(long.chars().nth(64), Some('>'));
+        assert_eq!(
+            clamp_title(&long),
+            format!("AB{}…", tag.repeat(6)),
+            "the partial nine-character token is dropped whole"
+        );
+        for token in [tag, "<U+10FFFF>"] {
+            for keep in 1..token.len() {
+                let s = format!("x{token}");
+                assert_eq!(
+                    back_off_from_split_escape(&s, 1 + keep),
+                    1,
+                    "{token} cut after {keep}"
+                );
+            }
+        }
+        // A complete token, then a lone `<` right before the cut. Both
+        // `<` are inside the nine-character window; the nearest one is the
+        // open one, so the complete token stays and the lone `<` goes.
+        let s = "x<U+0041><";
+        assert_eq!(back_off_from_split_escape(s, s.len()), 9);
+        assert_eq!(back_off_from_split_escape("x<U+0041>y", 10), 10);
     }
 
     /// The real bug this reconciliation replaces: an action withdrawn from
