@@ -552,6 +552,16 @@ struct RetainedCreateRefusal(String);
 /// not care about a given stage returns `Ok(())` for it.
 pub type CreateCrashSeam = Arc<dyn Fn(CreateStage) -> anyhow::Result<()> + Send + Sync>;
 
+/// Panic at the start of a supervisor-owned lifecycle mutation in tests.
+///
+/// The Stop and Restart handlers detach their work from the connection so a
+/// client disconnect cannot cancel it. Tests need a deterministic panic in
+/// that outer task to verify the reply waiter's `JoinError` boundary. Faults
+/// in Restart's relaunch phase become ordinary errors at its nested task
+/// boundary; the existing restart-window hook fires there, so it cannot
+/// exercise the outer waiter. Production installs no callback.
+pub type LifecycleMutationPanic = Arc<dyn Fn() + Send + Sync>;
+
 /// Observe a keyed create whose lock acquisition has returned `Pending`.
 ///
 /// Called at most once per request, after polling the real acquisition future.
@@ -737,6 +747,8 @@ macro_rules! fault_hooks {
 fault_hooks! {
     /// See [`CreateCrashSeam`]. `None` in production.
     create_crash: CreateCrashSeam,
+    /// See [`LifecycleMutationPanic`]. `None` in production.
+    lifecycle_mutation_panic: LifecycleMutationPanic,
     /// See [`CreateIntentWaiting`]. `None` in production.
     create_intent_waiting: CreateIntentWaiting,
     /// Reports the parent ID only after restricted create's lifecycle
@@ -5060,11 +5072,11 @@ impl Supervisor {
     /// The one real constructor: everything above delegates here with
     /// production defaults.
     ///
-    /// `seams` is what lets tests reach the two behaviors that are
-    /// otherwise unreachable in a test process — a host reboot (a
-    /// different boot id on the second construction) and a crash at an
-    /// exact ordering boundary inside `create_session`. See
-    /// [`SupervisorSeams`].
+    /// `seams` is what lets tests reach the fault and ordering behaviors that
+    /// are otherwise unreachable in a test process: a host reboot (a
+    /// different boot id on the second construction), a crash at an exact
+    /// ordering boundary inside `create_session`, and a panic in a
+    /// supervisor-owned lifecycle mutation. See [`SupervisorSeams`].
     pub async fn new_with_seams(
         state_dir: &Path,
         farhelm_exe: PathBuf,
@@ -10433,7 +10445,7 @@ impl Supervisor {
         match relaunch.await {
             Ok(result) => result,
             Err(join) => Err(anyhow::anyhow!(
-                "the relaunch task for session {} did not complete: {join}",
+                "the relaunch task for session {} failed, so it is unknown whether a new agent started: {join}",
                 truncate_for_error(session_id)
             )),
         }

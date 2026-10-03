@@ -26,8 +26,6 @@ One line per open item. This file must always match the feedback files in this d
   open terminal on it.
 - `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
   sidebar keeps deleted/stale rows.
-- `stop-restart-panic-no-reply.md` — a panicking stop or restart task sends no reply, leaving the UI or `farhelm agent`
-  waiting until the connection drops.
 - `tab-reap-budget-starved-by-failures.md` — failed tab closes spend the per-tick reap budget, so a few persistent
   failures stop exited tabs from being reaped host-wide.
 - `tmux-build-script-bash32.md` — build-private-tmux.sh's macOS branch aborts under bash 3.2 because of empty arrays
