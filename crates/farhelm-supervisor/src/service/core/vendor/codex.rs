@@ -119,22 +119,16 @@ impl Supervisor {
         if let Some(gate) = self.seams.faults.codex_report_gate() {
             gate().await;
         }
-        // Step 2: the bounded capture claim, then the authoritative
-        // reload. A readiness change in the previous conversation must
-        // neither discard a legitimate clear nor let a repeated report
-        // forget a newly established thread, which is why the binding
-        // below is read only after the claim excludes refresh.
-        let claim_deadline = tokio::time::Instant::now() + Self::CAPTURE_CLAIM_WAIT;
-        let _capture_claim = self
-            .capture_locks
-            .claim_before(id, claim_deadline)
-            .await
-            .ok_or_else(|| {
-                RequestError::new(
-                    ErrorKind::Conflict,
-                    "this session's capture is being updated; the report was not recorded",
-                )
-            })?;
+        // Step 2: the capture claim, then the authoritative reload. A
+        // readiness change in the previous conversation must neither discard
+        // a legitimate clear nor let a repeated report forget a newly
+        // established persistent thread, which is why the binding below is
+        // read only after the claim excludes refresh. The foreground and
+        // exact-record proofs stay under that same claim so refresh cannot
+        // change the binding between either proof and the generation-fenced
+        // write; moving them out would turn contention into a refusal again.
+        // The claim is unbounded because all work under it is local.
+        let _capture_claim = self.claim_capture_for_report(id).await;
         let row = self
             .store
             .session(id)
