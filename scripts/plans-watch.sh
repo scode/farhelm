@@ -9,10 +9,16 @@
 # against, so the agent's background-task completion is the wake-up.
 #
 # Why plans/ alone is enough: everything that can give an idle executor new work arrives as a change under plans/ on
-# main. A new plan adds an INDEX.md line; a dependency becoming satisfied flips its INDEX.md line to [executed]; a
-# blocked plan the user revises changes its plan file. Answers given in the executor's own session and "check for
-# plans" interrupt the agent directly. Merging or closing plan PRs makes nothing eligible: the next round reconciles
-# them (step 1 of Executing) before it builds anything, so noticing them late costs nothing.
+# main, because the plans queue script (scripts/plans-queue.py) records every state change as a commit there. A new
+# plan adds a line to plans/queue/INDEX.md; a plan answered, sent back for a follow-up, or given back returns to
+# [pending]; a dependency becomes satisfied when its line is removed after landing. "Check for plans" interrupts the
+# agent directly. Merging or closing plan PRs makes nothing eligible by itself.
+#
+# Not every change under plans/ is worth a wake-up, though. With several executors, claims are the most frequent
+# commits there and never give an idle executor work. With --wake-check, a changed tree hash is only a hint: the
+# watcher then asks the queue script whether the difference from the baseline commit is anything but claims, and keeps
+# waiting if not. The tree hash stays the cheap first filter, so the check runs when the tree changes, not on every
+# poll.
 #
 # The script only reads, through the GitHub API; it never touches a local repository, so it works the same from a
 # colocated checkout or a jj workspace and cannot disturb either while it runs. It sticks to bash 3.2 features, the
@@ -21,7 +27,7 @@
 # Usage:
 #   scripts/plans-watch.sh --repo OWNER/NAME (--baseline <tree-hash|none> | --baseline-from <commit-id>)
 #                          [--branch main] [--interval SECONDS] [--max-wait SECONDS] [--max-failures N]
-#                          [--request-timeout SECONDS]
+#                          [--request-timeout SECONDS] [--wake-check PATH]
 #
 # The baseline is the tree hash of plans/ in the main commit the agent's last round selected from, or `none` if that
 # commit has no plans/ directory. --baseline-from <commit-id> asks GitHub for it, through the same request the polls
@@ -29,9 +35,15 @@
 # the round's own commit rather than from the first poll: a plan that lands between the round's fetch and the
 # watcher's start would otherwise become the baseline and never wake anyone.
 #
+# --wake-check PATH needs --baseline-from, since it compares against that commit. The watcher runs
+# `PATH --repo OWNER/NAME wake-check --baseline <commit-id> --ref <branch>` (scripts/plans-queue.py has exactly that
+# interface), which must print `wake` or `ignore`. It runs under the same timeout and failure accounting as a request:
+# a check that fails or prints anything else is a failed poll, never a change.
+#
 # Exit status and the one line printed to stdout (nothing goes to stderr, so a harness that captures only stdout, or
 # merges both streams, still sees exactly one line):
-#   0   `changed <baseline> <current>`: plans/ differs from the baseline; drain now.
+#   0   `changed <baseline> <current>`: plans/ differs from the baseline (and, with --wake-check, the check said
+#       `wake`); drain now.
 #   10  `idle <baseline>`: --max-wait elapsed with no change; restart with the same baseline. The cap exists because
 #       agent harnesses bound how long a background command may run (Claude Code: two hours), and a watcher the
 #       harness kills is indistinguishable from one that failed.
@@ -46,6 +58,7 @@ set -u
 repo=""
 baseline=""
 baseline_from=""
+wake_check=""
 branch="main"
 interval=300
 max_wait=6600
@@ -77,10 +90,12 @@ is_object_id() {
 
 while [ $# -gt 0 ]; do
 	case "$1" in
-	--repo | --baseline | --baseline-from | --branch | --interval | --max-wait | --max-failures | --request-timeout)
+	--repo | --baseline | --baseline-from | --branch | --interval | --max-wait | --max-failures | --request-timeout | \
+		--wake-check)
 		[ $# -ge 2 ] || usage "$1 needs a value"
 		case "$1" in
 		--repo) repo=$2 ;;
+		--wake-check) wake_check=$2 ;;
 		--baseline) baseline=$2 ;;
 		--baseline-from) baseline_from=$2 ;;
 		--branch) branch=$2 ;;
@@ -120,6 +135,12 @@ case "$branch" in '' | -* | *[![:alnum:]._-]*) usage "--branch must be a branch 
 [ "$interval" -ge 1 ] || usage "--interval must be at least 1"
 [ "$max_failures" -ge 1 ] || usage "--max-failures must be at least 1"
 [ "$request_timeout" -ge 1 ] || usage "--request-timeout must be at least 1"
+if [ -n "$wake_check" ]; then
+	[ -n "$baseline_from" ] || usage "--wake-check needs --baseline-from: it compares against that commit"
+	if ! [ -f "$wake_check" ] || ! [ -x "$wake_check" ]; then
+		usage "--wake-check must name an executable file, got '$wake_check'"
+	fi
+fi
 
 # --- Children and signals ----------------------------------------------------------------------------------------
 #
@@ -148,19 +169,14 @@ nap() {
 
 # --- Requests ----------------------------------------------------------------------------------------------------
 
-# Sets $result to the tree hash of plans/ at <ref> (a branch or commit id), or `none` when there is no plans/ directory
-# there. Fails on any request error, on a hung request (after --request-timeout), on a truncated tree listing (plans/
-# could be the entry left out), or on a response that is neither shape, leaving a one-line reason in $tmp/err.
-# Validating the shape is what keeps an error body or an empty response from being mistaken for "plans/ changed".
+# Runs a command with stdout in $tmp/out and stderr in $tmp/err, cut off after --request-timeout. Returns its exit
+# status, or leaves "request timed out" in $tmp/err and fails when the watchdog had to kill it.
 #
 # The timeout is a watchdog process rather than coreutils `timeout`, which stock macOS lacks. The watchdog traps TERM
 # to take its own sleep down with it when the request finishes first.
-result=""
-plans_tree() {
-	local req dog status out
-	gh api "repos/$repo/git/trees/$1" \
-		--jq 'if .truncated then error("tree listing truncated") else ([.tree[] | select(.path == "plans" and .type == "tree") | .sha][0] // "none") end' \
-		>"$tmp/out" 2>"$tmp/err" &
+bounded() {
+	local req dog status
+	"$@" >"$tmp/out" 2>"$tmp/err" &
 	req=$!
 	(
 		trap 'kill "$s" 2>/dev/null; exit 0' TERM
@@ -176,16 +192,42 @@ plans_tree() {
 	kill "$dog" 2>/dev/null
 	wait "$dog" 2>/dev/null
 	children=""
-	if [ "$status" -ne 0 ]; then
-		[ "$status" -lt 128 ] || echo "request timed out after ${request_timeout}s" >"$tmp/err"
+	[ "$status" -lt 128 ] || echo "request timed out after ${request_timeout}s" >"$tmp/err"
+	return "$status"
+}
+
+# Sets $result to the tree hash of plans/ at <ref> (a branch or commit id), or `none` when there is no plans/ directory
+# there. Fails on any request error, on a hung request, on a truncated tree listing (plans/ could be the entry left
+# out), or on a response that is neither shape, leaving a one-line reason in $tmp/err. Validating the shape is what
+# keeps an error body or an empty response from being mistaken for "plans/ changed".
+result=""
+plans_tree() {
+	local out
+	bounded gh api "repos/$repo/git/trees/$1" \
+		--jq 'if .truncated then error("tree listing truncated") else ([.tree[] | select(.path == "plans" and .type == "tree") | .sha][0] // "none") end' ||
 		return 1
-	fi
 	out=$(cat "$tmp/out")
 	if [ "$out" = none ] || is_object_id "$out"; then
 		result=$out
 		return 0
 	fi
 	echo "unexpected response: $(printf '%s' "$out" | head -c 100)" >"$tmp/err"
+	return 1
+}
+
+# Sets $result to the --wake-check verdict, `wake` or `ignore`, for the branch against the baseline commit. Anything
+# else, like a failed or hung check, is a failure with its reason in $tmp/err.
+verdict() {
+	local out
+	bounded "$wake_check" --repo "$repo" wake-check --baseline "$baseline_from" --ref "$branch" || return 1
+	out=$(cat "$tmp/out")
+	case "$out" in
+	wake | ignore)
+		result=$out
+		return 0
+		;;
+	esac
+	echo "unexpected wake-check output: $(printf '%s' "$out" | head -c 100)" >"$tmp/err"
 	return 1
 }
 
@@ -200,16 +242,18 @@ failures=0
 succeeded=no
 start=$SECONDS
 
-# One request, with the failure accounting shared by the baseline lookup and the polls.
+# One request (`plans_tree <ref>` or `poll`), with the failure accounting shared by the baseline lookup and the polls.
 attempt() {
-	if plans_tree "$2"; then
+	local what=$1
+	shift
+	if "$@"; then
 		failures=0
 		succeeded=yes
 		return 0
 	fi
 	failures=$((failures + 1))
 	if [ "$failures" -ge "$max_failures" ]; then
-		echo "error: $1 failed $failures times in a row ($(last_error))"
+		echo "error: $what failed $failures times in a row ($(last_error))"
 		exit 3
 	fi
 	return 1
@@ -233,7 +277,7 @@ next_or_deadline() {
 }
 
 if [ -n "$baseline_from" ]; then
-	until attempt "reading the baseline at $baseline_from" "$baseline_from"; do
+	until attempt "reading the baseline at $baseline_from" plans_tree "$baseline_from"; do
 		next_or_deadline
 	done
 	baseline=$result
@@ -242,10 +286,37 @@ if [ -n "$baseline_from" ]; then
 	succeeded=no
 fi
 
+# One poll: sets $current to the branch's plans/ tree hash and $decision to `wake` or `same`. With --wake-check,
+# `ignored` is the last tree hash the check judged not worth waking for, so polls that keep seeing it do not re-run
+# the check; any newer tree is checked against the baseline again, which also catches a claim that is later given
+# back. The tree read and the check count as one attempt, so a check that keeps failing reaches --max-failures even
+# though the tree reads between its failures succeed.
+ignored=""
+current=""
+decision=same
+poll() {
+	decision=same
+	plans_tree "$branch" || return 1
+	current=$result
+	if [ "$current" = "$baseline" ] || [ "$current" = "$ignored" ]; then
+		return 0
+	fi
+	if [ -z "$wake_check" ]; then
+		decision=wake
+		return 0
+	fi
+	verdict || return 1
+	if [ "$result" = wake ]; then
+		decision=wake
+	else
+		ignored=$current
+	fi
+}
+
 # The deadline poll is not skipped: a change that lands in the last interval still reports as `changed`.
 while :; do
-	if attempt "polling repos/$repo/git/trees/$branch" "$branch" && [ "$result" != "$baseline" ]; then
-		echo "changed $baseline $result"
+	if attempt "polling repos/$repo/git/trees/$branch" poll && [ "$decision" = wake ]; then
+		echo "changed $baseline $current"
 		exit 0
 	fi
 	next_or_deadline

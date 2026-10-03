@@ -223,6 +223,83 @@ d=$(case_dir from-then-fail "tree $A" "fail HTTP 502")
 run_case "$d" --baseline-from "$C" --interval 1 --max-wait 2 --max-failures 100
 expect_line "baseline read is not a poll" "$d" 3 '^error: no successful request' && pass "baseline read is not a poll"
 
+# --- Wake check --------------------------------------------------------------------------------------------------
+#
+# With --wake-check, a changed tree is only a hint and the check decides. The stub check logs its argv and answers
+# from the case's verdict script the way the gh stub answers from its response script: `wake`, `ignore`, `fail
+# <text>` (stderr, exit 1), `raw <text>`, or `hang`.
+
+make_check() {
+	local dir=$1
+	shift
+	printf '%s\n' "$@" >"$dir/verdicts"
+	: >"$dir/checks"
+	cat >"$dir/bin/wake-check" <<'STUB'
+#!/usr/bin/env bash
+dir=$(cd "$(dirname "$0")/.." && pwd)
+echo "$*" >>"$dir/checks"
+n=$(wc -l <"$dir/checks")
+total=$(wc -l <"$dir/verdicts")
+[ "$n" -le "$total" ] || n=$total
+line=$(sed -n "${n}p" "$dir/verdicts")
+case "$line" in
+"fail "*) echo "${line#fail }" >&2; exit 1 ;;
+"raw "*) printf '%s\n' "${line#raw }" ;;
+hang) exec sleep 30 ;;
+*) echo "$line" ;;
+esac
+STUB
+	chmod +x "$dir/bin/wake-check"
+}
+check_count() { grep -c . "$1/checks"; }
+
+# An ignored tree is not re-checked on later polls that still see it; the next new tree is checked again and wakes.
+# The check gets the repository, the baseline commit, and the branch.
+d=$(case_dir wake-ignore "tree $A" "tree $B" "tree $B" "tree $SHA256")
+make_check "$d" ignore wake
+run_case "$d" --baseline-from "$C" --interval 1 --max-wait 60 --wake-check "$d/bin/wake-check"
+if expect "wake check ignores, then wakes" "$d" 0 "changed $A $SHA256"; then
+	if [ "$(check_count "$d")" -eq 2 ] &&
+		[ "$(head -n 1 "$d/checks")" = "--repo owner/name wake-check --baseline $C --ref main" ]; then
+		pass "wake check ignores, then wakes"
+	else
+		fail "wake check ignores, then wakes" "checks: $(tr '\n' ';' <"$d/checks")"
+	fi
+fi
+
+# Polls that see the baseline tree never run the check.
+d=$(case_dir wake-unchanged "tree $A")
+make_check "$d" wake
+run_case "$d" --baseline-from "$C" --interval 1 --max-wait 2 --wake-check "$d/bin/wake-check"
+if expect "unchanged tree skips the check" "$d" 10 "idle $A"; then
+	if [ "$(check_count "$d")" -eq 0 ]; then pass "unchanged tree skips the check"; else
+		fail "unchanged tree skips the check" "ran $(check_count "$d") checks"
+	fi
+fi
+
+# A failing check is a failed poll with its own message, and a garbled verdict is never a change.
+d=$(case_dir wake-fails "tree $A" "tree $B")
+make_check "$d" "fail error: gh is not on PATH"
+run_case "$d" --baseline-from "$C" --interval 1 --max-wait 60 --max-failures 2 --wake-check "$d/bin/wake-check"
+expect_line "failing wake check" "$d" 3 '^error: polling .* failed 2 times in a row (error: gh is not on PATH)$' &&
+	pass "failing wake check"
+d=$(case_dir wake-garbled "tree $A" "tree $B")
+make_check "$d" "raw maybe"
+run_case "$d" --baseline-from "$C" --interval 1 --max-wait 60 --max-failures 2 --wake-check "$d/bin/wake-check"
+expect_line "garbled wake check" "$d" 3 'unexpected wake-check output: maybe' && pass "garbled wake check"
+
+# A hung check is cut off like a hung request. The elapsed time is what shows the timeout worked: the stub's hang
+# ends on its own after 30 s, so without a working timeout the case would still report the change, only much later.
+d=$(case_dir wake-hang "tree $A" "tree $B")
+make_check "$d" hang wake
+started=$SECONDS
+run_case "$d" --baseline-from "$C" --interval 1 --max-wait 60 --request-timeout 1 --wake-check "$d/bin/wake-check"
+if expect "hung wake check times out" "$d" 0 "changed $A $B" && [ $((SECONDS - started)) -lt 10 ]; then
+	pass "hung wake check times out"
+else
+	fail "hung wake check times out" "took $((SECONDS - started))s"
+fi
+
 # --- Idle cap ----------------------------------------------------------------------------------------------------
 
 # With no change, the watcher exits 10 at --max-wait instead of running until a harness kills it, and it polls once
@@ -334,6 +411,8 @@ usage_case "zero max-failures" --repo owner/name --baseline "$A" --max-failures 
 usage_case "zero request timeout" --repo owner/name --baseline "$A" --request-timeout 0
 usage_case "unknown argument" --repo owner/name --baseline "$A" --bogus
 usage_case "missing value" --repo owner/name --baseline
+usage_case "wake check without baseline-from" --repo owner/name --baseline "$A" --wake-check /bin/true
+usage_case "wake check not executable" --repo owner/name --baseline-from "$C" --wake-check /nonexistent
 
 # --- Stopping ----------------------------------------------------------------------------------------------------
 
