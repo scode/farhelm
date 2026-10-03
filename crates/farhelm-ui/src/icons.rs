@@ -27,7 +27,7 @@
 //! rather than reaching for the icon alone.
 //!
 //! The locality pair was the first two glyphs; the harness marks, permission
-//! locks, ended-status shapes, and qualifier joined later under the same
+//! marks, ended-status shapes, and qualifier joined later under the same
 //! inline rule. The module doc for `list::shared::HostLocality` is where a
 //! future alias or tooltip feature (TODO.md's "host aliases" entry, which
 //! reuses this same title-line slot) would extend what appears beside these
@@ -68,10 +68,13 @@ pub(crate) enum HarnessGlyph {
     Terminal,
 }
 
-/// The compact mark that qualifies a recognized harness.
+/// Permission meaning retained independently of the three visual shapes.
+/// Approval modes share a shield but keep distinct accessible descriptions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PermissionGlyph {
     Yolo,
+    Default,
+    Unknown,
     Approve,
     SmartApprove,
     Chat,
@@ -97,7 +100,8 @@ pub(crate) enum QualifierGlyph {
 // Every harness mark is a filled or stroked path normalized into the shared
 // 12-unit box by ONE rule: the drawing's native bounding box is scaled so its
 // longer side spans 10 of the 12 units and then centred, leaving a one-unit
-// margin so the mark is optically the same weight as the lock beside it. The
+// margin so the mark is optically the same weight as the permission mark
+// beside it. The
 // `transform` strings below are the precomputed result of that rule for each
 // mark's native coordinates, so the row's marks agree on size by construction
 // rather than by eye. The rule, the provenance of every geometry, and the
@@ -232,22 +236,31 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
     }
 }
 
-/// Draw the permission mark beside a known harness without relying on color.
+/// Draw one of three silhouettes; a shield never means inferred approval.
+///
+/// The slash deliberately crosses the whole YOLO shield so it cannot be read
+/// as protection at sidebar size. Unknown commands get a question mark rather
+/// than borrowing the shield from a structured approval choice.
 #[component]
 pub(crate) fn PermissionIcon(glyph: PermissionGlyph) -> Element {
-    let (token, closed) = match glyph {
-        PermissionGlyph::Yolo => ("yolo", false),
-        PermissionGlyph::Approve => ("approve", true),
-        PermissionGlyph::SmartApprove => ("smart-approve", true),
-        PermissionGlyph::Chat => ("chat", true),
+    let token = match glyph {
+        PermissionGlyph::Yolo => "yolo",
+        PermissionGlyph::Unknown => "unknown",
+        PermissionGlyph::Default
+        | PermissionGlyph::Approve
+        | PermissionGlyph::SmartApprove
+        | PermissionGlyph::Chat => "shielded",
     };
     rsx! {
         svg { class: "sidebar-glyph permission-glyph", "data-glyph": "{token}", view_box: "0 0 12 12", fill: "none", stroke: "currentColor", stroke_width: "1.25", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true",
-            path { d: "M2.5 5.2h7v4.6h-7z" }
-            if closed {
-                path { d: "M4 5.2V3.8a2 2 0 0 1 4 0v1.4" }
+            if glyph == PermissionGlyph::Unknown {
+                path { d: "M3.8 3.5a2.2 2.2 0 0 1 4.4 0c0 1.8-2.2 1.7-2.2 3.5" }
+                path { d: "M6 9.5v.1" }
             } else {
-                path { d: "M4 5.2V3.8a2 2 0 0 1 3.4-1.4" }
+                path { d: "M6 1.3 10 2.8v3c0 2.3-2.2 4-4 4.9-1.8-.9-4-2.6-4-4.9v-3z" }
+                if glyph == PermissionGlyph::Yolo {
+                    path { d: "M1.3 1.3 10.7 10.7" }
+                }
             }
         }
     }
@@ -310,7 +323,7 @@ pub(crate) fn QualifierIcon(glyph: QualifierGlyph) -> Element {
 /// An open screen over a wider base reads as a different OBJECT from the
 /// remote cloud at a glance, not just a different arrangement of the same
 /// lines — legibility at 12px depends on silhouette, not on a reader
-/// parsing detail. The outline stays quiet beside the status dot, lock,
+/// parsing detail. The outline stays quiet beside the status dot, permission mark,
 /// and title, and it carries the red local caution color without becoming
 /// a solid red patch the way a filled screen would.
 #[component]

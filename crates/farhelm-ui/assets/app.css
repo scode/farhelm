@@ -2629,14 +2629,8 @@ samp {
   min-width: 4ch;
 }
 
-/* The agent badge is two fixed columns, not a shrink-wrapped flex group: the
-   harness mark always occupies the first cell and the permission lock the
-   second, whether or not a lock is rendered. As a flex group the badge was
-   right-aligned and narrower on rows without a lock, so their harness mark
-   slid over into the lock's column and the marks zigzagged down a mixed list.
-   A fleet where every session runs unattended never shows the shift (every
-   row has a lock), which is why it survived; the README hero fleet mixes the
-   two and made it visible. The cell widths match `.sidebar-glyph`. */
+/* Fixed tracks keep both marks in the same columns on every row. This once
+   broke when permission marks were optional; every row now carries both. */
 .session-agent {
   grid-column: 4;
   justify-self: end;
@@ -2680,18 +2674,22 @@ samp {
   flex: 0 0 auto;
 }
 
-/* Harness and qualifier glyphs share the text cap height. Raw command lines
-   that are not recognized as YOLO remain unmarked, including Codex full-auto. */
+/* Harness and qualifier glyphs share the text cap height. Every row gets one
+   permission silhouette, including unknown raw commands and shells. */
 .sidebar-glyph {
   width: 10px;
   height: 12px;
   flex: 0 0 auto;
 }
 
-.permission-glyph[data-glyph="yolo"] {
+.permission-glyph[data-glyph="yolo"],
+.permission-glyph[data-glyph="unknown"] {
   color: var(--warn);
 }
 
+.permission-glyph[data-glyph="shielded"] {
+  color: var(--ok);
+}
 
 .ended-status-glyph[data-glyph="exited"] {
   color: var(--fg-1);

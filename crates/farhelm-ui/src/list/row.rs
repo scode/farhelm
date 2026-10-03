@@ -398,9 +398,9 @@ fn abbreviate_home(cwd: &str) -> String {
 }
 
 /// The row's parsed view of a launch command: the program's basename to
-/// show, plus a YOLO mark when the shared classifier recognizes a bypass.
+/// show, plus a YOLO or unknown permission mark from the shared classifier.
 ///
-/// Two fields rather than one formatted string, because the row renders
+/// Separate fields rather than one formatted string, because the row renders
 /// each into its own bidi-isolated span (see `SessionRow`'s rsx and
 /// `crate::peer` for why): joining them here and handing the row one
 /// interpolated string would let a directional override inside the
@@ -410,12 +410,12 @@ fn abbreviate_home(cwd: &str) -> String {
 pub(super) struct CompactInvocation {
     pub(super) basename: String,
     pub(super) harness: HarnessGlyph,
-    pub(super) permission: Option<PermissionGlyph>,
+    pub(super) permission: PermissionGlyph,
 }
 
 /// The complete, accessible account of the compact agent badge.
 ///
-/// The sidebar reduces a known harness to one or two glyphs, but the reduced
+/// The sidebar pairs a harness glyph with a permission mark, but the reduced
 /// picture must never become the only place the invocation or permission
 /// meaning exists. This value keeps the visible classification and the
 /// tooltip/screen-reader wording together so a later glyph change cannot
@@ -423,7 +423,7 @@ pub(super) struct CompactInvocation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AgentBadge {
     harness: HarnessGlyph,
-    permission: Option<PermissionGlyph>,
+    permission: PermissionGlyph,
     description: String,
 }
 
@@ -442,9 +442,12 @@ fn known_harness(program: &str) -> HarnessGlyph {
     }
 }
 
+/// Keep the specific approval mode audible even when several modes share a shield.
 fn permission_description(permission: PermissionGlyph) -> &'static str {
     match permission {
         PermissionGlyph::Yolo => "YOLO permission bypass",
+        PermissionGlyph::Default => "default permission mode",
+        PermissionGlyph::Unknown => "unknown permission mode — profile or custom command",
         PermissionGlyph::Approve => "approve permission mode",
         PermissionGlyph::SmartApprove => "smart approve permission mode",
         PermissionGlyph::Chat => "chat permission mode",
@@ -473,19 +476,17 @@ fn agent_badge(session: &Session) -> AgentBadge {
         // The shared classifier decides YOLO; the effective permission helper
         // also handles older omitted or unsupported choices for mode display.
         let permission = if farhelm_proto::yolo::selection_is_yolo(launch) {
-            Some(PermissionGlyph::Yolo)
+            PermissionGlyph::Yolo
         } else {
-            launch
-                .harness
-                .effective_permission(launch.permissions)
-                .map(|permission| match permission {
-                    crate::LaunchPermission::Yolo => {
-                        unreachable!("the shared classifier handled YOLO")
-                    }
-                    crate::LaunchPermission::Approve => PermissionGlyph::Approve,
-                    crate::LaunchPermission::SmartApprove => PermissionGlyph::SmartApprove,
-                    crate::LaunchPermission::Chat => PermissionGlyph::Chat,
-                })
+            match launch.harness.effective_permission(launch.permissions) {
+                Some(crate::LaunchPermission::Yolo) => {
+                    unreachable!("the shared classifier handled YOLO")
+                }
+                Some(crate::LaunchPermission::Approve) => PermissionGlyph::Approve,
+                Some(crate::LaunchPermission::SmartApprove) => PermissionGlyph::SmartApprove,
+                Some(crate::LaunchPermission::Chat) => PermissionGlyph::Chat,
+                None => PermissionGlyph::Default,
+            }
         };
         let mut description = match harness {
             HarnessGlyph::Codex => "Codex".to_string(),
@@ -499,10 +500,8 @@ fn agent_badge(session: &Session) -> AgentBadge {
             HarnessGlyph::OpenCode => "OpenCode".to_string(),
             HarnessGlyph::Terminal => unreachable!("structured selections always name a harness"),
         };
-        if let Some(permission) = permission {
-            description.push_str(" — ");
-            description.push_str(permission_description(permission));
-        }
+        description.push_str(" — ");
+        description.push_str(permission_description(permission));
         description.push_str(" — ");
         description.push_str(&session.invocation);
         return AgentBadge {
@@ -518,10 +517,8 @@ fn agent_badge(session: &Session) -> AgentBadge {
     } else {
         compact.basename.clone()
     };
-    if let Some(permission) = compact.permission {
-        description.push_str(" — ");
-        description.push_str(permission_description(permission));
-    }
+    description.push_str(" — ");
+    description.push_str(permission_description(compact.permission));
     description.push_str(" — ");
     description.push_str(&session.invocation);
     AgentBadge {
@@ -533,10 +530,10 @@ fn agent_badge(session: &Session) -> AgentBadge {
 
 /// The row's one-glance parse of a launch command: the program's basename,
 /// plus a YOLO mark only when the shared classifier recognizes an approval-free
-/// launch. Unknown and sandboxed command lines remain unmarked.
+/// launch. Unknown and sandboxed command lines get the unknown mark.
 ///
 /// `claude --dangerously-skip-permissions --model opus` gets a YOLO mark;
-/// `/usr/bin/codex --full-auto` and `sleep 300` remain unmarked. The proto
+/// `/usr/bin/codex --full-auto` and `sleep 300` get the unknown mark. The proto
 /// classifier owns the vendor-specific flag tables.
 ///
 /// Argv is real shell-word splitting (`shell_words::split`), the same
@@ -545,14 +542,14 @@ fn agent_badge(session: &Session) -> AgentBadge {
 /// not a second, divergent implementation of it. Scanning for a marker
 /// STOPS at a bare `--`: everything after it is positional argument data by
 /// shell convention, not a flag this program is reading, so `codex --
-/// --yolo` shows no marker even though the literal text is present.
+/// --yolo` shows the unknown mark even though the literal text is present.
 ///
 /// ## Fallback
 ///
 /// A string `shell_words` cannot parse at all (an unbalanced quote, the only
 /// thing it refuses) — which the supervisor will not create, but a route
 /// stub or a future wire change could deliver — renders as the
-/// trimmed input with no marker, exactly as an invocation with no
+/// trimmed input with the unknown mark, exactly as an invocation with no
 /// non-whitespace characters at all does. Guessing further than the parser
 /// itself could resolve would be inventing structure for text that has
 /// none; the neutral fallback says only what was actually sent.
@@ -564,7 +561,7 @@ fn compact_invocation(invocation: &str) -> CompactInvocation {
     let fallback = || CompactInvocation {
         basename: trimmed.to_string(),
         harness: HarnessGlyph::Terminal,
-        permission: None,
+        permission: PermissionGlyph::Unknown,
     };
     let Ok(argv) = shell_words::split(invocation) else {
         return fallback();
@@ -579,9 +576,12 @@ fn compact_invocation(invocation: &str) -> CompactInvocation {
     let harness = known_harness(&basename);
     // The same classifier guards the launch on the helm, so an inferred YOLO
     // mark can never disagree with the confirmation decision. Unknown and
-    // sandboxed command lines deliberately carry no permission mark.
-    let permission =
-        farhelm_proto::yolo::invocation_is_yolo(invocation).then_some(PermissionGlyph::Yolo);
+    // sandboxed command lines carry the unknown mark.
+    let permission = if farhelm_proto::yolo::invocation_is_yolo(invocation) {
+        PermissionGlyph::Yolo
+    } else {
+        PermissionGlyph::Unknown
+    };
     CompactInvocation {
         basename,
         harness,
@@ -1581,10 +1581,8 @@ pub(super) fn SessionRow(
                             span { title: "{display_peer(&agent_tooltip)}",
                                 HarnessIcon { glyph: agent.harness }
                             }
-                            if let Some(permission) = agent.permission {
-                                span { title: "{permission_description(permission)}",
-                                    PermissionIcon { glyph: permission }
-                                }
+                            span { title: "{permission_description(agent.permission)}",
+                                PermissionIcon { glyph: agent.permission }
                             }
                             if let Some(source) = &session.source_profile {
                                 span { class: "visually-hidden", "{display_peer(&source_profile_label(source))}. " }
@@ -2894,7 +2892,7 @@ mod tests {
     fn badge(
         basename: &str,
         harness: HarnessGlyph,
-        permission: Option<PermissionGlyph>,
+        permission: PermissionGlyph,
     ) -> CompactInvocation {
         CompactInvocation {
             basename: basename.to_string(),
@@ -2903,46 +2901,43 @@ mod tests {
         }
     }
 
-    /// The invocation badge is the program's basename plus, at most, one
-    /// YOLO mark, regardless of how many bypass flags the command carries.
+    /// The invocation badge has exactly one permission mark, regardless of
+    /// how many bypass flags the command carries. Unknown commands get a
+    /// question mark rather than a claim that they ask for approval.
     ///
     /// Worth pinning because the badge is all the row shows of a command
     /// line the user may have spent real thought on: a regression that
     /// dropped the marker would make an agent running with every
     /// permission prompt skipped look identical to one that asks.
     #[farhelm_testtrace::test]
-    fn the_invocation_badge_is_a_basename_plus_at_most_one_marker() {
+    fn the_invocation_badge_is_a_basename_plus_one_permission_mark() {
         assert_eq!(
             compact_invocation("sleep 300"),
-            badge("sleep", HarnessGlyph::Terminal, None)
+            badge("sleep", HarnessGlyph::Terminal, PermissionGlyph::Unknown)
         );
         assert_eq!(
             compact_invocation("/usr/bin/codex --yolo"),
-            badge("codex", HarnessGlyph::Codex, Some(PermissionGlyph::Yolo))
+            badge("codex", HarnessGlyph::Codex, PermissionGlyph::Yolo)
         );
         assert_eq!(
             compact_invocation("claude --dangerously-skip-permissions --model opus"),
-            badge("claude", HarnessGlyph::Claude, Some(PermissionGlyph::Yolo))
+            badge("claude", HarnessGlyph::Claude, PermissionGlyph::Yolo)
         );
         assert_eq!(
             compact_invocation("opencode --auto"),
-            badge(
-                "opencode",
-                HarnessGlyph::OpenCode,
-                Some(PermissionGlyph::Yolo)
-            ),
+            badge("opencode", HarnessGlyph::OpenCode, PermissionGlyph::Yolo),
             "OpenCode's auto spelling is the requested YOLO equivalent"
         );
         assert_eq!(
             compact_invocation("codex --full-auto --yolo"),
-            badge("codex", HarnessGlyph::Codex, Some(PermissionGlyph::Yolo)),
+            badge("codex", HarnessGlyph::Codex, PermissionGlyph::Yolo),
             "multiple flags still produce one YOLO mark"
         );
         // A flag is only a marker as a whole token: substring matching
         // would badge an unrelated argument that merely contains one.
         assert_eq!(
             compact_invocation("claude --model=yolo-9"),
-            badge("claude", HarnessGlyph::Claude, None)
+            badge("claude", HarnessGlyph::Claude, PermissionGlyph::Unknown)
         );
     }
 
@@ -2952,16 +2947,16 @@ mod tests {
     fn the_no_sandbox_flag_earns_its_own_marker() {
         assert_eq!(
             compact_invocation("codex --dangerously-bypass-approvals-and-sandbox"),
-            badge("codex", HarnessGlyph::Codex, Some(PermissionGlyph::Yolo))
+            badge("codex", HarnessGlyph::Codex, PermissionGlyph::Yolo)
         );
     }
 
     /// Sandboxed auto-approval must not be confused with a full bypass.
     #[farhelm_testtrace::test]
-    fn the_full_auto_flag_stays_unmarked() {
+    fn the_full_auto_flag_has_unknown_permissions() {
         assert_eq!(
             compact_invocation("codex --full-auto"),
-            badge("codex", HarnessGlyph::Codex, None)
+            badge("codex", HarnessGlyph::Codex, PermissionGlyph::Unknown)
         );
     }
 
@@ -2982,7 +2977,7 @@ mod tests {
         ] {
             assert_eq!(
                 compact_invocation(command).permission,
-                Some(PermissionGlyph::Yolo),
+                PermissionGlyph::Yolo,
                 "{command}"
             );
         }
@@ -2992,7 +2987,11 @@ mod tests {
             "codex -- --yolo",
             "codex -c -- --yolo",
         ] {
-            assert_eq!(compact_invocation(command).permission, None, "{command}");
+            assert_eq!(
+                compact_invocation(command).permission,
+                PermissionGlyph::Unknown,
+                "{command}"
+            );
         }
     }
 
@@ -3034,7 +3033,7 @@ mod tests {
             agent_badge(&session),
             AgentBadge {
                 harness: HarnessGlyph::Claude,
-                permission: Some(PermissionGlyph::Yolo),
+                permission: PermissionGlyph::Yolo,
                 description: "Claude Code — YOLO permission bypass — unknown-command --anything"
                     .to_string(),
             }
@@ -3059,7 +3058,7 @@ mod tests {
         };
         assert_eq!(
             agent_badge(&goose).permission,
-            Some(PermissionGlyph::SmartApprove)
+            PermissionGlyph::SmartApprove
         );
         assert!(agent_badge(&goose).description.contains("smart approve"));
 
@@ -3074,12 +3073,90 @@ mod tests {
             invocation: "pi --provider openrouter".to_string(),
             ..row_specimen("structured-pi-badge")
         };
-        assert_eq!(agent_badge(&pi).permission, Some(PermissionGlyph::Yolo));
+        assert_eq!(agent_badge(&pi).permission, PermissionGlyph::Yolo);
         assert!(
             agent_badge(&pi)
                 .description
                 .contains("YOLO permission bypass")
         );
+    }
+
+    /// Structured non-YOLO modes are known choices; an identical raw command
+    /// cannot establish that guarantee. Every path still carries one mark.
+    #[farhelm_testtrace::test]
+    fn every_row_has_a_permission_mark_without_inferring_approval() {
+        for (permission, expected) in [
+            (None, PermissionGlyph::Default),
+            (Some(crate::LaunchPermission::Yolo), PermissionGlyph::Yolo),
+        ] {
+            let session = Session {
+                launch: Some(crate::LaunchSelection {
+                    harness: LaunchHarness::Codex,
+                    model: None,
+                    effort: None,
+                    permissions: permission,
+                    workspace_trust: None,
+                }),
+                invocation: "codex".into(),
+                ..row_specimen("structured-mode")
+            };
+            assert_eq!(agent_badge(&session).permission, expected);
+            assert!(
+                agent_badge(&session)
+                    .description
+                    .contains(permission_description(expected))
+            );
+        }
+        for invocation in [
+            "codex",
+            "codex --full-auto",
+            "sleep 300",
+            "omp",
+            "goose",
+            "opencode",
+        ] {
+            let session = Session {
+                launch: None,
+                invocation: invocation.into(),
+                ..row_specimen("unknown-mode")
+            };
+            assert_eq!(
+                agent_badge(&session).permission,
+                PermissionGlyph::Unknown,
+                "{invocation}"
+            );
+            assert!(
+                agent_badge(&session)
+                    .description
+                    .contains("profile or custom command")
+            );
+        }
+        for (permission, expected) in [
+            (crate::LaunchPermission::Approve, PermissionGlyph::Approve),
+            (
+                crate::LaunchPermission::SmartApprove,
+                PermissionGlyph::SmartApprove,
+            ),
+            (crate::LaunchPermission::Chat, PermissionGlyph::Chat),
+        ] {
+            let session = Session {
+                launch: Some(crate::LaunchSelection {
+                    harness: LaunchHarness::Goose,
+                    model: None,
+                    effort: None,
+                    permissions: Some(permission),
+                    workspace_trust: None,
+                }),
+                invocation: "goose session".into(),
+                ..row_specimen("approval-mode")
+            };
+            assert_eq!(agent_badge(&session).permission, expected);
+            assert!(
+                agent_badge(&session)
+                    .description
+                    .contains(permission_description(expected))
+            );
+        }
     }
 
     /// A marker applies only to the VENDOR it belongs to, and never past a
@@ -3088,24 +3165,24 @@ mod tests {
     /// happens to match one.
     #[farhelm_testtrace::test]
     fn markers_are_tied_to_the_recognized_programs_own_flags() {
-        // An unrecognized program earns no marker even though the flag
+        // An unrecognized program earns the unknown mark even though the flag
         // text is right there in its argv.
         assert_eq!(
             compact_invocation("echo --yolo"),
-            badge("echo", HarnessGlyph::Terminal, None)
+            badge("echo", HarnessGlyph::Terminal, PermissionGlyph::Unknown)
         );
         // Codex's own flag, but past a bare `--`: shell convention says
         // everything from there on is positional data, not a flag this
         // program reads as its own.
         assert_eq!(
             compact_invocation("codex -- --yolo"),
-            badge("codex", HarnessGlyph::Codex, None)
+            badge("codex", HarnessGlyph::Codex, PermissionGlyph::Unknown)
         );
         // Claude Code's binary, but Codex's flag — the wrong vendor's flag
         // is not a marker.
         assert_eq!(
             compact_invocation("claude --yolo"),
-            badge("claude", HarnessGlyph::Claude, None)
+            badge("claude", HarnessGlyph::Claude, PermissionGlyph::Unknown)
         );
     }
 
@@ -3121,7 +3198,7 @@ mod tests {
     /// A corrupted basename can never accidentally ACQUIRE a marker it does
     /// not legitimately have, either: the shared classifier matches by
     /// EXACT string equality against the basename, so `\u{202E}codex` is
-    /// simply not `codex` and earns no marker — one more reason the row's
+    /// simply not `codex` and earns the unknown mark — one more reason the row's
     /// two-span rendering (basename, marker) is a real structural split and
     /// not an escaping trick alone: there is no path by which an overridden
     /// basename could smuggle a false marker onto the row for the isolation
@@ -3133,7 +3210,7 @@ mod tests {
             CompactInvocation {
                 basename: "\u{202E}codex".to_string(),
                 harness: HarnessGlyph::Terminal,
-                permission: None,
+                permission: PermissionGlyph::Unknown,
             },
             "the override character rides along in the basename field untouched, and the \
              corrupted name simply fails the exact match against the recognized `codex` vendor"
@@ -3148,7 +3225,7 @@ mod tests {
         // A backslash-escaped space in an otherwise unquoted path.
         assert_eq!(
             compact_invocation("/opt/with\\ space/bin/claude --dangerously-skip-permissions"),
-            badge("claude", HarnessGlyph::Claude, Some(PermissionGlyph::Yolo))
+            badge("claude", HarnessGlyph::Claude, PermissionGlyph::Yolo)
         );
         // Adjacent quoted and unquoted fragments glue into ONE argv[0] —
         // the shape `shell_words::quote` itself produces for a path with
@@ -3159,7 +3236,7 @@ mod tests {
         // space was actually consumed as part of the same argv[0].
         assert_eq!(
             compact_invocation("\"/opt/with space\"/bin/codex --yolo"),
-            badge("codex", HarnessGlyph::Codex, Some(PermissionGlyph::Yolo))
+            badge("codex", HarnessGlyph::Codex, PermissionGlyph::Yolo)
         );
         // The whole path quoted, once with double quotes and once with
         // single — deliberately DISCRIMINATING fixtures, unlike the
@@ -3171,17 +3248,17 @@ mod tests {
         // consumed the space as part of argv[0] recovers the right answer.
         assert_eq!(
             compact_invocation("\"/opt/with space/bin/farhelm\" internal fake-agent"),
-            badge("farhelm", HarnessGlyph::Terminal, None)
+            badge("farhelm", HarnessGlyph::Terminal, PermissionGlyph::Unknown)
         );
         assert_eq!(
             compact_invocation("'/opt/with space/bin/farhelm' internal fake-agent"),
-            badge("farhelm", HarnessGlyph::Terminal, None)
+            badge("farhelm", HarnessGlyph::Terminal, PermissionGlyph::Unknown)
         );
         // A quoted flag: the parser strips the quotes, and the flag still
         // matches the marker table as a whole token.
         assert_eq!(
             compact_invocation("codex \"--yolo\""),
-            badge("codex", HarnessGlyph::Codex, Some(PermissionGlyph::Yolo))
+            badge("codex", HarnessGlyph::Codex, PermissionGlyph::Yolo)
         );
         // `#` starts a real POSIX comment at a word boundary — this parser
         // is not a hand-rolled stand-in, it is the genuine article — so
@@ -3189,12 +3266,12 @@ mod tests {
         // entirely rather than surviving as a literal trailing token.
         assert_eq!(
             compact_invocation("sleep 300 #not-a-comment"),
-            badge("sleep", HarnessGlyph::Terminal, None)
+            badge("sleep", HarnessGlyph::Terminal, PermissionGlyph::Unknown)
         );
         // Single quotes behave exactly like double quotes for this parser.
         assert_eq!(
             compact_invocation("'codex' --full-auto"),
-            badge("codex", HarnessGlyph::Codex, None)
+            badge("codex", HarnessGlyph::Codex, PermissionGlyph::Unknown)
         );
     }
 
@@ -3205,27 +3282,35 @@ mod tests {
     /// create it cannot split into argv — they come from route stubs in
     /// the browser suite and from whatever a future wire change allows.
     /// The contract is that the element still renders and says only what
-    /// it was given, with no marker.
+    /// it was given, with the unknown mark.
     #[farhelm_testtrace::test]
     fn a_degenerate_invocation_falls_back_to_what_it_was_given() {
         assert_eq!(
             compact_invocation(""),
-            badge("", HarnessGlyph::Terminal, None)
+            badge("", HarnessGlyph::Terminal, PermissionGlyph::Unknown)
         );
         assert_eq!(
             compact_invocation("   "),
-            badge("", HarnessGlyph::Terminal, None)
+            badge("", HarnessGlyph::Terminal, PermissionGlyph::Unknown)
         );
         assert_eq!(
             compact_invocation("/usr/bin/"),
-            badge("/usr/bin/", HarnessGlyph::Terminal, None),
+            badge(
+                "/usr/bin/",
+                HarnessGlyph::Terminal,
+                PermissionGlyph::Unknown
+            ),
             "a token with no basename to take stands as it is"
         );
         assert_eq!(
             compact_invocation("\"unbalanced --yolo"),
-            badge("\"unbalanced --yolo", HarnessGlyph::Terminal, None),
+            badge(
+                "\"unbalanced --yolo",
+                HarnessGlyph::Terminal,
+                PermissionGlyph::Unknown
+            ),
             "an unclosed quote is something shell_words itself cannot resolve, so this falls \
-             back to the trimmed raw text with no marker rather than guessing at structure that \
+             back to the trimmed raw text with the unknown mark rather than guessing at structure that \
              was never there"
         );
     }

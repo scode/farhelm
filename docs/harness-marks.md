@@ -1,6 +1,6 @@
 # Harness marks in the session sidebar
 
-The session list identifies each agent harness with a small mark beside the permission lock. This document records where
+The session list identifies each agent harness with a small mark beside the permission mark. This document records where
 every mark comes from, what the brand owner's terms allow, and the one sizing rule they all obey, so that the next
 person to touch `crates/farhelm-ui/src/icons.rs` does not have to redo the research or guess why a given harness does
 not carry its official logo. Research date: 2026-09-22. Brand terms change; re-check the cited pages before relying on a
