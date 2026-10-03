@@ -184,17 +184,44 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     esac
   }
 
-  # Emits $1 as one single-quoted POSIX shell word (embedded single quotes
-  # escaped the standard '\'' way), so a printed `export PATH=...` line stays
-  # safe to paste even when the install directory contains spaces or shell
-  # metacharacters. Returns failure if $1 contains a newline: no single-line
-  # quoting can represent that safely, and the caller falls back to non-
-  # pasteable guidance instead.
-  shquote() {
-    case "$1" in
-      *"$NEWLINE"*) return 1 ;;
-    esac
-    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+  # Decide styling per output stream: redirecting a report must not put
+  # terminal controls in it even when progress still goes to a terminal.
+  # NO_COLOR suppresses color and emphasis. OSC 8 links are emitted whenever
+  # stdout is a terminal, independently of NO_COLOR (the approved P2 behavior).
+  init_output() {
+    OUT_GREEN='' OUT_YELLOW='' OUT_CYAN='' OUT_DIM='' OUT_RESET=''
+    ERR_BOLD='' ERR_RED='' ERR_CYAN='' ERR_DIM='' ERR_RESET=''
+    ERR_TERMINAL=0
+    BREW_LINK=https://brew.sh/
+    if [ -t 1 ]; then
+      BREW_LINK=$(printf '\033]8;;https://brew.sh/\033\134https://brew.sh/\033]8;;\033\134')
+      if [ -z "${NO_COLOR:-}" ]; then
+        OUT_GREEN=$(printf '\033[1;32m')
+        OUT_YELLOW=$(printf '\033[1;33m')
+        OUT_CYAN=$(printf '\033[36m')
+        OUT_DIM=$(printf '\033[2m')
+        OUT_RESET=$(printf '\033[0m')
+      fi
+    fi
+    if [ -t 2 ]; then
+      ERR_TERMINAL=1
+      if [ -z "${NO_COLOR:-}" ]; then
+        ERR_BOLD=$(printf '\033[1m')
+        ERR_RED=$(printf '\033[1;31m')
+        ERR_CYAN=$(printf '\033[36m')
+        ERR_DIM=$(printf '\033[2m')
+        ERR_RESET=$(printf '\033[0m')
+      fi
+    fi
+  }
+
+  # Fatal diagnostics go to stderr with an error marker and, on a styled
+  # terminal, red text. Preserve their wording even when stdout is redirected.
+  error() {
+    printf '❌ %s' "$ERR_RED" >&2
+    # shellcheck disable=SC2059 # Callers supply a literal printf format and its arguments.
+    printf "$@" >&2
+    printf '%s' "$ERR_RESET" >&2
   }
 
   # Every network request in this script goes through here. `-q` disables
@@ -262,7 +289,7 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     pir_final=$1
     pir_stage=$2
     if [ -L "$pir_final" ] || { [ -e "$pir_final" ] && [ ! -f "$pir_final" ]; }; then
-      printf '%s exists and is not a regular file (or is a symlink); refusing to publish installer ownership metadata\n' "$pir_final" >&2
+      error '%s exists and is not a regular file (or is a symlink); refusing to publish installer ownership metadata\n' "$pir_final"
       return 1
     fi
 
@@ -347,19 +374,19 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
 
     esm_hits=$(member_count_named "$esm_archive" "$esm_base")
     if [ "$esm_hits" -ne 1 ]; then
-      printf '%s has %s members named %s, expected exactly 1\n' "$esm_label" "$esm_hits" "$esm_base" >&2
+      error '%s has %s members named %s, expected exactly 1\n' "$esm_label" "$esm_hits" "$esm_base"
       exit 1
     fi
     esm_member=$(tar tzf "$esm_archive" | awk -F/ -v b="$esm_base" '{n=split($0,p,"/"); if (p[n]==b) print}')
 
     case "$esm_member" in
       -*)
-        printf '%s: member name %s looks like a tar option; refusing\n' "$esm_label" "$esm_member" >&2
+        error '%s: member name %s looks like a tar option; refusing\n' "$esm_label" "$esm_member"
         exit 1
         ;;
     esac
     if printf '%s' "$esm_member" | LC_ALL=C grep -q '[[:cntrl:]]'; then
-      printf '%s: member name contains a control character; refusing\n' "$esm_label" >&2
+      error '%s: member name contains a control character; refusing\n' "$esm_label"
       exit 1
     fi
 
@@ -370,17 +397,17 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     # when it counts zero lines, so `|| true` keeps its "0" for the check
     # below instead of ending the run.
     esm_type_lines=$(tar tvzf "$esm_archive" -- "$esm_member" 2>/dev/null) || {
-      printf '%s: tar could not list %s in the archive; refusing\n' "$esm_label" "$esm_member" >&2
+      error '%s: tar could not list %s in the archive; refusing\n' "$esm_label" "$esm_member"
       exit 1
     }
     esm_type_count=$(printf '%s\n' "$esm_type_lines" | grep -c . || true)
     if [ "$esm_type_count" -ne 1 ]; then
-      printf '%s: %s reports %s metadata records for %s, expected exactly 1\n' "$esm_label" "tar tv" "$esm_type_count" "$esm_member" >&2
+      error '%s: %s reports %s metadata records for %s, expected exactly 1\n' "$esm_label" "tar tv" "$esm_type_count" "$esm_member"
       exit 1
     fi
     esm_type_char=$(printf '%s' "$esm_type_lines" | cut -c1)
     if [ "$esm_type_char" != "-" ]; then
-      printf '%s: %s is not a regular file (tar reports type '"'"'%s'"'"'); refusing to install it\n' "$esm_label" "$esm_member" "$esm_type_char" >&2
+      error '%s: %s is not a regular file (tar reports type '"'"'%s'"'"'); refusing to install it\n' "$esm_label" "$esm_member" "$esm_type_char"
       exit 1
     fi
 
@@ -406,7 +433,7 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   refuse_unless_absent_or_regular() {
     rufu_target=$1
     if [ -L "$rufu_target" ] || { [ -e "$rufu_target" ] && [ ! -f "$rufu_target" ]; }; then
-      printf '%s exists and is not a regular file (or is a symlink); refusing to touch it\n' "$rufu_target" >&2
+      error '%s exists and is not a regular file (or is a symlink); refusing to touch it\n' "$rufu_target"
       exit 1
     fi
   }
@@ -835,7 +862,7 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # journal in place rather than declaring victory (F8).
   rollback_from_journal() {
     if ! rfj_content=$(cat "$JOURNAL" 2>/dev/null); then
-      printf 'could not read the recovery journal %s; nothing was rolled back and %s is LEFT IN PLACE for inspection\n' "$JOURNAL" "$LOCK_DIR" >&2
+      error 'could not read the recovery journal %s; nothing was rolled back and %s is LEFT IN PLACE for inspection\n' "$JOURNAL" "$LOCK_DIR"
       return 1
     fi
 
@@ -874,7 +901,7 @@ EOF
     # this script wrote, and acting on part of it would be acting on a
     # stranger's instructions. Refuse, and change nothing.
     if [ -n "$rfj_bad" ]; then
-      printf 'the recovery journal %s contains a record this installer does not recognise; refusing to act on it -- %s and its journal are LEFT IN PLACE for inspection\n' "$JOURNAL" "$LOCK_DIR" >&2
+      error 'the recovery journal %s contains a record this installer does not recognise; refusing to act on it -- %s and its journal are LEFT IN PLACE for inspection\n' "$JOURNAL" "$LOCK_DIR"
       return 1
     fi
 
@@ -913,7 +940,7 @@ EOF
             rfj_did=1
           else
             rfj_ok=0
-            printf 'could not remove %s while rolling back; manual cleanup needed\n' "$rfj_dest" >&2
+            error 'could not remove %s while rolling back; manual cleanup needed\n' "$rfj_dest"
           fi
           ;;
         PARK)
@@ -925,12 +952,12 @@ EOF
             rfj_did=1
           elif [ -L "$rfj_dest" ] || { [ -e "$rfj_dest" ] && [ ! -f "$rfj_dest" ]; }; then
             rfj_ok=0
-            printf 'cannot restore %s to %s: %s exists and is not a regular file; leaving %s in place for manual recovery\n' "$rfj_backup" "$rfj_dest" "$rfj_dest" "$rfj_backup" >&2
+            error 'cannot restore %s to %s: %s exists and is not a regular file; leaving %s in place for manual recovery\n' "$rfj_backup" "$rfj_dest" "$rfj_dest" "$rfj_backup"
           elif mv "$rfj_backup" "$rfj_dest"; then
             rfj_did=1
           else
             rfj_ok=0
-            printf 'could not restore %s to %s while rolling back\n' "$rfj_backup" "$rfj_dest" >&2
+            error 'could not restore %s to %s while rolling back\n' "$rfj_backup" "$rfj_dest"
           fi
           ;;
       esac
@@ -942,7 +969,7 @@ EOF
         # cannot tell apart from "never done".
         if ! journal_mark_undone "$rfj_at"; then
           rfj_ok=0
-          printf 'could not record rollback progress in %s; stopping before a later attempt could undo an already-restored binary\n' "$JOURNAL" >&2
+          error 'could not record rollback progress in %s; stopping before a later attempt could undo an already-restored binary\n' "$JOURNAL"
           break
         fi
       fi
@@ -985,14 +1012,14 @@ EOF
     fi
 
     if ! is_our_lock "$LOCK_DIR"; then
-      printf '%s exists and is not a farhelm install lock (unexpected contents); refusing to touch it -- remove it by hand if you are sure nothing owns it, then retry\n' "$LOCK_DIR" >&2
+      error '%s exists and is not a farhelm install lock (unexpected contents); refusing to touch it -- remove it by hand if you are sure nothing owns it, then retry\n' "$LOCK_DIR"
       exit 1
     fi
 
     other_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
     case "$other_pid" in
       '' | *[!0-9]*)
-        printf 'another farhelm install/update appears to be starting against %s (its pid is not readable yet); wait a moment and retry -- if this persists, a previous run may have crashed between creating the lock and recording its pid, which requires removing %s by hand\n' "$INSTALL_DIR" "$LOCK_DIR" >&2
+        error 'another farhelm install/update appears to be starting against %s (its pid is not readable yet); wait a moment and retry -- if this persists, a previous run may have crashed between creating the lock and recording its pid, which requires removing %s by hand\n' "$INSTALL_DIR" "$LOCK_DIR"
         exit 1
         ;;
     esac
@@ -1002,7 +1029,7 @@ EOF
     # its own pid in a lock a SIGKILLed run left behind and refuse forever.
     # Unlike reuse by an unrelated process, this case is certain.
     if [ "$other_pid" != "$$" ] && kill -0 "$other_pid" 2>/dev/null; then
-      printf 'another farhelm install/update (pid %s) is already running against %s; wait for it to finish, then retry\n' "$other_pid" "$INSTALL_DIR" >&2
+      error 'another farhelm install/update (pid %s) is already running against %s; wait for it to finish, then retry\n' "$other_pid" "$INSTALL_DIR"
       exit 1
     fi
 
@@ -1017,7 +1044,7 @@ EOF
     # remove-by-hand advice the pid-less lock gets, because nothing can tell
     # it from one that is still running.
     if ! (umask 077; mkdir "$RECOVERY_CLAIM") 2>/dev/null; then
-      printf 'another farhelm install/update is recovering from an interrupted run against %s; wait a moment and retry -- if this persists, a previous recovery may itself have been interrupted, which requires removing %s by hand\n' "$INSTALL_DIR" "$RECOVERY_CLAIM" >&2
+      error 'another farhelm install/update is recovering from an interrupted run against %s; wait a moment and retry -- if this persists, a previous recovery may itself have been interrupted, which requires removing %s by hand\n' "$INSTALL_DIR" "$RECOVERY_CLAIM"
       exit 1
     fi
     # The lock may have changed hands between reading its pid and winning
@@ -1030,7 +1057,7 @@ EOF
     if [ "$claimed_pid" != "$other_pid" ] ||
       { [ "$claimed_pid" != "$$" ] && kill -0 "$claimed_pid" 2>/dev/null; }; then
       rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
-      printf 'another farhelm install/update took over %s while this one was starting; wait for it to finish, then retry\n' "$INSTALL_DIR" >&2
+      error 'another farhelm install/update took over %s while this one was starting; wait for it to finish, then retry\n' "$INSTALL_DIR"
       exit 1
     fi
 
@@ -1038,9 +1065,9 @@ EOF
       if rollback_from_journal; then
         rm -f "$JOURNAL"
         remove_owned_lock
-        printf 'recovered from an interrupted install/update (stale lock recording pid %s): restored the previous installation; re-run this script to retry\n' "$other_pid" >&2
+        error 'recovered from an interrupted install/update (stale lock recording pid %s): restored the previous installation; re-run this script to retry\n' "$other_pid"
       else
-        printf 'found an interrupted install/update (stale lock recording pid %s) and could not fully roll it back; %s and %s are LEFT IN PLACE for inspection -- see the lines above for what could not be restored, then re-run this script\n' "$other_pid" "$LOCK_DIR" "$JOURNAL" >&2
+        error 'found an interrupted install/update (stale lock recording pid %s) and could not fully roll it back; %s and %s are LEFT IN PLACE for inspection -- see the lines above for what could not be restored, then re-run this script\n' "$other_pid" "$LOCK_DIR" "$JOURNAL"
       fi
       rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
       exit 1
@@ -1054,7 +1081,7 @@ EOF
     remove_owned_lock
     if ! (umask 077; mkdir "$LOCK_DIR") 2>/dev/null; then
       rmdir "$RECOVERY_CLAIM" 2>/dev/null || true
-      printf 'could not re-create the install lock %s after clearing a stale one; retry\n' "$LOCK_DIR" >&2
+      error 'could not re-create the install lock %s after clearing a stale one; retry\n' "$LOCK_DIR"
       exit 1
     fi
     printf '%s\n' "$$" >"$LOCK_DIR/pid"
@@ -1074,7 +1101,7 @@ EOF
         mv "$BUNDLE_WORK/previous" "$app_path" 2>/dev/null || true
       fi
       if [ -e "$BUNDLE_WORK/previous" ]; then
-        printf 'the previous %s could not be put back; it is at %s\n' "$app_path" "$BUNDLE_WORK/previous" >&2
+        error 'the previous %s could not be put back; it is at %s\n' "$app_path" "$BUNDLE_WORK/previous"
       else
         rm -rf "$BUNDLE_WORK" 2>/dev/null || true
       fi
@@ -1114,7 +1141,7 @@ EOF
           rm -f "$JOURNAL"
           remove_owned_lock
         else
-          printf 'interrupted while updating; automatic rollback could not fully complete -- %s and %s are LEFT IN PLACE for inspection; re-run this script once you have looked, or ask for help\n' "$LOCK_DIR" "$JOURNAL" >&2
+          error 'interrupted while updating; automatic rollback could not fully complete -- %s and %s are LEFT IN PLACE for inspection; re-run this script once you have looked, or ask for help\n' "$LOCK_DIR" "$JOURNAL"
         fi
       else
         remove_owned_lock
@@ -1123,24 +1150,26 @@ EOF
   }
 
   main() {
+    init_output
+
     # 1. Environment and platform. The fixed install directory comes from HOME.
     if [ -z "${HOME:-}" ]; then
-      printf 'HOME is not set; refusing to install\n' >&2
+      error 'HOME is not set; refusing to install\n'
       exit 1
     fi
     case "$HOME" in
       /*) ;;
-      *) printf 'HOME must be an absolute path; refusing to install\n' >&2; exit 1 ;;
+      *) error 'HOME must be an absolute path; refusing to install\n'; exit 1 ;;
     esac
     # Only the installer is macOS-only. The helm provisions Linux hosts
     # itself; refusing here must happen before downloads or filesystem writes.
     os=$(uname -s)
     if [ "$os" != Darwin ]; then
+      error 'This installer only supports macOS for now.\n'
       printf '%s\n' \
-        '❌ This installer only supports macOS for now.' \
         '   Linux is supported for running a helm and session hosts; only this installer is' \
         '   limited, and that will be fixed. If you want to install on Linux, please open an' \
-        '   issue and it will be prioritized: https://github.com/scode/farhelm/issues' >&2
+        "   issue and it will be prioritized: ${ERR_CYAN}https://github.com/scode/farhelm/issues${ERR_RESET}" >&2
       exit 1
     fi
     # Rosetta reports x86_64 on Apple silicon, which can run the native build.
@@ -1151,12 +1180,12 @@ EOF
         if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = "1" ]; then
           TARGET=aarch64-apple-darwin
         else
-          printf 'farhelm has no release build for %s %s; see %s\n' "$os" "$machine" "$RELEASES_PAGE" >&2
+          error 'farhelm has no release build for %s %s; see %s\n' "$os" "$machine" "$RELEASES_PAGE"
           exit 1
         fi
         ;;
       *)
-        printf 'farhelm has no release build for %s %s; see %s\n' "$os" "$machine" "$RELEASES_PAGE" >&2
+        error 'farhelm has no release build for %s %s; see %s\n' "$os" "$machine" "$RELEASES_PAGE"
         exit 1
         ;;
     esac
@@ -1172,7 +1201,7 @@ EOF
     # keeps the same no-downgrade pinning as the default GitHub channel.
     if [ -n "${FARHELM_INSTALL_TEST_BASE_URL:-}" ]; then
       if ! validate_release_base_url "$FARHELM_INSTALL_TEST_BASE_URL"; then
-        printf 'FARHELM_INSTALL_TEST_BASE_URL must be an https URL, or an http URL on this machine (127.0.0.1, localhost or [::1]), with a host and no userinfo, query, or fragment; refusing it\n' >&2
+        error 'FARHELM_INSTALL_TEST_BASE_URL must be an https URL, or an http URL on this machine (127.0.0.1, localhost or [::1]), with a host and no userinfo, query, or fragment; refusing it\n'
         exit 1
       fi
       case "$FARHELM_INSTALL_TEST_BASE_URL" in
@@ -1225,7 +1254,7 @@ EOF
       missing="$missing sha256sum-or-shasum-or-openssl"
     fi
     if [ -n "$missing" ]; then
-      printf 'farhelm'"'"'s installer needs:%s\n' "$missing" >&2
+      error 'farhelm'"'"'s installer needs:%s\n' "$missing"
       exit 1
     fi
 
@@ -1289,7 +1318,7 @@ EOF
       { [ "$candidate" = "0.0.0-unreleased" ] || [ "$candidate" = "v0.0.0-unreleased" ]; }; then
       VERSION_TAG=v0.0.0-unreleased
     elif ! VERSION_TAG=$(normalize_version "$candidate"); then
-      printf '%s\n' "$version_error" >&2
+      error '%s\n' "$version_error"
       exit 1
     fi
     VERSION_NUM=${VERSION_TAG#v}
@@ -1360,6 +1389,10 @@ EOF
     # case this whole block exists to detect. `-w` itself already prints
     # "000" on a total connection failure (no response received at all),
     # so nothing else is needed to cover that case.
+    if [ "$ERR_TERMINAL" -eq 1 ]; then
+      printf '⏳ %sDownloading Farhelm %s%s\n' "$ERR_BOLD" "$VERSION_NUM" "$ERR_RESET" >&2
+      printf '%s   If it looks stuck, it is safe to press Ctrl-C and run the same command again.%s\n\n' "$ERR_DIM" "$ERR_RESET" >&2
+    fi
     sums_url="$BASE_URL/SHA256SUMS"
     sums_status=$(curl_get -fsSL -w '%{http_code}' -o "$STAGING_DIR/SHA256SUMS" "$sums_url" 2>/dev/null || true)
     if [ "$sums_status" = 404 ]; then
@@ -1369,10 +1402,10 @@ EOF
       # helm's version of this message ends "...or pass --payload-dir", a
       # flag this script does not have; here it ends by pointing at the
       # releases page instead.
-      printf 'no SHA256SUMS for %s at %s (HTTP 404): the release is not published or is still publishing; retry in a few minutes, or check %s\n' "$VERSION_TAG" "$BASE_URL" "$RELEASES_PAGE" >&2
+      error 'no SHA256SUMS for %s at %s (HTTP 404): the release is not published or is still publishing; retry in a few minutes, or check %s\n' "$VERSION_TAG" "$BASE_URL" "$RELEASES_PAGE"
       exit 1
     elif [ "$sums_status" != 200 ]; then
-      printf 'download failed (HTTP %s): %s\n' "$sums_status" "$sums_url" >&2
+      error 'download failed (HTTP %s): %s\n' "$sums_status" "$sums_url"
       exit 1
     fi
 
@@ -1391,7 +1424,17 @@ EOF
       [ "$row_target" = "$TARGET" ] || continue
 
       archive_path="$STAGING_DIR/$row_archive"
-      curl_get -fsSL --retry 3 -o "$archive_path" "$BASE_URL/$row_archive"
+      if [ "$ERR_TERMINAL" -eq 1 ]; then
+        # Approved numbering follows the two Darwin rows in the asset table.
+        case "$row_binary" in
+          farhelm) download_label='[1/2]'; download_name='farhelm command-line tool' ;;
+          farhelm-desktop) download_label='[2/2]'; download_name='Farhelm app' ;;
+        esac
+        printf '   %s%s%s %s\n' "$ERR_BOLD" "$download_label" "$ERR_RESET" "$download_name" >&2
+        curl_get -fL --show-error --progress-bar --retry 3 -o "$archive_path" "$BASE_URL/$row_archive"
+      else
+        curl_get -fsSL --retry 3 -o "$archive_path" "$BASE_URL/$row_archive"
+      fi
 
       # Exactly one SHA256SUMS line must name this archive (D3's
       # "sign-sums" job asserts the same on the publishing side) — awk's
@@ -1399,16 +1442,16 @@ EOF
       # name being a prefix of another's can never cross-match.
       sums_hits=$(awk -v f="$row_archive" '$2==f{c++} END{print c+0}' "$STAGING_DIR/SHA256SUMS")
       if [ "$sums_hits" -ne 1 ]; then
-        printf 'SHA256SUMS has %s entries for %s, expected exactly 1\n' "$sums_hits" "$row_archive" >&2
+        error 'SHA256SUMS has %s entries for %s, expected exactly 1\n' "$sums_hits" "$row_archive"
         exit 1
       fi
       expected_sha256=$(awk -v f="$row_archive" '$2==f{print $1; exit}' "$STAGING_DIR/SHA256SUMS")
       if ! actual_sha256=$(sha256_of "$archive_path"); then
-        printf '%s: could not compute a checksum (%s failed reading %s)\n' "$row_archive" "$CHECKSUM_TOOL" "$archive_path" >&2
+        error '%s: could not compute a checksum (%s failed reading %s)\n' "$row_archive" "$CHECKSUM_TOOL" "$archive_path"
         exit 1
       fi
       if [ "$actual_sha256" != "$expected_sha256" ]; then
-        printf '%s: checksum mismatch (expected %s, got %s)\n' "$row_archive" "$expected_sha256" "$actual_sha256" >&2
+        error '%s: checksum mismatch (expected %s, got %s)\n' "$row_archive" "$expected_sha256" "$actual_sha256"
         exit 1
       fi
 
@@ -1426,7 +1469,7 @@ EOF
       if [ "$row_binary" = "farhelm-desktop" ]; then
         icns_hits=$(member_count_named "$archive_path" "Farhelm.icns")
         if [ "$icns_hits" -gt 1 ]; then
-          printf '%s has %s members named Farhelm.icns, expected at most 1\n' "$row_archive" "$icns_hits" >&2
+          error '%s has %s members named Farhelm.icns, expected at most 1\n' "$row_archive" "$icns_hits"
           exit 1
         fi
         if [ "$icns_hits" -eq 1 ]; then
@@ -1446,7 +1489,7 @@ EOF
     # through a separate "did we stage one" variable, is enough: the loop
     # above can only ever write it at this one path.
     if [ ! -e "$STAGING_DIR/farhelm" ]; then
-      printf 'internal error: no farhelm archive matched target %s\n' "$TARGET" >&2
+      error 'internal error: no farhelm archive matched target %s\n' "$TARGET"
       exit 1
     fi
 
@@ -1456,14 +1499,14 @@ EOF
     reported_version=$("$STAGING_DIR/farhelm" --version)
     expected_version_line="farhelm $VERSION_NUM"
     if [ "$reported_version" != "$expected_version_line" ]; then
-      printf 'downloaded farhelm reports '"'"'%s'"'"', expected '"'"'%s'"'"'; refusing to install\n' "$reported_version" "$expected_version_line" >&2
+      error 'downloaded farhelm reports '"'"'%s'"'"', expected '"'"'%s'"'"'; refusing to install\n' "$reported_version" "$expected_version_line"
       exit 1
     fi
 
     # Old archives cannot supply the app this installer promises. Staging
     # may have created the bin directory, but no installed file has changed.
     if [ "$ICNS_STATE" != staged ]; then
-      printf '❌ Farhelm %s is too old for this installer: it has no Mac app.\n' "$VERSION_NUM" >&2
+      error 'Farhelm %s is too old for this installer: it has no Mac app.\n' "$VERSION_NUM"
       printf '%s\n' '   Pick 0.2.1 or newer, or leave FARHELM_VERSION unset for the latest release.' >&2
       exit 1
     fi
@@ -1517,6 +1560,10 @@ EOF
     # under the kept name from the moment the link exists, whatever happens
     # next (after a rollback it is simply reachable under both names).
     KEPT_NOTES=""
+    # An unrelated wrapper is not evidence of a previous Farhelm install.
+    # Only a recorded binary earns update/reopen wording. Pre-record binaries
+    # take the same conservative installed/open report as other kept files.
+    updated_installation=0
     kept_stamp=$(date -u +%Y%m%dT%H%M%SZ)
     for name in $binaries; do
       dest="$INSTALL_DIR/$name"
@@ -1527,6 +1574,7 @@ EOF
       recorded_sha=$(recorded_digest_of "$name")
       if [ -n "$recorded_sha" ] && existing_sha=$(sha256_of "$dest" 2>/dev/null) \
         && [ "$existing_sha" = "$recorded_sha" ]; then
+        updated_installation=1
         continue
       fi
       kept="$INSTALL_DIR/$name.replaced-$kept_stamp"
@@ -1534,13 +1582,13 @@ EOF
         kept="$kept-$$"
       fi
       if ! ln "$dest" "$kept"; then
-        printf 'could not keep a copy of the existing %s as %s; move it aside and re-run the installer\n' "$dest" "$kept" >&2
+        error 'could not keep a copy of the existing %s as %s; move it aside and re-run the installer\n' "$dest" "$kept"
         exit 1
       fi
-      KEPT_NOTES="${KEPT_NOTES}The existing $dest was not one this installer recorded installing, so it was kept as $kept.$NEWLINE"
+      KEPT_NOTES="${KEPT_NOTES}ℹ️  ~/.local/bin/$name was not installed by this installer, so it was renamed
+   to ~/.local/bin/${kept##*/} - farhelm installation still
+   proceeded.$NEWLINE"
     done
-
-    replaced_something=0
 
     for name in $binaries; do
       # The journal's own name for this binary (see the transaction
@@ -1559,14 +1607,13 @@ EOF
       backup="$INSTALL_DIR/.$name.old"
 
       if [ -e "$dest" ]; then
-        replaced_something=1
         journal_append PARK "$binary_id"
         if ! mv "$dest" "$backup"; then
           if rollback_from_journal; then
             rm -f "$JOURNAL"
-            printf '%s; %s\n' "$fail_prefix" "$restored_suffix" >&2
+            error '%s; %s\n' "$fail_prefix" "$restored_suffix"
           else
-            printf '%s; automatic rollback could not fully complete; %s and %s are LEFT IN PLACE for inspection, see the lines above for what could not be restored\n' "$fail_prefix" "$LOCK_DIR" "$JOURNAL" >&2
+            error '%s; automatic rollback could not fully complete; %s and %s are LEFT IN PLACE for inspection, see the lines above for what could not be restored\n' "$fail_prefix" "$LOCK_DIR" "$JOURNAL"
           fi
           exit 1
         fi
@@ -1576,9 +1623,9 @@ EOF
       if ! mv "$STAGING_DIR/$name" "$dest"; then
         if rollback_from_journal; then
           rm -f "$JOURNAL"
-          printf '%s; %s\n' "$fail_prefix" "$restored_suffix" >&2
+          error '%s; %s\n' "$fail_prefix" "$restored_suffix"
         else
-          printf '%s; automatic rollback could not fully complete; %s and %s are LEFT IN PLACE for inspection, see the lines above for what could not be restored\n' "$fail_prefix" "$LOCK_DIR" "$JOURNAL" >&2
+          error '%s; automatic rollback could not fully complete; %s and %s are LEFT IN PLACE for inspection, see the lines above for what could not be restored\n' "$fail_prefix" "$LOCK_DIR" "$JOURNAL"
         fi
         exit 1
       fi
@@ -1600,7 +1647,7 @@ EOF
     done
 
     if ! publish_installation_record "$INSTALL_DIR/.farhelm-installation" "$STAGING_DIR/.farhelm-installation"; then
-      printf 'could not publish installer ownership metadata. The binaries in %s are installed and usable; re-run the installer to repair uninstall metadata.\n' "$INSTALL_DIR" >&2
+      error 'could not publish installer ownership metadata. The binaries in %s are installed and usable; re-run the installer to repair uninstall metadata.\n' "$INSTALL_DIR"
       exit 1
     fi
     # The lock stays held through the bundle step below, and is released
@@ -1637,7 +1684,7 @@ EOF
     app_path="$app_parent/Farhelm.app"
 
     bundle_fail() {
-      printf 'assembling %s failed at: %s\n' "$app_path" "$1" >&2
+      error 'assembling %s failed at: %s\n' "$app_path" "$1"
       printf 'The binaries in %s are installed and usable; re-run the installer to retry the bundle.\n' "$INSTALL_DIR" >&2
       exit 1
     }
@@ -1655,7 +1702,7 @@ EOF
     (umask 022; mkdir -p "$app_parent") || bundle_fail "creating $app_parent"
     BUNDLE_LOCK="$app_parent/.farhelm-app.lock"
     if ! (umask 077; mkdir "$BUNDLE_LOCK") 2>/dev/null; then
-      printf 'another farhelm install is assembling %s right now, or one was interrupted while doing so; wait a moment and re-run -- if this persists, remove %s by hand\n' "$app_path" "$BUNDLE_LOCK" >&2
+      error 'another farhelm install is assembling %s right now, or one was interrupted while doing so; wait a moment and re-run -- if this persists, remove %s by hand\n' "$app_path" "$BUNDLE_LOCK"
       printf 'The binaries in %s are installed and usable.\n' "$INSTALL_DIR" >&2
       exit 1
     fi
@@ -1677,7 +1724,7 @@ EOF
     if { [ -e "$pending_receipt" ] || [ -L "$pending_receipt" ]; } &&
       ! record_file_is_ours "$pending_receipt" "$pir_canonical" &&
       ! record_file_moved_here "$pending_receipt" "$pir_canonical"; then
-      printf '%s was left by an interrupted farhelm uninstall and is not this installation'"'"'s record, and building %s now would leave that uninstall unable to finish; run that installation'"'"'s farhelm uninstall again to finish it (or delete %s if that installation is gone), then re-run this installer\n' "$pending_receipt" "$app_path" "$pending_receipt" >&2
+      error '%s was left by an interrupted farhelm uninstall and is not this installation'"'"'s record, and building %s now would leave that uninstall unable to finish; run that installation'"'"'s farhelm uninstall again to finish it (or delete %s if that installation is gone), then re-run this installer\n' "$pending_receipt" "$app_path" "$pending_receipt"
       printf 'The binaries in %s are installed and usable.\n' "$INSTALL_DIR" >&2
       exit 1
     fi
@@ -1702,10 +1749,10 @@ EOF
         && ! is_legacy_installer_bundle "$app_path"; then
         if other_install_dir=$(bundle_record_dir "$app_path"); then
           other_install_dir=${other_install_dir%/}
-          printf '%s belongs to the farhelm installation in %s, which is still installed; refusing to replace it.\n' "$app_path" "$other_install_dir" >&2
+          error '%s belongs to the farhelm installation in %s, which is still installed; refusing to replace it.\n' "$app_path" "$other_install_dir"
           printf 'The binaries in %s are installed and usable; uninstall the other installation, or remove or rename that bundle, and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
         else
-          printf '%s exists and does not look like a farhelm app bundle; refusing to replace it.\n' "$app_path" >&2
+          error '%s exists and does not look like a farhelm app bundle; refusing to replace it.\n' "$app_path"
           printf 'The binaries in %s are installed and usable; remove or rename that bundle and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
         fi
         exit 1
@@ -1814,83 +1861,18 @@ PLIST_EOF
     LOCK_ACQUIRED=0
     remove_owned_lock
 
-    # 8. Report. What happened first (the install summary and bundle
-    # note), then the update restart reminder and PATH repair, then the
-    # standing uninstall/setup guidance, then the tmux hint. Each block
-    # leads with its own blank line; a block whose condition does not
-    # apply prints nothing.
-    echo ""
-    if [ "$replaced_something" -eq 1 ]; then
-      printf 'Updated farhelm %s (and farhelm-desktop) in %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
-    else
-      printf 'Installed farhelm %s (and farhelm-desktop) to %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
-    fi
-    if [ -n "$KEPT_NOTES" ]; then
-      printf '%s' "$KEPT_NOTES"
-    fi
-    printf 'Assembled %s (Spotlight, Dock, and Cmd-Tab identity).\n' "$app_path"
-
-    if [ "$replaced_something" -eq 1 ]; then
-      echo ""
-      echo "Updated. Restart what is running:"
-      echo "  macOS: quit and reopen Farhelm (the desktop app owns the embedded helm and"
-      echo "  any supervisor it started as child processes; a supervisor you started by"
-      echo "  hand with 'farhelm supervisor run' is reused as-is — restart it yourself)."
-      echo "  Running sessions survive either way — they live in tmux, which neither"
-      echo "  restart touches."
-    fi
-
-    case "$INSTALL_DIR" in
-      *:*)
-        # A colon can never be represented as one PATH entry (POSIX PATH
-        # uses it as the separator, with no escape mechanism), and the
-        # membership test below can be fooled into a false match by two
-        # UNRELATED PATH entries that happen to concatenate into this
-        # directory's name around a colon — so this case is handled first,
-        # unconditionally, rather than trusted to that test at all.
-        printf '\n%s contains a colon, which cannot be represented in PATH; add it to PATH by hand.\n' "$INSTALL_DIR"
-        ;;
-      *"$NEWLINE"*)
-        printf '\n%s is not on your PATH; its name cannot be printed as a safe one-line command. Add it to PATH by hand.\n' "$INSTALL_DIR"
-        ;;
-      *)
-        case ":$PATH:" in
-          *":$INSTALL_DIR:"*) ;;
-          *)
-            printf '\n%s is not on your PATH.' "$INSTALL_DIR"
-            if quoted=$(shquote "$INSTALL_DIR" 2>/dev/null); then
-              # shellcheck disable=SC2016 # the literal text "$PATH" is what should print, not this shell's PATH
-              printf ' Add it with:\n  export PATH=%s:$PATH\n' "$quoted"
-            else
-              printf ' Add it to PATH by hand.\n'
-            fi
-            ;;
-        esac
-        ;;
-    esac
-
-    echo ""
-    echo "Stop sessions and their terminals, quit the desktop app, and stop manually"
-    echo "started Farhelm processes first: uninstall does not stop them for you."
-    echo "To remove this installation, run 'farhelm uninstall' (keeps user data)."
-    echo "Preview removal with 'farhelm uninstall --dry-run'."
-    echo ""
-    # tmux hint: parsed as "tmux <major>.<minor><letter?>" (tmux's own
-    # release spelling, e.g. "3.7c"); anything that does not match that
-    # shape, or no tmux at all, counts as "none". The WHOLE output must be
-    # exactly one line matching that shape: `sed`'s anchors apply per
-    # LINE, not per whole value, so a banner or warning printed alongside
-    # a real version line (e.g. "tmux 3.7c\nsome vendor banner") would
-    # otherwise still parse as that valid line — even though it is
-    # multi-line output the supervisor itself treats as unparseable, so
-    # this parser must not be more lenient than that. tmux_have stays
-    # "none" until parsing SUCCEEDS: a string like "tmux next-3.8" is
-    # correctly rejected for the floor comparison below, and must not be
-    # printed as though it were a recognized installed version.
+    # 8. Report. Choose the action from this run's outcome and the local
+    # tmux prerequisite. Fresh-install launch advice follows its remedy. An
+    # update keeps the approved restart/session-survival line and also ends
+    # with the prescribed reminder after tmux advice. Uninstall stays visible.
+    # Parse the whole tmux version output, not a matching line inside a banner.
     tmux_have="none"
     meets_floor=0
+    tmux_present=0
     if command -v tmux >/dev/null 2>&1; then
+      tmux_present=1
       tmux_version_output=$(tmux -V 2>/dev/null || true)
+      tmux_have=${tmux_version_output#tmux }
     else
       tmux_version_output=""
     fi
@@ -1899,7 +1881,6 @@ PLIST_EOF
       *) parsed=$(printf '%s' "$tmux_version_output" | sed -n 's/^tmux \([0-9][0-9]*\)\.\([0-9][0-9]*\)\([a-z]\{0,1\}\)$/\1 \2 \3/p') ;;
     esac
     if [ -n "$parsed" ]; then
-      tmux_have="$tmux_version_output"
       # shellcheck disable=SC2086 # word-splitting $parsed into its 2-3 fields is the point
       set -- $parsed
       tmux_major=$1
@@ -1918,9 +1899,32 @@ PLIST_EOF
         fi
       fi
     fi
+    if [ "$updated_installation" -eq 1 ]; then
+      printf '✅ %sFarhelm %s is ready.%s\n' "$OUT_GREEN" "$VERSION_NUM" "$OUT_RESET"
+      printf '\n   Quit and reopen Farhelm to finish updating. Your sessions keep running.\n'
+    else
+      printf '✅ %sFarhelm %s is installed.%s\n' "$OUT_GREEN" "$VERSION_NUM" "$OUT_RESET"
+      if [ "$meets_floor" -eq 1 ]; then
+        printf '\n   Open Farhelm from Spotlight or ~/Applications.\n'
+      fi
+    fi
+    if [ -n "$KEPT_NOTES" ]; then
+      printf '\n%s' "$KEPT_NOTES"
+    fi
+    printf '\n%s   To uninstall later, run:%s %s~/.local/bin/farhelm uninstall%s\n' "$OUT_DIM" "$OUT_RESET" "$OUT_CYAN" "$OUT_RESET"
     if [ "$meets_floor" -ne 1 ]; then
-      echo ""
-      printf 'tmux 3.7c or newer is required wherever sessions run; this machine has %s. Homebrew: brew install tmux.\n' "$tmux_have"
+      printf '\n⚠️  %sFarhelm needs tmux 3.7c or newer before it can start.%s\n' "$OUT_YELLOW" "$OUT_RESET"
+      if [ "$tmux_present" -eq 0 ]; then
+        printf '   This Mac has none. Install it with Homebrew: %sbrew install tmux%s\n' "$OUT_CYAN" "$OUT_RESET"
+      else
+        printf '   This Mac has tmux %s. Upgrade it with Homebrew: %sbrew upgrade tmux%s\n' "$tmux_have" "$OUT_CYAN" "$OUT_RESET"
+      fi
+      printf '   No Homebrew yet? Install it first: %s%s%s\n' "$OUT_CYAN" "$BREW_LINK" "$OUT_RESET"
+      if [ "$updated_installation" -eq 1 ]; then
+        printf '\n   Then quit and reopen Farhelm to finish updating.\n'
+      else
+        printf '\n   Then open Farhelm from Spotlight or ~/Applications.\n'
+      fi
     fi
   }
 

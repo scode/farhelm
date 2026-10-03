@@ -53,7 +53,7 @@ fi
 TMUX_FLOOR_MAJOR=${BASH_REMATCH[1]}
 TMUX_FLOOR_MINOR=${BASH_REMATCH[2]}
 TMUX_FLOOR_LETTER=${BASH_REMATCH[3]}
-TMUX_FLOOR_HINT="tmux $TMUX_FLOOR or newer is required"
+TMUX_FLOOR_HINT="Farhelm needs tmux $TMUX_FLOOR or newer before it can start."
 
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-install-test.XXXXXX")
 SERVER_PID=""
@@ -689,7 +689,7 @@ check "fresh install exits 0" [ "$RC" -eq 0 ]
 check "fresh install writes farhelm" [ -x "$INSTALL1/farhelm" ]
 check "fresh install reports its own version" contains "$("$INSTALL1/farhelm" --version)" "farhelm 1.2.3"
 check "fresh install installs mode 0755" [ "$(stat -c %a "$INSTALL1/farhelm")" = "755" ]
-check "fresh install reports Installed" contains "$OUT" "Installed farhelm 1.2.3 (and farhelm-desktop) to $INSTALL1."
+check "fresh install reports Installed" contains "$OUT" "Farhelm 1.2.3 is installed."
 check "fresh install writes owner-only standalone metadata" [ "$(stat -c %a "$INSTALL1/.farhelm-installation")" = "600" ]
 check "fresh install writes the exact standalone metadata fields" assert_standalone_record "$INSTALL1"
 check "fresh install has no appended canonical-path newline" assert_stable_path_field "$INSTALL1"
@@ -703,7 +703,7 @@ echo
 echo "== update (re-run) =="
 run_install "$TOOLCHAIN_FULL" "$HOME1" "$BASE/good" 1.2.3
 check "update exits 0" [ "$RC" -eq 0 ]
-check "update reports Updated" contains "$OUT" "Updated. Restart what is running:"
+check "update reports ready" contains "$OUT" "Farhelm 1.2.3 is ready."
 check "update gives macOS restart advice" contains "$OUT" "quit and reopen Farhelm"
 check "update does not print a rollback message" not_contains "$OUT$ERR" "was restored"
 check "update leaves no leftover staging/lock/backup dot-files" [ -z "$(find "$INSTALL1" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation')" ]
@@ -746,7 +746,7 @@ mkdir -p "$HOME_MAC"
 run_install "$MAC_TOOLS" "$HOME_MAC" "$BASE/good" 1.2.3
 check "macOS-shaped fresh install exits 0" [ "$RC" -eq 0 ]
 check "macOS-shaped fresh install writes farhelm-desktop too" [ -x "$INSTALL_MAC/farhelm-desktop" ]
-check "macOS-shaped fresh install reports the desktop binary" contains "$OUT" "Installed farhelm 1.2.3 (and farhelm-desktop) to $INSTALL_MAC."
+check "macOS-shaped fresh install reports success" contains "$OUT" "Farhelm 1.2.3 is installed."
 check "macOS-shaped fresh install: farhelm reports 1.2.3" \
   [ "$("$INSTALL_MAC/farhelm" --version)" = "farhelm 1.2.3" ]
 
@@ -757,8 +757,8 @@ check "macOS-shaped fresh install: farhelm reports 1.2.3" \
 # here is what keeps that from regressing on this case-SENSITIVE test
 # host, where the collision itself cannot reproduce).
 MAC_APP="$HOME_MAC/Applications/Farhelm.app"
-check "macOS-shaped fresh install reports the bundle" \
-  contains "$OUT" "Assembled $MAC_APP (Spotlight, Dock, and Cmd-Tab identity)."
+check "macOS-shaped fresh install reports where to open Farhelm" \
+  contains "$OUT" "Farhelm from Spotlight or ~/Applications."
 check "bundle: Info.plist names the stable bundle identifier" \
   contains "$(cat "$MAC_APP/Contents/Info.plist")" "<string>org.scode.farhelm.desktop</string>"
 check "bundle: Info.plist points CFBundleExecutable at farhelm-desktop" \
@@ -867,7 +867,7 @@ mkdir -p "$HOME_PREICON"
 run_install "$MAC_TOOLS" "$HOME_PREICON" "$BASE/good-preicon" 1.2.3
 check "pre-icon release is refused" [ "$RC" -eq 1 ]
 check "pre-icon release names the too-old release" \
-  contains "$ERR" "Farhelm 1.2.3 is too old for this installer: it has no Mac app."
+  contains "$ERR" "❌ Farhelm 1.2.3 is too old for this installer: it has no Mac app."
 check "pre-icon release explains the supported versions" \
   contains "$ERR" "   Pick 0.2.1 or newer, or leave FARHELM_VERSION unset for the latest release."
 check "pre-icon release leaves no staging or lock" \
@@ -1737,6 +1737,7 @@ mkdir -p "$HOMEBADSUM"
 run_install "$TOOLCHAIN_FULL" "$HOMEBADSUM" "$BASE/badchecksum" 1.2.3
 check "checksum mismatch exits 1" [ "$RC" -ne 0 ]
 check "checksum mismatch names the failure" contains "$ERR" "checksum mismatch"
+check "checksum mismatch has the error prefix" contains "$ERR" "❌ farhelm-aarch64-apple-darwin.tar.gz: checksum mismatch"
 
 # ===========================================================================
 # Scenario: malformed archive -- two members named farhelm.
@@ -1927,118 +1928,236 @@ for only in sha256sum shasum openssl; do
 done
 
 # ===========================================================================
-# Scenario: closing-message contract -- PATH warning, restart reminder, the
-# uninstall guidance, and the tmux hint across the floor boundary fixtures.
+# Approved report text, including blank lines and order. Real updates start
+# from a verified installer-owned pair, so kept-file notices cannot hide a
+# wrong update classification. tmux fixtures isolate the launch prerequisite.
 # ===========================================================================
 echo
 echo "== closing-message contract =="
-
-HOMEPATHOUT="$WORKDIR/homepathout"
-mkdir -p "$HOMEPATHOUT"
-run_install "$TOOLCHAIN_FULL" "$HOMEPATHOUT" "$BASE/good" 1.2.3
-check "PATH warning appears when install dir is not on PATH" contains "$OUT" "is not on your PATH."
-check "PATH warning includes a pasteable export line" contains "$OUT" "export PATH="
-
-HOMEPATHIN="$WORKDIR/homepathin"
-INSTALLPATHIN="$HOMEPATHIN/.local/bin"
-mkdir -p "$INSTALLPATHIN"
-run_install "$INSTALLPATHIN:$TOOLCHAIN_FULL" "$HOMEPATHIN" "$BASE/good" 1.2.3
-check "PATH warning is absent when install dir already on PATH" not_contains "$OUT" "is not on your PATH."
-
-# The install summary is present even when no advisory is needed.
-check "closing message: install summary" contains "$OUT" "Installed farhelm 1.2.3 (and farhelm-desktop) to"
-# F20: every settled semantic clause, line by line, across both
-# fresh/update Mac cases -- not just short substrings.
-# Each invocation below puts the install directory ON PATH (no PATH-
-# warning noise; that is covered separately above) and uses an at-floor
-# tmux fixture (no tmux-hint noise; that is covered separately below), so
-# every assertion here is squarely about the STANDING closing message.
 assert_closing_message_contract() {
-  local label=$1 is_update=$2 version=$3
-  local tools="$WORKDIR/toolchain-f20-$label"
+  local label=$1 is_update=$2 tmux_kind=$3
+  local tools="$WORKDIR/toolchain-report-$label" home="$WORKDIR/home-report-$label"
   mkdir -p "$tools"
   cp -a "$TOOLCHAIN_FULL"/. "$tools/"
-  write_fake_tmux "$tools" "tmux $TMUX_FLOOR"
-  local home="$WORKDIR/home-f20-$label"
-  local install="$home/.local/bin"
-  mkdir -p "$install"
+  case "$tmux_kind" in
+    floor) write_fake_tmux "$tools" "tmux $TMUX_FLOOR" ;;
+    old) write_fake_tmux "$tools" "tmux 3.4" ;;
+  esac
   if [ "$is_update" = yes ]; then
-    printf '#!/bin/sh\necho "farhelm 0.0.1-old"\n' >"$install/farhelm"
-    chmod 755 "$install/farhelm"
-    printf '#!/bin/sh\necho "farhelm-desktop 0.0.1-old"\n' >"$install/farhelm-desktop"
-    chmod 755 "$install/farhelm-desktop"
+    run_install "$tools" "$home" "$BASE/good" 1.2.3
+    check "report ($label): update premise succeeds" [ "$RC" -eq 0 ]
+    check "report ($label): update premise owns both binaries" assert_standalone_record "$home/.local/bin"
   fi
-  run_install "$install:$tools" "$home" "$BASE/good" "$version"
-  check "F20 ($label): install exits 0" [ "$RC" -eq 0 ]
-
-  # Both executables belong to every successful install. The summary
-  # distinguishes a fresh install from replacement of existing files.
+  run_install "$tools" "$home" "$BASE/good-v2" 1.2.4
+  check "report ($label): install succeeds" [ "$RC" -eq 0 ]
+  local expected
   if [ "$is_update" = yes ]; then
-    summary_verb="Updated"
-    summary_prep="in"
+    expected='✅ Farhelm 1.2.4 is ready.
+
+   Quit and reopen Farhelm to finish updating. Your sessions keep running.'
   else
-    summary_verb="Installed"
-    summary_prep="to"
+    expected='✅ Farhelm 1.2.4 is installed.'
+    if [ "$tmux_kind" = floor ]; then
+      expected+='
+
+   Open Farhelm from Spotlight or ~/Applications.'
+    fi
   fi
-  check "F20 ($label): install summary names both binaries" \
-    contains "$OUT" "$summary_verb farhelm $version (and farhelm-desktop) $summary_prep $install."
+  expected+='
 
-  check "F20 ($label): uninstall command is discoverable" \
-    contains "$OUT" "run 'farhelm uninstall' (keeps user data)"
-  check "F20 ($label): uninstall preview is discoverable" \
-    contains "$OUT" "farhelm uninstall --dry-run"
+   To uninstall later, run: ~/.local/bin/farhelm uninstall'
+  if [ "$tmux_kind" != floor ]; then
+    expected+="
 
-  # The restart-reminder block: present (every line) on an update, wholly
-  # absent on a fresh install.
-  if [ "$is_update" = yes ]; then
-    check "F20 ($label): restart-reminder heading" contains "$OUT" "Updated. Restart what is running:"
-    check "F20 ($label): restart-reminder macOS line 1" \
-      contains "$OUT" "macOS: quit and reopen Farhelm (the desktop app owns the embedded helm and"
-    check "F20 ($label): restart-reminder macOS line 2" \
-      contains "$OUT" "any supervisor it started as child processes; a supervisor you started by"
-    check "F20 ($label): restart-reminder macOS line 3" \
-      contains "$OUT" "hand with 'farhelm supervisor run' is reused as-is — restart it yourself)."
-    check "F20 ($label): restart-reminder sentence ends with the operator's own restart" \
-      contains "$OUT" "restart it yourself)."
-    check "F20 ($label): restart-reminder sessions-survive line 1" \
-      contains "$OUT" "Running sessions survive either way — they live in tmux, which neither"
-    check "F20 ($label): restart-reminder sessions-survive line 2" contains "$OUT" "restart touches."
-  else
-    check "F20 ($label): no restart-reminder on a fresh install" \
-      not_contains "$OUT" "Updated. Restart what is running:"
+⚠️  $TMUX_FLOOR_HINT"
+    if [ "$tmux_kind" = absent ]; then
+      expected+='
+   This Mac has none. Install it with Homebrew: brew install tmux'
+    else
+      expected+='
+   This Mac has tmux 3.4. Upgrade it with Homebrew: brew upgrade tmux'
+    fi
+    expected+='
+   No Homebrew yet? Install it first: https://brew.sh/'
+    if [ "$is_update" = yes ]; then
+      expected+='
+
+   Then quit and reopen Farhelm to finish updating.'
+    else
+      expected+='
+
+   Then open Farhelm from Spotlight or ~/Applications.'
+    fi
   fi
-
-  check "F20 ($label): bundle note present" \
-    contains "$OUT" "Assembled $home/Applications/Farhelm.app (Spotlight, Dock, and Cmd-Tab identity)."
-
-  check "F20 ($label): no PATH warning (install dir is on PATH)" not_contains "$OUT" "is not on your PATH"
-  check "F20 ($label): no tmux hint (at-floor fixture)" not_contains "$OUT" "or newer is required"
+  check "report ($label): exact approved plain text" [ "$OUT" = "$expected" ]
+  check "report ($label): redirected stdout has no escapes" not_contains "$OUT" $'\033'
+  check "report ($label): redirected stderr has no escapes" not_contains "$ERR" $'\033'
+  check "report ($label): no progress on redirected stderr" not_contains "$ERR" 'Downloading Farhelm'
 }
-assert_closing_message_contract "fresh-macos" no 1.2.3
-assert_closing_message_contract "update-macos" yes 1.2.3
+for report_tmux in floor absent old; do
+  assert_closing_message_contract "fresh-$report_tmux" no "$report_tmux"
+  assert_closing_message_contract "update-$report_tmux" yes "$report_tmux"
+done
 
-# tmux hint: absent, malformed, the floor-derived boundary cases below, and
-# exactly-at and above the floor.
+# NO_COLOR must not be needed to make redirected output safe to consume.
+# Both unset and set cases are covered; the exact-report cases above use unset.
+run_install "$TOOLCHAIN_FULL" "$WORKDIR/home-no-color" "$BASE/good" 1.2.3 NO_COLOR=1
+check "NO_COLOR redirected install succeeds" [ "$RC" -eq 0 ]
+check "NO_COLOR redirected stdout has no escapes" not_contains "$OUT" $'\033'
+check "NO_COLOR redirected stderr has no escapes" not_contains "$ERR" $'\033'
+
+# Drive stdout and stderr through separate pseudo-terminals. Checking all four
+# combinations catches a report that accidentally uses stderr's TTY decision.
+# Read the terminals while the child runs: waiting first could fill a PTY buffer
+# and deadlock a failure diagnostic or curl's progress output.
+check "terminal output and independent stream gating" python3 - "$INSTALL_SH" "$TOOLCHAIN_FULL" "$LINUX_TOOLS" "$WORKDIR" "$BASE" <<'PYTTY'
+import errno
+import os
+from pathlib import Path
+import pty
+import re
+import selectors
+import subprocess
+import sys
+import tempfile
+import time
+
+installer, tools, linux_tools, work, base = sys.argv[1:]
+assert not (Path(tools) / "tmux").exists(), "terminal-report fixture requires absent tmux"
+
+
+def capture(label, stdout_tty, stderr_tty, no_color=None, linux=False):
+    """Capture bounded child output without inheriting the harness environment.
+
+    A PTY supplies isatty, not shell interactivity. Each stream owns its own
+    terminal, so styling and progress decisions can be checked independently.
+    """
+    env = dict(PATH=linux_tools if linux else tools,
+               HOME=str(Path(work) / ("tty-home-" + label)),
+               FARHELM_INSTALL_TEST_BASE_URL=base + "/good",
+               FARHELM_VERSION="1.2.3", TERM="xterm")
+    if no_color is not None:
+        env["NO_COLOR"] = no_color
+    buffers = [bytearray(), bytearray()]
+    terminals = []
+    outputs = []
+    with selectors.DefaultSelector() as selector:
+        for index, terminal in enumerate((stdout_tty, stderr_tty)):
+            if terminal:
+                master, slave = pty.openpty()
+                terminals.append((master, slave))
+                outputs.append(slave)
+                selector.register(master, selectors.EVENT_READ, index)
+            else:
+                outputs.append(tempfile.TemporaryFile())
+        child = subprocess.Popen(["/bin/sh", installer], env=env,
+                                 stdin=subprocess.DEVNULL,
+                                 stdout=outputs[0], stderr=outputs[1])
+        for _, slave in terminals:
+            os.close(slave)
+        deadline = time.monotonic() + 45
+        try:
+            while selector.get_map() or child.poll() is None:
+                if time.monotonic() >= deadline:
+                    raise AssertionError(f"{label}: installer exceeded terminal-test deadline")
+                for key, _ in selector.select(0.2):
+                    try:
+                        data = os.read(key.fd, 8192)
+                    except OSError as error:
+                        if error.errno != errno.EIO:
+                            raise
+                        data = b""
+                    if not data:
+                        selector.unregister(key.fd)
+                    buffers[key.data].extend(data)
+                    assert len(buffers[key.data]) <= 65536, f"{label}: excessive output"
+            rc = child.wait(timeout=1)
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait()
+            for master, _ in terminals:
+                os.close(master)
+            for index, output in enumerate(outputs):
+                if not isinstance(output, int):
+                    output.seek(0)
+                    buffers[index].extend(output.read(65537))
+                    output.close()
+                    assert len(buffers[index]) <= 65536, f"{label}: excessive redirected output"
+    out, err = (bytes(data).replace(b"\r\n", b"\n") for data in buffers)
+    assert rc == (1 if linux else 0), (label, rc, out, err)
+    return out, err
+
+
+for out_tty, err_tty in ((True, True), (True, False), (False, True), (False, False)):
+    label = f"{int(out_tty)}-{int(err_tty)}"
+    out, err = capture(label, out_tty, err_tty)
+    assert (b"\x1b[1;32m" in out) == out_tty, (label, out)
+    assert (b"\x1b]8;;https://brew.sh/" in out) == out_tty, (label, out)
+    assert (b"Downloading Farhelm 1.2.3" in err) == err_tty, (label, err)
+    assert (b"[1/2]" in err and b"[2/2]" in err) == err_tty, (label, err)
+    assert (b"100.0%" in err) == err_tty, (label, err)
+    if err_tty:
+        assert err.count(b"100.0%") == 2, ("only the two archive transfers get bars", err)
+        assert b"\x1b[1m" in err, err
+    if not out_tty:
+        assert b"\x1b" not in out, out
+    if not err_tty:
+        assert b"\x1b" not in err, err
+    if out_tty and err_tty:
+        assert b"This Mac has none." in out, out
+        plain = re.sub(rb"\x1b\[[0-9;]*m", b"", out)
+        plain = re.sub(rb"\x1b\]8;;[^\x1b]*\x1b\\", b"", plain)
+        expected = ("✅ Farhelm 1.2.3 is installed.\n\n"
+                    "   To uninstall later, run: ~/.local/bin/farhelm uninstall\n\n"
+                    "⚠️  Farhelm needs tmux 3.7c or newer before it can start.\n"
+                    "   This Mac has none. Install it with Homebrew: brew install tmux\n"
+                    "   No Homebrew yet? Install it first: https://brew.sh/\n\n"
+                    "   Then open Farhelm from Spotlight or ~/Applications.\n").encode()
+        assert plain == expected, (plain, expected)
+        print("Observed terminal report:\n" + out.decode())
+        print("Observed terminal progress:\n" + err.decode())
+
+out, err = capture("no-color", True, True, no_color="1")
+assert b"\x1b[" not in out and b"\x1b[" not in err, (out, err)
+assert b"\x1b]8;;https://brew.sh/" in out, out
+assert b"Downloading Farhelm" in err and b"100.0%" in err, err
+out, err = capture("empty-no-color", True, True, no_color="")
+assert b"\x1b[1;32m" in out and b"\x1b[1m" in err, (out, err)
+for terminal in (False, True):
+    out, err = capture("linux-" + str(terminal), False, terminal, linux=True)
+    assert not out, out
+    assert "❌ ".encode() in err, err
+    assert (b"\x1b[1;31m" in err) == terminal, err
+    assert b"Downloading" not in err, err
+PYTTY
+
+# Boundary comparison stays tied to the pinned floor. A present but malformed
+# tmux reports its raw version output rather than claiming tmux is absent.
 run_tmux_case() {
-  local label=$1 tmux_output=$2 expect_hint=$3 expect_have=$4
-  local tools="$WORKDIR/toolchain-tmux-$label"
+  local label=$1 tmux_output=$2 expect_hint=$3
+  local tools="$WORKDIR/toolchain-tmux-$label" home="$WORKDIR/home-tmux-$label"
   mkdir -p "$tools"
   cp -a "$TOOLCHAIN_FULL"/. "$tools/"
   if [ -n "$tmux_output" ]; then
     write_fake_tmux "$tools" "$tmux_output"
   fi
-  local home="$WORKDIR/home-tmux-$label"
-  mkdir -p "$home"
   run_install "$tools" "$home" "$BASE/good" 1.2.3
+  check "tmux hint ($label): install succeeds" [ "$RC" -eq 0 ]
   if [ "$expect_hint" = yes ]; then
     check "tmux hint ($label): present" contains "$OUT" "$TMUX_FLOOR_HINT"
-    check "tmux hint ($label): reports '$expect_have'" contains "$OUT" "this machine has $expect_have."
+    if [ -n "$tmux_output" ]; then
+      check "tmux hint ($label): reports the actual version output" \
+        contains "$OUT" "This Mac has tmux ${tmux_output#tmux }. Upgrade it with Homebrew: brew upgrade tmux"
+    else
+      check "tmux hint ($label): reports absence" contains "$OUT" "This Mac has none."
+    fi
   else
-    check "tmux hint ($label): absent" not_contains "$OUT" "or newer is required"
+    check "tmux hint ($label): absent" not_contains "$OUT" "$TMUX_FLOOR_HINT"
   fi
 }
-run_tmux_case "absent" "" yes "none"
-run_tmux_case "malformed" "tmux next-3.8" yes "none"
+run_tmux_case "absent" "" yes
+run_tmux_case "malformed" "tmux next-3.8" yes
 # The boundary cases come from the pinned floor (see read_pinned_tmux_floor):
 # the previous release both bare and with the last possible patch letter
 # (so a floor raised by a minor release cannot leave the old letter check
@@ -2051,20 +2170,20 @@ if [ "$TMUX_FLOOR_MINOR" -gt 0 ]; then
 else
   previous_release="$((TMUX_FLOOR_MAJOR - 1)).99"
 fi
-run_tmux_case "below-floor" "tmux $previous_release" yes "tmux $previous_release"
-run_tmux_case "below-floor-last-patch" "tmux ${previous_release}z" yes "tmux ${previous_release}z"
+run_tmux_case "below-floor" "tmux $previous_release" yes
+run_tmux_case "below-floor-last-patch" "tmux ${previous_release}z" yes
 if [ -n "$TMUX_FLOOR_LETTER" ]; then
   no_letter="tmux $TMUX_FLOOR_MAJOR.$TMUX_FLOOR_MINOR"
-  run_tmux_case "below-floor-no-letter" "$no_letter" yes "$no_letter"
+  run_tmux_case "below-floor-no-letter" "$no_letter" yes
   if [ "$TMUX_FLOOR_LETTER" != a ]; then
     letters=abcdefghijklmnopqrstuvwxyz
     prefix=${letters%%"$TMUX_FLOOR_LETTER"*}
     previous_letter="tmux $TMUX_FLOOR_MAJOR.$TMUX_FLOOR_MINOR${prefix: -1}"
-    run_tmux_case "below-floor-letter" "$previous_letter" yes "$previous_letter"
+    run_tmux_case "below-floor-letter" "$previous_letter" yes
   fi
 fi
-run_tmux_case "at-floor" "tmux $TMUX_FLOOR" no ""
-run_tmux_case "above-floor" "tmux $TMUX_FLOOR_MAJOR.$((TMUX_FLOOR_MINOR + 1))" no ""
+run_tmux_case "at-floor" "tmux $TMUX_FLOOR" no
+run_tmux_case "above-floor" "tmux $TMUX_FLOOR_MAJOR.$((TMUX_FLOOR_MINOR + 1))" no
 
 # ===========================================================================
 # Scenario: no side effects outside the bin directory and bundle (F27).
@@ -2636,15 +2755,13 @@ check "F9: bundle Contents directory is not group/world-writable" \
 # ===========================================================================
 echo
 echo "== F12: multiline tmux -V output is rejected wholesale =="
-run_tmux_case "banner-then-valid" "$(printf 'some vendor banner\ntmux %s' "$TMUX_FLOOR")" yes "none"
-run_tmux_case "two-valid-lines" "$(printf 'tmux %s\ntmux 3.8' "$TMUX_FLOOR")" yes "none"
+run_tmux_case "banner-then-valid" "$(printf 'some vendor banner\ntmux %s' "$TMUX_FLOOR")" yes
+run_tmux_case "two-valid-lines" "$(printf 'tmux %s\ntmux 3.8' "$TMUX_FLOOR")" yes
 
 # ===========================================================================
-# Scenario: a colon-containing install directory is never treated as
-# representable in PATH (F15), even when the AMBIENT PATH deceptively
-# already contains the directory's two halves as separate, adjacent
-# entries -- a naive substring membership test could mistake that for the
-# real thing and wrongly suppress the warning.
+# Scenario: a colon-containing HOME still installs without PATH advice.
+# The fixed full-path uninstall command replaces PATH repair instructions,
+# including for directory names that cannot form a single PATH entry.
 # ===========================================================================
 echo
 echo "== F15: colon-containing install directory =="
@@ -2659,9 +2776,9 @@ env -i PATH="$DECEPTIVE_PATH" HOME="$HOMECOLON" \
 F15_RC=$?
 set -e
 check "F15: colon-containing install dir still installs successfully" [ "$F15_RC" -eq 0 ]
-check "F15: colon warning fires despite a deceptive PATH match" \
-  contains "$(cat "$WORKDIR/f15-out")" "cannot be represented in PATH"
-check "F15: colon warning names the actual directory" contains "$(cat "$WORKDIR/f15-out")" "$INSTALLCOLON"
+check "F15: no PATH repair advice" not_contains "$(cat "$WORKDIR/f15-out")" "PATH"
+# shellcheck disable=SC2088 # The approved output uses a literal home-relative command.
+check "F15: full-path uninstall command is printed" contains "$(cat "$WORKDIR/f15-out")" '~/.local/bin/farhelm uninstall'
 
 # ===========================================================================
 # Round 3: the install-transaction journal itself.
@@ -2935,10 +3052,8 @@ check "R3 F2b: recovery clears the lock and journal" \
 # rollback would quietly no-op and report success. Records naming binaries
 # instead of paths make the directory's name irrelevant to the format.
 #
-# Supported rather than refused: the one place a newline in the directory
-# name genuinely cannot be served is the pasteable `export PATH=...` hint,
-# and that already falls back to "add it to PATH by hand" instead of
-# printing something unsafe.
+# A newline-containing home remains supported. The fixed home-relative
+# uninstall command avoids printing an unsafe PATH assignment.
 # ===========================================================================
 echo
 echo "== R3 F3: an install directory containing '|' and a newline =="
@@ -2962,8 +3077,9 @@ check "R3 F3: the following run's farhelm reports 1.2.4" \
 check "R3 F3: standalone metadata preserves the awkward canonical path" assert_standalone_record "$INSTALL_R3F3"
 # The closing report is only reached by a run that gets that far, hence the
 # assertion here rather than on the deliberately-failed run above.
-check "R3 F3: the newline-named directory gets the by-hand PATH guidance" \
-  contains "$OUT" "Add it to PATH by hand."
+# shellcheck disable=SC2088 # The approved output uses a literal home-relative command.
+check "R3 F3: newline-named HOME still reports the uninstall command" \
+  contains "$OUT" '~/.local/bin/farhelm uninstall'
 
 # ===========================================================================
 # Scenario: recovery state is only ever trusted where this script alone
@@ -3062,13 +3178,27 @@ mkdir -p "$INSTALL_K1"
 printf '#!/bin/sh\necho my own wrapper\n' >"$INSTALL_K1/farhelm"
 K1_OWN=$(cat "$INSTALL_K1/farhelm")
 check "K1 premise: no ownership record before the install" [ ! -e "$INSTALL_K1/.farhelm-installation" ]
-run_install "$TOOLCHAIN_FULL" "$HOME_K1" "$BASE/good" 1.2.3
+K1_TOOLS="$WORKDIR/toolchain-k1"
+mkdir -p "$K1_TOOLS"
+cp -a "$TOOLCHAIN_FULL"/. "$K1_TOOLS/"
+write_fake_tmux "$K1_TOOLS" "tmux $TMUX_FLOOR"
+check "K1 premise: tmux meets the floor" [ "$("$K1_TOOLS/tmux" -V)" = "tmux $TMUX_FLOOR" ]
+run_install "$K1_TOOLS" "$HOME_K1" "$BASE/good" 1.2.3
 check "K1 (foreign file): the install exits 0" [ "$RC" -eq 0 ]
 K1_KEPT=$(kept_files "$INSTALL_K1")
 check "K1 (foreign file): exactly one kept copy exists" [ "$(printf '%s\n' "$K1_KEPT" | grep -c .)" -eq 1 ]
 check "K1 (foreign file): the kept copy is the user's file byte-for-byte" [ "$(cat "$K1_KEPT")" = "$K1_OWN" ]
 check "K1 (foreign file): farhelm itself was replaced" [ "$(cat "$INSTALL_K1/farhelm")" != "$K1_OWN" ]
-check "K1 (foreign file): the closing message names the kept copy" contains "$OUT" "was kept as $K1_KEPT"
+K1_EXPECTED="✅ Farhelm 1.2.3 is installed.
+
+   Open Farhelm from Spotlight or ~/Applications.
+
+ℹ️  ~/.local/bin/farhelm was not installed by this installer, so it was renamed
+   to ~/.local/bin/${K1_KEPT##*/} - farhelm installation still
+   proceeded.
+
+   To uninstall later, run: ~/.local/bin/farhelm uninstall"
+check "K1 (foreign file): exact fresh-install report and kept-file placement" [ "$OUT" = "$K1_EXPECTED" ]
 
 HOME_K2="$WORKDIR/home-k2"
 INSTALL_K2="$HOME_K2/.local/bin"
@@ -3079,7 +3209,7 @@ check "K2 premise: the record vouches for the installed farhelm" assert_standalo
 run_install "$TOOLCHAIN_FULL" "$HOME_K2" "$BASE/good" 1.2.3
 check "K2 (recorded update): the update exits 0" [ "$RC" -eq 0 ]
 check "K2 (recorded update): no kept copy is left behind" [ -z "$(kept_files "$INSTALL_K2")" ]
-check "K2 (recorded update): the closing message mentions no kept copy" not_contains "$OUT" "was kept as"
+check "K2 (recorded update): the closing message mentions no kept copy" not_contains "$OUT" "was not installed by this installer"
 
 HOME_K3="$WORKDIR/home-k3"
 INSTALL_K3="$HOME_K3/.local/bin"
