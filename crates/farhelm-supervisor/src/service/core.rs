@@ -1775,15 +1775,13 @@ impl KeyedLocks {
     }
 
     /// [`claim`](Self::claim) with a deadline: `None` when another
-    /// capture transaction still holds the key at `deadline`.
+    /// operation still holds the key at `deadline`.
     ///
-    /// The report path cannot wait open-endedly — the reporter's budget
-    /// is two seconds wall to wall, and a claim that parks past it turns
-    /// a slow capture pass into a hook error the vendor shows the user.
-    /// A timed-out claim is a `Conflict` rejection, a no-op for durable
-    /// capture, memory, ambiguity, and offers: the reporter retries on
-    /// its next lifecycle event, and the refresh pass converges the row
-    /// meanwhile. Background refresh paths keep the unbounded [`claim`](Self::claim).
+    /// The agent-request fence uses this bounded form: the asking CLI has no
+    /// timeout of its own, so an unbounded wait could run a mutation its
+    /// caller abandoned minutes ago (see the fence in `handlers.rs`). Report
+    /// admission uses the unbounded claim directly: its work is local, and a
+    /// deadline would lose valid identity reports.
     pub(crate) async fn claim_before(
         self: &Arc<Self>,
         key: &str,
@@ -13976,6 +13974,33 @@ impl Supervisor {
         }
     }
 
+    /// Log a diagnostic when a report has waited this long; the threshold no
+    /// longer rejects the report.
+    const REPORT_CLAIM_SLOW_WAIT: Duration = Duration::from_secs(1);
+
+    /// Acquire a report's per-session claim without a deadline.
+    ///
+    /// Everything under this claim is local store or process-state work. A
+    /// refused report is not resent (Claude reports again only at its next
+    /// session start), so a deadline would turn a slow moment into a lost
+    /// identity. See SPEC.md's "Healthy local filesystems" rule. The warning
+    /// preserves the evidence that a deadline used to provide while that
+    /// contract permits the local operation to finish.
+    pub(in crate::service::core) async fn claim_capture_for_report(&self, id: &str) -> KeyedGuard {
+        let started = tokio::time::Instant::now();
+        let claim = self.capture_locks.claim(id).await;
+        let waited = started.elapsed();
+        if waited >= Self::REPORT_CLAIM_SLOW_WAIT {
+            warn!(
+                target: LOG_TARGET,
+                session = %id,
+                waited_ms = waited.as_millis(),
+                "conversation report waited unusually long for its capture claim"
+            );
+        }
+        claim
+    }
+
     /// Record the conversation identity a session's own agent reported
     /// from inside its process, through the launch hook.
     ///
@@ -13998,10 +14023,10 @@ impl Supervisor {
     /// has landed. Resume construction then applies the kind's readiness
     /// rules: a Codex pending-clear locator is durable but is not a resume
     /// target until its exact root record appears. A failed write changes
-    /// nothing in memory and has no retry queue. This delivery is lost;
-    /// another lifecycle event may send a fresh report, and only Claude can
-    /// recover through a scan. A store that cannot write is a supervisor in
-    /// trouble, not a state to engineer a queue around.
+    /// nothing in memory and has no retry queue. A failed write is not retried
+    /// by the supervisor: another lifecycle event may send a fresh report, and
+    /// only Claude can recover through a scan. A store that cannot write is a
+    /// supervisor in trouble, not a state to engineer a queue around.
     ///
     /// Codex report and refresh transactions share a capture-only per-session
     /// claim and read the current binding while holding it. A refresh of the
@@ -14011,15 +14036,14 @@ impl Supervisor {
     /// that comparison is a conflict and publishes nothing.
     ///
     /// The same "no retry" rule covers a failed REPLACEMENT, and there it
-    /// is worth naming what it costs (plan §2.5): when a `/clear` report
-    /// cannot be written, the PREVIOUS identity keeps standing, durably
-    /// and in memory, so the session goes on offering to resume a
-    /// conversation the user has discarded until the next report or
-    /// relaunch. That is deliberately not repaired here. A retry queue for
-    /// this write would have to survive the process to be worth anything,
-    /// which means durable state describing an intention rather than a
-    /// fact — and the failure it would serve is a store this supervisor
-    /// can no longer write to at all.
+    /// is worth naming what it costs: when a `/clear` report cannot be
+    /// written, the PREVIOUS identity keeps standing, durably and in memory,
+    /// so the session goes on offering to resume a conversation the user has
+    /// discarded until the next report or relaunch. That is deliberately not
+    /// repaired here. A retry queue for this write would have to survive the
+    /// process to be worth anything, which means durable state describing an
+    /// intention rather than a fact — and the failure it would serve is a
+    /// store this supervisor can no longer write to at all.
     ///
     /// ## The publication gap
     ///
@@ -14081,9 +14105,9 @@ impl Supervisor {
     /// holds a session's lifecycle claim for the WHOLE restart, and
     /// Claude's hook fires at the new agent process's startup — squarely
     /// inside that window. Waiting on the claim would queue the report
-    /// behind the tail of the restart that caused it and blow the hook's
-    /// own 2 s budget under load, which the vendor surfaces as a hook
-    /// error in the user's terminal and never retries.
+    /// behind the tail of the restart that caused it. The report claim is
+    /// capture-only and unbounded: all work under it is local, and the hook
+    /// owns the total time budget.
     ///
     /// The store's generation CAS rejects a report if the generation changes
     /// after this handler observes it. It does not identify the sender's
@@ -14094,19 +14118,10 @@ impl Supervisor {
     /// to the current pane's foreground process around exact-record
     /// verification, and OMP to its launched runtime. Claude requires the
     /// peer's hook to have been run by the pane process or its direct child,
-    /// checked once before the write.
-    /// How long a report waits for the session's capture claim before
-    /// giving up with a `Conflict` rejection.
+    /// checked once before the capture claim.
     ///
-    /// Bounded because the reporter holds a two-second budget for the
-    /// whole round trip: parking past it converts contention into a hook
-    /// error the vendor shows the user, while a prompt rejection is a
-    /// no-op the next lifecycle event retries. One second leaves room
-    /// for the process attributions, the exact-record check, and the reply
-    /// inside that budget on an unloaded host; on a loaded one the report
-    /// loses rather than wedges, and the refresh pass converges the row.
-    const CAPTURE_CLAIM_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
-
+    /// ## Admission order
+    ///
     /// Admit one conversation-identity report through the five-step
     /// ownership contract (SPEC_impl's admission ordering):
     ///
@@ -14114,7 +14129,7 @@ impl Supervisor {
     ///    doorway has already authenticated, bounded, and
     ///    discriminator-checked, and this re-checks against the
     ///    generation-fenced resolution.
-    /// 2. The bounded capture claim, then a reload comparing
+    /// 2. The unbounded capture claim, then a reload comparing
     ///    kind/generation and the complete prior binding.
     /// 3. Mutation-free runtime ownership and vendor root proofs, with
     ///    repeat attribution around the evidence.
@@ -14258,9 +14273,13 @@ impl Supervisor {
     /// under the shared claim discipline.
     ///
     /// Claude additionally has to pass [`Supervisor::claude_foreground`]
-    /// before the write: the hook must have been run by the session's pane
-    /// process or its direct child, so a shelled-out `claude` that
-    /// inherited the credential cannot replace its parent's conversation.
+    /// before taking the capture claim: the hook must have been run by the
+    /// session's pane process or its direct child, so a shelled-out `claude`
+    /// that inherited the credential cannot replace its parent's conversation.
+    /// It runs before the claim because a long local wait can outlive the
+    /// reporting hook; the generation-fenced write keeps a check made before
+    /// a relaunch from committing into the new launch.
+    ///
     /// That check sits after the id-shape check, so a malformed report
     /// still answers `InvalidRequest` without any tmux or process
     /// inspection. Goose and Pi ignore `peer` and are admitted as before.
@@ -14284,36 +14303,7 @@ impl Supervisor {
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
     ) -> Result<(), RequestError> {
-        // Step 2: the bounded capture claim, then the authoritative
-        // reload and kind/generation comparison. Refresh and reconciling
-        // passes hold the same claim, so the row below is the binding the
-        // write below will be fenced on rather than one a racing pass has
-        // since replaced.
-        let claim_deadline = tokio::time::Instant::now() + Self::CAPTURE_CLAIM_WAIT;
-        let _capture_claim = self
-            .capture_locks
-            .claim_before(id, claim_deadline)
-            .await
-            .ok_or_else(|| {
-                RequestError::new(
-                    ErrorKind::Conflict,
-                    "this session's capture is being updated; the report was not recorded",
-                )
-            })?;
-        let row = self
-            .store
-            .session(id)
-            .await
-            .map_err(|_| RequestError::new(ErrorKind::Internal, "could not verify the launch"))?
-            .ok_or_else(|| {
-                RequestError::new(ErrorKind::NotFound, "the session no longer exists")
-            })?;
-        if row.generation != generation || row.agent_kind != kind {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "this session has moved on to another launch",
-            ));
-        }
+        // A malformed identity can be rejected before any process inspection.
         if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
             warn!(
                 session = %id,
@@ -14327,13 +14317,36 @@ impl Supervisor {
                 "the reported conversation identity does not match this session's agent kind",
             ));
         }
-        // Claude's legacy admission keeps its positional foreground check
-        // (the pane process or its direct child ran the hook); the other
-        // legacy kinds have none, and the proven kinds never reach here.
+
+        // Claude's attribution must run before the claim: a long local wait
+        // can outlive the hook process that supplied the peer identity. The
+        // later generation-fenced write makes this early check safe across a
+        // relaunch; proven vendors keep their evidence checks under the claim.
+        // Two nearby Claude reports can therefore attribute concurrently, and
+        // the slower one may commit second within one generation. That small
+        // last-commit race is accepted: two starts that close together are
+        // not a realistic lifecycle, and another coordination layer would
+        // put the hook-process lifetime back behind the claim.
         match kind {
             AgentKind::Claude => {
+                let row = self
+                    .store
+                    .session(id)
+                    .await
+                    .map_err(|_| {
+                        RequestError::new(ErrorKind::Internal, "could not verify the launch")
+                    })?
+                    .ok_or_else(|| {
+                        RequestError::new(ErrorKind::NotFound, "the session no longer exists")
+                    })?;
+                if row.generation != generation || row.agent_kind != kind {
+                    return Err(RequestError::new(
+                        ErrorKind::Conflict,
+                        "this session has moved on to another launch",
+                    ));
+                }
                 self.attribute_claude_report(&row, peer, id, generation, &source)
-                    .await?
+                    .await?;
             }
             AgentKind::Codex
             | AgentKind::Goose
@@ -14341,6 +14354,25 @@ impl Supervisor {
             | AgentKind::Omp
             | AgentKind::Grok
             | AgentKind::Generic => {}
+        }
+
+        // The shared claim is unbounded because all work under it is local.
+        // Refresh and report paths serialize on the same key, so the reload
+        // below is the binding the generation-fenced write is based on.
+        let _capture_claim = self.claim_capture_for_report(id).await;
+        let row = self
+            .store
+            .session(id)
+            .await
+            .map_err(|_| RequestError::new(ErrorKind::Internal, "could not verify the launch"))?
+            .ok_or_else(|| {
+                RequestError::new(ErrorKind::NotFound, "the session no longer exists")
+            })?;
+        if row.generation != generation || row.agent_kind != kind {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session has moved on to another launch",
+            ));
         }
         // The injected failure STANDS IN for the store call rather than
         // preceding it, so a test can exercise this function's own failure
@@ -19000,6 +19032,256 @@ pub(crate) mod tests {
             .expect("insert Grok fixture row");
     }
 
+    /// A report waits for a busy capture claim until the local transaction
+    /// finishes. This deliberately holds the claim past the former one-second
+    /// deadline and observes the parked waiter through the keyed-lock probe;
+    /// the report must still commit once the holder releases it.
+    #[farhelm_testtrace::test]
+    async fn pi_report_survives_the_former_claim_deadline() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = uuid::Uuid::new_v4().to_string();
+        let token = crate::agent_kind::encode_locator(
+            crate::agent_kind::LocatorVendor::Pi,
+            crate::agent_kind::SessionLocator {
+                version: 1,
+                session_id: "pi-after-wait".to_string(),
+                session_file: None,
+            },
+        )
+        .expect("encode Pi locator");
+        let integration =
+            IntegrationSnapshot::resolve(&["pi".into()], None, None).expect("Pi integration");
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: id.clone(),
+                    parent: None,
+                    title: "Pi wait fixture".into(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: state.path().to_string_lossy().into_owned(),
+                    invocation: "pi".into(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    agent_kind: AgentKind::Pi,
+                    resume_template: integration.resume_template.clone(),
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                },
+                None,
+            )
+            .await
+            .expect("insert Pi wait fixture");
+
+        assert_report_survives_busy_claim(
+            &sup,
+            &id,
+            reported(farhelm_proto::ReportVendor::Pi, token, "startup"),
+            None,
+        )
+        .await;
+    }
+
+    /// Exercise the full admission transaction across the former lock deadline.
+    /// The row and mirror must start empty, so either publication missing after
+    /// release is visible. Only the parked-claim interval uses a virtual clock;
+    /// tmux and process inspection before and after it retain their real budgets.
+    async fn assert_report_survives_busy_claim(
+        sup: &Arc<Supervisor>,
+        id: &str,
+        report: ReportedConversation,
+        kill_before_release: Option<crate::procs::ProcessIdentity>,
+    ) {
+        let row = sup.store.session(id).await.unwrap().unwrap();
+        let mut entry = entry_with(None, row.outcome.clone());
+        entry.info.id = id.to_string();
+        entry.info.agent_kind = row.agent_kind;
+        entry.snapshot = IntegrationSnapshot {
+            kind: row.agent_kind,
+            resume_template: row.resume_template.clone(),
+        };
+        entry.generation = row.generation;
+        let entry = Arc::new(entry);
+        assert_eq!(row.captured_conversation, None, "fixture starts unbound");
+        assert_eq!(row.generation, 0, "fixture describes the initial launch");
+        assert_eq!(
+            entry.run.capture.lock().unwrap().committed_conversation(),
+            None
+        );
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.to_string(), Arc::clone(&entry));
+        let expected = report.conversation.clone();
+        let holder = sup.capture_locks.claim(id).await;
+        assert!(
+            sup.capture_locks.claimed_for_test(id),
+            "fixture holds the claim"
+        );
+        let task = {
+            let sup = Arc::clone(sup);
+            let id = id.to_string();
+            tokio::spawn(async move { sup.report_conversation(&id, report).await })
+        };
+        let reached = tokio::time::timeout(
+            Duration::from_secs(5),
+            sup.capture_locks.claims_reached_for_test(id, 2),
+        )
+        .await;
+        if reached.is_err() {
+            if task.is_finished() {
+                let result = task.await;
+                panic!(
+                    "report did not reach the held claim: holder_still_held={}, task_result={result:?}",
+                    sup.capture_locks.claimed_for_test(id),
+                );
+            }
+            panic!(
+                "report did not reach the held claim: holder_still_held={}, report_still_running",
+                sup.capture_locks.claimed_for_test(id),
+            );
+        }
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_millis(1100)).await;
+        tokio::task::yield_now().await;
+        if task.is_finished() {
+            let result = task.await;
+            panic!("report finished before the former one-second deadline: {result:?}");
+        }
+        if let Some(peer) = kill_before_release {
+            // Claude's attribution must already have completed. Killing the
+            // reporter at this parked boundary makes a regression that moves
+            // attribution back under the claim fail instead of passing on a
+            // process that happened to remain alive for the whole test.
+            // SAFETY: kill(2) touches no memory; this is the fixture's own
+            // live reporter, verified Running when it was spawned.
+            unsafe { libc::kill(peer.pid as libc::pid_t, libc::SIGKILL) };
+            wait_pid_gone(peer.pid, peer.start, "the Claude reporter").await;
+        }
+        tokio::time::resume();
+        drop(holder);
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("report completes after the local claim releases")
+            .expect("report task succeeds")
+            .expect("valid foreground report is admitted");
+        let row = sup.store.session(id).await.unwrap().unwrap();
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some(expected.as_str())
+        );
+        assert_eq!(
+            entry.run.capture.lock().unwrap().committed_conversation(),
+            Some(expected.as_str())
+        );
+    }
+
+    /// Claude's positional attribution must finish before the parked claim:
+    /// the test kills the hook-shaped child while it is parked, so moving the
+    /// check under the claim makes admission fail. The accepted identity must
+    /// still reach both representations after release.
+    #[farhelm_testtrace::test]
+    async fn claude_report_survives_the_former_claim_deadline() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let peer = fixture.spawn_claude_runtime(&id).await;
+        let sup = fixture.sup.as_ref().unwrap();
+        let integration = IntegrationSnapshot::resolve(&["claude".into()], None, None).unwrap();
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: id.clone(),
+                    parent: None,
+                    title: "Claude wait fixture".into(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: fixture.state.path().to_string_lossy().into_owned(),
+                    invocation: "claude".into(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: "%0".into(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: AgentKind::Claude,
+                    resume_template: integration.resume_template,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let mut report = reported(
+            farhelm_proto::ReportVendor::Claude,
+            "claude-after-wait".to_string(),
+            "clear",
+        );
+        report.peer = Some(peer);
+        assert_report_survives_busy_claim(sup, &id, report, Some(peer)).await;
+    }
+
+    /// OMP keeps its live ownership checks under the claim, yet contention
+    /// beyond the former deadline must not lose a still-live parent's report.
+    /// This complements Claude: the two paths take attribution on opposite
+    /// sides of the claim and both must publish the committed identity.
+    #[farhelm_testtrace::test]
+    async fn omp_report_survives_the_former_claim_deadline() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let Some(peer) = fixture.spawn_runtime(&id).await else {
+            return;
+        };
+        let file = fixture.session_file("wait.jsonl", "omp-after-wait");
+        let token = fixture.locator_token("omp-after-wait", Some(&file));
+        let mut report = reported(farhelm_proto::ReportVendor::Omp, token, "session_start");
+        report.peer = Some(peer);
+        assert_report_survives_busy_claim(fixture.sup.as_ref().unwrap(), &id, report, None).await;
+    }
+
     /// A report from an unattributable process against a pristine row is
     /// refused and records nothing when the owned pane is absent.
     ///
@@ -19946,6 +20228,57 @@ exit 0
             let runtime_pid = self.runtimes.last().expect("runtime child").child.id();
             self.write_pane_answer(runtime_pid, &format!("fh-{id}"));
             Some(peer)
+        }
+
+        /// Spawn a shell-shaped foreground chain for Claude's positional
+        /// admission without requiring the Bun substrate used by OMP.
+        /// The inner hook process is the pane process's direct child, so the
+        /// test can kill it while a report waits and prove attribution ran
+        /// before the claim.
+        async fn spawn_claude_runtime(&mut self, id: &str) -> crate::procs::ProcessIdentity {
+            let root = self.scratch.path().to_path_buf();
+            let peer_file = root.join("claude-peer.pid");
+            let script = format!(
+                "sh internal hook --vendor claude & peer=$!; echo $peer > {}; wait",
+                peer_file.display()
+            );
+            let mut command = std::process::Command::new("sh");
+            command
+                .arg("-c")
+                .arg(script)
+                .current_dir(&root)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt as _;
+                command.process_group(0);
+            }
+            let child = command.spawn().expect("spawn the Claude shell chain");
+            let pane_pid = child.id();
+            self.runtimes.push(OwnedRuntime {
+                child,
+                group: pane_pid,
+            });
+            self.write_pane_answer(pane_pid, &format!("fh-{id}"));
+            let peer_pid = Self::await_reporter(
+                &peer_file,
+                std::time::Instant::now() + std::time::Duration::from_secs(5),
+            )
+            .await
+            .expect("Claude hook-shaped child publishes its pid");
+            let peer = crate::procs::ProcessIdentity::read(peer_pid)
+                .expect("Claude hook-shaped child remains live");
+            let (parent, _, state) = crate::procs::read_process(peer.pid)
+                .expect("read the Claude hook-shaped child")
+                .expect("Claude hook-shaped child still exists");
+            assert_eq!(state, crate::procs::ProcessState::Running);
+            assert_eq!(
+                parent, pane_pid,
+                "Claude reporter is the pane's direct child"
+            );
+            peer
         }
 
         /// A second live chain for the same fixture — a separately

@@ -163,17 +163,13 @@ impl Supervisor {
             )
         })?;
 
-        let claim_deadline = tokio::time::Instant::now() + Self::CAPTURE_CLAIM_WAIT;
-        let _capture_claim = self
-            .capture_locks
-            .claim_before(id, claim_deadline)
-            .await
-            .ok_or_else(|| {
-                RequestError::new(
-                    ErrorKind::Conflict,
-                    "this session's capture is being updated; the report was not recorded",
-                )
-            })?;
+        // Keep the ordered selection and foreground proofs under the claim:
+        // the reload must remain the binding those proofs and the
+        // generation-fenced write agree on. Moving them before the claim
+        // would let a refresh change that binding and turn contention into a
+        // refusal again. The claim is unbounded because all work under it is
+        // local.
+        let _capture_claim = self.claim_capture_for_report(id).await;
         let row = self
             .store
             .session(id)
