@@ -5697,7 +5697,11 @@
 - Completion criteria: the attach wait stops early on skew, identity mismatch, unverified identity and duplicate, and
   reports the state and its remedy, reusing the existing update-trust wording; add tests. Remove this feedback file and
   its index entry. Stop and ask before implementing if this needs significant new complexity or a refactor.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: deferred: the complexity gate tripped. The fix needs the connection manager to tie each published refusal
+  to the reconnect request current when its attempt started, with a deterministic test of an attempt in flight across
+  the request; recorded as the TODO.md `Near term` entry "Name the real refusal when a provisioned host will not
+  attach". Change `wmnrrwur`, bookmark `triage-1001e/08-attach-names-refusal`, PR
+  https://github.com/scode/farhelm/pull/1449.
 
 ## folder-picker-skips-symlinks.md
 
