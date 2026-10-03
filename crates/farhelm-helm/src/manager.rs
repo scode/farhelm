@@ -79,7 +79,7 @@ use crate::store::{
 };
 use anyhow::Context as _;
 use farhelm_proto::io::VersionSkew;
-use farhelm_proto::{ErrorKind, SessionInfo, SessionStatus};
+use farhelm_proto::{ErrorKind, SESSIONS_CHANGED_MIN_GAP, SessionInfo, SessionStatus};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -153,8 +153,9 @@ pub const REPROBE_INTERVAL: Duration = Duration::from_secs(45);
 /// Since protocol 33 this is the BACKSTOP, not the only path: a supervisor
 /// sends a content-free change hint (`ControlMsg::SessionsChanged`) when
 /// something a user can see changes, and `HostActor::serve` refreshes that
-/// host at once. The poll stays for anything a hint misses (a dropped hint,
-/// a change no hint source covers), which is why it keeps its cadence.
+/// host at once, at most once per `SESSIONS_CHANGED_MIN_GAP`. The poll stays
+/// for anything a hint misses (a dropped hint, a change no hint source
+/// covers), which is why it keeps its cadence.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
 /// How long ONE connection attempt — the dial AND the hello it must
@@ -316,8 +317,8 @@ struct RefreshStep {
     /// (a create, rename, delete, or another seed; see
     /// [`ActorHandle::seed_epoch`]) landed while it was in flight. Such a
     /// refresh answers nothing: a pending change hint it was meant to serve
-    /// is still pending, and `serve` refreshes again at once rather than
-    /// leaving it to the backstop poll.
+    /// is still pending, and `serve` refreshes again as soon as the hint
+    /// pacing allows rather than leaving it to the backstop poll.
     discarded: bool,
 }
 
@@ -3622,10 +3623,23 @@ impl HostActor {
         // it counting as answered already. A new connection's count starts
         // at zero, so this is exactly "nothing answered yet".
         let mut answered = 0;
+        // Hint pacing. Supervisor messages are untrusted, so the helm does
+        // not rely on the supervisor's promise to space its hints
+        // (`SESSIONS_CHANGED_MIN_GAP`): the wait's hint arm below does not
+        // fire until that gap has passed since the last refresh that started
+        // with a hint pending. Hints arriving during the gap need no queue,
+        // since the count already collapses them into the one refresh that
+        // follows, which answers them all. Only the hint's own wake is
+        // paced; the poll, a user's refresh and a nudge race the gap and
+        // never wait on it.
+        let mut last_hint_refresh: Option<tokio::time::Instant> = None;
         loop {
             // Marked seen here, so a hint arriving during this refresh shows
             // up as a change afterwards and gets a refresh of its own.
             let hints_at_start = *hints.borrow_and_update();
+            if hints_at_start > answered {
+                last_hint_refresh = Some(tokio::time::Instant::now());
+            }
             let step = tokio::select! {
                 _ = next_nudge(nudge) => {
                     ended = "the host was reconfigured or an immediate retry was requested";
@@ -3704,16 +3718,14 @@ impl HostActor {
                 ended = reason;
                 break;
             }
-            // Refresh again at once, skipping the wait, when a hint is still
-            // unanswered and either arrived during this refresh or this
-            // refresh was thrown away by a seeded write. A FAILED refresh is
-            // left to the wait below, so a failing host cannot spin; the
-            // backstop poll (or the next hint) retries it on the host's
-            // ordinary schedule.
+            // Refresh again as soon as the hint pacing allows, without
+            // waiting for a further hint, when a hint is still unanswered and
+            // either arrived during this refresh or this refresh was thrown
+            // away by a seeded write. A FAILED refresh is left to the wait
+            // below, so a failing host cannot spin; the backstop poll (or the
+            // next hint) retries it on the host's ordinary schedule.
             let pending = *hints.borrow() > answered;
-            if pending && (discarded || hints.has_changed().unwrap_or(false)) {
-                continue;
-            }
+            let retry_hint = pending && (discarded || hints.has_changed().unwrap_or(false));
             tokio::select! {
                 _ = client.closed() => break,
                 _ = tokio::time::sleep(self.cadence.refresh) => {}
@@ -3734,13 +3746,17 @@ impl HostActor {
                     ended = "the host was reconfigured or an immediate retry was requested";
                     break;
                 }
-                // A change hint: refresh now instead of at the next poll.
+                // A change hint (or one still owed, above): refresh now
+                // instead of at the next poll, once the pacing gap allows.
                 _ = async {
-                    if hints.changed().await.is_err() {
+                    if !retry_hint && hints.changed().await.is_err() {
                         // The client owns the sender and outlives this loop,
                         // so this cannot happen; parked for the same reason
                         // as the refresh arm above if it ever did.
                         std::future::pending::<()>().await;
+                    }
+                    if let Some(previous) = last_hint_refresh {
+                        tokio::time::sleep_until(previous + SESSIONS_CHANGED_MIN_GAP).await;
                     }
                 } => {}
             }
@@ -4937,6 +4953,11 @@ mod tests {
         /// before the helm has asked for anything: a hint that reaches the
         /// helm while its connection actor is still setting up.
         hint_after_hello: bool,
+        /// The peer sends `SessionsChanged` right behind every
+        /// `SessionList` reply (read from the LIVE script): the flooding
+        /// supervisor a hostile host could run, asking for another refresh
+        /// the moment each one is answered.
+        hint_after_list: bool,
     }
 
     impl Default for Script {
@@ -4956,6 +4977,7 @@ mod tests {
                 hint_sender: None,
                 list_gate: None,
                 hint_after_hello: false,
+                hint_after_list: false,
             }
         }
     }
@@ -5001,8 +5023,9 @@ mod tests {
         /// conversation-capture sweep rides its `ListSessions` handler, so
         /// every extra request is another whole-host scan — see
         /// [`drain_sessions`]). The message carries nothing but its
-        /// `req_id`, so the host is all there is to record.
-        requests: Arc<Mutex<Vec<HostId>>>,
+        /// `req_id`, so the host is all there is to record, beside when the
+        /// peer received it (for pacing tests).
+        requests: Arc<Mutex<Vec<(HostId, std::time::Instant)>>>,
         origin: tokio::time::Instant,
         /// Broadcast to every live peer, which then drops its half of the
         /// duplex — the client sees EOF, exactly as it would when an ssh
@@ -5043,12 +5066,18 @@ mod tests {
 
         /// Every `ListSessions` one host's peers have received so far.
         fn requests(&self, host: HostId) -> Vec<HostId> {
+            self.request_times(host).iter().map(|_| host).collect()
+        }
+
+        /// When each of one host's `ListSessions` reached its peer, in
+        /// arrival order.
+        fn request_times(&self, host: HostId) -> Vec<std::time::Instant> {
             self.requests
                 .lock()
                 .expect("request log mutex")
                 .iter()
-                .filter(|id| **id == host)
-                .cloned()
+                .filter(|(id, _)| *id == host)
+                .map(|(_, at)| *at)
                 .collect()
         }
 
@@ -5178,7 +5207,7 @@ mod tests {
     #[derive(Clone)]
     struct PeerContext {
         scripts: Arc<Mutex<HashMap<HostId, Script>>>,
-        requests: Arc<Mutex<Vec<HostId>>>,
+        requests: Arc<Mutex<Vec<(HostId, std::time::Instant)>>>,
         closures: watch::Sender<Vec<HostId>>,
         id: HostId,
     }
@@ -5267,7 +5296,10 @@ mod tests {
                 return;
             };
             if let ControlMsg::ListSessions { req_id } = msg {
-                requests.lock().expect("request log mutex").push(id);
+                requests
+                    .lock()
+                    .expect("request log mutex")
+                    .push((id, std::time::Instant::now()));
                 let current = scripts
                     .lock()
                     .expect("script mutex")
@@ -5296,6 +5328,14 @@ mod tests {
                     .write_control(&list_reply(&current, req_id))
                     .await
                     .is_err()
+                {
+                    return;
+                }
+                if current.hint_after_list
+                    && writer
+                        .write_control(&ControlMsg::SessionsChanged)
+                        .await
+                        .is_err()
                 {
                     return;
                 }
@@ -6381,9 +6421,91 @@ mod tests {
         );
     }
 
+    /// Spec: against a peer that answers every listing with another hint,
+    /// the helm starts hint-driven refreshes at least
+    /// `SESSIONS_CHANGED_MIN_GAP` apart, and keeps answering them.
+    ///
+    /// Why: supervisor messages are untrusted, and the supervisor's own
+    /// spacing of its hints is only a promise. Without the helm's side of
+    /// the gap, a hostile host drives back-to-back refreshes at round-trip
+    /// rate, each raising a fleet-wide feed event that makes every open
+    /// client re-read the list and every open session view re-read its own
+    /// host. The spacing asserted is a lower bound that delays only widen,
+    /// so a slow or loaded machine cannot fail it; the closing wait
+    /// shows the pacing delays hints rather than dropping them. How promptly
+    /// paced hints are answered is deliberately not asserted: a lower bound
+    /// on refreshes per second would be a timing budget a loaded machine
+    /// can miss.
+    #[farhelm_testtrace::test]
+    async fn a_flooding_peer_gets_at_most_one_hint_refresh_per_gap() {
+        let fixture = fixture(quiet_cadence(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("flooding.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    sessions: vec![session("steady", 100)],
+                    hint_after_list: true,
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let (host, _) = connected_hinting_host(&fixture).await;
+        // Premise: the flood is running, so the bound below measures pacing
+        // rather than a peer whose hints never arrive.
+        let connected_at = fixture.transport.requests(host).len();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while fixture.transport.requests(host).len() < connected_at + 2 {
+                // sleep-ok: polling pace behind the request log, which alone decides readiness
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("fixture premise: the peer's hint after each listing drives further refreshes");
+
+        let observed_from = fixture.transport.requests(host).len();
+        // sleep-ok: the observation window whose refresh spacing is checked below
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let arrivals = fixture.transport.request_times(host);
+        let arrivals = &arrivals[observed_from..];
+        // Refreshes run one at a time, so each one's request reaches the
+        // peer after its own start and before the next refresh starts. The
+        // refreshes behind arrivals i+1..=j therefore all started between
+        // arrival i and arrival j, at least one gap apart: j-i-1 gaps must
+        // fit between those two arrivals. Delays on a loaded machine only
+        // widen the spacing, so this cannot fail for a correct helm, while
+        // spacing under the gap fails it as soon as it is sustained.
+        for i in 0..arrivals.len() {
+            for j in i + 1..arrivals.len() {
+                let gaps = u32::try_from(j - i - 1).expect("a handful of refreshes");
+                assert!(
+                    arrivals[j] - arrivals[i] >= SESSIONS_CHANGED_MIN_GAP * gaps,
+                    "refreshes {i} and {j} of a flooding peer's {} arrived {:?} apart, under {gaps} gaps; \
+                     spacing: {:?}",
+                    arrivals.len(),
+                    arrivals[j] - arrivals[i],
+                    arrivals.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>()
+                );
+            }
+        }
+
+        let answered_so_far = fixture.transport.requests(host).len();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while fixture.transport.requests(host).len() < answered_so_far + 2 {
+                // sleep-ok: polling pace behind the request log, which alone decides readiness
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("paced hints must still be answered, not dropped");
+    }
+
     /// Spec: a hint stays pending through a refresh that a seeded write
-    /// threw away, and the helm refreshes again at once, without waiting
-    /// for the backstop poll, then raises the hint's feed event.
+    /// threw away, and the helm refreshes again without waiting for the
+    /// backstop poll, then raises the hint's feed event.
     ///
     /// Why: a discarded refresh answers nothing, since it read the host
     /// before the seed. Waiting for the backstop, which may be slow, would
@@ -6449,7 +6571,7 @@ mod tests {
             }
         })
         .await
-        .expect("a discarded hint refresh must be retried at once, not left to the hourly poll");
+        .expect("a discarded hint refresh must be retried without waiting for the hourly poll");
         wait_for_bump(
             &fixture,
             seeded_revision,
@@ -6461,7 +6583,7 @@ mod tests {
     /// Spec: a hint the supervisor sends during the handshake, before the
     /// connection actor's first refresh has started, is pending for that
     /// refresh: when a seeded write discards it, the actor refreshes again
-    /// at once rather than leaving the hint to the (hourly) backstop.
+    /// without leaving the hint to the (hourly) backstop.
     ///
     /// Why: the connection's reader runs from the handshake on, so a hint
     /// can be counted before the actor starts serving. Treating hints
@@ -6524,7 +6646,7 @@ mod tests {
             }
         })
         .await
-        .expect("the discarded first refresh must be retried at once for the pending hint");
+        .expect("the discarded first refresh must be retried for the pending hint, not left to the poll");
     }
 
     /// A host's provisioning lock survives the replacement of its connection

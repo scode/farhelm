@@ -25,12 +25,14 @@
 //! in what `SessionInfo` would carry does.
 //!
 //! One task, started by `serve` beside the ticker ([`start_hint_sender`]),
-//! turns marks into hints. It sends at most one per [`HINT_MIN_GAP`]: marks
-//! that land during the gap collapse into the single `Notify` permit and go
-//! out together when it ends, so a burst (a mass exit, a reap pass closing
-//! several tabs) costs the helm one refresh, not one per change. The
-//! trailing edge is kept, never dropped: a change marked during the gap is
-//! still hinted, just after it.
+//! turns marks into hints. It sends at most one per
+//! [`SESSIONS_CHANGED_MIN_GAP`] (a protocol constant, because the helm holds
+//! its hint-driven refreshes to the same gap): marks that land during the
+//! gap collapse into the single `Notify` permit and go out together when it
+//! ends, so a burst (a mass exit, a reap pass closing several tabs) costs
+//! the helm one refresh, not one per change. The trailing edge is kept,
+//! never dropped: a change marked during the gap is still hinted, just
+//! after it.
 //!
 //! # Where hints go
 //!
@@ -47,19 +49,9 @@
 //! one is served by its backstop poll.
 
 use super::core::Supervisor;
-use farhelm_proto::{ControlMsg, Frame};
+use farhelm_proto::{ControlMsg, Frame, SESSIONS_CHANGED_MIN_GAP};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Notify;
-
-/// The least time between two hints this supervisor sends.
-///
-/// Each hint costs the helm a whole `ListSessions` round trip (an ssh round
-/// trip for a remote host, plus the capture sweep that listing runs), and
-/// each resulting feed event makes every open session view do a live read
-/// of its own. The gap bounds that multiplication during a burst while
-/// staying well under the three-second poll it is meant to beat.
-pub(crate) const HINT_MIN_GAP: Duration = Duration::from_millis(200);
 
 /// The pending-hint flag the whole supervisor shares: marked by any path
 /// that changed something user-visible, drained by the sender task.
@@ -154,7 +146,7 @@ pub(crate) fn start_hint_sender(sup: &Arc<Supervisor>) -> HintSender {
             sup.send_sessions_changed().await;
             drop(sup);
             // sleep-ok: the minimum gap between hints, which is what coalesces a burst
-            tokio::time::sleep(HINT_MIN_GAP).await;
+            tokio::time::sleep(SESSIONS_CHANGED_MIN_GAP).await;
         }
     });
     HintSender { task }
@@ -165,6 +157,7 @@ pub(crate) fn start_hint_sender(sup: &Arc<Supervisor>) -> HintSender {
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
+    use std::time::Duration;
 
     /// A registered full-authority link plus a running sender: what `serve`
     /// would set up for a connected helm, minus the socket.
@@ -206,6 +199,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     /// Register a full-authority link on `sup` with a writer queue of
     /// `capacity`, returning the queue's receiving end.
@@ -233,8 +227,8 @@ mod tests {
 
     /// Spec: a mark reaches every registered full-authority connection as
     /// one `SessionsChanged` at once; marks made during the following
-    /// [`HINT_MIN_GAP`] send nothing until the gap ends, then go out as
-    /// exactly one hint.
+    /// [`SESSIONS_CHANGED_MIN_GAP`] send nothing until the gap ends, then go
+    /// out as exactly one hint.
     ///
     /// Why: each hint costs the helm a whole listing round trip, so a burst
     /// must collapse; but the trailing edge must survive, or a change made
@@ -263,7 +257,7 @@ mod tests {
         }
 
         // Five marks spread over the gap, the last one just before it ends.
-        let step = HINT_MIN_GAP / 5;
+        let step = SESSIONS_CHANGED_MIN_GAP / 5;
         for _ in 0..5 {
             sup.hint_sessions_changed();
             settle().await;
@@ -284,7 +278,7 @@ mod tests {
         assert!(is_hint(&trailing));
         // Nothing further is owed: the burst collapsed into that one hint,
         // and no mark has been made since.
-        tokio::time::advance(HINT_MIN_GAP * 3).await;
+        tokio::time::advance(SESSIONS_CHANGED_MIN_GAP * 3).await;
         settle().await;
         assert!(
             first.try_recv().is_err(),

@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `sessions-changed-hint-unthrottled.md` — the helm does not rate-limit "sessions changed" hints, so a hostile host can
-  drive back-to-back refreshes and fleet-wide re-reads.
 - `claude-resume-template-selector-collision.md` — Claude's derived resume command keeps an original `--continue`,
   `--resume` or `--`, so Resume can open the wrong conversation or start fresh.
 - `omp-corridor-uncounted-pane-runtime.md` — when the foreground OMP's command line cannot be read, a nested OMP can

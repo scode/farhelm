@@ -1124,11 +1124,16 @@ drain earlier. The supervisor owes a hint whenever a value it would list actuall
 transition, the activity and work-start stamps advancing, a restart offer changing, and every lifecycle mutation), never
 merely because a listing was served, so hints and the refreshes they cause cannot feed each other. It coalesces owed
 hints into at most one per 200 ms and sends each on every full-authority connection's ordinary writer queue, dropping it
-rather than blocking when that queue is full. The helm refreshes the hinted host at once, and a refresh a hint caused
-always raises a feed event, even when the cache compares equal: a tab opened and exited between two refreshes leaves the
-cache unchanged but a client's optimistic tab behind. The three-second poll stays as the backstop and keeps its
-changed-only rule. A hint stays pending until a refresh that STARTED after it completes; a refresh the helm discarded
-because one of its own seeded writes overtook it is retried at once rather than left to the poll.
+rather than blocking when that queue is full. The helm refreshes the hinted host at once, unless a refresh that started
+with a hint pending began less than that same 200 ms ago (`SESSIONS_CHANGED_MIN_GAP` in the protocol crate, which both
+ends use); then it waits out the rest of the gap, and the one refresh that follows answers every hint that arrived
+meanwhile. Supervisor messages are untrusted, so the helm enforces the gap itself rather than relying on the
+supervisor's spacing. Only a hint's own wake waits: the poll, a user's refresh and a nudge do not. A refresh a hint
+caused always raises a feed event, even when the cache compares equal: a tab opened and exited between two refreshes
+leaves the cache unchanged but a client's optimistic tab behind. The three-second poll stays as the backstop and keeps
+its changed-only rule. A hint stays pending until a refresh that STARTED after it completes; a refresh the helm
+discarded because one of its own seeded writes overtook it is retried as soon as the gap allows rather than left to the
+poll.
 
 The helm's client closes its transport when its final owning handle drops, even with an unanswered upcall. Answer tasks
 hold writer senders of their own, so closing the client's sender alone cannot make a quiet connection reach EOF. The

@@ -5802,7 +5802,8 @@
   busy honest one; add a test with a flooding peer. SPEC.md "Remote input, session defaults, and availability" gains the
   principle above, alongside the misbehaving-host remedy recorded under `merged-list-crowded-by-one-host.md`. Remove
   this feedback file and its index entry.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `qzvqsxoo`, bookmark `triage-1001e/14-hint-pacing`, PR
+  https://github.com/scode/farhelm/pull/1457.
 
 ## claude-resume-template-selector-collision.md
 
