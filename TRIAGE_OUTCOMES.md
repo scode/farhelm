@@ -6076,3 +6076,370 @@
   `TERM_EVENT_QUEUE`'s comment so the memory bound it now implies (256 × the limit) is stated rather than disclaimed.
   Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-clipboard-terminal-limit.md`.
+
+## delete-skips-scoped-tab-on-stale-verdict.md
+
+- Outcome: `other`.
+- Assessment: confirmed by source inspection on main at cc32cc53; not reproduced at runtime. Delete's teardown
+  (`crates/farhelm-supervisor/src/service/teardown.rs`) records only the agent's own launch unit, adds every tab unit as
+  derived regardless of the window's scoped marker, re-probes a stale verdict only when the agent's launch was scoped,
+  and on a "no usable manager" verdict only logs the glob failure at debug level, so a scoped tab of an unscoped session
+  is never checked and Delete reports success. The finding's preconditions (agent unscoped, tab scoped, negative verdict
+  at delete time) all arise from per-launch and per-tab scope decisions against a cached verdict. Contradicts SPEC.md
+  "Lifecycle operations" and SPEC_impl.md's rule that a scope-marked tab refuses until its scope check has passed.
+- Decision: the user decided (2026-10-02) that on Linux a usable systemd user manager is simply required, and macOS
+  keeps the portable sweep. A given host then no longer flip-flops between systemd and no systemd, and this edge case
+  goes away with the fallback. The only action is to add this finding as example complexity to TODO.md's existing
+  `Maybe later` entry about dropping Linux support without a systemd user manager (retitled "Require a systemd user
+  manager on Linux, with no fallback" when the sibling entry on the silent fallback was folded into it), which takes
+  care of it when executed.
+- Completion criteria: the TODO.md entry "Require a systemd user manager on Linux, with no fallback" records the
+  decision and names this case (done during triage). Remove the feedback file and its index entry, with no code or spec
+  change.
+- Execution: `pending`. The TODO.md change was made during triage.
+
+## create-rollback-orphans-unconfirmed-scope.md
+
+- Outcome: `other`.
+- Assessment: confirmed by source inspection on main at cc32cc53; not reproduced at runtime. The create rollback paths
+  in `crates/farhelm-supervisor/src/service/core.rs` still pass `ScopeKillFailure::Warn`, under which a clean sweep plus
+  an unconfirmed scope kill counts as success, and then remove the launching record, leaving nothing that can later find
+  the scope. Needs four rare conditions together (create fails after the agent started, systemd does not confirm the
+  scope kill, a process the sweep cannot see, and for one path a tmux session already gone). Unlike the Delete case, the
+  trigger is a hung or overloaded manager at rollback time rather than the no-systemd fallback, so requiring systemd
+  does not by itself change what this rollback does. What remains is not systemd-specific: the rollback drops the only
+  record of a scope whose kill was not confirmed, where other unconfirmed cleanups keep the session so a later Delete
+  can retry.
+- Decision: same as `delete-skips-scoped-tab-on-stale-verdict.md`: systemd is required on Linux with no fallback (user,
+  2026-10-02), a hung or broken user manager is a broken host like any other, and the action is to add this finding as
+  example complexity to the same TODO.md entry. Asked whether the remaining non-systemd part needs anything, the user
+  chose consistency with other places: a cleanup Farhelm cannot confirm fails visibly and keeps the session, so the
+  TODO.md entry asks the rollback to keep the session when the scope kill is unconfirmed.
+- Completion criteria: the TODO.md entry names this case and that the rollback must fail visibly and keep the session
+  (done during triage). Remove the feedback file and its index entry, with no code or spec change.
+- Execution: `pending`. The TODO.md change was made during triage.
+
+## desktop-auth-ready-with-stale-webview-credential.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by source inspection on main at cc32cc53; the reviewer's focused reproduction was not rerun.
+  `crates/farhelm-ui/assets/desktop-auth.js` swallows a failed `localStorage` write of the new webview secret and still
+  sends `ready: true`, while terminals, uploads and the event feed read their credential from `localStorage`, so the
+  window can open with a missing or revoked secret for those consumers. The trigger is the desktop app's internal
+  re-authentication, which runs after `farhelm helm token rotate` or when the helm's 64-credential cap evicts the app's
+  stored secrets.
+- Decision: the user (2026-10-02): the desktop app must never involve a user-visible credential; the split between the
+  embedded helm and the window is an implementation detail. Agreed direction: token rotation and the client-credential
+  cap no longer apply to the desktop app's own secrets, so this internal re-authentication essentially never runs,
+  rather than hardening each step of it. This changes SPEC.md "Signing in again" (and the "Client to helm" and
+  client-scale text), which today describe a desktop re-sign-in with a Retry surface.
+- Completion criteria: SPEC.md and SPEC_impl.md say the desktop app's own credentials are not revoked by browser token
+  rotation or evicted by the client cap, and drop the desktop re-sign-in requirement; the code matches, and no ordinary
+  operation leaves the desktop window running with a credential the helm has revoked. Keep or remove the existing
+  recovery machinery as the simplest correct design requires. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## desktop-reauth-failure-loses-action-outcomes.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by source inspection on main at cc32cc53; not reproduced. A failed desktop authentication run
+  replaces the whole app with the failure page and Retry button (`crates/farhelm-ui/src/auth.rs`), which unmounts the
+  components awaiting pending actions such as Delete, so their outcome is never reported. SPEC.md "Signing in again"
+  forbids that.
+- Decision: same direction as `desktop-auth-ready-with-stale-webview-credential.md` (user, 2026-10-02): no user-visible
+  credential in the desktop app, and its own credentials are not subject to rotation or eviction, so a desktop
+  re-authentication, and with it this failure page, should not occur in ordinary operation. Execute together with that
+  item.
+- Completion criteria: as for `desktop-auth-ready-with-stale-webview-credential.md`; once desktop re-authentication no
+  longer occurs in ordinary operation, a pending desktop action cannot be unmounted by it. Remove the feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## dropped-create-skips-bookkeeping.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by #1404 (`493c903e`), which postdates the reviewed commit: `create_session` and
+  `replace_session` in `crates/farhelm-helm/src/sessions.rs` now run their bodies through `run_owned`, so a dropped
+  request loses only the reply.
+- Decision: already fixed; discarded without discussion under the triage rule for findings fixed on main.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: `complete`; removed during triage on 2026-10-02.
+
+## agent-create-aborted-on-retire.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by #1419 (`ad72d901`), which postdates the reviewed commit: `spawn_agent_answer` in
+  `crates/farhelm-helm/src/client.rs` no longer registers an abort handle for state-changing agent requests, so retiring
+  the asking host's connection cannot stop a started create or clone partway.
+- Decision: already fixed; discarded without discussion under the triage rule for findings fixed on main.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: `complete`; removed during triage on 2026-10-02.
+
+## seen-write-cancellation-skips-notification.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by #1404 (`493c903e`): `mark_seen` in `crates/farhelm-helm/src/sessions.rs` runs the
+  store write and the fleet-revision bump inside one `run_owned`. The dedicated cancellation test the finding proposed
+  was not added; minor. Also covered by SPEC.md "One GUI at a time", since only a second GUI could see the stale dot.
+- Decision: already fixed; discarded without discussion under the triage rule for findings fixed on main.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: `complete`; removed during triage on 2026-10-02.
+
+## create-directory-wait-blocks-terminal-reader.md
+
+- Outcome: `other`.
+- Assessment: confirmed on main at cc32cc53: the supervisor's connection reader awaits `handle_create_session` inline
+  (`crates/farhelm-supervisor/src/service/handlers.rs`), which waits on the per-key intent lock and the host-wide
+  directory lock that Delete holds through its kill grace. Fully covered by TODO.md `Planned` "Keep session creation off
+  the connection read loop" and the `create-runs-inline-on-read-loop.md` decision in this file; the feedback file itself
+  says it was retained only as additional evidence.
+- Decision: covered by planned work; removed under the triage rule for items covered by the `Planned` bucket.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: `complete`; removed during triage on 2026-10-02.
+
+## stop-admission-blocks-terminal-reader.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main at cc32cc53. The supervisor reads every frame of a helm connection in one loop and
+  awaits control handling inline (`crates/farhelm-supervisor/src/service/connection.rs`); `handle_stop_session` awaits
+  its own `acquire_owned()` on the eight-slot management semaphore (`HANDLER_ADMISSION_PERMITS`, `core.rs`) before
+  spawning its task, so with all slots held, a Stop freezes terminal input, resize, detach and list requests for every
+  session on the host. The waiting is deliberate today: the semaphore's comment and `spawn_admitted`'s comment say it
+  backpressures the sending connection, and the test
+  `spawn_admitted_acquires_the_permit_before_spawning_not_inside_the_task` enforces it. A long freeze can escalate: the
+  helm drops the whole connection when a list request exceeds its 30 s `REFRESH_TIMEOUT`. Contradicts SPEC.md "Waiting
+  between operations on one host".
+- Decision: the user (2026-10-02): when management capacity is exhausted, refuse promptly instead of queueing, and make
+  the code comments say clearly why. Delete keeps its current behavior: it already waits for its slot inside its own
+  task, off the reader.
+- Completion criteria: one shared non-waiting admission step (take a slot without waiting, otherwise reply with the
+  existing `ErrorKind::Unavailable`, which the helm maps to 503 and the UI shows as the action's error text) replaces
+  the waiting acquire in Stop, Restart, Rename and the shared `spawn_admitted` helper (which also covers directory
+  browse, repository search, and tab open/close). Refusal happens before any change, so a retry is safe. Rewrite the
+  semaphore's and helper's comments to explain the refusal and why the reader must never wait, and replace the test that
+  enforces waiting with one where the slots are saturated, the request is refused, and terminal input to another session
+  still reaches its pane. The four admission items share this change: whichever executes first introduces it, and the
+  others apply it to their call site. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## restart-admission-blocks-terminal-reader.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main at cc32cc53: `handle_restart_session`
+  (`crates/farhelm-supervisor/src/service/handlers.rs`) has its own inline wait for a management slot, independent of
+  Stop's and of `spawn_admitted`, with the same reader-freezing consequence as
+  `stop-admission-blocks-terminal-reader.md`.
+- Decision: as for `stop-admission-blocks-terminal-reader.md` (user, 2026-10-02): refuse promptly when capacity is
+  exhausted, with comments saying why.
+- Completion criteria: Restart uses the shared non-waiting admission step described under
+  `stop-admission-blocks-terminal-reader.md`, with a saturated-restart test showing the refusal and that input to
+  another session progresses. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## rename-admission-blocks-terminal-reader.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main at cc32cc53: Rename acquires its slot inline in the read loop (`handlers.rs`, commented
+  "acquired here, in the read loop") and then hands that one permit through the database update and reply. The handoff
+  still works if the slot is taken without waiting.
+- Decision: as for `stop-admission-blocks-terminal-reader.md` (user, 2026-10-02).
+- Completion criteria: Rename uses the shared non-waiting admission step, keeping its single-permit handoff, with a
+  saturated-rename test showing the refusal and that input to another session progresses. Remove the feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## list-admission-blocks-terminal-reader.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main at cc32cc53: `handle_list_sessions` goes through `spawn_admitted`, which awaits a
+  management slot inline in the reader, so eight in-flight lifecycle operations make a list request freeze the
+  connection. The list needs no management slot for correctness: listing holds the session map only briefly and takes no
+  lifecycle, intent or directory lock; the slot only bounds its tmux subprocesses and capture sweep. SPEC.md "Waiting
+  between operations on one host" requires the session list not to wait on management operations, and refusing it while
+  they hold the slots would show last-known rows with a refresh-failed note for as long as management is busy, which is
+  the same dependence by another route.
+- Decision: the user (2026-10-02) agreed that the session list is exempt from the management cap rather than refused; it
+  gets its own small limit for its tmux and capture cost, like the status sampler's separate limit.
+- Completion criteria: list requests no longer take a management slot and never wait in the reader; a separate small
+  bound, documented with the reason, caps concurrent list work. Test: all management slots held by controlled lifecycle
+  operations, then a list request and terminal input on the same connection both progress. Remove the feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## checkout-reconciliation-blocks-terminal-reader.md
+
+- Outcome: `other`.
+- Assessment: confirmed on main at cc32cc53: the reconciliation request the helm sends before a keyed fresh-checkout
+  create is awaited inline in the reader (`handlers.rs`) and calls `admit_create` (`core.rs`), which waits on the
+  per-key intent lock and the host-wide directory lock that Delete holds through its kill grace. This is a lock wait,
+  not a capacity wait, and SPEC.md explicitly lets creates queue behind Delete, so refusing here would fail every fresh
+  checkout while any Delete runs. Not named by the `Planned` create-dispatch item or any plan file.
+- Decision: the user (2026-10-02) agreed: fold it into TODO.md `Planned` "Keep session creation off the connection read
+  loop" by naming the reconciliation request there, and remove the queue item.
+- Completion criteria: the `Planned` entry names the reconciliation request (done during triage). Remove the feedback
+  file and its index entry.
+- Execution: `complete`; TODO.md updated and the feedback file and index entry removed during triage on 2026-10-02.
+
+## browser-signin-loses-action-outcomes.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed on main at cc32cc53: when a browser request gets 401, `crates/farhelm-ui/src/lib.rs` swaps the
+  whole signed-in tree for `auth::TokenPrompt`, unmounting the components that await pending actions (Delete included).
+  The helm still completes the work, since accepted actions are helm-owned; only the report is lost. The realistic
+  trigger is `farhelm helm token rotate`, credential eviction past 64 enrollments, or cleared browser storage while an
+  action is pending. A code fix is not trivial (hoisting action ownership above the sign-in branch). Contradicts SPEC.md
+  "Signing in again": "An action the user started is never lost silently".
+- Decision: the user (2026-10-02): the browser is best effort for rare UX issues that are not correctness issues; this
+  is acceptable and not high priority. The desktop app keeps the guarantee. Moved from the `high` to the `other` bucket
+  in the queue index, since nothing is lost on the server and the trigger is rare and user-initiated.
+- Completion criteria: SPEC.md "Signing in again" carves the browser out of the never-lost-silently sentence, along the
+  lines of: in the browser, an action still pending when the token prompt opens may lose its report; the helm still
+  carries it out, and the list shows the result after sign-in. The desktop guarantee stays as specified (see the desktop
+  credential decisions above). Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## list-ingress-id-validation-gap.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main at cc32cc53: `drain_sessions` (`crates/farhelm-helm/src/manager.rs`) checks only the
+  reply cap, id length and duplicates, while create's `created_session_from` (`client.rs`) also refuses empty and
+  control-character ids, and its doc comment wrongly says both apply the same rule. The UI's `encode_path_segment`
+  (`crates/farhelm-ui/src/api.rs`) claims `%2E` blocks dot-segment resolution; under the WHATWG URL Standard it does
+  not. No current route is reachable this way. Supervisors mint UUIDs.
+- Decision: the user (2026-10-02): reasonable, straightforward defensive checks are encouraged when cheap, without lots
+  of complexity for defense in depth at every level. This one is cheap.
+- Completion criteria: one shared session-id check (non-empty, within the length cap, no control characters, not `.` or
+  `..`; a conservative character set is optional) used by both list and create ingress. A list containing a bad id is
+  refused whole, keeping the previous cache, as oversized and duplicate ids already are. On the UI side, correct the
+  encoder's doc and test comment only; the helm check is the boundary. Fix `created_session_from`'s doc. Remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## profile-body-accepts-unknown-fields.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main at cc32cc53: `ProfileSpec` (`crates/farhelm-helm/src/profiles.rs`) lacks
+  `deny_unknown_fields` and its optional `resume_template` makes a misspelled key clear the stored template. The shipped
+  UI, the e2e helper and the Rust e2e test send only known fields, though the latter two omit `resume_template`, so
+  making that key required would break them.
+- Decision: the user (2026-10-02): cheap defensive checks are encouraged.
+- Completion criteria: `#[serde(deny_unknown_fields)]` on `ProfileSpec`, with `resume_template` still optional, and a
+  REST test showing a misspelled key is refused and the stored profile is unchanged. Remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## provision-lock-map-grows-per-requested-id.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main at cc32cc53: `host_provision_lock` and `try_host_provision_lock`
+  (`crates/farhelm-helm/src/manager.rs`) insert an entry for any requested id before any existence check, and retarget,
+  alias and remove (`hosts.rs`) take the lock before the store refuses an unknown id, so the documented bound is false.
+  Needs an authenticated client.
+- Decision: the user (2026-10-02): cheap defensive checks are encouraged.
+- Completion criteria: an entry is removed when its lock is released and nothing else holds or waits on it (checked
+  under the map's mutex), bounding the map to locks in use without a store read and without changing callers. Correct
+  the doc comment and add a test that requests many unregistered ids and checks the map's size. Remove the feedback file
+  and its index entry.
+- Execution: `pending`.
+
+## restart-with-skips-create-validation.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main at cc32cc53: the restart-with branch of `restart_session`
+  (`crates/farhelm-supervisor/src/service/core.rs`) applies neither `ensure_no_cwd_program` nor `ensure_resume_template`
+  that create applies, and the restart handler applies none of create's template caps, while loading refuses a row
+  failing those checks, so one bad bundle stops the supervisor from loading its sessions. SPEC_impl.md "Restart-with
+  backend wire and persistence" already says restart-with uses create's checks. The shipped helm never sends such a
+  bundle. The checks would run before the old agent is stopped.
+- Decision: the user (2026-10-02): cheap defensive checks are encouraged.
+- Completion criteria: the restart-with branch applies `ensure_no_cwd_program` to the invocation and
+  `ensure_resume_template` to the resolved template, mapping these and the existing argv and resolve errors to
+  `InvalidRequest`, plus create's template element cap. Test that a bundle with `{conversation}` as the template's
+  program is refused, the row is unchanged, and a fresh supervisor still starts. Remove the feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## escape-token-clamp-too-short.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main at cc32cc53: `back_off_from_split_escape` (`crates/farhelm-ui/src/menu_panel.rs`)
+  assumes 8-character tokens, but unsafe tag characters U+E0000–U+E007F render as 9-character `<U+E0041>` tokens, so one
+  cut position leaves a broken marker in the host menu's accessible label. The doc comments claiming eight characters
+  are wrong.
+- Decision: the user (2026-10-02): cheap defensive checks are encouraged; this is trivial.
+- Completion criteria: look back far enough for the longest token and back off to the nearest `<` (nearest matters: a
+  complete token followed by a lone `<` must not match the earlier token), fix both doc comments, and test a cut inside
+  a `<U+E00xx>` token. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## opencode-bare-model-rejected.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed on main at cc32cc53. Every model lookup compares the typed text with the catalog as typed. Bare
+  `gpt-6-luna`, `gpt-5.6-terra`, `gpt-6.1-sol` and `gpt-6-astra` (and others such as `claude-fable-5`) are catalog
+  entries owned by other harnesses, while OpenCode's entries carry the `opencode/` prefix. So `validate_selection`
+  (`crates/farhelm-helm/src/launches.rs`) refuses an OpenCode launch of a bare name as belonging to another harness, the
+  browser's `selection_is_compatible` and `compatible_efforts` (`crates/farhelm-ui/src/launch_composer.rs`) disagree the
+  same way, and pressing Enter switches the harness (see `opencode-bare-model-switches-harness.md`). A server-only or
+  UI-only fix leaves the bug visible.
+- Decision: the user (2026-10-02): choosing a model name must never switch the harness unless it is a true special case
+  where the model can only be available in one harness, and no such case is known; users must not have to type
+  `opencode/`. Agreed details: bare names resolve inside the selected harness; pressing Enter on a typed model never
+  switches an already selected harness, and a model only another harness offers keeps the harness and shows an inline
+  error naming the owner; an explicit pick of a harness-labelled row in "Show all" still switches; with no harness
+  selected, bare `gpt-6-luna` and similar pick Codex, the primary harness, with no extra question.
+- Completion criteria: one per-harness method in the place the harness-specific-code rules name (`LaunchHarness` in
+  `crates/farhelm-proto/src/launch.rs` was suggested) gives a typed model's catalog form (OpenCode qualifies a bare
+  name; others return it unchanged), used by the helm's validation and effort lookup and by the UI's Enter handling,
+  compatibility, effort and history filters, while the user's typed text stays the stored selection. Enter never
+  switches a selected harness. SPEC.md's "A known model identifies its owning harness" is narrowed to filling an
+  unselected harness, and the existing test asserting a typed Codex-to-Claude switch is reversed. Tests cover both
+  spellings of the overlapping names under OpenCode on the server and on Enter. Remove the feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## opencode-bare-model-switches-harness.md
+
+- Outcome: `other`.
+- Assessment: confirmed on main at cc32cc53 and broader than reported: `model_enter_target`
+  (`crates/farhelm-ui/src/launch_composer.rs`) keeps the selected harness only if it owns the exact typed id, and
+  otherwise `apply_model_option` (`crates/farhelm-ui/src/list/create_form.rs`) switches to the owning harness. This
+  happens for any known model of another harness (Codex to Claude too), not just OpenCode bare names. Same root cause as
+  `opencode-bare-model-rejected.md`.
+- Decision: the user (2026-10-02): fixed by the change recorded under `opencode-bare-model-rejected.md`, which includes
+  the no-switch rule; the two halves cannot be fixed separately.
+- Completion criteria: that item's change lands. Remove the feedback file and its index entry in the same PR as that
+  change, or in its own bookkeeping PR immediately after it.
+- Execution: `pending`.
+
+## stop-restart-panic-no-reply.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main at cc32cc53: the Stop and Restart waiter tasks in
+  `crates/farhelm-supervisor/src/service/handlers.rs` only log a panicked work task and send no reply, while Delete's
+  sends an `Internal` error. The helm puts no deadline on that reply. No concrete panic was found.
+- Decision: the user (2026-10-02): crash the whole process when that is simpler than handling an internal crash, but
+  where resilience is trivial and does not hurt the user experience, do that. Here it is trivial (about 15 lines copying
+  Delete) and consistent with the helm's own rule that a panicking handler still answers.
+- Completion criteria: the Stop and Restart waiters send an `Internal` error on a panicked join, Restart's saying the
+  outcome is unknown, with a test for each. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## host-write-lock-split-on-actor-respawn.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct on main at cc32cc53. The headline consequence (a host edited or removed mid-install after
+  its connection worker restarted) was fixed after the review by #1165 and #1167, which added the per-host provisioning
+  lock in a manager-level map keyed by host id, with the test `the_provisioning_lock_survives_actor_replacement`. The
+  cache-write lock is still created per actor in `spawn_actor` (`crates/farhelm-helm/src/manager.rs`), and a handle is
+  replaced while its host still exists only after the actor panicked (via `sync_registry` or a Retry's `revive`), so the
+  remaining split needs a panic plus a Retry during a retarget, remove or yolo-safe edit. Making an actor panic fatal is
+  not simpler here: SPEC_impl.md deliberately retires a panicked actor and lets Retry revive it, with a test asserting
+  that. The two locks must not be merged; #1165 split them so long runs do not stall session write-backs.
+- Decision: the user (2026-10-02) agreed with the narrowed fix under the same crash policy as
+  `stop-restart-panic-no-reply.md`: resilience is trivial here (about 25 lines copying the provisioning-lock pattern).
+- Completion criteria: the cache-write lock lives in a manager-level map keyed by host id, as `provision_locks` does, so
+  `spawn_actor` and `host_write_lock` share one lock per host across actor replacement; test it the way the provisioning
+  lock is tested. Note in the PR that the finding's text predates #1165 and #1167. Remove the feedback file and its
+  index entry.
+- Execution: `pending`.

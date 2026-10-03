@@ -34,11 +34,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Keep session creation off the connection read loop.** Run creation through tracked background handlers so ordinary
   launch work and admission waits do not delay terminal input or unrelated requests on the helm's shared connection to
-  that supervisor. Cover both full-authority and session-authenticated create paths; preserve bounded handler admission,
-  credential revalidation after waits, keyed-create durability, and disconnect cleanup. Verify with a deterministic
-  regression that another request or terminal input progresses while creation is paused. Medium effort: localized
-  dispatch changes, with care around task ownership and existing lifecycle guards. This plans the fix described in
-  `create-runs-inline-on-read-loop.md`; it does not request immediate implementation.
+  that supervisor. Cover both full-authority and session-authenticated create paths, and the separate keyed
+  fresh-checkout reconciliation request the helm sends before such a create, which waits on the same intent and
+  directory locks inside the read loop (`checkout-reconciliation-blocks-terminal-reader.md`); preserve bounded handler
+  admission, credential revalidation after waits, keyed-create durability, and disconnect cleanup. Verify with a
+  deterministic regression that another request or terminal input progresses while creation is paused. Medium effort:
+  localized dispatch changes, with care around task ownership and existing lifecycle guards. This plans the fix
+  described in `create-runs-inline-on-read-loop.md`; it does not request immediate implementation.
 
 ## Near term
 
@@ -545,24 +547,35 @@ are large mostly because of their tests.
 
 ## Maybe later
 
-- **Consider dropping Linux support without a systemd user manager.** Today a Linux supervisor that finds no usable
-  `systemd --user` falls back to the same portable process sweep macOS uses, with the weaker cleanup guarantee SPEC.md's
-  lifecycle operations section describes. The macOS path must stay, because running on an ordinary MacBook is a goal,
-  but on Linux the fallback mainly serves hand-run supervisors and hosts whose user manager is missing or broken.
-  Dropping it would narrow the support and test matrix; the code saving is small, since the sweep itself is shared with
-  macOS and only the `/proc` reader is Linux-specific. Open question before deciding: a probe that times out is already
-  retried a minute later, but a definite "no usable manager" answer is cached for the supervisor's lifetime, so a
-  systemd host whose user manager is briefly broken when the supervisor first probes keeps the weaker sweep until the
-  supervisor restarts; dropping the fallback would mean refusing to launch there instead, or probing again. Came up in
-  review-feedback triage on 2026-09-28.
+- **Require a systemd user manager on Linux, with no fallback.** Decided 2026-10-02: on Linux, a usable `systemd --user`
+  is simply required, and Farhelm has no fallback for working without one; macOS has no systemd and keeps the portable
+  process sweep. A Linux host whose user manager is missing, hung or broken is a broken host, like one with an I/O error
+  or a full disk, not a mode Farhelm adapts to. What is left is the implementation, not the decision.
 
-- **Reassess the silent fallback when systemd is expected.** On Linux each session normally runs in its own systemd
-  scope, which is what guarantees all its processes stop with it. Since #1279, a launch that meets a slow systemd user
-  manager still starts, just without a scope, so that session relies on the weaker process-tree sweep for good; later
-  launches check again. Reassess whether a host that is expected to have systemd should hard-require it instead: refuse
-  the launch, or at least say so, rather than quietly falling back. Part of the question is how Farhelm knows a host is
-  expected to have it. Decide together with the entry above on dropping the no-systemd fallback altogether, which covers
-  hosts that never had a working user manager.
+  Today there are two fallbacks. A Linux supervisor that finds no usable user manager uses the same sweep macOS uses,
+  with the weaker cleanup guarantee SPEC.md's lifecycle operations section describes; a definite "no usable manager"
+  answer is cached for the supervisor's lifetime, while a probe that times out is retried a minute later. And since
+  #1279, a launch that meets a slow user manager still starts, just without a scope, so that session relies on the sweep
+  for good while later launches check again. Both go. A launch or tab open on Linux that cannot get its scope fails
+  visibly instead of starting unscoped, and a supervisor that once found the manager unusable checks again rather than
+  keeping that verdict. The code saving is small, since the sweep itself is shared with macOS and only the `/proc`
+  reader is Linux-specific. The real gain is that a Linux host stops flip-flopping between systemd and no systemd: scope
+  use is decided per launch and per tab against a cached verdict, so one session can mix scoped and unscoped processes,
+  and a stale "no usable manager" verdict can make cleanup skip a scope that does exist. That mixing breeds edge cases
+  like these two, found in review-feedback triage on 2026-10-02 and folded into this entry rather than fixed separately:
+  - Delete skips a tab's scope (`delete-skips-scoped-tab-on-stale-verdict.md`). An agent launched without a scope
+    because systemd was briefly unreachable, a terminal tab later opened inside one, and a supervisor whose first
+    systemd check after a restart failed: Delete then never checks the tab's scope and reports success, and a process
+    the sweep cannot see (such as an `ssh-agent` started by the tab's shell startup files) outlives the session with
+    nothing left that can find it.
+  - A failed create orphans its scope (`create-rollback-orphans-unconfirmed-scope.md`). When a create fails after the
+    agent started and systemd does not confirm the scope's kill, the rollback still removes the half-created session if
+    the sweep came up clean, so a daemon the sweep cannot see keeps running with no session to Delete. Dropping the
+    fallback does not change this by itself, because the trigger is a hung manager at rollback time. Make the rollback
+    behave like every other cleanup Farhelm cannot confirm: the create fails visibly and the session is kept, so a later
+    Delete can retry once the host is healthy.
+
+  When executing, check that both cases are actually gone.
 
 - **Native `<dialog>` for the app's modal dialogs.** The restart-with dialog, the rename dialog (`rename.rs`), and the
   session launcher (`list/create_form.rs`, `install_composer_focus_trap`) are each a plain `div` with `role="dialog"`, a
