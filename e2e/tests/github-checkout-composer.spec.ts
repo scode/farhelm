@@ -290,8 +290,9 @@ test("a fresh-checkout replace-with retry carries the precondition shown at that
     await expect(form).toBeVisible();
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await selectRepo(page);
-    // The fixture names the checkout after the launch's title, here the source's.
-    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(`/checkout-fixture/bar-${title}`);
+    // The copied source title is not a name for a fresh checkout, so the
+    // fixture offers its unnamed path rather than one named after the source.
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/checkout-fixture/bar-1");
     const warning = form.locator(".launch-composer-replace-warning");
     await expect(warning).toContainText("still running");
     await expect(form.locator(".create-session-submit")).toBeEnabled();
@@ -317,6 +318,93 @@ test("a fresh-checkout replace-with retry carries the precondition shown at that
     await cleanupSession(request, source.id);
   }
 });
+
+/** Why: Clone and Replace with copy the source's title, and a fresh checkout
+ * named after that title collides with the source's own checkout, so every
+ * such launch used to be refused. Spec (SPEC.md, Fresh GitHub checkouts):
+ * while a fresh checkout is the destination and the copied title is
+ * unedited, the preview and the launch body both carry an empty title, the
+ * name field is empty with the unnamed `repo-N` as its placeholder, a return
+ * to a folder restores the copied title, and a typed title is sent as typed.
+ * The request bodies are the oracle; the intercepted replies keep any clone
+ * from running. */
+for (const action of ["clone", "replace-with"] as const) {
+  test(`${action} into a fresh checkout drops the copied title unless the user edits it`, async ({ page, request }) => {
+    const host = await localHost(request);
+    const title = `copied-title-${action}-${Date.now()}`;
+    const source = await createSession(request, { title });
+    try {
+      await unavailableDiscovery(page, host);
+      const previews: PreviewInput[] = [];
+      await page.route("**/api/github-checkout-preview", async (route) => {
+        const input = route.request().postDataJSON() as PreviewInput;
+        previews.push(input);
+        await fulfill(route, { json: previewFor(input, host, 1) });
+      });
+      // Clone creates and Replace with replaces; both are refused before any
+      // allocation so the test can launch twice from one dialog.
+      const launches: Record<string, unknown>[] = [];
+      const endpoint = action === "clone" ? "**/api/sessions" : `**/api/sessions/${source.id}/replace`;
+      await page.route(endpoint, async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        const body = route.request().postDataJSON();
+        launches.push(action === "clone" ? body : body.with);
+        await unaccepted(route);
+      });
+      await page.goto("/");
+      const sourceRow = page.locator(`.session-row[data-session-id="${source.id}"]`);
+      await expect(sourceRow).toBeVisible({ timeout: 20_000 });
+      await openRowMenu(sourceRow);
+      await sourceRow.locator(`.session-row-${action}`).click();
+      const form = page.locator('.create-session-form[role="dialog"]');
+      await expect(form).toBeVisible();
+      await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+      const name = form.getByLabel("name (optional)", { exact: true });
+      const folder = form.getByLabel("folder", { exact: true });
+      // Premise: the dialog opened as a Clone/Replace with, carrying the title.
+      await expect(name).toHaveValue(title);
+
+      await selectRepo(page);
+      await expect(folder).toHaveValue("/checkout-fixture/bar-1");
+      await expect(name).toHaveValue("");
+      await expect(name).toHaveAttribute("placeholder", "bar-1");
+      expect(previews.length).toBeGreaterThan(0);
+      expect(previews.every((input) => input.title === ""), JSON.stringify(previews)).toBe(true);
+      await expect(form.locator(".create-session-submit")).toBeEnabled();
+      await form.locator(".create-session-submit").click();
+      await expect.poll(() => launches.length).toBe(1);
+      expect(launches[0]).toMatchObject({
+        title: null, cwd: "/checkout-fixture/bar-1", github_checkout: { repo: "acme/bar", title: "" },
+      });
+
+      // A folder destination makes the copied title the session's name again.
+      await form.getByRole("button", { name: "use existing folder" }).click();
+      await expect(folder).toHaveJSProperty("readOnly", false);
+      await expect(name).toHaveValue(title);
+      await expect(name).toHaveJSProperty("placeholder", "");
+
+      // Re-entering the checkout drops the copy again; the preview for that
+      // selection, not just the field, must carry the empty title.
+      const previewsBefore = previews.length;
+      await selectRepo(page);
+      await expect(name).toHaveValue("");
+      await expect(name).toHaveAttribute("placeholder", "bar-1");
+      expect(previews.length).toBeGreaterThan(previewsBefore);
+      expect(previews.slice(previewsBefore).every((input) => input.title === ""), JSON.stringify(previews)).toBe(true);
+      await name.fill("typed");
+      await expect(folder).toHaveValue("/checkout-fixture/bar-typed");
+      await expect(name).toHaveJSProperty("placeholder", "");
+      await expect(form.locator(".create-session-submit")).toBeEnabled();
+      await form.locator(".create-session-submit").click();
+      await expect.poll(() => launches.length).toBe(2);
+      expect(launches[1]).toMatchObject({
+        title: "typed", cwd: "/checkout-fixture/bar-typed", github_checkout: { repo: "acme/bar", title: "typed" },
+      });
+    } finally {
+      await cleanupSession(request, source.id);
+    }
+  });
+}
 
 /** Recent repo intent must never restore its old ephemeral directory. The
  * offered setup selects the agent and obtains a new preview before submission. */

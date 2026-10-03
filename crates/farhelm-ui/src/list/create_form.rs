@@ -1326,6 +1326,51 @@ fn reseed_cloned_field(
     edited.set(false);
 }
 
+/// Whether the title a Clone or Replace with carried in stops counting as a
+/// name once the destination is a fresh GitHub checkout.
+///
+/// Clone and Replace with copy the source's title into the name field, and
+/// for an existing-folder launch that copy is what the new session should be
+/// called. A fresh checkout is different: its directory is named after the
+/// title, and SPEC.md (Fresh GitHub checkouts) refuses an explicit name that
+/// is taken rather than suffixing it. The copied title usually names the
+/// source's own checkout, so treating it as typed made every Clone or
+/// Replace with into `gh:` of the same repository fail with a directory
+/// conflict. A title the person never edited is not a choice they made, so
+/// with a fresh checkout as the destination the session is unnamed instead
+/// and gets the next free `repo-N`, as a blank New form would.
+///
+/// A seed (`Some`) is what marks the field as clone-carried; an ordinary New
+/// form has none, and anything the person types sets `edited`, which makes
+/// the field theirs again regardless of destination.
+fn copied_title_ignored(edited: bool, seed: Option<&str>, fresh_checkout: bool) -> bool {
+    fresh_checkout && !edited && seed.is_some()
+}
+
+/// The title a launch sends: [`submitted_field`]'s rule, except that a copied,
+/// unedited title is sent empty when the destination is a fresh checkout (see
+/// [`copied_title_ignored`]).
+///
+/// Every read of the title for a launch goes through this one function: the
+/// checkout preview, the retry and submit bindings, the draft snapshot and
+/// the request-key re-read. The preview's title must equal the create's or
+/// the launch is refused as stale, so a site that still read the copied
+/// title would turn this fix into a "wait for a current checkout preview"
+/// refusal instead. Deciding at read time, rather than clearing the field
+/// when a repository is picked, also means switching back to a folder
+/// restores the copied title with no extra bookkeeping.
+///
+/// The empty string is how an unnamed checkout is already requested
+/// (`checkout_basename` treats it like an absent title), so the helm and
+/// supervisor need no change.
+fn submitted_title(text: &str, edited: bool, seed: Option<&str>, fresh_checkout: bool) -> String {
+    if copied_title_ignored(edited, seed, fresh_checkout) {
+        String::new()
+    } else {
+        submitted_field(text, edited, seed)
+    }
+}
+
 /// The session-launch dialog, including the structured composer and the
 /// explicit legacy fallback.
 ///
@@ -2231,10 +2276,12 @@ pub(super) fn CreateSessionForm(
             incarnation: host.connection,
             installation_identity: host.identity.clone()?,
             repo,
-            title: Some(submitted_field(
+            // Only built while a repository is the destination, hence `true`.
+            title: Some(submitted_title(
                 &title(),
                 title_edited(),
                 title_raw_seed.peek().as_deref(),
+                true,
             )),
             agent: preview_agent_now(),
         })
@@ -2449,7 +2496,12 @@ pub(super) fn CreateSessionForm(
             &hosts,
             cwd(),
             launch,
-            submitted_field(&title(), title_edited(), title_raw_seed.peek().as_deref()),
+            submitted_title(
+                &title(),
+                title_edited(),
+                title_raw_seed.peek().as_deref(),
+                destination_draft().repo().is_some(),
+            ),
             prefill_for_submit
                 .as_ref()
                 .and_then(|prefill| prefill.replace_source.clone()),
@@ -2517,6 +2569,28 @@ pub(super) fn CreateSessionForm(
             },
             true,
         ),
+    };
+    // The name field never shows a title the launch will ignore: while a
+    // fresh checkout drops the copied title (`copied_title_ignored`), the
+    // field reads empty. Whenever a checkout launch is unnamed, the name it
+    // will actually get, the preview's `repo-N`, is the placeholder instead.
+    let title_ignored = copied_title_ignored(
+        title_edited(),
+        title_raw_seed.peek().as_deref(),
+        checkout_mode,
+    );
+    let title_field_value = if title_ignored {
+        String::new()
+    } else {
+        title()
+    };
+    let title_placeholder = if checkout_mode && (title_ignored || title().is_empty()) {
+        displayed_preview
+            .as_ref()
+            .map(|preview| display_peer(&preview.basename))
+            .unwrap_or_default()
+    } else {
+        String::new()
     };
     let summary_model = structured_model()
         .map(|model| display_peer(&model))
@@ -3238,7 +3312,12 @@ pub(super) fn CreateSessionForm(
                     &hosts,
                     submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
                     launch,
-                    submitted_field(&title(), title_edited(), title_raw_seed.peek().as_deref()),
+                    submitted_title(
+                        &title(),
+                        title_edited(),
+                        title_raw_seed.peek().as_deref(),
+                        destination_draft.peek().repo().is_some(),
+                    ),
                     replace_source,
                 ) else {
                     error.set(Some(
@@ -3265,7 +3344,7 @@ pub(super) fn CreateSessionForm(
                     structured_model.peek().clone(), *structured_effort.peek(),
                     *structured_permissions.peek(), chosen_profile.peek().clone(),
                     submitted_field(&invocation.peek(), *invocation_edited.peek(), invocation_raw_seed.peek().as_deref()),
-                    submitted_field(&title.peek(), *title_edited.peek(), title_raw_seed.peek().as_deref()),
+                    submitted_title(&title.peek(), *title_edited.peek(), title_raw_seed.peek().as_deref(), destination_draft.peek().repo().is_some()),
                     *chosen_host.peek(),
                 );
                 let fresh_snapshot = fresh_draft_snapshot();
@@ -3447,10 +3526,14 @@ pub(super) fn CreateSessionForm(
                             cwd: if binding.github_checkout.is_some() { binding.cwd.clone() } else {
                                 submitted_field(&cwd.peek(), *cwd_edited.peek(), cwd_raw_seed.peek().as_deref())
                             },
-                            title: submitted_field(
+                            // Same destination test as `cwd` above, so a
+                            // fresh checkout's re-read title still matches the
+                            // preview it was accepted against.
+                            title: submitted_title(
                                 &title.peek(),
                                 *title_edited.peek(),
                                 title_raw_seed.peek().as_deref(),
+                                binding.github_checkout.is_some(),
                             ),
                             ..binding
                         };
@@ -4562,9 +4645,12 @@ pub(super) fn CreateSessionForm(
                                     spellcheck: "false",
                                     // A clone can seed this from a peer-supplied
                                     // title, using the same escaped-display/raw-seed
-                                    // model as the folder field above.
+                                    // model as the folder field above. A fresh
+                                    // checkout can hide that seed; see
+                                    // `title_field_value`.
                                     dir: "ltr",
-                                    value: "{title}",
+                                    value: "{title_field_value}",
+                                    placeholder: "{title_placeholder}",
                                     disabled: busy,
                                     oninput: move |evt| {
                                         if !draft_transition_allowed(ops) {
@@ -5714,6 +5800,36 @@ mod tests {
         assert_eq!(prefill.title, "my session");
         assert_eq!(prefill.replace_source, None);
         assert_eq!(prefill.replace_source_opened, None);
+    }
+
+    /// Why this matters: Clone and Replace with copy the source's title, and
+    /// a fresh checkout names its directory after the title and refuses a
+    /// taken one, so the copied title (usually the source's own checkout)
+    /// made every Clone or Replace with into `gh:` of the same repository
+    /// fail with a directory conflict. Spec (SPEC.md, Fresh GitHub
+    /// checkouts): with a fresh checkout as the destination, an unedited
+    /// copied title is sent empty so the session is unnamed and gets
+    /// `repo-N`; an edited title, a form with no copied seed, and every
+    /// existing-folder launch keep `submitted_field`'s rule unchanged.
+    #[farhelm_testtrace::test]
+    fn a_copied_unedited_title_is_sent_empty_only_for_a_fresh_checkout() {
+        let copied = Some("bar-fix");
+        // Fresh checkout, copied and untouched: unnamed.
+        assert!(copied_title_ignored(false, copied, true));
+        assert_eq!(submitted_title("bar-fix", false, copied, true), "");
+        // The same field with a folder destination keeps the copied raw
+        // title, including when its display spelling is escaped.
+        assert!(!copied_title_ignored(false, copied, false));
+        assert_eq!(submitted_title("escaped", false, copied, false), "bar-fix");
+        // Typing makes the title the person's own again, for either
+        // destination, so a taken typed name still gets the conflict.
+        assert!(!copied_title_ignored(true, copied, true));
+        assert_eq!(submitted_title("typed", true, copied, true), "typed");
+        assert_eq!(submitted_title("typed", true, copied, false), "typed");
+        // An ordinary New form has no seed: whatever the field holds is sent.
+        assert!(!copied_title_ignored(false, None, true));
+        assert_eq!(submitted_title("", false, None, true), "");
+        assert_eq!(submitted_title("named", false, None, true), "named");
     }
 
     /// Why this matters: "Replace with" opened the launcher straight from the
