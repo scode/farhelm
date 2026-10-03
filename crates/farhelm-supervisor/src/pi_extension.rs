@@ -23,6 +23,12 @@ pub(crate) struct VendorAsset {
 /// Pi's conversation reporter, loaded with `-e` and pointed at the reporter
 /// through `FARHELM_PI_REPORTER_EXE`.
 ///
+/// The embedded reporter deliberately keeps its published two-second child
+/// timer. Changing those source bytes would require a new asset identity, so
+/// keep the published value and rely on Pi's end-of-turn reports to heal a
+/// report cut short by that timer; the shared hook can still retry within the
+/// vendor-controlled bound.
+///
 /// `v2` because the bytes changed after `v1` had shipped (#811, first in
 /// v0.13.0) and [`materialize_asset`] refuses a published file whose bytes
 /// differ: every host that had already published `v1` went on launching Pi
@@ -38,6 +44,12 @@ pub(crate) const PI_ASSET: VendorAsset = VendorAsset {
 /// OMP's conversation reporter, loaded with `-e` and pointed at the reporter
 /// through `FARHELM_OMP_REPORTER_EXE`. Same publication contract as Pi's;
 /// the assets are never shared because the vendors' event surfaces differ.
+///
+/// Its published two-second child timer is intentional for the same reason as
+/// Pi's, but OMP also refuses a report whose launch named a different asset
+/// identity. Changing the bytes would therefore make every running OMP
+/// session lose conversation tracking until relaunched; an end-of-turn report
+/// on the next turn heals one cut short by the timer.
 ///
 /// The file name is versioned past OMP's own gateless `v1`: the gated asset must
 /// materialize beside — never over — the gateless `v1` bytes an old launch

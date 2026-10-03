@@ -1574,10 +1574,10 @@ impl AgentIntegration for ClaudeIntegration {
     /// built with `serde_json::json!` rather than string formatting so a
     /// path that happens to need JSON escaping (a quote, a backslash) can
     /// never produce malformed JSON, only a correctly escaped string. The
-    /// `timeout` of 5 seconds is the OUTER bound Claude itself enforces on
-    /// the hook process; `farhelm internal hook` budgets 2 seconds
-    /// internally (`hook.rs`, a later step), so this is scheduling margin,
-    /// not an expectation that the hook will ever need it.
+    /// `timeout` of 60 seconds is the OUTER bound Claude itself enforces
+    /// on the hook process; `farhelm internal hook` budgets 30 seconds
+    /// internally (`hook.rs`), leaving scheduling margin before the vendor's
+    /// own timer can make a busy-supervisor report look lost.
     fn hook_argv(&self, hook_exe: &str, instructions: AgentInstructions) -> Vec<String> {
         let command = hook_command(hook_exe, instructions, farhelm_proto::ReportVendor::Claude);
         let settings = serde_json::json!({
@@ -1586,7 +1586,7 @@ impl AgentIntegration for ClaudeIntegration {
                     "hooks": [{
                         "type": "command",
                         "command": command,
-                        "timeout": 5
+                        "timeout": 60
                     }]
                 }]
             }
@@ -1680,7 +1680,7 @@ impl AgentIntegration for CodexIntegration {
             "features.hooks=true".to_string(),
             "-c".to_string(),
             format!(
-                "hooks.SessionStart=[{{hooks=[{{type=\"command\",command={command},timeout=5}}]}}]"
+                "hooks.SessionStart=[{{hooks=[{{type=\"command\",command={command},timeout=60}}]}}]"
             ),
         ]
     }
@@ -5005,7 +5005,7 @@ mod tests {
             .expect("Claude's --settings value must be valid JSON");
         let claude_hook = &claude_json["hooks"]["SessionStart"][0]["hooks"][0];
         assert_eq!(claude_hook["type"], "command");
-        assert_eq!(claude_hook["timeout"], 5);
+        assert_eq!(claude_hook["timeout"], 60);
         let claude_command = claude_hook["command"]
             .as_str()
             .expect("command must be a JSON string");
@@ -5042,7 +5042,7 @@ mod tests {
         );
         assert_eq!(
             document["v"][0]["hooks"][0]["timeout"].as_integer(),
-            Some(5)
+            Some(60)
         );
         let codex_words = shell_words::split(codex_command)
             .expect("Codex's rendered command must be one valid shell command line");

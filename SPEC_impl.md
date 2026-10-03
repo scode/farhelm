@@ -1809,7 +1809,13 @@ evidence, but cannot authorize another directory move.
   once at supervisor start and carried as a seam value. Claude's scan, pending removal, still runs when no report has
   been accepted; Codex requires attributed reporting and does not infer ownership from nearby rollout files. An accepted
   report dominates scan-derived state, including ambiguity.
-  `website/src/content/docs/docs/agents/agent-hook-injection.md` is the user-facing account of the same mechanism.
+  `website/src/content/docs/docs/agents/agent-hook-injection.md` is the user-facing account of the same mechanism. The
+  hook has one 30 s budget covering stdin and the round trip under 60 s outer timers where Farhelm sets or documents
+  them; it retries a refused or missing socket for about 4 s. A connection that lived for at least about a second before
+  dropping gets a fresh reconnect window; immediate accept-then-drop failures stay within the current window. It never
+  retries an `Error` reply or a protocol-version mismatch. Pi and OMP keep their published 2 s child timers. Replaying
+  one report is safe, but two distinct reports from Claude, Goose or Pi can both straddle a supervisor restart and
+  arrive out of order; the later arrival wins. Ordering between those reports remains a known limitation.
 
   Grok uses the same hook executable and authenticated supervisor message but not this injection path. Its native TUI
   cannot take a per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each

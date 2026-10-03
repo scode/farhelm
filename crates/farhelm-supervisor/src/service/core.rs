@@ -14035,10 +14035,12 @@ impl Supervisor {
     /// has landed. Resume construction then applies the kind's readiness
     /// rules: a Codex pending-clear locator is durable but is not a resume
     /// target until its exact root record appears. A failed write changes
-    /// nothing in memory and has no retry queue. A failed write is not retried
-    /// by the supervisor: another lifecycle event may send a fresh report, and
-    /// only Claude can recover through a scan. A store that cannot write is a
-    /// supervisor in trouble, not a state to engineer a queue around.
+    /// nothing in memory and has no supervisor-owned retry queue. The hook can
+    /// retry transport loss before admission answers, but a failed admission
+    /// is not replayed by the supervisor: another lifecycle event may send a
+    /// fresh report, and only Claude can recover through a scan. A store that
+    /// cannot write is a supervisor in trouble, not a state to engineer a
+    /// queue around.
     ///
     /// Codex report and refresh transactions share a capture-only per-session
     /// claim and read the current binding while holding it. A refresh of the
@@ -14047,7 +14049,7 @@ impl Supervisor {
     /// The durable write also compares the exact capture and generation; losing
     /// that comparison is a conflict and publishes nothing.
     ///
-    /// The same "no retry" rule covers a failed REPLACEMENT, and there it
+    /// The same no-supervisor-queue rule covers a failed REPLACEMENT, and there it
     /// is worth naming what it costs: when a `/clear` report cannot be
     /// written, the PREVIOUS identity keeps standing, durably and in memory,
     /// so the session goes on offering to resume a conversation the user has

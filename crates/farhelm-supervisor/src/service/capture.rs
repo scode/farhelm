@@ -216,12 +216,12 @@ pub(crate) enum CaptureState {
     /// is ready to resume. In particular, a pending Codex clear locator
     /// withdraws the previous target without offering the new one yet.
     /// The reporting path owes this ordering; a failed write leaves memory
-    /// alone, with no retry list.
-    /// The vendor does not re-attempt that DELIVERY — the hook call has already
-    /// returned, and its result is not revisited — which is not the same as
-    /// the hook never firing again: a later lifecycle event in the same
-    /// process (another `/clear`, a resume, a compaction) fires a fresh
-    /// hook and produces a fresh report. What is lost is this one report.
+    /// alone, with no supervisor-owned retry list. The hook may retry a
+    /// dropped transport before the supervisor answers, but once admission
+    /// has failed the supervisor does not queue a speculative write. A later
+    /// lifecycle event in the same process (another `/clear`, a resume, or a
+    /// compaction) fires a fresh hook and produces a fresh report. What is
+    /// lost is this one failed admission.
     /// Only kinds with a supported scan fallback can recover without a report.
     ///
     /// `ownership_version` is the durable `capture_ownership_version` the

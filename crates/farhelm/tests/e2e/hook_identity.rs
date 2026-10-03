@@ -1472,12 +1472,16 @@ async fn hooks_can_be_disabled_by_kind() {
 
 /// Longest any hook run may take before the test calls it hung.
 ///
-/// Comfortably past the binary's own 2 s internal budget and comfortably
-/// under the 5 s timeout the injected hook configuration hands the vendor:
-/// a run that lands between those two numbers has already failed the thing
-/// the budget exists for, which is never letting the VENDOR be the one to
-/// time us out.
-const SILENCE_DEADLINE: Duration = Duration::from_secs(4);
+/// The child-only budget is intentionally 5 s so absent-socket cases can
+/// exercise their 4 s reconnect cap without stretching the suite by half a
+/// minute. Keep two seconds of margin here for spawning a debug binary and
+/// building its runtime under a loaded runner; the margin, rather than the
+/// hook budget, absorbs that scheduling cost.
+const SILENCE_DEADLINE: Duration = Duration::from_secs(7);
+
+/// Keep real-binary hook cases bounded without changing the test runner's
+/// environment. The override is placed on each spawned hook command below.
+const TEST_HOOK_BUDGET_MS: &str = "5000";
 
 /// Owns a silent supervisor fixture and witnesses its connection and release edges.
 struct SilentSupervisor {
@@ -1576,6 +1580,7 @@ fn hook_command(socket: &std::path::Path, session_id: &str) -> std::process::Com
     // required since the envelope migration, and an invocation without it
     // fails closed at CLI parse rather than reporting untagged.
     cmd.args(["internal", "hook", "--vendor", "claude"])
+        .env("FARHELM_TEST_HOOK_BUDGET_MS", TEST_HOOK_BUDGET_MS)
         .env(farhelm_supervisor::launch::SESSION_ID_ENV_VAR, session_id)
         .env(
             farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR,
@@ -1600,7 +1605,7 @@ fn hook_command(socket: &std::path::Path, session_id: &str) -> std::process::Com
 /// Polled with `try_wait` rather than `wait` because the deadline is the
 /// assertion: a blocking wait on a hung child would hang the test instead
 /// of failing it.
-fn assert_silent(mut cmd: std::process::Command, payload: &[u8], hold_stdin: bool) {
+fn assert_silent(mut cmd: std::process::Command, payload: &[u8], hold_stdin: bool) -> Duration {
     use std::io::Write;
     let started = std::time::Instant::now();
     let mut child = ChildGuard(cmd.spawn().expect("spawn the hook binary"));
@@ -1635,8 +1640,7 @@ fn assert_silent(mut cmd: std::process::Command, payload: &[u8], hold_stdin: boo
             None => {
                 assert!(
                     started.elapsed() < SILENCE_DEADLINE,
-                    "the hook did not finish within {SILENCE_DEADLINE:?}; a run this long is \
-                     one the vendor times out and shows the user"
+                    "the hook did not finish within {SILENCE_DEADLINE:?}; it overran its test budget"
                 );
                 // sleep-ok: poll child exit while respecting the caller's chosen stdin lifetime.
                 std::thread::sleep(Duration::from_millis(50));
@@ -1670,6 +1674,7 @@ fn assert_silent(mut cmd: std::process::Command, payload: &[u8], hold_stdin: boo
         "stderr is the agent's own terminal; got {:?}",
         String::from_utf8_lossy(&err)
     );
+    started.elapsed()
 }
 
 /// A hook whose supervisor socket does not exist says nothing, exits 0,
@@ -1685,14 +1690,22 @@ fn assert_silent(mut cmd: std::process::Command, payload: &[u8], hold_stdin: boo
 /// before it ever dials, so garbage here would produce a silent, successful
 /// run that never touched a socket — passing this test without exercising
 /// the failure it is named for. `connect-failed` in the log is what says
-/// the dial was actually attempted and actually failed.
+/// the dial was actually attempted and actually failed. The elapsed assertion
+/// below also pins that the shipped binary used its production reconnect
+/// window rather than a zero-cap test seam.
 #[farhelm_testtrace::test]
 fn a_hook_with_no_supervisor_is_silent_and_leaves_a_trace() {
     let state = farhelm_teststate::tempdir().expect("state dir");
     let socket = state.path().join("supervisor.sock");
     let payload =
         br#"{"session_id":"conv-missing","hook_event_name":"SessionStart","source":"startup"}"#;
+    let started = std::time::Instant::now();
     assert_silent(hook_command(&socket, "sess-missing"), payload, false);
+    assert!(
+        started.elapsed() >= Duration::from_secs(3),
+        "a missing supervisor must consume the production reconnect window: {:?}",
+        started.elapsed()
+    );
 
     let outcome = sole_hook_log_outcome(state.path(), "sess-missing");
     assert!(
@@ -1746,7 +1759,11 @@ fn a_hook_talking_to_a_silent_supervisor_still_finishes_in_budget() {
 
     let payload =
         br#"{"session_id":"conv-hung","hook_event_name":"SessionStart","source":"startup"}"#;
-    assert_silent(hook_command(&socket, "sess-hung"), payload, false);
+    let elapsed = assert_silent(hook_command(&socket, "sess-hung"), payload, false);
+    assert!(
+        elapsed >= Duration::from_millis(4500),
+        "a connected silent supervisor must consume nearly the 5 s test budget: {elapsed:?}"
+    );
 
     dialled_rx
         .recv_timeout(Duration::from_secs(5))
@@ -1924,7 +1941,7 @@ fn a_hook_without_a_vendor_flag_fails_closed_at_parse() {
             None => {
                 assert!(
                     started.elapsed() < SILENCE_DEADLINE,
-                    "a parse refusal must not hang; a run this long is one the vendor times out"
+                    "a parse refusal must not hang; the hook overran its test budget"
                 );
                 // sleep-ok: poll child exit while a parse refusal settles.
                 std::thread::sleep(Duration::from_millis(50));

@@ -49,7 +49,7 @@ installed binary visible on that host:
           {
             "type": "command",
             "command": "/absolute/path/to/farhelm internal hook --vendor grok",
-            "timeout": 3
+            "timeout": 60
           }
         ]
       }
@@ -60,7 +60,7 @@ installed binary visible on that host:
           {
             "type": "command",
             "command": "/absolute/path/to/farhelm internal hook --vendor grok",
-            "timeout": 3
+            "timeout": 60
           }
         ]
       }
@@ -71,7 +71,7 @@ installed binary visible on that host:
           {
             "type": "command",
             "command": "/absolute/path/to/farhelm internal hook --vendor grok",
-            "timeout": 3
+            "timeout": 60
           }
         ]
       }
@@ -88,9 +88,11 @@ Restart Grok after adding the file. Use Grok's `/hooks` view to confirm all thre
 integration, remove these three matcher groups (or delete `farhelm.json` when it contains nothing else) and restart
 Grok. Farhelm does not remove them for you.
 
-The reporter is silent, exits zero, and gives up its Farhelm round trip after two seconds. It does no reporting when the
-Grok process was not launched by Farhelm. The hook still adds a short synchronous call at each subscribed event;
-`UserPromptSubmit` is on the prompt path, so this is not zero-overhead integration. Grok does not receive Farhelm's
+The reporter is silent, exits zero, and gives up its Farhelm round trip after 30 seconds. Set each hook timeout to at
+least 60 seconds, including in existing configurations, so Grok does not kill the reporter before that budget ends. It
+does no reporting when the Grok process was not launched by Farhelm. The hook still adds a short synchronous call at
+each subscribed event; `UserPromptSubmit` is on the prompt path, so this is not zero-overhead integration. When no
+supervisor is running, each call waits about four seconds before giving up. Grok does not receive Farhelm's
 agent-instructions announcement from these manual hooks.
 
 ## What capture and Resume mean

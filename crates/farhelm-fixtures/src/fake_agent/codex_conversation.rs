@@ -12,7 +12,7 @@ use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use super::{HOOK_CHILD_DEADLINE, fresh_conversation_id, wait_bounded};
+use super::{HOOK_CHILD_DEADLINE, TEST_HOOK_BUDGET_MS, fresh_conversation_id, wait_bounded};
 
 const HOOK_BINARY_FLAG: &str = "--hook-binary";
 const RESUME_ID_FLAG: &str = "--resume-id";
@@ -302,6 +302,7 @@ fn run_shell_reporter(
         .arg(hook_binary)
         .arg(&payload_path)
         .current_dir(root)
+        .env("FARHELM_TEST_HOOK_BUDGET_MS", TEST_HOOK_BUDGET_MS)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -370,6 +371,7 @@ fn run_shell_dash_c(root: &Path, hook_binary: &Path, payload: &str) -> anyhow::R
         .arg("-c")
         .arg(&command)
         .current_dir(root)
+        .env("FARHELM_TEST_HOOK_BUDGET_MS", TEST_HOOK_BUDGET_MS)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -447,6 +449,7 @@ fn nested_shell_native(
     .context("writing shell native script")?;
     let mut child = Command::new("/bin/sh")
         .arg(&script)
+        .env("FARHELM_TEST_HOOK_BUDGET_MS", TEST_HOOK_BUDGET_MS)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -678,6 +681,7 @@ fn report(
     })
     .to_string();
     let mut child = Command::new(hook_binary)
+        .env("FARHELM_TEST_HOOK_BUDGET_MS", TEST_HOOK_BUDGET_MS)
         // The envelope discriminator comes from this fixture's own entry
         // point — the real injection installs `--vendor codex` the same
         // way — never from the payload.

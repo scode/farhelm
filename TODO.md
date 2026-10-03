@@ -55,18 +55,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   offer. Earlier write-up: https://claude.ai/code/artifact/554790ce-c744-4daa-b9a5-151facdb1f42. Plan:
   `plans/queue/remove-identity-heuristics.md`.
 
-- **Apply identity reports that arrive while the session's record is busy.** Decided in triage 2026-10-01: a
-  conversation-identity report from the correct, verified source must never be dropped because it arrived late. Today
-  report admission waits at most a second for the session's capture claim (`CAPTURE_CLAIM_WAIT` in
-  `crates/farhelm-supervisor/src/service/core.rs`) and otherwise refuses, and the hook never resends, so after a
-  `/clear` whose report lost the race, Resume reopens the cleared conversation. The hook also gives up at once if the
-  supervisor is restarting. Decided 2026-10-02: drop the time limit on the claim (everything under it is local), run
-  Claude's sender check before it, give the hook 30 s and Claude's, Codex's and Grok's kill timers 60 s, and retry while
-  no supervisor process is listening for about 4 s. The earlier idea of replying first and committing later is dropped:
-  its premise, that a longer wait shows the user a hook error, was wrong. Review item:
-  `review_feedback_queue/claude-clear-report-dropped-on-claim-timeout.md`. Plan:
-  `plans/queue/identity-report-wait-retry.md`.
-
 - **Re-examine and simplify how launches are represented.** The maintainer wants to interrogate how launches are handled
   end to end and reconsider the design with simplification in mind. Today a session can be launched from a structured
   selection, a built-in profile, a user profile, or a raw command line, and a profile or raw create can carry a separate

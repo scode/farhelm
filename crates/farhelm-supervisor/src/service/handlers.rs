@@ -3507,8 +3507,9 @@ pub(crate) async fn handle_restricted_control(
             // claim for the whole restart, and Claude's hook fires at the
             // replacement process's startup — inside that window. Queuing
             // this behind the claim would put the tail of a restart in
-            // front of a hook that has a 2 s budget and no retry, and the
-            // vendor shows a blown budget to the user as a hook error.
+            // front of a hook that has a bounded budget. The hook can retry
+            // transport loss while the supervisor restarts, but it cannot
+            // keep waiting behind a lifecycle claim after its own budget.
             // `Supervisor::report_conversation` carries the full argument,
             // including what the generation fence has to cover instead.
             if let Err((kind, message)) = require_session_auth(sup, auth).await {
@@ -8520,10 +8521,11 @@ mod tests {
     /// be worse still — `Reported` advertises `Resume`, which promises a
     /// restart there is a stored id to fill in, and there would not be.
     ///
-    /// Nothing retries it: neither vendor re-fires the hook, so the report
-    /// is simply lost and the scan remains the fallback for that session,
-    /// which it still is precisely because this refusal left the state
-    /// unsettled.
+    /// The hook may retry a dropped transport, but this is an explicit
+    /// supervisor refusal after authentication and is therefore final. No
+    /// vendor event or supervisor task replays it; the scan remains the
+    /// fallback for that session precisely because this refusal left the
+    /// state unsettled.
     #[farhelm_testtrace::test]
     async fn a_report_is_refused_and_dropped_while_the_supervisor_is_not_recording() {
         let state = StateDir::new();
@@ -8647,9 +8649,10 @@ mod tests {
     /// in the code — the report path is defined by a lock it does NOT take.
     /// Claude's hook fires at the replacement process's startup, which is
     /// inside `restart_session`'s claim; a report that waited on that claim
-    /// would queue behind the tail of the very restart that caused it, blow
-    /// the hook's 2 s budget, and surface to the user as a hook error the
-    /// vendor never retries.
+    /// would queue behind the tail of the very restart that caused it and
+    /// eventually outlive the hook's bounded budget. The hook can retry a
+    /// dropped transport, but it cannot recover a report that never gets an
+    /// admission reply before its budget expires.
     ///
     /// Holding the claim from the test and requiring the reply BEFORE
     /// releasing it is the only way to state that as a test: a version that
