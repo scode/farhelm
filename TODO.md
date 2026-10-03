@@ -52,7 +52,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `--settings`, a bare `--`, `FARHELM_AGENT_HOOKS` opting out, a hook that failed) take the fallback SPEC.md already
   defines for an uncaptured identity. Review feedback that is only true because this code still exists is discarded
   rather than fixed. Alert the maintainer before landing if existing scan-captured sessions would lose a valid Resume
-  offer. Earlier write-up: https://claude.ai/code/artifact/554790ce-c744-4daa-b9a5-151facdb1f42
+  offer. Earlier write-up: https://claude.ai/code/artifact/554790ce-c744-4daa-b9a5-151facdb1f42. Plan:
+  `plans/queue/remove-identity-heuristics.md`.
 
 - **Apply identity reports that arrive while the session's record is busy.** Decided in triage 2026-10-01: a
   conversation-identity report from the correct, verified source must never be dropped because it arrived late. Today
@@ -138,6 +139,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   replaced. Auto-update is coming and needs this to be safe. Decided 2026-10-03: side-by-side versions inside
   `Farhelm.app` with a small forwarder for long-lived sessions, the way Chrome updates itself; design and real-Mac
   evidence at https://snippets.scode.org/s/farhelm-update-while-running/. Plan: `plans/queue/update-while-running.md`.
+
+- **Notification system.** A way for Farhelm to tell the user about things that need their attention, instead of writing
+  them only to a log nobody reads. The first thing to go into it is the session-tracking warnings, starting with the
+  supervisor's warning that a session launched with Farhelm's conversation hook (Claude, Codex) has had input for a
+  while and no identity report has arrived, which today is only a supervisor log line; the user finds out only later,
+  when restart offers a fresh launch instead of Resume. Design TBD.
 
 ## Doc todo
 
