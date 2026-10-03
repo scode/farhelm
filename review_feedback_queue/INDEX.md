@@ -24,14 +24,8 @@ One line per open item. This file must always match the feedback files in this d
   host showing stale status for seconds while background processes stop.
 - `desktop-reauth-failure-loses-action-outcomes.md` — If desktop sign-in recovery fails while an action is pending, the
   action can still finish on the server while its result disappears without an unknown-outcome notice.
-- `browser-signin-loses-action-outcomes.md` — A browser token prompt can silently lose the results of actions already
-  running, including Delete, even though the server continues the work.
 - `desktop-auth-ready-with-stale-webview-credential.md` — Desktop sign-in can appear successful while terminals, uploads
   and the event feed remain unusable because the window kept a revoked or missing credential.
-- `create-directory-wait-blocks-terminal-reader.md` — Creating a session during Delete can freeze input and other
-  requests for every session on that host. This finding is already covered by the Planned creation-dispatch work.
-- `checkout-reconciliation-blocks-terminal-reader.md` — Starting a fresh checkout during Delete can freeze unrelated
-  terminal input before the actual create request is even sent.
 - `list-admission-blocks-terminal-reader.md` — When eight management operations occupy the host, a session-list request
   can stop later keystrokes and terminal control messages from being dispatched.
 - `stop-admission-blocks-terminal-reader.md` — A Stop waiting for management capacity can freeze input to unrelated
@@ -45,6 +39,8 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
+- `browser-signin-loses-action-outcomes.md` — A browser token prompt can silently lose the results of actions already
+  running, including Delete, even though the server continues the work.
 - `host-write-lock-split-on-actor-respawn.md` — the per-host write lock lives on the actor handle, so a respawn lets
   edits run during provisioning.
 - `hostnotfound-refresh-keeps-serving.md` — an identity-less actor for a deleted host keeps serving, because its
@@ -58,10 +54,6 @@ One line per open item. This file must always match the feedback files in this d
 - `attach-reports-generic-timeout.md` — the attach step spins 30 s on skew/identity states and reports only "timed out".
 - `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
   sidebar keeps deleted/stale rows.
-- `dropped-create-skips-bookkeeping.md` — reloading during a create starts the agent but never records launch history or
-  the remembered default profile.
-- `agent-create-aborted-on-retire.md` — an agent's create/clone aborted by its host's reconnect still creates the
-  session but skips launch history and gets no answer.
 - `stop-restart-panic-no-reply.md` — a panicking stop or restart task sends no reply, leaving the UI or `farhelm agent`
   waiting until the connection drops.
 - `tab-reap-budget-starved-by-failures.md` — failed tab closes spend the per-tick reap budget, so a few persistent
@@ -86,5 +78,3 @@ One line per open item. This file must always match the feedback files in this d
   sidebar say the agent needs an answer when it is idle.
 - `build-metadata-false-old-version.md` — A host running the same release can incorrectly show an old-version warning
   when the helm or supervisor build includes metadata.
-- `seen-write-cancellation-skips-notification.md` — Closing the browser during a read/unread update can save the change
-  without notifying other windows, leaving their dots stale until another event or refresh.
