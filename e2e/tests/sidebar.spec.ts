@@ -3345,8 +3345,8 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
  * Fixed status/locality tracks, right-aligned ages, and menu reservations hold
  * at an adversarial 280px sidebar width. The fixtures deliberately mix live,
  * ended, and unknown states plus short and long agent badges, and rows with
- * and without a permission lock so the harness mark's column is checked
- * against both badge widths. One age exceeds four characters: unbounded day
+ * with YOLO and unknown permission marks so the harness column is checked
+ * across different mark shapes. One age exceeds four characters: unbounded day
  * counts must keep the same right edge without overlapping the adjacent
  * badge. A legacy row without a host name must retain its directory without
  * inventing either a host label or a dangling colon.
@@ -3471,13 +3471,10 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   async function left(target: Locator, selector: string) {
     return (await target.locator(selector).boundingBox())!.x;
   }
-  // The harness mark is in this list on purpose: the fixture mixes rows with
-  // a permission lock (`--yolo`, `--dangerously-skip-permissions`) and rows
-  // without one, and the mark must sit in the same column either way. The
-  // badge used to be a right-aligned flex group, so a lockless row's mark
-  // drifted into the lock's column; a fleet where every row is unattended
-  // never shows that, which is why only a mixed fixture can pin it.
-  for (const selector of [".session-status-slot", ".session-locality-slot", ".session-agent .harness-glyph"] as const) {
+  // Both glyph columns must stay aligned across permission meanings. The old
+  // optional-mark layout let unmarked rows drift into the permission column;
+  // every row now has a mark, but the grid must still reserve both tracks.
+  for (const selector of [".session-status-slot", ".session-locality-slot", ".session-agent .harness-glyph", ".permission-glyph"] as const) {
     const positions = await Promise.all(rows.map((target) => left(target, selector)));
     expect(Math.max(...positions) - Math.min(...positions), `${selector} must align`).toBeLessThanOrEqual(2);
   }
@@ -3492,6 +3489,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   await expect(rows[0].locator(".session-status-slot .status-dot")).toHaveCount(1);
   await expect(rows[0].locator(".harness-glyph")).toHaveAttribute("data-glyph", "codex");
   await expect(rows[0].locator(".permission-glyph")).toHaveAttribute("data-glyph", "yolo");
+  await expect(rows[1].locator(".permission-glyph")).toHaveAttribute("data-glyph", "unknown");
   await expect(rows[1].locator(".session-status-slot .status-badge")).toHaveCount(0);
   await expect(rows[1].locator(".session-row-detail .status-badge")).toContainText("exited (code 17)");
   await expect(rows[2].locator(".session-status-slot .status-badge")).toHaveCount(0);

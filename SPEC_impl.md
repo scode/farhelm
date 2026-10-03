@@ -232,9 +232,14 @@ abbreviations is lossy, so the untouched string rides along in a `title` attribu
 truth stays one hover away.
 
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
-The agent and permission SVGs sit in separate `title` targets, so hovering the open lock explains its permission mode
-instead of returning only the combined agent summary. The combined summary remains on the agent track for provenance and
-the full invocation.
+Permission marks use three hand-drawn stroke silhouettes in the 12-unit viewBox: a slashed shield (`data-glyph="yolo"`)
+and a question mark (`unknown`) use `--warn`; a plain shield (`shielded`) uses `--ok`. The badge's permission is
+non-optional. Structured non-YOLO modes share the plain shield but retain their own mode-specific descriptions; a raw
+command or profile never gets that shield merely because YOLO was not recognized. Both slots remain fixed-width.
+
+The agent and permission SVGs sit in separate `title` targets, so hovering the permission mark explains its mode instead
+of returning only the combined agent summary. The combined summary remains on the agent track for provenance and the
+full invocation.
 
 `status::status_badge` supplies the status wording; the row chooses its presentation according to compact mode. Live
 states keep their text for screen readers alongside the colored dot. Ended states use a distinct icon in compact mode,
@@ -2113,9 +2118,9 @@ which falls back to the harness default for unsupported older values. The classi
 helm's remembered permission and the browser's local mirror discard a permission equal to the harness's omitted mode.
 This prevents default or forced YOLO from becoming another harness's preselection while preserving explicit YOLO on
 harnesses with a non-YOLO default. Harness switching applies the same boundary: passing through a default-YOLO harness
-loses any earlier explicit YOLO provenance, so switching back selects the real default. Preferences written before
-this change retain their value until the next structured launch; the stored word does not say which harness supplied
-it. No second default-mode table or preference provenance is kept.
+loses any earlier explicit YOLO provenance, so switching back selects the real default. Preferences written before this
+change retain their value until the next structured launch; the stored word does not say which harness supplied it. No
+second default-mode table or preference provenance is kept.
 
 Schema 30 adds nullable `remembered_workspace_trust` to the preference row. The helm updates it in the same admitted
 create transaction as structured launch history, only for an explicit Codex, Muse, or Pi choice from a user-originated

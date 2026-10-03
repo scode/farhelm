@@ -140,12 +140,15 @@ test("an OMP session row shows the OMP glyph and its actual permission", async (
   });
   await page.goto("/");
 
-  // The explicit Approve row shows OMP's glyph beside the approve mark.
+  // Explicit Approve uses the shared shield but retains its mode description.
   const approveRow = page.locator(".session-row", { hasText: "omp approve row" });
   await expect(approveRow.locator(".session-agent svg[data-glyph='omp']")).toBeVisible();
   await expect(
-    approveRow.locator(".session-agent svg.permission-glyph[data-glyph='approve']"),
+    approveRow.locator(".session-agent svg.permission-glyph[data-glyph='shielded']"),
   ).toBeVisible();
+
+  await expect(approveRow.locator(".permission-glyph").locator("..")).toHaveAttribute("title", "approve permission mode");
+  await expect(approveRow.locator(".session-agent .visually-hidden")).toContainText("approve permission mode");
 
   // Old snapshots with no permission use the same YOLO default as a new
   // structured OMP launch; explicit Approve above remains distinct.

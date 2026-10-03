@@ -3855,12 +3855,14 @@ test("a long error detail wraps completely and compact ended rows stay one line"
 test("compact rows retain distinct ended and harness glyphs within two characters", async ({ page, request }, testInfo) => {
   const preferences = await readPreferences(request);
   const cases = [
-    { id: "stopped", invocation: "codex --yolo", harness: "codex", permission: "yolo", status: { state: "exited", exit_code: 0 }, annotation: "stopped by user" },
-    { id: "exited", invocation: "muse --yolo", harness: "muse", permission: "yolo", status: { state: "exited", exit_code: 7 }, annotation: null },
-    { id: "interrupted", invocation: "claude --dangerously-skip-permissions", harness: "claude", permission: "yolo", status: { state: "interrupted" }, annotation: null },
-    { id: "error", invocation: "opencode --auto", harness: "opencode", permission: "yolo", status: { state: "error", detail: "cannot launch" }, annotation: null },
-    { id: "full-auto", invocation: "codex --full-auto", harness: "codex", permission: null, status: { state: "idle" }, annotation: null },
-    { id: "unknown", invocation: "sleep 300", harness: "terminal", permission: null, status: { state: "idle" }, annotation: null },
+    { id: "stopped", invocation: "codex --yolo", harness: "codex", permission: "yolo", description: "YOLO permission bypass", status: { state: "exited", exit_code: 0 }, annotation: "stopped by user" },
+    { id: "exited", invocation: "muse --yolo", harness: "muse", permission: "yolo", description: "YOLO permission bypass", status: { state: "exited", exit_code: 7 }, annotation: null },
+    { id: "interrupted", invocation: "claude --dangerously-skip-permissions", harness: "claude", permission: "yolo", description: "YOLO permission bypass", status: { state: "interrupted" }, annotation: null },
+    { id: "error", invocation: "opencode --auto", harness: "opencode", permission: "yolo", description: "YOLO permission bypass", status: { state: "error", detail: "cannot launch" }, annotation: null },
+    { id: "default", invocation: "codex", harness: "codex", permission: "shielded", description: "default permission mode", launch: { harness: "codex", model: null, effort: null, permissions: null }, status: { state: "idle" }, annotation: null },
+    { id: "approve", invocation: "omp --approval-mode always-ask", harness: "omp", permission: "shielded", description: "approve permission mode", launch: { harness: "omp", model: null, effort: null, permissions: "approve" }, status: { state: "idle" }, annotation: null },
+    { id: "full-auto", invocation: "codex --full-auto", harness: "codex", permission: "unknown", description: "unknown permission mode — profile or custom command", status: { state: "idle" }, annotation: null },
+    { id: "unknown", invocation: "sleep 300", harness: "terminal", permission: "unknown", description: "unknown permission mode — profile or custom command", status: { state: "idle" }, annotation: null },
   ];
   await patchPreferences(request, { compact: true });
   await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
@@ -3876,11 +3878,21 @@ test("compact rows retain distinct ended and harness glyphs within two character
       await expect(row.locator(`.harness-glyph[data-glyph="${item.harness}"]`)).toBeVisible();
       await expect(row.locator(".harness-glyph").locator("..")).toHaveAttribute("title", / — /);
       await expect(row.locator(".session-agent")).toHaveAttribute("title", new RegExp(item.invocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-      await expect(row.locator(".permission-glyph")).toHaveCount(item.permission ? 1 : 0);
-      if (item.permission) {
-        await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", item.permission);
-        await expect(row.locator(".permission-glyph").locator("..")).toHaveAttribute("title", /permission bypass|full-auto/);
-      }
+      await expect(row.locator(".permission-glyph")).toHaveCount(1);
+      await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", item.permission);
+      await expect(row.locator(".permission-glyph").locator("..")).toHaveAttribute("title", item.description);
+      await expect(row.locator(".session-agent .visually-hidden")).toContainText(item.description);
+      // Let the browser resolve the token, including future non-hex palettes.
+      // This catches later CSS rules that override the intended mark color.
+      const expectedColor = await row.evaluate((el, token) => {
+        const probe = document.createElement("span");
+        probe.style.color = `var(${token})`;
+        el.appendChild(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      }, item.permission === "shielded" ? "--ok" : "--warn");
+      await expect(row.locator(".permission-glyph")).toHaveCSS("color", expectedColor);
       if (["stopped", "exited", "interrupted", "error"].includes(item.id)) {
         await expect(row.locator(`.ended-status-glyph[data-glyph="${item.id}"]`)).toBeVisible();
         await expect(row.locator(".status-dot")).toHaveCount(0);

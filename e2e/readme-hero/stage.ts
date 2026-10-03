@@ -326,8 +326,9 @@ export async function openStagedFleet(
   for (const session of scenario.sessions) {
     const row = page.locator(`[data-session-id="${fleet.ids.get(session.title)}"]`);
     await expect(row).toBeVisible();
-    // Verify both marked and ordinary rows before capturing them. Otherwise
-    // a broken flag-to-glyph mapping could silently publish the wrong design.
-    await expect(row.locator('[data-glyph="yolo"]')).toHaveCount(session.yolo ? 1 : 0);
+    // These are raw invocations, so ordinary rows have unknown permissions.
+    // Pin the exact mark before capture instead of merely checking for YOLO.
+    await expect(row.locator(".permission-glyph")).toHaveCount(1);
+    await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", session.yolo ? "yolo" : "unknown");
   }
 }

@@ -820,7 +820,13 @@ when the helm-wide compact preference is on, which defaults off and is shared at
 clients. The working directory and launch command remain abbreviated only where shown, with their full, untouched values
 always available on the row (a tooltip on the web and desktop clients); an abbreviation is never the only place a value
 is recorded. A row's own actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread
-toggle — reachable there or by clicking the dot itself — that sets the session's seen state directly (see Status).
+toggle — reachable there or by clicking the dot itself — that sets the session's seen state directly (see Status). Every
+session row carries one permission mark. An amber slashed shield means its effective structured permission is YOLO, or
+the shared command-line classifier recognizes it as YOLO. A green plain shield means a structured launch in a non-YOLO
+mode. Every other row, including shells and `codex --full-auto`, carries an amber question mark: a profile or custom
+command cannot establish that the session asks for approval. Hover and screen-reader text name the specific structured
+mode (default, approve, smart approve, chat, or YOLO); unknown text explains the profile/custom origin.
+
 Hovering a live status dot, agent mark, or permission mark explains that mark. A clickable dot also names its mark read
 or mark unread action. The hover text uses the same status and permission meaning the row exposes to assistive
 technology. Exactly how a row lays out its lines and pixels is an implementation choice, covered in SPEC_impl.md rather

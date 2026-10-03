@@ -18,7 +18,7 @@
 //!
 //! The raw recognition is shared with the browser's session row, which calls
 //! the same classifier as the helm. Codex's `--full-auto` is deliberately not
-//! YOLO: it skips prompts but keeps Codex's sandbox, so it remains unmarked.
+//! YOLO: it skips prompts but keeps Codex's sandbox.
 
 use crate::{LaunchPermission, LaunchSelection};
 

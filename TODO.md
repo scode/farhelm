@@ -155,12 +155,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   it. The message is also wrong for the case. The update action should be greyed out for this machine, in the host's
   pop-up menu and in the inline update button on host rows, so the refusal is never reached.
 
-- **Replace the YOLO session icon.** The sidebar marks a YOLO session with an open padlock, but the other permission
-  modes use a closed one, and the difference is hard to see. That makes it easy to read as "this session is locked
-  down", which is the opposite of what it means. Replace it with a mark that cannot be mistaken for a lock; the
-  replacement is TBD. The marks are drawn by `PermissionIcon` in `crates/farhelm-ui/src/icons.rs`. Plan:
-  `plans/queue/yolo-icon.md`.
-
 - **A fresh-checkout end-to-end test fails on main, and Replace with logs a provenance error.** The e2e test
   `lost_fresh_checkout_success_replays_after_settings_change_and_helm_restart` fails every time on main (reproduced on
   2026-10-02 by the boundary-checks plan, on unmodified main): it expects the refusal that names changed checkout
