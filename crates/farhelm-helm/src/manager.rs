@@ -978,8 +978,9 @@ enum ActorCompletion {
 pub struct ConnectionManager {
     /// Source of [`ActorStatus::incarnation`] tokens: monotonic, never
     /// reset, never reused, shared by every actor this manager ever spawns.
-    /// Starts at one so a zero can only ever be an uninitialized value, not
-    /// a real connection.
+    /// Starts at a random value from [`initial_incarnation`], never zero, so
+    /// a zero can only ever be an uninitialized value, not a real
+    /// connection, and two helm processes do not hand out the same numbers.
     incarnations: Arc<std::sync::atomic::AtomicU64>,
     store: HelmStore,
     transport: Arc<dyn HostTransport>,
@@ -1272,7 +1273,7 @@ impl ConnectionManager {
         cadence: Cadence,
     ) -> Arc<ConnectionManager> {
         Arc::new(ConnectionManager {
-            incarnations: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            incarnations: Arc::new(std::sync::atomic::AtomicU64::new(initial_incarnation())),
             store,
             transport,
             cadence,
@@ -4343,6 +4344,43 @@ fn failure(row: &HostRow, error: anyhow::Error) -> AttemptOutcome {
     }
 }
 
+/// The first incarnation token this helm process hands out: random,
+/// nonzero, and at most 2^52.
+///
+/// A client holds an incarnation as a claim about which connection it
+/// prepared against (the create precondition compares only the number), and
+/// a client can outlive the helm process that issued it: a laptop woken with
+/// the create dialog open, say. When every process counted from 1, a stale
+/// claim could match the same number on a retargeted or adopted host's new
+/// connection in the restarted helm, and the session would launch on the
+/// replacement machine instead of being refused. A random start makes that
+/// coincidence negligible. The bound keeps every number exact in JSON (below
+/// 2^53) with 2^52 increments of headroom. If the operating system's
+/// randomness cannot be read, this falls back to the clock, which still
+/// differs between restarts.
+fn initial_incarnation() -> u64 {
+    let mut bytes = [0_u8; 8];
+    let bits = match getrandom::fill(&mut bytes) {
+        Ok(()) => u64::from_le_bytes(bytes),
+        Err(error) => {
+            warn!(
+                %error,
+                "operating-system randomness is unavailable; starting connection numbers from the clock"
+            );
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(1, |elapsed| elapsed.as_nanos() as u64)
+        }
+    };
+    incarnation_start_from(bits)
+}
+
+/// Map any 64 random bits into `1..=2^52`, the range
+/// [`initial_incarnation`] promises.
+fn incarnation_start_from(bits: u64) -> u64 {
+    (bits % (1 << 52)) + 1
+}
+
 /// The remediation text a version-skewed host carries.
 ///
 /// SPEC.md demands errors be actionable, not merely diagnostic. When the
@@ -4386,6 +4424,30 @@ mod tests {
     use std::{future::Future, pin::Pin};
     use tokio::io::{AsyncRead, AsyncWrite};
     use tokio::sync::broadcast;
+
+    /// Why this matters: incarnation numbers are compared by clients that
+    /// can outlive a helm restart, and a restarted helm that counted from 1
+    /// again could hand a stale claim a matching number on a different
+    /// machine's connection. Spec: the first token of a process is never
+    /// zero (zero means "never connected"), never above 2^52 (exact in JSON
+    /// with ample headroom below 2^53), and is not a fixed value: eight
+    /// draws do not all agree.
+    #[farhelm_testtrace::test]
+    fn the_first_incarnation_is_random_nonzero_and_json_exact() {
+        assert_eq!(incarnation_start_from(0), 1);
+        assert_eq!(incarnation_start_from((1 << 52) - 1), 1 << 52);
+        assert_eq!(incarnation_start_from(1 << 52), 1);
+        assert_eq!(incarnation_start_from(u64::MAX), 1 << 52);
+        let drawn: Vec<u64> = (0..8).map(|_| initial_incarnation()).collect();
+        assert!(
+            drawn.iter().all(|&start| (1..=1 << 52).contains(&start)),
+            "{drawn:?}"
+        );
+        assert!(
+            drawn.windows(2).any(|pair| pair[0] != pair[1]),
+            "eight draws from 2^52 values must not all agree: {drawn:?}"
+        );
+    }
 
     /// A skewed host's remedy names the side that is behind.
     ///

@@ -5780,7 +5780,8 @@
 - Completion criteria: incarnation numbers do not repeat across helm processes in practice (for example a per-process
   random or time-derived starting value kept below 2^53 for JSON safety); add a test. Remove this feedback file and its
   index entry. Stop and ask before implementing if this needs significant new complexity or a refactor.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `xztkvzvk`, bookmark `triage-1001e/13-incarnation-random-start`, PR
+  https://github.com/scode/farhelm/pull/1455.
 
 ## sessions-changed-hint-unthrottled.md
 
