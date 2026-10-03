@@ -6425,7 +6425,9 @@
   the no-switch rule; the two halves cannot be fixed separately.
 - Completion criteria: that item's change lands. Remove the feedback file and its index entry in the same PR as that
   change, or in its own bookkeeping PR immediately after it.
-- Execution: planned in `plans/queue/triage-opencode-model-names.md`.
+- Execution: complete: closed by PR https://github.com/scode/farhelm/pull/1484 (Enter keeps a selected harness; its
+  browser test covers this report). Bookkeeping: change `psoyllpkxvvq`, bookmark
+  `plan/triage-opencode-model-names/02-switch-harness-bookkeeping`, PR https://github.com/scode/farhelm/pull/1485.
 
 ## stop-restart-panic-no-reply.md
 
