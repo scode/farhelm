@@ -345,15 +345,15 @@ three-keyframe pulse is eight changes per cycle). Interpolating timing functions
 `ease-in`, `ease-out`, `ease-in-out`, `cubic-bezier(...)`) are forbidden, and so are `requestAnimationFrame` loops and
 JS timers that change what is drawn more often than 10 times per second. That list explains the rule; it is not a
 whitelist, and a technique it does not name that redraws every frame is just as forbidden. One-shot transitions and
-animations started by a user action or a state change, and finished within about a second, are allowed: the 100 ms hover
-tints, or xterm.js's 800 ms scrollbar fade. Every looping animation also stands still while the window is inactive,
-meaning the window or tab lacks keyboard focus or is hidden or minimized, which includes a Farhelm window visible beside
-another app that has focus; one universal `animation-play-state` rule in app.css, keyed on an attribute the UI root
-keeps in step with focus and visibility, covers present and future animations alike. That rule freezes one-shot CSS
-animations as well, so one that may start while the window is inactive has to read correctly at its first keyframe, or
-be written as a CSS transition, which the pause does not touch. Under Reduce Motion (`prefers-reduced-motion: reduce`)
-every looping indicator is static. `js-tests/app-css-animations.test.js` enforces the stepped-timing half against
-app.css.
+animations started by a user action or a state change, and done drawing within about a second, are allowed (a delay
+before one starts draws nothing and does not count): the 100 ms hover tints, or xterm.js's 800 ms scrollbar fade. Every
+looping animation also stands still while the window is inactive, meaning the window or tab lacks keyboard focus or is
+hidden or minimized, which includes a Farhelm window visible beside another app that has focus; one universal
+`animation-play-state` rule in app.css, keyed on an attribute the UI root keeps in step with focus and visibility,
+covers present and future animations alike. That rule freezes one-shot CSS animations as well, so one that may start
+while the window is inactive has to read correctly at its first keyframe, or be written as a CSS transition, which the
+pause does not touch. Under Reduce Motion (`prefers-reduced-motion: reduce`) every looping indicator is static.
+`js-tests/app-css-animations.test.js` enforces the stepped-timing half against app.css.
 
 The reason is CPU and battery, not taste. An interpolated animation produces a new frame on every display refresh for as
 long as it runs, so on macOS the compositor (WindowServer) redraws the window at the display's full rate, up to 120 Hz,
@@ -762,6 +762,16 @@ helm without a sink so a remote browser can never write a server machine's clipb
 native write succeeded or not). A browser tab keeps the web API path and inherits its engine's policy: Chromium-family
 engines treat loopback HTTP as a secure context and work; Safari does not, and stays silently refused. OSC 52 reads are
 refused identically on every surface — the native route is write-only by construction, not by policy that could drift.
+
+The "this drag did not copy" notice is decided in `assets/copy-on-select.js` (`dragMayHaveCopiedNothing`,
+`dragCopyNoticeText`, `takeNoticeOnce`) and driven from terminal.js's existing copy-on-select mousedown/mouseup pair:
+the press records the pointer position, whether the pane's program had mouse tracking on
+(`term.modes.mouseTrackingMode`), and the pane's OSC 52 count, kept by a fall-through `registerOscHandler(52, …)`
+registered after the clipboard addon so the addon still performs the write; the release checks for a drag with no local
+selection, and 1.5 seconds later whether any OSC 52 arrived since the press. The forcing modifier it names copies the
+vendored xterm's own `isMac` platform list. Agent-specific wording comes from the session's agent kind
+(`SessionAgentKind::drag_copy_hint` in the UI crate, an exhaustive per-kind function per the harness map), passed on the
+agent terminal's spec only; tabs always get the generic text.
 
 An OSC 8 link's hover compares the link's underlined text with its target (`linkTextMismatch` in
 `assets/terminal-links.js`) to decide whether the display is the quiet one or the loud mismatch warning. The text is

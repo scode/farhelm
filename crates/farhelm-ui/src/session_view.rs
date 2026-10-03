@@ -1567,6 +1567,12 @@ pub(crate) fn SessionView(
             // anywhere else would leave the user reading about a file
             // they dropped somewhere they cannot see.
             "status": attachment_status_element_id(AGENT_TERMINAL_ELEMENT_ID),
+            // Where the "this drag did not copy" notice is written, and the
+            // agent's own copy instruction for it, if Farhelm knows one.
+            // Only the agent terminal gets the instruction: a tab runs a
+            // shell, whatever the session's agent is.
+            "notice": drag_copy_notice_element_id(AGENT_TERMINAL_ELEMENT_ID),
+            "copyHint": session.agent_kind.drag_copy_hint(),
             "path": terminal_ws_path(&spec_session_id, None, &lease),
             // Where an UNATTENDED reconnect attaches instead (PLAN_M6.md
             // item 7): a route only a helm that honors the non-displacing
@@ -1589,6 +1595,8 @@ pub(crate) fn SessionView(
                 "banner": tab_banner_element_id(id),
                 "connecting": tab_connecting_element_id(id),
                 "status": attachment_status_element_id(&tab_terminal_element_id(id)),
+                "notice": drag_copy_notice_element_id(&tab_terminal_element_id(id)),
+                "copyHint": serde_json::Value::Null,
                 "path": terminal_ws_path(&spec_session_id, Some(id), &lease),
                 "pathUnowned": terminal_ws_unowned_path(&spec_session_id, Some(id), &lease),
                 "gen": 0,
@@ -2663,6 +2671,17 @@ pub(crate) fn SessionView(
                             id: "{attachment_status_element_id(AGENT_TERMINAL_ELEMENT_ID)}",
                             class: "attach-status",
                         }
+                        // The "this drag did not copy" notice, overlaid like
+                        // the status line above and owned by terminal.js the
+                        // same way. Rendered empty from the start with its
+                        // live-region role already in place: a region that
+                        // exists before its text is set is what screen
+                        // readers announce reliably.
+                        div {
+                            id: "{drag_copy_notice_element_id(AGENT_TERMINAL_ELEMENT_ID)}",
+                            class: "drag-copy-notice",
+                            role: "status",
+                        }
                     }
                     for (index , tab_id) in tabs.iter().enumerate() {
                         div {
@@ -2691,6 +2710,12 @@ pub(crate) fn SessionView(
                                     id: "{attachment_status_element_id(&tab_terminal_element_id(tab_id))}",
                                     class: "attach-status",
                                 }
+                                // See the agent pane's notice above.
+                                div {
+                                    id: "{drag_copy_notice_element_id(&tab_terminal_element_id(tab_id))}",
+                                    class: "drag-copy-notice",
+                                    role: "status",
+                                }
                             } else {
                                 div { class: "terminal-not-mounted",
                                     "this session reports more than {MAX_MOUNTED_TAB_ISLANDS} terminal tabs; \
@@ -2709,6 +2734,18 @@ pub(crate) fn SessionView(
             }
         }
     }
+}
+
+/// The id of the element a terminal's "this drag did not copy" notice is
+/// written into, derived from the terminal's own mount-point id so each
+/// island has exactly one, like `attachment_status_element_id`.
+///
+/// The notice tells the user that the program in the pane took a plain
+/// drag for itself (it turned on mouse reporting) and copied nothing, and
+/// how to copy instead. terminal.js decides when to show it and owns its
+/// text; this view only renders the empty, overlaid element.
+fn drag_copy_notice_element_id(terminal_element_id: &str) -> String {
+    format!("drag-copy-notice-{terminal_element_id}")
 }
 
 /// Whether `session` is a candidate for the automatic "mark seen" effect
@@ -3015,6 +3052,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
+            agent_kind: crate::SessionAgentKind::Unrecognized,
             launch: None,
             status: crate::SessionStatus::Running,
             annotation: None,
@@ -3375,6 +3413,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "agent".to_string(),
+                agent_kind: crate::SessionAgentKind::Unrecognized,
                 launch: None,
                 status: SessionStatus::Running,
                 annotation: None,
@@ -3426,6 +3465,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "agent".to_string(),
+                agent_kind: crate::SessionAgentKind::Unrecognized,
                 launch: None,
                 status,
                 annotation: None,
@@ -3517,6 +3557,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
+            agent_kind: crate::SessionAgentKind::Unrecognized,
             launch: None,
             status: SessionStatus::Unknown,
             annotation: None,
@@ -3582,6 +3623,7 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "agent".to_string(),
+                agent_kind: crate::SessionAgentKind::Unrecognized,
                 launch: None,
                 status: crate::SessionStatus::Idle,
                 annotation: None,
@@ -3640,6 +3682,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
+            agent_kind: crate::SessionAgentKind::Unrecognized,
             launch: None,
             status: crate::SessionStatus::Idle,
             annotation: None,

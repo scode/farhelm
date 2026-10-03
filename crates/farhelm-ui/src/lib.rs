@@ -216,6 +216,70 @@ pub use farhelm_proto::{
     SessionStatus, TabInfo as Tab,
 };
 
+/// Which agent a session runs, as the helm's session JSON reports it
+/// (`SessionInfo::agent_kind`), mirrored locally so decoding can never fail
+/// on a kind this build has not heard of.
+///
+/// The wire enum (`farhelm_proto::AgentKind`) has no catch-all, so decoding
+/// it directly would let a newer helm's new kind fail the whole session
+/// list. `Unrecognized` follows [`HostKind`]'s precedent: an unknown kind
+/// costs that one session its per-kind behavior and nothing else. It is also
+/// what a helm that predates the field yields, through `Default`.
+///
+/// Keyed on the agent KIND, not the launch harness, on purpose: raw and
+/// profile launches carry no structured launch selection, yet the
+/// supervisor still derives their kind (a `codex` invocation is Codex
+/// however it was started).
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAgentKind {
+    Claude,
+    Codex,
+    Goose,
+    Pi,
+    Omp,
+    Grok,
+    Generic,
+    #[default]
+    #[serde(other)]
+    Unrecognized,
+}
+
+/// The browser's per-agent-kind decisions, each answered by an exhaustive
+/// match so a new kind is a compile error here rather than silently taking
+/// another kind's behavior (root `AGENTS.md` "Harness-specific code"; the
+/// map in `farhelm-supervisor/src/agent_kind/mod.rs` lists this place).
+#[warn(clippy::wildcard_enum_match_arm)]
+impl SessionAgentKind {
+    /// How to copy in this agent when a plain mouse drag over its terminal
+    /// copied nothing, or `None` when Farhelm knows nothing more specific
+    /// than the generic advice.
+    ///
+    /// The terminal shows this in the notice it raises after such a drag
+    /// (`assets/copy-on-select.js` composes the rest). Codex's fullscreen
+    /// interface takes mouse drags itself: over its conversation it copies
+    /// on release by itself, but in its prompt box it only highlights, and
+    /// copies only on Ctrl+C while the highlight is up. Verified against
+    /// Codex 0.160.0: Ctrl+C with no highlight clears the draft instead, and
+    /// Ctrl+Insert does not copy, so neither is offered.
+    pub(crate) fn drag_copy_hint(self) -> Option<&'static str> {
+        match self {
+            SessionAgentKind::Codex => Some(
+                "Codex handles mouse selection itself: to copy what you highlighted, press \
+                 Ctrl+C while it is still highlighted (without a highlight, Ctrl+C clears your \
+                 draft).",
+            ),
+            SessionAgentKind::Claude
+            | SessionAgentKind::Goose
+            | SessionAgentKind::Pi
+            | SessionAgentKind::Omp
+            | SessionAgentKind::Grok
+            | SessionAgentKind::Generic
+            | SessionAgentKind::Unrecognized => None,
+        }
+    }
+}
+
 /// Mirror of the helm's session JSON (farhelm-proto `SessionInfo`). Kept
 /// as a local type so the UI depends on the HTTP contract, not on proto
 /// internals — the browser speaks JSON, not frames.
@@ -231,6 +295,12 @@ pub struct Session {
     #[serde(default)]
     pub canonical_cwd: Option<String>,
     pub invocation: String,
+    /// Which agent this session runs, decoded tolerantly (see
+    /// [`SessionAgentKind`]). The session view reads it for per-kind
+    /// terminal guidance; a helm that predates the field yields
+    /// `Unrecognized`.
+    #[serde(default)]
+    pub agent_kind: SessionAgentKind,
     /// The explicit composer selection which produced this invocation.
     /// Legacy raw/profile rows intentionally carry no guessed replacement.
     pub launch: Option<LaunchSelection>,
@@ -2426,6 +2496,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
+            agent_kind: SessionAgentKind::Unrecognized,
             launch: None,
             status: SessionStatus::Running,
             annotation: None,
@@ -2489,6 +2560,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
+            agent_kind: SessionAgentKind::Unrecognized,
             launch: None,
             status: SessionStatus::Idle,
             annotation: None,
@@ -2535,5 +2607,62 @@ mod tests {
             "a stamp newer than the current activity (a mark that raced an older \
              read) is still seen, never negative unseen-ness"
         );
+    }
+
+    /// Spec: a session's agent kind decodes from the helm's JSON, and an
+    /// unknown or missing kind decodes as `Unrecognized` instead of failing
+    /// the row.
+    ///
+    /// Why: the wire enum has no catch-all, so a newer helm reporting a kind
+    /// this bundle predates would otherwise fail the whole session list, and
+    /// a helm that predates the field must keep working. Only the per-kind
+    /// guidance is lost in those cases.
+    #[farhelm_testtrace::test]
+    fn session_agent_kind_decodes_tolerantly() {
+        let row = |kind: Option<&str>| {
+            let mut json = serde_json::json!({
+                "id": "s1",
+                "title": "t",
+                "cwd": "/tmp",
+                "invocation": "agent",
+            });
+            if let Some(kind) = kind {
+                json["agent_kind"] = serde_json::json!(kind);
+            }
+            serde_json::from_value::<Session>(json).expect("the row must decode")
+        };
+        assert_eq!(row(Some("codex")).agent_kind, SessionAgentKind::Codex);
+        assert_eq!(row(Some("generic")).agent_kind, SessionAgentKind::Generic);
+        assert_eq!(
+            row(Some("a-kind-from-a-newer-helm")).agent_kind,
+            SessionAgentKind::Unrecognized
+        );
+        assert_eq!(row(None).agent_kind, SessionAgentKind::Unrecognized);
+    }
+
+    /// Spec: Codex sessions get Codex's own copy instruction for the
+    /// "this drag did not copy" notice, and every other kind gets none, so
+    /// the notice falls back to the generic advice.
+    ///
+    /// Why: the instruction is only true of Codex (Ctrl+C while the text is
+    /// highlighted; without a highlight Ctrl+C clears the draft), and
+    /// telling another agent's user to press Ctrl+C could interrupt it.
+    #[farhelm_testtrace::test]
+    fn only_codex_has_a_drag_copy_hint() {
+        let codex = SessionAgentKind::Codex
+            .drag_copy_hint()
+            .expect("Codex has a copy instruction");
+        assert!(codex.contains("Ctrl+C") && codex.contains("still highlighted"));
+        for kind in [
+            SessionAgentKind::Claude,
+            SessionAgentKind::Goose,
+            SessionAgentKind::Pi,
+            SessionAgentKind::Omp,
+            SessionAgentKind::Grok,
+            SessionAgentKind::Generic,
+            SessionAgentKind::Unrecognized,
+        ] {
+            assert_eq!(kind.drag_copy_hint(), None, "{kind:?}");
+        }
     }
 }

@@ -1,5 +1,7 @@
 // The mouse-mode fake-agent script's reattach-restoration coverage
-// (PLAN_M6_5.md item 2). A dedicated file, not an addition to
+// (PLAN_M6_5.md item 2), and, at the end of the file, the "this drag did not
+// copy" notice tests, which also drive real pointer events at a pane whose
+// program has mouse reporting on. A dedicated file, not an addition to
 // the terminal spec family: per this milestone's own testing decision,
 // new coverage starts in its own per-area file so one subject stays
 // findable and runnable together.
@@ -30,7 +32,10 @@
 import { expect, test } from "./helpers/evidence";
 import { Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
-import { cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
+import fs from "node:fs";
+import { createSession, listSessions } from "./helpers/fleet";
+import { attachSession, cleanupSession, fillCreateForm, termText, waitForTermText } from "./helpers/term";
+import { stackScratchDir } from "./helpers/scratch";
 import { waitForIslandMounted, waitForSessionMounted, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 /**
@@ -428,5 +433,185 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
       );
       throw new Error(`cleanup: lost track of session "${title}"'s id; it cannot be cleaned up`);
     }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The "this drag did not copy" notice
+// ---------------------------------------------------------------------------
+//
+// When a program has mouse reporting on, a plain drag goes to the program;
+// Farhelm makes no selection and copies nothing unless the program writes
+// OSC 52 itself. terminal.js then shows a short notice (copy-on-select.js's
+// "The drag that copies nothing" has the decision). These two tests drive it
+// through real pointer events against real panes, on both engines, because
+// the notice depends on xterm's live mouse-tracking state, the pane's OSC 52
+// stream and the page's DOM together, none of which the node unit tests see.
+
+/** The notice element of the agent terminal (session_view.rs's
+ * `drag_copy_notice_element_id` for the `terminal` island). */
+const AGENT_NOTICE = "#drag-copy-notice-terminal";
+
+/**
+ * How long the tests watch for a notice that must NOT appear: past the
+ * 1.5 s grace terminal.js waits for an OSC 52 write after the release
+ * (copy-on-select.js's `OSC52_GRACE_MS`), with room for a loaded machine.
+ */
+const NO_NOTICE_WINDOW_MS = 3_000;
+
+/**
+ * A program that turns on mouse reporting (button events, SGR encoding),
+ * prints `ready`, and answers the FIRST byte it reads with an OSC 52 write
+ * followed by `COPIED` (output arrives in order, so seeing `COPIED` proves the
+ * write reached the terminal first), then reads and discards everything else. Raw mode without echo, so a mouse
+ * report reaches it byte by byte and is never echoed back onto the screen.
+ * The first drag's press therefore draws the copy, and every later gesture
+ * is one the program keeps to itself without copying.
+ */
+function mouseProgramScript(ready: string): string {
+  return (
+    `stty raw -echo; printf "\\033[?1000h\\033[?1006h"; echo ${ready}; ` +
+    `dd bs=1 count=1 >/dev/null 2>&1; printf "\\033]52;c;YW5zd2VyZWQ=\\007"; echo COPIED; ` +
+    `exec cat >/dev/null`
+  );
+}
+
+/** Wait until the agent terminal's program has mouse tracking on, as xterm
+ * itself reports it: the precondition every drag below depends on. */
+async function waitForMouseTracking(page: Page): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__farhelmTerm.modes.mouseTrackingMode), {
+      timeout: 15_000,
+      message: "the program must have turned mouse tracking on before the drag",
+    })
+    .not.toBe("none");
+}
+
+/** A plain left-button drag across the agent terminal's screen, well past
+ * the drag threshold, starting a few rows down so it is on the screen. */
+async function dragAcrossTerminal(page: Page): Promise<void> {
+  const box = await page.locator("#terminal .xterm-screen").boundingBox();
+  if (!box) throw new Error("the agent terminal's screen has no box");
+  const y = box.y + Math.min(60, box.height / 2);
+  await page.mouse.move(box.x + 20, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 160, y, { steps: 8 });
+  await page.mouse.up();
+}
+
+/** The forcing modifier the page itself will name, from the shipped rule. */
+async function pageForcingModifier(page: Page): Promise<string> {
+  return page.evaluate(() =>
+    (window as any).farhelmCopyOnSelect.forcingModifier(navigator.platform),
+  );
+}
+
+/**
+ * Spec: no notice after a drag the program answered with OSC 52, nor after a
+ * plain click; after a drag the program kept to itself, the generic notice
+ * appears and names the platform's forcing key.
+ *
+ * Why: the notice is only useful if it appears exactly when a drag copied
+ * nothing. The negative gestures run first because each notice text shows
+ * once per page, and the stub program copies only on its first byte.
+ */
+test("drag-copy notice: shown only for a drag the program kept without copying", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(90_000);
+  const ready = `DRAG-NOTICE-READY-${Date.now()}`;
+  const session = await createSession(request, {
+    title: `drag-notice-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: `sh -c '${mouseProgramScript(ready)}'`,
+  });
+  try {
+    await page.goto("/");
+    await attachSession(page, session.id);
+    await waitForSessionRevealed(page, session.id);
+    await waitForTermText(page, ready);
+    await waitForMouseTracking(page);
+    const notice = page.locator(AGENT_NOTICE);
+    await expect(notice).toHaveText("");
+
+    // The program copies in answer to this drag's first byte.
+    await dragAcrossTerminal(page);
+    await waitForTermText(page, "COPIED");
+    // sleep-ok: observation window for a notice that must not appear, past the OSC 52 grace period.
+    await page.waitForTimeout(NO_NOTICE_WINDOW_MS);
+    await expect(notice, "a drag the program copied must not raise the notice").toHaveText("");
+
+    // A click is not a drag, whatever the program does with it.
+    const box = await page.locator("#terminal .xterm-screen").boundingBox();
+    await page.mouse.click(box!.x + 40, box!.y + Math.min(60, box!.height / 2));
+    // sleep-ok: observation window for a notice that must not appear, past the OSC 52 grace period.
+    await page.waitForTimeout(NO_NOTICE_WINDOW_MS);
+    await expect(notice, "a click must not raise the notice").toHaveText("");
+
+    // The program keeps this drag and copies nothing.
+    await dragAcrossTerminal(page);
+    const key = await pageForcingModifier(page);
+    await expect(notice).toContainText("handles mouse selection itself", { timeout: 10_000 });
+    await expect(notice).toContainText(`hold ${key} while dragging`);
+    await expect(notice).not.toContainText("Codex");
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * Spec: in a Codex session's agent terminal, the notice gives Codex's own
+ * copy instruction.
+ *
+ * Why: the session's agent kind is derived from the invocation's basename,
+ * so a stub program named `codex` (an absolute path, not the bare word,
+ * which the stack's PATH maps to a fake agent that never turns on mouse
+ * reporting) exercises the whole path from the supervisor's kind through the
+ * UI's spec to the notice. The stub ignores the arguments the supervisor
+ * adds for Codex and never copies.
+ */
+test("drag-copy notice: a Codex session gets Codex's own instruction", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(90_000);
+  const ready = `DRAG-NOTICE-CODEX-READY-${Date.now()}`;
+  const dir = stackScratchDir("drag-notice-codex-");
+  const stub = path.join(dir, "codex");
+  fs.writeFileSync(
+    stub,
+    `#!/bin/sh\nstty raw -echo\nprintf '\\033[?1000h\\033[?1006h'\necho ${ready}\nexec cat >/dev/null\n`,
+    { mode: 0o755 },
+  );
+  const session = await createSession(request, {
+    title: `drag-notice-codex-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: stub,
+  });
+  try {
+    // The premise everything below rests on: the supervisor classified the
+    // stub as Codex from its basename.
+    await expect
+      .poll(
+        async () =>
+          (await listSessions(request)).sessions.find((row) => row.id === session.id)?.agent_kind,
+        { timeout: 15_000, message: "the stub named codex must be classified as a Codex session" },
+      )
+      .toBe("codex");
+    await page.goto("/");
+    await attachSession(page, session.id);
+    await waitForSessionRevealed(page, session.id);
+    await waitForTermText(page, ready);
+    await waitForMouseTracking(page);
+
+    await dragAcrossTerminal(page);
+    const key = await pageForcingModifier(page);
+    const notice = page.locator(AGENT_NOTICE);
+    await expect(notice).toContainText("Codex handles mouse selection itself", { timeout: 10_000 });
+    await expect(notice).toContainText("Ctrl+C while it is still highlighted");
+    await expect(notice).toContainText(`hold ${key} while dragging`);
+  } finally {
+    await cleanupSession(request, session.id);
   }
 });

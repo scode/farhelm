@@ -2397,6 +2397,7 @@ pub(super) fn row_specimen(id: &str) -> Session {
         cwd: "/tmp".to_string(),
         canonical_cwd: None,
         invocation: "agent".to_string(),
+        agent_kind: crate::SessionAgentKind::Unrecognized,
         launch: None,
         status: SessionStatus::Exited { exit_code: Some(0) },
         annotation: None,

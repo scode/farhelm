@@ -871,6 +871,12 @@
     "Not connected: this terminal never finished connecting, so nothing typed here would "
     + "reach the session — reopen the session to try again.";
 
+  // Which "this drag did not copy" notices this page has already shown
+  // (copy-on-select.js's `takeNoticeOnce`). Page-wide rather than per
+  // terminal: each distinct text shows once per page load, whichever pane
+  // the drag happened in, so a user who has read it is not told again.
+  const shownDragNotices = new Set();
+
   // The clipboard provider handed to every mount's `ClipboardAddon`
   // (`mount()`, below) in place of the addon's own default
   // `BrowserClipboardProvider`. One shared, stateless object rather than
@@ -2648,11 +2654,14 @@
      * session view currently wants (see this file's header for why the
      * diff is computed here rather than in Rust).
      *
-     * Each spec is `{el, banner, status, connecting, path, gen, primary,
-     * focus}`: the DOM element to mount into, the element its detach/error
-     * banner writes to, the element its attachment progress and failures
-     * write to, the element its connecting placeholder writes to while it
-     * catches up (PLAN_M5.md item 5), the helm WebSocket path (already
+     * Each spec is `{el, banner, status, connecting, notice, copyHint,
+     * path, gen, primary, focus}`: the DOM element to mount into, the element
+     * its detach/error banner writes to, the element its attachment progress
+     * and failures write to, the element its connecting placeholder writes
+     * to while it catches up (PLAN_M5.md item 5), the element its "this drag
+     * did not copy" notice writes to and the agent's own copy instruction
+     * for that notice (null when Farhelm knows none; read once at mount, as
+     * the session's agent does not change), the helm WebSocket path (already
      * carrying `?tab=`/`?lease=`), a remount counter, whether this island
      * owns the legacy singleton globals, and whether it should hold
      * keyboard focus.
@@ -5048,12 +5057,71 @@
         // — the addon's own parser-driven path, never routed through this
         // listener at all — are untouched by this change.
         let gestureStartedHere = false;
-        const handleTerminalMouseDown = () => {
+        // The drag-copy notice's view of the gesture (copy-on-select.js's
+        // "The drag that copies nothing"): where the press was, whether the
+        // program had mouse tracking on at that moment, and how many OSC 52
+        // writes this pane had seen by then. Recorded at the press because
+        // the release is too late: a program can turn tracking off, or copy,
+        // in between.
+        let pressed = null;
+        // OSC 52 writes this pane's program has sent, counted by a
+        // fall-through handler. The page-wide clipboard provider cannot tell
+        // panes apart, so the count lives here. Registered AFTER the
+        // clipboard addon on purpose: xterm calls the newest handler first
+        // and moves on when it returns false, so this one only counts and
+        // the addon still performs the copy. Disposed with the terminal.
+        let osc52Writes = 0;
+        term.parser.registerOscHandler(52, (data) => {
+          if (window.farhelmCopyOnSelect.isOsc52Write(data)) osc52Writes += 1;
+          return false;
+        });
+        const handleTerminalMouseDown = (ev) => {
           gestureStartedHere = true;
+          pressed = {
+            x: ev.clientX,
+            y: ev.clientY,
+            button: ev.button,
+            onScreen: !!(ev.target && ev.target.closest && ev.target.closest(".xterm-screen")),
+            trackingAtPress: !!(term.modes && term.modes.mouseTrackingMode !== "none"),
+            forced: window.farhelmCopyOnSelect.pressForcesSelection(ev, navigator.platform),
+            osc52AtPress: osc52Writes,
+          };
         };
-        const handleCopyOnSelectMouseUp = () => {
+        // After the grace period: no OSC 52 since the press means the
+        // program kept the drag to itself, so show the notice (once per
+        // page per text). Never takes focus and never blocks input: it only
+        // writes text into an overlaid, pointer-transparent live region.
+        const showDragCopyNotice = (osc52AtPress) => {
+          if (!alive || osc52Writes !== osc52AtPress) return;
+          const el = spec.notice ? document.getElementById(spec.notice) : null;
+          if (!el) return;
+          // A pane the user switched away from during the grace period is
+          // hidden, not unmounted: showing (and spending the once-per-page
+          // allowance) there would mean nobody ever sees this notice.
+          if (el.closest(".terminal-pane:not(.selected)")) return;
+          const text = window.farhelmCopyOnSelect.dragCopyNoticeText({
+            platform: navigator.platform,
+            appHint: spec.copyHint,
+          });
+          if (!window.farhelmCopyOnSelect.takeNoticeOnce(shownDragNotices, text)) return;
+          el.textContent = text;
+          // Below the pane's banner when one is up (a detach or takeover
+          // line sits in flow at the top of the pane), so the notice never
+          // covers it.
+          const banner = spec.banner ? document.getElementById(spec.banner) : null;
+          el.style.top = banner && banner.offsetHeight ? `${banner.offsetHeight}px` : "";
+          // Restart the CSS fade (app.css `.drag-copy-notice.showing`);
+          // reading `offsetWidth` between the two class changes is what
+          // makes the browser treat the second as a new animation.
+          el.classList.remove("showing");
+          void el.offsetWidth;
+          el.classList.add("showing");
+        };
+        const handleCopyOnSelectMouseUp = (ev) => {
           if (!gestureStartedHere) return;
           gestureStartedHere = false;
+          const press = pressed;
+          pressed = null;
           setTimeout(() => {
             // `alive` (declared further down, with the rest of this
             // mount's deferred-work guards) is the same token
@@ -5064,6 +5132,23 @@
             if (!alive) return;
             const hasSelection = term.hasSelection();
             const selectionText = hasSelection ? term.getSelection() : "";
+            if (
+              press &&
+              window.farhelmCopyOnSelect.dragMayHaveCopiedNothing({
+                button: press.button,
+                moved: Math.hypot(ev.clientX - press.x, ev.clientY - press.y),
+                onScreen: press.onScreen,
+                trackingAtPress: press.trackingAtPress,
+                forced: press.forced,
+                hasSelection,
+                osc52SincePress: osc52Writes !== press.osc52AtPress,
+              })
+            ) {
+              setTimeout(
+                () => showDragCopyNotice(press.osc52AtPress),
+                window.farhelmCopyOnSelect.OSC52_GRACE_MS,
+              );
+            }
             if (
               !window.farhelmCopyOnSelect.copySelectionOnMouseUp({ hasSelection, selectionText })
             ) {
