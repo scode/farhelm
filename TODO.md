@@ -79,8 +79,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   own command already carries, so a Claude session started as `claude --continue`, or with a `--` in its command, could
   restart into a different conversation or a fresh one (`claude-resume-template-selector-collision.md`, triaged
   2026-10-01; Codex had the same problem in `codex-resume-template-duplicates-selector.md`, and both now refuse such a
-  launch at create time unless it brings its own resume command). First step: walk through the launch paths with the
-  maintainer.
+  launch at create time unless it brings its own resume command). Walked through with the maintainer on 2026-10-03:
+  profiles are removed, launches become agent or command launches with named templates, and the spec change is
+  https://github.com/scode/farhelm/pull/1537. Plan: `plans/queue/launch-representation.md`.
 
 - **No network path for the desktop app.** The desktop app's webview talks to its embedded helm the way the browser
   does, over HTTP and WebSockets on a loopback port, so one UI code path serves both clients. That port can be reached
@@ -118,7 +119,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   through the `farhelm` tool, against any host or session, should ask the user for permission first, with an "always
   allow when coming from this host" option. Model it on the per-host setting for starting YOLO sessions without asking:
   ask by default, and let the user turn asking off for a host. Related to the Maybe later entry on closing the
-  cross-host execution hole in agent-requested session creation and cloning.
+  cross-host execution hole in agent-requested session creation and cloning. Two things are required parts of this work,
+  from the launch-kinds redesign (`plans/queue/launch-representation.md`): until it lands, a command launch's YOLO
+  assertion is trusted even from an agent, so an agent can start a YOLO command on a host that asks before YOLO launches
+  by asserting that it is not YOLO, and with this work an agent's command launch on such a host must ask whatever its
+  assertion says; and agents may apply launch templates but not create, edit or delete them, and this work is what
+  allows template writes from agents, behind the same prompt.
 
 - **Install Claude and Codex on a host for the user.** Offer to install Claude Code and Codex (only those two) on a host
   on the user's behalf, always through each vendor's one-line curl installer, and optionally copy the user's credentials
@@ -180,7 +186,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   profile as YOLO only on a best-effort basis: common shapes such as a vendor's approval-skipping flag, also behind an
   `env NAME=value` prefix, are caught, but an arbitrary wrapper (a script, `sh -c '…'`) that turns approvals off may not
   be. Launches built with the New dialog's harness and permission choices are always classified exactly. SPEC.md's
-  YOLO-launch paragraph will state the rule once `yolo-guard-misses-env-prefix.md`'s triage outcome lands.
+  YOLO-launch paragraph will state the rule once `yolo-guard-misses-env-prefix.md`'s triage outcome lands. Moot once the
+  launch-kinds redesign lands, since command launches then carry an explicit YOLO assertion and nothing is recognized
+  from command lines; that plan removes this entry. Plan: `plans/queue/launch-representation.md`.
 
 ## Tricky bugs
 
@@ -503,7 +511,7 @@ are large mostly because of their tests.
   existing resume/continue selectors or an end-of-options marker must not collide with the generated resume command.
   Preserve shared permission and configuration options without requiring users to duplicate them between launch and
   resume. Settle the composition, editor, and migration behavior when this is picked up; keep it out of the immediate
-  fix.
+  fix. Superseded by the launch-kinds redesign, which removes it. Plan: `plans/queue/launch-representation.md`.
 
 - Reconsider agent parent/child relationships: either remove them or make them useful. Current parent tracking is
   optional, and fleet `agent create`/`clone` do not record the asking session, so the parent filter cannot reliably
