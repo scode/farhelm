@@ -10,10 +10,12 @@ Terminal-widget sections.
 
 ## The engine-discrimination tree
 
-The same UI is served by the embedded helm at `http://127.0.0.1:<port>/`, so any browser can render the same component
-tree, from the same source revision, against the same helm — but NOT the same artifact: the browser gets the wasm web
-build while the app runs the native desktop target, with desktop-only Rust (bootstrap, native HTTP, the eval bridge)
-that has no browser equivalent. The tree below is a strong heuristic over shared sources, not an exact-build comparison:
+The desktop helm is an internal API surface and serves no browser UI. To compare the app with a browser, quit the app
+and run a standalone `farhelm helm run` on the same state directory; any browser can then render the same component tree
+from the same source revision against that standalone helm. This is still NOT the same artifact: the browser gets the
+wasm web build while the app runs the native desktop target, with desktop-only Rust (bootstrap, native HTTP, the eval
+bridge) that has no browser equivalent. The tree below is a strong heuristic over shared sources, not an exact-build
+comparison:
 
 - **Broken in the app, fine in Safari** → the desktop-specific stack. wry and the eval bridge are the usual suspects
   (custom scheme, eval IPC, wry's own event handling), but desktop-only Rust paths and packaging belong on the list too,

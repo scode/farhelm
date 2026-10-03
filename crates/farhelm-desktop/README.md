@@ -1,7 +1,8 @@
 # farhelm-desktop
 
-The native window: a webview showing the Farhelm UI, with a helm running in the same process. Released as a bare binary
-that installs next to `farhelm` in `~/.local/bin` (D6 in the distribution plan).
+The native window: a webview showing the Farhelm UI, with an internal helm running in the same process. The embedded
+helm serves the window's API over a fresh loopback port and does not serve a browser page or token exchange. Released as
+a bare binary that installs next to `farhelm` in `~/.local/bin` (D6 in the distribution plan).
 
 The local supervisor is not in this process. On startup the app probes for one that is already answering and reuses it
 untouched; only if none answers does it start `farhelm supervisor run` from the sibling binary, as a separate child
@@ -71,6 +72,4 @@ binary under Xvfb, which is the same `desktop::run` shell with the asset names f
 ## Environment overrides
 
 - `FARHELM_DESKTOP_FARHELM` — path to the `farhelm` CLI, instead of the sibling next to this binary.
-- `FARHELM_DESKTOP_UI_DIST` — a directory the embedded helm serves over loopback. It does not change what the window
-  renders; the window's own assets always come from the embedded tree.
-- `FARHELM_DESKTOP_STATE_DIR`, `FARHELM_DESKTOP_PORT` — state directory and loopback port.
+- `FARHELM_DESKTOP_STATE_DIR` — state directory for the embedded helm and managed local supervisor.

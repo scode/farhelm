@@ -108,19 +108,7 @@ for tool in Xvfb xdotool openbox import convert curl python3 tmux dx; do
   fi
 done
 
-# Ask the kernel for a free loopback port rather than defaulting to a fixed
-# one: other agents run this harness on the same machine, and a fixed default
-# (7493, once) made two concurrent runs collide at the app's bind. The pick is
-# released before the app binds it, so a loss is possible but loud (the
-# embedded helm fails its bind with "Address already in use" and the app exits
-# through its ordinary fallback path, so the leg that launched it fails on
-# readiness) and the window is milliseconds. DESKTOP_SMOKE_PORT still forces a
-# specific port for a human who wants to point a browser at the run.
-free_port() {
-  python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
-}
-PORT="${DESKTOP_SMOKE_PORT:-$(free_port)}" || { echo "FAIL: could not pick a free port" >&2; exit 1; }
-API="http://127.0.0.1:$PORT"
+API=""
 DISP="" # assigned once Xvfb reports its allocated display number, below
 
 # A fixed correlation value, not a uniqueness scheme: every run greps a log
@@ -154,6 +142,7 @@ else
   umask "$OLD_UMASK"
 fi
 mkdir -p "$X/state" "$X/work"
+DESKTOP_READY="$X/desktop-ready.json"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -166,23 +155,20 @@ fail() {
 # appears in a process listing. Every loopback request bypasses ambient proxy
 # configuration as the desktop clients do.
 #
-# The secret is the smoke's OWN browser credential, from the same bootstrap
-# exchange a browser uses. The desktop app's credentials are minted in
-# memory by its embedded helm and never written anywhere this script could
-# read them, which is part of what it checks.
+# The secret is the desktop app's native in-memory credential, published only
+# through the debug-only readiness seam. The embedded helm has no browser
+# token exchange, so this is the only credential the smoke can use.
 CURL_AUTH_CONFIG="$X/curl-auth.conf"
 write_curl_auth() {
   printf 'header = "Authorization: Bearer %s"\n' "$SMOKE_SECRET" >"$CURL_AUTH_CONFIG"
   chmod 600 "$CURL_AUTH_CONFIG"
 }
-# Exchange the helm's current web token for a fresh browser credential and
-# point curl_auth at it.
-mint_smoke_credential() {
-  local token
-  token=$("$BUILT_FARHELM" helm token show --state-dir "$X/state") || fail "reading the helm's web token"
-  SMOKE_SECRET=$(python3 -c 'import json,sys; print(json.dumps({"token": sys.argv[1]}))' "$token" |
-    curl --noproxy '*' -sf --max-time 5 -H 'content-type: application/json' -d @- "$API/api/auth/token" |
-    python3 -c 'import json,sys; print(json.load(sys.stdin)["device_secret"])') || fail "exchanging the web token for the smoke's credential"
+read_desktop_ready() {
+  local ready="$1"
+  API=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base"])' "$ready") ||
+    fail "reading the embedded helm address"
+  SMOKE_SECRET=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_device_secret"])' "$ready") ||
+    fail "reading the embedded helm credential"
   write_curl_auth
 }
 # The desktop app must never write a credential to its state file.
@@ -460,9 +446,7 @@ SIBLING_LOG_MISSING="$X/farhelm-sibling-missing.log"
 : >"$SIBLING_LOG_MISSING"
 FARHELM_TMUX="$MISSING_TMUX" \
   FARHELM_DESKTOP_STATE_DIR="$PREFLIGHT_MISSING_STATE" \
-  FARHELM_DESKTOP_PORT="$PORT" \
   FARHELM_DESKTOP_FARHELM="$INSTRUMENTED_FARHELM" \
-  FARHELM_DESKTOP_UI_DIST="$WEB_DIST" \
   FARHELM_SMOKE_SIBLING_LOG="$SIBLING_LOG_MISSING" \
   "$BUILT_FARHELM_DESKTOP" >/dev/null 2>"$TMUX_PREFLIGHT_STDERR"
 TMUX_PREFLIGHT_STATUS=$?
@@ -529,9 +513,7 @@ SIBLING_LOG_BELOWFLOOR="$X/farhelm-sibling-belowfloor.log"
 : >"$SIBLING_LOG_BELOWFLOOR"
 FARHELM_TMUX="$BELOWFLOOR_TMUX" \
   FARHELM_DESKTOP_STATE_DIR="$PREFLIGHT_BELOWFLOOR_STATE" \
-  FARHELM_DESKTOP_PORT="$PORT" \
   FARHELM_DESKTOP_FARHELM="$INSTRUMENTED_FARHELM" \
-  FARHELM_DESKTOP_UI_DIST="$WEB_DIST" \
   FARHELM_SMOKE_SIBLING_LOG="$SIBLING_LOG_BELOWFLOOR" \
   "$BUILT_FARHELM_DESKTOP" >/dev/null 2>"$TMUX_PREFLIGHT_BELOWFLOOR_STDERR"
 TMUX_PREFLIGHT_BELOWFLOOR_STATUS=$?
@@ -573,9 +555,7 @@ BOGUS_STATE="$X/pf-bogus-state"
 : >"$BOGUS_STATE"
 BOGUS_STATE_STDERR="$X/pf-bogus-state.stderr"
 FARHELM_DESKTOP_STATE_DIR="$BOGUS_STATE" \
-  FARHELM_DESKTOP_PORT="$PORT" \
   FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
-  FARHELM_DESKTOP_UI_DIST="$WEB_DIST" \
   "$BUILT_FARHELM_DESKTOP" >/dev/null 2>"$BOGUS_STATE_STDERR"
 BOGUS_STATE_STATUS=$?
 [ "$BOGUS_STATE_STATUS" -eq 1 ] ||
@@ -609,24 +589,31 @@ DISP=":$DISPNUM"
 DISPLAY=$DISP openbox >"$X/openbox.log" 2>&1 &
 echo $! >"$X/openbox.pid"
 sleep 1
+rm -f "$DESKTOP_READY"
 DISPLAY=$DISP \
   PATH="/usr/bin:/bin" \
   FARHELM_TMUX="$SENTINEL_TMUX" \
   FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
   FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
   RUST_LOG="info,farhelm_ui::desktop=debug" \
-  FARHELM_DESKTOP_PORT="$PORT" \
+  FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
   FARHELM_DESKTOP_STATE_DIR="$X/state" \
   FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
-  FARHELM_DESKTOP_UI_DIST="$WEB_DIST" \
   "$APP" >"$X/desktop.log" 2>&1 &
 echo $! >"$X/desktop.pid"
 
 for _ in $(seq 1 30); do
-  curl_local -sf --max-time 2 "$API/" >/dev/null 2>&1 && break
+  [ -s "$DESKTOP_READY" ] && break
   sleep 1
 done
-curl_local -sf --max-time 5 "$API/" | grep -q '<!DOCTYPE html>' || fail "embedded helm did not serve the bundled UI"
+[ -s "$DESKTOP_READY" ] || fail "desktop did not publish embedded helm readiness"
+read_desktop_ready "$DESKTOP_READY"
+FIRST_SECRET="$SMOKE_SECRET"
+ROOT_STATUS=$(curl_local -s -o "$X/root-response" -w '%{http_code}' --max-time 5 "$API/")
+[ "$ROOT_STATUS" = 404 ] || fail "embedded helm served browser UI at / (status $ROOT_STATUS)"
+TOKEN_STATUS=$(curl_auth -s -o "$X/token-response" -w '%{http_code}' --max-time 5 \
+  -X POST -H 'content-type: application/json' -d '{}' "$API/api/auth/token")
+[ "$TOKEN_STATUS" = 404 ] || fail "embedded helm exposed /api/auth/token (status $TOKEN_STATUS)"
 
 # The state file appears when the webview records its first authenticated
 # readiness; until then there is nothing to read.
@@ -640,12 +627,10 @@ for _ in $(seq 1 30); do
 done
 [ "$WEBVIEW_GENERATION" -ge 1 ] || fail "the webview JavaScript stack did not authenticate its event socket"
 assert_no_persisted_credentials "first launch"
-# Both desktop credentials are in-memory ones the embedded helm minted; a
-# stored row here would be a credential rotation or the client cap could
-# revoke, which is exactly the churn they exist to avoid.
+# Both desktop credentials are in-memory ones the embedded helm minted; no
+# stored row should exist for either one.
 DEVICE_ROWS=$(device_rows)
 [ "$DEVICE_ROWS" = 0 ] || fail "desktop bootstrap stored $DEVICE_ROWS device rows instead of none"
-mint_smoke_credential
 LOCAL_READY=""
 for _ in $(seq 1 30); do
   if curl_auth -sf --max-time 5 "$API/api/hosts" | python3 -c '
@@ -659,6 +644,27 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
   sleep 1
 done
 [ -n "$LOCAL_READY" ] || fail "authenticated native API or managed local supervisor was not reachable"
+
+# Random ports no longer make two app launches collide at bind. The state
+# directory's ownership lock must still refuse the newcomer, and its startup
+# error must reach stderr before the GUI starts. The incumbent must keep serving.
+echo "== a second desktop launch refuses the owned state directory"
+python3 - "$BUILT_FARHELM_DESKTOP" "$BUILT_FARHELM" "$X/state" "$X/second-desktop.stderr" <<'PY_SECOND' || fail "second desktop refusal"
+import os
+import subprocess
+import sys
+
+binary, sibling, state, stderr_path = sys.argv[1:]
+child_env = dict(os.environ, FARHELM_DESKTOP_STATE_DIR=state, FARHELM_DESKTOP_FARHELM=sibling)
+with open(stderr_path, "wb") as stderr:
+    result = subprocess.run([binary], env=child_env, stdout=subprocess.DEVNULL,
+                            stderr=stderr, timeout=20)
+assert result.returncode == 1, f"second desktop exited {result.returncode}"
+with open(stderr_path) as stderr:
+    message = stderr.read()
+assert "another process owns token control" in message, message
+PY_SECOND
+curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "second launch disturbed the incumbent helm"
 [ -s "$X/tmux-override-used" ] || fail "managed supervisor did not run the tmux named by FARHELM_TMUX"
 # A nonempty marker alone is not enough: the desktop's own tmux preflight
 # calls this same wrapper with plain `-V` before the managed supervisor
@@ -821,39 +827,45 @@ for _ in $(seq 1 20); do
   sleep 0.25
 done
 [ -n "$SUPERVISOR_GONE" ] || fail "managed supervisor outlived the desktop app"
-for _ in $(seq 1 20); do
-  curl_local -sf --max-time 1 "$API/" >/dev/null 2>&1 || break
-  sleep 0.25
-done
 
+rm -f "$DESKTOP_READY"
 DISPLAY=$DISP \
   PATH="/usr/bin:/bin" \
   FARHELM_TMUX="$SENTINEL_TMUX" \
   FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
   FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
   RUST_LOG="info,farhelm_ui::desktop=debug" \
-  FARHELM_DESKTOP_PORT="$PORT" \
+  FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
   FARHELM_DESKTOP_STATE_DIR="$X/state" \
   FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
-  FARHELM_DESKTOP_UI_DIST="$WEB_DIST" \
   "$APP" >"$X/desktop-restart.log" 2>&1 &
 echo $! >"$X/desktop.pid"
 for _ in $(seq 1 30); do
-  curl_local -sf --max-time 2 "$API/" >/dev/null 2>&1 && break
+  [ -s "$DESKTOP_READY" ] && break
   sleep 1
 done
+[ -s "$DESKTOP_READY" ] || fail "restarted desktop did not publish embedded helm readiness"
+read_desktop_ready "$DESKTOP_READY"
+[ "$SMOKE_SECRET" != "$FIRST_SECRET" ] || fail "desktop restart reused its native credential"
+# Fresh issuance alone does not prove expiry. Present the old credential to
+# the new listener, keeping it out of argv just like the current credential.
+printf 'header = "Authorization: Bearer %s"\n' "$FIRST_SECRET" >"$X/old-curl-auth.conf"
+chmod 600 "$X/old-curl-auth.conf"
+OLD_STATUS=$(curl_local --config "$X/old-curl-auth.conf" -s -o /dev/null -w '%{http_code}' --max-time 5 "$API/api/hosts")
+[ "$OLD_STATUS" = 401 ] || fail "the previous launch's native credential still authenticated (status $OLD_STATUS)"
+
 for _ in $(seq 1 30); do
   RESTART_WEBVIEW_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
   [ "$RESTART_WEBVIEW_GENERATION" -gt "$WEBVIEW_GENERATION" ] && break
   sleep 1
 done
 [ "$RESTART_WEBVIEW_GENERATION" -gt "$WEBVIEW_GENERATION" ] || fail "restarted webview never completed authenticated readiness"
-curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "the smoke's browser credential did not survive the app restart"
+curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "the native credential did not authenticate after the app restart"
 assert_no_persisted_credentials "restart"
-# Exactly the smoke's own row: the relaunch minted fresh in-memory desktop
-# credentials and stored nothing, so nothing accumulates across launches.
+# The relaunch minted fresh in-memory desktop credentials and stored nothing,
+# so no device rows accumulate across launches.
 RESTART_ROWS=$(device_rows)
-[ "$RESTART_ROWS" = 1 ] || fail "restart left $RESTART_ROWS device rows instead of only the smoke's own"
+[ "$RESTART_ROWS" = 0 ] || fail "restart left $RESTART_ROWS device rows instead of none"
 RESTART_PREFERENCES=$(curl_auth -sf --max-time 5 "$API/api/preferences") || fail "reading the shared preference after the restart"
 RESTART_SELECTION=$(printf '%s' "$RESTART_PREFERENCES" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("last_selected") or "")')
 RESTART_SORT=$(printf '%s' "$RESTART_PREFERENCES" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("list_sort") or "")')
@@ -900,20 +912,16 @@ done
 echo "== waiting for the restarted app's client-log marker"
 wait_for_client_log_marker "$X/desktop-restart.log"
 
-echo "== rotating the token: browser credentials end, the desktop window carries on"
-# Rotation revokes every browser credential and closes their sockets, but the
-# desktop app's credentials are exempt (SPEC.md "Signing in again"). The
-# observable proof is threefold: the smoke's browser credential is refused,
-# the webview never runs another authentication (its readiness generation
-# does not move), and the page's terminal output client on the remembered
-# session is the SAME tmux client afterwards, because its WebSocket was
-# never closed. Before the exemption, rotation closed that socket and the
-# page reattached with a new client.
+echo "== rotating the token: the internal desktop credential carries on"
+# Rotation still changes the durable token used by a standalone helm, but the
+# desktop's per-launch credential is in memory and deliberately outside that
+# authority. The webview must not re-authenticate, and its terminal client must
+# remain the same socket after rotation.
 PAGE_CLIENT_BEFORE=$(tmux -S "$X/state/tmux.sock" list-clients -t "fh-$SID" -F '#{client_name} #{client_created}' 2>/dev/null | sort)
 [ -n "$PAGE_CLIENT_BEFORE" ] || fail "test premise: the page has no output client on the remembered session before rotation"
 "$BUILT_FARHELM" helm token rotate --state-dir "$X/state" >/dev/null || fail "rotating desktop helm token"
 ROTATED_STATUS=$(curl_auth -s -o /dev/null -w '%{http_code}' --max-time 5 "$API/api/hosts")
-[ "$ROTATED_STATUS" = 401 ] || fail "rotation did not revoke the smoke's browser credential (status $ROTATED_STATUS)"
+[ "$ROTATED_STATUS" = 200 ] || fail "rotation revoked the desktop's native credential (status $ROTATED_STATUS)"
 # An observation window rather than a readiness wait: the claim is that
 # nothing happens, so the script has to give the old behavior (a webview
 # re-authentication within a second or two of rotation) time to show up.
@@ -927,8 +935,6 @@ PAGE_CLIENT_AFTER=$(tmux -S "$X/state/tmux.sock" list-clients -t "fh-$SID" -F '#
 ROTATED_ROWS=$(device_rows)
 [ "$ROTATED_ROWS" = 0 ] || fail "rotation left $ROTATED_ROWS device rows instead of none"
 assert_no_persisted_credentials "rotation"
-mint_smoke_credential
-curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "a fresh browser credential after rotation was not accepted"
 # And the app's own native client is still authenticated: a new session makes
 # the page list sessions again over native REST, and the smoke hook logs a
 # listing only once the helm has answered it with success. Counting answered
@@ -1134,9 +1140,8 @@ if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
   #
   # Reuses the Xvfb/openbox display already up for the main launch above —
   # dioxus-desktop still needs one to reach this supervisor at all, even
-  # though this leg drives no window and clicks nothing — and the exact
-  # DOCTYPE readiness check the main launch used earlier, so a broken
-  # bypass fails the same oracle a broken embedded helm would.
+  # though this leg drives no window and clicks nothing. The readiness file
+  # and authenticated API request prove the embedded helm started.
   echo "== an answering supervisor bypasses the desktop's own tmux preflight"
   ANSWERING_STATE="$X/answering-state"
   mkdir -m 0700 "$ANSWERING_STATE"
@@ -1157,31 +1162,23 @@ if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
   # A path inside this run's own private directory, deliberately never
   # created — the same reasoning as the missing-tmux preflight leg above
   # applies here: a global path like `/nonexistent/tmux` could exist on
-  # some machine and defeat the point. A different port than the main
-  # launch's, since that app has only just been asked to close and its
-  # listener may still be draining. Under a forced DESKTOP_SMOKE_PORT the
-  # neighbor keeps the old predictable shape; otherwise it is picked the
-  # way the main port was, since PORT+1 next to an ephemeral pick is no
-  # more likely to be free than any other number.
+  # some machine and defeat the point. The embedded helm chooses its own
+  # fresh loopback port, published through the debug-only readiness seam.
   ANSWERING_BAD_TMUX="$X/answering-bad-tmux/tmux"
-  if [ -n "${DESKTOP_SMOKE_PORT:-}" ]; then
-    ANSWERING_PORT=$((PORT + 1))
-  else
-    ANSWERING_PORT="$(free_port)" || fail "could not pick a free port for the answering-supervisor leg"
-  fi
+  ANSWERING_READY_PATH="$X/answering-ready.json"
+  rm -f "$ANSWERING_READY_PATH"
   ANSWERING_DESKTOP_LOG="$X/answering-desktop.log"
   DISPLAY=$DISP \
     FARHELM_TMUX="$ANSWERING_BAD_TMUX" \
-    FARHELM_DESKTOP_PORT="$ANSWERING_PORT" \
+    FARHELM_DESKTOP_SMOKE_READY="$ANSWERING_READY_PATH" \
     FARHELM_DESKTOP_STATE_DIR="$ANSWERING_STATE" \
     FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
-    FARHELM_DESKTOP_UI_DIST="$WEB_DIST" \
     "$APP" >"$ANSWERING_DESKTOP_LOG" 2>&1 &
   ANSWERING_DESKTOP_PID=$!
 
   ANSWERING_READY=""
   for _ in $(seq 1 30); do
-    if curl_local -sf --max-time 2 "http://127.0.0.1:$ANSWERING_PORT/" | grep -q '<!DOCTYPE html>'; then
+    if [ -s "$ANSWERING_READY_PATH" ]; then
       ANSWERING_READY=1
       break
     fi
@@ -1189,7 +1186,10 @@ if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
     sleep 1
   done
   [ -n "$ANSWERING_READY" ] ||
-    fail "desktop against an answering supervisor never served the bundled UI (see $ANSWERING_DESKTOP_LOG)"
+    fail "desktop against an answering supervisor never published readiness (see $ANSWERING_DESKTOP_LOG)"
+  read_desktop_ready "$ANSWERING_READY_PATH"
+  curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null ||
+    fail "desktop against an answering supervisor could not authenticate its native API"
   # The preflight's refusal text ("needs tmux ...") naming the bad
   # candidate would be definitive proof it ran; its absence plus the
   # candidate never existing (checked next) is what proves it did not.

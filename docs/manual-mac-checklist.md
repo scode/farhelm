@@ -165,8 +165,10 @@ happens" from an older build or a non-macOS launch means "run
    against your supervisor — the preflight must not run at all, because this process is not about to spawn or configure
    a tmux of its own.
 2. Start the native app and provision a fresh Ubuntu host using only the account's existing passwordless SSH. Confirm
-   that setup needs no root, the supervisor registers, and a session runs. Then use
-   `~/.local/bin/farhelm helm token show` and open the same embedded helm's authenticated web UI.
+   that setup needs no root, the supervisor registers, and a session runs. Quit the app, then use
+   `~/.local/bin/farhelm helm token show` with a standalone `farhelm helm run` on the same state directory and open that
+   helm's authenticated web UI. The running desktop helm itself serves no browser UI or token exchange. Stop the
+   standalone helm and relaunch the app before continuing.
 3. In an existing `jj` workspace where Git reports detached HEAD, create an official Claude Code session in one action.
 4. Create a local Mac session the same way. Confirm the local and remote sessions appear together in one list.
 5. Paste a Mac screenshot into the remote terminal. Confirm the path appears at the active cursor and Claude can read
@@ -179,7 +181,8 @@ happens" from an older build or a non-macOS launch means "run
    confirm that same session is selected and attached and that the chosen order is still applied. Also confirm both
    sessions and their terminal state remain. Reboot the Mac and confirm the remote session is untouched while the local
    session is interrupted and offers conversation resume.
-7. Attach to the remote session from the token-authenticated web UI and confirm the native app visibly detaches.
+7. Quit the app and start a standalone `farhelm helm run` on the same state directory. Attach to the remote session from
+   one token-authenticated browser tab, then another, and confirm the first tab visibly detaches.
 8. Ask real Claude to create a new `jj workspace` and invoke the injected spawn CLI. Confirm the child appears without
    refreshing either client.
 

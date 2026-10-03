@@ -3,7 +3,8 @@
 //! Per SPEC.md, exactly one helm runs at a time. It connects to
 //! supervisors (locally over their unix socket, remotely over the user's
 //! own ssh running `farhelm internal stdio`), aggregates their sessions,
-//! and serves the UI and API over loopback HTTP/WS. It holds no
+//! and serves the API over loopback HTTP/WS. A standalone helm also serves
+//! the browser UI; the desktop embeds a helm private to its window. It holds no
 //! authoritative session state — supervisors are the authority.
 //!
 //! The loopback-only bind is enforced here — SPEC.md's security posture
@@ -237,7 +238,8 @@ mod http_contract_tests;
 /// them could only ever have meant the wrong thing.
 #[derive(Args, Debug, Clone)]
 pub struct HelmArgs {
-    /// Loopback port for the web UI and API.
+    /// Loopback port for the standalone web UI and API. The desktop passes
+    /// zero so the kernel chooses its private API port for each launch.
     #[arg(long, default_value_t = 7433)]
     pub port: u16,
 
@@ -441,9 +443,11 @@ impl HelmArgs {
 /// crate's docs for why the single-client `AppState` this replaced could
 /// not survive multi-host.
 struct AppState {
+    /// One choice controls credential admission, browser routes, and static UI.
+    mode: ServingMode,
     manager: Arc<manager::ConnectionManager>,
     store: store::HelmStore,
-    /// The browser security boundary: durable credentials plus the
+    /// The client security boundary: mode-selected credentials plus the
     /// process-local channel that closes admitted sockets on rotation.
     auth: auth::AuthState,
     /// How many `/api/events` subscriptions this helm admits at once.
@@ -480,6 +484,14 @@ struct AppState {
     clipboard_admission: clipboard::ClipboardAdmission,
 }
 
+/// The two serving surfaces share their handlers, but the desktop's embedded
+/// helm has a narrower authentication and static-content boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ServingMode {
+    Standalone,
+    Embedded,
+}
+
 /// A native system-clipboard writer the embedding desktop shell provides.
 ///
 /// Takes the full text to place on the system clipboard; an `Err` carries a
@@ -504,6 +516,7 @@ impl AppState {
         state_dir: PathBuf,
         payload_selection: provisioning::PayloadSelection,
         release_build: bool,
+        mode: ServingMode,
     ) -> anyhow::Result<AppState> {
         let provisioning = provisioning::ProvisioningService::production(
             store.clone(),
@@ -512,7 +525,7 @@ impl AppState {
             payload_selection,
             release_build,
         )?;
-        Ok(Self::with_provisioning(manager, store, provisioning))
+        Ok(Self::with_provisioning(manager, store, provisioning, mode))
     }
 
     /// Assemble state with an injected provisioning service. The ordinary
@@ -522,11 +535,13 @@ impl AppState {
         manager: Arc<manager::ConnectionManager>,
         store: store::HelmStore,
         provisioning: Arc<provisioning::ProvisioningService>,
+        mode: ServingMode,
     ) -> AppState {
         AppState {
+            mode,
             manager,
             store: store.clone(),
-            auth: auth::AuthState::new(store),
+            auth: auth::AuthState::for_mode(store, mode),
             event_subscriber_cap: events::MAX_SUBSCRIBERS,
             provisioning,
             client_log_rate: std::sync::Mutex::new(client_log::RateWindow::new(
@@ -543,10 +558,11 @@ impl AppState {
 ///
 /// The static UI deliberately does not live here: it must remain reachable
 /// before a browser has authenticated. The control-plane routes are assembled
-/// first and protected as one group; the one public exchange route is added
-/// afterwards. Keeping both boundaries structural avoids relying on each
+/// first and protected as one group; standalone mode adds the public exchange
+/// route afterwards. Keeping both boundaries structural avoids relying on each
 /// future route to remember whether it belongs inside authentication.
 fn api_router(state: Arc<AppState>) -> Router {
+    let mode = state.mode;
     let protected = Router::new()
         .route(
             "/api/sessions",
@@ -784,19 +800,22 @@ fn api_router(state: Arc<AppState>) -> Router {
             clipboard::MAX_BODY_BYTES,
         ));
 
-    protected
+    let app = protected
         .merge(desktop_device)
         .merge(desktop_attachment)
         .merge(desktop_client_log)
-        .merge(desktop_clipboard)
-        .route(
+        .merge(desktop_clipboard);
+    let app = match mode {
+        ServingMode::Standalone => app.route(
             "/api/auth/token",
             axum::routing::post(auth::exchange_token)
                 .layer(axum::extract::DefaultBodyLimit::max(256))
                 .options(middleware::desktop_webview_preflight)
                 .layer(axum::middleware::from_fn(middleware::desktop_webview_cors)),
-        )
-        .with_state(state)
+        ),
+        ServingMode::Embedded => app,
+    };
+    app.with_state(state)
 }
 
 /// Return the ordinary status for an authenticated but unknown API path.
@@ -1007,14 +1026,21 @@ fn serve_embedded_bytes(path: &str, bytes: &'static [u8]) -> axum::response::Res
         .into_response()
 }
 
-/// Compose the protected API with the public static UI and the middleware
-/// that must stamp every response.
+/// Compose the API, static UI, and shared middleware from one serving mode.
 ///
-/// Pulled out of `run()` so tests can drive the real middleware stack
-/// in-process (via `tower::ServiceExt::oneshot`) against a scripted fleet,
-/// instead of only exercising handlers directly and silently skipping the
-/// origin guard and its response headers.
+/// An embedded helm ignores every supplied UI source: its mode also selected
+/// its credential authority when the state was built. Keeping the mode on
+/// that state makes a browser router over embedded auth (or the reverse)
+/// impossible through these constructors.
+///
+/// Tests drive this same composition in-process against a scripted fleet,
+/// including the origin guard and headers, rather than exercising handlers
+/// in isolation and silently skipping the security boundary.
 fn build_router(state: Arc<AppState>, ui: UiSource, port: u16) -> Router {
+    let ui = match state.mode {
+        ServingMode::Standalone => ui,
+        ServingMode::Embedded => UiSource::None,
+    };
     let mut app = api_router(state);
 
     app = match ui {
@@ -1084,6 +1110,82 @@ mod embedded_ui_tests {
             UiSource::Embedded(&FIXTURE_UI),
             7433,
         )
+    }
+
+    /// The desktop's private helm exposes the API only: a browser pointed at
+    /// its loopback address must find neither the standalone SPA nor the
+    /// bootstrap token exchange. A credential proven valid against standalone
+    /// state must be refused even though the same durable row still exists.
+    #[farhelm_testtrace::test]
+    async fn embedded_mode_has_no_browser_ui_or_token_exchange() {
+        let harness = rest_harness::idle_helm().await;
+        let stored_secret = harness.state.auth.mint_device().await.unwrap();
+        let standalone = build_router(Arc::clone(&harness.state), UiSource::None, 7433);
+        let accepted = standalone
+            .oneshot(
+                Request::builder()
+                    .uri("/api/auth/device")
+                    .header(header::HOST, "127.0.0.1:7433")
+                    .header(header::AUTHORIZATION, format!("Bearer {stored_secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            accepted.status(),
+            StatusCode::NO_CONTENT,
+            "fixture premise: the durable credential authenticates standalone"
+        );
+        let state = Arc::new(AppState::with_provisioning(
+            Arc::clone(&harness.state.manager),
+            harness.state.store.clone(),
+            Arc::clone(&harness.state.provisioning),
+            ServingMode::Embedded,
+        ));
+        let device_secret = state.auth.mint_embedded_device().unwrap();
+        let router = build_router(state, UiSource::Embedded(&FIXTURE_UI), 7433);
+        let stored_request = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/hosts")
+                    .header(header::HOST, "127.0.0.1:7433")
+                    .header(header::AUTHORIZATION, format!("Bearer {stored_secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stored_request.status(), StatusCode::UNAUTHORIZED);
+
+        let root = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(header::HOST, "127.0.0.1:7433")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(root.status(), StatusCode::NOT_FOUND);
+
+        let token = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/auth/token")
+                    .header(header::HOST, "127.0.0.1:7433")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, format!("Bearer {device_secret}"))
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(token.status(), StatusCode::NOT_FOUND);
     }
 
     /// A `UiSource::Dir` router over a freshly written temp directory
@@ -1575,7 +1677,7 @@ mod embedded_ui_tests {
 /// none is needed: SPEC.md's whole durability promise is that killing the
 /// helm does nothing to any session.
 pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
-    run_with_ready(args, None, None, None).await
+    run_with_ready(args, None, None, None, ServingMode::Standalone).await
 }
 
 /// What an embedded helm hands the desktop process that owns it once every
@@ -1601,10 +1703,10 @@ pub struct EmbeddedReady {
 /// Run an embedded helm and report its bound address and the desktop's own
 /// credentials once every serving dependency is ready.
 ///
-/// The desktop shell chooses its documented stable port, but it must not launch the UI
-/// until the HTTP listener, durable token, local-host actor, and token-control
-/// socket all exist. A synchronous channel keeps that startup boundary out of
-/// the Dioxus runtime and, unlike parsing stdout, cannot confuse another log
+/// The desktop shell lets the kernel choose a fresh loopback port, but it must
+/// not launch the window until the HTTP listener, durable token, local-host
+/// actor, and token-control socket all exist. A synchronous channel keeps that
+/// startup boundary out of the Dioxus runtime and, unlike parsing stdout, cannot confuse another log
 /// line for readiness. The explicit shutdown receiver gives `DesktopBootstrap`
 /// a teardown path it can join; dropping its sender carries the same owner-
 /// disappeared meaning as sending the signal.
@@ -1614,7 +1716,14 @@ pub async fn run_embedded(
     ready: std::sync::mpsc::Sender<EmbeddedReady>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
-    run_with_ready(args, clipboard_sink, Some(ready), Some(shutdown)).await
+    run_with_ready(
+        args,
+        clipboard_sink,
+        Some(ready),
+        Some(shutdown),
+        ServingMode::Embedded,
+    )
+    .await
 }
 
 /// Shared process and embedded-app serving path. There is deliberately one
@@ -1631,6 +1740,7 @@ async fn run_with_ready(
     clipboard_sink: Option<ClipboardSink>,
     ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
     shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
+    mode: ServingMode,
 ) -> anyhow::Result<()> {
     let state_dir = match args.state_dir.clone() {
         Some(dir) => dir,
@@ -1677,10 +1787,10 @@ async fn run_with_ready(
         store,
         state_dir.clone(),
         args.payload_selection(),
-        // D13: a release build is exactly a build that embedded a web UI.
-        // Read here, not at `HelmArgs::payload_selection`, because it is a
-        // fact about THIS BINARY, not about the argv the operator passed.
+        // D13: release payload selection follows this binary's build, not
+        // whether this serving mode exposes its compiled UI over HTTP.
         cfg!(farhelm_release_build),
+        mode,
     )?;
     app.clipboard_sink = clipboard_sink;
     let state = Arc::new(app);
@@ -1708,8 +1818,13 @@ async fn run_with_ready(
     // database whose bootstrap secret exists only after somebody invokes the
     // separate `token show` command.
     state.auth.token().await?;
-    let ui = select_ui_source(args.ui_dist.clone(), embedded_ui());
-    warn_if_no_ui(&ui);
+    let ui = match mode {
+        ServingMode::Standalone => select_ui_source(args.ui_dist.clone(), embedded_ui()),
+        ServingMode::Embedded => UiSource::None,
+    };
+    if mode == ServingMode::Standalone {
+        warn_if_no_ui(&ui);
+    }
     let app = build_router(Arc::clone(&state), ui, addr.port());
 
     // Establish the configuration baseline before announcing readiness or
@@ -1727,9 +1842,12 @@ async fn run_with_ready(
         });
     }
 
-    // Printed on stdout, not logged: the README tells the user to open
-    // this URL, and tracing goes to stderr behind an env filter.
-    println!("farhelm helm: http://{addr}/");
+    // Only a standalone helm has a browser-facing URL. Printing the embedded
+    // address invites users and other processes to treat the desktop's
+    // private implementation detail as a supported browser endpoint.
+    if mode == ServingMode::Standalone {
+        println!("farhelm helm: http://{addr}/");
+    }
     let embedded_shutdown = async move {
         match shutdown {
             Some(receiver) => {
