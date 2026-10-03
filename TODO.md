@@ -127,7 +127,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   attempt. Possible shapes: compare the payload's version against the helm's `PROTOCOL_VERSION` before pushing and
   refuse with a message naming the mismatch; or make the staged-payload path (`--payload-dir`,
   `FARHELM_HELM_PAYLOAD_DIR`) the documented answer for from-main helms. Noted 2026-08-31 when upgrading the stable
-  install to a from-main build while the newest release was still 0.1.1.
+  install to a from-main build while the newest release was still 0.1.1. Plan:
+  `plans/queue/unreleased-download-message.md`.
 
 - **No network path for the desktop app.** The desktop app's webview talks to its embedded helm the way the browser
   does, over HTTP and WebSockets on a loopback port, so one UI code path serves both clients. That port can be reached
@@ -176,7 +177,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Easy font size changes.** Let the user make the font larger or smaller with keyboard shortcuts, plus buttons for the
   same. Which shortcuts, where the buttons go, whether it covers the terminal, the rest of the UI, or both, and whether
-  the size is remembered, are to be decided when this is picked up.
+  the size is remembered, are to be decided when this is picked up. Plan: `plans/queue/font-size-controls.md`.
 
 - **Download files named in the terminal.** When text in a session's terminal looks like a file path (an agent saying "I
   wrote the file here"), hovering it should mark it as clickable, and clicking it should download that file from the
@@ -194,7 +195,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   should do about it: a hint, making a Codex prompt-box drag copy without the user knowing about Ctrl+C, an upstream
   report, or a combination. Any Codex-specific handling goes where the harness map in
   `crates/farhelm-supervisor/src/agent_kind/mod.rs` says. Not yet checked: whether other harnesses' prompt boxes behave
-  the same way.
+  the same way. Plan: `plans/queue/drag-copy-hint.md`.
 
 - **Keyboard quick switcher.** A keyboard shortcut that opens a quick switcher, like Slack's: type to jump to an
   existing session, or to start a new one. Details TBD.
@@ -250,7 +251,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Replace the YOLO session icon.** The sidebar marks a YOLO session with an open padlock, but the other permission
   modes use a closed one, and the difference is hard to see. That makes it easy to read as "this session is locked
   down", which is the opposite of what it means. Replace it with a mark that cannot be mistaken for a lock; the
-  replacement is TBD. The marks are drawn by `PermissionIcon` in `crates/farhelm-ui/src/icons.rs`.
+  replacement is TBD. The marks are drawn by `PermissionIcon` in `crates/farhelm-ui/src/icons.rs`. Plan:
+  `plans/queue/yolo-icon.md`.
 
 - **Name the real refusal when a provisioned host will not attach.** After setting up or updating a host, the last step
   waits for the helm to connect to the new supervisor and recognizes only success. A supervisor that answers and refuses
@@ -267,7 +269,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   fresh-window retry returns the revision its nudge set (a revived actor counting from its own start), and the attach
   wait stops early on a refusal stamped at or after that ticket; it needs a deterministic test of an attempt in flight
   across the nudge. Review item: `review_feedback_queue/attach-reports-generic-timeout.md` (`TRIAGE_OUTCOMES.md` heading
-  of the same name).
+  of the same name). Plan: `plans/queue/attach-refusal-reason.md`.
 
 ## Doc todo
 
@@ -820,6 +822,17 @@ are large mostly because of their tests.
   orchestrating agent driving workhorse agents that run as Farhelm sessions. The second overlaps with the cross-host
   orchestration authority question in the earlier entry on closing the cross-host execution hole in agent-requested
   session creation.
+
+- **Make copying work out of the box with Codex.** Since Codex 0.157 its fullscreen interface captures the mouse, so a
+  plain drag in its prompt box highlights text without copying it; the drag-copy hint plan only explains this to the
+  user. Consider a launcher option to turn Codex's fullscreen mode off (`-c tui.fullscreen_transcript=false`, the
+  setting `/tui` → Scrollback saves), or another way to make copying work without the user having to know Codex's copy
+  key. Decided 2026-10-02 while planning the hint.
+
+- **Whole-app zoom.** The font size plan covers terminal text only. Consider a zoom for the whole UI as well: the
+  desktop app's webview has a native zoom Farhelm never uses (Cmd/Ctrl +/− do nothing there today), while on the web the
+  browser's own page zoom already works but cannot be driven from a button. The rest of the UI uses about 110 hard-coded
+  pixel sizes, so a CSS-based scale would be a refactor. Deferred 2026-10-02 as more work than the terminal control.
 
 ## Unbucketized
 
