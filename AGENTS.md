@@ -366,11 +366,13 @@ instructions is validated with the end-to-end procedure in `deflake/EVAL.md`, a 
 
 # plans/
 
-`plans/` holds one plan per planned TODO entry, or per batch of triage outcomes the user chose to schedule there: a goal
-file to execute unattended, with `plans/INDEX.md` as the authoritative order to execute them in. "Plan to implement
-<TODO items>", "use the planning system to schedule these" (for triage outcomes), "execute the next plan", "drain the
-plans" (optionally "and keep monitoring"), "show the plan reports", "delete the executed plans", and "plan help" are
-defined in `plans/AGENTS.md`; read it before any of those, or before changing anything in the directory.
+`plans/` holds a queue of planned work: one goal file per planned TODO entry or triaged outcome, executed unattended by
+any number of concurrent executors, each claiming one plan at a time through `scripts/plans-queue.py`.
+`plans/queue/INDEX.md` is the queue, with each plan's state. "Plan to implement <TODO items>", "use the planning system
+to schedule these" (for triage outcomes), "pick a plan to execute" and "execute the next plan" (with "in order" or a
+named plan as variants), "drain the plans" (optionally "and keep monitoring"), "review the plans", "show blocked plans",
+"land the approved plans", "release plan X", and "plan help" are defined in `plans/AGENTS.md`; read it before any of
+those, or before changing anything in the directory.
 
 # review_feedback_queue/
 
@@ -470,8 +472,8 @@ as it appears in `review_feedback_queue/`, with these fields:
   For spec changes, include the underlying principle; for `other`, include the negotiated action.
 - Completion criteria: what execution must accomplish, including any deliberately retained part of the feedback.
 - Execution: `pending` initially; later `in progress`, `blocked` with the reason, or `complete`, with the stable jj
-  change ID, bookmark, and PR URL as they become available. `` planned in `plans/<slug>.md` `` means the outcome was
-  scheduled through `plans/` (see `plans/AGENTS.md`) and is executed only by running that plan.
+  change ID, bookmark, and PR URL as they become available. `` planned in `plans/queue/<slug>.md` `` means the outcome
+  was scheduled through `plans/` (see `plans/AGENTS.md`) and is executed only by running that plan.
 
 Keep previous decisions and execution records; do not overwrite the file on a new triage session. If the user revises a
 decision, retain the prior decision and note what supersedes it. Do not create entries for undecided items. Triaged
@@ -483,10 +485,10 @@ spec-covered or already-planned cleanup above is the exception: those queue item
 
 "Execute triage outcomes" is a separate user request. Read root `TRIAGE_OUTCOMES.md` and execute its pending decisions
 (or the subset the user names); resume incomplete execution rather than making duplicate PRs. Outcomes marked
-`` planned in `plans/<slug>.md` `` belong to that plan: execute them only as part of running it. Scheduling outcomes
-through `plans/` instead of executing them here happens only when the user explicitly asks for the planning system;
-`plans/AGENTS.md` describes it. Do not silently triage undecided items or change an agreed outcome. If current code or
-specs invalidate a decision, return that item to the user for clarification.
+`` planned in `plans/queue/<slug>.md` `` belong to that plan: execute them only as part of running it. Scheduling
+outcomes through `plans/` instead of executing them here happens only when the user explicitly asks for the planning
+system; `plans/AGENTS.md` describes it. Do not silently triage undecided items or change an agreed outcome. If current
+code or specs invalidate a decision, return that item to the user for clarification.
 
 Load and follow the `jjstack` skill. Make one reviewable commit, stable bookmark, and draft PR per triaged outcome,
 including `discard` and `other`, in a single linear stack. Use ledger order unless dependencies require another order;

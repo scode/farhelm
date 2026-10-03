@@ -5,10 +5,10 @@ system in `plans/AGENTS.md`. You, the executing agent, have none of the conversa
 need is here or in the repository files it names. SPEC.md and SPEC_impl.md stay authoritative over anything this file
 says, except where this file names a passage the user decided to change.
 
-This plan runs after `plans/host-dialogs-and-menu.md`, which reworks the same host row and its menu (hover-revealed
-toggle, session-style menu, removal in a dialog). The dependency is about avoiding churn in shared code, not about
-building on anything from it: read what it landed and fit your change to the row as it is then. If it has not landed and
-the inline removal prompt still exists, disable the new button while that prompt shows, as the `⋯` toggle is.
+This plan runs after `plans/queue/host-dialogs-and-menu.md`, which reworks the same host row and its menu
+(hover-revealed toggle, session-style menu, removal in a dialog). The dependency is about avoiding churn in shared code,
+not about building on anything from it: read what it landed and fit your change to the row as it is then. If it has not
+landed and the inline removal prompt still exists, disable the new button while that prompt shows, as the `⋯` toggle is.
 
 ## The goal
 
@@ -111,7 +111,7 @@ One PR (`feat:`). Line numbers drift; find the code by name.
     `host-menu-survives-the-longest-phase-word`) into it. No real update: the menu's tests in
     `e2e/tests/provisioning.spec.ts` already cover that path end to end.
 - SPEC.md, SPEC_impl.md and `manage-hosts.md` as in the constraints. Changelog fragment `kind: added`. Remove the TODO
-  entry. Mark this plan's line in `plans/INDEX.md` `[executed]`.
+  entry.
 
 ### What not to build
 
@@ -131,7 +131,9 @@ describes, not in the checkout.
 
 Your first action is to invoke the `agent-resumeable` skill with the log file's absolute path. If the log exists, read
 it and resume where the previous session left off, cross-checking it against reality (the jj graph, bookmarks, open PRs,
-TODO.md and `plans/INDEX.md`) rather than starting over. If it does not exist, this is a fresh start.
+TODO.md and `plans/queue/INDEX.md`) rather than starting over. If it does not exist, this is a fresh start. A plan that
+an earlier executor worked on, or that came back from review, also gets the resume check in `plans/AGENTS.md` (Executing
+one plan, step 7) before any work.
 
 ### Galaxy-brain, no-workhorse
 
@@ -139,7 +141,9 @@ The user requires you to use `$scode-galaxy-brain` to achieve this entire goal. 
 the resume protocol and keep it active for the whole run. The user forbids delegating any unit of your own
 decomposition, read-only or writing: you do all of that work yourself and do not ask routing about it, and this demand
 overrides galaxy-brain's own judgment of what is worth delegating. The spawns this file calls for (the review gate and
-the scope reassessment review) are still routed and launched through galaxy-brain.
+the scope reassessment review) are still routed and launched through galaxy-brain. The sub-agents `plans/AGENTS.md`
+requires of every plan (the resume check, and the cold reads of a blocked question and of the report) are exempt from
+the no-delegation demand and run as that file says, not through galaxy-brain.
 
 ### Resource watchdog
 
@@ -165,9 +169,9 @@ restarts it, and stop it when the plan closes. Do not lengthen the sampling inte
 
 ### PR discipline
 
-- Use the `jjstack` skill. The stack's base is not main but the tip of the plan stack, set up per `plans/AGENTS.md`
-  (Executing, step 4). PRs already in the plan stack, from earlier plans or an earlier blocked run of this one, are the
-  base and are not rewritten.
+- Use the `jjstack` skill. The stack's base is `main@origin`, or this plan's own open PRs when it resumes, set up per
+  `plans/AGENTS.md` (Executing one plan, step 6); never another plan's PRs. Bookmarks are
+  `plan/host-update-button/<nn>-<short-name>`.
 - One commit, bookmark and draft PR. Within this run, if it needs correcting, restructure it rather than stacking a
   correction on top.
 - Commit message and PR title use Conventional Commits; the PR is `feat:`. It adds its changelog fragment under
@@ -175,7 +179,8 @@ restarts it, and stop it when the plan closes. Do not lengthen the sampling inte
   `python3 releasing/check-changelog.py format`.
 - Run the commit message, PR title and PR description through the `scode-commit-msg-reviewer` skill's cold read. Leave
   the PR description empty when the diff and title say everything.
-- The PR stays a draft. Never mark it ready and never merge; landing the plan stack is the user's job.
+- The PR stays a draft. Never mark it ready and never merge; landing waits until the maintainer has reviewed this plan's
+  report (`plans/AGENTS.md`).
 
 ### Validation
 
@@ -239,11 +244,12 @@ finding you declined. The user will ask for these later.
 Resolve routine implementation forks within the agreed scope and log them. Remove planner-invented machinery that turns
 out unnecessary when the decisions still hold. A material scope expansion, a weakened guarantee, or an omitted required
 behavior needs an agreed fallback or the user's decision; a review finding or a log entry is not authorization. Anything
-that needs a decision: record the concrete tradeoff and block per `plans/AGENTS.md` (Executing, step 7).
+that needs a decision: record the concrete tradeoff and block per `plans/AGENTS.md` (Executing one plan, step 10).
 
 ## Done criterion
 
-The plan is complete when its one draft PR exists on the plan stack's tip, satisfies the acceptance criteria, has passed
-the review gate, has removed the TODO.md entry, and has marked this plan's `plans/INDEX.md` line `[executed]`. Open, not
-merged: merging is the user's job. Then close the plan per `plans/AGENTS.md` (Executing, step 8): write its report,
-write a closing entry in its log, and stop the watchdog.
+The plan is complete when its one draft PR exists, satisfies the acceptance criteria, has passed the review gate, and
+has removed the TODO.md entry. Open, not merged: merging happens only after the maintainer has reviewed this plan's
+report. If a `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
+`plans/AGENTS.md` (Executing one plan, steps 11 and 12): deliver its report through the queue script, write a closing
+entry in its log, and stop the watchdog. Never edit `plans/` yourself.

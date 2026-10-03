@@ -8,8 +8,8 @@ says, except where this file names a SPEC_impl.md sentence that the user decided
 This plan has no dependency on another plan. Two neighbors touch nearby ground; read what they landed (if they have) so
 your text does not contradict it:
 
-- `plans/triage-confirm-ssh-identity.md` rewrites SPEC.md "Durability and resume" toward report-only conversation
-  identity and changes Claude's resume selector handling.
+- The earlier `triage-confirm-ssh-identity` plan, now landed, rewrote SPEC.md "Durability and resume" toward report-only
+  conversation identity (#1444) and changed Claude's resume selector handling (#1458).
 - TODO.md's `Near term` entry "Remove heuristic conversation-identity fallbacks" (no plan yet) removes Claude's record
   scan. This plan does not depend on it: the scan never takes the lock this plan is about.
 
@@ -40,7 +40,7 @@ The fix, as decided with the user:
 
 Acceptance criteria:
 
-- Two draft PRs exist, stacked in the order below on top of the plan stack's tip (see PR discipline).
+- Two draft PRs exist, stacked in the order below (see PR discipline).
 - No report path refuses because the lock was busy. A Claude, Goose or Pi report is applied once the lock frees however
   long that takes; a Codex, Grok or OMP report is applied as long as its hook is still there when the lock frees (about
   30 s, U3). A regression test holds the lock past the old 1 s limit and shows the report landing (Claude, and at least
@@ -55,9 +55,8 @@ Acceptance criteria:
 - Each PR adds a changelog fragment.
 - PR 2 also removes the TODO.md entry "Apply identity reports that arrive while the session's record is busy", removes
   the feedback file and its line in `review_feedback_queue/INDEX.md`, updates that item's Execution field in root
-  `TRIAGE_OUTCOMES.md` to `complete` (change IDs, bookmarks, PR URLs), and changes this plan's line in `plans/INDEX.md`
-  to `[executed]`. Do not delete this plan file. Record the change ID and bookmark before creating the PR, then add the
-  URL to the same change and push again; no separate bookkeeping PR.
+  `TRIAGE_OUTCOMES.md` to `complete` (change IDs, bookmarks, PR URLs). Record the change ID and bookmark before creating
+  the PR, then add the URL to the same change and push again; no separate bookkeeping PR.
 - Both PRs have passed the review gate. No PR is marked ready, and nothing is merged.
 
 ## Requirement sources
@@ -242,8 +241,7 @@ Line numbers drift; find the code by name.
 - Bookkeeping, in this PR: remove the TODO.md entry, the feedback file and its line in `review_feedback_queue/INDEX.md`;
   in root `TRIAGE_OUTCOMES.md`, add a Decision line to the item's record saying the 2026-10-02 decisions above supersede
   the plan-time deferral (unbounded claim, Claude's check first, 30 s and 60 s timers, retry per U8, Pi and OMP plugins
-  unchanged), and set its Execution to `complete` with both PRs' change IDs, bookmarks and URLs; mark this plan's
-  `plans/INDEX.md` line `[executed]`.
+  unchanged), and set its Execution to `complete` with both PRs' change IDs, bookmarks and URLs.
 
 ## How to run
 
@@ -258,7 +256,9 @@ section says. Resolve it to an absolute path before you start. Scratch files go 
 
 Your first action is to invoke the `agent-resumeable` skill with the log file's absolute path. If the log exists, read
 it and resume where the previous session left off, cross-checking it against reality (the jj graph, bookmarks, open PRs,
-and the `TRIAGE_OUTCOMES.md` Execution field) rather than starting over. If it does not exist, this is a fresh start.
+and the `TRIAGE_OUTCOMES.md` Execution field) rather than starting over. If it does not exist, this is a fresh start. A
+plan that an earlier executor worked on, or that came back from review, also gets the resume check in `plans/AGENTS.md`
+(Executing one plan, step 7) before any work.
 
 ### Galaxy-brain, no-workhorse
 
@@ -266,7 +266,9 @@ The user requires you to use `$scode-galaxy-brain` to achieve this entire goal. 
 the resume protocol and keep it active for the whole run. The user forbids delegating any unit of your own
 decomposition, read-only or writing: you do all of that work yourself and do not ask routing about it, and this demand
 overrides galaxy-brain's own judgment of what is worth delegating. The spawns this file calls for (the review gate and
-the scope reassessment review) are still routed and launched through galaxy-brain.
+the scope reassessment review) are still routed and launched through galaxy-brain. The sub-agents `plans/AGENTS.md`
+requires of every plan (the resume check, and the cold reads of a blocked question and of the report) are exempt from
+the no-delegation demand and run as that file says, not through galaxy-brain.
 
 ### Resource watchdog
 
@@ -292,9 +294,9 @@ restarts it, and stop it when the plan closes. Do not lengthen the sampling inte
 
 ### PR discipline
 
-- Use the `jjstack` skill. The stack's base is not main but the tip of the plan stack, set up per `plans/AGENTS.md`
-  (Executing, step 4). PRs already in the plan stack, from earlier plans or an earlier blocked run of this one, are the
-  base and are not rewritten.
+- Use the `jjstack` skill. The stack's base is `main@origin`, or this plan's own open PRs when it resumes, set up per
+  `plans/AGENTS.md` (Executing one plan, step 6); never another plan's PRs. Bookmarks are
+  `plan/identity-report-wait-retry/<nn>-<short-name>`.
 - PR 1 then PR 2, one commit, bookmark and draft PR each. Within this run, if a PR needs correcting, restructure it
   rather than stacking a correction on top, and do not add code in PR 1 that PR 2 deletes.
 - Commit messages and PR titles use Conventional Commits; both PRs are `fix:`. Each adds its changelog fragment under
@@ -302,7 +304,8 @@ restarts it, and stop it when the plan closes. Do not lengthen the sampling inte
   `python3 releasing/check-changelog.py format`.
 - Run every commit message, PR title and PR description through the `scode-commit-msg-reviewer` skill's cold read. Leave
   a PR description empty when the diff and title say everything.
-- PRs stay drafts. Never mark one ready and never merge; landing the plan stack is the user's job.
+- PRs stay drafts. Never mark one ready and never merge; landing waits until the maintainer has reviewed this plan's
+  report (`plans/AGENTS.md`).
 
 ### Validation
 
@@ -374,12 +377,14 @@ out unnecessary when the decisions still hold. A material scope expansion, a wea
 behavior needs an agreed fallback or the user's decision; a review finding or a log entry is not authorization. Agreed
 fallback: if the real binary's budget cannot get a clean test seam, rewrite the affected e2e deadlines around the real
 budget and connect cap instead, keeping the suites' runtime reasonable. Anything else that needs a decision: record the
-concrete tradeoff and block per `plans/AGENTS.md` (Executing, step 7). Because the PRs form one linear stack, if PR 1
-blocks, do not build PR 2 on top of it.
+concrete tradeoff and block per `plans/AGENTS.md` (Executing one plan, step 10). Because the PRs form one linear stack,
+if PR 1 blocks, do not build PR 2 on top of it.
 
 ## Done criterion
 
-The plan is complete when both draft PRs exist as one linear stack on the plan stack's tip, each satisfies its section
-above and the acceptance criteria, both have passed the review gate, and PR 2 has done the TODO, review queue, triage
-ledger and `plans/INDEX.md` bookkeeping. Open, not merged: merging is the user's job. Then close the plan per
-`plans/AGENTS.md` (Executing, step 8): write its report, write a closing entry in its log, and stop the watchdog.
+The plan is complete when both draft PRs exist as one linear stack, each satisfies its section above and the acceptance
+criteria, both have passed the review gate, and PR 2 has done the TODO, review queue and triage ledger bookkeeping.
+Open, not merged: merging happens only after the maintainer has reviewed this plan's report. If a `## Decisions` section
+exists, its latest entry must also be satisfied. Then close the plan per `plans/AGENTS.md` (Executing one plan, steps 11
+and 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog. Never
+edit `plans/` yourself.

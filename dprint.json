@@ -9,6 +9,7 @@
     "**/bun.lock",
     "target/**",
     "lore/**",
+    "plans/queue/INDEX.md",
     "CHANGELOG.md",
     "releasing/changelog.d/*.md",
     "releasing/drafts/**"
