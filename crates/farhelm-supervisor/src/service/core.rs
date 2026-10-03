@@ -4740,11 +4740,7 @@ impl Supervisor {
                 truncated = true;
                 break;
             }
-            if !entry
-                .file_type()
-                .context("reading directory entry type")?
-                .is_dir()
-            {
+            if !Self::browse_entry_is_directory(&entry) {
                 continue;
             }
             let path = entry.path();
@@ -4768,6 +4764,37 @@ impl Supervisor {
             children,
             truncated,
         })
+    }
+
+    /// Whether a directory entry belongs in the folder picker: a directory,
+    /// or a symlink that resolves to one (a `~/src` pointing at another
+    /// disk is a folder to the person choosing it).
+    ///
+    /// Only symlinks are followed; an ordinary entry's type comes from the
+    /// directory read itself, so no extra `stat` is spent per file. A
+    /// dangling or looping link, or one whose target cannot be read, is
+    /// left out, as it was before links were followed. An entry whose own
+    /// type cannot be read is now left out too, where it used to fail the
+    /// whole listing.
+    ///
+    /// Following a link can block on a hung mount like any other call here.
+    /// That stalls the listing of the folder holding the link (often the
+    /// home folder the picker opens on), and each stalled attempt keeps one
+    /// of the supervisor's browse workers until the mount answers, so
+    /// repeated attempts can leave the picker unusable on that host until
+    /// then. The worker permit and the caller's deadline bound the damage to
+    /// the picker (see [`Self::browse_directory_blocking`]), apart from each
+    /// waiting request holding one of the supervisor's shared slots for slow
+    /// requests until its deadline, as browsing into a stalled folder already
+    /// did.
+    fn browse_entry_is_directory(entry: &std::fs::DirEntry) -> bool {
+        match entry.file_type() {
+            Ok(file_type) if file_type.is_symlink() => {
+                std::fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_dir())
+            }
+            Ok(file_type) => file_type.is_dir(),
+            Err(_) => false,
+        }
     }
 
     /// Return the sorted bounded prefix of one already-scanned candidate set.
@@ -16082,6 +16109,64 @@ pub(crate) mod tests {
                 .all(|child| !child.ends_with("ordinary-file"))
         );
         assert_eq!(listing.parent.as_deref(), home.path().to_str());
+    }
+
+    /// Why this matters: people keep project folders behind symlinks (a
+    /// `~/src` pointing at another disk), and the picker used to keep only
+    /// entries whose own type is a directory, so those folders never showed
+    /// up. Spec: a symlink to a directory is listed under its link path; a
+    /// symlink to a file and a dangling symlink are left out. (An entry whose
+    /// own type cannot be read is also skipped, but that cannot be produced
+    /// portably in a test.)
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn directory_browse_lists_symlinked_folders_and_skips_broken_links() {
+        let state = StateDir::new();
+        let directory = tempfile::tempdir().expect("directory to browse");
+        let elsewhere = tempfile::tempdir().expect("link target");
+        std::fs::create_dir(directory.path().join("plain")).expect("plain directory");
+        std::fs::write(elsewhere.path().join("file"), b"not a directory").expect("target file");
+        std::os::unix::fs::symlink(elsewhere.path(), directory.path().join("linked"))
+            .expect("directory symlink");
+        std::os::unix::fs::symlink(
+            elsewhere.path().join("file"),
+            directory.path().join("file-link"),
+        )
+        .expect("file symlink");
+        std::os::unix::fs::symlink(
+            directory.path().join("missing"),
+            directory.path().join("dangling"),
+        )
+        .expect("dangling symlink");
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams::default(),
+        )
+        .await
+        .expect("supervisor");
+
+        let listing = sup
+            .browse_directory(directory.path().to_str().expect("UTF-8 path"))
+            .await
+            .expect("a dangling link must not fail the listing");
+
+        let names: Vec<&str> = listing
+            .children
+            .iter()
+            .map(|child| child.rsplit('/').next().expect("child name"))
+            .collect();
+        assert_eq!(names, vec!["linked", "plain"]);
+        let canonical = directory
+            .path()
+            .canonicalize()
+            .expect("canonical directory");
+        assert_eq!(
+            listing.children[0],
+            canonical.join("linked").to_str().expect("UTF-8 path"),
+            "a linked folder is offered under its link path, not its target"
+        );
     }
 
     /// A browse reply with no child directories must still stop reading a

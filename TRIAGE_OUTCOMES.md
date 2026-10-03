@@ -5715,7 +5715,8 @@
   skipped rather than failing the listing; add a symlink test. Following links can block on a wedged mount, which the
   existing browse worker and permit design tolerates. Remove this feedback file and its index entry. Stop and ask before
   implementing if this needs significant new complexity or a refactor.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `xkpplqww`, bookmark `triage-1001e/09-picker-follows-symlinks`, PR
+  https://github.com/scode/farhelm/pull/1450.
 
 ## tilde-in-remote-path-fields.md
 

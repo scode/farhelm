@@ -89,8 +89,6 @@ One line per open item. This file must always match the feedback files in this d
   failures stop exited tabs from being reaped host-wide.
 - `profile-body-accepts-unknown-fields.md` — a profile create/update with a misspelled or stray field is accepted and
   silently clears the stored resume template.
-- `folder-picker-skips-symlinks.md` — the create dialog's folder picker never lists symlinked folders, and one
-  unreadable entry fails the whole listing.
 - `tilde-in-remote-path-fields.md` — `~` in the remote farhelm or remote state dir fields is not expanded, giving a
   false "not installed" or a folder named `~`.
 - `escape-token-clamp-too-short.md` — the 64-character host label clamp can cut a `<U+E00xx>` escape token in half.
