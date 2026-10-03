@@ -6157,7 +6157,12 @@
 - Completion criteria: as for `desktop-auth-ready-with-stale-webview-credential.md`; once desktop re-authentication no
   longer occurs in ordinary operation, a pending desktop action cannot be unmounted by it. Remove the feedback file and
   its index entry.
-- Execution: planned in `plans/queue/triage-signin-recovery.md`.
+- Execution: complete — planned in `plans/queue/triage-signin-recovery.md`; jj change `wvtlsrzvvsut`, bookmark
+  `plan/triage-signin-recovery/02-desktop-outcome-loss`, https://github.com/scode/farhelm/pull/1488. Checked against the
+  code PR 1 produced: once the window is open, nothing replaces it. The failure page only comes from the window's
+  authentication run, which runs before the app is first shown and again only from that page's own Retry button, and the
+  browser's token prompt is never raised in the desktop build. SPEC.md's existing never-lost-silently sentence and PR
+  1's "Signing in again" text cover it; no new spec sentence.
 
 ## dropped-create-skips-bookkeeping.md
 
