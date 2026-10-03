@@ -171,6 +171,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Replace-with test. Both concern fresh-checkout bookkeeping, so they are investigated together; whether they share a
   cause is unknown. Plan: `plans/queue/fresh-checkout-provenance.md`.
 
+- **Update Farhelm while it runs.** On a Mac, updating while Farhelm is open breaks session starts, agent reports and
+  `farhelm spawn` until Farhelm is restarted, because the running Farhelm keeps starting the program the installer just
+  replaced. Auto-update is coming and needs this to be safe. Decided 2026-10-03: side-by-side versions inside
+  `Farhelm.app` with a small forwarder for long-lived sessions, the way Chrome updates itself; design and real-Mac
+  evidence at https://snippets.scode.org/s/farhelm-update-while-running/. Plan: `plans/queue/update-while-running.md`.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
