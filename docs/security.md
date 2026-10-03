@@ -61,14 +61,14 @@ the desktop process directly: one for its native reqwest client, kept in process
 and one passed to the webview over IPC so that the webview's `localStorage` and WebSocket subprotocol carry a credential
 of their own. The helm keeps only their digests, in memory; they are never `device_sessions` rows, so rotation and the
 64-row cap do not revoke them, rotation does not close the sockets they authenticate, and no HTTP route can mint one.
-They die with the process, and the app writes neither to disk: every launch gets a fresh pair, and the web token never
-enters the desktop process's JavaScript. The webview checks its secret via `GET /api/auth/device` before the window
-opens. The webview's origin is a custom scheme (`dioxus://`, `wry://`), so its fetches to the loopback helm are
-cross-origin; CORS headers are attached to exactly five routes (validate, exchange, upload, client-log, clipboard),
-echoing only those custom-scheme origins. The webview no longer calls the exchange; its CORS was left in place. Every
-Dioxus desktop app presents the same `dioxus://index.html` origin, and any wry-based app can present `wry://`, so
-content in another such app on the machine passes the Origin check too; SPEC.md accepts that for the browser-facing
-check, and the desktop app's identity rests on its credential, never on its Origin.
+The embedded helm serves no browser UI, chooses a fresh loopback port at every launch, and rejects stored browser rows
+from the shared state directory. The two credentials die with the process, and the app writes neither to disk: every
+launch gets a fresh pair, and the web token never enters the desktop process's JavaScript. The webview checks its secret
+via `GET /api/auth/device` before the window opens. The webview's origin is a custom scheme (`dioxus://`, `wry://`), so
+its fetches to the loopback helm are cross-origin; CORS headers remain attached to the desktop routes that need them.
+The standalone helm keeps the browser exchange and UI. Every Dioxus desktop app presents the same `dioxus://index.html`
+origin, and any wry-based app can present `wry://`. SPEC.md accepts other such apps passing this browser-facing check;
+the desktop app's identity rests on its credential, never on its Origin.
 
 Two things sit beside the credential and are worth knowing about because the tradeoff below leans on them. The loopback
 origin guard (`require_loopback_origin`) refuses any request whose `Host` is not this helm's own loopback authority, any
@@ -143,9 +143,11 @@ machine, not something a link click can do. The other complete answer is to not 
 The position, decided 2026-08-30 and deliberately: this is an accepted trade-off, not an oversight. The browser
 interface is recommended only in single-user situations, meaning a helm machine (and any machine an SSH forward passes
 through) where nobody else has a local account. The native application is the preferred client wherever it is available;
-it embeds the helm and reads the token from disk, so there is no port and no page to impersonate. Farhelm does not ship
-local TLS or a trust-store installer, and does not plan to for v1; SPEC.md's Security section states the assumption in
-one sentence and points here.
+it embeds the helm and obtains its per-launch credentials in-process. Its window loads packaged assets, so no network
+page or token prompt establishes its identity. The app still uses a private loopback HTTP/WebSocket API, and Dioxus
+keeps its own loopback WebSocket for UI updates, guarded by a random per-launch key. Farhelm does not ship local TLS or
+a trust-store installer, and does not plan to for v1; SPEC.md's Security section states the assumption in one sentence
+and points here.
 
 For calibration, this is where nearly every local-web-UI tool sits. Jupyter runs token-authenticated plain HTTP on
 loopback and tells users to add TLS themselves if the machine is shared; most local dev servers and tools with a

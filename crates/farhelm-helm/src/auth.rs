@@ -97,6 +97,11 @@ pub(crate) struct AuthState {
     rotation: Arc<tokio::sync::Mutex<()>>,
     revocations: tokio::sync::broadcast::Sender<()>,
     embedded_devices: Arc<std::sync::RwLock<Vec<[u8; 32]>>>,
+    /// Embedded helms deliberately reject durable browser credentials. The
+    /// helm recognizes only the two credentials minted in this process, so an
+    /// old credential left in the shared state directory cannot authenticate
+    /// against a later desktop launch.
+    accepts_stored_devices: bool,
 }
 
 /// Which kind of credential a request authenticated with, which decides
@@ -112,8 +117,16 @@ pub(crate) enum AcceptedDevice {
 }
 
 impl AuthState {
-    /// Build the one authentication authority for a helm process.
+    /// Build the standalone authority used by browser-auth fixtures.
+    #[cfg(test)]
     pub(crate) fn new(store: HelmStore) -> AuthState {
+        Self::for_mode(store, crate::ServingMode::Standalone)
+    }
+
+    /// Bind credential admission to the same mode that selects the routes.
+    /// Embedded helms share durable state with standalone helms but accept
+    /// only their own launch's in-memory credentials.
+    pub(crate) fn for_mode(store: HelmStore, mode: crate::ServingMode) -> AuthState {
         let (revocations, _) = tokio::sync::broadcast::channel(16);
         AuthState {
             store,
@@ -121,6 +134,7 @@ impl AuthState {
             rotation: Arc::new(tokio::sync::Mutex::new(())),
             revocations,
             embedded_devices: Arc::new(std::sync::RwLock::new(Vec::new())),
+            accepts_stored_devices: mode == crate::ServingMode::Standalone,
         }
     }
 
@@ -229,6 +243,9 @@ impl AuthState {
             });
         if bool::from(embedded) {
             return Ok(Some(AcceptedDevice::Embedded));
+        }
+        if !self.accepts_stored_devices {
+            return Ok(None);
         }
         Ok(self
             .store
@@ -915,6 +932,37 @@ mod tests {
         auth.token().await.unwrap();
         auth.rotate().await.unwrap();
         assert_eq!(auth.accepts_device(secret).await.unwrap(), None);
+    }
+
+    /// A desktop launch shares the state directory with standalone helm
+    /// commands, so old browser rows may still be present. Its in-memory
+    /// authority must nevertheless admit only the credentials minted during
+    /// that launch.
+    #[farhelm_testtrace::test]
+    async fn embedded_auth_rejects_stored_devices() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        let stored = "AAAAAAAAAAAAAAAAAAAAAA";
+        store
+            .insert_device_session(digest(stored.as_bytes()), i64::MIN)
+            .await
+            .unwrap();
+        assert_eq!(
+            AuthState::new(store.clone())
+                .accepts_device(stored)
+                .await
+                .unwrap(),
+            Some(AcceptedDevice::Stored),
+            "fixture premise: the stored row is valid on a standalone helm"
+        );
+        let auth = AuthState::for_mode(store, crate::ServingMode::Embedded);
+
+        assert_eq!(auth.accepts_device(stored).await.unwrap(), None);
+        let current = auth.mint_embedded_device().unwrap();
+        assert_eq!(
+            auth.accepts_device(&current).await.unwrap(),
+            Some(AcceptedDevice::Embedded)
+        );
     }
 
     /// The desktop app's own credentials are exempt from rotation: after

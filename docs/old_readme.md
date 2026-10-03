@@ -41,8 +41,8 @@ Linux" below).
   also appears in a critical alert and lands in Console under the `farhelm-desktop` tag.
 - Start `farhelm-desktop` (double-click it in Finder, or run `~/.local/bin/farhelm-desktop` from a terminal). It starts
   its embedded helm and a managed local supervisor, so the Mac itself is already a host; both stop when the app exits.
-  The window shows the web UI at `http://127.0.0.1:7433/`. If another process owns that port, the app refuses to start
-  instead of choosing an undiscoverable origin; stop the conflicting service and relaunch.
+  The window is the app's only interface: its helm picks a fresh loopback port at each launch and serves no browser
+  page.
 - Add the remote host from the permanent host list: choose "add" in the host-count heading and enter the host's SSH
   destination. Use the row's "⋯" menu for host actions, and open "details" when you need evidence or provisioning
   progress. Farhelm connects with your existing passwordless SSH configuration and inspects the host. A supervisor
@@ -64,9 +64,10 @@ Linux" below).
   `{cwd}` where the directory goes and set the profile's agent kind — see
   [the agent wrappers page](../website/src/content/docs/docs/agents/agent-wrappers.md).
 
-To use an ordinary browser instead of (or alongside) the app window, open `http://127.0.0.1:7433/` and paste the token
-printed by `farhelm helm token show`. `farhelm helm token rotate` replaces that token and invalidates every browser that
-has signed in.
+To use an ordinary browser instead of the app window, quit the app, run a standalone `farhelm helm run` on the same
+state directory, open `http://127.0.0.1:7433/`, and paste the token printed by `farhelm helm token show`. Quitting the
+app also stops its local supervisor, so local sessions keep running without one until you relaunch the app.
+`farhelm helm token rotate` replaces that token and invalidates every browser that has signed in.
 
 ## Setting up supervisors
 

@@ -1,6 +1,5 @@
 //! Where the desktop app finds what it needs outside itself: its state
-//! directory, the `farhelm` CLI installed beside it, and a developer's UI
-//! tree for the embedded helm.
+//! directory and the `farhelm` CLI installed beside it.
 
 use super::*;
 
@@ -64,25 +63,6 @@ fn resolve_sibling_farhelm(
          run the install script or set FARHELM_DESKTOP_FARHELM",
         sibling.display()
     )
-}
-
-/// The UI tree the EMBEDDED HELM serves over loopback, if a developer named
-/// one.
-///
-/// `None` is the normal answer, and it is not a failure: a release build
-/// carries the tree compiled in (D12) and the helm falls back to that, while
-/// a plain `cargo build -p farhelm-desktop` genuinely has no UI to serve and
-/// says so in its own log (`farhelm-helm`'s `warn_if_no_ui`).
-///
-/// Note the scope: this only decides what the loopback HELM answers with. The
-/// native window never loads that page — it renders the component tree in the
-/// webview and pulls its `/assets/*` from `assets::serve_asset` instead — so an
-/// override here does NOT change what the window shows. The
-/// `Contents/Resources/web` lookup this used to perform is gone with the
-/// dx-produced `.app` bundle it belonged to (D6); the installer-assembled
-/// `Farhelm.app` carries no web tree either, so nothing brings it back.
-pub(super) fn bundled_web_ui() -> Option<PathBuf> {
-    std::env::var_os("FARHELM_DESKTOP_UI_DIST").map(PathBuf::from)
 }
 
 #[cfg(test)]
