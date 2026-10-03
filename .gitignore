@@ -54,9 +54,17 @@ e2e/.auth/storage-state.json
 e2e/readme-hero/.stack-info.json
 # The demo video's equivalent (e2e/readme-video.config.ts), same lifecycle.
 e2e/readme-video/.stack-info.json
+# The docs screenshots' equivalents (e2e/docs-shots.config.ts): the stack info and
+# the staged fleet's ids, both per run.
+e2e/docs-shots/.stack-info.json
+e2e/docs-shots/.fleet.json
 __pycache__/
 
 # Astro build output and content-collection cache for the docs website;
 # Vercel builds website/dist itself and nothing in the repo consumes it.
 website/dist/
 website/.astro/
+# Docs screenshots captured locally by scripts/docs-screenshots.sh, shown by the
+# preview and read by scripts/publish-docs-shots.sh; published images live off
+# main (docs/docs-shots/SPEC.md).
+website/public/docs-shots-local/

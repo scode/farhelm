@@ -46,14 +46,54 @@ export interface Annotation {
 const FADE_MS = 350;
 
 /**
+ * How the overlay looks: colour, text size, and arrow geometry. The defaults
+ * are sized for the demo video (1920x1080 at scale 1, watched full screen);
+ * the docs screenshots (docs/docs-shots/SPEC.md) install a smaller, red theme,
+ * because their images are cropped and shown at half their pixel size inside
+ * a page of text. Chosen once per page at install: the in-page half is
+ * idempotent, so a second install with another theme changes nothing.
+ */
+export interface OverlayTheme {
+  /** Arrows, callout borders, rings, and the card's cursor block. */
+  accent: string;
+  /** The ring's glow, a translucent version of the accent. */
+  glow: string;
+  /** Callout text size in CSS pixels. */
+  calloutPx: number;
+  /** Widest a callout box may grow before its text wraps. */
+  calloutMaxPx: number;
+  /** Arrow stroke width. */
+  strokePx: number;
+  /** Length of each stroke of the arrow head. */
+  headPx: number;
+  /** Distance between a callout box and the target it points at. */
+  gapPx: number;
+  /** Ring border width. */
+  ringPx: number;
+}
+
+/** The demo video's look, unchanged from before themes existed. */
+export const VIDEO_THEME: OverlayTheme = {
+  accent: "#ff5fa2",
+  glow: "rgba(255, 95, 162, 0.65)",
+  calloutPx: 20,
+  calloutMaxPx: 420,
+  strokePx: 4,
+  headPx: 16,
+  gapPx: 80,
+  ringPx: 4,
+};
+
+/**
  * The in-page half. Serialised by Playwright and evaluated in the page, so
  * it must be self-contained: no imports, no references to module scope.
  * Exposes `window.__farhelmDemo`; idempotent so it can run both as an init
  * script and directly against an already-loaded page.
  */
-function installOverlay(fadeMs: number): void {
+function installOverlay({ fadeMs, theme }: { fadeMs: number; theme: OverlayTheme }): void {
   const w = window as any;
   if (w.__farhelmDemo) return;
+  const t = theme;
 
   const css = `
     :host { all: initial; }
@@ -62,21 +102,21 @@ function installOverlay(fadeMs: number): void {
     .fade { opacity: 0; transition: opacity ${fadeMs}ms ease; }
     .fade.shown { opacity: 1; }
     svg.arrows { position: fixed; inset: 0; width: 100vw; height: 100vh; overflow: visible; }
-    svg.arrows path { fill: none; stroke: #ff5fa2; stroke-width: 4; stroke-linecap: round; }
+    svg.arrows path { fill: none; stroke: ${t.accent}; stroke-width: ${t.strokePx}; stroke-linecap: round; }
     .callout {
-      position: fixed; max-width: 420px; padding: 14px 18px; border-radius: 10px;
-      background: rgba(18, 12, 20, 0.94); border: 2px solid #ff5fa2; color: #fff;
-      font-size: 20px; line-height: 1.4; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+      position: fixed; max-width: ${t.calloutMaxPx}px; padding: ${t.calloutPx * 0.7}px ${t.calloutPx * 0.9}px;
+      border-radius: 10px; background: rgba(18, 12, 20, 0.94); border: 2px solid ${t.accent}; color: #fff;
+      font-size: ${t.calloutPx}px; line-height: 1.4; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
     }
     .ring {
-      position: fixed; border: 4px solid #ff5fa2; border-radius: 12px;
-      box-shadow: 0 0 22px rgba(255, 95, 162, 0.65);
+      position: fixed; border: ${t.ringPx}px solid ${t.accent}; border-radius: 12px;
+      box-shadow: 0 0 22px ${t.glow};
     }
-    .ring.spotlight { box-shadow: 0 0 22px rgba(255, 95, 162, 0.65), 0 0 0 200vmax rgba(0, 0, 0, 0.55); }
+    .ring.spotlight { box-shadow: 0 0 22px ${t.glow}, 0 0 0 200vmax rgba(0, 0, 0, 0.55); }
     .caption {
       position: fixed; left: 50%; bottom: 48px; transform: translateX(-50%); max-width: 70vw;
       padding: 14px 26px; border-radius: 12px; background: rgba(10, 10, 14, 0.9);
-      border: 2px solid #ff5fa2; color: #fff; font-size: 24px; text-align: center;
+      border: 2px solid ${t.accent}; color: #fff; font-size: 24px; text-align: center;
     }
     .card {
       position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
@@ -85,7 +125,7 @@ function installOverlay(fadeMs: number): void {
     }
     .card h1 { margin: 0; font-size: 64px; font-weight: 700; letter-spacing: -0.02em; }
     .card h1::after { content: ""; display: inline-block; width: 0.55em; height: 0.95em; margin-left: 0.12em;
-      vertical-align: -0.1em; background: #ff5fa2; }
+      vertical-align: -0.1em; background: ${t.accent}; }
     .card p { margin: 0; font-size: 26px; color: #c9d1dc; max-width: 60vw; }
     .cursor {
       position: fixed; left: 0; top: 0; width: 28px; height: 28px; opacity: 0;
@@ -95,7 +135,7 @@ function installOverlay(fadeMs: number): void {
     .anchor { position: fixed; opacity: 0; }
     .pulse {
       position: fixed; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%;
-      border: 3px solid #ff5fa2; animation: pulse 520ms ease-out forwards;
+      border: 3px solid ${t.accent}; animation: pulse 520ms ease-out forwards;
     }
     @keyframes pulse { from { transform: scale(0.3); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
   `;
@@ -146,7 +186,7 @@ function installOverlay(fadeMs: number): void {
      * facing edge.
      */
     const place = (r: DOMRect, bw: number, bh: number, wanted: string, dx: number, dy: number) => {
-      const W = innerWidth, H = innerHeight, gap = 80, margin = 16;
+      const W = innerWidth, H = innerHeight, gap = t.gapPx, margin = 16;
       const room: Record<string, number> = {
         right: W - r.right - bw, left: r.left - bw, bottom: H - r.bottom - bh, top: r.top - bh,
       };
@@ -186,7 +226,7 @@ function installOverlay(fadeMs: number): void {
       const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
       const cx = (x1 + x2) / 2 - (dy / len) * len * 0.18, cy = (y1 + y2) / 2 + (dx / len) * len * 0.18;
       // The head points along the curve's final tangent (control point to tip).
-      const tx = x2 - cx, ty = y2 - cy, tl = Math.hypot(tx, ty) || 1, ux = tx / tl, uy = ty / tl, head = 16;
+      const tx = x2 - cx, ty = y2 - cy, tl = Math.hypot(tx, ty) || 1, ux = tx / tl, uy = ty / tl, head = t.headPx;
       const hx1 = x2 - ux * head - uy * head * 0.6, hy1 = y2 - uy * head + ux * head * 0.6;
       const hx2 = x2 - ux * head + uy * head * 0.6, hy2 = y2 - uy * head - ux * head * 0.6;
       return `M${x1},${y1} Q${cx},${cy} ${x2},${y2} M${hx1},${hy1} L${x2},${y2} L${hx2},${hy2}`;
@@ -327,9 +367,9 @@ export class Director {
    * and park the pointer near the bottom-right corner, hidden until the
    * first move.
    */
-  static async install(page: Page): Promise<Director> {
-    await page.addInitScript(installOverlay, FADE_MS);
-    await page.evaluate(installOverlay, FADE_MS);
+  static async install(page: Page, theme: OverlayTheme = VIDEO_THEME): Promise<Director> {
+    await page.addInitScript(installOverlay, { fadeMs: FADE_MS, theme });
+    await page.evaluate(installOverlay, { fadeMs: FADE_MS, theme });
     const director = new Director(page);
     const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
     director.cursor = { x: viewport.width * 0.82, y: viewport.height * 0.78 };
