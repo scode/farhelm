@@ -2141,6 +2141,7 @@ mod tests {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
             "ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+            ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
             ALTER TABLE hosts DROP COLUMN yolo_safe;
              PRAGMA user_version = 29;",
         )

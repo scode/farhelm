@@ -373,6 +373,8 @@ pub(crate) struct Preferences {
     pub(crate) remembered_permissions: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) remembered_workspace_trust: Option<bool>,
+    /// Whether host removal can proceed without opening its confirmation.
+    pub(crate) skip_host_remove_confirmation: Option<bool>,
 }
 
 /// How long the seed read of the shared preference may take before the
@@ -407,7 +409,7 @@ pub(crate) async fn fetch_preferences(base: &str) -> Result<Preferences, String>
 
 /// Which field of the shared preference a writer owns.
 ///
-/// The write queue below serializes writes PER FIELD: the three fields are
+/// The write queue below serializes writes PER FIELD: each field is
 /// independent last-writer-wins values (the helm merges sparse patches per
 /// field), so a slow selection write must not delay a sort write, while two
 /// writes to the SAME field must reach the helm in the order the user made
@@ -417,6 +419,7 @@ pub(crate) enum PreferenceField {
     Sort,
     Selected,
     Compact,
+    HostRemoveConfirmation,
 }
 
 impl PreferenceField {
@@ -426,6 +429,7 @@ impl PreferenceField {
             PreferenceField::Sort => "list_sort",
             PreferenceField::Selected => "last_selected",
             PreferenceField::Compact => "compact",
+            PreferenceField::HostRemoveConfirmation => "skip_host_remove_confirmation",
         }
     }
 }
@@ -441,6 +445,7 @@ pub(crate) enum PreferenceValue {
     Sort(String),
     Selected(String),
     Compact(bool),
+    HostRemoveConfirmation(bool),
 }
 
 impl PreferenceValue {
@@ -450,6 +455,7 @@ impl PreferenceValue {
             Self::Sort(_) => PreferenceField::Sort,
             Self::Selected(_) => PreferenceField::Selected,
             Self::Compact(_) => PreferenceField::Compact,
+            Self::HostRemoveConfirmation(_) => PreferenceField::HostRemoveConfirmation,
         }
     }
 
@@ -457,7 +463,7 @@ impl PreferenceValue {
     fn wire_value(&self) -> serde_json::Value {
         match self {
             Self::Sort(value) | Self::Selected(value) => serde_json::json!(value),
-            Self::Compact(value) => serde_json::json!(value),
+            Self::Compact(value) | Self::HostRemoveConfirmation(value) => serde_json::json!(value),
         }
     }
 
@@ -467,6 +473,9 @@ impl PreferenceValue {
             Self::Sort(value) => seed.list_sort = Some(value.clone()),
             Self::Selected(value) => seed.last_selected = Some(value.clone()),
             Self::Compact(value) => seed.compact = Some(*value),
+            Self::HostRemoveConfirmation(value) => {
+                seed.skip_host_remove_confirmation = Some(*value)
+            }
         }
     }
 }
@@ -514,6 +523,7 @@ struct PreferenceWrites {
     sort: FieldWrite,
     selected: FieldWrite,
     compact: FieldWrite,
+    host_remove_confirmation: FieldWrite,
 }
 
 impl PreferenceWrites {
@@ -522,6 +532,7 @@ impl PreferenceWrites {
             PreferenceField::Sort => &mut self.sort,
             PreferenceField::Selected => &mut self.selected,
             PreferenceField::Compact => &mut self.compact,
+            PreferenceField::HostRemoveConfirmation => &mut self.host_remove_confirmation,
         }
     }
 
@@ -584,6 +595,7 @@ impl PreferenceWrites {
             PreferenceField::Sort => &self.sort,
             PreferenceField::Selected => &self.selected,
             PreferenceField::Compact => &self.compact,
+            PreferenceField::HostRemoveConfirmation => &self.host_remove_confirmation,
         };
         if slot.acked {
             return None;
@@ -669,6 +681,7 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
         PreferenceField::Sort,
         PreferenceField::Selected,
         PreferenceField::Compact,
+        PreferenceField::HostRemoveConfirmation,
     ] {
         let claimed = {
             let mut queue = preference_writes();
@@ -2260,7 +2273,7 @@ type SeenWriteReport = Box<dyn FnOnce(Result<(), String>)>;
 
 /// The seen-state write queue's whole state: a latest-wins slot per session
 /// id, styled directly on [`PreferenceWrites`] but keyed dynamically
-/// (sessions come and go over a tab's lifetime, unlike the two fixed
+/// (sessions come and go over a tab's lifetime, unlike the fixed
 /// preference fields) rather than over a closed enum.
 ///
 /// Exists to close the race findings (SYSTEMS-1/DATA-1) raised against the
@@ -2275,7 +2288,7 @@ type SeenWriteReport = Box<dyn FnOnce(Result<(), String>)>;
 /// is sent AFTER it settles — so requests for the same session reach the
 /// helm in the order they were queued, never the order their network calls
 /// happen to finish. A slot is pruned once its queue drains (unlike
-/// `PreferenceWrites`'s three fields, kept forever): an idle per-session slot
+/// `PreferenceWrites`'s fixed fields, kept forever): an idle per-session slot
 /// held for a tab's whole lifetime would otherwise leak.
 #[derive(Default)]
 struct SeenWrites(std::collections::HashMap<String, SeenWriteSlot>);
@@ -4369,10 +4382,10 @@ mod preference_write_tests {
         );
     }
 
-    /// The three fields are independent queues: text and boolean choices
+    /// The preference fields are independent queues: text and boolean choices
     /// neither wait behind nor reorder one another.
     #[farhelm_testtrace::test]
-    fn the_three_fields_do_not_share_a_writer() {
+    fn preference_fields_do_not_share_a_writer() {
         let mut queue = PreferenceWrites::default();
         assert!(queue.record(PreferenceValue::Sort("title".to_string())));
         assert!(
@@ -4381,7 +4394,11 @@ mod preference_write_tests {
         );
         assert!(
             queue.record(PreferenceValue::Compact(true)),
-            "the boolean compact choice owns a third independent writer"
+            "the boolean compact choice owns an independent writer"
+        );
+        assert!(
+            queue.record(PreferenceValue::HostRemoveConfirmation(true)),
+            "the host-removal choice owns an independent writer"
         );
     }
 

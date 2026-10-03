@@ -56,9 +56,9 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 
 use crate::api::{
-    Commit, ProbeResponse, ProvisioningOperation, ProvisioningSubmission, adopt_host,
-    probe_ssh_host, provision_host, remove_host, retry_host, set_alias, set_host_destination,
-    set_yolo_safe,
+    Commit, PreferenceValue, ProbeResponse, ProvisioningOperation, ProvisioningSubmission,
+    adopt_host, probe_ssh_host, provision_host, remove_host, retry_host, set_alias,
+    set_host_destination, set_yolo_safe, store_preference,
 };
 use crate::icons::{LocalHostIcon, RemoteHostIcon};
 use crate::menu_panel::{
@@ -67,7 +67,7 @@ use crate::menu_panel::{
     measurement_outcome, remember_menu_item, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
-use crate::ops::{ConfirmSlot, OpLock, use_confirm_slot};
+use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_identity, display_peer};
 use crate::provisioning::{
     ActionRequest, HostBinding, HostUpdateProgress, PlanConfirmation, ProvisioningMenuState,
@@ -839,14 +839,13 @@ type HostRequest = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Com
 /// failure than an unread reply, and the authoritative hosts refresh fires
 /// either way.
 ///
-/// ## Why remove confirms in-page
+/// ## Why removal uses a modal
 ///
 /// wry ships no native JS dialogs on macOS's WKWebView (observed directly
 /// running the desktop build), so `window.confirm()` silently does nothing
-/// there — the same discovery that replaced the session list's delete
-/// confirmation with an inline prompt. This one follows that established
-/// pattern exactly, down to focusing cancel: consequence first, then the
-/// host being forgotten, then confirm/cancel.
+/// there. The Dioxus modal keeps the question available in both browsers and
+/// the desktop app, and its isolation keeps focus on the safe cancel answer
+/// until the user chooses a removal action.
 ///
 /// The consequence wording says FORGET rather than delete on purpose.
 /// SPEC.md's contract is that removal touches nothing on the host — its
@@ -902,6 +901,7 @@ pub(crate) fn HostsPanel(
     on_changed: EventHandler<()>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let mut preferences = use_context::<crate::list::SharedPreferences>();
     // The parent owns one compact update status per row and passes it to both
     // the renderer and the provisioning child that publishes it.
     let row_update_progress = use_signal(HashMap::<HostId, HostUpdateProgress>::new);
@@ -913,12 +913,9 @@ pub(crate) fn HostsPanel(
     // Committed-but-unvalidated replies, kept apart from `errors` because
     // they mean the opposite thing — see this component's docs.
     let mut warnings = use_signal(HashMap::<HostId, String>::new);
-    // Which row is showing the in-page removal confirmation. One at a time:
-    // it replaces the row's controls.
-    // Keyed by host; see `ConfirmSlot` for the queued-click races it closes.
-    // Only confirmation consumption lives here: the removal claims the page
-    // lock afterwards, through `run`, not when the prompt opens.
-    let mut confirming_remove: ConfirmSlot<HostId> = use_confirm_slot();
+    // Which host's removal dialog is open. The modal is panel-owned so a
+    // refresh cannot tear down its focus or explanation mid-question.
+    let mut remove_open = use_signal(|| None::<HostId>);
     // Which field of which host the settings dialog is editing, if any. One
     // at a time, and only inside the open dialog.
     let mut editing = use_signal(|| None::<(HostId, EditField)>);
@@ -1090,23 +1087,21 @@ pub(crate) fn HostsPanel(
     };
 
     let remove_base = base.clone();
-    let on_remove_confirm = move |host: HostId| {
-        // Only ever proceeds when this host is still the one being
-        // confirmed, which is what keeps a confirm click queued behind a
-        // cancel (both fired in one burst) from forgetting a host the user
-        // just backed out of.
-        if confirming_remove.take(&host).is_none() {
+    let on_remove_confirm = use_callback(move |(host, skip_future): (HostId, bool)| {
+        if *remove_open.peek() != Some(host) {
             return;
         }
+        remove_open.set(None);
+        if skip_future {
+            preferences.0.write().skip_host_remove_confirmation = Some(true);
+            store_preference(&remove_base, PreferenceValue::HostRemoveConfirmation(true));
+        }
         let base = remove_base.clone();
-        // A removal has no host row to report back, so it confirms itself:
-        // the 200 IS the whole answer, and there is no body for a decode to
-        // fail on.
         run(
             host,
             Box::pin(async move { remove_host(&base, host).await.map(|()| Commit::Confirmed) }),
         );
-    };
+    });
 
     let edit_base = base.clone();
     let on_edit_submit = move |(host, field, value): (HostId, EditField, String)| {
@@ -1388,7 +1383,6 @@ pub(crate) fn HostsPanel(
                         HostRow {
                             key: "{host.id}",
                             controls: HostRowControls {
-                                confirming_remove: confirming_remove.current_key() == Some(host.id),
                                 menu_open: *host_menu_open.read() == Some(host.id),
                             },
                             // While this host's settings dialog is open, its
@@ -1466,7 +1460,6 @@ pub(crate) fn HostsPanel(
                                 // past the guard above, so a request refused
                                 // because another operation is in flight
                                 // leaves the menu exactly as it was.
-                                confirming_remove.clear();
                                 editing.set(None);
                                 host_menu_open.set(None);
                                 settings_open.set(Some(id));
@@ -1483,10 +1476,13 @@ pub(crate) fn HostsPanel(
                                 // same single-owner close, past the same
                                 // guard.
                                 host_menu_open.set(None);
-                                confirming_remove.open(id, ());
+                                if preferences.0.peek().skip_host_remove_confirmation == Some(true) {
+                                    remove_open.set(Some(id));
+                                    on_remove_confirm.call((id, false));
+                                } else {
+                                    remove_open.set(Some(id));
+                                }
                             },
-                            on_remove_confirm: on_remove_confirm.clone(),
-                            on_remove_cancel: move |id: HostId| confirming_remove.cancel_for(&id),
                             on_provisioning: move |(id, request): (HostId, ActionRequest)| {
                                 if provisioning_busy_hosts.peek().contains(&id) {
                                     return;
@@ -1550,6 +1546,33 @@ pub(crate) fn HostsPanel(
                     on_yolo_safe: on_yolo_safe.clone(),
                     on_close: on_settings_close,
                     host,
+                }
+            }
+            if let Some(host) = remove_open
+                .read()
+                .and_then(|id| read.hosts()?.iter().find(|host| host.id == id).cloned())
+            {
+                settings_dialog::HostRemoveDialog {
+                    busy: mutation_busy_hosts.read().contains(&host.id)
+                        || provisioning_busy_hosts.read().contains(&host.id)
+                        || busy,
+                    host: host.clone(),
+                    on_remove: {
+                        let handler = on_remove_confirm;
+                        move |skip_future| {
+                            // Copy the id out before calling: an `if let`
+                            // over `*remove_open.peek()` keeps the read guard
+                            // alive through its body, and the handler's
+                            // `remove_open.set(None)` then panics on the
+                            // still-borrowed signal, which a release wasm
+                            // build reports only as `unreachable`.
+                            let open = *remove_open.peek();
+                            if let Some(id) = open {
+                                handler.call((id, skip_future));
+                            }
+                        }
+                    },
+                    on_cancel: move |_| remove_open.set(None),
                 }
             }
         }
@@ -1807,21 +1830,15 @@ fn host_row_class(menu_open: bool) -> &'static str {
 
 /// Which of the host row's optional surfaces the user has opened.
 ///
-/// Grouped because all three answer one question — what does this row offer
-/// beyond its ordinary control strip right now — and because `HostsPanel`
-/// narrows all three from at-most-one-row signals to a boolean here: its own
-/// `confirming_remove` and `editing`, and the `host_menu_open` `ListView`
-/// owns to keep at most one row menu open across
-/// BOTH the session list and the hosts panel (see `HostsPanel`'s own doc for
-/// that single-open discipline). Not one enum because the panel already owns
-/// the first two signals while the list owns the cross-panel menu signal.
+/// Grouped because this answers which row-local control surface is open, and
+/// because the `host_menu_open` `ListView` keeps at most one row menu open
+/// across both the session list and hosts panel. Dialog state remains owned by
+/// `HostsPanel`, where it can apply modal isolation and focus restoration.
 ///
 /// State only, like every group here — see [`HostRowActivity`] for why no
 /// group may ever carry a callback.
 #[derive(Clone, PartialEq, Eq)]
 struct HostRowControls {
-    /// Whether this row is showing the in-place forget-this-host prompt.
-    confirming_remove: bool,
     /// Whether this row's "⋯" menu is the (at most one, across sessions AND
     /// hosts) open one.
     menu_open: bool,
@@ -2268,10 +2285,9 @@ fn format_elapsed(seconds: u64) -> String {
 /// what is shared and why. The name, phase status, and muted toggle stay on
 /// the row line. `settings` opens the host settings dialog, which `HostsPanel`
 /// renders (see `settings_dialog`): the destination and alias editors live
-/// there, not in the row. The removal confirmation uses a full-width block
-/// below the line; while it is open the toggle stays in its trailing gutter
-/// but is disabled, preventing a competing command without making the row
-/// jump horizontally.
+/// there, not in the row. Removal opens a modal dialog owned by
+/// `HostsPanel`; while it is open the row remains behind the modal and cannot
+/// receive a competing command.
 ///
 /// Every actionable item closes the menu when chosen. Setup commands
 /// additionally open the global details disclosure before sending their
@@ -2280,8 +2296,8 @@ fn format_elapsed(seconds: u64) -> String {
 /// needs no confirmation and leaves details alone: it reports through this
 /// row's status spot, and only a failure or uncertain outcome opens the row.
 ///
-/// `settings` and `remove` both take over from the menu (a modal dialog, a
-/// block that disables the toggle), so closing is a correctness requirement:
+/// `settings` and `remove` both take over from the menu (modal dialogs), so
+/// closing is a correctness requirement:
 /// cancelling either flow must not silently revive a menu the user never
 /// asked to reopen. `HostsPanel`'s own `on_settings_start`/
 /// `on_remove_start` are where that close happens, past their own busy
@@ -2297,8 +2313,8 @@ fn HostRow(
     host: Host,
     /// Whether automatic local setup replaces the ordinary remedy slot.
     local_setup: bool,
-    /// Which control surface this row is showing: its removal prompt and
-    /// its menu (grouped state). Host settings are not among them: they live
+    /// Which control surface this row is showing: its menu (grouped state).
+    /// Host settings and removal are not among them: they live
     /// in `HostsPanel`'s dialog, not in the row.
     controls: HostRowControls,
     /// What the management verbs are doing to this row (grouped state).
@@ -2317,8 +2333,6 @@ fn HostRow(
     /// Open this host's settings dialog (the menu's Settings item).
     on_settings_start: EventHandler<HostId>,
     on_remove_start: EventHandler<HostId>,
-    on_remove_confirm: EventHandler<HostId>,
-    on_remove_cancel: EventHandler<HostId>,
     /// Route a provisioning menu command back to this row's permanently
     /// mounted provisioning component. The request carries the binding this
     /// row rendered with, captured at click time.
@@ -2328,10 +2342,7 @@ fn HostRow(
     /// `HostsPanel`'s own doc for the single-open discipline it keeps).
     on_menu_toggle: EventHandler<HostId>,
 ) -> Element {
-    let HostRowControls {
-        confirming_remove,
-        menu_open,
-    } = controls;
+    let HostRowControls { menu_open } = controls;
     let HostRowActivity {
         busy,
         error,
@@ -2364,8 +2375,10 @@ fn HostRow(
     let remedy = state_remedy(&host.state);
     let detail = state_detail(&host.state);
     let shown_name = gui_host_name(&host.name, host.kind.is_this_machine());
-    // The flyout header stays concise while retaining the destination and
-    // peer build facts that help a user distinguish similarly named hosts.
+    // Keep peer-owned destination and version values isolated in the same
+    // `PeerLine` contract used by the session menu. The menu header is a
+    // compact identity aid, so it follows the live phase when a peer has
+    // reported a build and falls back to the cached value otherwise.
     let menu_summary_parts = host_menu_summary_parts(&host);
     // This render's menu item list — see `host_menu_order`'s own doc. Read
     // every render, not only while the menu is open, because the `use_effect`
@@ -2373,6 +2386,9 @@ fn HostRow(
     // even while a menu built against the wider list is still up.
     let adoptable_now = adopt_identity.is_some();
     let menu_order = host_menu_order(adoptable_now, manageable, provisioning_menu);
+    let has_provisioning_menu = provisioning_menu.rerun.is_some()
+        || provisioning_menu.automatic_setup
+        || provisioning_menu.update;
     // Setup still refuses behind the page lock, so its items stay disabled
     // while another operation holds it. Update planning mutates nothing and
     // its submission claim retries reactively, so the update item answers
@@ -2629,15 +2645,13 @@ fn HostRow(
                         },
                     }
                 }
-                // The line always keeps its three children. The removal
-                // prompt disables the menu rather than replacing its toggle,
-                // so the trailing gutter does not jump while its full-width
-                // block renders below. `nowrap` remains load-bearing for the
-                // fixed-position panel (F2/COR-HOST-MENU-OFFSCREEN).
+                // The line always keeps its three children, so the trailing
+                // gutter does not jump while a modal dialog takes over.
+                // `nowrap` remains load-bearing for the fixed-position panel
+                // (F2/COR-HOST-MENU-OFFSCREEN).
                     button {
                         r#type: "button",
                         class: "btn host-row-menu",
-                        disabled: confirming_remove,
                         aria_label: host_menu_label(&host.name),
                         aria_expanded: menu_open,
                         aria_haspopup: "menu",
@@ -2677,7 +2691,7 @@ fn HostRow(
                         },
                         "⋯"
                     }
-                    if menu_open && !confirming_remove {
+                    if menu_open {
                         div {
                             class: "host-row-menu-flyout",
                             style: session_menu_placement_style(placement()),
@@ -2697,7 +2711,7 @@ fn HostRow(
                                         class: "session-row-menu-summary",
                                         title: "{host_menu_summary_tooltip(&menu_summary_parts)}",
                                         PeerLine {
-                                            class: "session-row-menu-summary-runs",
+                                            class: "session-row-menu-summary-runs".to_string(),
                                             parts: menu_summary_parts.clone(),
                                             peer_tooltips: true,
                                         }
@@ -2782,10 +2796,7 @@ fn HostRow(
                                         }
                                     }
                                 }
-                                if provisioning_menu.rerun.is_some()
-                                    || provisioning_menu.automatic_setup
-                                    || provisioning_menu.update
-                                {
+                                if has_provisioning_menu {
                                     div { class: "host-row-menu-separator", role: "separator" }
                                 }
                                 if let Some(operation) = provisioning_menu.rerun {
@@ -2826,11 +2837,12 @@ fn HostRow(
                                         HostMenuActionIcon { action: HostMenuAction::Rerun }
                                         span { class: "session-row-menu-copy",
                                             span { class: "session-row-menu-label", if provisioning_menu.planning { "planning…" } else { "re-run" } }
-                                            span { id: "host-menu-rerun-description", class: "session-row-menu-description",
-                                                if operation == ProvisioningOperation::Update {
-                                                    "try the failed update again"
-                                                } else {
-                                                    "try the failed setup again"
+                                            span {
+                                                id: "host-menu-rerun-description",
+                                                class: "session-row-menu-description",
+                                                match operation {
+                                                    ProvisioningOperation::Update => "try the failed update again",
+                                                    ProvisioningOperation::Add => "try the failed setup again",
                                                 }
                                             }
                                         }
@@ -2924,7 +2936,9 @@ fn HostRow(
                                         }
                                     }
                                 }
-                                div { class: "host-row-menu-separator", role: "separator" }
+                                if has_provisioning_menu {
+                                    div { class: "host-row-menu-separator", role: "separator" }
+                                }
                                 button {
                                     r#type: "button",
                                     class: "btn session-row-menu-item host-row-menu-item host-settings",
@@ -3006,53 +3020,6 @@ fn HostRow(
                         }
                     }
             }
-            }
-            // The removal prompt: a full-width block BELOW the name/status
-            // header line, not a flex child squeezed onto it (see the
-            // guard on that line, just above). It has to fit an
-            // unshrinkable warning sentence, a second copy of the
-            // (unbounded) host name, AND both buttons, which is more room
-            // than the 340px sidebar has on one line regardless of how
-            // short the name is — `confirm remove`/`cancel` rendered
-            // clipped and unclickable off the sidebar's edge exactly the
-            // way `remove` itself used to before the row's other verbs
-            // folded into the "⋯" menu (see the section banner above this
-            // component). `cancel` is the safe default here, so keeping it
-            // reachable is not a cosmetic concern.
-            if confirming_remove {
-                div { class: "host-confirm-remove-panel",
-                    // Consequence first and never truncated, then the
-                    // host it is about — the reading order this prompt
-                    // established, for the reason recorded there: a
-                    // long name must not be able to clip the sentence
-                    // that says what the button does.
-                    span { class: "confirm-consequence",
-                        "forgetting a host leaves its supervisor and sessions running; \
-                         re-adding the destination finds them again:"
-                    }
-                    span { class: "confirm-title peer-value", dir: "ltr", "\"{shown_name}\"" }
-                    div { class: "host-confirm-remove-actions",
-                        button {
-                            r#type: "button",
-                            class: "btn btn-danger confirm-delete host-confirm-remove",
-                            disabled: busy,
-                            onclick: move |_| on_remove_confirm.call(id),
-                            "confirm remove"
-                        }
-                        button {
-                            r#type: "button",
-                            class: "btn btn-neutral confirm-cancel host-cancel-remove",
-                            // Focus lands on the way OUT of the
-                            // destructive action, through the plain
-                            // HTML attribute rather than a fallible
-                            // `set_focus` whose discarded `Result`
-                            // could drop the safety behavior silently.
-                            autofocus: true,
-                            onclick: move |_| on_remove_cancel.call(id),
-                            "cancel"
-                        }
-                    }
-                }
             }
             if details_open {
                 if host.alias.clone().flatten().is_some() && let Some(destination) = host.destination.as_deref() {
@@ -4586,8 +4553,6 @@ mod tests {
             let on_retry = use_callback(|_: HostId| {});
             let on_adopt = use_callback(|_: (HostId, String)| {});
             let on_remove_start = use_callback(|_: HostId| {});
-            let on_remove_confirm = use_callback(|_: HostId| {});
-            let on_remove_cancel = use_callback(|_: HostId| {});
             let on_provisioning = use_callback(|_: (HostId, ActionRequest)| {});
             let on_menu_toggle = use_callback(|_: HostId| {});
             rsx! {
@@ -4595,7 +4560,6 @@ mod tests {
                     host: row_specimen(1),
                     local_setup: false,
                     controls: HostRowControls {
-                        confirming_remove: false,
                         menu_open: false,
                     },
                     activity: HostRowActivity {
@@ -4611,8 +4575,6 @@ mod tests {
                     on_adopt,
                     on_settings_start: use_callback(|_: HostId| {}),
                     on_remove_start,
-                    on_remove_confirm,
-                    on_remove_cancel,
                     on_provisioning,
                     on_menu_toggle,
                 }
@@ -4638,9 +4600,9 @@ mod tests {
     /// field from each of the two state groups.
     ///
     /// This is the cost model the grouping has to preserve. Both structs are
-    /// compared by value, so MOVING an open removal prompt is two row renders
-    /// (the row that loses it and the row that gains it) and a refusal
-    /// landing on one host is one — not a fleet-wide repaint. A field that
+    /// compared by value, so changing the menu state is limited to the row
+    /// that owns it and a refusal landing on one host is one render — not a
+    /// fleet-wide repaint. A field that
     /// drops out of what memoization compares, or a group that starts
     /// invalidating rows it does not describe, moves these per-row counts.
     /// Exercising `HostRowControls` and `HostRowActivity` in the same virtual
@@ -4653,7 +4615,6 @@ mod tests {
         // on each parent render, so memoization alone decides which rows
         // actually run.
         std::thread_local! {
-            static CONFIRMING: std::cell::Cell<HostId> = const { std::cell::Cell::new(1) };
             static REFUSED: std::cell::Cell<Option<HostId>> =
                 const { std::cell::Cell::new(None) };
         }
@@ -4662,11 +4623,8 @@ mod tests {
             let on_retry = use_callback(|_: HostId| {});
             let on_adopt = use_callback(|_: (HostId, String)| {});
             let on_remove_start = use_callback(|_: HostId| {});
-            let on_remove_confirm = use_callback(|_: HostId| {});
-            let on_remove_cancel = use_callback(|_: HostId| {});
             let on_provisioning = use_callback(|_: (HostId, ActionRequest)| {});
             let on_menu_toggle = use_callback(|_: HostId| {});
-            let confirming = CONFIRMING.with(std::cell::Cell::get);
             let refused = REFUSED.with(std::cell::Cell::get);
             rsx! {
                 for id in [1_i64, 2, 3] {
@@ -4674,10 +4632,7 @@ mod tests {
                         key: "{id}",
                         host: row_specimen(id),
                         local_setup: false,
-                        controls: HostRowControls {
-                            confirming_remove: confirming == id,
-                            menu_open: false,
-                        },
+                        controls: HostRowControls { menu_open: false },
                         activity: HostRowActivity {
                             busy: false,
                             error: (refused == Some(id))
@@ -4691,8 +4646,6 @@ mod tests {
                         on_adopt,
                         on_settings_start: use_callback(|_: HostId| {}),
                         on_remove_start,
-                        on_remove_confirm,
-                        on_remove_cancel,
                         on_provisioning,
                         on_menu_toggle,
                     }
@@ -4700,7 +4653,6 @@ mod tests {
             }
         }
 
-        CONFIRMING.with(|confirming| confirming.set(1));
         REFUSED.with(|refused| refused.set(None));
         HOST_ROW_RENDERS.with(|renders| renders.borrow_mut().clear());
         let mut dom = VirtualDom::new(app);
@@ -4711,19 +4663,6 @@ mod tests {
             "the initial build renders every row once"
         );
 
-        // `HostRowControls`: the removal prompt is at most one row's at a
-        // time, so moving it touches the row that had it and the row that
-        // gets it — and only those.
-        CONFIRMING.with(|confirming| confirming.set(2));
-        dom.mark_dirty(dioxus::core::ScopeId::APP);
-        dom.render_immediate(&mut dioxus::core::NoOpMutations);
-        assert_eq!(
-            host_row_renders(),
-            vec![(1, 2), (2, 2), (3, 1)],
-            "moving the removal prompt must rerender the row that lost it and the row that \
-             gained it, and nothing else"
-        );
-
         // `HostRowActivity`: a refusal is per-host, so it costs exactly the
         // one row that has to show it.
         REFUSED.with(|refused| refused.set(Some(3)));
@@ -4731,7 +4670,7 @@ mod tests {
         dom.render_immediate(&mut dioxus::core::NoOpMutations);
         assert_eq!(
             host_row_renders(),
-            vec![(1, 2), (2, 2), (3, 2)],
+            vec![(1, 1), (2, 1), (3, 2)],
             "a refusal landing on one host must rerender only that host's row"
         );
     }

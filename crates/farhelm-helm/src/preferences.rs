@@ -234,6 +234,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let response = harness
+            .router()
+            .oneshot(put(
+                serde_json::json!({ "skip_host_remove_confirmation": true }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert_eq!(
             read(&harness).await,
             Preferences {
@@ -242,6 +250,7 @@ mod tests {
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_workspace_trust: None,
+                skip_host_remove_confirmation: Some(true),
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -341,6 +350,7 @@ mod tests {
                 compact: Some(true),
                 remembered_permissions: Some("yolo".to_string()),
                 remembered_workspace_trust: None,
+                skip_host_remove_confirmation: Some(true),
             },
             "an explicit null clears the field it names and only that one"
         );

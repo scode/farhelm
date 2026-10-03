@@ -930,6 +930,8 @@ export interface Preferences {
    * helm-wide — written only by the helm itself, never by a client PUT (see
    * `patchPreferences`'s own doc for why the type still accepts one). */
   remembered_permissions?: string;
+  /** Whether host removal skips its confirmation dialog after this client seeds. */
+  skip_host_remove_confirmation?: boolean;
 }
 
 /** Read the helm's shared preference row (SPEC.md, Session list). */
@@ -957,6 +959,7 @@ export async function patchPreferences(
     compact?: boolean | null;
     remembered_permissions?: string | null;
     remembered_workspace_trust?: boolean | null;
+    skip_host_remove_confirmation?: boolean | null;
   },
 ): Promise<void> {
   const response = await request.put("/api/preferences", { data: patch });
@@ -978,6 +981,7 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
     last_selected: null,
     compact: null,
     remembered_permissions: null,
+    skip_host_remove_confirmation: null,
   });
 }
 

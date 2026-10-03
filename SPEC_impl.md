@@ -308,20 +308,20 @@ not to compete with selection: it colors only the spinner or dot, the words, and
 the deleting row takes no tint or edge of its own, which would look exactly like the selection it usually already is.
 Action buttons use three deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the normal blue
 affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is reserved for destructive
-confirmations. One deliberate fourth look exists: the YOLO confirmation's "start, and don't ask again on this host" is
-danger-outlined rather than filled. It starts the same YOLO session as the filled one-off override beside it, so it is
-red, but it also turns the question off for good, and the maintainer chose (2026-09-30) not to make the permanent answer
-the filled one that draws the reflex click. Pressed disclosures use `--accent-fill-hover` so an open trigger is distinct
-from a resting primary. The normal-primary entry is scoped per SURFACE, not per screen: the sidebar's resting chrome
-carries exactly one filled control (`new session`), and each dialog or popup that floats over it may supply its own
-affirmative primary. The sidebar's secondary actions and profile-row edit/delete controls use the neutral tier; menu
-items, tabs, composer selections, relays, and other explicit exemptions retain their ghost or purpose-built styling.
-Destructive menu items remain red text, while their confirmation buttons use the danger tier. SPEC.md requires the
-sidebar to mark the selected session's row readably at a glance, so anything else joining that list has to be a place
-where the accent means "this is where you are" — the same thing every entry but the delete wait says — because an accent
-spread across ordinary decoration would leave nothing to make the selection readable. Both constraints have a contrast
-floor under them: the quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest surface it
-lands on, which is what caps how light the selected row's fill may go.
+confirmations. A permanent answer uses the outlined form of its one-off tier: the YOLO confirmation's "start, and don't
+ask again on this host" and host removal's "remove, and don't ask again" keep the danger color while leaving the one-off
+action as the filled choice. The maintainer chose (2026-09-30) not to make a permanent answer the filled one that draws
+the reflex click. Pressed disclosures use `--accent-fill-hover` so an open trigger is distinct from a resting primary.
+The normal-primary entry is scoped per SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled
+control (`new session`), and each dialog or popup that floats over it may supply its own affirmative primary. The
+sidebar's secondary actions and profile-row edit/delete controls use the neutral tier; menu items, tabs, composer
+selections, relays, and other explicit exemptions retain their ghost or purpose-built styling. Destructive menu items
+remain red text, while their confirmation buttons use the danger tier. SPEC.md requires the sidebar to mark the selected
+session's row readably at a glance, so anything else joining that list has to be a place where the accent means "this is
+where you are" — the same thing every entry but the delete wait says — because an accent spread across ordinary
+decoration would leave nothing to make the selection readable. Both constraints have a contrast floor under them: the
+quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on, which is
+what caps how light the selected row's fill may go.
 
 Selection is one construct wherever it appears — the sidebar's selected row, the selected tab, and the launch composer's
 chosen harness, segment, folder, and list option: the accent-tinted `--accent-fill`, an accent bar along one edge, and
@@ -462,8 +462,10 @@ short trace when details are closed. The one exception is an update whose status
 repeat it, so it is left out until that status clears.
 
 The host actions menu follows the session menu's anchor, pointer, raised surface, header, grouped inset commands, line
-icons, muted descriptions, roving keyboard focus, and one-menu-at-a-time dismissal rules. Its Remove command remains a
-host-specific exception: it keeps the existing in-place confirmation until the host-removal dialog work lands.
+icons, muted descriptions, roving keyboard focus, and one-menu-at-a-time dismissal rules. Remove opens the modal
+`HostRemoveDialog`; the modal is isolated from the page, starts focus on cancel, and returns focus to the row toggle
+when cancelled. The dialog's permanent answer writes the shared helm preference best-effort before removing the registry
+row.
 
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel opens just beyond the sidebar's right edge, with its top aligned to
@@ -2122,7 +2124,7 @@ beside its installation snapshot from AppBody, independently of the filtered sid
 - State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities, and optional
   aliases), last-known session cache (survives helm restarts per SPEC.md), the helm-wide profile catalog and its one
   remembered default, recoverable web token, hashed browser device sessions, and the one client preference (list order,
-  last-selected session, compact rows) every client shares.
+  last-selected session, compact rows, and host-removal confirmation choice) every client shares.
 - The `profiles` table is bounded on both axes — 128 stored profiles per helm, 8 KiB of caller-supplied text per profile
   — so the unpaginated catalog reply stays predictably bounded. The helm combines those stored rows with eight
   release-owned Claude Code, Codex, Muse, and Cursor built-ins in its read and resolution paths; built-ins are never

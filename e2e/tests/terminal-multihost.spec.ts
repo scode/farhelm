@@ -38,6 +38,8 @@ import {
   createSession,
   openHostMenu,
   openHostsPanel,
+  patchPreferences,
+  readPreferences,
   openRowMenu,
   selfSshAvailable,
   stubFeed,
@@ -774,15 +776,11 @@ test.describe("multi-host", () => {
     await assertFullyPaintedAndHitTestable(page, remove);
   });
 
-  // F1/COR-CONFIRM-CLIP: choosing `remove` used to replace `.host-row-main`'s
-  // contents with the name, the status, an unshrinkable warning sentence, a
-  // second copy of the name, AND both buttons — all on one non-wrapping
-  // line, which the 340px sidebar clips exactly the way it once clipped
-  // `remove` itself (the regression the previous test guards). This proves
-  // the FIX rather than merely the shape of the old bug: both confirmation
-  // controls are fully painted and hit-testable after proceeding through
-  // the real click path, not just present in the DOM.
-  test("host-confirm-remove-fits-the-sidebar: both prompt buttons stay reachable", async ({
+  // F1/COR-CONFIRM-CLIP: the removal question is a modal, so its controls
+  // must remain fully painted and reachable even for a long host name. The
+  // test follows the real menu click path rather than asserting only that the
+  // dialog exists in the DOM.
+  test("host-remove-dialog-fits: both prompt buttons stay reachable", async ({
     page,
   }) => {
     await page.route("**/api/hosts", async (route) => {
@@ -818,8 +816,9 @@ test.describe("multi-host", () => {
     await openHostMenu(row);
     await row.locator(".host-remove").click();
 
-    const confirm = row.locator(".host-confirm-remove");
-    const cancel = row.locator(".host-cancel-remove");
+    const dialog = page.locator(".host-remove-dialog");
+    const confirm = dialog.locator("button.btn-danger").first();
+    const cancel = dialog.locator(".host-settings-close");
     await expect(confirm).toBeVisible();
     await expect(cancel).toBeVisible();
 
@@ -869,7 +868,7 @@ test.describe("multi-host", () => {
     const row = hostRowByName(page, "user@remove-refusal");
     await openHostMenu(row);
     await row.locator(".host-remove").click();
-    await row.locator(".host-confirm-remove").click();
+    await page.locator(".host-remove-dialog button.btn-danger").first().click();
 
     await expect(row.locator(".host-error")).toContainText("the host is still required");
     await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -879,9 +878,10 @@ test.describe("multi-host", () => {
   // (`unreachable-reprobing`) is long enough BY ITSELF — no unusually long
   // host name required — to overflow the header line's available width
   // once the name, the status, and the "⋯" toggle are all accounted for.
-  // `.host-row-main` used to allow that line to WRAP (to make room for the
-  // removal confirmation below it — see `.host-confirm-remove-panel` in
-  // app.css), and wrapping sent the "⋯" onto a line of its own starting at
+  // `.host-row-main` must stay single-line while the removal question lives
+  // in its modal, and the fixed menu must remain anchored to the toggle even
+  // when the status wording is long. Wrapping would send the "⋯" onto a line
+  // of its own starting at
   // the row's LEFT edge, anchoring its `position: fixed` floating menu off
   // the sidebar's own left edge with it — clipped and unclickable, the
   // same class of bug `host-remove-escapes-the-sidebar-clip` above already
@@ -1658,7 +1658,7 @@ test.describe("multi-host", () => {
 
       // Nothing opened…
       await expect(page.locator(".host-settings-dialog")).toHaveCount(0);
-      await expect(target.locator(".host-confirm-remove")).toHaveCount(0);
+      await expect(page.locator(".host-remove-dialog")).toHaveCount(0);
       await expect(target.locator(".host-row-menu-panel")).toBeVisible();
       // …and nothing the menu could have caused reached this host's own
       // endpoints.
@@ -2774,16 +2774,15 @@ test.describe("multi-host", () => {
         { timeout: 30_000 },
       );
 
-      // Remove through the in-page confirmation — wry has no native
-      // dialogs, so there is no browser prompt to accept, and the flow is
-      // the same on both renderers.
+      // Remove through the modal confirmation — wry has no native dialogs,
+      // so the Dioxus dialog is the same flow on both renderers.
       const row = hostRowByName(page, info.remote_ssh);
       await openHostMenu(row);
       await row.locator(".host-remove").click();
-      await expect(row.locator(".confirm-consequence")).toContainText(
-        "leaves its supervisor and sessions running",
+      await expect(page.locator(".host-remove-dialog")).toContainText(
+        "supervisor and sessions keep running",
       );
-      await row.locator(".host-confirm-remove").click();
+      await page.locator(".host-remove-dialog button.btn-danger").first().click();
 
       await expect(hostRowByName(page, info.remote_ssh)).toHaveCount(0, {
         timeout: 30_000,
@@ -3048,11 +3047,12 @@ test.describe("multi-host", () => {
     const row = hostRowByName(page, info.remote_ssh);
     await openHostMenu(row);
     await row.locator(".host-remove").click();
-    await expect(row.locator(".host-confirm-remove")).toBeVisible();
+    const dialog = page.locator(".host-remove-dialog");
+    await expect(dialog).toBeVisible();
     // Focus lands on the way OUT of the destructive action, so a stray
     // Enter after the remove click backs out rather than in.
-    await expect(row.locator(".host-cancel-remove")).toBeFocused();
-    await row.locator(".host-cancel-remove").click();
+    await expect(dialog.locator(".host-settings-close")).toBeFocused();
+    await dialog.locator(".host-settings-close").click();
 
     // Back to the ordinary controls, same host, same id — a cancel that
     // "worked" by re-adding the host would look identical without this.
@@ -3061,8 +3061,49 @@ test.describe("multi-host", () => {
     // reopened one rather than on the row line.
     await openHostMenu(row);
     await expect(row.locator(".host-remove")).toBeVisible();
-    await expect(row.locator(".host-confirm-remove")).toHaveCount(0);
+    await expect(page.locator(".host-remove-dialog")).toHaveCount(0);
     expect((await apiRemoteHost(request)).id).toBe(before.id);
+  });
+
+  /**
+   * The shared helm preference turns a later menu click into the same
+   * removal request without mounting a second question in the page.
+   */
+  test("remove-skip-confirmation: a saved answer removes directly", async ({
+    page,
+    request,
+  }) => {
+    requireFleet();
+    const info = stackInfo();
+    await patchPreferences(request, { skip_host_remove_confirmation: null });
+    expect((await readPreferences(request)).skip_host_remove_confirmation).not.toBe(true);
+    try {
+      await page.goto("/");
+      await openHostsPanel(page);
+      const row = hostRowByName(page, info.remote_ssh);
+      await openHostMenu(row);
+      await row.locator(".host-remove").click();
+      const dialog = page.locator(".host-remove-dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.locator("button.btn-danger.btn-outline").click();
+      await expect(page.locator(".host-remove-dialog")).toHaveCount(0);
+      await expect(row).toHaveCount(0, { timeout: 30_000 });
+
+      await expect
+        .poll(async () => (await readPreferences(request)).skip_host_remove_confirmation)
+        .toBe(true);
+      await restoreFleetRow(request);
+      await page.reload();
+      await openHostsPanel(page);
+      const restored = hostRowByName(page, info.remote_ssh);
+      await openHostMenu(restored);
+      await restored.locator(".host-remove").click();
+      await expect(page.locator(".host-remove-dialog")).toHaveCount(0);
+      await expect(restored).toHaveCount(0, { timeout: 30_000 });
+    } finally {
+      await patchPreferences(request, { skip_host_remove_confirmation: null });
+      await restoreFleetRow(request);
+    }
   });
 
 
