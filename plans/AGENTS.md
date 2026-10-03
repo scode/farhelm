@@ -122,11 +122,51 @@ those changes into a plan checkout. Once the status is clean, fetch `origin`, st
 `main@origin` with `jj new main@origin`, and verify clean status again before planning, picking, executing, draining,
 reviewing, or landing plans.
 
-After a plan closes, a drain must return to a clean working copy of the latest `main` before considering another plan.
-The same sequence applies: confirm the working copy is clean, fetch `origin`, run `jj new main@origin`, and verify clean
-status again. If the previous plan left uncommitted or otherwise unreconciled work, stop and report it instead of
-letting the next plan inherit it. The clean-main boundary applies between plans even when the earlier plan delivered,
-blocked, or gave up its claim; a monitor's baseline commit is not a reason to skip the reset.
+Whenever work on a plan ends, the executor ALWAYS returns to a clean working copy of the latest `main`, inside a drain
+or not, and whether the plan delivered, blocked, or gave up its claim. Unlike the starting check, this one does not
+abort on a dirty working copy: it cleans it up. When the executor closes a plan it still held (it delivered, blocked, or
+gave the claim back itself after pushing), every consistent piece of the plan has been pushed (steps 9 to 11 under
+Executing one plan), so anything still local is a leftover (a half-made edit, a scratch file jj snapshotted, an unpushed
+or amended commit on the plan's stack), and leaving it in place is how the next plan ends up building on top of it. The
+starting check is different because a working copy found dirty before any plan runs may be the maintainer's own work or
+an interrupted executor's unpushed progress, and neither is the executor's to throw away.
+
+Here's the reset after a close, run from the checkout, with `<slug>` the plan's slug:
+
+```
+jj git fetch
+s='::@ & mutable() & ~::remote_bookmarks()'
+jj diff --summary -r "($s) ~ ::(($s):: ~ ($s))"
+jj abandon --retain-bookmarks -r "($s) ~ ::(($s):: ~ ($s))"
+```
+
+Then put each local `plan/<slug>/*` bookmark back where GitHub has it, and move onto `main`:
+
+- a bookmark with an `@origin`: `jj bookmark set <name> -r <name>@origin --allow-backwards`;
+- a bookmark that was never pushed: `jj bookmark delete <name>`;
+- finally `jj new main@origin` and `jj status`, which must report no changes and no conflicted `plan/<slug>/*` bookmark.
+
+The fetch comes first because `remote_bookmarks()` is only as current as the last fetch, and a commit that reached
+GitHub since then must not count as unpushed. `$s` is the working copy and its ancestors that no remote bookmark
+reaches; the `~ ::(($s):: ~ ($s))` part leaves out any of those that something outside the set builds on (another jj
+workspace's working copy, another plan's commit), because abandoning them would rewrite that history under its owner.
+What the guard leaves out stays where it is, outside the working copy. The `jj diff` lists the paths being dropped, and
+the plan's closing log entry records them so a discard is never silent. The bookmark step is needed because
+`--retain-bookmarks` only moves a bookmark to the abandoned commit's parent: that is its pushed commit when the local
+work merely extended the stack, but `main` when the pushed commit was amended or rebased, and a later push of that name
+would then empty the PR. Without `--retain-bookmarks` the abandon deletes the bookmark outright, which is worse.
+
+When the claim was released rather than given up (step 1, or `block`/`deliver` exiting 10), the executor no longer owns
+the plan and the reset is narrower: `jj git fetch`, then `jj new main@origin` and `jj status`, with nothing abandoned
+and no bookmark touched. Unpushed work may still be local at that point (step 9 forbids pushing it once the claim is
+gone), and step 7 has the next claimer inspect exactly that work in this checkout before deciding what to do with it.
+Moving off it keeps the working copy clean without destroying it; record the old working-copy commit id in the executor
+log so the leftover can be found.
+
+Either reset leaves ignored files alone, since jj never sees them. That keeps the checkout's build caches (`target/`,
+`node_modules/`, `.ci-tmux/`, and the like) for the next plan, and it also leaves the other ignored files (release
+drafts, delegation records, saved authentication state) where their owners expect them. A monitor's baseline commit is
+not a reason to skip the reset.
 
 ## Sub-agents this file requires
 
@@ -248,13 +288,15 @@ its open PRs. Record the pick and its reasoning in the executor log.
      claim was released while you were away.
    - `claiming`: your id on the line means the claim landed; resume at step 5. Otherwise it never landed: clear the log
      entry and pick afresh, with no notification.
-   - `unclaiming`: your id still on the line means the `unclaim` never landed; run it again. Otherwise it did.
+   - `unclaiming`: your id still on the line means the `unclaim` never landed; run it again. Once it has landed, finish
+     the close it was part of: step 12 if the plan is still unclaimed, or, if another executor has claimed it since, the
+     reset for a released claim (Clean-main boundary), recorded in the executor log only.
    - `blocking` or `delivering`: if `history` shows that commit with your claim id, it landed, whatever the line says
      now (review may already have moved on); finish closing (step 12). If not and your id is still on the line, run the
      verb again. Otherwise the claim was released.
 
    A released claim means: drop it from the executor log, push nothing more for that plan and write nothing more to its
-   working log, notify, and continue with a fresh pick.
+   working log, run the reset for a released claim (Clean-main boundary), notify, and continue with a fresh pick.
 2. Apply the clean-main boundary, then run `queue status` and pick (Picking above). Nothing picked: the round is over.
 3. Claim. Generate a claim id (`python3 -c 'import secrets; print(secrets.token_hex(3))'`), write slug, id and
    `claiming` to the executor log, then `queue claim <slug> --claim <id>`. Exit 10 means someone else got there first:
@@ -262,7 +304,8 @@ its open PRs. Record the pick and its reasoning in the executor log.
    `queue status`; if the line carries your id, the claim landed. Otherwise leave `claiming (uncertain)` in the executor
    log and pick again; step 1 settles it on the next start, since a late landing is still possible.
 4. Re-check. Run `queue status` again. If a plan claimed since your pick is a strong conflict with this one, give the
-   claim back (`queue unclaim`) and pick again.
+   claim back (`queue unclaim`) and pick again from step 2, whose boundary brings the checkout up to the `main` the
+   unclaim just moved.
 5. Read the plan file from `main@origin`, including any `## Decisions`.
 6. Set up the base from the clean `main@origin` working copy. If the plan has open `plan/<slug>/*` PRs (a resume), track
    those bookmarks, rebase that stack onto `main@origin` as a careful rebase (root `AGENTS.md`), and build on its tip;
@@ -276,10 +319,10 @@ its open PRs. Record the pick and its reasoning in the executor log.
    pushes differ from GitHub's, inspect that checkout without changing it (`jj --ignore-working-copy -R <path> log`);
    unpushed work found there is a block, with that as the question, rather than something to rebuild blind. A sub-agent
    then checks the entry against the same sources. Reconcile any disagreement before working. If the plan cannot be
-   reconciled, give the claim back and notify. Always start your own resource watchdog; treat the previous executor's
-   scratch directory as read-only input. After a release, entries the released executor wrote to the working log before
-   it noticed are expected: record that you saw them and continue, rather than stopping as the resume protocol would for
-   entries of unknown origin.
+   reconciled, give the claim back (the paragraph after step 12) and notify. Always start your own resource watchdog;
+   treat the previous executor's scratch directory as read-only input. After a release, entries the released executor
+   wrote to the working log before it noticed are expected: record that you saw them and continue, rather than stopping
+   as the resume protocol would for entries of unknown origin.
 8. Run the plan file as the goal. For a single plan, set the harness's goal to it if the harness lets the model set its
    own goal; otherwise, and always within a drain, behave exactly as if it were the harness-provided goal under the
    outer request. A drain does not register each plan as a harness goal, because a plan that blocks could not be cleared
@@ -297,14 +340,18 @@ its open PRs. Record the pick and its reasoning in the executor log.
     maintainer below) and have a sub-agent cold-read it, asking whether the maintainer could approve or ask for a
     follow-up from it alone and whether it breaks public-repo hygiene. Revise until it passes, write `delivering` to the
     executor log, run `queue deliver <slug> --claim <id> --report <file>`, and notify.
-12. Close: write a closing entry in the plan's working log, stop its resource watchdog, and clear the claim from the
-    executor log. Closing ends the plan's resume-log protocol and its review demands, as an express stop; the next plan
-    starts its own.
+12. Close: return to clean `main` with the reset under Clean-main boundary, write a closing entry in the plan's working
+    log that names any paths the reset discarded, stop its resource watchdog, and clear the claim from the executor log.
+    Closing ends the plan's resume-log protocol and its review demands, as an express stop; the next plan starts its
+    own.
 
 `block` or `deliver` exiting 10 means the claim was released while you worked: push nothing more, record it in both
-logs, and notify. To give a claim back for any other reason (the maintainer stops the flow mid-plan, a `gh` login that
-expired, a disk alert that cannot be cleared), push what is consistent, write the working log, write `unclaiming` to the
-executor log, run `queue unclaim`, and notify.
+logs, run the reset for a released claim (Clean-main boundary), and notify. To give a claim back for any other reason
+(the maintainer stops the flow mid-plan, a `gh` login that expired, a disk alert that cannot be cleared), push what is
+consistent, write the working log, write `unclaiming` to the executor log, run `queue unclaim`, close (step 12), and
+notify. If pushing the consistent work failed (the expired login, say), close with the reset for a released claim
+instead of the full one, so that work stays in the checkout for the next claimer to find (step 7), and say so in the
+working log and the notification.
 
 To notify, use the harness's own notification facility (in Claude Code, the push notification tool). If there is none,
 say so in the flow's final report instead.
@@ -332,10 +379,14 @@ dropped.
 
 ## Draining: "drain the plans"
 
-Start by applying the clean-main boundary. Execute one plan after another, returning to a clean working copy of the
-latest `main` after each plan closes and before the next pick, until a pick takes nothing. If a boundary check finds a
-dirty working copy, abort the drain and tell the maintainer which paths are dirty. Finish by reporting what was
-delivered and what blocked, with PR links, restating any open questions the way Writing for the maintainer requires.
+Start with step 1 of Executing one plan, which settles any claim or close that an earlier run of this executor left
+unfinished; a dirty working copy that belongs to such a claim is resumed or reset there, not reported. Then get onto a
+clean, freshly fetched `main` with the clean-main boundary's starting check, even when the working copy already looks
+clean: an older `main` is not good enough. If that check finds a dirty working copy, abort the drain and tell the
+maintainer which paths are dirty. Then execute one plan after another, until a pick takes nothing. Each plan's close
+resets the working copy to a clean, fresh `main` (step 12), so the next pick always starts there. Every "drain again"
+under monitoring below starts with the same starting check. Finish by reporting what was delivered and what blocked,
+with PR links, restating any open questions the way Writing for the maintainer requires.
 
 Any number of executors may drain at once, each in its own checkout; claims keep them off each other's plans.
 
