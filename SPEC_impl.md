@@ -1715,9 +1715,9 @@ evidence, but cannot authorize another directory move.
   exactly one native `codex` image, a hook-shaped reporter, and shell-`-c` trampolines only; Grok's adds the required
   `--no-leader` option to its one native image. Admission runs five steps: cheap envelope/kind/generation gating with no
   vendor I/O (the doorway's discriminator check re-applied against the fenced resolution, plus raw
-  event/source/agent-identity validation before diagnostic sanitation); the bounded capture claim (one shared
-  session-keyed `capture_locks` registry for report admission and readiness refresh, never the lifecycle claim, at most
-  a second of waiting on the report path) and a reload comparing kind, generation, and the complete prior binding; the
+  event/source/agent-identity validation before diagnostic sanitation); the unbounded capture claim (one shared
+  session-keyed `capture_locks` registry for report admission and readiness refresh, never the lifecycle claim; slow
+  waits are logged for diagnostics) and a reload comparing kind, generation, and the complete prior binding; the
   mutation-free runtime and vendor-root proofs with repeat attribution around the evidence; the atomic
   generation-plus-complete-binding CAS committing identity, locator, provenance, source, readiness, and the ambiguity
   reset together; and the mirror of only the committed result into the matching current-generation entry under the same
@@ -1725,8 +1725,9 @@ evidence, but cannot authorize another directory move.
   report-only reconciliation passes take the same claim and reload before mirroring, carrying the row's version beside
   the identity, so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a
   rejected report never triggers a readiness withdrawal through them. Scan writes, restart verification and lifecycle
-  resets retain their durable generation/binding fences; they do not all acquire this capture claim. The timeout bounds
-  lock acquisition, not the entire admission operation.
+  resets retain their durable generation/binding fences; they do not all acquire this capture claim. The report claim
+  has no time limit because every operation under it is local; a slow wait is logged for diagnostics, and the hook's own
+  budget bounds the caller.
 
   **Ownership provenance and the offer gate.** Migration 20 adds `capture_ownership_version`
   (`INTEGER NOT NULL
@@ -1754,21 +1755,25 @@ evidence, but cannot authorize another directory move.
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
   Attribution proofs apply to Codex, Grok, and OMP. Goose and Pi retain their existing acceptance behind the
   discriminator gate, and new framework entry points default to deny rather than allow. Claude stays on that legacy path
-  with one added check: the peer's walk to the owned pane (`procs::foreground_claude_emitter`), skipping the hook's
-  narrow `sh -c` trampolines, must end at the pane process or its direct child. It is positional on purpose. Claude's
-  native binary is named after its version and npm installs run under `node`, so an image rule would have to track
-  install layouts, and the injected `--settings` hook is a vendor detail that may change on its own; the closed attempt
-  in PR #830 shows where following either leads. A shelled-out child is always at least two links below the pane,
-  because the foreground's Bash tool runs it through a shell that does not `exec` it. Accepted costs: a wrapper chain
-  deeper than one level loses hook capture and falls back to the scan (pending removal), and a child the foreground
-  Claude spawned with no shell between them in a wrapperless launch would be admitted (not observed; the Bash tool
-  always interposes a shell). The check writes no provenance and does not flip Claude's predicate, because flipping it
-  would make every existing Claude capture fresh-only until its next proven report, and stopping replacement needs no
-  version. The offer gate has its final shape but flips per kind: Codex, Grok, and OMP require version 1, while the
-  other kinds keep today's offer behavior until their proof lands, writes 1, and flips the single per-kind predicate
-  every surface consults. There is no general report epoch. Grok's locator carries only its vendor-specific selection
-  timestamp; no other kind inherits that ordering rule. OMP uses serial cancellation fences, not cross-reporter
-  chronology. Old processes and assets fail closed after the upgrade; nothing is grandfathered.
+  with one added check before the capture claim: the peer's walk to the owned pane (`procs::foreground_claude_emitter`),
+  skipping the hook's narrow `sh -c` trampolines, must end at the pane process or its direct child. It is positional on
+  purpose. Claude's native binary is named after its version and npm installs run under `node`, so an image rule would
+  have to track install layouts, and the injected `--settings` hook is a vendor detail that may change on its own; the
+  closed attempt in PR #830 shows where following either leads. A shelled-out child is always at least two links below
+  the pane, because the foreground's Bash tool runs it through a shell that does not `exec` it. Accepted costs: a
+  wrapper chain deeper than one level loses hook capture and falls back to the scan (pending removal), and a child the
+  foreground Claude spawned with no shell between them in a wrapperless launch would be admitted (not observed; the Bash
+  tool always interposes a shell). Because this check runs before the capture claim, two nearby Claude reports may
+  attribute concurrently and a slower one may commit second within one generation. That race is accepted because two
+  session starts that close together are not a realistic sequence; the generation fence only keeps a check made before a
+  relaunch from committing into the new launch. The lifecycle does not justify another coordination layer. The check
+  writes no provenance and does not flip Claude's predicate, because flipping it would make every existing Claude
+  capture fresh-only until its next proven report, and stopping replacement needs no version. The offer gate has its
+  final shape but flips per kind: Codex, Grok, and OMP require version 1, while the other kinds keep today's offer
+  behavior until their proof lands, writes 1, and flips the single per-kind predicate every surface consults. There is
+  no general report epoch. Grok's locator carries only its vendor-specific selection timestamp; no other kind inherits
+  that ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology. Old processes and assets fail
+  closed after the upgrade; nothing is grandfathered.
 
   **The per-launch identity hook.** Scanning cannot see a conversation being replaced inside a live process: Claude
   Code's `/clear` and Codex's `/new` both mint a new conversation id with nothing on disk pointing back at the record
