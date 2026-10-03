@@ -166,9 +166,16 @@ that its required systemd or SSH substrate ran.
   cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
 - `bash scripts/test-plans-watch.sh` — drives the plans monitor's watcher (`scripts/plans-watch.sh`) against a strict
   stub `gh` that runs the watcher's own `jq` filter over GitHub-shaped tree listings: change detection, baselines read
-  from a commit, the idle cap, retried and persistent failures, malformed and truncated responses, hung requests,
-  argument errors, and prompt exit on SIGTERM without leaving children behind. Run it, with `shellcheck` on both
-  scripts, when either changes; under a minute, no network, needs `jq`.
+  from a commit, the wake check that keeps claims from waking idle executors, the idle cap, retried and persistent
+  failures, malformed and truncated responses, hung requests, argument errors, and prompt exit on SIGTERM without
+  leaving children behind. Run it, with `shellcheck` on both scripts, when either changes; under a minute, no network,
+  needs `jq`.
+- `python3 scripts/test-plans-queue.py` — the plans queue script (`scripts/plans-queue.py`), which is the lock that
+  keeps concurrent plan executors off each other's plans: its line grammar, every state transition and refusal, the
+  invariants between a state and its files, the rules a planning PR must keep, the wake check, and the compare-and-swap
+  loop against an in-memory GitHub that injects racing writers and lost responses. One case runs the real `dprint` when
+  it is on PATH, which downloads dprint's plugins if its cache is cold. Run it when the script changes; seconds, no
+  other network.
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, a synthetic git
   history for the fragment sweep, synthetic dist manifests for the announcement comparison). Run the lint when
