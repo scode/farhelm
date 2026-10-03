@@ -988,11 +988,8 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// suggestions, not an action. Raising the scan's budget, or lowering this
 /// one, eats into the margin that transport has left and can break that fit.
 ///
-/// On the desktop build, a 401 on one of these reads runs the native
-/// credential refresh and the retry inside this same absolute deadline;
-/// a refresh slower than the deadline cancels the exchange and the next
-/// reader starts another. The five-second preference seed shares that
-/// accepted shape at half the budget.
+/// The five-second preference seed shares that accepted shape at half the
+/// budget.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Send one protected request and read the helm's build stamp off its reply
@@ -1017,12 +1014,9 @@ const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// another machine, are the reason for; helm-local idempotent GETs get
 /// [`send_read`]'s [`READ_TIMEOUT`] instead, and the paged listing once had
 /// a budget of its own before it went and returned with the preference
-/// seed. In the desktop build, a recognized 401 refreshes the
-/// native credential, retries once, and then restarts the webview's own
-/// authentication without unmounting the app, all inside one absolute
-/// deadline — recovery
-/// cannot turn one request's remaining budget into two fresh ones; browser
-/// builds retain the ordinary full-page token prompt.
+/// seed. A recognized 401 raises the full-page token prompt in browser
+/// builds; the desktop build has nothing to recover with (its credential
+/// cannot be revoked; see `send_inner`) and reports it as an error.
 async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
     send_inner(request, REQUEST_TIMEOUT)
         .await
@@ -1197,20 +1191,13 @@ async fn send_inner(
     request: reqwest::RequestBuilder,
     timeout: std::time::Duration,
 ) -> Result<reqwest::Response, SendError> {
-    #[cfg(native_desktop)]
-    let deadline = tokio::time::Instant::now() + timeout;
-    #[cfg(native_desktop)]
-    let (request, retry) = authorize_with_retry_copy(request, crate::auth::device_secret());
-    #[cfg(not(native_desktop))]
     let request = match crate::auth::device_secret() {
         Some(secret) => request.bearer_auth(secret),
         None => request,
     };
-    #[cfg(native_desktop)]
-    let request_timeout = remaining(deadline)?;
-    #[cfg(not(native_desktop))]
-    let request_timeout = timeout;
-    let (client, built) = request.timeout(request_timeout).build_split();
+    // reqwest's per-request timeout runs until the body has been read, so it
+    // bounds the 401 body read below too.
+    let (client, built) = request.timeout(timeout).build_split();
     let built = built.map_err(|error| SendError::Request(error.to_string()))?;
     let resp = execute_with_receipt(&client, built)
         .await
@@ -1220,38 +1207,18 @@ async fn send_inner(
     // the value is unchanged and the point is entirely the side effect.
     skew::note_build(&resp);
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        #[cfg(native_desktop)]
-        let body = tokio::time::timeout_at(deadline, resp.text())
-            .await
-            .map_err(|_| SendError::Request("request deadline elapsed".to_string()))?
-            .map_err(|error| SendError::Request(error.to_string()))?;
-        #[cfg(not(native_desktop))]
         let body = resp
             .text()
             .await
             .map_err(|error| SendError::Request(error.to_string()))?;
         if device_auth_required(&body) {
-            #[cfg(native_desktop)]
-            if !skew::build_skew_detected_now()
-                && let Some(retry) = retry
-            {
-                return retry_desktop_request(
-                    retry,
-                    deadline,
-                    || async {
-                        crate::desktop::refresh_native_device()
-                            .await
-                            .map_err(|error| error.to_string())
-                    },
-                    crate::auth::require_desktop_webview_reauth,
-                )
-                .await;
-            }
             // Stamp classification happens first. A bundle that disagrees
             // with the helm cannot safely interpret even this marker, so the
             // skew prompt wins and this one stays dormant. Only the browser
-            // owns the token prompt; desktop recovery is native and the
-            // webview gate cannot repair the native request from that form.
+            // owns the token prompt. The desktop app has nothing to recover
+            // with: its credential is an in-memory one its own embedded helm
+            // minted, which rotation cannot revoke, so a refusal here means
+            // something is broken and is reported as such.
             #[cfg(not(native_desktop))]
             if !skew::build_skew_detected_now() {
                 crate::auth::require_token();
@@ -1266,100 +1233,6 @@ async fn send_inner(
         }));
     }
     Ok(resp)
-}
-
-/// Attach the current device secret, keeping a copy of the request WITHOUT it
-/// for the one refresh-and-retry.
-///
-/// The copy must be taken before the credential is attached. reqwest's
-/// `bearer_auth` appends an `Authorization` header rather than replacing
-/// one, and the helm reads the first; a copy carrying the old secret made
-/// the retry send the revoked secret first, so the documented recovery after
-/// a token rotation or device eviction could never succeed.
-#[cfg(native_desktop)]
-fn authorize_with_retry_copy(
-    request: reqwest::RequestBuilder,
-    secret: Option<String>,
-) -> (reqwest::RequestBuilder, Option<reqwest::RequestBuilder>) {
-    let retry = request.try_clone();
-    let request = match secret {
-        Some(secret) => request.bearer_auth(secret),
-        None => request,
-    };
-    (request, retry)
-}
-
-/// Refresh and retry inside the original request's absolute deadline.
-///
-/// When this caller's refresh replaced the native credential, `reauth` asks
-/// the webview to sign in again too, since a rotation revoked its separate
-/// credential as well. That request waits until the retried request has
-/// settled, success or failure. A webview sign-in that fails replaces the
-/// app with its failure page, which cancels whatever component task is
-/// awaiting this retry; firing `reauth` first let a fast failure discard a
-/// Delete or Stop before its outcome existed (SPEC.md "Signing in again").
-///
-/// The injected refresh future and `reauth` are narrow test seams;
-/// production still has exactly one caller, one native refresh operation and
-/// one webview re-authentication trigger.
-#[cfg(native_desktop)]
-async fn retry_desktop_request<Refresh, Refreshed>(
-    retry: reqwest::RequestBuilder,
-    deadline: tokio::time::Instant,
-    refresh: Refresh,
-    reauth: impl FnOnce(),
-) -> Result<reqwest::Response, SendError>
-where
-    Refresh: FnOnce() -> Refreshed,
-    Refreshed: std::future::Future<Output = Result<(String, bool), String>>,
-{
-    let (secret, replaced) = tokio::time::timeout_at(deadline, refresh())
-        .await
-        .map_err(|_| SendError::Request("request deadline elapsed".to_string()))?
-        .map_err(SendError::Request)?;
-    let retried = async {
-        let allowance = remaining(deadline)?;
-        let (retry_client, built) = retry.bearer_auth(secret).timeout(allowance).build_split();
-        let built = built.map_err(|error| SendError::Request(error.to_string()))?;
-        execute_with_receipt(&retry_client, built)
-            .await
-            .map_err(|error| SendError::Request(error.to_string()))
-    }
-    .await;
-    if replaced {
-        reauth();
-    }
-    let retried = retried?;
-    skew::note_build(&retried);
-    if retried.status() != reqwest::StatusCode::UNAUTHORIZED {
-        return Ok(retried);
-    }
-    let retry_body = tokio::time::timeout_at(deadline, retried.text())
-        .await
-        .map_err(|_| SendError::Request("request deadline elapsed".to_string()))?
-        .map_err(|error| SendError::Request(error.to_string()))?;
-    if device_auth_required(&retry_body) {
-        // Desktop recovery already restarted the webview's independent
-        // authentication. The browser token prompt cannot persist a native
-        // credential.
-        return Err(SendError::Unauthenticated);
-    }
-    let detail = retry_body.trim();
-    Err(SendError::Request(if detail.is_empty() {
-        "the helm refused this request as unauthorized".to_string()
-    } else {
-        detail.to_string()
-    }))
-}
-
-/// Remaining time in one request's absolute budget, including desktop
-/// credential recovery and its single retry.
-#[cfg(native_desktop)]
-fn remaining(deadline: tokio::time::Instant) -> Result<std::time::Duration, SendError> {
-    deadline
-        .checked_duration_since(tokio::time::Instant::now())
-        .filter(|remaining| !remaining.is_zero())
-        .ok_or_else(|| SendError::Request("request deadline elapsed".to_string()))
 }
 
 /// Whether a 401 body is the helm's "sign in again" answer
@@ -1378,62 +1251,6 @@ pub(crate) fn device_auth_required(body: &str) -> bool {
                 == Some(farhelm_proto::http::AUTH_REQUIRED_CODE)
         })
 }
-
-/// Mint the desktop webview's device secret from the web token, natively.
-///
-/// `Ok(None)` is the helm refusing the token (it may have been rotated since
-/// it was read); anything else that is not a secret is an `Err`. Done here
-/// rather than in the webview so the web token, the helm's root credential,
-/// never enters the page's JavaScript, where a script injected by content the
-/// window showed could intercept it (SPEC.md "Client hardening"). The page
-/// only ever holds the revocable device secret this returns.
-///
-/// `deadline` bounds the whole exchange, headers and body alike: the
-/// window shows "Starting Farhelm…" until this answers, so a helm that
-/// accepts the request and then stalls must turn into a visible error
-/// promptly (the gate passes [`WEBVIEW_EXCHANGE_TIMEOUT`]), not after the
-/// minute ordinary requests are allowed.
-#[cfg(native_desktop)]
-pub(crate) async fn mint_webview_device_secret(
-    base: &str,
-    token: &str,
-    deadline: tokio::time::Instant,
-) -> Result<Option<String>, String> {
-    #[derive(serde::Deserialize)]
-    struct DeviceExchange {
-        device_secret: String,
-    }
-    let url = format!("{base}/api/auth/token");
-    let exchange = async {
-        let resp = client()
-            .post(&url)
-            .json(&serde_json::json!({ "token": token }))
-            .send()
-            .await
-            .map_err(|error| format!("exchanging the desktop token: {error}"))?;
-        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Ok(None);
-        }
-        if !resp.status().is_success() {
-            return Err(format!(
-                "webview device exchange failed with {}",
-                resp.status()
-            ));
-        }
-        resp.json::<DeviceExchange>()
-            .await
-            .map(|exchange| Some(exchange.device_secret))
-            .map_err(|error| format!("the helm returned an unreadable device session: {error}"))
-    };
-    tokio::time::timeout_at(deadline, exchange)
-        .await
-        .unwrap_or_else(|_| Err("webview device exchange timed out".to_string()))
-}
-
-/// How long one webview device exchange may take: the bound the page's own
-/// exchange had when it ran there.
-#[cfg(native_desktop)]
-pub(crate) const WEBVIEW_EXCHANGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Exchange a pasted bootstrap token for an origin-scoped device secret.
 ///
@@ -1610,6 +1427,8 @@ pub(crate) async fn fetch_sessions(
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
+    #[cfg(native_desktop)]
+    crate::desktop::log_smoke_session_answered(&query);
     let body = resp
         .json::<SessionListBody>()
         .await
@@ -3903,122 +3722,6 @@ mod tests {
         assert_eq!(dispatch, "fetch #3 dispatch GET /api/hosts (no timeout)");
     }
 
-    /// Time spent on the first response and serialized refresh must reduce
-    /// the retry's allowance; otherwise one page can consume two advertised
-    /// request budgets while claiming to remain bounded by one.
-    ///
-    /// The bound listener never accepts or answers. Only deadline accounting
-    /// matters here, not which socket phase reaches the timeout. Tokio's paused
-    /// clock removes scheduler load from the elapsed-time assertion.
-    #[cfg(native_desktop)]
-    #[farhelm_testtrace::test(start_paused = true)]
-    async fn desktop_refresh_and_retry_share_the_original_deadline() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let started = tokio::time::Instant::now();
-        let deadline = started + std::time::Duration::from_millis(150);
-        // sleep-ok: spend part of the original budget on the paused clock before entering refresh and retry.
-        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-
-        let result = retry_desktop_request(
-            client().get(format!("http://{addr}/stalled-retry")),
-            deadline,
-            || async {
-                // sleep-ok: the injected refresh consumes another part of the same virtual request budget.
-                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
-                Ok(("replacement".to_string(), false))
-            },
-            || panic!("a refresh that replaced nothing must not ask the webview to sign in again"),
-        )
-        .await;
-
-        assert!(matches!(result, Err(SendError::Request(_))));
-        assert!(started.elapsed() >= std::time::Duration::from_millis(150));
-        assert!(started.elapsed() < std::time::Duration::from_millis(250));
-        drop(listener);
-    }
-
-    /// The webview is asked to sign in again only after the retried
-    /// request has settled.
-    ///
-    /// Why it matters: that sign-in can fail, and a failure replaces the app,
-    /// cancelling the component task awaiting the retry. Asking first let a
-    /// fast failure discard a Delete or Stop before its outcome existed
-    /// (SPEC.md "Signing in again"). Spec: with a replaced credential the
-    /// trigger fires exactly once, and not before the retry's own outcome,
-    /// here a stall that runs to the deadline. A stall rather than an
-    /// answer, because an answered request would need a Dioxus runtime for
-    /// the build-skew bookkeeping (see the test below).
-    #[cfg(native_desktop)]
-    #[farhelm_testtrace::test(start_paused = true)]
-    async fn desktop_webview_reauth_waits_for_the_retry_to_settle() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let started = tokio::time::Instant::now();
-        let deadline = started + std::time::Duration::from_millis(150);
-        let fired_at = std::cell::Cell::new(None);
-
-        let result = retry_desktop_request(
-            client().get(format!("http://{addr}/stalled-retry")),
-            deadline,
-            || async { Ok(("replacement".to_string(), true)) },
-            || {
-                assert!(fired_at.get().is_none(), "the trigger fires once");
-                fired_at.set(Some(started.elapsed()));
-            },
-        )
-        .await;
-
-        assert!(matches!(result, Err(SendError::Request(_))));
-        let fired_at = fired_at
-            .get()
-            .expect("a replaced credential must ask the webview to sign in again");
-        assert!(
-            fired_at >= std::time::Duration::from_millis(150),
-            "the trigger fired at {fired_at:?}, before the retry settled at the deadline"
-        );
-        drop(listener);
-    }
-
-    /// The desktop refresh-and-retry sends exactly one credential: the
-    /// refreshed one.
-    ///
-    /// Why it matters: the retry copy used to be taken after the old secret
-    /// was attached, and reqwest appends rather than replaces the header, so
-    /// the retry carried the revoked secret first and the helm (which reads
-    /// the first value) refused it again. Spec: the first attempt carries the
-    /// current secret, and the retry, once `retry_desktop_request` attaches
-    /// the refreshed secret the same way, carries only that one. Checked on
-    /// the built requests: sending one would need a Dioxus runtime for the
-    /// build-skew bookkeeping every response goes through.
-    #[cfg(native_desktop)]
-    #[farhelm_testtrace::test]
-    fn desktop_retry_carries_only_the_refreshed_secret() {
-        let authorization = |request: reqwest::RequestBuilder| {
-            request
-                .build()
-                .expect("a plain GET builds")
-                .headers()
-                .get_all(reqwest::header::AUTHORIZATION)
-                .iter()
-                .map(|value| value.to_str().unwrap().to_string())
-                .collect::<Vec<_>>()
-        };
-        let (first, retry) = authorize_with_retry_copy(
-            client().get("http://127.0.0.1:9/retried"),
-            Some("revoked".to_string()),
-        );
-        assert_eq!(authorization(first), ["Bearer revoked"]);
-        let retry = retry
-            .expect("a plain GET can be copied")
-            .bearer_auth("refreshed");
-        assert_eq!(
-            authorization(retry),
-            ["Bearer refreshed"],
-            "the retry must carry only the refreshed secret"
-        );
-    }
-
     /// A blank install field must reach the wire as ABSENT, and a non-blank
     /// one byte for byte.
     ///
@@ -4912,107 +4615,5 @@ mod seen_write_tests {
             queue.record("sess-1", Some(2), Box::new(|_| {})),
             "the next write must be able to start a replacement writer"
         );
-    }
-}
-
-#[cfg(all(test, native_desktop))]
-mod webview_mint_tests {
-    use super::mint_webview_device_secret;
-    use std::time::Duration;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    /// Serve one connection: read the request, then write `response` and
-    /// hold the connection open (so a short body stalls rather than ends).
-    async fn one_response(response: String) -> (String, tokio::task::JoinHandle<()>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut request = [0_u8; 4096];
-            let _ = socket.read(&mut request).await;
-            socket.write_all(response.as_bytes()).await.unwrap();
-            std::future::pending::<()>().await;
-        });
-        (base, server)
-    }
-
-    /// A refused token is `Ok(None)` (the caller re-reads a rotated token
-    /// once), and a granted one returns the device secret.
-    ///
-    /// Why it matters: the gate retries only a refusal; any other failure
-    /// must surface, and a success must hand the page exactly the secret the
-    /// helm minted. Specified: a 401 answer yields `Ok(None)`; a 200 answer
-    /// with a device secret yields it.
-    #[farhelm_testtrace::test]
-    async fn a_refused_token_is_none_and_a_granted_one_is_the_secret() {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        let (base, server) =
-            one_response("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n".to_string())
-                .await;
-        assert_eq!(
-            mint_webview_device_secret(&base, "token", deadline).await,
-            Ok(None)
-        );
-        server.abort();
-        let body = r#"{"device_secret":"minted"}"#;
-        let (base, server) = one_response(format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
-            body.len()
-        ))
-        .await;
-        assert_eq!(
-            mint_webview_device_secret(&base, "token", deadline).await,
-            Ok(Some("minted".to_string()))
-        );
-        server.abort();
-    }
-
-    /// A helm that answers the headers and then stalls the body is cut off
-    /// at the deadline.
-    ///
-    /// Why it matters: the exchange used to run in the page under a
-    /// five-second bound covering the body too; moved to native it must keep
-    /// that, or a stalled helm leaves the window on "Starting Farhelm…" for
-    /// the ordinary request timeout. Specified: with headers promising a body
-    /// that never arrives, written well before the deadline, the call
-    /// returns the timeout error. Real time, not a paused clock, so the
-    /// headers really do arrive first; a bound covering only the request,
-    /// not the body, would hang here until the test harness's own timeout.
-    #[farhelm_testtrace::test]
-    async fn a_stalled_exchange_body_is_cut_off_at_the_deadline() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let (headers_sent, headers_sent_at) = tokio::sync::oneshot::channel();
-        let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut request = [0_u8; 4096];
-            let _ = socket.read(&mut request).await;
-            socket
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
-                      Content-Length: 100\r\n\r\n",
-                )
-                .await
-                .unwrap();
-            let _ = headers_sent.send(tokio::time::Instant::now());
-            std::future::pending::<()>().await;
-        });
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-
-        let result = mint_webview_device_secret(&base, "token", deadline).await;
-
-        assert_eq!(result, Err("webview device exchange timed out".to_string()));
-        assert!(
-            !server.is_finished(),
-            "the fixture server must still be holding the stalled body open"
-        );
-        let sent_at = headers_sent_at
-            .await
-            .expect("test premise: the fixture sent the response headers");
-        assert!(
-            sent_at < deadline,
-            "test premise: the headers arrived before the deadline, so the timeout hit the body"
-        );
-        server.abort();
     }
 }

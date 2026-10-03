@@ -698,9 +698,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             auth::require_device_session,
         ));
     // Validation is protected like every other read, but its webview caller
-    // must be able to distinguish the auth middleware's 401 from a transport
-    // failure. Keeping CORS outside this small router makes that refusal
-    // readable without widening any ordinary REST route.
+    // (on a custom-scheme origin) must be able to read the status at all,
+    // including the auth middleware's 401, to report it rather than a bare
+    // transport failure. Keeping CORS outside this small router makes that
+    // refusal readable without widening any ordinary REST route.
     let desktop_device = Router::new()
         .route("/api/auth/device", get(auth::validate_device))
         .route_layer(axum::middleware::from_fn_with_state(
@@ -1577,8 +1578,28 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
     run_with_ready(args, None, None, None).await
 }
 
-/// Run an embedded helm and report its bound address once every serving
-/// dependency is ready.
+/// What an embedded helm hands the desktop process that owns it once every
+/// serving dependency is ready.
+///
+/// The two device secrets are the desktop app's own credentials, one for its
+/// native REST client and one for its webview. They are minted in memory for
+/// this helm process alone (see `auth::AuthState::mint_embedded_device`):
+/// token rotation and the cap on remembered browser credentials never revoke
+/// them, no HTTP request can obtain one, and they are worthless once the
+/// process exits. The owner must not persist them; a fresh pair comes with
+/// every launch.
+pub struct EmbeddedReady {
+    /// The address the helm actually bound, which a port-0 caller needs.
+    pub addr: SocketAddr,
+    /// The credential for the desktop's native REST client.
+    pub native_device_secret: String,
+    /// The credential for the desktop's webview (its localStorage and
+    /// WebSocket subprotocols).
+    pub webview_device_secret: String,
+}
+
+/// Run an embedded helm and report its bound address and the desktop's own
+/// credentials once every serving dependency is ready.
 ///
 /// The desktop shell chooses its documented stable port, but it must not launch the UI
 /// until the HTTP listener, durable token, local-host actor, and token-control
@@ -1590,7 +1611,7 @@ pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
 pub async fn run_embedded(
     args: HelmArgs,
     clipboard_sink: Option<ClipboardSink>,
-    ready: std::sync::mpsc::Sender<SocketAddr>,
+    ready: std::sync::mpsc::Sender<EmbeddedReady>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     run_with_ready(args, clipboard_sink, Some(ready), Some(shutdown)).await
@@ -1608,7 +1629,7 @@ pub async fn run_embedded(
 async fn run_with_ready(
     args: HelmArgs,
     clipboard_sink: Option<ClipboardSink>,
-    ready: Option<std::sync::mpsc::Sender<SocketAddr>>,
+    ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
     shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> anyhow::Result<()> {
     let state_dir = match args.state_dir.clone() {
@@ -1697,7 +1718,13 @@ async fn run_with_ready(
     let checkout_revision = state.store.checkout_config_snapshot(None).await?.revision;
 
     if let Some(ready) = ready {
-        let _ = ready.send(addr);
+        // Minted only on the embedded path: a `farhelm helm run` has no
+        // in-process owner to hand them to, so it holds none.
+        let _ = ready.send(EmbeddedReady {
+            addr,
+            native_device_secret: state.auth.mint_embedded_device()?,
+            webview_device_secret: state.auth.mint_embedded_device()?,
+        });
     }
 
     // Printed on stdout, not logged: the README tells the user to open

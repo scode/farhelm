@@ -1508,10 +1508,9 @@ fn AppBody() -> Element {
 /// unmounts this gate in favor of it, and the gate remounts after recovery
 /// and re-reads — and `api::seed_with_local_changes` overlays any choice
 /// made in THIS client whose write never got through, so recovery cannot
-/// roll the current client back to the helm's older row. On desktop the
-/// funnel refreshes the native credential and retries the read itself, and
-/// the webview's re-authentication runs without unmounting this gate
-/// (`auth::DesktopBootstrapGate`), so nothing here remounts.
+/// roll the current client back to the helm's older row. The desktop app
+/// never signs in again (its own credentials cannot be revoked; see
+/// `auth::DesktopBootstrapGate`), so nothing there remounts this gate.
 #[component]
 fn PreferencesGate(children: Element) -> Element {
     let base = use_context::<ApiBase>().0;

@@ -6140,7 +6140,8 @@
   rotation or evicted by the client cap, and drop the desktop re-sign-in requirement; the code matches, and no ordinary
   operation leaves the desktop window running with a credential the helm has revoked. Keep or remove the existing
   recovery machinery as the simplest correct design requires. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-signin-recovery.md`.
+- Execution: complete — planned in `plans/queue/triage-signin-recovery.md`; jj change `suwwmmmvmrqk`, bookmark
+  `plan/triage-signin-recovery/01-desktop-own-credentials`, https://github.com/scode/farhelm/pull/1487.
 
 ## desktop-reauth-failure-loses-action-outcomes.md
 

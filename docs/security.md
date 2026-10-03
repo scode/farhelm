@@ -46,25 +46,29 @@ attempt and requires a current credential. These are product guarantees; the soc
 implementation, not a required revocation guarantee for established connections.
 
 The current implementation replaces the web token and deletes every `device_sessions` row in one transaction, then
-broadcasts a process-local revocation that every live terminal and event-feed socket is selecting on; those sockets drop
-and detach from the supervisor. Sockets subscribe to that broadcast before their handshake is admitted, so a rotation
-cannot land in the gap between "authenticated" and "listening for revocation". When a helm is serving, the CLI hands the
-rotation to it over a private unix socket in the 0700 state directory. The CLI checks the server's peer UID; the server
-relies on the private directory to exclude other users rather than checking each accepted peer's UID. The running
-process is the one that both commits and revokes; when none is, the CLI rotates in the database directly, and a lifetime
-`flock` keeps the two from racing. After rotation new requests using an old device secret receive a 401, and the browser
-prompts for the token again when it encounters that authentication failure.
+broadcasts a process-local revocation that every live browser terminal and event-feed socket is selecting on; those
+sockets drop and detach from the supervisor. Sockets the desktop app opened with its own credentials (below) do not
+subscribe, since rotation does not revoke those credentials. Sockets subscribe to that broadcast before their handshake
+is admitted, so a rotation cannot land in the gap between "authenticated" and "listening for revocation". When a helm is
+serving, the CLI hands the rotation to it over a private unix socket in the 0700 state directory. The CLI checks the
+server's peer UID; the server relies on the private directory to exclude other users rather than checking each accepted
+peer's UID. The running process is the one that both commits and revokes; when none is, the CLI rotates in the database
+directly, and a lifetime `flock` keeps the two from racing. After rotation new requests using an old device secret
+receive a 401, and the browser prompts for the token again when it encounters that authentication failure.
 
-The desktop app is a variation on the same flow, not a different one. It embeds the helm, reads the web token straight
-out of `helm.db` (same user, same machine), and holds two device sessions: one for its native reqwest client, kept in
-process memory and never handed to JavaScript, and one exchanged inside the webview so that the webview's `localStorage`
-and WebSocket subprotocol carry a credential of their own. The webview's secret is also persisted to
-`desktop-client.json` (mode 0600) so a relaunch validates it via `GET /api/auth/device` instead of minting another. The
-webview's origin is a custom scheme (`dioxus://`, `wry://`), so its fetches to the loopback helm are cross-origin; CORS
-headers are attached to exactly the five routes it fetches (validate, exchange, upload, client-log, clipboard), echoing
-only those custom-scheme origins. Every Dioxus desktop app presents the same `dioxus://index.html` origin, and any
-wry-based app can present `wry://`, so content in another such app on the machine passes the Origin check too; SPEC.md
-accepts that for the browser-facing check, and the desktop app's identity rests on its credential, never on its Origin.
+The desktop app skips the exchange. Its embedded helm mints two device secrets in memory at startup and hands them to
+the desktop process directly: one for its native reqwest client, kept in process memory and never handed to JavaScript,
+and one passed to the webview over IPC so that the webview's `localStorage` and WebSocket subprotocol carry a credential
+of their own. The helm keeps only their digests, in memory; they are never `device_sessions` rows, so rotation and the
+64-row cap do not revoke them, rotation does not close the sockets they authenticate, and no HTTP route can mint one.
+They die with the process, and the app writes neither to disk: every launch gets a fresh pair, and the web token never
+enters the desktop process's JavaScript. The webview checks its secret via `GET /api/auth/device` before the window
+opens. The webview's origin is a custom scheme (`dioxus://`, `wry://`), so its fetches to the loopback helm are
+cross-origin; CORS headers are attached to exactly five routes (validate, exchange, upload, client-log, clipboard),
+echoing only those custom-scheme origins. The webview no longer calls the exchange; its CORS was left in place. Every
+Dioxus desktop app presents the same `dioxus://index.html` origin, and any wry-based app can present `wry://`, so
+content in another such app on the machine passes the Origin check too; SPEC.md accepts that for the browser-facing
+check, and the desktop app's identity rests on its credential, never on its Origin.
 
 Two things sit beside the credential and are worth knowing about because the tradeoff below leans on them. The loopback
 origin guard (`require_loopback_origin`) refuses any request whose `Host` is not this helm's own loopback authority, any
@@ -94,17 +98,21 @@ inside the page; the credential is full authority and nothing is gated behind a 
 authority whether or not it can read the bytes. What HttpOnly would still have prevented is _exfiltration_: with
 `localStorage`, an injection can send the secret out and the attacker then holds a standalone credential that can
 authenticate new requests from any client until rotation or eviction from the 64 retained enrollments, rather than only
-for as long as their script runs in the user's tab. That is the residual, and it is why every path from untrusted text
-into the DOM (session titles, cwds, host and provisioning output, anything a terminal can turn into a link) has to be
-treated as a security boundary rather than a rendering concern.
+for as long as their script runs in the user's tab. For the desktop window the window is different, and rotation is no
+remedy: its webview secret is exempt from rotation and the cap, so a stolen one stays valid until the desktop app quits,
+which is what revokes it. That follows from the decision that the desktop app never has a credential to renew (SPEC.md
+"Signing in again"); it is narrower than the stored desktop secrets it replaced, which survived restarts until a
+rotation. That is the residual, and it is why every path from untrusted text into the DOM (session titles, cwds, host
+and provisioning output, anything a terminal can turn into a link) has to be treated as a security boundary rather than
+a rendering concern.
 
 Other properties of the current design, stated without judgment: device secrets have no time-based expiry; rotation
-revokes all of them at once, and retaining only the 64 newest enrollments also invalidates older credentials for
-subsequent authentication (there is no user-facing per-device revocation). The helm is intended for a handful of
-browser/desktop clients; reauthentication friction beyond a few tens of enrollments is acceptable. The exchange endpoint
-is public and unthrottled; the web token is the same value forever until someone rotates it; and the device secret is
-transmitted in the clear on every request, which is acceptable only because the edge is loopback-only and the spec
-forbids binding anything else.
+revokes all browser ones at once (the desktop app's in-memory pair is exempt and ends with its process), and retaining
+only the 64 newest enrollments also invalidates older credentials for subsequent authentication (there is no user-facing
+per-device revocation). The helm is intended for a handful of browser/desktop clients; reauthentication friction beyond
+a few tens of enrollments is acceptable. The exchange endpoint is public and unthrottled; the web token is the same
+value forever until someone rotates it; and the device secret is transmitted in the clear on every request, which is
+acceptable only because the edge is loopback-only and the spec forbids binding anything else.
 
 ### The gap the browser path does not close, and the position taken on it
 

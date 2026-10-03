@@ -2,12 +2,15 @@
 //! credentials.
 //!
 //! The native app is not a remote-helm client. It owns one loopback helm for
-//! its lifetime, discovers or starts the local supervisor against the same
-//! state directory, and authenticates both client stacks through the helm's normal
-//! token exchange. Native reqwest and the webview deliberately retain
-//! different device credentials: they are separate clients with separate
-//! persistence and WebSocket behavior, and sharing one would leave half of
-//! the bootstrap contract unexercised.
+//! its lifetime and discovers or starts the local supervisor against the same
+//! state directory. Its two client stacks authenticate with credentials the
+//! embedded helm mints in memory and hands over at startup
+//! ([`farhelm_helm::EmbeddedReady`]), not through the token exchange a browser
+//! uses: token rotation and the helm's cap on remembered browser credentials
+//! never revoke them, so the window never has to sign in again (SPEC.md
+//! "Signing in again"). They are not persisted; every launch gets a fresh
+//! pair. Native reqwest and the webview deliberately hold different
+//! credentials: they are separate clients with separate WebSocket behavior.
 //!
 //! This file holds the entry point, the bootstrap of the helm, supervisor,
 //! and credentials, and the pre-window refusal path. The rest is split by
@@ -38,7 +41,7 @@ mod window_state;
 
 pub(crate) use assets::use_embedded_asset_handler;
 use bundle::{bundled_farhelm, bundled_web_ui, desktop_state_dir};
-use state::{APP_STATE_FILE, PersistedState, read_state, update_state};
+use state::{APP_STATE_FILE, update_state};
 use tmux_preflight::{
     is_executable_file, macos_tmux_prefixes, resolve_supervisor_tmux, run_tmux_preflight_or_exit,
 };
@@ -262,16 +265,17 @@ fn init_tracing() {
         .init();
 }
 
-/// Values the webview needs to validate or mint its own device session.
+/// Values the webview needs to authenticate.
 ///
-/// The bootstrap token crosses the native/webview boundary through Dioxus
-/// IPC after the document exists. It is never placed in a URL, page markup,
-/// or command line.
+/// The device secret crosses the native/webview boundary through Dioxus IPC
+/// after the document exists. It is never placed in a URL, page markup, or
+/// command line, and the web token never crosses at all.
 #[derive(Clone, PartialEq)]
 pub struct WebviewBootstrap {
     pub(crate) base: String,
-    /// Durable browser credential candidate; `None` means the page must mint.
-    pub(crate) persisted_secret: Option<String>,
+    /// The webview's own in-memory credential for this launch, minted by the
+    /// embedded helm (see [`farhelm_helm::EmbeddedReady`]).
+    pub(crate) device_secret: String,
     /// A smoke-test-only hook: `None` in every real run.
     ///
     /// `scripts/desktop-smoke.sh` sets `FARHELM_SMOKE_CLIENT_LOG_MARKER` so
@@ -283,17 +287,9 @@ pub struct WebviewBootstrap {
     pub(crate) smoke_client_log_marker: Option<String>,
 }
 
-struct RuntimeAuth {
-    base: String,
-    state_dir: PathBuf,
-    state_path: PathBuf,
-}
-
-static RUNTIME_AUTH: std::sync::OnceLock<RuntimeAuth> = std::sync::OnceLock::new();
-
-/// Serializes recovery after rotation so a burst of stale REST requests mints
-/// one replacement native session, not one session per in-flight reader.
-static DEVICE_REFRESH: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+/// Where [`record_webview_ready`] writes, set once startup has resolved the
+/// state directory.
+static RUNTIME_STATE_PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 /// The app-owned processes and authentication state kept alive by `main`.
 pub struct DesktopBootstrap {
@@ -314,11 +310,6 @@ pub struct DesktopBootstrap {
     /// Separates expected teardown from a fatal post-readiness completion in
     /// the independent monitor thread.
     expected_helm_shutdown: Arc<AtomicBool>,
-}
-
-#[derive(Debug, Deserialize)]
-struct DeviceExchange {
-    device_secret: String,
 }
 
 impl DesktopBootstrap {
@@ -420,7 +411,7 @@ impl DesktopBootstrap {
             .transpose()?
             .unwrap_or(DEFAULT_DESKTOP_PORT);
         let ui_dist = bundled_web_ui();
-        let (ready_tx, ready_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel::<farhelm_helm::EmbeddedReady>();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let helm_state = state_dir.clone();
         let helm = std::thread::Builder::new()
@@ -447,14 +438,14 @@ impl DesktopBootstrap {
             })
             .context("starting embedded helm thread")?;
         let helm_deadline = std::time::Instant::now() + DESKTOP_STARTUP_TIMEOUT;
-        let addr = loop {
+        let ready = loop {
             ensure_managed_supervisor_running(&mut supervisor)?;
             let remaining = helm_deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {
                 bail!("embedded helm did not become ready within 30 seconds");
             }
             match ready_rx.recv_timeout(std::cmp::min(remaining, Duration::from_millis(100))) {
-                Ok(addr) => break addr,
+                Ok(ready) => break ready,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     return match helm.join() {
                         Ok(Err(error)) => {
@@ -500,47 +491,37 @@ impl DesktopBootstrap {
         // the helm can observe the dropped sender.
         let mut startup_failure =
             ExpectHelmShutdownUnlessDisarmed(Some(Arc::clone(&expected_helm_shutdown)));
-        let base = format!("http://{addr}");
-
-        let state_path = state_dir.join(APP_STATE_FILE);
-        let mut persisted = read_state(&state_path)?;
-        let token = runtime.block_on(farhelm_helm::show_token(Some(state_dir.clone())))?;
-        let credential_deadline = tokio::time::Instant::now() + DESKTOP_STARTUP_TIMEOUT;
-        let native = runtime.block_on(native_credential(
-            &base,
-            &token,
-            persisted.native_device_secret.as_deref(),
-            credential_deadline,
-        ))?;
-        persisted = persist_then_publish_native(&state_path, native, |secret| {
-            crate::auth::install_native_device_secret(secret);
-        })?;
+        let base = format!("http://{}", ready.addr);
+        let native_secret = ready.native_device_secret;
+        crate::auth::install_native_device_secret(native_secret.clone());
         runtime.block_on(await_local_supervisor(
             &base,
             &state_dir,
-            &state_path,
-            &mut persisted,
+            &native_secret,
             &mut supervisor,
         ))?;
 
-        let window_state_dir = state_dir.clone();
-        RUNTIME_AUTH
-            .set(RuntimeAuth {
-                base: base.clone(),
-                state_dir,
-                state_path: state_path.clone(),
-            })
+        // Rewrite the state file once, before any window exists. A file from
+        // an older build still holds that build's device secrets, and this
+        // drops them at launch rather than whenever the webview first
+        // records readiness; a file that cannot be read or written fails
+        // here, on the pre-window refusal path, instead of later inside the
+        // window.
+        let state_path = state_dir.join(APP_STATE_FILE);
+        update_state(&state_path, |_| {})?;
+        RUNTIME_STATE_PATH
+            .set(state_path)
             .map_err(|_| anyhow::anyhow!("desktop authentication runtime was initialized twice"))?;
 
         let webview = WebviewBootstrap {
             base: base.clone(),
-            persisted_secret: persisted.webview_device_secret,
+            device_secret: ready.webview_device_secret,
             smoke_client_log_marker: std::env::var("FARHELM_SMOKE_CLIENT_LOG_MARKER").ok(),
         };
         startup_failure.disarm();
         Ok(Self {
             webview,
-            state_dir: window_state_dir,
+            state_dir,
             supervisor,
             helm_monitor: Some(helm_monitor),
             helm_shutdown: Some(shutdown_tx),
@@ -599,16 +580,19 @@ impl Drop for DesktopBootstrap {
     }
 }
 
-/// Persist a webview credential only after its JavaScript stack completed an
-/// authenticated event-socket handshake, advancing the durable readiness
-/// generation in the same atomic state-file replacement.
-pub(crate) fn persist_webview_secret(secret: String) -> anyhow::Result<()> {
-    let state_path = &RUNTIME_AUTH
+/// Record that the webview's JavaScript stack completed an authenticated
+/// event-socket handshake by advancing the durable readiness generation.
+///
+/// Only `scripts/desktop-smoke.sh` reads the generation, as its proof that a
+/// launch's real JavaScript stack authenticated, so the caller treats a
+/// failure here as worth a warning, not as a reason to keep the window shut.
+/// The credential itself is not written: it is valid only for this helm
+/// process, so persisting it would buy nothing and leave a secret on disk.
+pub(crate) fn record_webview_ready() -> anyhow::Result<()> {
+    let state_path = RUNTIME_STATE_PATH
         .get()
-        .context("desktop authentication runtime is not initialized")?
-        .state_path;
+        .context("desktop authentication runtime is not initialized")?;
     update_state(state_path, |state| {
-        state.webview_device_secret = Some(secret);
         state.webview_auth_generation = state.webview_auth_generation.saturating_add(1);
     })
     .map(|_| ())
@@ -637,22 +621,25 @@ pub(crate) fn persist_webview_secret(secret: String) -> anyhow::Result<()> {
 /// before launch and nothing changes it afterwards, so re-reading the
 /// variable on every listing walk bought nothing.
 pub(crate) fn log_smoke_session_query(query: &str) {
-    static ARMED: LazyLock<bool> =
-        LazyLock::new(|| std::env::var_os("FARHELM_SMOKE_CLIENT_LOG_MARKER").is_some());
-    if *ARMED {
+    if *SMOKE_HOOKS_ARMED {
         eprintln!("desktop_smoke: session listing requested query={query}");
     }
 }
 
-/// Read the current bootstrap token for a webview exchange. Rotation can
-/// happen in a separate bundled-CLI process, so retaining the startup value
-/// would retry a credential the helm has already invalidated.
-pub(crate) async fn current_token() -> anyhow::Result<String> {
-    let runtime = RUNTIME_AUTH
-        .get()
-        .context("desktop authentication runtime is not initialized")?;
-    farhelm_helm::show_token(Some(runtime.state_dir.clone())).await
+/// The companion to [`log_smoke_session_query`], emitted only once the helm
+/// has ANSWERED that listing with success, so the smoke can prove the native
+/// client was still authenticated at a given moment (after a token rotation,
+/// in particular), which a request-time line cannot show. Same plain-stderr
+/// format rule and the same contract with `scripts/desktop-smoke.sh`.
+pub(crate) fn log_smoke_session_answered(query: &str) {
+    if *SMOKE_HOOKS_ARMED {
+        eprintln!("desktop_smoke: session listing answered query={query}");
+    }
 }
+
+/// Whether the smoke hooks above print, decided once per process.
+static SMOKE_HOOKS_ARMED: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("FARHELM_SMOKE_CLIENT_LOG_MARKER").is_some());
 
 /// Bring the window to the foreground once dioxus first makes it visible.
 ///
@@ -695,113 +682,6 @@ pub(crate) fn use_foreground_on_launch() {
             window.window.set_focus();
         });
     });
-}
-
-/// Replace the native credential after the helm explicitly returns 401.
-///
-/// The boolean reports whether this caller performed the exchange. Concurrent
-/// callers validate and reuse that result so only the winner restarts the
-/// webview's authentication.
-pub(crate) async fn refresh_native_device() -> anyhow::Result<(String, bool)> {
-    let _guard = DEVICE_REFRESH
-        .get_or_init(|| tokio::sync::Mutex::new(()))
-        .lock()
-        .await;
-    let runtime = RUNTIME_AUTH
-        .get()
-        .context("desktop authentication runtime is not initialized")?;
-    let token = farhelm_helm::show_token(Some(runtime.state_dir.clone())).await?;
-    let previous = crate::auth::device_secret();
-    let secret = native_credential(
-        &runtime.base,
-        &token,
-        previous.as_deref(),
-        tokio::time::Instant::now() + DESKTOP_STARTUP_TIMEOUT,
-    )
-    .await?;
-    if previous.as_deref() == Some(&secret) {
-        return Ok((secret, false));
-    }
-    persist_then_publish_native(&runtime.state_path, secret.clone(), |secret| {
-        crate::auth::install_native_device_secret(secret);
-    })?;
-    Ok((secret, true))
-}
-
-/// Commit a replacement native credential before making it visible to REST.
-///
-/// `publish` is a seam rather than direct global access so persistence
-/// failures can be tested without mutating process-wide credential state.
-fn persist_then_publish_native(
-    state_path: &Path,
-    secret: String,
-    publish: impl FnOnce(String),
-) -> anyhow::Result<PersistedState> {
-    let state = update_state(state_path, |state| {
-        state.native_device_secret = Some(secret.clone());
-    })?;
-    publish(secret);
-    Ok(state)
-}
-
-/// Reuse a credential only when the helm accepts it, otherwise exchange the
-/// current file-backed token after an explicit authentication rejection.
-///
-/// Transport failures and non-authentication HTTP failures remain startup
-/// errors: silently minting around them would hide a broken embedded helm and
-/// consume another entry in its bounded device table.
-async fn native_credential(
-    base: &str,
-    token: &str,
-    persisted: Option<&str>,
-    deadline: tokio::time::Instant,
-) -> anyhow::Result<String> {
-    let client = loopback_client()?;
-    if let Some(secret) = persisted {
-        let response = tokio::time::timeout_at(
-            deadline,
-            client
-                .get(format!("{base}/api/hosts"))
-                .bearer_auth(secret)
-                .send(),
-        )
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!("desktop credential bootstrap did not complete within 30 seconds")
-        })?
-        .context("validating persisted native device session")?;
-        if response.status().is_success() {
-            return Ok(secret.to_string());
-        }
-        if response.status() != reqwest::StatusCode::UNAUTHORIZED {
-            bail!(
-                "persisted native device check failed with {}",
-                response.status()
-            );
-        }
-    }
-    let response = tokio::time::timeout_at(
-        deadline,
-        client
-            .post(format!("{base}/api/auth/token"))
-            .json(&serde_json::json!({ "token": token }))
-            .send(),
-    )
-    .await
-    .map_err(|_| {
-        anyhow::anyhow!("desktop credential bootstrap did not complete within 30 seconds")
-    })?
-    .context("exchanging the desktop token for native REST")?;
-    if !response.status().is_success() {
-        bail!("native device exchange failed with {}", response.status());
-    }
-    tokio::time::timeout_at(deadline, response.json::<DeviceExchange>())
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!("desktop credential bootstrap did not complete within 30 seconds")
-        })?
-        .context("decoding native device exchange")
-        .map(|exchange| exchange.device_secret)
 }
 
 /// Fail startup if the supervisor child owned by this app has already exited.
@@ -929,28 +809,28 @@ fn local_supervisor_refusal(
 async fn await_local_supervisor(
     base: &str,
     state_dir: &Path,
-    state_path: &Path,
-    state: &mut PersistedState,
+    secret: &str,
     supervisor: &mut Option<Child>,
 ) -> anyhow::Result<()> {
     await_local_supervisor_until(
         base,
         state_dir,
-        state_path,
-        state,
+        secret,
         supervisor,
         tokio::time::Instant::now() + Duration::from_secs(30),
     )
     .await
 }
 
-/// Poll the managed row under one deadline, refreshing only a structured
-/// desktop-auth rejection and preserving every other HTTP failure.
+/// Poll the managed row under one deadline, reporting every HTTP failure.
+///
+/// A 401 is one of those failures, not something to recover from: `secret`
+/// is an in-memory credential the embedded helm minted for this process, so
+/// the helm refusing it means something is broken, not that it expired.
 async fn await_local_supervisor_until(
     base: &str,
     state_dir: &Path,
-    state_path: &Path,
-    state: &mut PersistedState,
+    secret: &str,
     supervisor: &mut Option<Child>,
     deadline: tokio::time::Instant,
 ) -> anyhow::Result<()> {
@@ -960,10 +840,6 @@ async fn await_local_supervisor_until(
     let spawned = supervisor.is_some();
     loop {
         ensure_managed_supervisor_running(supervisor)?;
-        let secret = state
-            .native_device_secret
-            .as_deref()
-            .context("desktop native credential is missing during supervisor readiness")?;
         let response = tokio::time::timeout_at(
             deadline,
             client
@@ -995,26 +871,6 @@ async fn await_local_supervisor_until(
                 .await
                 .map_err(|_| not_connected_in_time(spawned))?
                 .context("reading the local supervisor check's refusal")?;
-            if status == reqwest::StatusCode::UNAUTHORIZED
-                && crate::api::device_auth_required(&body)
-            {
-                let token = tokio::time::timeout_at(
-                    deadline,
-                    farhelm_helm::show_token(Some(state_dir.to_path_buf())),
-                )
-                .await
-                .map_err(|_| not_connected_in_time(spawned))??;
-                let replacement = tokio::time::timeout_at(
-                    deadline,
-                    native_credential(base, &token, None, deadline),
-                )
-                .await
-                .map_err(|_| not_connected_in_time(spawned))??;
-                *state = persist_then_publish_native(state_path, replacement, |secret| {
-                    crate::auth::install_native_device_secret(secret);
-                })?;
-                continue;
-            }
             let detail = body.trim();
             bail!(
                 "{} check failed with {status}{}",
@@ -1197,24 +1053,6 @@ mod tests {
         );
     }
 
-    /// A failed atomic replacement must leave the credential visible to REST
-    /// unchanged, or later requests can no longer drive webview recovery.
-    #[farhelm_testtrace::test]
-    fn persistence_failure_never_publishes_the_replacement_native_secret() {
-        let root = tempfile::tempdir().unwrap();
-        let missing_parent = root.path().join("missing");
-        let state_path = missing_parent.join(APP_STATE_FILE);
-        let mut published = "old-secret".to_string();
-
-        let result =
-            persist_then_publish_native(&state_path, "replacement-secret".to_string(), |secret| {
-                published = secret
-            });
-
-        assert!(result.is_err());
-        assert_eq!(published, "old-secret");
-    }
-
     /// An unanswered request must consume the readiness deadline rather than
     /// parking desktop startup indefinitely. The listener never accepts or
     /// replies; the paused clock checks the budget independently of scheduler
@@ -1224,19 +1062,13 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let root = tempfile::tempdir().unwrap();
-        let state_path = root.path().join(APP_STATE_FILE);
-        let mut state = PersistedState {
-            native_device_secret: Some("device-secret".to_string()),
-            ..PersistedState::default()
-        };
         let started = tokio::time::Instant::now();
         let mut supervisor = None;
 
         let error = await_local_supervisor_until(
             &format!("http://{addr}"),
             root.path(),
-            &state_path,
-            &mut state,
+            "device-secret",
             &mut supervisor,
             tokio::time::Instant::now() + Duration::from_millis(100),
         )
@@ -1313,11 +1145,6 @@ mod tests {
             }
         });
         let root = tempfile::tempdir().unwrap();
-        let state_path = root.path().join(APP_STATE_FILE);
-        let mut state = PersistedState {
-            native_device_secret: Some("device-secret".to_string()),
-            ..PersistedState::default()
-        };
         let mut supervisor = None;
 
         let error = tokio::time::timeout(
@@ -1325,8 +1152,7 @@ mod tests {
             await_local_supervisor_until(
                 &format!("http://{addr}"),
                 root.path(),
-                &state_path,
-                &mut state,
+                "device-secret",
                 &mut supervisor,
                 tokio::time::Instant::now() + Duration::from_secs(3600),
             ),
@@ -1475,36 +1301,6 @@ mod tests {
             None,
             "a local host still connecting keeps startup waiting"
         );
-    }
-
-    /// The first credential exchange shares one absolute startup deadline
-    /// across connection, headers, and body decoding. A bound listener that
-    /// never answers must therefore time out instead of freezing launch.
-    /// This checks deadline expiry on a paused clock, not body decoding or
-    /// socket progress; an unrelated early request error must not pass.
-    #[farhelm_testtrace::test(start_paused = true)]
-    async fn initial_native_credential_exchange_has_an_absolute_deadline() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let started = tokio::time::Instant::now();
-
-        let error = native_credential(
-            &format!("http://{addr}"),
-            "bootstrap-token",
-            None,
-            tokio::time::Instant::now() + Duration::from_millis(100),
-        )
-        .await
-        .unwrap_err();
-
-        assert!(started.elapsed() >= Duration::from_millis(100));
-        assert!(started.elapsed() < Duration::from_secs(1));
-        assert!(
-            error
-                .to_string()
-                .contains("desktop credential bootstrap did not complete")
-        );
-        drop(listener);
     }
 
     /// Own the server thread until its protocol result and actual exit have been observed.

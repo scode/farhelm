@@ -5,6 +5,15 @@
 //! secret; only that secret's SHA-256 digest is stored. REST carries it
 //! in `Authorization`, while browser WebSockets offer it as a subprotocol so
 //! the credential remains scoped to the helm's complete origin, port included.
+//!
+//! The desktop app is the one exception to the exchange. A helm embedded in
+//! the desktop process mints that app's own two device secrets in memory at
+//! startup and hands them to its owner directly ([`AuthState::mint_embedded_device`]).
+//! They never reach the database, so token rotation and the cap on
+//! remembered browser credentials cannot revoke them, and no HTTP request can
+//! obtain one: the desktop window never has a credential to lose or renew
+//! (SPEC.md "Signing in again").
+//!
 //! The middleware in this module covers every protected API method, including
 //! both WebSocket handshakes. The static bundle, bootstrap exchange, and the
 //! attachment OPTIONS preflight remain reachable before a device has
@@ -76,12 +85,30 @@ pub(crate) enum RotationError {
 /// validates every cache-approved exchange in the same immediate transaction
 /// that inserts its device row; that transaction is the authority when a
 /// rotation and exchange overlap.
+///
+/// `embedded_devices` holds the digests of the in-memory credentials an
+/// embedding desktop process was given. They live exactly as long as this
+/// process, which is also the desktop app's lifetime, so nothing about them
+/// needs persisting, revoking, or evicting.
 #[derive(Clone)]
 pub(crate) struct AuthState {
     store: HelmStore,
     token: Arc<tokio::sync::RwLock<Option<String>>>,
     rotation: Arc<tokio::sync::Mutex<()>>,
     revocations: tokio::sync::broadcast::Sender<()>,
+    embedded_devices: Arc<std::sync::RwLock<Vec<[u8; 32]>>>,
+}
+
+/// Which kind of credential a request authenticated with, which decides
+/// whether token rotation applies to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AcceptedDevice {
+    /// A browser device row minted by the bootstrap exchange: revoked by
+    /// rotation and subject to the cap on remembered credentials.
+    Stored,
+    /// One of the embedding desktop app's in-memory credentials: valid for
+    /// the life of this helm process, whatever rotation does.
+    Embedded,
 }
 
 impl AuthState {
@@ -93,7 +120,27 @@ impl AuthState {
             token: Arc::new(tokio::sync::RwLock::new(None)),
             rotation: Arc::new(tokio::sync::Mutex::new(())),
             revocations,
+            embedded_devices: Arc::new(std::sync::RwLock::new(Vec::new())),
         }
+    }
+
+    /// Mint a device secret for the desktop app that embeds this helm.
+    ///
+    /// Only [`crate::run_embedded`] calls this, in process, before the helm
+    /// announces readiness; there is deliberately no HTTP route to it, so a
+    /// browser on the same loopback port can never obtain a credential that
+    /// rotation would not revoke. That single caller IS the guarantee: any
+    /// new caller needs the same scrutiny, since no test can catch a route
+    /// that leaks one. The secret is held as a digest in memory
+    /// only: it is not a device row, so rotation's delete and the exchange's
+    /// eviction never see it, and it dies with the process.
+    pub(crate) fn mint_embedded_device(&self) -> anyhow::Result<String> {
+        let secret = mint_secret()?;
+        self.embedded_devices
+            .write()
+            .expect("embedded device list poisoned")
+            .push(digest(secret.as_bytes()));
+        Ok(secret)
     }
 
     /// Return the stable bootstrap token and retain it for lock-free exchange
@@ -164,18 +211,39 @@ impl AuthState {
         Ok(accepted.then_some(secret))
     }
 
-    /// Validate a browser device secret through the digest primary key.
-    async fn accepts_device(&self, secret: &str) -> anyhow::Result<bool> {
-        self.store
-            .has_device_session(digest(secret.as_bytes()))
-            .await
+    /// Validate a device secret: the embedding desktop app's in-memory
+    /// credentials first, then the stored browser rows by digest primary key.
+    ///
+    /// The in-memory comparison is constant-time per entry and visits every
+    /// entry, like the token check, so timing says nothing about which
+    /// embedded credential (if any) a guess came close to.
+    async fn accepts_device(&self, secret: &str) -> anyhow::Result<Option<AcceptedDevice>> {
+        let supplied = digest(secret.as_bytes());
+        let embedded = self
+            .embedded_devices
+            .read()
+            .expect("embedded device list poisoned")
+            .iter()
+            .fold(subtle::Choice::from(0), |found, known| {
+                found | known.ct_eq(&supplied)
+            });
+        if bool::from(embedded) {
+            return Ok(Some(AcceptedDevice::Embedded));
+        }
+        Ok(self
+            .store
+            .has_device_session(supplied)
+            .await?
+            .then_some(AcceptedDevice::Stored))
     }
 
     /// Subscribe before authenticating a WebSocket handshake so rotation
     /// cannot land in the gap between admission and subscription.
     pub(crate) fn socket_session(&self) -> AuthenticatedSocket {
         AuthenticatedSocket {
-            revocations: Arc::new(tokio::sync::Mutex::new(self.revocations.subscribe())),
+            revocations: Some(Arc::new(tokio::sync::Mutex::new(
+                self.revocations.subscribe(),
+            ))),
         }
     }
 }
@@ -185,15 +253,32 @@ impl AuthState {
 ///
 /// Wrapped so axum can clone request extensions. A request owns one receiver;
 /// the clone moved into `on_upgrade` is the only consumer that waits on it.
+///
+/// `revocations` is `None` for a socket the embedding desktop app opened
+/// with one of its in-memory credentials. Rotation does not revoke those
+/// credentials, so it must not close their sockets either: the desktop
+/// window's terminals and event feed stay up through `farhelm helm token
+/// rotate`.
 #[derive(Clone)]
 pub(crate) struct AuthenticatedSocket {
-    revocations: Arc<tokio::sync::Mutex<tokio::sync::broadcast::Receiver<()>>>,
+    revocations: Option<Arc<tokio::sync::Mutex<tokio::sync::broadcast::Receiver<()>>>>,
 }
 
 impl AuthenticatedSocket {
+    /// A socket that no rotation revokes, for an embedded credential.
+    fn unrevocable() -> AuthenticatedSocket {
+        AuthenticatedSocket { revocations: None }
+    }
+
     /// Resolve when token rotation invalidates this socket's device session.
+    /// Never resolves for an embedded credential's socket.
     pub(crate) async fn revoked(&self) {
-        let _ = self.revocations.lock().await.recv().await;
+        match &self.revocations {
+            Some(revocations) => {
+                let _ = revocations.lock().await.recv().await;
+            }
+            None => std::future::pending().await,
+        }
     }
 
     /// Observe a revocation that already landed without waiting for a future
@@ -202,7 +287,10 @@ impl AuthenticatedSocket {
     pub(crate) async fn is_revoked(&self) -> bool {
         use tokio::sync::broadcast::error::TryRecvError;
 
-        match self.revocations.lock().await.try_recv() {
+        let Some(revocations) = &self.revocations else {
+            return false;
+        };
+        match revocations.lock().await.try_recv() {
             Ok(()) | Err(TryRecvError::Lagged(_) | TryRecvError::Closed) => true,
             Err(TryRecvError::Empty) => false,
         }
@@ -240,8 +328,8 @@ pub(crate) async fn exchange_token(
     }
 }
 
-/// `GET /api/auth/device`: prove that one persisted desktop credential is
-/// still valid without minting a replacement on transport failures.
+/// `GET /api/auth/device`: let the desktop webview prove the helm accepts the
+/// credential it was handed before its window opens.
 ///
 /// Authentication middleware runs before this handler. Reaching it is the
 /// entire success condition; the empty response carries no credential or
@@ -271,13 +359,20 @@ pub(crate) async fn require_device_session(
     };
     match supplied {
         Some(secret) => match state.auth.accepts_device(secret).await {
-            Ok(true) => {
+            Ok(Some(accepted)) => {
                 if let Some(socket_session) = socket_session {
+                    // The subscription was taken before the check (see
+                    // `socket_session`); an embedded credential swaps it for
+                    // one rotation cannot close.
+                    let socket_session = match accepted {
+                        AcceptedDevice::Stored => socket_session,
+                        AcceptedDevice::Embedded => AuthenticatedSocket::unrevocable(),
+                    };
                     request.extensions_mut().insert(socket_session);
                 }
                 next.run(request).await
             }
-            Ok(false) => unauthenticated(),
+            Ok(None) => unauthenticated(),
             Err(error) => internal_error(error),
         },
         None => unauthenticated(),
@@ -755,7 +850,10 @@ mod tests {
             Err(RotationError::Storage(_))
         ));
         assert_eq!(auth.token().await.unwrap(), old_token);
-        assert!(auth.accepts_device(&old_device).await.unwrap());
+        assert_eq!(
+            auth.accepts_device(&old_device).await.unwrap(),
+            Some(AcceptedDevice::Stored)
+        );
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(50), socket.revoked())
                 .await
@@ -810,10 +908,148 @@ mod tests {
             .insert_device_session(digest(secret.as_bytes()), i64::MIN)
             .await
             .unwrap();
-        assert!(auth.accepts_device(secret).await.unwrap());
+        assert_eq!(
+            auth.accepts_device(secret).await.unwrap(),
+            Some(AcceptedDevice::Stored)
+        );
         auth.token().await.unwrap();
         auth.rotate().await.unwrap();
-        assert!(!auth.accepts_device(secret).await.unwrap());
+        assert_eq!(auth.accepts_device(secret).await.unwrap(), None);
+    }
+
+    /// The desktop app's own credentials are exempt from rotation: after
+    /// `farhelm helm token rotate` an embedded credential still
+    /// authenticates while a browser credential minted beside it does not,
+    /// and the embedded one was never a database row for rotation's delete
+    /// to reach. This is what keeps the desktop window from ever having to
+    /// sign in again (SPEC.md "Signing in again").
+    #[farhelm_testtrace::test]
+    async fn rotation_revokes_browser_credentials_but_not_embedded_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        let auth = AuthState::new(store.clone());
+        let embedded = auth.mint_embedded_device().unwrap();
+        let browser = auth.mint_device().await.unwrap();
+        assert_eq!(
+            store.device_session_hashes().await.unwrap(),
+            vec![digest(browser.as_bytes())],
+            "only the browser credential may be stored"
+        );
+
+        auth.rotate().await.unwrap();
+
+        assert_eq!(
+            auth.accepts_device(&embedded).await.unwrap(),
+            Some(AcceptedDevice::Embedded)
+        );
+        assert_eq!(auth.accepts_device(&browser).await.unwrap(), None);
+    }
+
+    /// The cap on remembered browser credentials evicts the oldest stored
+    /// rows, and a desktop credential must never be one of them: many
+    /// browser sign-ins used to evict the desktop app's own credentials and
+    /// force its hidden re-authentication.
+    #[farhelm_testtrace::test]
+    async fn browser_exchanges_past_the_cap_never_evict_embedded_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        let auth = AuthState::new(store.clone());
+        let embedded = auth.mint_embedded_device().unwrap();
+        let first_browser = auth.mint_device().await.unwrap();
+        for _ in 0..crate::store::MAX_DEVICE_SESSIONS {
+            auth.mint_device().await.unwrap();
+        }
+        // Premise: the cap really did evict something, so the embedded
+        // credential surviving is not just an under-filled table.
+        assert_eq!(auth.accepts_device(&first_browser).await.unwrap(), None);
+        assert_eq!(
+            store.device_session_count().await.unwrap(),
+            crate::store::MAX_DEVICE_SESSIONS
+        );
+        assert_eq!(
+            auth.accepts_device(&embedded).await.unwrap(),
+            Some(AcceptedDevice::Embedded)
+        );
+    }
+
+    /// The public bootstrap exchange yields an ordinary stored credential,
+    /// which rotation revokes, never an embedded one: a browser on the
+    /// loopback port must not be able to obtain a credential `token rotate`
+    /// cannot take back. This covers the one route that mints credentials;
+    /// the guarantee against any OTHER route handing out an embedded one is
+    /// structural (`mint_embedded_device` has a single, in-process caller),
+    /// not something a test can enumerate.
+    #[farhelm_testtrace::test]
+    async fn the_bootstrap_exchange_only_mints_stored_credentials() {
+        let harness = rest_harness::idle_helm().await;
+        let token = harness.state.auth.token().await.unwrap();
+        let exchanged = exchange_through_router(&harness, &token).await;
+        assert_eq!(
+            harness.state.auth.accepts_device(&exchanged).await.unwrap(),
+            Some(AcceptedDevice::Stored)
+        );
+        harness.state.auth.rotate().await.unwrap();
+        assert_eq!(
+            harness.state.auth.accepts_device(&exchanged).await.unwrap(),
+            None
+        );
+    }
+
+    /// Rotation closes every live browser WebSocket, but a socket the
+    /// desktop app opened with its embedded credential stays open: its
+    /// credential is still valid, and closing it would make the window's
+    /// terminals and event feed drop and reconnect for nothing. Driven
+    /// through the real middleware with a WebSocket-shaped request; the
+    /// probe handler rotates after admission and reports what the socket's
+    /// revocation subscription saw.
+    #[farhelm_testtrace::test]
+    async fn rotation_closes_browser_sockets_but_not_embedded_ones() {
+        let harness = rest_harness::idle_helm().await;
+        let auth = harness.state.auth.clone();
+        let app = axum::Router::new()
+            .route(
+                "/probe",
+                axum::routing::get(
+                    move |axum::Extension(socket): axum::Extension<AuthenticatedSocket>| {
+                        let auth = auth.clone();
+                        async move {
+                            auth.rotate().await.unwrap();
+                            if socket.is_revoked().await {
+                                "revoked"
+                            } else {
+                                "open"
+                            }
+                        }
+                    },
+                ),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                Arc::clone(&harness.state),
+                require_device_session,
+            ));
+        let probe = |secret: String| {
+            Request::builder()
+                .uri("/probe")
+                .header(header::UPGRADE, "websocket")
+                .header(
+                    header::SEC_WEBSOCKET_PROTOCOL,
+                    format!("{WS_PROTOCOL}, {WS_DEVICE_PREFIX}{secret}"),
+                )
+                .body(Body::empty())
+                .unwrap()
+        };
+        let read = |response: Response| async move {
+            assert_eq!(response.status(), StatusCode::OK);
+            String::from_utf8(to_bytes(response.into_body(), 64).await.unwrap().to_vec()).unwrap()
+        };
+
+        let embedded = harness.state.auth.mint_embedded_device().unwrap();
+        let response = app.clone().oneshot(probe(embedded)).await.unwrap();
+        assert_eq!(read(response).await, "open");
+
+        let browser = harness.state.auth.mint_device().await.unwrap();
+        let response = app.oneshot(probe(browser)).await.unwrap();
+        assert_eq!(read(response).await, "revoked");
     }
 
     /// Drive the public exchange route and decode its explicit credential.
