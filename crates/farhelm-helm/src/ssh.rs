@@ -3,13 +3,16 @@
 //!
 //! Farhelm never speaks ssh itself — it shells out to the user's own
 //! `ssh`, which is the whole point of SPEC.md's transport story (their
-//! config, their keys, their agent, their jump hosts). What is left on
-//! this side is text: a vector of arguments, assembled from registry rows
-//! the user wrote. That assembly is where this transport's subtlest bug
-//! class lives — and it is pure, so the tests below pin it exactly. What
-//! CI cannot run is the transport AROUND it: no reachable remote host, no
-//! keys, no agent, so a wrong argv would otherwise surface only on a user's
-//! machine. Pinning the argv is how that gap is covered.
+//! config, their keys, their agent, their jump hosts). The config governs
+//! reaching and authenticating to the host; it does not get to forward
+//! anything over Farhelm's connections or replace or wrap Farhelm's remote
+//! command (see [`CONNECTION_OVERRIDES`]). What is left on this side is
+//! text: a vector of arguments, assembled from registry rows the user
+//! wrote. That assembly is where this transport's subtlest bug class lives
+//! — and it is pure, so the tests below pin it exactly. What CI cannot run
+//! is the transport AROUND it: no reachable remote host, no keys, no agent,
+//! so a wrong argv would otherwise surface only on a user's machine.
+//! Pinning the argv is how that gap is covered.
 //!
 //! ## Two layers of quoting, neither of them shell-quoting the argv
 //!
@@ -23,17 +26,91 @@
 //!
 //! ## The prefix is a security boundary, so it is built in one place
 //!
-//! `ssh_base_args` owns everything up to and including the destination —
-//! the connection-multiplexing options, the option terminator, and the
-//! destination's placement AFTER that terminator. That ordering is what
-//! keeps a user-supplied destination from being read as an ssh option (see
-//! its docs), so it is stated once here and inherited by every remote
-//! command built on top of it. `ssh_stdio_args` builds the steady-state
+//! `ssh_base_args` owns everything up to and including the destination — the
+//! connection overrides, the connection-multiplexing options, the option
+//! terminator, and the destination's placement AFTER that terminator. That
+//! ordering is what keeps a user-supplied destination from being read as an ssh
+//! option (see its docs), so it is stated once here and inherited by every
+//! remote command built on top of it. `ssh_stdio_args` builds the steady-state
 //! `farhelm internal stdio` proxy; provisioning reuses the prefix for its
 //! discovery, reach checks, convergence commands, and payload uploads.
 
 use anyhow::Context;
 use farhelm_proto::io::ClosedBeforeHello;
+
+/// ssh settings every Farhelm connection overrides, whatever the user's ssh
+/// config says (SPEC.md "Security": the config governs reaching the host,
+/// never what rides Farhelm's connection).
+///
+/// Command-line `-o` values win over the config file, which is the whole
+/// mechanism. What each one prevents:
+///
+/// - `ForwardAgent=no`, `ForwardX11=no`, `ClearAllForwardings=yes`: the
+///   supervisor connection stays up around the clock, so a `ForwardAgent
+///   yes` (or an X11 or port forward) from a `Host *` block would hand any
+///   agent running on that host the user's ssh keys, display or local ports
+///   for as long as the helm runs. `ClearAllForwardings` covers
+///   `LocalForward`, `RemoteForward` and `DynamicForward` in one setting.
+///   It does not affect `ProxyJump`, which runs the jump as a separate
+///   `ssh -W` child: checked with a real connection through a jump on
+///   localhost (OpenSSH 9.6).
+/// - `RemoteCommand=none`: with a `RemoteCommand` in the config, OpenSSH
+///   refuses any command given on its command line ("Cannot execute
+///   command-line and remote command.") before connecting, so the host
+///   could never be added, set up or connected to.
+/// - `RequestTTY=no`: a `RequestTTY force` would put a terminal between the
+///   supervisor's binary stdio stream and the helm, which rewrites bytes.
+/// - `PermitLocalCommand=no`: a `LocalCommand` writes to ssh's own stdout,
+///   so its output would land in front of the framed protocol stream.
+///
+/// The user's keys and agent are still used to AUTHENTICATE; only
+/// forwarding the agent to the far side is off. Agent and X11 forwarding are
+/// requested per session by the client, so they stay off even on a shared
+/// connection (`ControlMaster`) opened before these overrides existed.
+///
+/// What this list does not cover, deliberately:
+///
+/// - Port forwards belong to the shared connection's master, which a new client
+///   cannot cancel, and the master is a detached process that outlives the helm
+///   that started it (a Linux service's stop kills it with the rest of the
+///   service; nothing else does). After an upgrade, a helm started within the
+///   master's 60-second `ControlPersist` reuses it, which is the ordinary path
+///   for the macOS desktop app (quit, install, reopen) and for a helm run by
+///   hand, and the long-lived supervisor connection then keeps any port
+///   forwards that master set up from the user's config. They last until that
+///   master exits: it needs more than 60 seconds with no client attached, so
+///   further quick manual restarts keep it alive, and it ends when left unused
+///   for over a minute (the helm stopped that long), when its connection to the
+///   host drops, or on `ssh -O exit` on its socket. A service manager's restart
+///   is no remedy: a master the hand-started helm created is not in the
+///   service's process group. Giving the socket a new name would close this
+///   upgrade-time window at the permanent cost of one character of the socket-
+///   path budget (see [`control_socket`]), so it was not done.
+/// - `SessionType none`, `StdinNull yes` and `ForkAfterAuthentication yes`
+///   also cut Farhelm off from its remote command, but their override
+///   keywords only exist since OpenSSH 8.7, and an unknown `-o` keyword is
+///   fatal, so overriding them would break every helm on an older ssh.
+///
+/// The floor these overrides do set is OpenSSH 7.6 (`RemoteCommand`); an
+/// older ssh rejects the whole command line.
+const CONNECTION_OVERRIDES: [&str; 6] = [
+    "ForwardAgent=no",
+    "ForwardX11=no",
+    "ClearAllForwardings=yes",
+    "RemoteCommand=none",
+    "RequestTTY=no",
+    "PermitLocalCommand=no",
+];
+
+/// `CONNECTION_OVERRIDES` as `-o` argument pairs, followed by `options` as
+/// further pairs, ready to precede the option terminator.
+fn options_with_overrides(options: &[&str]) -> Vec<String> {
+    CONNECTION_OVERRIDES
+        .iter()
+        .chain(options)
+        .flat_map(|option| ["-o".to_string(), (*option).to_string()])
+        .collect()
+}
 
 /// The ssh argv prefix shared by every remote command: the options, the
 /// terminator, and the destination.
@@ -70,16 +147,10 @@ pub(crate) fn ssh_base_args(
         // options are needed: `ControlMaster=no` only stops ssh creating a
         // master, and without `ControlPath=none` it would still use (or
         // trip over) a ControlPath from the user's own ssh config.
-        return Ok(vec![
-            "-o".to_string(),
-            "BatchMode=yes".to_string(),
-            "-o".to_string(),
-            "ControlMaster=no".to_string(),
-            "-o".to_string(),
-            "ControlPath=none".to_string(),
-            "--".to_string(),
-            dest.to_string(),
-        ]);
+        let mut args =
+            options_with_overrides(&["BatchMode=yes", "ControlMaster=no", "ControlPath=none"]);
+        args.extend(["--".to_string(), dest.to_string()]);
+        return Ok(args);
     };
     let control_path = control_path.as_path();
     // This is the last point a local filesystem path is still a `Path`
@@ -107,21 +178,16 @@ pub(crate) fn ssh_base_args(
         )
     })?;
     let control_path = ssh_control_path_option(control_path_str);
-    Ok(vec![
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        "-o".to_string(),
-        "ControlMaster=auto".to_string(),
-        "-o".to_string(),
-        control_path,
-        "-o".to_string(),
-        "ControlPersist=60".to_string(),
-        // See this function's own docs: the terminator precedes the
-        // destination so an option-shaped destination can never be read as
-        // an option.
-        "--".to_string(),
-        dest.to_string(),
-    ])
+    let mut args = options_with_overrides(&[
+        "BatchMode=yes",
+        "ControlMaster=auto",
+        &control_path,
+        "ControlPersist=60",
+    ]);
+    // See this function's own docs: the terminator precedes the destination
+    // so an option-shaped destination can never be read as an option.
+    args.extend(["--".to_string(), dest.to_string()]);
+    Ok(args)
 }
 
 /// The ssh argv for reaching a remote supervisor, as a pure function so
@@ -361,6 +427,41 @@ mod tests {
             !args.iter().any(|arg| arg == "ControlPersist=60"),
             "{args:?}"
         );
+    }
+
+    /// Why this matters: Farhelm's supervisor connection stays up around the
+    /// clock, so a `ForwardAgent yes` in the user's ssh config would hand the
+    /// remote host their keys for as long as the helm runs, and a
+    /// `RemoteCommand` there makes ssh refuse every Farhelm command. Spec:
+    /// both argv shapes (with and without connection sharing) carry every
+    /// connection override as an `-o` pair before the option terminator, so
+    /// it outranks the config file.
+    #[farhelm_testtrace::test]
+    fn every_connection_overrides_forwarding_and_the_remote_command() {
+        let shared = super::ssh_base_args("user@host", std::path::Path::new("/state")).unwrap();
+        let deep = std::path::PathBuf::from(format!("/{}", "d".repeat(199)));
+        let unshared = super::ssh_base_args("user@host", &deep).unwrap();
+        assert!(shared.iter().any(|arg| arg == "ControlPersist=60"));
+        assert!(unshared.iter().any(|arg| arg == "ControlPath=none"));
+        for args in [shared, unshared] {
+            let dashdash = args.iter().position(|a| a == "--").expect("-- separator");
+            let options = &args[..dashdash];
+            for setting in [
+                "ForwardAgent=no",
+                "ForwardX11=no",
+                "ClearAllForwardings=yes",
+                "RemoteCommand=none",
+                "RequestTTY=no",
+                "PermitLocalCommand=no",
+            ] {
+                assert!(
+                    options
+                        .windows(2)
+                        .any(|pair| pair[0] == "-o" && pair[1] == setting),
+                    "missing -o {setting} before the terminator: {args:?}"
+                );
+            }
+        }
     }
 
     /// The remote argv, as ssh will hand it to the remote login shell:

@@ -8,8 +8,6 @@ One line per open item. This file must always match the feedback files in this d
   other host's sessions out of the merged list.
 - `sessions-changed-hint-unthrottled.md` — the helm does not rate-limit "sessions changed" hints, so a hostile host can
   drive back-to-back refreshes and fleet-wide re-reads.
-- `ssh-forwarding-inherited.md` — with ForwardAgent/ForwardX11 in the user's ssh config, the helm's always-on
-  connections expose the ssh agent and X display to remote agents.
 - `claude-resume-template-selector-collision.md` — Claude's derived resume command keeps an original `--continue`,
   `--resume` or `--`, so Resume can open the wrong conversation or start fresh.
 - `omp-corridor-uncounted-pane-runtime.md` — when the foreground OMP's command line cannot be read, a nested OMP can
@@ -110,8 +108,6 @@ One line per open item. This file must always match the feedback files in this d
   verdict when the agent launch itself was unscoped.
 - `restart-with-skips-create-validation.md` — restart-with stores argv and resume templates without create's checks, so
   a bad bundle can stop the supervisor from starting.
-- `ssh-config-remotecommand-blocks-host.md` — a `RemoteCommand` in the user's ssh config makes every connection to that
-  host fail, with a misleading error.
 - `provision-lock-map-grows-per-requested-id.md` — the host provisioning lock map gains a never-freed entry for every
   host id a request names, registered or not.
 - `create-rollback-orphans-unconfirmed-scope.md` — a failed create whose scope kill is unconfirmed still deletes the
