@@ -831,7 +831,7 @@ fn main() -> anyhow::Result<()> {
                     hook::run_with(
                         credential,
                         std::io::Cursor::new(payload),
-                        std::time::Duration::from_secs(2),
+                        hook_budget(),
                         hook_log,
                         farhelm_proto::ReportVendor::Goose,
                     );
@@ -877,13 +877,10 @@ fn main() -> anyhow::Result<()> {
                 let hook_log = env.hook_log();
                 let credential = env.hook_credential();
 
-                // Well under the timeout the injected hook config gives
-                // the vendor, so the vendor never gets to time us out.
-                const BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
                 hook::run_with(
                     credential,
                     std::io::stdin(),
-                    BUDGET,
+                    hook_budget(),
                     hook_log,
                     vendor.report_vendor(),
                 );
@@ -917,6 +914,38 @@ fn main() -> anyhow::Result<()> {
             }
         },
     }
+}
+
+/// Select the hook's process-local budget.
+///
+/// Production launches use [`hook::HOOK_BUDGET`]. The private environment
+/// override exists only for child-process tests: the test puts it on the
+/// spawned hook command itself, never on the test runner, so a short fixture
+/// budget cannot leak into sibling tests or a live supervisor session.
+fn hook_budget() -> std::time::Duration {
+    #[cfg(debug_assertions)]
+    {
+        let value = std::env::var("FARHELM_TEST_HOOK_BUDGET_MS").ok();
+        hook_budget_from(value.as_deref())
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        hook::HOOK_BUDGET
+    }
+}
+
+/// Convert the optional child-test override into a bounded hook budget.
+///
+/// Invalid, empty, and zero values use production behavior; a positive test
+/// value can only shorten the production budget, never extend it.
+#[cfg(any(debug_assertions, test))]
+fn hook_budget_from(value: Option<&str>) -> std::time::Duration {
+    value
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+        .filter(|budget| *budget > std::time::Duration::ZERO)
+        .map(|budget| budget.min(hook::HOOK_BUDGET))
+        .unwrap_or(hook::HOOK_BUDGET)
 }
 
 /// Run a supervisor with the optional desktop-app lifetime tether.
@@ -1362,6 +1391,21 @@ async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hook budget override is a child-only testing seam: absent, invalid,
+    /// and zero values must preserve production behavior, while positive values
+    /// may shorten but never lengthen the shared 30-second budget.
+    #[farhelm_testtrace::test]
+    fn hook_budget_override_is_bounded_and_fail_closed() {
+        assert_eq!(hook_budget_from(None), hook::HOOK_BUDGET);
+        assert_eq!(hook_budget_from(Some("garbage")), hook::HOOK_BUDGET);
+        assert_eq!(hook_budget_from(Some("0")), hook::HOOK_BUDGET);
+        assert_eq!(
+            hook_budget_from(Some("5000")),
+            std::time::Duration::from_secs(5)
+        );
+        assert_eq!(hook_budget_from(Some("999999")), hook::HOOK_BUDGET);
+    }
 
     /// On a Mac, this message IS `farhelm helm setup` — the arm prints it
     /// and exits 2, and nothing else happens. Only a child process can

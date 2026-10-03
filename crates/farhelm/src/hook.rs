@@ -34,8 +34,13 @@
 //! 3. **One budget for the whole run, stdin included.** Overrunning the
 //!    vendor's own hook timeout is exactly the failure that shows up in
 //!    the agent's UI, so the budget covers reading the payload as well as
-//!    the socket round trip. See [`run_with`] for why that forces a
-//!    detached reader thread rather than any async-stdin design.
+//!    the socket round trip. The production budget is 30 seconds: long
+//!    enough for a supervisor that is present but briefly busy, while still
+//!    bounded for a hook running inside an agent turn. A refused or missing
+//!    Unix socket gets a shorter reconnect window, because it proves that no
+//!    supervisor process is listening; a connection that succeeds is allowed
+//!    to use the full budget. See [`run_with`] for why the shared deadline
+//!    forces a detached reader thread rather than any async-stdin design.
 //! 4. **No credential, no IDENTITY work.** Without the three injected
 //!    environment values there is no supervisor to talk to (someone ran
 //!    the agent outside Farhelm with its callback still configured); the run
@@ -52,9 +57,13 @@
 //! ## The hook log
 //!
 //! Because nothing may be printed, the per-session log file is the only
-//! place a failure is ever visible. Every run appends **exactly one line**
-//! and then stops; a run never writes two lines, so counting lines counts
-//! runs. The file lives at `<state_dir>/hook-log/<session-id>.log`, where
+//! place a failure is ever visible. Every run that reaches its logger appends
+//! **exactly one line** and then stops; a run never writes two lines, so
+//! counting lines counts completed runs. A vendor that kills the child first
+//! can prevent that final diagnostic write. Pi and OMP reporters do exactly
+//! that at their published two-second child timer (see `pi_extension.rs` for
+//! why that timer stays). The file lives at
+//! `<state_dir>/hook-log/<session-id>.log`, where
 //! `<state_dir>` is the parent of the supervisor socket.
 //!
 //! That path needs only the session id and the socket — not the token —
@@ -97,7 +106,7 @@
 //! | `no-credential` | — |
 //! | `bad-payload` | a one-word reason (`unparsable`, `missing-session-id`, …), or `no-reader: <io error>` |
 //! | `connect-failed` | `<phase>: <error>` |
-//! | `timeout` | the phase the budget expired in |
+//! | `timeout` | the phase the overall budget expired in |
 //! | `panic` | — |
 //!
 //! Phases are `stdin`, `connect`, `handshake`, `send`, `reply`.
@@ -130,8 +139,11 @@
 //! created, an unwritable path, a full disk — is ignored. The log exists
 //! to explain a broken run, never to become one.
 
-use farhelm_proto::io::{FrameReader, FrameWriter, handshake_with_session_auth, parse_control};
-use farhelm_proto::{ControlMsg, SessionAuth};
+use farhelm_proto::io::{
+    ClosedBeforeHello, FrameReader, FrameWriter, VersionSkew, handshake_with_session_auth,
+    parse_control,
+};
+use farhelm_proto::{ControlMsg, Frame, SessionAuth};
 use std::io::Read;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -160,6 +172,91 @@ const MAX_LOG_BYTES: u64 = 64 * 1024;
 /// The correlation id every hook request uses. One request per process,
 /// so there is nothing to correlate against.
 const REQUEST_ID: u64 = 1;
+
+/// The production hook budget shared by every vendor entry point.
+///
+/// This gives hooks with configurable vendor timers enough time to wait while
+/// a present supervisor is briefly busy. A supervisor restart is bounded
+/// separately by `CONNECT_RETRY_CAP`; the published Pi and OMP reporters
+/// retain their own child timers, while tests may pass a lower value through
+/// the child-only environment seam in `main.rs`.
+pub const HOOK_BUDGET: Duration = Duration::from_secs(30);
+
+/// A supervisor that is absent gets a short reconnect window. A live
+/// connection receives the full hook budget, but repeated refused or missing
+/// socket attempts stop after this cap: an unattended session whose supervisor
+/// is down should not hold every hook, including Grok's prompt-path hook, for
+/// the full 30 seconds, and sessions launched before the upgrade may still
+/// have Claude or Codex's old five-second outer timer. Grok configurations
+/// that still carry the earlier three-second timer are not covered: Grok can
+/// kill the hook mid-retry while the supervisor is down, so its docs ask users
+/// to raise that timer to 60 seconds.
+///
+/// A stopped supervisor and a restarting one produce the same socket errors,
+/// so this cap covers both. Unlinking the socket on clean shutdown would not
+/// distinguish them: a restart is a clean shutdown too, and startup removes
+/// the stale socket before binding its replacement.
+const CONNECT_RETRY_CAP: Duration = Duration::from_secs(4);
+/// The first pause between attempts while a supervisor is absent.
+const RETRY_INITIAL_DELAY: Duration = Duration::from_millis(100);
+/// The exponential reconnect pause stops growing at this bound. A connected
+/// peer that lives at least this long counts as long-lived and earns a fresh
+/// reconnect window after it drops.
+const RETRY_MAX_DELAY: Duration = Duration::from_secs(1);
+/// A failed write may race a refusal frame already buffered by the peer.
+const SEND_FAILURE_REPLY_PROBE: Duration = Duration::from_millis(100);
+
+/// Retry pacing and test-only observers for one hook report.
+struct RetryConfig {
+    connect_cap: Duration,
+    initial_delay: Duration,
+    max_delay: Duration,
+    #[cfg(test)]
+    retry_observer: Option<std::sync::mpsc::Sender<()>>,
+    #[cfg(test)]
+    probe_observer: Option<std::sync::mpsc::Sender<()>>,
+}
+
+impl RetryConfig {
+    const PRODUCTION: Self = Self {
+        connect_cap: CONNECT_RETRY_CAP,
+        initial_delay: RETRY_INITIAL_DELAY,
+        max_delay: RETRY_MAX_DELAY,
+        #[cfg(test)]
+        retry_observer: None,
+        #[cfg(test)]
+        probe_observer: None,
+    };
+
+    /// Return a copy that notifies a test on every retryable failure. The
+    /// hook's production configuration has no observer; this seam lets a
+    /// fixture publish its listener after the first failed attempt, removing
+    /// a timing race from the test.
+    #[cfg(test)]
+    fn observing(mut self, observer: std::sync::mpsc::Sender<()>) -> Self {
+        self.retry_observer = Some(observer);
+        self
+    }
+
+    /// Mark the failed-send refusal probe for a deterministic unit test.
+    #[cfg(test)]
+    fn observing_probe(mut self, observer: std::sync::mpsc::Sender<()>) -> Self {
+        self.probe_observer = Some(observer);
+        self
+    }
+
+    /// Return the bounded exponential pause before the next attempt.
+    ///
+    /// The shift reaches its maximum at attempt four; later attempts keep the
+    /// configured cap instead of growing without bound.
+    fn delay(&self, attempt: u32) -> Duration {
+        let factor = 1u32 << attempt.min(4);
+        self.initial_delay
+            .checked_mul(factor)
+            .unwrap_or(self.max_delay)
+            .min(self.max_delay)
+    }
+}
 
 /// The one line the hook is allowed to say out loud — the pointer that
 /// tells an agent `farhelm agent instructions` exists.
@@ -275,12 +372,46 @@ pub fn run_with(
     hook_log: Option<PathBuf>,
     entry_vendor: farhelm_proto::ReportVendor,
 ) {
+    run_with_config(
+        credential,
+        payload,
+        budget,
+        hook_log,
+        entry_vendor,
+        RetryConfig::PRODUCTION,
+    );
+}
+
+/// Test-only entry point for choosing a short reconnect cap without changing
+/// the process environment. Real hook children always use [`run_with`]'s
+/// production retry policy; focused unit tests use this seam to keep their
+/// absence and reconnect cases bounded to milliseconds.
+#[cfg(test)]
+fn run_with_retry_config(
+    credential: Option<HookCredential>,
+    payload: impl Read + Send + 'static,
+    budget: Duration,
+    hook_log: Option<PathBuf>,
+    entry_vendor: farhelm_proto::ReportVendor,
+    retry: RetryConfig,
+) {
+    run_with_config(credential, payload, budget, hook_log, entry_vendor, retry);
+}
+
+fn run_with_config(
+    credential: Option<HookCredential>,
+    payload: impl Read + Send + 'static,
+    budget: Duration,
+    hook_log: Option<PathBuf>,
+    entry_vendor: farhelm_proto::ReportVendor,
+    retry: RetryConfig,
+) {
     // Two nested catches, for two different failures. The inner one turns
     // a panic in the work into the `panic` outcome, so the log still gets
     // its one line; the outer one guarantees that even a panic while
     // logging cannot escape into the caller, which must reach `exit(0)`.
     let outcome = match std::panic::catch_unwind(AssertUnwindSafe(|| {
-        run_inner(credential, payload, budget, entry_vendor)
+        run_inner(credential, payload, budget, entry_vendor, retry)
     })) {
         Ok(outcome) => outcome,
         Err(_) => Outcome::word("panic"),
@@ -307,6 +438,7 @@ fn run_inner(
     payload: impl Read + Send + 'static,
     budget: Duration,
     entry_vendor: farhelm_proto::ReportVendor,
+    retry: RetryConfig,
 ) -> Outcome {
     let deadline = Instant::now() + budget;
     let Some(credential) = credential else {
@@ -351,7 +483,7 @@ fn run_inner(
         }
     };
     runtime
-        .block_on(report(credential, &request, deadline))
+        .block_on(report(credential, &request, deadline, retry))
         .about(conversation, source)
 }
 
@@ -639,68 +771,246 @@ fn parse_grok_payload(value: &serde_json::Value) -> Result<ControlMsg, &'static 
     })
 }
 
-/// One authenticated round trip: connect, handshake, report, read the reply.
-///
-/// Each step is bounded by whatever is left of the shared deadline rather
-/// than by a per-step timeout, so a slow connect cannot buy the handshake
-/// extra time. The reply is read even though the hook does nothing with a
-/// successful one: reading it is what distinguishes "the supervisor
-/// accepted this" from "the supervisor refused it" in the log, and the
-/// handshake's own contract requires callers to keep reading anyway (an
-/// `Unauthorized` error arrives uncorrelated, after the hellos cross).
-///
-/// Takes the credential BY VALUE: this is the only round trip the process
-/// will make, so the id and token can be moved into the handshake rather
-/// than cloned out of a borrow, and the bearer token then exists in
-/// exactly one place on its way to the socket.
-async fn report(credential: HookCredential, request: &ControlMsg, deadline: Instant) -> Outcome {
+/// Retry one authenticated report while the supervisor is absent or a live
+/// connection drops. Refused protocol replies are final: they prove a
+/// supervisor is alive and deliberately rejected this request, so replaying
+/// them would only duplicate a refusal. Transport failures after a long-lived
+/// connection get a fresh absence window; repeated immediate drops stay within
+/// the current window, and neither path exceeds the overall hook deadline. A
+/// send that fails after the peer may have written a
+/// refusal gets a short read probe first, because a closed socket can carry a
+/// final protocol frame even though the write returned `BrokenPipe`.
+async fn report(
+    credential: HookCredential,
+    request: &ControlMsg,
+    deadline: Instant,
+    retry: RetryConfig,
+) -> Outcome {
+    let mut absence_started = None;
+    let mut attempt = 0;
+    loop {
+        match report_once(&credential, request, deadline, &retry).await {
+            Attempt::Done(outcome) => return outcome,
+            Attempt::Retry(failure) => {
+                #[cfg(test)]
+                if let Some(observer) = &retry.retry_observer {
+                    let _ = observer.send(());
+                }
+                let now = Instant::now();
+                let reset_window = absence_started.is_none()
+                    || failure.connected_at.is_some_and(|connected_at| {
+                        now.duration_since(connected_at) >= retry.max_delay
+                    });
+                let started = if reset_window {
+                    *absence_started.insert(now)
+                } else {
+                    absence_started.expect("a retry window exists")
+                };
+                let absence_left = retry
+                    .connect_cap
+                    .saturating_sub(now.duration_since(started));
+                let overall_left = remaining(deadline);
+                let delay = retry.delay(if reset_window { 0 } else { attempt });
+                if delay >= absence_left {
+                    return failure.into_outcome();
+                }
+                if delay >= overall_left {
+                    return Outcome::detail("timeout", failure.phase);
+                }
+                tokio::time::sleep(delay).await;
+                // Replaying is safe after a transport drop: Claude, Goose,
+                // and Pi write the same id, while Codex, Grok, and OMP rerun
+                // admission against the stored binding. Explicit protocol
+                // refusals never reach this branch and remain final.
+                attempt = if reset_window {
+                    1
+                } else {
+                    attempt.saturating_add(1)
+                };
+            }
+        }
+    }
+}
+
+/// The result of one connection attempt, retaining enough structure to decide
+/// whether a transport error is safe to replay without parsing log text.
+enum Attempt {
+    Done(Outcome),
+    Retry(RetryFailure),
+}
+
+/// A retryable transport failure and the phase that produced it.
+struct RetryFailure {
+    phase: &'static str,
+    detail: String,
+    connected_at: Option<Instant>,
+}
+
+impl RetryFailure {
+    fn into_outcome(self) -> Outcome {
+        Outcome::detail("connect-failed", format!("{}: {}", self.phase, self.detail))
+    }
+}
+
+/// One bounded connect/handshake/report/reply exchange.
+async fn report_once(
+    credential: &HookCredential,
+    request: &ControlMsg,
+    deadline: Instant,
+    retry: &RetryConfig,
+) -> Attempt {
+    #[cfg(not(test))]
+    let _ = retry;
+    // A refused connect or missing socket means no process is listening; a
+    // successful connect means one held the socket at that instant. The
+    // supervisor may leave the pathname behind while it restarts, so the
+    // caller retries both Unix-socket errors for the same bounded window.
     let connect = tokio::net::UnixStream::connect(&credential.socket);
     let stream = match tokio::time::timeout(remaining(deadline), connect).await {
-        Err(_) => return Outcome::detail("timeout", "connect"),
-        Ok(Err(err)) => return Outcome::io("connect", &err),
+        Err(_) => return Attempt::Done(Outcome::detail("timeout", "connect")),
+        Ok(Err(err)) if retryable_connect_error(&err) => {
+            return Attempt::Retry(RetryFailure {
+                phase: "connect",
+                detail: err.to_string(),
+                connected_at: None,
+            });
+        }
+        Ok(Err(err)) => return Attempt::Done(Outcome::io("connect", &err)),
         Ok(Ok(stream)) => stream,
     };
+    let connected_at = Instant::now();
     let (read, write) = tokio::io::split(stream);
     let mut reader = FrameReader::new(read);
     let mut writer = FrameWriter::new(write);
 
     let auth = SessionAuth {
-        session_id: credential.session_id,
-        token: credential.token,
+        session_id: credential.session_id.clone(),
+        token: credential.token.clone(),
     };
     let handshake = handshake_with_session_auth(&mut reader, &mut writer, auth);
     match tokio::time::timeout(remaining(deadline), handshake).await {
-        Err(_) => return Outcome::detail("timeout", "handshake"),
-        Ok(Err(err)) => return Outcome::io("handshake", &err),
+        Err(_) => return Attempt::Done(Outcome::detail("timeout", "handshake")),
+        Ok(Err(err)) if retryable_handshake_error(&err) => {
+            return Attempt::Retry(RetryFailure {
+                phase: "handshake",
+                detail: err.to_string(),
+                connected_at: Some(connected_at),
+            });
+        }
+        Ok(Err(err)) => return Attempt::Done(Outcome::io("handshake", &err)),
         Ok(Ok(_peer_hello)) => {}
     }
 
     match tokio::time::timeout(remaining(deadline), writer.write_control(request)).await {
-        Err(_) => return Outcome::detail("timeout", "send"),
-        Ok(Err(err)) => return Outcome::io("send", &err),
+        Err(_) => return Attempt::Done(Outcome::detail("timeout", "send")),
+        Ok(Err(err)) if retryable_transport_error(&err) => {
+            // A supervisor can write an explicit refusal and close while this
+            // side is still flushing the request. Probe briefly before
+            // replaying: the refusal is final, while an empty/closed probe
+            // preserves the normal transport retry path.
+            let probe_window = remaining(deadline).min(SEND_FAILURE_REPLY_PROBE);
+            #[cfg(test)]
+            if let Some(observer) = &retry.probe_observer {
+                let _ = observer.send(());
+            }
+            match tokio::time::timeout(probe_window, reader.read_frame()).await {
+                Ok(Ok(Some(frame))) => return classify_reply(frame),
+                Ok(Err(reply_error)) if !retryable_transport_error(&reply_error) => {
+                    return Attempt::Done(Outcome::io("reply", &reply_error));
+                }
+                Ok(Ok(None)) | Ok(Err(_)) | Err(_) => {}
+            }
+            return Attempt::Retry(RetryFailure {
+                phase: "send",
+                detail: err.to_string(),
+                connected_at: Some(connected_at),
+            });
+        }
+        Ok(Err(err)) => return Attempt::Done(Outcome::io("send", &err)),
         Ok(Ok(())) => {}
     }
 
     let frame = match tokio::time::timeout(remaining(deadline), reader.read_frame()).await {
-        Err(_) => return Outcome::detail("timeout", "reply"),
-        Ok(Err(err)) => return Outcome::io("reply", &err),
+        Err(_) => return Attempt::Done(Outcome::detail("timeout", "reply")),
+        Ok(Err(err)) if retryable_transport_error(&err) => {
+            return Attempt::Retry(RetryFailure {
+                phase: "reply",
+                detail: err.to_string(),
+                connected_at: Some(connected_at),
+            });
+        }
+        Ok(Err(err)) => return Attempt::Done(Outcome::io("reply", &err)),
         Ok(Ok(None)) => {
-            return Outcome::detail("connect-failed", "reply: closed before answering");
+            return Attempt::Retry(RetryFailure {
+                phase: "reply",
+                detail: "closed before answering".to_string(),
+                connected_at: Some(connected_at),
+            });
         }
         Ok(Ok(Some(frame))) => frame,
     };
+    classify_reply(frame)
+}
+
+/// Classify the one frame a supervisor sends after an authenticated report.
+/// Keeping this separate lets a failed write inspect a refusal that was
+/// already buffered by the peer before its socket closed.
+fn classify_reply(frame: Frame) -> Attempt {
     match parse_control(&frame) {
-        Err(err) => Outcome::io("reply", &err),
+        Err(err) => Attempt::Done(Outcome::io("reply", &err)),
         // The reply's `req_id` is not checked: this connection carried
         // exactly one request, so there is nothing a mismatched id could
         // disambiguate, and refusing on it would only convert a
         // successful report into a confusing log line.
-        Ok(ControlMsg::ConversationReported { .. }) => Outcome::word("acked"),
-        Ok(ControlMsg::Error { kind, message, .. }) => {
-            Outcome::detail("refused", format!("{} {message}", error_kind_word(kind)))
-        }
-        Ok(other) => Outcome::detail("refused", format!("unexpected {}", control_tag(&other))),
+        Ok(ControlMsg::ConversationReported { .. }) => Attempt::Done(Outcome::word("acked")),
+        Ok(ControlMsg::Error { kind, message, .. }) => Attempt::Done(Outcome::detail(
+            "refused",
+            format!("{} {message}", error_kind_word(kind)),
+        )),
+        Ok(other) => Attempt::Done(Outcome::detail(
+            "refused",
+            format!("unexpected {}", control_tag(&other)),
+        )),
     }
+}
+
+fn retryable_connect_error(error: &std::io::Error) -> bool {
+    // A full Unix-listener backlog can report WouldBlock. That rare
+    // present-listener saturation case is deliberately outside this retry
+    // classifier; the ordinary restart shapes are NotFound and Refused.
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+    )
+}
+
+/// Identify handshake failures that mean the connected peer disappeared.
+///
+/// Version skew is checked first because it is a deliberate protocol refusal,
+/// while the remaining transport errors can be retried against a restarted
+/// supervisor.
+fn retryable_handshake_error(error: &std::io::Error) -> bool {
+    if VersionSkew::cause_of(error).is_some() {
+        return false;
+    }
+    ClosedBeforeHello::is_cause_of(error) || retryable_transport_error(error)
+}
+
+/// Identify transport failures that are safe to replay on a new connection.
+///
+/// Timeouts and `NotConnected` are included because they describe a broken
+/// exchange, not an explicit supervisor decision; protocol `Error` frames are
+/// classified separately and remain final.
+fn retryable_transport_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::NotConnected
+            | std::io::ErrorKind::UnexpectedEof
+            | std::io::ErrorKind::TimedOut
+    )
 }
 
 /// Time left before the shared deadline, saturating at zero.
@@ -908,6 +1218,7 @@ mod tests {
     use farhelm_proto::ReportVendor;
     use farhelm_teststate::thread::FixtureThread;
     use std::io::Cursor;
+    use std::os::fd::AsRawFd;
 
     /// The Claude Code 2.1.241 `SessionStart` payload, verbatim from the
     /// hand-verified vendor audit (re-run by `real_agent_capture.rs`'s
@@ -922,6 +1233,18 @@ mod tests {
     /// A budget short enough to keep the timeout tests fast while staying
     /// far above the scheduling jitter of a loaded CI runner.
     const TEST_BUDGET: Duration = Duration::from_millis(300);
+    /// Success and refusal fixtures have generous time to start their peer.
+    const SUCCESS_BUDGET: Duration = Duration::from_secs(5);
+
+    /// Keep reconnect tests quick while preserving the production pacing
+    /// shape: a short absence cap and exponentially spaced attempts.
+    const TEST_RETRY: RetryConfig = RetryConfig {
+        connect_cap: Duration::from_millis(60),
+        initial_delay: Duration::from_millis(5),
+        max_delay: Duration::from_millis(20),
+        retry_observer: None,
+        probe_observer: None,
+    };
 
     /// How long a test's fake supervisor will wait for any single
     /// milestone before giving up.
@@ -1121,6 +1444,341 @@ mod tests {
         })
         .expect("start fixture join observer");
         RoundTripSupervisor { owner, outcome }
+    }
+
+    /// Which controlled peer behavior a retry test should expose.
+    #[derive(Clone, Copy)]
+    enum RetryPeer {
+        /// Drop the first connected socket, then complete the next exchange.
+        CloseFirst,
+        /// Read the first report, drop the connection before its reply, then
+        /// complete the same report on the next connection.
+        CloseAfterReport,
+        /// Keep a received report pending past the short reconnect cap, then
+        /// drop it and acknowledge the replay. This models a busy supervisor
+        /// that restarts while the hook is still waiting for admission.
+        HoldThenClose(Duration),
+        /// Drop every accepted connection, so the hook must exhaust the short
+        /// reconnect window rather than resetting it on each crash.
+        AlwaysClose,
+        /// Answer one valid request with a protocol refusal and reject any retry.
+        Refuse,
+        /// Write an uncorrelated refusal before reading the report, then close
+        /// so the hook's failed-send probe must preserve the final answer.
+        RefuseAndClose,
+        /// Speak an incompatible protocol hello and reject any retry.
+        VersionMismatch,
+    }
+
+    /// Serve one deterministic retry scenario without putting sleeps in the hook
+    /// test itself. The listener remains owned by the fixture thread, so a
+    /// failed assertion still closes every accepted socket during cleanup.
+    fn spawn_retry_supervisor(
+        listener: std::os::unix::net::UnixListener,
+        context: farhelm_testtrace::ThreadContext,
+        seen_tx: mpsc::Sender<(String, String, Option<SessionAuth>)>,
+        peer: RetryPeer,
+    ) -> RoundTripSupervisor {
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+        let (outcome_tx, outcome) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            context
+                .with_runtime(
+                    farhelm_testtrace::RuntimeConfig {
+                        flavor: farhelm_testtrace::RuntimeFlavor::CurrentThread,
+                        worker_threads: None,
+                        start_paused: false,
+                    },
+                    |runtime| {
+                        runtime.block_on(async move {
+                            let listener = tokio::net::UnixListener::from_std(listener)
+                                .expect("adopt retry listener");
+                            let transaction = async {
+                                let (stream, _) =
+                                    tokio::time::timeout(SERVER_DEADLINE, listener.accept())
+                                        .await
+                                        .map_err(|_| "first accept timeout")?
+                                        .map_err(|_| "first accept failed")?;
+                                if matches!(peer, RetryPeer::AlwaysClose) {
+                                    drop(stream);
+                                    while let Ok(Ok((stream, _))) = tokio::time::timeout(
+                                        Duration::from_millis(200),
+                                        listener.accept(),
+                                    )
+                                    .await
+                                    {
+                                        drop(stream);
+                                    }
+                                } else if matches!(peer, RetryPeer::CloseFirst) {
+                                    drop(stream);
+                                    serve_retry_exchange(&listener, &seen_tx).await?;
+                                } else {
+                                    serve_retry_peer(stream, &listener, &seen_tx, peer).await?;
+                                }
+                                Ok::<(), &'static str>(())
+                            };
+                            let result = match tokio::time::timeout(SERVER_DEADLINE, async {
+                                tokio::select! {
+                                    _ = cancel_rx => Err("fixture cancelled"),
+                                    result = transaction => result,
+                                }
+                            })
+                            .await
+                            {
+                                Ok(result) => result,
+                                Err(_) => Err("aggregate timeout"),
+                            };
+                            let _ = outcome_tx.send(result);
+                        });
+                    },
+                )
+                .expect("retry server runtime");
+        });
+        let owner = FixtureThread::new("hook-retry-supervisor", server, move || {
+            let _ = cancel_tx.send(());
+        })
+        .expect("start retry fixture join observer");
+        RoundTripSupervisor { owner, outcome }
+    }
+
+    /// Leave the socket absent long enough to force one failed connect, then
+    /// publish a supervisor that can accept the retried report.
+    fn spawn_delayed_retry_supervisor(
+        socket: std::path::PathBuf,
+        context: farhelm_testtrace::ThreadContext,
+        seen_tx: mpsc::Sender<(String, String, Option<SessionAuth>)>,
+        retry_ready: mpsc::Receiver<()>,
+        peer: Option<RetryPeer>,
+    ) -> RoundTripSupervisor {
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+        let (outcome_tx, outcome) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            if retry_ready.recv_timeout(SERVER_DEADLINE).is_err() {
+                let _ = outcome_tx.send(Err("hook never observed an absent socket"));
+                return;
+            }
+            context
+                .with_runtime(
+                    farhelm_testtrace::RuntimeConfig {
+                        flavor: farhelm_testtrace::RuntimeFlavor::CurrentThread,
+                        worker_threads: None,
+                        start_paused: false,
+                    },
+                    |runtime| {
+                        runtime.block_on(async move {
+                            let transaction = async {
+                                let listener = std::os::unix::net::UnixListener::bind(&socket)
+                                    .map_err(|_| "delayed bind failed")?;
+                                listener
+                                    .set_nonblocking(true)
+                                    .map_err(|_| "delayed nonblocking failed")?;
+                                let listener = tokio::net::UnixListener::from_std(listener)
+                                    .map_err(|_| "adopt delayed listener failed")?;
+                                if let Some(peer) = peer {
+                                    let (stream, _) = listener
+                                        .accept()
+                                        .await
+                                        .map_err(|_| "delayed accept failed")?;
+                                    serve_retry_peer(stream, &listener, &seen_tx, peer).await
+                                } else {
+                                    serve_retry_exchange(&listener, &seen_tx).await
+                                }
+                            };
+                            let result = match tokio::time::timeout(SERVER_DEADLINE, async {
+                                tokio::select! {
+                                    _ = cancel_rx => Err("fixture cancelled"),
+                                    result = transaction => result,
+                                }
+                            })
+                            .await
+                            {
+                                Ok(result) => result,
+                                Err(_) => Err("aggregate timeout"),
+                            };
+                            let _ = outcome_tx.send(result);
+                        });
+                    },
+                )
+                .expect("delayed retry server runtime");
+        });
+        let owner = FixtureThread::new("hook-delayed-retry-supervisor", server, move || {
+            let _ = cancel_tx.send(());
+        })
+        .expect("start delayed retry fixture join observer");
+        RoundTripSupervisor { owner, outcome }
+    }
+
+    /// Accept one connection and complete a report exchange on it.
+    async fn serve_retry_exchange(
+        listener: &tokio::net::UnixListener,
+        seen_tx: &mpsc::Sender<(String, String, Option<SessionAuth>)>,
+    ) -> Result<(), &'static str> {
+        let (stream, _) = tokio::time::timeout(SERVER_DEADLINE, listener.accept())
+            .await
+            .map_err(|_| "accept timeout")?
+            .map_err(|_| "accept failed")?;
+        let (read, write) = tokio::io::split(stream);
+        let mut reader = FrameReader::new(read);
+        let mut writer = FrameWriter::new(write);
+        let hello = tokio::time::timeout(
+            SERVER_DEADLINE,
+            farhelm_proto::io::handshake(&mut reader, &mut writer, "supervisor"),
+        )
+        .await
+        .map_err(|_| "handshake timeout")?
+        .map_err(|_| "handshake failed")?;
+        let auth = match hello {
+            ControlMsg::Hello { auth, .. } => auth,
+            _ => return Err("second hello shape"),
+        };
+        let frame = tokio::time::timeout(SERVER_DEADLINE, reader.read_frame())
+            .await
+            .map_err(|_| "report timeout")?
+            .map_err(|_| "report read failed")?
+            .ok_or("report eof")?;
+        match parse_control(&frame).map_err(|_| "second report decode")? {
+            ControlMsg::ReportConversation {
+                req_id,
+                conversation,
+                source,
+                ..
+            } => {
+                let _ = seen_tx.send((conversation, source, auth));
+                tokio::time::timeout(
+                    SERVER_DEADLINE,
+                    writer.write_control(&ControlMsg::ConversationReported { req_id }),
+                )
+                .await
+                .map_err(|_| "ack timeout")?
+                .map_err(|_| "ack failed")?;
+                Ok(())
+            }
+            _ => Err("second message shape"),
+        }
+    }
+
+    /// Handle the first connection for a refusal or version-skew test and prove
+    /// that the hook does not open a second socket after the final answer.
+    async fn serve_retry_peer(
+        stream: tokio::net::UnixStream,
+        listener: &tokio::net::UnixListener,
+        seen_tx: &mpsc::Sender<(String, String, Option<SessionAuth>)>,
+        peer: RetryPeer,
+    ) -> Result<(), &'static str> {
+        if matches!(peer, RetryPeer::VersionMismatch) {
+            let (read, write) = tokio::io::split(stream);
+            let mut reader = FrameReader::new(read);
+            let mut writer = FrameWriter::new(write);
+            writer
+                .write_control(&ControlMsg::Hello {
+                    protocol_version: farhelm_proto::PROTOCOL_VERSION + 1,
+                    build_version: "test-version-skew".to_string(),
+                    role: "supervisor".to_string(),
+                    host_identity: None,
+                    auth: None,
+                })
+                .await
+                .map_err(|_| "version hello write failed")?;
+            let _ = reader.read_frame().await;
+        } else {
+            let stream_fd = stream.as_raw_fd();
+            let (read, write) = tokio::io::split(stream);
+            let mut reader = FrameReader::new(read);
+            let mut writer = FrameWriter::new(write);
+            let hello = if matches!(peer, RetryPeer::RefuseAndClose) {
+                // Read the hook's hello before shutting down this half. The
+                // hook cannot send its report until it has read our hello,
+                // so this makes the failed-send probe deterministic.
+                reader
+                    .read_frame()
+                    .await
+                    .map_err(|_| "early refusal hello read failed")?
+                    .ok_or("early refusal hello eof")?;
+                // SAFETY: the split read half owns this live Unix socket fd.
+                let result = unsafe { libc::shutdown(stream_fd, libc::SHUT_RD) };
+                if result != 0 {
+                    return Err("early refusal read shutdown failed");
+                }
+                writer
+                    .write_control(&ControlMsg::Hello {
+                        protocol_version: farhelm_proto::PROTOCOL_VERSION,
+                        build_version: "test-refusal".to_string(),
+                        role: "supervisor".to_string(),
+                        host_identity: None,
+                        auth: None,
+                    })
+                    .await
+                    .map_err(|_| "early refusal hello write failed")?;
+                ControlMsg::Hello {
+                    protocol_version: farhelm_proto::PROTOCOL_VERSION,
+                    build_version: "test-refusal".to_string(),
+                    role: "supervisor".to_string(),
+                    host_identity: None,
+                    auth: None,
+                }
+            } else {
+                farhelm_proto::io::handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .map_err(|_| "refusal handshake failed")?
+            };
+            let auth = match hello {
+                ControlMsg::Hello { auth, .. } => auth,
+                _ => return Err("refusal hello shape"),
+            };
+            if matches!(peer, RetryPeer::RefuseAndClose) {
+                writer
+                    .write_control(&ControlMsg::Error {
+                        req_id: REQUEST_ID,
+                        kind: farhelm_proto::ErrorKind::Unauthorized,
+                        message: "test refusal before report".to_string(),
+                    })
+                    .await
+                    .map_err(|_| "early refusal write failed")?;
+                drop(writer);
+                drop(reader);
+            } else {
+                let frame = reader
+                    .read_frame()
+                    .await
+                    .map_err(|_| "refusal report read failed")?
+                    .ok_or("refusal report eof")?;
+                let ControlMsg::ReportConversation {
+                    req_id,
+                    conversation,
+                    source,
+                    ..
+                } = parse_control(&frame).map_err(|_| "refusal report decode")?
+                else {
+                    return Err("refusal report shape");
+                };
+                let _ = seen_tx.send((conversation, source, auth));
+                if let RetryPeer::HoldThenClose(hold) = peer {
+                    // sleep-ok: hold an already received report past the old absence window to exercise a busy peer restarting, not fixture readiness.
+                    tokio::time::sleep(hold).await;
+                }
+                if matches!(
+                    peer,
+                    RetryPeer::CloseAfterReport | RetryPeer::HoldThenClose(_)
+                ) {
+                    drop(writer);
+                    drop(reader);
+                    serve_retry_exchange(listener, seen_tx).await?;
+                    return Ok(());
+                }
+                writer
+                    .write_control(&ControlMsg::Error {
+                        req_id,
+                        kind: farhelm_proto::ErrorKind::Conflict,
+                        message: "test refusal".to_string(),
+                    })
+                    .await
+                    .map_err(|_| "refusal write failed")?;
+            }
+        }
+        match tokio::time::timeout(Duration::from_millis(100), listener.accept()).await {
+            Ok(Ok(_)) => Err("hook retried a final peer answer"),
+            Ok(Err(_)) | Err(_) => Ok(()),
+        }
     }
 
     /// Read the hook log, asserting it holds exactly one line.
@@ -1789,7 +2447,7 @@ mod tests {
             Some(log.clone()),
             ReportVendor::Claude,
         );
-        run_with(
+        run_with_retry_config(
             Some(HookCredential {
                 session_id: "sess-1".to_string(),
                 token: "tok".to_string(),
@@ -1799,6 +2457,7 @@ mod tests {
             TEST_BUDGET,
             Some(log.clone()),
             ReportVendor::Claude,
+            TEST_RETRY,
         );
 
         let text = std::fs::read_to_string(&log).expect("hook log should exist");
@@ -1811,16 +2470,69 @@ mod tests {
         );
     }
 
-    /// A socket path that does not exist must produce a `connect-failed`
-    /// line and an ordinary return — never a panic and never a message on
-    /// a descriptor the agent can see. A stale or removed socket is a real
-    /// situation (a supervisor restart mid-session), so it has to be the
-    /// boring path.
+    /// A stale socket that refuses connections must produce a
+    /// `connect-failed` line and an ordinary return — never a panic and never
+    /// a message on a descriptor the agent can see. A stale or removed socket
+    /// is a real situation (a supervisor restart mid-session), so it has to be
+    /// the boring path.
     #[farhelm_testtrace::test]
-    fn missing_socket_reports_connect_failed() {
+    fn a_refused_stale_socket_reports_connect_failed() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
-        run_with(
+        // A dropped listener leaves the Unix pathname behind on Linux, so this
+        // exercises the refused-socket branch explicitly.
+        let stale = dir.path().join("stale.sock");
+        let stale_listener =
+            std::os::unix::net::UnixListener::bind(&stale).expect("bind stale socket");
+        drop(stale_listener);
+        assert!(
+            stale.exists(),
+            "the dropped listener must leave its pathname behind"
+        );
+        let started = Instant::now();
+        run_with_retry_config(
+            Some(HookCredential {
+                session_id: "sess-1".to_string(),
+                token: "tok".to_string(),
+                socket: stale,
+            }),
+            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
+            TEST_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Claude,
+            TEST_RETRY,
+        );
+        let line = single_line(&log);
+        let detail = line.splitn(3, ' ').nth(2).expect("outcome word and detail");
+        assert!(
+            line.contains(" connect-failed connect: "),
+            "line was {line:?}"
+        );
+        assert!(
+            detail.to_ascii_lowercase().contains("refused"),
+            "the stale pathname must exercise ConnectionRefused: {line:?}"
+        );
+        // The identity pair still rides along on a failed report: knowing
+        // which conversation went unreported is the point of the log.
+        assert!(
+            detail.ends_with(" 6af192d4-0000-4000-8000-000000000000 startup"),
+            "line was {line:?}"
+        );
+        assert!(
+            started.elapsed() >= TEST_RETRY.connect_cap - TEST_RETRY.max_delay,
+            "a refused socket must exhaust the reconnect window before giving up: {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// When the overall hook budget ends before the next reconnect attempt,
+    /// the log names the exhausted phase as `timeout` rather than treating
+    /// the supervisor's absence as a completed reconnect failure.
+    #[farhelm_testtrace::test]
+    fn a_reconnect_attempt_can_hit_the_overall_budget() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log").join("s.log");
+        run_with_retry_config(
             Some(HookCredential {
                 session_id: "sess-1".to_string(),
                 token: "tok".to_string(),
@@ -1830,18 +2542,399 @@ mod tests {
             TEST_BUDGET,
             Some(log.clone()),
             ReportVendor::Claude,
+            RetryConfig {
+                connect_cap: Duration::from_secs(60),
+                initial_delay: Duration::from_secs(1),
+                max_delay: Duration::from_secs(1),
+                ..TEST_RETRY
+            },
+        );
+        assert!(single_line(&log).contains(" timeout connect"));
+    }
+
+    /// A supervisor that appears during the reconnect window receives the
+    /// original report. A first refusal is not the final outcome when the
+    /// socket was absent: the retry is what bridges a brief restart gap.
+    #[farhelm_testtrace::test]
+    fn a_supervisor_appearing_during_absence_is_retried_and_acked() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log").join("s.log");
+        let socket = dir.path().join("supervisor.sock");
+        let (seen_tx, seen_rx) = mpsc::channel();
+        let (retry_tx, retry_rx) = mpsc::channel();
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let server =
+            spawn_delayed_retry_supervisor(socket.clone(), context, seen_tx, retry_rx, None);
+        let retry = RetryConfig {
+            connect_cap: Duration::from_secs(4),
+            ..TEST_RETRY
+        }
+        .observing(retry_tx);
+
+        run_with_retry_config(
+            Some(HookCredential {
+                session_id: "sess-1".to_string(),
+                token: "tok".to_string(),
+                socket,
+            }),
+            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
+            SUCCESS_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Claude,
+            retry,
+        );
+        assert!(single_line(&log).contains(" acked"));
+        let (conversation, source, _) = seen_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("appearing supervisor saw the retried report");
+        assert_eq!(conversation, "6af192d4-0000-4000-8000-000000000000");
+        assert_eq!(source, "startup");
+        server
+            .owner
+            .finish(Duration::from_secs(1))
+            .expect("delayed retry supervisor fixture");
+        assert_eq!(
+            server
+                .outcome
+                .recv_timeout(Duration::from_secs(1))
+                .expect("delayed retry supervisor outcome"),
+            Ok(())
+        );
+    }
+
+    /// A busy peer may hold the report longer than the absence cap before
+    /// restarting. That connected wait must not consume the next reconnect
+    /// window: both exchanges must carry the same report and end in an ack.
+    #[farhelm_testtrace::test]
+    fn a_long_lived_connection_gets_a_fresh_reconnect_window() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log").join("s.log");
+        let socket = dir.path().join("supervisor.sock");
+        assert!(!socket.exists(), "the first attempt must observe absence");
+        let (seen_tx, seen_rx) = mpsc::channel();
+        let (retry_tx, retry_rx) = mpsc::channel();
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let server = spawn_delayed_retry_supervisor(
+            socket.clone(),
+            context,
+            seen_tx,
+            retry_rx,
+            Some(RetryPeer::HoldThenClose(Duration::from_secs(1))),
+        );
+        run_with_retry_config(
+            Some(HookCredential {
+                session_id: "sess-1".to_string(),
+                token: "tok".to_string(),
+                socket,
+            }),
+            Cursor::new(CLAUDE_PAYLOAD.as_bytes().to_vec()),
+            SUCCESS_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Claude,
+            RetryConfig {
+                // Leave real thread/runtime startup headroom while holding the
+                // connected report long enough to outlast this absence cap.
+                connect_cap: Duration::from_millis(500),
+                ..TEST_RETRY
+            }
+            .observing(retry_tx),
         );
         let line = single_line(&log);
-        let detail = line.splitn(3, ' ').nth(2).expect("outcome word and detail");
+        assert!(line.contains(" acked"), "line was {line:?}");
+        let first = seen_rx.recv_timeout(SERVER_DEADLINE).expect("first report");
+        let second = seen_rx
+            .recv_timeout(SERVER_DEADLINE)
+            .expect("replayed report");
+        assert_eq!(
+            first, second,
+            "reconnection must preserve the report and auth"
+        );
+        server
+            .owner
+            .finish(SERVER_DEADLINE)
+            .expect("hold-and-drop fixture");
+        assert_eq!(
+            server
+                .outcome
+                .recv_timeout(SERVER_DEADLINE)
+                .expect("fixture outcome"),
+            Ok(())
+        );
+    }
+
+    /// A crashing listener must not keep a hook alive for its full budget by
+    /// repeatedly opening and closing sockets. Several immediate failures
+    /// share one short window and finish as a transport failure, not timeout.
+    #[farhelm_testtrace::test]
+    fn immediate_connection_drops_share_the_reconnect_cap() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log").join("s.log");
+        let socket = dir.path().join("supervisor.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let (seen_tx, _) = mpsc::channel();
+        let (retry_tx, retry_rx) = mpsc::channel();
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let server = spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::AlwaysClose);
+        run_with_retry_config(
+            Some(HookCredential {
+                session_id: "sess-1".to_string(),
+                token: "tok".to_string(),
+                socket,
+            }),
+            Cursor::new(CLAUDE_PAYLOAD.as_bytes().to_vec()),
+            SUCCESS_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Claude,
+            RetryConfig {
+                // Scheduling the controlled peer must have substantially more
+                // headroom than the tiny pacing used by ordinary unit cases.
+                connect_cap: Duration::from_millis(500),
+                max_delay: Duration::from_millis(100),
+                ..TEST_RETRY
+            }
+            .observing(retry_tx),
+        );
+        let line = single_line(&log);
         assert!(
-            line.contains(" connect-failed connect: "),
+            line.contains(" connect-failed handshake:"),
             "line was {line:?}"
         );
-        // The identity pair still rides along on a failed report: knowing
-        // which conversation went unreported is the point of the log.
         assert!(
-            detail.ends_with(" 6af192d4-0000-4000-8000-000000000000 startup"),
-            "line was {line:?}"
+            retry_rx.try_iter().count() >= 2,
+            "must exercise repeated connected failures"
+        );
+        server
+            .owner
+            .finish(SERVER_DEADLINE)
+            .expect("crashing peer fixture");
+        assert_eq!(
+            server
+                .outcome
+                .recv_timeout(SERVER_DEADLINE)
+                .expect("fixture outcome"),
+            Ok(())
+        );
+    }
+
+    /// A connected supervisor can disappear before answering while a restart
+    /// races the hook. The same report is safe to resend, so the second
+    /// connection must receive and acknowledge it.
+    #[farhelm_testtrace::test]
+    fn a_closed_connection_is_retried_and_acked() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log").join("s.log");
+        let socket = dir.path().join("supervisor.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let (seen_tx, seen_rx) = mpsc::channel();
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let server = spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::CloseFirst);
+
+        run_with_retry_config(
+            Some(HookCredential {
+                session_id: "sess-1".to_string(),
+                token: "tok".to_string(),
+                socket,
+            }),
+            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
+            SUCCESS_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Claude,
+            TEST_RETRY,
+        );
+        assert!(single_line(&log).contains(" acked"));
+        let (conversation, source, _) = seen_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("retrying supervisor saw the second report");
+        assert_eq!(conversation, "6af192d4-0000-4000-8000-000000000000");
+        assert_eq!(source, "startup");
+        server
+            .owner
+            .finish(Duration::from_secs(1))
+            .expect("retry supervisor fixture");
+        assert_eq!(
+            server
+                .outcome
+                .recv_timeout(Duration::from_secs(1))
+                .expect("retry supervisor outcome"),
+            Ok(())
+        );
+    }
+
+    /// A supervisor can receive the report and disappear before sending its
+    /// acknowledgement. The hook must treat the reply-phase EOF as a
+    /// transport loss and replay the same report on the next connection.
+    #[farhelm_testtrace::test]
+    fn a_reply_drop_is_retried_and_acked() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log").join("s.log");
+        let socket = dir.path().join("supervisor.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let (seen_tx, seen_rx) = mpsc::channel();
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let server =
+            spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::CloseAfterReport);
+
+        run_with_retry_config(
+            Some(HookCredential {
+                session_id: "sess-1".to_string(),
+                token: "tok".to_string(),
+                socket,
+            }),
+            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
+            SUCCESS_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Claude,
+            TEST_RETRY,
+        );
+        assert!(single_line(&log).contains(" acked"));
+        let first = seen_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("reply-drop supervisor saw the first report");
+        let second = seen_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("reply-drop supervisor saw the retried report");
+        assert_eq!(
+            first, second,
+            "the replay must carry the same report and auth"
+        );
+        assert_eq!(second.0, "6af192d4-0000-4000-8000-000000000000");
+        assert_eq!(second.1, "startup");
+        server
+            .owner
+            .finish(Duration::from_secs(1))
+            .expect("reply-drop supervisor fixture");
+        assert_eq!(
+            server
+                .outcome
+                .recv_timeout(Duration::from_secs(1))
+                .expect("reply-drop supervisor outcome"),
+            Ok(())
+        );
+    }
+
+    /// An explicit supervisor refusal proves the peer is alive and is never
+    /// retried, even though the same hook retries a dropped transport.
+    #[farhelm_testtrace::test]
+    fn a_refusal_is_logged_once_without_retrying() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log").join("s.log");
+        let socket = dir.path().join("supervisor.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let (seen_tx, _seen_rx) = mpsc::channel();
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let server = spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::Refuse);
+
+        run_with_retry_config(
+            Some(HookCredential {
+                session_id: "sess-1".to_string(),
+                token: "tok".to_string(),
+                socket,
+            }),
+            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
+            SUCCESS_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Claude,
+            TEST_RETRY,
+        );
+        assert!(single_line(&log).contains(" refused conflict test refusal"));
+        server
+            .owner
+            .finish(Duration::from_secs(1))
+            .expect("refusal supervisor fixture");
+        assert_eq!(
+            server
+                .outcome
+                .recv_timeout(Duration::from_secs(1))
+                .expect("refusal supervisor outcome"),
+            Ok(())
+        );
+    }
+
+    /// A refusal frame may reach the hook just as the peer closes, making the
+    /// report write fail. The short read probe must preserve that refusal and
+    /// must not replay the report as though the supervisor had restarted.
+    #[farhelm_testtrace::test]
+    fn a_refusal_before_report_is_logged_once_without_retrying() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log").join("s.log");
+        let socket = dir.path().join("supervisor.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let (seen_tx, _seen_rx) = mpsc::channel();
+        let (probe_tx, probe_rx) = mpsc::channel();
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let server = spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::RefuseAndClose);
+
+        run_with_retry_config(
+            Some(HookCredential {
+                session_id: "sess-1".to_string(),
+                token: "tok".to_string(),
+                socket,
+            }),
+            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
+            SUCCESS_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Claude,
+            TEST_RETRY.observing_probe(probe_tx),
+        );
+        assert!(single_line(&log).contains(" refused unauthorized test refusal before report"));
+        probe_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("failed-send refusal probe ran");
+        server
+            .owner
+            .finish(Duration::from_secs(1))
+            .expect("early refusal supervisor fixture");
+        assert_eq!(
+            server
+                .outcome
+                .recv_timeout(Duration::from_secs(1))
+                .expect("early refusal supervisor outcome"),
+            Ok(())
+        );
+    }
+
+    /// A protocol-version refusal is a deterministic incompatibility, not a
+    /// restarting supervisor. It must finish after one handshake and never
+    /// open a second connection.
+    #[farhelm_testtrace::test]
+    fn a_handshake_version_refusal_is_not_retried() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log").join("s.log");
+        let socket = dir.path().join("supervisor.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let (seen_tx, _seen_rx) = mpsc::channel();
+        let context = farhelm_testtrace::current_thread_context().expect("test trace context");
+        let server = spawn_retry_supervisor(listener, context, seen_tx, RetryPeer::VersionMismatch);
+
+        run_with_retry_config(
+            Some(HookCredential {
+                session_id: "sess-1".to_string(),
+                token: "tok".to_string(),
+                socket,
+            }),
+            Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
+            SUCCESS_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Claude,
+            TEST_RETRY,
+        );
+        assert!(single_line(&log).contains(" connect-failed handshake: protocol version mismatch"));
+        server
+            .owner
+            .finish(Duration::from_secs(1))
+            .expect("version supervisor fixture");
+        assert_eq!(
+            server
+                .outcome
+                .recv_timeout(Duration::from_secs(1))
+                .expect("version supervisor outcome"),
+            Ok(())
         );
     }
 
@@ -2185,7 +3278,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
         let payload = r#"{"session_id":"a\nb 1724470000 acked","source":"c\td"}"#;
-        run_with(
+        run_with_retry_config(
             Some(HookCredential {
                 session_id: "sess-1".to_string(),
                 token: "tok".to_string(),
@@ -2195,6 +3288,7 @@ mod tests {
             TEST_BUDGET,
             Some(log.clone()),
             ReportVendor::Claude,
+            TEST_RETRY,
         );
         let line = single_line(&log);
         assert!(
@@ -2222,7 +3316,7 @@ mod tests {
             r#"{{"session_id":"a{}b{}c","source":"d{}e"}}"#,
             '\u{2028}', '\u{202e}', '\u{2066}'
         );
-        run_with(
+        run_with_retry_config(
             Some(HookCredential {
                 session_id: "sess-1".to_string(),
                 token: "tok".to_string(),
@@ -2232,6 +3326,7 @@ mod tests {
             TEST_BUDGET,
             Some(log.clone()),
             ReportVendor::Claude,
+            TEST_RETRY,
         );
         let line = single_line(&log);
         assert!(line.ends_with(" a_b_c d_e"), "line was {line:?}");

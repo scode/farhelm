@@ -5849,13 +5849,23 @@
   fixed wait, for Claude and for any other kind sharing the path (check Codex's); the hook's own bounded wait still
   keeps the agent from being held up. Correct the comments that claim a retry or refresh converges the row. Add a
   regression with the claim held past the old bound. Remove this feedback file and its index entry.
-- Decision (plan time, 2026-10-01, supersedes the code fix above): planning found the fix needs a reorder of the
-  documented report-admission steps (both simple approaches fail: a longer wait overruns the hook's 2 s budget, and a
-  deferred write cannot redo Claude's live-process attribution). The user chose to promote it to a `Near term` TODO.md
-  entry referencing this review item and explaining the complication, instead of fixing it now. The feedback file stays,
+- Decision (plan time, 2026-10-01, superseded by execution): planning found the fix needed a reorder of the documented
+  report-admission steps (both simple approaches fail: a longer wait overruns the hook's 2 s budget, and a deferred
+  write cannot redo Claude's live-process attribution). The user chose to promote it to a `Near term` TODO.md entry
+  referencing this review item and explaining the complication, instead of fixing it now. The feedback file stays,
   referenced by that entry.
-- Execution: `deferred`; promoted to TODO.md's `Near term` entry "Apply identity reports that arrive while the session's
-  record is busy" during planning. The feedback file and its index line stay until that entry is done.
+- Execution: `deferred` (superseded below); promoted to TODO.md's `Near term` entry "Apply identity reports that arrive
+  while the session's record is busy" during planning. The feedback file and its index line stay until that entry is
+  done.
+- Decision (user, 2026-10-02, recorded at execution; supersedes the plan-time deferral): the implementation waits
+  without a local claim deadline, runs Claude's sender check before that claim, uses a 30 s hook budget with the
+  applicable 60 s outer timers, retries a brief supervisor absence, and leaves the published Pi and OMP reporters
+  unchanged.
+- Execution: `complete`; PR1 preserves reports behind busy capture claims on bookmark
+  `plan/identity-report-wait-retry/01-wait-for-claim` (jj change `puvxunnp`,
+  https://github.com/scode/farhelm/pull/1504/changes). PR2 carries the hook budget and retry behavior on bookmark
+  `plan/identity-report-wait-retry/02-hook-retry` (jj change `trmmopou`,
+  https://github.com/scode/farhelm/pull/1535/changes). The TODO entry and feedback file were removed in PR2.
 
 ## omp-corridor-uncounted-pane-runtime.md
 

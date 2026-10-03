@@ -637,6 +637,7 @@ fn run_injected_hook() -> anyhow::Result<String> {
     let mut child = std::process::Command::new("sh")
         .arg("-c")
         .arg(command)
+        .env("FARHELM_TEST_HOOK_BUDGET_MS", TEST_HOOK_BUDGET_MS)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         // Inherited on purpose: the hook's contract is that it writes
@@ -1120,12 +1121,19 @@ fn report_once(shape: RecordShape, conversation: &str) -> anyhow::Result<()> {
 /// the injected `SessionStart` hook [`run_injected_hook`] runs — before
 /// declaring it hung, killing it, and carrying on.
 ///
-/// Generously past the hook binary's own 2 s internal budget, and well
-/// inside the 30 s the tests give a `report` line: a fixture that blocked
-/// forever on `wait_with_output` would take its test's whole deadline and
-/// then fail with a transcript that says nothing about why, whereas a
-/// `HOOK-HUNG:` marker names the failure in the pane the test prints.
+/// Generously past the 5 s child-only budget installed on the real hook
+/// subprocesses below, and well inside the surrounding e2e deadlines: a
+/// fixture that blocked forever on `wait_with_output` would take its test's
+/// whole deadline and then fail with a transcript that says nothing about
+/// why, whereas a `HOOK-HUNG:` marker names the failure in the pane the test
+/// prints.
 const HOOK_CHILD_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Test-only hook budget passed to each real hook child. Keeping this on the
+/// child command leaves the fixture process and any sibling tests untouched,
+/// while making absent or silent supervisors finish within their local
+/// deadline instead of waiting for the production 30-second budget.
+pub(super) const TEST_HOOK_BUDGET_MS: &str = "5000";
 
 /// Wait for one child under a deadline, killing and REAPING it if the
 /// deadline passes; `None` means it was killed.
@@ -1254,6 +1262,7 @@ fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> 
 
     let mut child = std::process::Command::new(&exe)
         .args(["internal", "hook", "--vendor", vendor])
+        .env("FARHELM_TEST_HOOK_BUDGET_MS", TEST_HOOK_BUDGET_MS)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
