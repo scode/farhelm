@@ -1599,12 +1599,12 @@ async fn commit_capture(
 /// separate: the report handler is not serialized with capture passes at
 /// all. Passes serialize among themselves through `CaptureCoordination`;
 /// the handler takes NEITHER that lock nor the session's lifecycle claim —
-/// see `Supervisor::report_conversation` for why a hook with a 2 s budget
-/// cannot be made to wait behind a restart. What a report does hold is the
-/// entry's own capture-state lock, for the moment it swaps the state, and
-/// the store's generation fence, which decides whether its row write lands
-/// at all. Neither of those orders it against a pass's DECISION, so a pass
-/// can compute an ambiguity, have a report land underneath it, and then try
+/// see `Supervisor::report_conversation` for why report admission uses a
+/// capture-only claim. The hook owns the total time budget. A report holds
+/// the entry's own capture-state lock only for the moment it swaps the
+/// state, and the store's generation fence, which decides whether its row
+/// write lands at all. Neither orders it against a pass's DECISION. A pass can
+/// compute an ambiguity, have a report land underneath it, and then try
 /// to write. The SQL fence is what makes the durable row right in that
 /// race. This
 /// skip is what keeps the log honest: without it the supervisor would emit
