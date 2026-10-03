@@ -155,6 +155,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   probably red; the exact treatment is for design time. Hovering over the button should say what clicking it does and
   whether the update is required or merely possible; wording TBD. Plan: `plans/queue/host-update-button.md`.
 
+- **No update for this machine.** Choosing update on the local host ("this machine") is not a supported flow: the helm
+  refuses with "this is the helm's own machine; run farhelm helm setup here instead of provisioning from the panel"
+  (`crates/farhelm-helm/src/provisioning.rs`), and that error then sticks under the host's row with no way to dismiss
+  it. The message is also wrong for the case. The update action should be greyed out for this machine, in the host's
+  pop-up menu and in the update button the entry above adds, so the refusal is never reached.
+
 - **Replace the YOLO session icon.** The sidebar marks a YOLO session with an open padlock, but the other permission
   modes use a closed one, and the difference is hard to see. That makes it easy to read as "this session is locked
   down", which is the opposite of what it means. Replace it with a mark that cannot be mistaken for a lock; the
