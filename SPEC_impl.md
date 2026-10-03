@@ -1746,8 +1746,9 @@ evidence, but cannot authorize another directory move.
   the generation can arrive ahead of its provenance. Migration 22 adds `omp_launch_program` the same way: the program
   that launch's argv started, retained beside the marker so admission classifies the current launch rather than the
   resume template (a future resume's command). OMP admission requires the marker to name the current binary's asset with
-  the file's bytes re-verified; pre-21 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception: every
-  older OMP row offers fresh-only until its first proven report.
+  the file's bytes re-verified, so changing the asset breaks reporting for every OMP session already running (see "What
+  running sessions hold across versions"); pre-21 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception:
+  every older OMP row offers fresh-only until its first proven report.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
   Attribution proofs apply to Codex, Grok, and OMP. Goose and Pi retain their existing acceptance behind the
@@ -1810,7 +1811,9 @@ evidence, but cannot authorize another directory move.
   dropping gets a fresh reconnect window; immediate accept-then-drop failures stay within the current window. It never
   retries an `Error` reply or a protocol-version mismatch. Pi and OMP keep their published 2 s child timers. Replaying
   one report is safe, but two distinct reports from Claude, Goose or Pi can both straddle a supervisor restart and
-  arrive out of order; the later arrival wins. Ordering between those reports remains a known limitation.
+  arrive out of order; the later arrival wins. Ordering between those reports remains a known limitation. The injected
+  command line outlives the binary that wrote it, so it is part of what newer binaries keep accepting (see "What running
+  sessions hold across versions").
 
   Grok uses the same hook executable and authenticated supervisor message but not this injection path. Its native TUI
   cannot take a per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each
@@ -1822,12 +1825,13 @@ evidence, but cannot authorize another directory move.
   **Goose and Pi reporters.** These integrations never scan vendor state. A fresh Goose launch registers one named stdio
   MCP server, `farhelm-reporter`; Goose persists that declaration in its conversation, so resumed launches add no second
   reporter and only supply current-launch enablement, executable, and instruction controls. The persisted command
-  contains no credential or session identity and falls back to `farhelm` on `PATH` for a manual Goose resume. Its empty
-  MCP interface reports `AGENT_SESSION_ID` when current Farhelm credentials enable it and carries the instruction
-  pointer in the initialize result. Pi loads a versioned TypeScript artifact materialized with private permissions under
-  Farhelm's state directory. The extension serializes `session_start` and `agent_end` reports, including the exact
-  absolute session file only after Pi has persisted it. The database retains a bounded, versioned Pi locator containing
-  both ID and optional file; list/status inspect only that token. Resume alone opens the exact file through the bounded
+  contains no credential or session identity and falls back to `farhelm` on `PATH` for a manual Goose resume; it is part
+  of the surface newer binaries keep accepting (see "What running sessions hold across versions"). Its empty MCP
+  interface reports `AGENT_SESSION_ID` when current Farhelm credentials enable it and carries the instruction pointer in
+  the initialize result. Pi loads a versioned TypeScript artifact materialized with private permissions under Farhelm's
+  state directory. The extension serializes `session_start` and `agent_end` reports, including the exact absolute
+  session file only after Pi has persisted it. The database retains a bounded, versioned Pi locator containing both ID
+  and optional file; list/status inspect only that token. Resume alone opens the exact file through the bounded
   no-follow regular-file reader and compares its first `type=session` record's ID. Failure compare-replaces that exact
   locator and generation with a same-ID fileless locator, so a concurrent newer report wins and the stale request gets
   the ordinary offer-changed conflict. Each capture pass reconciles these report-only kinds with their own durable row
@@ -1929,18 +1933,19 @@ evidence, but cannot authorize another directory move.
   exists — and because the pointer rides on the hook, every skip that suppresses injection suppresses the pointer with
   it.
 - Per-session spawn credential: random token in the session's environment (`FARHELM_SESSION_ID`,
-  `FARHELM_SESSION_TOKEN`, socket path), checked by the supervisor on the unix socket.
+  `FARHELM_SESSION_TOKEN`, socket path), checked by the supervisor on the unix socket. These variables, like the rest of
+  what a session holds, stay meaningful to newer binaries (see "What running sessions hold across versions").
 - Process-tree ownership (SPEC.md's stop/reap promises): killing the tmux pane is not enough — tmux signals the
   foreground process group, and daemonized descendants escape it. The portable sweep combines the pane's descendant tree
   with environment-marker selection through the platform process API. Every marker selection requires the matching
   `FARHELM_SESSION_ID`. Stop and restart select the agent's `FARHELM_AGENT_ID`; delete selects the whole session,
   including tabs; closing one tab selects its exact `FARHELM_TAB_ID`. Agent selection also retains the existing legacy
-  case with neither kind marker. These are process-ownership hints, not authenticated credentials or a promise of
-  indefinite historical compatibility. Launch boundaries scrub the opposite kind's marker so nested supervisors do not
-  misclassify a new agent as an outer tab's process. On both platforms the marker is read from the memory where the
-  kernel placed the environment at exec (`/proc/<pid>/environ` on Linux, `KERN_PROCARGS2` on macOS), which is live: a
-  program that rewrites its process title can overwrite it, and SPEC.md accepts that such a detached process escapes the
-  sweep.
+  case with neither kind marker. These are process-ownership hints, not authenticated credentials; across versions they
+  follow "What running sessions hold across versions", and nothing older than the markers themselves is promised beyond
+  the legacy case above. Launch boundaries scrub the opposite kind's marker so nested supervisors do not misclassify a
+  new agent as an outer tab's process. On both platforms the marker is read from the memory where the kernel placed the
+  environment at exec (`/proc/<pid>/environ` on Linux, `KERN_PROCARGS2` on macOS), which is live: a program that
+  rewrites its process title can overwrite it, and SPEC.md accepts that such a detached process escapes the sweep.
 
   The sweep sends SIGTERM, allows a short grace, quiesces with SIGSTOP, re-enumerates, sends SIGKILL, and polls for
   confirmed disappearance. PID/start-time revalidation narrows reuse races; it does not make the separate identity read
@@ -2717,7 +2722,8 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   terminal" path.
 - `farhelm spawn --cwd <dir> (--agent <name> | --profile-id <id> | --inherit-agent) [--title ...] [--parent ...]
   [--idempotency-key ...]`
-  — the in-session spawn CLI from SPEC.md.
+  — the in-session spawn CLI from SPEC.md. Agents are taught it, so it is part of what newer binaries keep accepting
+  (see "What running sessions hold across versions"), as are the `farhelm agent` verbs below.
 - `farhelm agent hosts|sessions|profiles [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected
   credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a
   refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a
@@ -2794,6 +2800,8 @@ thin crate (`crates/farhelm-desktop`) whose `main` is one call into farhelm-ui's
 alongside `farhelm` and installed next to it. The two are one artifact pair, not one bundle — the shell embeds
 farhelm-helm from the same workspace version and reaches supervisor code by finding its CLI sibling next to its own
 executable, discovering a local supervisor that already answers or spawning `farhelm supervisor run` when none does.
+Replacing that pair never re-issues what running sessions already hold, which is why newer binaries keep accepting those
+values (see "What running sessions hold across versions").
 
 On top of that pair, `install.sh` assembles `~/Applications/Farhelm.app` on macOS: an Info.plist (bundle identifier
 `org.scode.farhelm.desktop`), the icon shipped in the desktop archive, and COPIES of both committed binaries in
@@ -2895,23 +2903,25 @@ fails the run at attach rather than being taken over. The alternative — demand
 
 Artifacts land under temporary names in their final flat directories and are atomically renamed into place. There are no
 version directories or `current` symlinks: a failed transfer leaves the installed file intact, while a running binary
-keeps its old inode until the explicit supervisor restart. Hash checks skip identical payloads and unit files are
-written only when their content differs, so rerunning provisioning converges from wherever an earlier run stopped.
-Remote plans report binary upload and installation as separate actions. Upload verifies the nonce temporary's digest;
-installation checks it again before the atomic rename. The upload's stall timeout (SPEC.md "Provisioning transfers time
-out only on stalls") starts once the host's temporary file first exists and renews only on its verified growth. Before
-that file appears the upload has no deadline of its own: a slow ssh connection setup has no byte-progress signal to tell
-it from a stall, and ssh runs without a connect or keepalive timeout of its own, so a host that stops answering in that
-window holds the upload until the connection itself fails. SPEC.md accepts that window (same section): ordinary ssh and
-TCP behavior bounds it, and Farhelm adds no deadline or ssh timeout of its own for it. Both actions use the same staged
-payload snapshot, and local plans retain a single install action because they do not transfer over the network. Matching
-content also repairs installed-file mode drift. Provisioning may create directories with explicit modes and repair
-permissions on directories dedicated to Farhelm; the supervisor state directory is private to its user (`0700`).
-Existing shared directories, including a shared executable directory or the systemd user-unit directory, must retain
-their permissions. If those permissions prevent installation, report the obstacle rather than changing them. Each plan's
-`EnsureDirectories` step marks every directory dedicated or shared: a dedicated one converges on its mode with
-`install -d -m` (which chmods an existing directory, and that is the point), while a shared one is handed to
-`install -d` only when it is missing, and the confirmation text says an existing one keeps its permissions.
+keeps its old inode until the explicit supervisor restart. Sessions on the host keep whatever the old binary handed
+them, so the new one must accept it (see "What running sessions hold across versions"). Hash checks skip identical
+payloads and unit files are written only when their content differs, so rerunning provisioning converges from wherever
+an earlier run stopped. Remote plans report binary upload and installation as separate actions. Upload verifies the
+nonce temporary's digest; installation checks it again before the atomic rename. The upload's stall timeout (SPEC.md
+"Provisioning transfers time out only on stalls") starts once the host's temporary file first exists and renews only on
+its verified growth. Before that file appears the upload has no deadline of its own: a slow ssh connection setup has no
+byte-progress signal to tell it from a stall, and ssh runs without a connect or keepalive timeout of its own, so a host
+that stops answering in that window holds the upload until the connection itself fails. SPEC.md accepts that window
+(same section): ordinary ssh and TCP behavior bounds it, and Farhelm adds no deadline or ssh timeout of its own for it.
+Both actions use the same staged payload snapshot, and local plans retain a single install action because they do not
+transfer over the network. Matching content also repairs installed-file mode drift. Provisioning may create directories
+with explicit modes and repair permissions on directories dedicated to Farhelm; the supervisor state directory is
+private to its user (`0700`). Existing shared directories, including a shared executable directory or the systemd
+user-unit directory, must retain their permissions. If those permissions prevent installation, report the obstacle
+rather than changing them. Each plan's `EnsureDirectories` step marks every directory dedicated or shared: a dedicated
+one converges on its mode with `install -d -m` (which chmods an existing directory, and that is the point), while a
+shared one is handed to `install -d` only when it is missing, and the confirmation text says an existing one keeps its
+permissions.
 
 The supervisor unit uses `KillMode=process`. Sessions started through Farhelm belong to the private tmux server that the
 supervisor launches, so systemd's default `control-group` policy would kill that server and every session whenever an
@@ -3092,6 +3102,67 @@ the Farhelm wordmark, inlined at compile time from `packaging/farhelm-desktop/wo
 use of the name as a mark shares) rather than served as an asset, so both the web bundle and the desktop build carry it
 without a desktop asset-parity entry. A nonshrinking settings gear follows the version, outside the macOS drag region;
 long versions ellipsize before it or the wordmark shrinks.
+
+### What running sessions hold across versions
+
+A newer `farhelm` must accept everything a running or resumable session was handed and will hand back to whatever
+`farhelm` it reaches. Sessions outlive the binary that started them: an update replaces the installed `farhelm` while
+sessions keep running, and once Farhelm restarts on the new version, the sessions it adopts and the conversations it
+resumes reach the new binary with whatever the old one handed them. Nothing re-issues those values, and the protocol
+hello does not help, since no handshake stands between a session's command line and the program it ends up running.
+(State the supervisor keeps for itself, such as its database, its tmux window options and its scope unit names, follows
+its own migration and adoption rules instead.) So the following are a compatibility surface, held to the same care as a
+wire format:
+
+- The hook command lines and their flags: `farhelm internal hook --vendor <adapter>`, with or without `--announce`, as
+  injected into Claude's `--settings` and Codex's `-c hooks.…` overrides and as the user installs it for Grok (see "The
+  per-launch identity hook" under Supervisor internals), and the outer timeouts those declarations carry, which bound
+  how long a newer hook, and anything in front of it, may take. Sessions launched before an earlier upgrade still hold
+  Claude's or Codex's old five-second limit, which is why the hook stops retrying an absent supervisor after about four
+  seconds. The supervisor's recognition of those shapes counts too: hook attribution for Claude, Codex, Grok and OMP
+  matches the reporter's `<farhelm> internal hook …` argv and its `sh -c` trampoline syntactically, never by path, so
+  that an upgraded supervisor still accepts an older hook.
+- Goose's stored reporter declaration, in full: the extension name `farhelm-reporter`, its
+  `sh -c 'exec "${FARHELM_GOOSE_REPORTER_EXE:-farhelm}" internal goose-hook'` command, and the fallback to `farhelm` on
+  `PATH`. Goose replays it on every resume, including a manual one long after the Farhelm session is gone: Farhelm adds
+  no reporter to a resumed launch and relies on that stored declaration, which reads Goose's own `AGENT_SESSION_ID` as
+  the conversation it reports.
+- The Pi and OMP reporters: the `internal hook --vendor pi|omp` invocations their assets spawn, the JSON those assets
+  write to the hook's stdin, and the materialized asset files a running launch loaded with `-e`, which is why a new
+  asset version is published beside the old ones, never over them.
+- The environment a launch sets: `FARHELM_SUPERVISOR_SOCK`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, the reporter
+  variables (`FARHELM_GOOSE_REPORTER_EXE`, `FARHELM_GOOSE_REPORTER_ENABLED`, `FARHELM_GOOSE_INSTRUCTIONS`,
+  `FARHELM_PI_REPORTER_EXE`, `FARHELM_OMP_REPORTER_EXE`), the process markers (`FARHELM_AGENT_ID`, `FARHELM_TAB_ID`)
+  that a restarted supervisor uses to decide what stopping, restarting, deleting or closing a tab cleans up, and the
+  directory holding `farhelm` that a launch puts first on the session's `PATH`. Names, accepted values and meanings all
+  count, and so does any `FARHELM_*` variable a launch sets later. This binds Farhelm's own binaries to each other; it
+  does not turn these variables into a contract for users, which SPEC.md limits to the session id and credential.
+- What agents were taught: `farhelm spawn` and the `farhelm agent` verbs, with their flags and aliases, and the output
+  the instructions tell agents to read (for example the `--json` fields and values they name, the `*` that marks the
+  agent's own session or host, the bare session id that spawn, create and clone print, and the flags a refusal tells
+  them to add). The instructions pointer and `farhelm agent instructions` put that text in the agent's context, and in a
+  resumed conversation's, so the agent keeps typing and parsing what it was told after the binary behind it has changed.
+
+Every path among those values (the hook's program, the reporter variables, the `PATH` entry, the `-e` asset, the
+supervisor socket) must keep naming a working `farhelm` or file after an update. An installer, a change of layout, or a
+cleanup of old versions may not move or remove one while a session can still reach it.
+
+In practice: add new spellings beside old ones rather than in place of them, never make an optional argument required,
+and never give an existing spelling a different meaning. An old spelling may become an alias or a no-op, but it keeps
+being accepted; retiring one is a decision to surface, not a cleanup. Anything placed between a session and the binary
+it reaches, such as a launcher that picks which installed version to run, passes arguments, environment, stdin, stdout,
+stderr and exit status through unchanged, prints nothing of its own when it succeeds, and replaces itself with that
+binary (`exec`) rather than running it as a child: hook attribution walks the reporter's process ancestry to the
+session's pane, and an extra process in that chain is an unclassified intermediary that gets the report refused.
+Reviewers check every change that touches any of the above against this section.
+
+SPEC.md (Durability and resume) has compatibility decided with the maintainer feature by feature; this section is that
+decision for what sessions hold, and it applies from here on. Breaks already decided stay as they were: hooks that
+predate the required `--vendor` discriminator fail closed (see "Ownership provenance and the offer gate"), sessions
+launched before the spawn credential existed must be restarted before an agent in them can use `farhelm spawn` or
+`farhelm agent` (the refusal says so), and OMP admission accepts only the current binary's reporter asset. The last one
+keeps biting: any change to the OMP asset's bytes or name makes every OMP session started before it lose conversation
+tracking until relaunched, so such a change is exactly the kind of retirement this section asks to be surfaced.
 
 ### Restart-with backend wire and persistence
 
