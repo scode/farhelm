@@ -2776,9 +2776,9 @@ async fn supervisor_writer_failure_ends_a_half_broken_connection() {
 ///
 /// M2.5 bounded the writer queue, which changed how this same peer
 /// misbehaves and made the test's original shape unable to reach its own
-/// half-close: once every admission permit is held by a handler parked on
-/// a full queue, `handle_control` blocks the read loop too, so the flood
-/// below backs up into the request direction. `WRITER_STALL_TIMEOUT` is
+/// half-close: a peer that never reads still stalls the read loop on the
+/// inline replies it sends to the full writer queue, so the flood below
+/// backs up into the request direction. `WRITER_STALL_TIMEOUT` is
 /// what breaks that — shortened here, since the production value is a
 /// minute — and the request count is now sized to fit comfortably inside
 /// the transport buffer either way, so the half-close is reachable

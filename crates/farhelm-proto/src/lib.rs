@@ -333,11 +333,11 @@ pub enum ErrorKind {
     /// opening the session in the UI. Retry-when-the-fleet-changes is the
     /// action, and no existing kind carries it.
     ///
-    /// A supervisor also answers a management request (a stop, restart, tab
-    /// open or close, directory browse or repository search) with this
-    /// kind, and [`HOST_BUSY_REFUSAL`], when every one of its management
-    /// slots is taken. That is the same promise: nothing happened, and the same
-    /// request works once the host is less busy.
+    /// A supervisor also answers a management request (a stop, restart,
+    /// rename, tab open or close, directory browse or repository search)
+    /// with this kind, and [`HOST_BUSY_REFUSAL`], when every one of its
+    /// management slots is taken. That is the same promise: nothing
+    /// happened, and the same request works once the host is less busy.
     Unavailable,
     /// The request was forwarded and the answer did not arrive inside the
     /// relay's budget. Added with `PROTOCOL_VERSION` 13.

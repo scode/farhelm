@@ -735,44 +735,47 @@ async fn a_rename_does_not_disturb_the_create_intent_key() {
 }
 
 /// More concurrent renames than the supervisor has admission slots all
-/// complete — the request must never hold one slot while waiting for
-/// another.
+/// answer: each either lands or is refused as busy (or, for a session that
+/// does not exist, as not found), and none wedges.
 ///
-/// This is a deadlock regression, and it is worth the concurrency it
-/// costs. A rename has two phases with different cancellation rules (a
-/// commit that must outlive its connection, a reply that must not), and
-/// the obvious way to admit both — take a slot for the commit, then let
-/// `spawn_admitted` take one for the reply — livelocks the whole
-/// supervisor the moment `HANDLER_ADMISSION_PERMITS` renames are in
-/// flight: every one of them holds a slot nothing can release while
-/// waiting for a slot nobody will free. Every rename here would then hang
-/// forever, and so would every later request on those connections.
+/// The regression this pins is a rename that holds one slot while waiting
+/// for another. A rename has two phases with different cancellation rules
+/// (a commit that must outlive its connection, a reply that must not), and
+/// admitting each phase separately through a WAITING acquisition wedged
+/// the whole supervisor once `HANDLER_ADMISSION_PERMITS` renames were in
+/// flight, every one of them holding a slot nothing can release while
+/// waiting for one nobody will free. Admission no longer waits (a rename
+/// that finds every slot taken is refused with a "try again"), so this test
+/// accepts that refusal; whether a rename waits in its connection's read
+/// loop is pinned by the supervisor's unit test
+/// `a_rename_on_a_saturated_host_is_refused_and_typing_continues`, not
+/// here.
 ///
-/// Each rename gets its own connection, which is what makes the read
-/// loops independent — the deadlock needs several loops parked in
-/// acquisition at once, and one connection could only ever park one. The
-/// count is comfortably past the permit count so the test does not depend
-/// on knowing it exactly, and the timeout is generous because a healthy
-/// run finishes these in well under a second: what is being detected is
-/// "never", not "slow".
+/// Each rename gets its own connection, which is what makes the read loops
+/// independent; the count is comfortably past the permit count so the test
+/// does not depend on knowing it exactly. Which renames are refused depends
+/// on timing, so the test asserts only what timing cannot change: every one
+/// answers, every refusal is one of the two expected ones, at least one
+/// rename of the real session lands, and the surviving title is one of
+/// those. The timeout is generous because a healthy run finishes these in
+/// well under a second: what is being detected is "never", not "slow".
 ///
-/// The REFUSED renames in the second half matter for the same structural
-/// reason: an error path that acquired its own slot, or that took a
-/// second one to send its refusal, would wedge here exactly as the
-/// success path would. What no external test can observe is the other
-/// half of the failure-path rule — that the slot is held until the
-/// refusal has been handed to the writer queue rather than freed before
-/// it — since the difference is task accumulation against a peer that
-/// never reads. That one rests on the single-acquisition structure being
-/// visible in `Supervisor::rename_session`, which returns the permit with
-/// BOTH outcomes for this reason.
+/// The REFUSED renames in the first half matter for the same structural
+/// reason: an error path that took a second slot to send its refusal would
+/// wedge exactly as the success path would. What no external test can
+/// observe is the other half of the failure-path rule, that the slot is
+/// held until the refusal has been handed to the writer queue rather than
+/// freed before it, since the difference is task accumulation against a
+/// peer that never reads. That one rests on the single-acquisition
+/// structure being visible in `Supervisor::rename_session`, which returns
+/// the permit with BOTH outcomes for this reason.
 #[farhelm_testtrace::test]
-async fn more_concurrent_renames_than_admission_slots_all_complete() {
+async fn concurrent_renames_past_the_admission_slots_all_answer() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
 
     // Refusals first, against a session that does not exist: the failure
-    // path runs the same acquisition, and nothing may hold a slot waiting
+    // path runs the same admission, and nothing may hold a slot waiting
     // for one.
     const REFUSALS: usize = 24;
     let mut refused = tokio::task::JoinSet::new();
@@ -789,17 +792,24 @@ async fn more_concurrent_renames_than_admission_slots_all_complete() {
             )
         });
     }
-    let kinds = tokio::time::timeout(Duration::from_secs(60), async {
-        let mut kinds = Vec::new();
+    let refusals = tokio::time::timeout(Duration::from_secs(60), async {
+        let mut refusals = Vec::new();
         while let Some(joined) = refused.join_next().await {
-            kinds.push(joined.expect("a refused-rename task panicked").0);
+            refusals.push(joined.expect("a refused-rename task panicked"));
         }
-        kinds
+        refusals
     })
     .await
-    .expect("refused renames past the admission bound must all complete, not deadlock");
-    assert_eq!(kinds.len(), REFUSALS);
-    assert!(kinds.iter().all(|kind| *kind == ErrorKind::NotFound));
+    .expect("refused renames past the admission bound must all answer, not deadlock");
+    assert_eq!(refusals.len(), REFUSALS);
+    for (kind, message) in &refusals {
+        assert!(
+            *kind == ErrorKind::NotFound
+                || (*kind == ErrorKind::Unavailable && message == farhelm_proto::HOST_BUSY_REFUSAL),
+            "a rename of a missing session is either not found or refused as busy, got \
+             {kind:?}: {message}"
+        );
+    }
 
     // Past `HANDLER_ADMISSION_PERMITS` (8) with room to spare.
     const RENAMES: usize = 24;
@@ -807,24 +817,40 @@ async fn more_concurrent_renames_than_admission_slots_all_complete() {
     for n in 0..RENAMES {
         let sup = Arc::clone(&h.sup);
         let id = session.id.clone();
-        renames.spawn(async move { renamed(rename(&sup, &id, &format!("racer-{n}")).await) });
+        renames.spawn(async move { rename(&sup, &id, &format!("racer-{n}")).await });
     }
-    let finished = tokio::time::timeout(Duration::from_secs(60), async {
-        let mut titles = Vec::new();
+    let replies = tokio::time::timeout(Duration::from_secs(60), async {
+        let mut replies = Vec::new();
         while let Some(joined) = renames.join_next().await {
-            titles.push(joined.expect("a rename task panicked").title);
+            replies.push(joined.expect("a rename task panicked"));
         }
-        titles
+        replies
     })
     .await
-    .expect("renames past the admission bound must all complete, not deadlock");
-    assert_eq!(finished.len(), RENAMES);
+    .expect("renames past the admission bound must all answer, not deadlock");
+    assert_eq!(replies.len(), RENAMES);
+    let mut landed = Vec::new();
+    for reply in replies {
+        match reply {
+            ControlMsg::SessionRenamed { session, .. } => landed.push(session.title),
+            ControlMsg::Error { kind, message, .. } => assert!(
+                kind == ErrorKind::Unavailable && message == farhelm_proto::HOST_BUSY_REFUSAL,
+                "a rename of a live session either lands or is refused as busy, got {kind:?}: \
+                 {message}"
+            ),
+            other => panic!("expected SessionRenamed or a busy refusal, got {other:?}"),
+        }
+    }
+    assert!(
+        !landed.is_empty(),
+        "with every slot free at the start, at least one rename must land"
+    );
 
     // And the session is left in one of the states somebody asked for,
     // rather than half-written by whichever writers were interrupted.
     let listed = listed_title(&h.client, &session.id).await;
     assert!(
-        finished.contains(&listed),
+        landed.contains(&listed),
         "the surviving title must be one of the ones written, got {listed:?}"
     );
     assert_eq!(listed, stored_title(h.state.path(), &session.id).await);
