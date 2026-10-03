@@ -6238,7 +6238,8 @@
 - Completion criteria: Restart uses the shared non-waiting admission step described under
   `stop-admission-blocks-terminal-reader.md`, with a saturated-restart test showing the refusal and that input to
   another session progresses. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-busy-host-refusal.md`.
+- Execution: complete: change `sswupomv`, bookmark `plan/triage-busy-host-refusal/03-restart-refuses`, PR
+  https://github.com/scode/farhelm/pull/1490.
 
 ## rename-admission-blocks-terminal-reader.md
 

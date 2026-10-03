@@ -1311,16 +1311,15 @@ impl StateDirOwnership {
 ///
 /// ## A full cap refuses rather than waiting in the read loop
 ///
-/// Stop and the requests admitted through `spawn_admitted` take their slot
-/// in a connection's read loop with `admit_or_refuse`, which answers "this
-/// host is busy, try again" (`ErrorKind::Unavailable`) when no slot is
-/// free. That loop also delivers every keystroke, resize and detach for
-/// every session on the connection, and SPEC.md "Waiting between
-/// operations on one host" says those must never wait on management
-/// operations. Waiting for a slot there used to freeze typing on the whole
-/// host until one of eight in-flight Stops or Deletes finished, kill grace
-/// period included, which could outlast the helm's 30-second list timeout
-/// and cost the connection.
+/// Stop, Restart and the requests admitted through `spawn_admitted` take their
+/// slot in a connection's read loop with `admit_or_refuse`, which answers "this
+/// host is busy, try again" (`ErrorKind::Unavailable`) when no slot is free.
+/// That loop also delivers every keystroke, resize and detach for every session
+/// on the connection, and SPEC.md "Waiting between operations on one host" says
+/// those must never wait on management operations. Waiting for a slot there
+/// used to freeze typing on the whole host until one of eight in-flight Stops
+/// or Deletes finished, kill grace period included, which could outlast the
+/// helm's 30-second list timeout and cost the connection.
 ///
 /// Delete is the exception, and it does not touch the loop either: it must
 /// claim its agent-request fence before admission, so a retained mutation
