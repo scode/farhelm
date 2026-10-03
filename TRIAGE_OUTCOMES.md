@@ -6452,7 +6452,9 @@
   Delete) and consistent with the helm's own rule that a panicking handler still answers.
 - Completion criteria: the Stop and Restart waiters send an `Internal` error on a panicked join, Restart's saying the
   outcome is unknown, with a test for each. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-crash-replies-and-locks.md`.
+- Execution: complete: change `zoryuwktsyytlswvxqlqqlqoukmvwlry`, bookmark
+  `plan/triage-crash-replies-and-locks/03-stop-restart-panic`, draft PR
+  [#1512](https://github.com/scode/farhelm/pull/1512/changes).
 
 ## host-write-lock-split-on-actor-respawn.md
 

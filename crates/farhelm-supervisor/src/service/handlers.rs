@@ -1171,6 +1171,54 @@ where
     }
 }
 
+/// Names the lifecycle mutation whose reply waiter is being observed.
+///
+/// Keeping the operation-specific wording in one value avoids an opaque
+/// boolean at the call site and keeps the user-facing failure contract beside
+/// the operation it describes.
+#[derive(Clone, Copy)]
+enum LifecycleMutation {
+    Stop,
+    Restart,
+}
+
+impl LifecycleMutation {
+    /// Explain the failure without pretending to know a restarted agent's
+    /// final state.
+    fn panic_message(self, join: &tokio::task::JoinError) -> String {
+        match self {
+            Self::Stop => format!("the session stop task failed: {join}"),
+            Self::Restart => format!(
+                "the session restart task failed, so it is unknown whether the old agent was stopped or a new one started: {join}"
+            ),
+        }
+    }
+}
+
+/// Turn a supervisor-owned mutation panic into the request's terminal reply.
+///
+/// The mutation sends its own reply on every path it completes. If it panics,
+/// this waiter is the only code left that can answer the request id. Without
+/// that answer the helm, which puts no deadline on supervisor replies, waits
+/// until the connection drops. Delete's waiter follows the same rule inline,
+/// because it also delivers the mutation's returned outcome.
+async fn wait_for_mutation_reply(
+    mutation: tokio::task::JoinHandle<()>,
+    tx: mpsc::Sender<Frame>,
+    req_id: u64,
+    operation: LifecycleMutation,
+) {
+    if let Err(join) = mutation.await {
+        reply_error(
+            &tx,
+            req_id,
+            ErrorKind::Internal,
+            operation.panic_message(&join),
+        )
+        .await;
+    }
+}
+
 /// Start a stop without making its process sweep connection-cancellable.
 /// The supervisor-owned mutation keeps the lifecycle claim and admission
 /// permit until intent, sweep, and outcome are complete; the connection's
@@ -1196,9 +1244,13 @@ async fn handle_stop_session(
     let mutation_sup = Arc::clone(sup);
     let mutation_id = session_id.clone();
     let tx = tx.clone();
+    let waiter_tx = tx.clone();
     let mutation = tokio::spawn(async move {
         let _permit = permit;
         let sup = mutation_sup;
+        if let Some(panic) = sup.seams.faults.lifecycle_mutation_panic() {
+            panic();
+        }
         let session_id = mutation_id;
         // This session's lifecycle claim, held for the whole stop —
         // the intent, the sweep, and the outcome. Without it a
@@ -1479,11 +1531,12 @@ async fn handle_stop_session(
             }
         }
     });
-    tasks.spawn(async move {
-        if let Err(join) = mutation.await {
-            tracing::error!(error = %join, "the supervisor-owned session stop task failed");
-        }
-    });
+    tasks.spawn(wait_for_mutation_reply(
+        mutation,
+        waiter_tx,
+        req_id,
+        LifecycleMutation::Stop,
+    ));
 }
 
 /// Delete's mutation belongs to the supervisor, not to the connection that
@@ -2380,8 +2433,13 @@ async fn handle_restart_session(
     };
     let sup = Arc::clone(sup);
     let tx = tx.clone();
+    let waiter_tx = tx.clone();
+    let req_id = request.req_id;
     let mutation = tokio::spawn(async move {
         let _permit = permit;
+        if let Some(panic) = sup.seams.faults.lifecycle_mutation_panic() {
+            panic();
+        }
         let RestartSessionRequest {
             req_id,
             session_id,
@@ -2410,11 +2468,12 @@ async fn handle_restart_session(
             }
         }
     });
-    tasks.spawn(async move {
-        if let Err(join) = mutation.await {
-            tracing::error!(error = %join, "the supervisor-owned session restart task failed");
-        }
-    });
+    tasks.spawn(wait_for_mutation_reply(
+        mutation,
+        waiter_tx,
+        req_id,
+        LifecycleMutation::Restart,
+    ));
 }
 
 /// Every request-shape check a rename can make lives here, ahead
@@ -4154,6 +4213,116 @@ mod tests {
             cancelled.load(Ordering::SeqCst),
             "timeout must drop the pending browse rather than leaving it alive after replying"
         );
+    }
+
+    /// A panicking Stop mutation must settle the real dispatched request with
+    /// an internal error. The test-only lifecycle seam supplies a deterministic
+    /// panic in the supervisor-owned mutation, before it can reply. Without
+    /// the error reply the helm waits until the connection drops: it has no
+    /// deadline for a supervisor's answer.
+    #[farhelm_testtrace::test]
+    async fn panicking_stop_mutation_replies_with_internal_error() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                faults: crate::service::FaultHooks {
+                    lifecycle_mutation_panic: Some(Arc::new(|| {
+                        panic!("synthetic stop mutation panic")
+                    })),
+                    ..crate::service::FaultHooks::default()
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let (mut tasks, mut rx) = dispatch_for_test(
+            &sup,
+            ControlMsg::StopSession {
+                req_id: 71,
+                session_id: "panic-stop".to_string(),
+            },
+        )
+        .await;
+        while tasks.join_next().await.is_some() {}
+
+        let frame = rx.recv().await.expect("panicking Stop must send a reply");
+        let ControlMsg::Error {
+            req_id,
+            kind,
+            message,
+        } = parse_control(&frame).expect("decode Stop panic reply")
+        else {
+            panic!("a panicking Stop must reply with ControlMsg::Error");
+        };
+        assert_eq!(req_id, 71);
+        assert_eq!(kind, ErrorKind::Internal);
+        assert!(message.contains("session stop task failed"));
+        assert!(message.contains("synthetic stop mutation panic"));
+    }
+
+    /// A panicking Restart mutation must settle the real dispatched request
+    /// with an internal error and warn that its result is unknown. The
+    /// test-only lifecycle seam supplies a panic in the supervisor-owned
+    /// mutation before the operation can answer normally. Without the error
+    /// reply the helm waits until the connection drops, since it has no
+    /// deadline for the answer.
+    #[farhelm_testtrace::test]
+    async fn panicking_restart_mutation_replies_with_unknown_outcome() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                faults: crate::service::FaultHooks {
+                    lifecycle_mutation_panic: Some(Arc::new(|| {
+                        panic!("synthetic restart mutation panic")
+                    })),
+                    ..crate::service::FaultHooks::default()
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let session_id = "panic-restart".to_string();
+
+        let (mut tasks, mut rx) = dispatch_for_test(
+            &sup,
+            ControlMsg::RestartSession {
+                req_id: 72,
+                session_id,
+                mode: farhelm_proto::RestartMode::Fresh,
+                stop_if_running: false,
+                invocation: None,
+                launch: None,
+                resume_template: None,
+            },
+        )
+        .await;
+        while tasks.join_next().await.is_some() {}
+
+        let frame = rx
+            .recv()
+            .await
+            .expect("panicking Restart must send a reply");
+        let ControlMsg::Error {
+            req_id,
+            kind,
+            message,
+        } = parse_control(&frame).expect("decode Restart panic reply")
+        else {
+            panic!("a panicking Restart must reply with ControlMsg::Error");
+        };
+        assert_eq!(req_id, 72);
+        assert_eq!(kind, ErrorKind::Internal);
+        assert!(message.contains("session restart task failed"));
+        assert!(message.contains("synthetic restart mutation panic"));
+        assert!(message.contains("unknown whether the old agent was stopped or a new one started"));
     }
 
     /// Seed the durable half of a parent, which is the authority source a
