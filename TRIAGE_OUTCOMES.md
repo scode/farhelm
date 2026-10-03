@@ -5910,7 +5910,8 @@
 - Completion criteria: the whole probe runs on a helm-owned task (`run_owned`, as plan item 13 uses), so a dropped
   request still runs the probe's own process-group cleanup within its timeout; add a dropped-request regression. Land
   alongside or after plan item 13. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `otwupulm`, bookmark `triage-1001e/18-probe-owned`, PR
+  https://github.com/scode/farhelm/pull/1460.
 
 ## pi-pointer-overrides-user-prompt.md
 
