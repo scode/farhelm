@@ -59,7 +59,7 @@ const ADD_DIALOG_SELECTOR: &str = r#".host-add-dialog[role="dialog"]"#;
 pub(super) enum SettingsField {
     Destination,
     Alias,
-    YoloSafe,
+    YoloWithoutAsking,
 }
 
 impl From<EditField> for SettingsField {
@@ -239,7 +239,7 @@ fn refocus_after_write(reset_checkbox: bool) {
             const target = usable
                 ? last
                 : (dialog.querySelector('.host-destination-input')
-                    ?? dialog.querySelector('.host-yolo-safe-toggle')
+                    ?? dialog.querySelector('.host-yolo-without-asking-toggle')
                     ?? dialog);
             target.focus({{ preventScroll: true }});
         }}))"#
@@ -267,13 +267,13 @@ fn focus_edit_button(field: EditField) {
 /// JavaScript, run with `dialog` in scope, that sets the YOLO checkbox's
 /// shown state back to the setting the page currently renders.
 ///
-/// The value is read from the input's `data-yolo-safe` attribute when the
+/// The value is read from the input's `data-yolo-without-asking` attribute when the
 /// script runs, not baked in when it is built: a host-list refresh landing
 /// in between (another client toggling the same host) must win over a reset
 /// that was queued against the older value.
 fn reset_yolo_checkbox_js() -> String {
-    "const toggle = dialog.querySelector('.host-yolo-safe-toggle'); \
-     if (toggle) toggle.checked = toggle.dataset.yoloSafe === 'true';"
+    "const toggle = dialog.querySelector('.host-yolo-without-asking-toggle'); \
+     if (toggle) toggle.checked = toggle.dataset.yoloWithoutAsking === 'true';"
         .to_string()
 }
 
@@ -295,8 +295,8 @@ pub(super) fn reset_yolo_checkbox() {
 ///
 /// Both sentences start by saying what YOLO means, because this is where a
 /// user decides about it and cannot be assumed to know the term.
-fn yolo_help(yolo_safe: bool) -> &'static str {
-    if yolo_safe {
+fn yolo_help(yolo_without_asking: bool) -> &'static str {
+    if yolo_without_asking {
         "YOLO means an agent runs with no approval prompts: any command, any file, without asking you. \
          YOLO sessions start on this host without asking you to confirm."
     } else {
@@ -323,7 +323,7 @@ pub(super) fn HostSettingsDialog(
     on_edit_start: EventHandler<(HostId, EditField, String)>,
     on_edit_submit: EventHandler<(HostId, EditField, String)>,
     on_edit_cancel: EventHandler<()>,
-    on_yolo_safe: EventHandler<(HostId, bool)>,
+    on_yolo_without_asking: EventHandler<(HostId, bool)>,
     on_close: EventHandler<()>,
 ) -> Element {
     let id = host.id;
@@ -341,7 +341,10 @@ pub(super) fn HostSettingsDialog(
     let mut last_busy = use_signal(|| busy);
     let yolo_refused = matches!(
         &outcome,
-        Some((Some(SettingsField::YoloSafe), FieldOutcome::Error(_)))
+        Some((
+            Some(SettingsField::YoloWithoutAsking),
+            FieldOutcome::Error(_)
+        ))
     );
     use_effect(use_reactive((&busy,), move |(busy,)| {
         let previous = *last_busy.peek();
@@ -476,22 +479,22 @@ pub(super) fn HostSettingsDialog(
                     }
                 }
                 div { class: "host-settings-yolo",
-                    label { class: "host-yolo-safe",
+                    label { class: "host-yolo-without-asking",
                         input {
                             r#type: "checkbox",
-                            class: "host-yolo-safe-toggle",
-                            checked: host.yolo_safe,
-                            "data-yolo-safe": "{host.yolo_safe}",
+                            class: "host-yolo-without-asking-toggle",
+                            checked: host.yolo_without_asking,
+                            "data-yolo-without-asking": "{host.yolo_without_asking}",
                             // One setting at a time: a toggle while a field
                             // is open would replace that field's refusal with
                             // its own outcome while the draft stays open.
                             disabled: busy || editing.is_some(),
-                            onchange: move |event| on_yolo_safe.call((id, event.checked())),
+                            onchange: move |event| on_yolo_without_asking.call((id, event.checked())),
                         }
                         span { "start YOLO sessions here without asking" }
                     }
-                    p { class: "host-settings-help", "{yolo_help(host.yolo_safe)}" }
-                    {outcome_for(Some(SettingsField::YoloSafe))}
+                    p { class: "host-settings-help", "{yolo_help(host.yolo_without_asking)}" }
+                    {outcome_for(Some(SettingsField::YoloWithoutAsking))}
                 }
                 div { class: "host-settings-actions",
                     button {
@@ -602,12 +605,12 @@ mod tests {
         );
         assert_eq!(
             field_outcome(
-                Some(SettingsField::YoloSafe),
+                Some(SettingsField::YoloWithoutAsking),
                 None,
                 Some("unreadable reply".to_string())
             ),
             Some((
-                Some(SettingsField::YoloSafe),
+                Some(SettingsField::YoloWithoutAsking),
                 FieldOutcome::Warning("unreadable reply".to_string())
             )),
             "a committed-but-unreadable reply is shown as a warning, not an error"

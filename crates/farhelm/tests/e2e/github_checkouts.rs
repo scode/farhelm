@@ -549,9 +549,9 @@ fn create_body(
         "host": claim.id,
         "expected_incarnation": claim.incarnation,
         "intent_key": key,
-        // Every selector here is a YOLO launch and the fixture's host starts
-        // sensitive; the guard is covered elsewhere, not by these cases.
-        "allow_yolo_on_sensitive_host": true,
+        // Every selector here is a YOLO launch and the fixture's host starts asking first;
+        // the guard is covered elsewhere, not by these cases.
+        "confirm_yolo": true,
         "github_checkout": {
             "repo": REPO_TEXT,
             "title": title,

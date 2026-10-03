@@ -359,7 +359,7 @@ impl AgentCmd {
                 invocation: invocation.clone(),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
-                allow_yolo_on_sensitive_host: *confirm_yolo,
+                confirm_yolo: *confirm_yolo,
             }),
             AgentCmd::Clone {
                 source_session,
@@ -374,7 +374,7 @@ impl AgentCmd {
                 cwd: cwd.clone(),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
-                allow_yolo_on_sensitive_host: *confirm_yolo,
+                confirm_yolo: *confirm_yolo,
             }),
             AgentCmd::Instructions | AgentCmd::Help => None,
         }
@@ -658,7 +658,7 @@ fn main() -> anyhow::Result<()> {
                     inherit_agent,
                     parent,
                     idempotency_key,
-                    allow_yolo_on_sensitive_host: confirm_yolo,
+                    confirm_yolo,
                 },
             ))?;
             println!("{child}");

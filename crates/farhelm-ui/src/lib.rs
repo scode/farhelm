@@ -694,11 +694,11 @@ pub struct Host {
     /// process's connections and means nothing across a restart.
     #[serde(default)]
     pub incarnation: u64,
-    /// Whether the user marked this host safe for YOLO launches; `false`
-    /// (sensitive) until they do, and for a helm that predates the field.
-    /// The host settings dialog shows and flips it.
+    /// Whether the host starts YOLO sessions without asking; `false` (ask first) until the
+    /// user changes it, and for a helm that predates the field. The host settings dialog
+    /// shows and flips it.
     #[serde(default)]
-    pub yolo_safe: bool,
+    pub yolo_without_asking: bool,
 }
 
 /// Which kind of registry row a host is (farhelm-helm's `HostKind`, as the

@@ -339,13 +339,12 @@ impl AgentRequestHandler for HelmAgentRequests {
             AgentVerb::ResolveProfile {
                 name,
                 id,
-                allow_yolo_on_sensitive_host,
+                confirm_yolo,
             } => {
-                // The resolution is for a child the ASKING host is about to
-                // start (`farhelm spawn`), so the YOLO check applies to that
-                // host exactly as it does to a create routed through the
-                // helm (see `yolo_guard`): a YOLO profile for a sensitive
-                // host is not resolved without the override.
+                // The resolution is for a child the ASKING host is about to start (`farhelm
+                // spawn`), so the YOLO check applies to that host exactly as it does to a
+                // create routed through the helm (see `yolo_guard`): a YOLO profile for a
+                // host that asks before YOLO launches is not resolved without the override.
                 async {
                     let profiles = state.store.profiles().await?;
                     let profile =
@@ -354,7 +353,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                         &state,
                         origin.host,
                         crate::yolo_guard::invocation_is_yolo(&profile.invocation),
-                        allow_yolo_on_sensitive_host,
+                        confirm_yolo,
                     )
                     .await?;
                     info!(
@@ -423,7 +422,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                 invocation,
                 title,
                 intent_key,
-                allow_yolo_on_sensitive_host,
+                confirm_yolo,
             } => {
                 create_for_agent(
                     &state,
@@ -437,7 +436,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                         invocation,
                         title,
                         intent_key,
-                        allow_yolo_on_sensitive_host,
+                        confirm_yolo,
                     },
                 )
                 .await
@@ -448,7 +447,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                 cwd,
                 title,
                 intent_key,
-                allow_yolo_on_sensitive_host,
+                confirm_yolo,
             } => {
                 clone_for_agent(
                     &state,
@@ -460,7 +459,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                         cwd,
                         title,
                         intent_key,
-                        allow_yolo_on_sensitive_host,
+                        confirm_yolo,
                     },
                 )
                 .await
@@ -808,7 +807,7 @@ struct CreateRequest {
     invocation: Option<String>,
     title: Option<String>,
     intent_key: Option<String>,
-    allow_yolo_on_sensitive_host: bool,
+    confirm_yolo: bool,
 }
 
 /// One `clone` verb's fields. See [`CreateRequest`] for why it is a struct.
@@ -818,7 +817,7 @@ struct CloneRequest {
     cwd: Option<String>,
     title: Option<String>,
     intent_key: Option<String>,
-    allow_yolo_on_sensitive_host: bool,
+    confirm_yolo: bool,
 }
 
 /// Resolve exactly one profile selector without treating ids as names.
@@ -1170,7 +1169,7 @@ async fn create_for_agent(
                 // back, which is what the key is for. Contrast
                 // `clone_for_agent`, whose replay can be the ASKING session.
                 accept_result: None,
-                allow_yolo_on_sensitive_host: request.allow_yolo_on_sensitive_host,
+                confirm_yolo: request.confirm_yolo,
                 settings_from_source: false,
             },
         )
@@ -1343,7 +1342,7 @@ async fn clone_for_agent(
                         reject_clone_replay(&asking, &source, created)
                     }
                 })),
-                allow_yolo_on_sensitive_host: request.allow_yolo_on_sensitive_host,
+                confirm_yolo: request.confirm_yolo,
                 settings_from_source: false,
             },
         )
@@ -1742,7 +1741,7 @@ mod tests {
             cwd: cwd.map(str::to_string),
             title: None,
             intent_key: None,
-            allow_yolo_on_sensitive_host: false,
+            confirm_yolo: false,
         };
         assert!(
             validate_authoritative_verb(&clone(Some("")))
@@ -1763,7 +1762,7 @@ mod tests {
             identity: None,
             remote_farhelm: None,
             remote_state_dir: None,
-            yolo_safe: false,
+            yolo_without_asking: false,
             state,
             incarnation: 1,
         }
@@ -3035,7 +3034,7 @@ mod tests {
                 request: AgentVerb::ResolveProfile {
                     name: Some("codex".to_string()),
                     id: None,
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             })
             .await
@@ -3067,18 +3066,16 @@ mod tests {
         );
     }
 
-    /// Spec: a supervisor's upward `ResolveProfile` for a YOLO profile
-    /// (`farhelm spawn --agent codex-yolo`) on a host marked sensitive is
-    /// refused with a conflict naming the override, resolves with
-    /// `allow_yolo_on_sensitive_host`, and resolves without it once the host
-    /// is marked safe; a non-YOLO profile resolves either way.
+    /// Spec: a supervisor's upward `ResolveProfile` for a YOLO profile (`farhelm spawn
+    /// --agent codex-yolo`) on a host that asks before YOLO launches is refused with a
+    /// conflict naming the override, resolves with `confirm_yolo`, and resolves without it
+    /// once the host allows YOLO without asking; a non-YOLO profile resolves either way.
     ///
-    /// Why: `farhelm spawn` creates on its own supervisor without going
-    /// through the helm's create path, so this lookup is the only point where
-    /// the helm can stop an agent from quietly starting a YOLO child on a
-    /// sensitive machine.
+    /// Why: `farhelm spawn` creates on its own supervisor without going through the helm's
+    /// create path, so this lookup is the only point where the helm can stop an agent from
+    /// quietly starting a YOLO child on a machine that asks before YOLO launches.
     #[farhelm_testtrace::test]
-    async fn resolve_profile_refuses_a_yolo_profile_for_a_sensitive_host() {
+    async fn resolve_profile_refuses_a_yolo_profile_for_a_host_that_asks() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 
         let (ours, theirs) = tokio::io::duplex(1 << 20);
@@ -3108,7 +3105,7 @@ mod tests {
         // The host's stored setting, read back from the registry: each
         // phase's premise is established here, not inferred from the
         // resolution whose outcome is under test.
-        let remote_yolo_safe = async |store: &crate::store::HelmStore| {
+        let remote_yolo_without_asking = async |store: &crate::store::HelmStore| {
             store
                 .list_hosts()
                 .await
@@ -3116,11 +3113,11 @@ mod tests {
                 .into_iter()
                 .find(|row| row.id == remote)
                 .expect("the remote host row exists")
-                .yolo_safe
+                .yolo_without_asking
         };
         assert!(
-            !remote_yolo_safe(&harness.store).await,
-            "premise: the remote host starts sensitive"
+            !remote_yolo_without_asking(&harness.store).await,
+            "premise: the remote host starts asking before YOLO launches"
         );
 
         let mut next_id = 90;
@@ -3133,7 +3130,7 @@ mod tests {
                     request: AgentVerb::ResolveProfile {
                         name: Some(name.to_string()),
                         id: None,
-                        allow_yolo_on_sensitive_host: allow,
+                        confirm_yolo: allow,
                     },
                 })
                 .await
@@ -3160,7 +3157,9 @@ mod tests {
                     "the refusal must name the override: {message}"
                 );
             }
-            other => panic!("a YOLO profile for a sensitive host must be refused: {other:?}"),
+            other => panic!(
+                "a YOLO profile for a host that asks before YOLO launches must be refused: {other:?}"
+            ),
         }
         assert!(matches!(
             resolve("codex", false).await,
@@ -3170,9 +3169,13 @@ mod tests {
             resolve("codex-yolo", true).await,
             AgentOutcome::Ok { .. }
         ));
-        harness.store.set_yolo_safe(remote, true).await.unwrap();
+        harness
+            .store
+            .set_yolo_without_asking(remote, true)
+            .await
+            .unwrap();
         assert!(
-            remote_yolo_safe(&harness.store).await,
+            remote_yolo_without_asking(&harness.store).await,
             "the remote host must read back as safe for YOLO launches"
         );
         assert!(matches!(
@@ -3974,7 +3977,7 @@ mod tests {
                     invocation: Some("sh".to_string()),
                     title: None,
                     intent_key: None,
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;
@@ -4033,7 +4036,7 @@ mod tests {
                     invocation: Some("sh".to_string()),
                     title: None,
                     intent_key: None,
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;
@@ -4106,7 +4109,7 @@ mod tests {
                     invocation: Some("sh".to_string()),
                     title: None,
                     intent_key: None,
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;
@@ -4166,7 +4169,7 @@ mod tests {
                     cwd: None,
                     title: None,
                     intent_key: Some("clone-key".to_string()),
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;
@@ -4235,7 +4238,7 @@ mod tests {
                         cwd: None,
                         title: None,
                         intent_key: Some("owner-race".to_string()),
-                        allow_yolo_on_sensitive_host: false,
+                        confirm_yolo: false,
                     },
                 )
                 .await
@@ -4309,7 +4312,7 @@ mod tests {
                     cwd: None,
                     title: None,
                     intent_key: Some("clone-profile-key".to_string()),
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;
@@ -4372,7 +4375,7 @@ mod tests {
                     cwd: None,
                     title: None,
                     intent_key: None,
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;
@@ -4414,9 +4417,9 @@ mod tests {
                     invocation: None,
                     title: Some("resolved".to_string()),
                     intent_key: Some("resolved-key".to_string()),
-                    // A YOLO profile on a host that starts sensitive; the
-                    // guard has its own tests.
-                    allow_yolo_on_sensitive_host: true,
+                    // A YOLO profile on a host that requires confirmation; the guard has
+                    // its own tests.
+                    confirm_yolo: true,
                 },
             )
             .await;
@@ -4485,9 +4488,9 @@ mod tests {
                     invocation: None,
                     title: None,
                     intent_key: None,
-                    // A YOLO profile on a host that starts sensitive; the
-                    // guard has its own tests.
-                    allow_yolo_on_sensitive_host: true,
+                    // A YOLO profile on a host that requires confirmation; the guard has
+                    // its own tests.
+                    confirm_yolo: true,
                 },
             )
             .await;
@@ -4521,9 +4524,9 @@ mod tests {
                     invocation: None,
                     title: None,
                     intent_key: None,
-                    // A YOLO profile on a host that starts sensitive; the
-                    // guard has its own tests.
-                    allow_yolo_on_sensitive_host: true,
+                    // A YOLO profile on a host that requires confirmation; the guard has
+                    // its own tests.
+                    confirm_yolo: true,
                 },
             )
             .await;
@@ -4603,9 +4606,9 @@ mod tests {
                         invocation: None,
                         title: None,
                         intent_key: Some("muse-launch".to_string()),
-                        // A YOLO profile on a host that starts sensitive; the
-                        // guard has its own tests.
-                        allow_yolo_on_sensitive_host: true,
+                        // A YOLO profile on a host that requires confirmation; the guard
+                        // has its own tests.
+                        confirm_yolo: true,
                     },
                 )
                 .await;
@@ -4676,7 +4679,7 @@ mod tests {
                     invocation: None,
                     title: None,
                     intent_key: None,
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;
@@ -4789,7 +4792,7 @@ mod tests {
                         invocation: Some("agent".to_string()),
                         title: None,
                         intent_key: None,
-                        allow_yolo_on_sensitive_host: false,
+                        confirm_yolo: false,
                     },
                 )
                 .await;
@@ -5004,7 +5007,7 @@ mod tests {
                     cwd: None,
                     title: None,
                     intent_key: Some("the-key-that-made-me".to_string()),
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;
@@ -5081,7 +5084,7 @@ mod tests {
                     invocation: Some("sh -c 'sleep 1'".to_string()),
                     title: Some("raw one".to_string()),
                     intent_key: Some("raw-key".to_string()),
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;
@@ -5133,7 +5136,7 @@ mod tests {
                     invocation: None,
                     title: None,
                     intent_key: None,
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;
@@ -5213,7 +5216,7 @@ mod tests {
                     invocation: None,
                     title: None,
                     intent_key: Some("remembered-current".to_string()),
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;
@@ -5279,7 +5282,7 @@ mod tests {
                     invocation: None,
                     title: None,
                     intent_key: None,
-                    allow_yolo_on_sensitive_host: false,
+                    confirm_yolo: false,
                 },
             )
             .await;

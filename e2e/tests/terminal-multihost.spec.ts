@@ -668,7 +668,7 @@ test.describe("multi-host", () => {
     await local.locator(".host-settings").click();
     const localSettings = page.locator(".host-settings-dialog");
     await expect(localSettings).toBeVisible();
-    await expect(localSettings.locator(".host-yolo-safe-toggle")).toHaveCount(1);
+    await expect(localSettings.locator(".host-yolo-without-asking-toggle")).toHaveCount(1);
     await expect(localSettings.locator('[data-setting="destination"]')).toHaveCount(0);
     await localSettings.locator(".host-settings-close").click();
     await expect(localSettings).toHaveCount(0);
@@ -1205,21 +1205,20 @@ test.describe("multi-host", () => {
     await expect(retry).toBeFocused();
   });
 
-  // The YOLO-launch setting round-trips through the helm from the host's
-  // settings dialog. Every host starts sensitive, so the checkbox starts
-  // clear; the local row is used because it always exists. The setting is
-  // restored to sensitive whatever happens, since the stack is shared by the
-  // specs that follow.
-  test("host-settings-yolo-safe: the toggle is stored by the helm", async ({ page, request }) => {
+  // The YOLO-launch setting round-trips through the helm from the host's settings dialog.
+  // Every host starts asking before YOLO launches, so the checkbox starts clear; the local
+  // row is used because it always exists. The setting is restored to asking first whatever
+  // happens, since the stack is shared by the specs that follow.
+  test("host-settings-yolo-without-asking: the toggle is stored by the helm", async ({ page, request }) => {
     const local = (await apiHosts(request)).find((host: any) => host.kind === "local");
-    expect(local.yolo_safe).toBe(false);
+    expect(local.yolo_without_asking).toBe(false);
     try {
       await page.goto("/");
       const row = page.locator('[data-host-kind="local"]');
       await openHostMenu(row);
       await row.locator(".host-settings").click();
       const dialog = page.locator(".host-settings-dialog");
-      const toggle = dialog.locator(".host-yolo-safe-toggle");
+      const toggle = dialog.locator(".host-yolo-without-asking-toggle");
       const help = dialog.locator(".host-settings-help");
       await expect(help).toContainText("Farhelm asks you to confirm each YOLO launch on this host.");
       await expect(toggle).not.toBeChecked();
@@ -1227,7 +1226,7 @@ test.describe("multi-host", () => {
       await expect(toggle).toBeChecked();
       await expect
         .poll(async () =>
-          (await apiHosts(request)).find((host: any) => host.id === local.id).yolo_safe,
+          (await apiHosts(request)).find((host: any) => host.id === local.id).yolo_without_asking,
         )
         .toBe(true);
       await expect(help).toContainText("YOLO sessions start on this host without asking you to confirm.");
@@ -1235,13 +1234,13 @@ test.describe("multi-host", () => {
       await expect(toggle).not.toBeChecked();
       await expect
         .poll(async () =>
-          (await apiHosts(request)).find((host: any) => host.id === local.id).yolo_safe,
+          (await apiHosts(request)).find((host: any) => host.id === local.id).yolo_without_asking,
         )
         .toBe(false);
       await dialog.locator(".host-settings-close").click();
       await expect(dialog).toHaveCount(0);
     } finally {
-      await request.post(`/api/hosts/${local.id}/yolo-safe`, { data: { yolo_safe: false } });
+      await request.post(`/api/hosts/${local.id}/yolo-without-asking`, { data: { yolo_without_asking: false } });
     }
   });
 

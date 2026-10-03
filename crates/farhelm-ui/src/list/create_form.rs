@@ -1723,17 +1723,15 @@ pub(super) fn CreateSessionForm(
     let mut title_raw_seed = use_signal(|| None::<String>);
     let mut title_edited = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
-    // A YOLO launch the helm refused because its host is marked sensitive,
-    // and the user's confirmation of one (see `yolo_confirm`). Both are tied
-    // to the intent key the refused request carried, not to "the next
-    // submit": the key is bound to the whole draft (host, folder, launch),
-    // so any edit that changes what would launch retires the key and with it
-    // the confirmation, and a confirmation for host A can never ride along
-    // with a launch on host B. Holding the confirmed key rather than a
-    // one-shot flag also keeps the override on every retry of the SAME
-    // intent: a confirmed create whose reply was lost must replay under its
-    // key with the override, or the helm would refuse the replay and a
-    // second confirmation would mint a new key and a second session.
+    // A YOLO launch the helm refused because its host asks before YOLO launches, and the
+    // user's confirmation of one (see `yolo_confirm`). Both are tied to the intent key the
+    // refused request carried, not to "the next submit": the key is bound to the whole
+    // draft (host, folder, launch), so any edit that changes what would launch retires the
+    // key and with it the confirmation, and a confirmation for host A can never ride along
+    // with a launch on host B. Holding the confirmed key rather than a one-shot flag also
+    // keeps the override on every retry of the SAME intent: a confirmed create whose reply
+    // was lost must replay under its key with the override, or the helm would refuse the
+    // replay and a second confirmation would mint a new key and a second session.
     //
     // "Start, and don't ask again on this host" adds a request to mark the
     // host safe first, held the same way: under the refused key, set by that
@@ -3602,7 +3600,7 @@ pub(super) fn CreateSessionForm(
                             ));
                         let mut attempt = attempt;
                         if allow_yolo {
-                            api::allow_yolo_on_sensitive_host(&mut attempt.body);
+                            api::confirm_yolo(&mut attempt.body);
                         }
                         // Publish before dispatch. A lost response must leave
                         // the exact payload available to the next explicit retry.

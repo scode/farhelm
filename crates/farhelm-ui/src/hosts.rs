@@ -60,7 +60,7 @@ use dioxus::prelude::*;
 use crate::api::{
     Commit, PreferenceValue, ProbeResponse, ProvisioningOperation, ProvisioningSubmission,
     adopt_host, probe_ssh_host, provision_host, remove_host, retry_host, set_alias,
-    set_host_destination, set_yolo_safe, store_preference,
+    set_host_destination, set_yolo_without_asking, store_preference,
 };
 use crate::icons::{LocalHostIcon, RemoteHostIcon};
 use crate::menu_panel::{
@@ -1218,14 +1218,18 @@ pub(crate) fn HostsPanel(
     // under the checkbox, see `dialog_write`), and refreshes the list the
     // checkbox renders from.
     let yolo_base = base.clone();
-    let on_yolo_safe = move |(host, yolo_safe): (HostId, bool)| {
+    let on_yolo_without_asking = move |(host, yolo_without_asking): (HostId, bool)| {
         let base = yolo_base.clone();
         let started = run(
             host,
-            Box::pin(async move { set_yolo_safe(&base, host, yolo_safe).await }),
+            Box::pin(
+                async move { set_yolo_without_asking(&base, host, yolo_without_asking).await },
+            ),
         );
         if started {
-            dialog_write.write().insert(host, SettingsField::YoloSafe);
+            dialog_write
+                .write()
+                .insert(host, SettingsField::YoloWithoutAsking);
         } else {
             settings_dialog::reset_yolo_checkbox();
         }
@@ -1664,7 +1668,7 @@ pub(crate) fn HostsPanel(
                     on_edit_start,
                     on_edit_submit: on_edit_submit.clone(),
                     on_edit_cancel,
-                    on_yolo_safe: on_yolo_safe.clone(),
+                    on_yolo_without_asking: on_yolo_without_asking.clone(),
                     on_close: on_settings_close,
                     host,
                 }
@@ -3766,7 +3770,7 @@ mod tests {
             remote_state_dir: None,
             state,
             incarnation: 1,
-            yolo_safe: false,
+            yolo_without_asking: false,
         }
     }
 
@@ -4043,10 +4047,10 @@ mod tests {
         assert_eq!(ssh_plain.get(2), Some(Remove));
         assert_eq!(ssh_plain.position(Adopt), None);
 
-        // The local row's identity-mismatch shape: unmanageable, so no
-        // remove, but settings still (the local host can be marked safe for
-        // YOLO launches and aliased like any other). A real, reachable state:
-        // the local row's actor compares identities exactly like an ssh row's.
+        // The local row's identity-mismatch shape: unmanageable, so no remove, but settings
+        // still (the local host can start without asking for YOLO launches and aliased like
+        // any other). A real, reachable state: the local row's actor compares identities
+        // exactly like an ssh row's.
         let local = host_menu_order(true, false, ProvisioningMenuState::default());
         assert_eq!(local.len(), 3);
         assert_eq!(local.get(0), Some(Retry));
@@ -4809,7 +4813,7 @@ mod tests {
                 refresh: RefreshHealth::Ok { sessions: 0 },
             },
             incarnation: 1,
-            yolo_safe: false,
+            yolo_without_asking: false,
         }
     }
 

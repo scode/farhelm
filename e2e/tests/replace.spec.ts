@@ -318,9 +318,9 @@ test("opening replace-with from the keyboard focuses search before any typing", 
       title,
       host: local,
       launch: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "yolo" },
-      // A YOLO fixture on the suite's sensitive-by-default host; the guard
+      // A YOLO fixture on the suite's ask-first host; the guard
       // itself is yolo-guard.spec.ts's subject.
-      allow_yolo_on_sensitive_host: true,
+      confirm_yolo: true,
     },
   });
   expect(created.ok(), `creating structured source: ${await created.text()}`).toBe(true);

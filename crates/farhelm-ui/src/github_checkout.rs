@@ -229,8 +229,8 @@ pub(crate) enum FreshCreateError {
     Unaccepted(String),
     /// No such proof: a transport failure or an unresolved/previously accepted key.
     Unresolved(String),
-    /// The helm refused a YOLO launch on a host marked sensitive; nothing
-    /// was dispatched, and it will run only with an explicit confirmation.
+    /// The helm refused a YOLO launch on a host that asks before YOLO launches; nothing was
+    /// dispatched, and it will run only with an explicit confirmation.
     YoloConfirmation(String),
 }
 

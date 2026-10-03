@@ -54,19 +54,19 @@ pub const CREATE_OUTCOME_HEADER: &str = "x-farhelm-create-outcome";
 pub const CREATE_OUTCOME_DEFINITELY_UNACCEPTED: &str = "definitely-unaccepted";
 
 /// Response header marking a refused launch as a YOLO launch on a host the
-/// user has not marked safe for YOLO launches, which the client may retry
+/// user has not set to start YOLO launches without asking, which the client may retry
 /// only after an explicit confirmation, with the request's
-/// `allow_yolo_on_sensitive_host` set.
+/// `confirm_yolo` set.
 ///
 /// A header rather than a marker in the body for the reason
 /// [`PRECONDITION_HEADER`] is one: only the helm's own response code sets
 /// headers, so a supervisor's text cannot make the client ask. The refused
 /// launch was never dispatched, so the response also carries
 /// [`CREATE_OUTCOME_HEADER`]. The only value it carries is
-/// [`YOLO_CONFIRMATION_SENSITIVE_HOST`].
+/// [`YOLO_CONFIRMATION_REQUIRED`].
 pub const YOLO_CONFIRMATION_HEADER: &str = "x-farhelm-yolo-confirmation";
 /// The one value of [`YOLO_CONFIRMATION_HEADER`].
-pub const YOLO_CONFIRMATION_SENSITIVE_HOST: &str = "sensitive-host";
+pub const YOLO_CONFIRMATION_REQUIRED: &str = "confirmation-required";
 /// The host-list `cause` for a local row whose supervisor is not running.
 ///
 /// The one unreachable cause a user can fix with a command on the machine they

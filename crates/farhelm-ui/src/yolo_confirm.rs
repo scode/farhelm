@@ -116,7 +116,7 @@ pub(crate) struct YoloAsk {
 /// reason plus what did not happen, because "nothing started and the host
 /// still asks" is the part the user decides from.
 pub(crate) async fn stop_asking(base: &str, host: HostId, host_name: &str) -> Result<(), String> {
-    match crate::api::set_yolo_safe(base, host, true).await {
+    match crate::api::set_yolo_without_asking(base, host, true).await {
         Ok(_) => Ok(()),
         // "May still ask": an error can also be a lost reply to a write
         // that committed, so the host's state is not known here. Retrying is

@@ -253,7 +253,7 @@ fn word_basename(word: &str) -> &str {
 /// past the prefix to inject hooks and build resume commands, and wraps
 /// Goose, Pi and OMP launches in exactly this shape to pass their reporter
 /// controls) and the YOLO classifier below, so the program the supervisor
-/// integrates as an agent is the program the sensitive-host guard checks.
+/// integrates as an agent is the program the YOLO confirmation guard checks.
 /// Option-bearing `env` commands have parsing rules of their own and are
 /// deliberately not interpreted: callers decide what an unknown shape means
 /// for them. `env` is recognized by [`is_env_program`].
@@ -342,7 +342,7 @@ pub fn invocation_marker(argv: &[String]) -> Option<InvocationMarker> {
 }
 
 /// Whether a raw command line (already split into argv) is a YOLO launch,
-/// for the helm's sensitive-host guard.
+/// for the helm's YOLO confirmation guard.
 ///
 /// Deliberately broader than [`invocation_marker`]: any argument before a
 /// `--` that exactly equals one of the program's YOLO-class flags counts,
@@ -552,8 +552,7 @@ mod tests {
     /// `agent`. A flag spelling used as
     /// another option's value counts, by design.
     ///
-    /// Why: this decides whether the helm refuses a launch on a sensitive
-    /// host. A miss starts a YOLO session the user never confirmed; a false
+    /// Why: this decides whether the helm refuses a launch on a host that asks before YOLO launches. A miss starts a YOLO session the user never confirmed; a false
     /// hit only asks. The command lines Farhelm's own launch compiler writes
     /// (every harness's YOLO spelling, after its other options) are the ones
     /// this has to get right first.
@@ -624,7 +623,7 @@ mod tests {
     /// Why: an env prefix is an ordinary way to set an API key or config
     /// directory, and the supervisor already integrates the program behind it
     /// as that agent. Before this, the first word `env` matched no vendor, so
-    /// the sensitive-host guard let `env A=1 claude
+    /// the YOLO confirmation guard let `env A=1 claude
     /// --dangerously-skip-permissions` start without asking and the sidebar
     /// showed no badge.
     #[test]

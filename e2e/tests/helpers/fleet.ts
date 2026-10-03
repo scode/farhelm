@@ -211,9 +211,9 @@ export interface HostRow {
    * request carried THIS value rather than merely some value. The create is
    * the only guarded request; profile reads and edits carry no precondition. */
   incarnation: number;
-  /** Whether the host is marked safe for YOLO launches; every host starts
-   * sensitive (`false`). Read back by `setLocalYoloSafe` to prove its write. */
-  yolo_safe: boolean;
+  /** Whether the host is set to start YOLO launches without asking; every host starts
+   * asking first (`false`). Read back by `setLocalYoloWithoutAsking` to prove its write. */
+  yolo_without_asking: boolean;
 }
 
 /**
@@ -270,27 +270,27 @@ export async function localHostId(request: APIRequestContext): Promise<number> {
 }
 
 /**
- * Mark the local host safe (or sensitive, the default) for YOLO launches.
+ * Set whether the local host starts YOLO sessions without asking.
  *
- * Every host starts sensitive, so a spec that launches a YOLO session for
+ * Every host starts asking before YOLO launches, so a spec that launches a YOLO session for
  * some other reason (remembered permissions, clone, replace) would otherwise
  * get the helm's confirmation refusal instead of a session. Such a spec
  * marks the host safe for its duration and puts it back afterwards: the
  * suite shares one helm, so a setting left behind would silently change
  * what every later spec's YOLO launch does.
  */
-export async function setLocalYoloSafe(request: APIRequestContext, yoloSafe: boolean): Promise<void> {
+export async function setLocalYoloWithoutAsking(request: APIRequestContext, yoloWithoutAsking: boolean): Promise<void> {
   const id = await localHostId(request);
   await ok(
-    await request.post(`/api/hosts/${id}/yolo-safe`, { data: { yolo_safe: yoloSafe } }),
-    `marking the local host ${yoloSafe ? "safe" : "sensitive"} for YOLO launches`,
+    await request.post(`/api/hosts/${id}/yolo-without-asking`, { data: { yolo_without_asking: yoloWithoutAsking } }),
+    `setting local-host YOLO confirmation to ${yoloWithoutAsking ? "off" : "on"}`,
   );
   // The premise every caller acts on, read back rather than inferred from
   // the write's status: a spec whose YOLO launch then behaves unexpectedly
   // should fail here, naming the setting, not later on the launch.
   const local = (await listHosts(request)).find((host) => host.id === id);
-  if (local?.yolo_safe !== yoloSafe) {
-    throw new Error(`the local host's yolo_safe reads ${local?.yolo_safe}, not ${yoloSafe}, after setting it`);
+  if (local?.yolo_without_asking !== yoloWithoutAsking) {
+    throw new Error(`the local host's yolo_without_asking reads ${local?.yolo_without_asking}, not ${yoloWithoutAsking}, after setting it`);
   }
 }
 

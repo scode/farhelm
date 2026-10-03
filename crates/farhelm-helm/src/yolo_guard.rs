@@ -1,14 +1,13 @@
-//! The helm's refusal to start a YOLO session on a sensitive host without
-//! an explicit override.
+//! Require explicit confirmation before a YOLO launch unless the host permits those
+//! launches without asking.
 //!
-//! Every host is sensitive until the user marks it safe for YOLO launches
-//! (`HostRow::yolo_safe`, the host settings dialog). Starting an agent that
-//! runs without approval prompts on the wrong machine by accident is the
-//! failure this exists to stop, so the check lives here, on every create
-//! path the helm has (a new session, a fresh checkout, replace, and an
-//! agent's create and clone) and on restart-with, rather than in any one
-//! client: no client can skip it. A plain restart or resume relaunches a
-//! choice the user already made and is not checked.
+//! Every host asks before YOLO launches until the user turns off that confirmation
+//! (`HostRow::yolo_without_asking`, the host settings dialog). Starting an agent that runs
+//! without approval prompts on the wrong machine by accident is the failure this exists to
+//! stop, so the check lives here, on every create path the helm has (a new session, a fresh
+//! checkout, replace, and an agent's create and clone) and on restart-with, rather than in
+//! any one client: no client can skip it. A plain restart or resume relaunches a choice the
+//! user already made and is not checked.
 //!
 //! A refused launch is never dispatched. The browser answers the refusal
 //! with a loud confirmation and retries the same request with the override
@@ -19,7 +18,7 @@ use crate::AppState;
 use crate::sessions::CreateMode;
 use crate::store::HostId;
 
-/// A YOLO launch refused because its host is sensitive and the request did
+/// A YOLO launch refused because its host asks before YOLO launches and the request did
 /// not carry the override.
 ///
 /// A distinct type so the HTTP layer can recognize it (and only it) and mark
@@ -32,7 +31,7 @@ use crate::store::HostId;
      --confirm-yolo), or turn on \"start YOLO sessions here without asking\" in the host's \
      settings"
 )]
-pub(crate) struct YoloOnSensitiveHost {
+pub(crate) struct YoloNeedsConfirmation {
     pub(crate) host_name: String,
 }
 
@@ -57,18 +56,18 @@ pub(crate) fn invocation_is_yolo(invocation: &str) -> bool {
     shell_words::split(invocation).is_ok_and(|argv| farhelm_proto::yolo::argv_is_yolo(&argv))
 }
 
-/// Refuse a YOLO launch on `host` unless the host is marked safe or the
-/// request carries the override. Reads the host's setting from the store at
-/// the moment of the decision, so a change in the settings dialog applies to
-/// the very next launch. A YOLO launch to a host with no registry row is
-/// refused with the helm's unknown-host error rather than allowed.
+/// Refuse a YOLO launch on `host` unless the host allows YOLO without asking or the request
+/// carries the override. Reads the host's setting from the store at the moment of the
+/// decision, so a change in the settings dialog applies to the very next launch. A YOLO
+/// launch to a host with no registry row is refused with the helm's unknown-host error
+/// rather than allowed.
 pub(crate) async fn check(
     state: &AppState,
     host: HostId,
     is_yolo: bool,
-    allow_on_sensitive_host: bool,
+    confirm_yolo: bool,
 ) -> anyhow::Result<()> {
-    if !is_yolo || allow_on_sensitive_host {
+    if !is_yolo || confirm_yolo {
         return Ok(());
     }
     let row = state
@@ -78,8 +77,8 @@ pub(crate) async fn check(
         .into_iter()
         .find(|row| row.id == host);
     match row {
-        Some(row) if row.yolo_safe => Ok(()),
-        Some(row) => Err(anyhow::Error::new(YoloOnSensitiveHost {
+        Some(row) if row.yolo_without_asking => Ok(()),
+        Some(row) => Err(anyhow::Error::new(YoloNeedsConfirmation {
             host_name: crate::aggregate::host_display_name(
                 row.kind,
                 row.destination.as_deref(),
@@ -103,16 +102,15 @@ pub(crate) async fn check(
 mod tests {
     use super::*;
 
-    /// Spec: a YOLO launch checked against a host id the registry has no row
-    /// for is refused with the helm's unknown-host error ("no such host", the
-    /// same text routing gives), not allowed; a launch that is not YOLO, or
-    /// carries the override, is not this check's to refuse.
+    /// Spec: a YOLO launch checked against a host id the registry has no row for is refused
+    /// with the helm's unknown-host error ("no such host", the same text routing gives),
+    /// not allowed; a launch that is not YOLO, or carries the override, is not this check's
+    /// to refuse.
     ///
-    /// Why: create and restart-with hold the host's connection before this
-    /// check, and host removal deletes the row before stopping that
-    /// connection, so a missing row does not mean routing will refuse. When
-    /// this check let a missing row through, a YOLO launch in that window
-    /// started an approval-free agent on a sensitive host unasked.
+    /// Why: create and restart-with hold the host's connection before this check, and host
+    /// removal deletes the row before stopping that connection, so a missing row does not
+    /// mean routing will refuse. When this check let a missing row through, a YOLO launch
+    /// in that window started an approval-free agent without the required confirmation.
     #[farhelm_testtrace::test]
     async fn a_yolo_check_against_a_host_with_no_registry_row_is_refused() {
         let harness = crate::rest_harness::idle_helm().await;
@@ -144,12 +142,12 @@ mod tests {
     }
 
     /// Spec: every built-in profile named `…-yolo` is classified YOLO by the
-    /// sensitive-host guard, and every other built-in is not.
+    /// YOLO confirmation guard, and every other built-in is not.
     ///
     /// Why: built-in profiles are plain command lines, so the guard sees them
     /// only through the shared classifier's tables. When the classifier
     /// stopped reading the generic name `agent`, the built-in `cursor-yolo`
-    /// profile (then `agent --force`) would have started on a sensitive host
+    /// profile (then `agent --force`) would have started on a host that asks before YOLO launches
     /// without asking had its launch not moved to `cursor-agent` in the same
     /// change. An edit to either the built-in table or the classifier tables
     /// can break that coupling silently; this catches it.

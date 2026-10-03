@@ -169,7 +169,7 @@ test("restart with shows fixed context and submits one edited resume", async ({ 
 });
 
 /**
- * A restart with YOLO settings that the helm refuses for a sensitive host asks
+ * A restart with YOLO settings that the helm refuses for a host that asks before YOLO launches asks
  * inside the dialog, and confirming resends the dialog's settings with the
  * override.
  *
@@ -179,17 +179,17 @@ test("restart with shows fixed context and submits one edited resume", async ({ 
  * what only a browser shows is where the question appears and what the
  * confirmed request carries.
  */
-test("a YOLO restart with refused for a sensitive host is confirmed inside the dialog", async ({ page }) => {
+test("a YOLO restart-with requires confirmation inside the dialog", async ({ page }) => {
   await injectSession(page, BASELINE, "resume");
   const bodies: any[] = [];
   await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
     const body = route.request().postDataJSON();
     bodies.push(body);
-    if (!body.allow_yolo_on_sensitive_host) {
+    if (!body.confirm_yolo) {
       await fulfillAsHelm(route, {
         status: 409,
         contentType: "text/plain",
-        headers: { "x-farhelm-yolo-confirmation": "sensitive-host" },
+        headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
         body: "this machine asks before YOLO launches; confirm with --confirm-yolo",
       });
       return;
@@ -244,7 +244,7 @@ test("a YOLO restart with refused for a sensitive host is confirmed inside the d
   expect(bodies[2]).toMatchObject({
     mode: "resume",
     with: { harness: "codex", permissions: "yolo" },
-    allow_yolo_on_sensitive_host: true,
+    confirm_yolo: true,
   });
 });
 
@@ -271,11 +271,11 @@ test("don't ask again from restart with keeps focus in the dialog and marks befo
   await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
     const body = route.request().postDataJSON();
     restarts.push(body);
-    if (!body.allow_yolo_on_sensitive_host) {
+    if (!body.confirm_yolo) {
       await fulfillAsHelm(route, {
         status: 409,
         contentType: "text/plain",
-        headers: { "x-farhelm-yolo-confirmation": "sensitive-host" },
+        headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
         body: "this machine asks before YOLO launches; confirm with --confirm-yolo",
       });
       return;
@@ -303,7 +303,7 @@ test("don't ask again from restart with keeps focus in the dialog and marks befo
   let markHeld = new Promise<void>((resolve) => (releaseMark = resolve));
   let refuseMark = true;
   const marks: unknown[] = [];
-  await page.route("**/api/hosts/*/yolo-safe", async (route) => {
+  await page.route("**/api/hosts/*/yolo-without-asking", async (route) => {
     marks.push(route.request().postDataJSON());
     await markHeld;
     if (refuseMark) {
@@ -343,12 +343,12 @@ test("don't ask again from restart with keeps focus in the dialog and marks befo
   markHeld = Promise.resolve();
   await stopAsking.click();
   await expect(dialog).toHaveCount(0);
-  expect(marks).toEqual([{ yolo_safe: true }, { yolo_safe: true }]);
+  expect(marks).toEqual([{ yolo_without_asking: true }, { yolo_without_asking: true }]);
   expect(restarts).toHaveLength(2);
   expect(restarts[1]).toMatchObject({
     mode: "resume",
     with: { harness: "codex", permissions: "yolo" },
-    allow_yolo_on_sensitive_host: true,
+    confirm_yolo: true,
   });
 });
 

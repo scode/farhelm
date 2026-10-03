@@ -258,7 +258,7 @@ mod tests {
                 remote_state_dir: state_dir.map(str::to_string),
                 host_identity: None,
                 cache_truncated: false,
-                yolo_safe: false,
+                yolo_without_asking: false,
             }
         };
         let rows = vec![

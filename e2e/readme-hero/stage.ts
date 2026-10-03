@@ -269,7 +269,7 @@ export async function stageFleet(
         // one launch is what a user clicking through that question does, and
         // unlike marking the host safe it leaves no setting behind that the
         // picture could show.
-        ...(session.yolo ? { allow_yolo_on_sensitive_host: true } : {}),
+        ...(session.yolo ? { confirm_yolo: true } : {}),
       },
     });
     expect(response.ok(), `create ${session.title}: ${await response.text()}`).toBeTruthy();
