@@ -6356,7 +6356,8 @@
   under the map's mutex), bounding the map to locks in use without a store read and without changing callers. Correct
   the doc comment and add a test that requests many unregistered ids and checks the map's size. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/triage-boundary-checks.md`.
+- Execution: complete: change `lnnnpmrxqmxz`, bookmark `plan/triage-boundary-checks/03-provision-lock-map`, PR
+  https://github.com/scode/farhelm/pull/1494.
 
 ## restart-with-skips-create-validation.md
 

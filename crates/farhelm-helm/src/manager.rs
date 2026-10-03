@@ -773,6 +773,54 @@ pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<Session
 
 // ---- The manager -----------------------------------------------------
 
+/// The per-host provisioning locks, keyed by host id; see
+/// `ConnectionManager::provision_locks`.
+type ProvisionLocks = HashMap<HostId, Arc<tokio::sync::Mutex<()>>>;
+
+/// A held per-host provisioning lock (`ConnectionManager::host_provision_lock`).
+///
+/// Releasing it also drops the host's map entry when nothing else holds or
+/// waits on that lock, so the map holds only locks in use. "Nothing else" is
+/// read from the mutex's reference count: the map's own reference plus this
+/// guard's makes two, and a waiter or another holder makes it more.
+///
+/// New references are only taken under the map's mutex
+/// (`ConnectionManager::provision_lock_entry_in`), so the count cannot grow
+/// while this check holds that mutex, and dropping the entry while this
+/// guard still holds the lock is safe: nobody else can reach that mutex, and
+/// the next caller for the host gets a fresh one. References are NOT always
+/// dropped under the mutex, though: a waiter cancelled after this check saw
+/// it leaves an entry nobody holds. The check can therefore over-count and
+/// keep an entry, never drop one in use, and the next acquisition's sweep
+/// removes any such leftover. A refused `try` cannot cause this, because it
+/// runs entirely under the mutex.
+pub struct ProvisionLockGuard {
+    host: HostId,
+    locks: Arc<Mutex<ProvisionLocks>>,
+    /// Always `Some` until `drop`, which releases it only after deciding
+    /// about the map entry under the map's mutex.
+    guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl Drop for ProvisionLockGuard {
+    fn drop(&mut self) {
+        // A poisoned map still has to release the lock; the map's contents
+        // are plain data, so its last state is safe to keep using.
+        let mut locks = self
+            .locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(guard) = &self.guard
+            && let Some(entry) = locks.get(&self.host)
+            && Arc::ptr_eq(entry, tokio::sync::OwnedMutexGuard::mutex(guard))
+            && Arc::strong_count(entry) == 2
+        {
+            locks.remove(&self.host);
+        }
+        self.guard = None;
+    }
+}
+
 /// What one actor publishes about itself, and the only channel through
 /// which anything outside the actor observes it.
 ///
@@ -1019,9 +1067,14 @@ pub struct ConnectionManager {
     /// an actor is replaced when it is revived or reconciled, including by a
     /// provisioning run's own re-registration, and a lock that lived on the
     /// handle would be replaced with it, letting an edit through while the
-    /// run still holds the old one. Entries are never removed; the map is
-    /// bounded by the hosts registered in this process's lifetime.
-    provision_locks: Mutex<HashMap<HostId, Arc<tokio::sync::Mutex<()>>>>,
+    /// run still holds the old one.
+    ///
+    /// An entry lives only while some caller holds or waits on its lock:
+    /// [`ProvisionLockGuard`] removes it on release when nothing else does.
+    /// Callers take the lock before the store has said whether the host
+    /// exists, so a map that kept every requested id would grow with
+    /// whatever ids an authenticated client chose to ask about.
+    provision_locks: Arc<Mutex<ProvisionLocks>>,
     /// Serializes [`Self::sync_registry`] end to end — the registry READ
     /// included, which is why it cannot be the actor-map mutex (that one is
     /// std, and is deliberately never held across an await).
@@ -1291,7 +1344,7 @@ impl ConnectionManager {
             events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
-            provision_locks: Mutex::new(HashMap::new()),
+            provision_locks: Arc::new(Mutex::new(HashMap::new())),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         })
     }
@@ -2124,15 +2177,13 @@ impl ConnectionManager {
     /// SPEC.md "Waiting between operations on one host" lets registry edits
     /// wait for an install or update, never the session list. Stable across
     /// actor replacement; see [`Self::provision_locks`].
-    pub async fn host_provision_lock(&self, host: HostId) -> tokio::sync::OwnedMutexGuard<()> {
-        let provision_lock = {
-            let mut locks = self
-                .provision_locks
-                .lock()
-                .expect("provision lock map mutex poisoned");
-            Arc::clone(locks.entry(host).or_default())
-        };
-        provision_lock.lock_owned().await
+    pub async fn host_provision_lock(&self, host: HostId) -> ProvisionLockGuard {
+        let provision_lock = self.provision_lock_entry(host);
+        ProvisionLockGuard {
+            host,
+            locks: Arc::clone(&self.provision_locks),
+            guard: Some(provision_lock.lock_owned().await),
+        }
     }
 
     /// [`Self::host_provision_lock`] without waiting: `None` while a
@@ -2142,18 +2193,51 @@ impl ConnectionManager {
     /// (SPEC.md "Waiting between operations on one host"): a run can sit in a
     /// throttled download or a stalled upload for a long time, and the user
     /// asked for removal to refuse while busy rather than abort the run.
-    pub fn try_host_provision_lock(
-        &self,
+    pub fn try_host_provision_lock(&self, host: HostId) -> Option<ProvisionLockGuard> {
+        // The whole attempt runs under the map's mutex (`try_lock_owned`
+        // never waits), so a refused attempt's extra reference is gone before
+        // any holder's release can count it; see `ProvisionLockGuard`.
+        let mut locks = self
+            .provision_locks
+            .lock()
+            .expect("provision lock map mutex poisoned");
+        let guard = Self::provision_lock_entry_in(&mut locks, host)
+            .try_lock_owned()
+            .ok()?;
+        drop(locks);
+        Some(ProvisionLockGuard {
+            host,
+            locks: Arc::clone(&self.provision_locks),
+            guard: Some(guard),
+        })
+    }
+
+    /// This host's provisioning mutex, created if no caller currently holds
+    /// or waits on one.
+    fn provision_lock_entry(&self, host: HostId) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self
+            .provision_locks
+            .lock()
+            .expect("provision lock map mutex poisoned");
+        Self::provision_lock_entry_in(&mut locks, host)
+    }
+
+    /// [`Self::provision_lock_entry`] for a caller already holding the map's
+    /// mutex: the only place a reference to an entry is taken.
+    ///
+    /// Also sweeps out entries only the map still references. A release
+    /// can over-count and keep an entry it could have dropped (a cancelled
+    /// waiter's reference vanishes after the holder's release looked; see
+    /// [`ProvisionLockGuard`]), and an entry with no reference but the map's
+    /// is one nobody holds or waits on. Removing it under the mutex is
+    /// race-free because new references are only taken here. The map holds
+    /// a handful of entries, so the sweep is cheap.
+    fn provision_lock_entry_in(
+        locks: &mut ProvisionLocks,
         host: HostId,
-    ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
-        let provision_lock = {
-            let mut locks = self
-                .provision_locks
-                .lock()
-                .expect("provision lock map mutex poisoned");
-            Arc::clone(locks.entry(host).or_default())
-        };
-        provision_lock.try_lock_owned().ok()
+    ) -> Arc<tokio::sync::Mutex<()>> {
+        locks.retain(|_, lock| Arc::strong_count(lock) > 1);
+        Arc::clone(locks.entry(host).or_default())
     }
 
     /// Ask `host` to refresh NOW, without disturbing anything else.
@@ -6705,6 +6789,59 @@ mod tests {
             .expect("the released provisioning lock is acquired");
     }
 
+    /// Why: provisioning locks are taken before the store says whether the
+    /// host exists, and the map used to keep an entry for every id ever
+    /// requested, so an authenticated client could grow it without bound.
+    /// Spec: the map holds only locks someone holds or waits on. Releasing
+    /// the last holder (by either lock call, for registered or unregistered
+    /// ids) removes the entry, a holder with a waiter keeps it until the
+    /// waiter is done too, and a refused `try` changes nothing.
+    #[farhelm_testtrace::test]
+    async fn provision_locks_live_only_while_held_or_awaited() {
+        let fixture = fixture(Cadence::default(), |store, _transport| async move {
+            store
+                .add_ssh_host("provision-map.example", None, None)
+                .await
+                .unwrap();
+        })
+        .await;
+        let manager = &fixture.manager;
+        let size = || manager.provision_locks.lock().unwrap().len();
+        let hosts = fixture.store.list_hosts().await.unwrap();
+        let registered = hosts[1].id;
+        // Premise: the ids below name no registered host.
+        assert!(hosts.iter().all(|host| host.id < 10_000), "{hosts:?}");
+
+        for id in 10_000..10_200 {
+            drop(manager.host_provision_lock(id).await);
+            drop(manager.try_host_provision_lock(id).expect("free"));
+        }
+        assert_eq!(
+            size(),
+            0,
+            "released locks for unregistered ids leave no entry"
+        );
+
+        let held = manager.host_provision_lock(registered).await;
+        assert_eq!(size(), 1);
+        assert!(
+            manager.try_host_provision_lock(registered).is_none(),
+            "a held lock refuses a try"
+        );
+        assert_eq!(size(), 1, "the refused try neither adds nor removes");
+        let mut waiter = std::pin::pin!(manager.host_provision_lock(registered));
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(waiter.as_mut().poll(&mut cx).is_pending());
+        drop(held);
+        assert_eq!(size(), 1, "the waiter's lock outlives the first holder");
+        let second = tokio::time::timeout(Duration::from_secs(10), waiter)
+            .await
+            .expect("the waiter acquires the released lock");
+        assert_eq!(size(), 1);
+        drop(second);
+        assert_eq!(size(), 0, "the last release removes the entry");
+    }
+
     /// A delete that already entered its durable write must not clear collision
     /// evidence published under a newer connection incarnation while it awaited.
     #[farhelm_testtrace::test]
@@ -9605,7 +9742,7 @@ mod tests {
             events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
-            provision_locks: Mutex::new(HashMap::new()),
+            provision_locks: Arc::new(Mutex::new(HashMap::new())),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         };
         let revision = manager.events().revision();
