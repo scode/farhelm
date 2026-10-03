@@ -78,10 +78,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Resume runs with approvals off unconfirmed (`yolo-guard-skips-resume-template.md`, triaged 2026-10-01 as a spec
   clarification rather than a code fix because closing it was not worth the complexity). Another: the resume command
   Farhelm derives by appending a conversation selector to the original command line collides with a selector the user's
-  own command already carries, so a Claude session started as `claude --continue`, or with a `--` in its command, can
+  own command already carries, so a Claude session started as `claude --continue`, or with a `--` in its command, could
   restart into a different conversation or a fresh one (`claude-resume-template-selector-collision.md`, triaged
-  2026-10-01; Codex had the same problem in `codex-resume-template-duplicates-selector.md` and now refuses such a launch
-  at create time unless it brings its own resume command). First step: walk through the launch paths with the
+  2026-10-01; Codex had the same problem in `codex-resume-template-duplicates-selector.md`, and both now refuse such a
+  launch at create time unless it brings its own resume command). First step: walk through the launch paths with the
   maintainer.
 
 - **Uninstall after a move when the installer skipped the app.** On macOS, after the install directory moves
