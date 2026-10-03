@@ -12,7 +12,8 @@ stack of PRs. SPEC.md and SPEC_impl.md stay authoritative over anything a plan s
 ## Layout
 
 - `queue/INDEX.md` lists every plan, one physical line each, in queue order (oldest first, unless the maintainer placed
-  a plan elsewhere), with its state. It is excluded from dprint, so a line is never rewrapped.
+  a plan elsewhere), with its state. The file is excluded from dprint, so a line is never rewrapped. Queue order is a
+  picking preference, not a sequence (see the note under Planning).
 - `queue/<slug>.md` is one plan, named briefly after the work (`create-off-read-loop.md`, `font-size-shortcuts.md`),
   never a number or a date, and with no project prefix. Every `.md` file in `queue/` other than `INDEX.md` is a plan.
 - `reports/<slug>.report.md` is the report a finished plan delivered for review.
@@ -157,9 +158,20 @@ with these overrides on top of the skill's own rules:
 - The done criterion: every PR exists and has passed its review gate, and the latest `## Decisions` entry, if any, is
   satisfied. Delivering the report is the executor's closing step, not part of the goal.
 - The unattended fallback blocks per Executing one plan (Blocking).
-- If the plan depends on another plan being built first, the goal file says which, and so does its `INDEX.md` line.
+- If the plan depends on another plan's work being on main first, the goal file says which, and so does its `INDEX.md`
+  line.
 
 New plans go at the end of `INDEX.md` unless the maintainer places them elsewhere.
+
+NOTE: Queue order is not execution order. Several executors drain the queue at once, so any eligible plan may run at the
+same time as any other, and a plan listed later can start, deliver and land before one listed earlier (Picking prefers
+the oldest eligible plan, but skips it when it would conflict with unlanded work). Listing one plan below another orders
+nothing. The only ordering between plans is `(after x.md)`, and that holds the dependent plan back until `x.md` has been
+reviewed, approved and landed, so it waits on the maintainer. When pieces of work must be built in a particular order,
+or one of them touches much of what the others touch (a broad rename that every other change would rebase across, say),
+keep them in one plan whose goal builds them as one stack in that order; for separate TODO entries that is a merge to
+propose, as above. Do not split such work into separate plans on the assumption that a later plan runs after an earlier
+one: without a dependency they may run concurrently and conflict, and with one the later work idles behind review.
 
 When every plan in the request is written, land them as one commit and one PR per the `jjstack` skill, on top of the
 latest `main@origin`: the plan files, their `INDEX.md` lines, and the TODO.md references, all together. Validate with
