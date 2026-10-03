@@ -2444,21 +2444,27 @@ async fn handle_restart_session(
 /// A rename is the one request whose halves have different
 /// cancellation rules — the commit must outlive its connection,
 /// the reply must not — so it cannot simply wrap the whole thing
-/// in [`spawn_admitted`]. What it does instead is acquire ONE
-/// owned permit here (this read loop waits for capacity) and
-/// then move it: into
+/// in [`spawn_admitted`]. What it does instead is take ONE
+/// owned permit here, through [`admit_or_refuse`] (so a rename on a
+/// host whose management slots are all taken is refused with a "try
+/// again" rather than waited for in this read loop), and then move
+/// it: into
 /// [`Supervisor::rename_session`]'s supervisor-owned commit task,
 /// which hands it back with a successful result, and from there
 /// into the reply build.
 ///
-/// Exactly one acquisition per request is not a tidiness point.
-/// An earlier shape took a second permit for the reply phase via
-/// `spawn_admitted`, which deadlocks: with
-/// `HANDLER_ADMISSION_PERMITS` renames in flight, each holds a
-/// slot while waiting for another, and no commit task exists yet
-/// to release one. Moving a single slot along the phases makes
-/// that unrepresentable, and keeps both phases bounded by the same
-/// semaphore every other slow handler answers to.
+/// Exactly one admission per request, taken before the commit, is
+/// not a tidiness point. A busy refusal promises that nothing
+/// happened, so it is only honest before the title has changed; a
+/// second, refusable admission for the reply phase would let a
+/// rename land and then answer "this host is busy, try again". An
+/// even earlier shape took that second permit through a WAITING
+/// acquisition, which deadlocked: with `HANDLER_ADMISSION_PERMITS`
+/// renames in flight, each held a slot while waiting for another,
+/// and no commit task existed yet to release one. Moving a single
+/// slot along the phases makes both unrepresentable, and keeps both
+/// phases bounded by the same semaphore every other slow handler
+/// answers to.
 ///
 /// The slot is held until the reply has been HANDED OVER, on both
 /// the success and the failure path — the same parity every other
@@ -2491,13 +2497,13 @@ async fn handle_rename_session(
         reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
-    // THE request's admission slot — acquired here, in the read loop, so
-    // that is what waits for capacity, and moved through both phases
-    // afterwards. See this function's docs for why there is exactly one.
-    let permit = Arc::clone(&sup.admission)
-        .acquire_owned()
-        .await
-        .expect("admission semaphore is never closed");
+    // THE request's admission slot — taken here, in the read loop, without
+    // waiting (a busy host refuses the rename instead, see
+    // `admit_or_refuse`), and moved through both phases afterwards. See
+    // this function's docs for why there is exactly one.
+    let Some(permit) = admit_or_refuse(&sup.admission, tx, req_id).await else {
+        return;
+    };
     let sup2 = Arc::clone(sup);
     let tx = tx.clone();
     // Tracked like every other spawned handler (so this connection's
@@ -10452,6 +10458,38 @@ mod tests {
         })
         .await;
         host.type_and_see_echo("typed-after-the-restart").await;
+        let reply = host.reply(2).await;
+        assert_refused_as_busy(&reply, 2);
+        assert_eq!(
+            host.sup.admission.available_permits(),
+            0,
+            "the refusal must have come while the parked Stops still held every slot"
+        );
+
+        host.release().await;
+    }
+
+    /// Spec: with every management slot held, a Rename is refused at once
+    /// with a "try again" (`ErrorKind::Unavailable`), and typing on the same
+    /// connection keeps reaching its pane.
+    ///
+    /// Why: Rename took its one admission slot in the connection's read loop
+    /// before handing it through its commit and reply, separately from every
+    /// other request, so even a title change could freeze every keystroke on
+    /// a busy host. It now takes that slot without waiting; the single-slot
+    /// handoff after admission is unchanged.
+    #[farhelm_testtrace::test]
+    async fn a_rename_on_a_saturated_host_is_refused_and_typing_continues() {
+        let mut host = BusyHost::new().await;
+
+        host.send(ControlMsg::RenameSession {
+            req_id: 2,
+            session_id: "another-session".to_string(),
+            title: "renamed while busy".to_string(),
+            expected_title: None,
+        })
+        .await;
+        host.type_and_see_echo("typed-after-the-rename").await;
         let reply = host.reply(2).await;
         assert_refused_as_busy(&reply, 2);
         assert_eq!(

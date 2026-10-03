@@ -186,8 +186,8 @@ pub const STALL_DETACH_TIMEOUT: Duration = Duration::from_secs(60);
 /// grew memory without limit but never blocked anything — the read loop
 /// kept running and tore the connection down the moment it saw EOF.
 /// Bounded, the same peer instead backpressures every producer, including
-/// `handle_control` itself once the admission permits are all held by
-/// tasks parked on a full queue. The read loop then never reaches its
+/// `handle_control` itself, whose inline replies (a busy refusal among
+/// them) await the same full queue. The read loop then never reaches its
 /// `select!` again, never observes EOF, and the whole connection task
 /// leaks — the exact failure `WRITER_DRAIN_TIMEOUT` was introduced to
 /// prevent, reintroduced through the other door.
@@ -1309,13 +1309,13 @@ impl StateDirOwnership {
 /// a REAL bound against a pathological flood or a buggy client that fires
 /// requests without waiting for replies.
 ///
-/// ## A full cap refuses rather than waiting in the read loop
+/// ## A full cap refuses; it never waits in the read loop
 ///
-/// Stop, Restart and the requests admitted through `spawn_admitted` take their
-/// slot in a connection's read loop with `admit_or_refuse`, which answers "this
-/// host is busy, try again" (`ErrorKind::Unavailable`) when no slot is free.
-/// That loop also delivers every keystroke, resize and detach for every session
-/// on the connection, and SPEC.md "Waiting between operations on one host" says
+/// Every management request dispatched from a connection's read loop takes
+/// its slot with `admit_or_refuse`, which answers "this host is busy, try
+/// again" (`ErrorKind::Unavailable`) when no slot is free. That loop also
+/// delivers every keystroke, resize and detach for every session on the
+/// connection, and SPEC.md "Waiting between operations on one host" says
 /// those must never wait on management operations. Waiting for a slot there
 /// used to freeze typing on the whole host until one of eight in-flight Stops
 /// or Deletes finished, kill grace period included, which could outlast the
@@ -11941,9 +11941,12 @@ impl Supervisor {
     /// FAILED — so the caller holds the same slot through whichever reply
     /// it sends. Two separate reasons, and both matter.
     ///
-    /// One slot per request, rather than a second one for the reply, is
-    /// what keeps this from deadlocking: a rename that acquired one permit
-    /// and then waited for another would wedge outright once
+    /// One slot per request, taken before the commit, rather than a
+    /// second one for the reply. Admission refuses when the host is busy,
+    /// and that refusal promises nothing happened, so it can only come
+    /// before the rename has landed; a second admission for the reply could
+    /// answer "busy" for a title already changed. A second WAITING
+    /// acquisition, an earlier shape, was worse: it wedged outright once
     /// `HANDLER_ADMISSION_PERMITS` renames were in flight, every one of
     /// them holding a slot nothing can release while waiting for a slot
     /// nobody will free.

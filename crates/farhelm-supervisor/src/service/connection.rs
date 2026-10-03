@@ -849,8 +849,9 @@ where
             // treated exactly like a write that failed. See
             // WRITER_STALL_TIMEOUT: without this, bounding the queue would
             // let a peer that stops reading park every producer —
-            // including this connection's own read loop, via the admission
-            // permits — so the connection could never notice the peer was
+            // including this connection's own read loop, whose inline
+            // replies (a busy refusal among them) await the same full
+            // queue — so the connection could never notice the peer was
             // gone. Breaking here drops `rx`, which is what unblocks those
             // producers with a closed-channel error.
             if let Err(detail) =
@@ -1009,28 +1010,28 @@ pub(crate) fn notify_detached(
 /// Take a management slot for one request without waiting, or refuse the
 /// request with [`farhelm_proto::HOST_BUSY_REFUSAL`] and return `None`.
 ///
-/// The admission step Stop, Restart and the requests admitted through
-/// [`spawn_admitted`] take in a connection's read loop, so that loop never
-/// waits for their slot. Waiting there is what this replaced, and it was
-/// wrong: the same loop delivers every keystroke, resize and detach for
-/// every session on the connection, so a request parked on a full
-/// semaphore froze typing on the whole host until one of the eight
-/// operations holding the slots finished (later, if Deletes were already
-/// queued for a slot), which for a Stop or Delete can mean waiting out a
-/// kill grace period. SPEC.md "Waiting between operations on one host"
-/// forbids that.
-/// Refusing promptly is the chosen response, rather than queueing the
-/// request somewhere off the loop: a queue would keep the wait away from
-/// the input path too, but it is a second mechanism to bound and drain, and
-/// a "try again" costs the user one click.
+/// The admission step every management request takes in a connection's read
+/// loop (Stop, Restart, Rename, and the requests admitted through
+/// [`spawn_admitted`]), so that loop never waits for a slot. Waiting there is
+/// what this replaced, and it was wrong: the same loop delivers every
+/// keystroke, resize and detach for every session on the connection, so a
+/// request parked on a full semaphore froze typing on the whole host until one
+/// of the eight operations holding the slots finished (later, if Deletes were
+/// already queued for a slot), which for a Stop or Delete can mean waiting out
+/// a kill grace period. SPEC.md "Waiting between operations on one host"
+/// forbids that. Refusing promptly is the chosen response, rather than queueing
+/// the request somewhere off the loop: a queue would keep the wait away from
+/// the input path too, but it is a second mechanism to bound and drain, and a
+/// "try again" costs the user one click.
 ///
 /// The refusal is `ErrorKind::Unavailable`, the kind that already means
-/// "nothing happened, the same request works later"; the helm turns it
-/// into a 503 and the UI shows the message on the action. It is sent
-/// before anything about the request has been looked at or changed, which
-/// is what makes a retry safe. Sending it awaits the bounded writer queue,
-/// like every other reply the read loop sends inline; that wait is on the
-/// peer reading its own replies, not on management work.
+/// "nothing happened, the same request works later"; the helm turns it into a
+/// 503 and the UI shows the message on the action. It is sent before anything
+/// the request asks for has been changed (a request may check its own fields
+/// first, as Rename checks its title), which is what makes a retry safe.
+/// Sending it awaits the bounded writer queue, like every other reply the read
+/// loop sends inline; that wait is on the peer reading its own replies, not on
+/// management work.
 pub(crate) async fn admit_or_refuse(
     admission: &Arc<tokio::sync::Semaphore>,
     tx: &mpsc::Sender<Frame>,
@@ -1061,11 +1062,11 @@ pub(crate) async fn admit_or_refuse(
 /// future's whole lifetime. `work` is handed its own sender for the reply, and
 /// is only called once the request is admitted: the shared admission-then-spawn
 /// shape of the management requests whose work all happens on the connection's
-/// tracked task (directory browse, repository search, tab open and close). Stop
-/// and Restart take their slot through `admit_or_refuse` directly, because
-/// their work is owned by the supervisor rather than the connection, and Delete
-/// waits for its slot inside its own task after its agent-request fence; see
-/// their handlers.
+/// tracked task (directory browse, repository search, tab open and close).
+/// Stop, Restart and Rename take their slot through `admit_or_refuse`
+/// directly, because part or all of their work is owned by the supervisor
+/// rather than the connection, and Delete waits for its slot inside its own
+/// task after its agent-request fence; see their handlers.
 ///
 /// Admission still happens BEFORE the spawn, so a refused request leaves
 /// no task behind and an admitted one never exists without its slot.

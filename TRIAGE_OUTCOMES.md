@@ -6251,7 +6251,8 @@
 - Completion criteria: Rename uses the shared non-waiting admission step, keeping its single-permit handoff, with a
   saturated-rename test showing the refusal and that input to another session progresses. Remove the feedback file and
   its index entry.
-- Execution: planned in `plans/queue/triage-busy-host-refusal.md`.
+- Execution: complete: change `povunnsp`, bookmark `plan/triage-busy-host-refusal/04-rename-refuses`, PR
+  https://github.com/scode/farhelm/pull/1493.
 
 ## list-admission-blocks-terminal-reader.md
 
