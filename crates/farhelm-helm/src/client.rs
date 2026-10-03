@@ -62,18 +62,14 @@ const INPUT_CHUNK: usize = 32 * 1024;
 /// bounded writer — so a healthy terminal never approaches this in steady
 /// state; it only fills when the consumer has genuinely stopped.
 ///
-/// Honest caveat: this bounds EVENTS, not bytes, and the two only line up
-/// when frames are large. Live pane output arrives as whatever tmux
-/// notification sizes the producer happens to generate — often a few
-/// hundred bytes, not `REPLAY_CHUNK` — so for small frames the real
-/// ceiling is closer to a hundred kilobytes than to the 8 MiB the count
-/// would suggest, and a consumer that stops draining trips the detach
-/// below quickly. That is the right bias for what this bound exists to
-/// catch (a genuinely wedged viewer), and it is why the number cannot be
-/// read as a memory budget. A byte-accounted bound would be the honest fix
-/// if this ever needs to double as one; `mpsc` offers no such thing, and a
-/// side counter is not worth it while the watermark upstream governs the
-/// steady state.
+/// Honest caveat: this still bounds EVENTS, not bytes, but every incoming
+/// terminal data frame is capped at `farhelm_proto::MAX_TERMINAL_DATA_LEN`.
+/// The queue therefore admits at most 256 × 64 KiB, about 16 MiB, of terminal
+/// payload even when a supervisor ignores flow control. Smaller live-pane
+/// notifications use less memory; the cap is the worst-case guarantee, not a
+/// promise that every attachment reaches it. A consumer that stops draining
+/// still trips the detach as soon as the event count fills, preserving the
+/// head-of-line protection this queue exists to provide.
 const TERM_EVENT_QUEUE: usize = 256;
 
 /// Depth of the single outbound queue to the supervisor.
@@ -1977,13 +1973,34 @@ impl SupervisorClient {
         Ok(())
     }
 
-    /// Push one event onto `channel`'s bounded queue, applying `dispatch`'s
-    /// overflow-is-stall-detach rule uniformly for both queue producers:
-    /// raw `Data` off the wire and the `ReplayComplete` marker synthesized
-    /// from a `ControlMsg` (PLAN_M5.md item 4). A channel `dispatch` does
-    /// not know about — the attachment already ended, or never existed on
-    /// this connection — is a silent no-op, the same normal race a stray
-    /// data frame for a dead terminal already tolerates.
+    /// Remove a terminal after an incoming frame violates its admission bound.
+    ///
+    /// Oversized data and a full event queue have the same user-visible
+    /// outcome: the terminal is stalled, its local detach reason is published
+    /// out of band, and the supervisor receives an independent `Detach`.
+    /// Keeping that teardown in one helper prevents the two admission checks
+    /// from drifting apart.
+    fn detach_stalled_terminal(&self, channel: u32, handle: TerminalHandle) {
+        signal_detached(
+            &handle,
+            Detach {
+                reason: farhelm_proto::DETACH_REASON_STALLED.to_string(),
+                code: farhelm_proto::DetachCode::Stalled,
+            },
+        );
+        self.release_upstream(channel);
+    }
+
+    /// Push one event onto `channel`'s bounded queue, applying the same
+    /// stall-detach rule to queue overflow and an oversized incoming data
+    /// frame. The size check happens before `try_send`, so frames that arrive
+    /// before `Attached` cannot consume queue capacity beyond the byte bound.
+    /// The two queue producers remain uniform: raw `Data` off the wire and
+    /// the `ReplayComplete` marker synthesized from a `ControlMsg` (PLAN_M5.md
+    /// item 4). A channel `dispatch` does not know about — the attachment
+    /// already ended, or never existed on this connection — is a silent
+    /// no-op, the same normal race a stray data frame for a dead terminal
+    /// already tolerates.
     ///
     /// `entry` rather than get-then-remove so the overflow arm removes the
     /// very entry it just observed, under the SAME lock hold: releasing
@@ -1993,18 +2010,18 @@ impl SupervisorClient {
     async fn route_terminal_event(&self, channel: u32, event: TermEvent) {
         let mut terms = self.terminals.lock().await;
         if let std::collections::hash_map::Entry::Occupied(entry) = terms.entry(channel) {
+            if matches!(
+                &event,
+                TermEvent::Data(bytes)
+                    if bytes.len() > farhelm_proto::MAX_TERMINAL_DATA_LEN
+            ) {
+                self.detach_stalled_terminal(channel, entry.remove());
+                return;
+            }
             match entry.get().events.try_send(event) {
                 Ok(()) => {}
                 Err(mpsc::error::TrySendError::Full(_)) => {
-                    let handle = entry.remove();
-                    signal_detached(
-                        &handle,
-                        Detach {
-                            reason: farhelm_proto::DETACH_REASON_STALLED.to_string(),
-                            code: farhelm_proto::DetachCode::Stalled,
-                        },
-                    );
-                    self.release_upstream(channel);
+                    self.detach_stalled_terminal(channel, entry.remove());
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
                     // The consumer dropped its receiver without detaching
@@ -5307,6 +5324,134 @@ mod tests {
             "the stalled terminal must be told why it stopped, using the same reason string \
              the supervisor's own stall detach emits"
         );
+    }
+
+    /// Enforce the terminal payload cap during the attach window itself.
+    ///
+    /// The helm registers an attachment before sending `Attach`, so a
+    /// supervisor can deliver data before the `Attached` reply is processed.
+    /// An oversized frame in that window must detach only that terminal with
+    /// the ordinary stalled outcome; a frame exactly at the shared limit must
+    /// still reach the stream. Running both cases through real attach
+    /// exchanges prevents a test helper from accidentally skipping the race
+    /// the bound is meant to close.
+    #[farhelm_testtrace::test]
+    async fn terminal_data_limit_applies_before_attach_and_accepts_the_limit() {
+        let (client_side, peer_side) = tokio::io::duplex(256 * 1024);
+        let (detach_seen_tx, detach_seen_rx) = oneshot::channel();
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+
+            let first = parse_control(
+                &reader
+                    .read_frame()
+                    .await
+                    .unwrap()
+                    .expect("the first attach request must arrive"),
+            )
+            .unwrap();
+            let ControlMsg::Attach {
+                req_id, channel, ..
+            } = first
+            else {
+                panic!("expected the first Attach request, got {first:?}");
+            };
+            writer
+                .write_frame(&Frame::data(
+                    channel,
+                    vec![b'x'; farhelm_proto::MAX_TERMINAL_DATA_LEN + 1],
+                ))
+                .await
+                .unwrap();
+            writer
+                .write_control(&ControlMsg::Attached { req_id, channel })
+                .await
+                .unwrap();
+
+            let detach = timeout(Duration::from_secs(5), reader.read_frame())
+                .await
+                .expect("the oversized frame never triggered a detach")
+                .unwrap()
+                .expect("the peer closed before receiving the detach");
+            assert!(
+                matches!(parse_control(&detach).unwrap(), ControlMsg::Detach { channel: got } if got == channel),
+                "oversized terminal data must release only its own attachment: {detach:?}"
+            );
+            detach_seen_tx
+                .send(())
+                .expect("the test must still be waiting for the detach");
+
+            let second = parse_control(
+                &reader
+                    .read_frame()
+                    .await
+                    .unwrap()
+                    .expect("the second attach request must arrive"),
+            )
+            .unwrap();
+            let ControlMsg::Attach {
+                req_id, channel, ..
+            } = second
+            else {
+                panic!("expected the second Attach request, got {second:?}");
+            };
+            writer
+                .write_frame(&Frame::data(
+                    channel,
+                    vec![b'y'; farhelm_proto::MAX_TERMINAL_DATA_LEN],
+                ))
+                .await
+                .unwrap();
+            writer
+                .write_control(&ControlMsg::Attached { req_id, channel })
+                .await
+                .unwrap();
+        });
+
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (_first_channel, mut first_stream) = client
+            .attach_terminal("session", 80, 24, TerminalSelector::default(), "")
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                timeout(Duration::from_secs(5), first_stream.recv())
+                    .await
+                    .expect("the first attachment never reported its detach"),
+                Some(TermEvent::Detached(detach))
+                    if detach.reason == farhelm_proto::DETACH_REASON_STALLED
+                        && detach.code == farhelm_proto::DetachCode::Stalled
+            ),
+            "an oversized pre-Attached frame must use the stalled detach contract"
+        );
+
+        timeout(Duration::from_secs(5), detach_seen_rx)
+            .await
+            .expect("the peer never observed the first attachment's detach")
+            .expect("the peer dropped its detach readiness signal");
+        let (_second_channel, mut second_stream) = client
+            .attach_terminal("session", 80, 24, TerminalSelector::default(), "")
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                timeout(Duration::from_secs(5), second_stream.recv())
+                    .await
+                    .expect("the exact-limit frame never arrived"),
+                Some(TermEvent::Data(bytes))
+                    if bytes.len() == farhelm_proto::MAX_TERMINAL_DATA_LEN
+                        && bytes.iter().all(|byte| *byte == b'y')
+            ),
+            "a terminal frame exactly at the shared limit must still be delivered"
+        );
+
+        peer.await.unwrap();
     }
 
     /// The marker shares `Data`'s bounded-queue pressure rule rather than
