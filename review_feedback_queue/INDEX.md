@@ -38,8 +38,6 @@ One line per open item. This file must always match the feedback files in this d
   verdict when the agent launch itself was unscoped.
 - `restart-with-skips-create-validation.md` — restart-with stores argv and resume templates without create's checks, so
   a bad bundle can stop the supervisor from starting.
-- `provision-lock-map-grows-per-requested-id.md` — the host provisioning lock map gains a never-freed entry for every
-  host id a request names, registered or not.
 - `create-rollback-orphans-unconfirmed-scope.md` — a failed create whose scope kill is unconfirmed still deletes the
   row, leaving processes nothing can reach.
 - `provisioning-update-replaces-binary-before-setup-guard.md` — remote UPDATE replaces the farhelm binary before
