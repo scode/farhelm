@@ -2835,9 +2835,7 @@ test.describe("multi-host", () => {
   // plausible-looking text. Unique sentinels make each assertion about THAT
   // field in THAT row, and the table is exhaustive so a phase added later
   // arrives here without coverage rather than silently unrendered.
-  test("host-list-phase-table: every phase renders status and details", async ({
-    page,
-  }) => {
+  test("host-list-phase-table: every phase renders status and details", async ({ page }) => {
     const phases = [
       {
         id: 8001,
@@ -2935,8 +2933,59 @@ test.describe("multi-host", () => {
         },
         needles: ["sentinel-unrecognized-kind", "sentinel-unrecognized-kind-build"],
       },
+      // The development helm never calls a real peer old: keep the age
+      // cases explicit so optional and required updates exercise the UI.
+      ...[
+        { id: 8011, kind: "ssh", updateKind: "optional", label: "old version" },
+        { id: 8013, kind: "local", updateKind: undefined, label: "old version" },
+        { id: 8015, kind: "ssh", updateKind: undefined, label: "old version" },
+        { id: 8016, kind: "ssh", updateKind: undefined, label: "too new" },
+      ].map((entry) => ({
+        ...entry,
+        phase: "connected",
+        state: {
+          phase: "connected",
+          identity: "old-identity",
+          build_version: "0.1.0",
+          old_version: entry.id !== 8016,
+          newer_version: entry.id === 8016,
+          refresh: { status: "ok", sessions: 0 },
+        },
+        needles: ["old-identity", "0.1.0"],
+      })),
+      {
+        id: 8012,
+        phase: "version-skew",
+        updateKind: "required",
+        label: "needs update",
+        state: {
+          phase: "version-skew",
+          peer_protocol: 1,
+          our_protocol: 8,
+          peer_build: "0.1.0",
+          our_build: "0.2.0",
+          remediation: "update the host",
+        },
+        needles: ["0.1.0", "0.2.0"],
+      },
     ];
 
+    // A live ADD keeps the old words: age alone must not offer an action.
+    // Missing menu publication is covered by the pure eligibility test;
+    // a failed progress read does not itself withdraw the menu's offer.
+    await page.route("**/api/hosts/*/provisioning", async (route) => {
+      const hostId = Number(new URL(route.request().url()).pathname.split("/")[3]);
+      await fulfillAsHelm(route, {
+        json: {
+          host_id: hostId,
+          run_id: hostId === 8015 ? "active-add" : null,
+          operation: hostId === 8015 ? "add" : null,
+          status: hostId === 8015 ? "running" : "completed",
+          steps: [],
+          message: null,
+        },
+      });
+    });
     await page.route("**/api/hosts", async (route) => {
       const response = await route.fetch();
       const body = await response.json();
@@ -2962,11 +3011,45 @@ test.describe("multi-host", () => {
       await expect(row).toHaveAttribute("data-host-phase", entry.phase);
       const status = row.locator(".host-status");
       await expect(status.locator(".status-dot")).toBeVisible();
-      if (entry.phase === "connected") {
+      const updateKind = "updateKind" in entry ? entry.updateKind : undefined;
+      const label = "label" in entry ? entry.label : undefined;
+      if (entry.id === 8015) {
+        await expect(
+          row.locator(
+            '.provisioning-run[data-provisioning-operation="setup"][data-provisioning-status="running"]',
+          ),
+        ).toBeVisible();
+      }
+      if (updateKind) {
+        const button = row.getByRole("button", { name: /^update / });
+        await expect(button).toBeVisible();
+        await expect(button).toHaveAttribute("data-update-kind", updateKind);
+        await expect(button).toHaveAttribute("title", new RegExp(`update ${updateKind}`));
+        await expect(button).toHaveAttribute("title", /0\.1\.0/);
+        await expect(button).toHaveAttribute(
+          "title",
+          /click to update this host to the helm's version/,
+        );
+        if (updateKind === "required") {
+          await expect(button).toHaveAttribute("title", /protocol 1.*0\.2\.0.*protocol 8/);
+        } else {
+          await expect(button).toHaveAttribute(
+            "title",
+            new RegExp(helmBuild().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+          );
+        }
+        await expect(row.getByRole("status", { name: label })).toHaveCount(1);
+        await expect(status.locator(".host-status-label")).toHaveCount(0);
+        await expect(status.getByRole("button")).toHaveCount(0);
+      } else if (entry.phase === "connected" && label === undefined) {
         await expect(row.getByRole("status", { name: "connected" })).toHaveCount(1);
         await expect(status.locator(".host-status-label")).toHaveCount(0);
       } else {
         await expect(status.locator(".host-status-label")).toBeVisible();
+      }
+      if (!updateKind) await expect(row.locator(".host-update-button")).toHaveCount(0);
+      if (label !== undefined && !updateKind) {
+        await expect(status.locator(".host-status-label")).toHaveText(label);
       }
       const detail = row.locator(".host-detail");
       await expect(detail).toBeVisible();
@@ -2981,13 +3064,128 @@ test.describe("multi-host", () => {
       // asserting either one would be the same invented claim
       // `list::shared::session_locality`'s `Unknown` case refuses to make
       // for a session row (`hosts.rs`'s icon-selection doc).
-      if (entry.kind && entry.kind !== "ssh") {
+      if (entry.kind && !["ssh", "local"].includes(entry.kind)) {
         await expect(row).toHaveAttribute("data-host-kind", "unrecognized");
         await expect(row.locator(".host-kind-icon")).toHaveCount(0);
         await expect(row.locator(".visually-hidden")).toHaveCount(0);
       }
     }
   });
+
+  /**
+   * Pointer and keyboard activation must send the menu's bodyless update
+   * request, then yield the button's space to progress and focus to the menu
+   * toggle. Holding planning establishes that progress precedes any reply;
+   * the menu update tests cover automatic submission after a successful plan.
+   * A truncated long name checks the width budget beside both action targets.
+   */
+  for (const activation of ["pointer", "keyboard"] as const) {
+    test(`host-inline-update: ${activation} starts progress and keeps the header on one line`, async ({
+      page,
+    }) => {
+      const hostId = 8020;
+      const name = "user@a-very-long-remote-host-name-that-needs-ellipsis";
+      await page.route("**/api/hosts", async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        body.hosts = [
+          {
+            id: hostId,
+            kind: "ssh",
+            destination: "user@remote-host",
+            name,
+            identity: null,
+            remote_farhelm: null,
+            remote_state_dir: null,
+            state: {
+              phase: "connected",
+              identity: "old-host",
+              build_version: "0.1.0",
+              old_version: true,
+              newer_version: false,
+              refresh: { status: "ok", sessions: 0 },
+            },
+          },
+        ];
+        await route.fulfill({ response, json: body });
+      });
+      await page.route(`**/api/hosts/${hostId}/provisioning`, async (route) => {
+        await fulfillAsHelm(route, {
+          json: {
+            host_id: hostId,
+            run_id: null,
+            operation: null,
+            status: "completed",
+            steps: [],
+            message: null,
+          },
+        });
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const requests: { method: string; body: string | null; path: string }[] = [];
+      await page.route(`**/api/hosts/${hostId}/update`, async (route) => {
+        const request = route.request();
+        requests.push({
+          method: request.method(),
+          body: request.postData(),
+          path: new URL(request.url()).pathname,
+        });
+        await gate;
+        await fulfillAsHelm(route, { status: 409, json: { error: "held fixture update refused" } });
+      });
+      try {
+        await page.goto("/");
+        const row = page.locator(`[data-host-id="${hostId}"]`);
+        const button = row.getByRole("button", { name: `update ${name}`, exact: true });
+        await expect(button).toBeVisible();
+        await expect(row.getByRole("status", { name: "old version" })).toHaveCount(1);
+        await row.hover();
+        const toggle = row.locator(".host-row-menu");
+        await assertFullyPaintedAndHitTestable(page, button);
+        await assertFullyPaintedAndHitTestable(page, toggle);
+        expect(
+          await row.locator(".host-name").evaluate((el) => el.scrollWidth > el.clientWidth),
+        ).toBe(true);
+        const boxes = await Promise.all(
+          [row.locator(".host-name"), row.locator(".host-status"), button, toggle].map((el) =>
+            el.boundingBox(),
+          ),
+        );
+        expect(boxes.every(Boolean)).toBe(true);
+        const bounds = boxes.map((box) => box!);
+        expect(
+          Math.min(...bounds.map((box) => box.y + box.height)) -
+            Math.max(...bounds.map((box) => box.y)),
+        ).toBeGreaterThan(0);
+        const nameFloor = await row
+          .locator(".host-name")
+          .evaluate((el) => 4 * parseFloat(getComputedStyle(el).fontSize));
+        expect(bounds[0].width).toBeGreaterThanOrEqual(nameFloor);
+        if (activation === "pointer") {
+          await button.click();
+        } else {
+          await button.focus();
+          await expect(button).toBeFocused();
+          await page.keyboard.press("Enter");
+        }
+        await expect
+          .poll(() => requests)
+          .toEqual([{ method: "POST", body: null, path: `/api/hosts/${hostId}/update` }]);
+        await expect(row.locator('.host-update-pending[data-update-phase="planning"]')).toHaveText(
+          "updating…",
+        );
+        await expect(button).toHaveCount(0);
+        await expect(toggle).toBeFocused();
+        await assertFullyPaintedAndHitTestable(page, toggle);
+      } finally {
+        release();
+        await page.unrouteAll({ behavior: "wait" });
+      }
+    });
+  }
 
   // Retry is offered in every state and must actually DIAL: it is one
   // attempt rather than a shortened wait, and for a retired host it is the

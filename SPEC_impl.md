@@ -311,10 +311,13 @@ affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` 
 confirmations. A permanent answer uses the outlined form of its one-off tier: the YOLO confirmation's "start, and don't
 ask again on this host" and host removal's "remove, and don't ask again" keep the danger color, while host setup's "yes,
 and don't ask in the future" keeps the primary color. Each leaves its one-off action as the filled choice. The
-maintainer chose (2026-09-30) not to make a permanent answer the filled one that draws the reflex click. Pressed
-disclosures use `--accent-fill-hover` so an open trigger is distinct from a resting primary. The normal-primary entry is
-scoped per SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and
-each dialog or popup that floats over it may supply its own affirmative primary. The sidebar's secondary actions and
+maintainer chose (2026-09-30) not to make a permanent answer the filled one that draws the reflex click. The host row's
+inline update action is another deliberate outlined treatment: amber (`--warn`) for an optional update and red
+(`--danger-strong`) for a required one. Its outline signals urgency without presenting an update as a destructive
+confirmation. Being outlined, it preserves the sidebar's one-filled-control rule. Pressed disclosures use
+`--accent-fill-hover` so an open trigger is distinct from a resting primary. The normal-primary entry is scoped per
+SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and each
+dialog or popup that floats over it may supply its own affirmative primary. The sidebar's secondary actions and
 profile-row edit/delete controls use the neutral tier; menu items, tabs, composer selections, relays, and other explicit
 exemptions retain their ghost or purpose-built styling. Destructive menu items remain red text, while their confirmation
 buttons use the danger tier. SPEC.md requires the sidebar to mark the selected session's row readably at a glance, so
@@ -452,15 +455,21 @@ also reads `too new`, but keeps the red styling of every skew, since that host c
 Either way the `too new` label's hover names both versions, and Update (and a rerun of a failed Update) is not offered.
 Other phases use humanized prose and retain the stable wire token in their data attribute. A protocol-incompatible
 supervisor remains the red `needs update` case; an unparseable build leaves a connected host's age unknown and keeps the
-ordinary connected label. Each row's effective disclosure is the global checkbox OR that row's automatic update
-disclosure: the checkbox is the user's preference and no update writes it, while an update keeps its row folded during
-planning and execution, shows a pending status until a progress snapshot is available, and then publishes compact
-step/count/elapsed progress beside the row status. A failed run or unresolved diagnostic opens that row; authoritative
-success clears the automatic half for the exact tracked run. Provisioning commands live in the row menu, but active or
-retained progress stays under the row because that lifecycle owns more context than a floating menu can safely hold.
-Starting setup opens details before planning, while a running or failed retained run leaves one short trace when details
-are closed. The one exception is an update whose status is showing inline: the trace would only repeat it, so it is left
-out until that status clears.
+ordinary connected label. When an older SSH host has Update available, a compact outlined `↑ update` button replaces
+`old version` or `needs update`, amber for the former and red for a lower-protocol peer. It shares the fleet update
+eligibility predicate (remote kind, not newer, menu offer present, no live provisioning work) and sends the same bound
+Update request as the menu. The button sits outside the status region; that region retains its phase words through an
+accessible label. Its hover uses escaped peer builds and explains urgency and installing the helm's version. Current,
+newer, local, busy, and not-yet-loaded rows keep their existing presentation. Each row's effective disclosure is the
+global checkbox OR that row's automatic update disclosure: the checkbox is the user's preference and no update writes
+it, while an update keeps its row folded during planning and execution, shows a pending status until a progress snapshot
+is available, and then publishes compact step/count/elapsed progress beside the row status. A failed run or unresolved
+diagnostic opens that row; authoritative success clears the automatic half for the exact tracked run. Provisioning
+commands live in the row menu, with the older-host update shortcut also inline, but active or retained progress stays
+under the row because that lifecycle owns more context than a floating menu can safely hold. Starting setup opens
+details before planning, while a running or failed retained run leaves one short trace when details are closed. The one
+exception is an update whose status is showing inline: the trace would only repeat it, so it is left out until that
+status clears.
 
 The host actions menu follows the session menu's anchor, pointer, raised surface, header, grouped inset commands, line
 icons, muted descriptions, roving keyboard focus, and one-menu-at-a-time dismissal rules. The add-host fields, probe

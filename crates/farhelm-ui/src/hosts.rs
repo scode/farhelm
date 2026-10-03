@@ -18,7 +18,9 @@
 //! humanized word, while the stable wire token remains on `data-host-phase`
 //! for automation and machine-authored diagnostics. A compatible peer with
 //! an older parseable build is still connected, but gets the advisory
-//! `old version` label and amber status class.
+//! `old version` label and amber status class. On an older remote host with
+//! Update available, the inline action replaces the visible words while the
+//! accessible status retains them; progress takes that action's place.
 //!
 //! ## Peer-supplied text is displayed, never trusted to lay itself out
 //!
@@ -226,6 +228,68 @@ pub(crate) fn too_new_title(state: &HostPhase) -> Option<String> {
     }
 }
 
+/// The urgency of an older peer's update, independent of whether a run can start.
+///
+/// A newer build wins over the old-build hint, just as it does for the status
+/// label. Unknown or equal protocol versions do not establish a required update.
+fn host_update_kind(state: &HostPhase) -> Option<&'static str> {
+    match state {
+        HostPhase::Connected {
+            old_version: true,
+            newer_version: false,
+            ..
+        } => Some("optional"),
+        HostPhase::VersionSkew {
+            peer_protocol,
+            our_protocol,
+            ..
+        } if peer_protocol < our_protocol => Some("required"),
+        _ => None,
+    }
+}
+
+/// Explain the inline action using the versions that established its urgency.
+///
+/// Peer-controlled builds use the same display escaping as the too-new remedy.
+/// This describes installing the helm's build, not updating to an arbitrary release.
+fn host_update_title(state: &HostPhase) -> Option<String> {
+    match state {
+        HostPhase::Connected {
+            old_version: true,
+            newer_version: false,
+            build_version,
+            ..
+        } => Some(format!(
+            "this host runs farhelm {}; this helm runs {}; update optional; click to update this host to the helm's version",
+            display_peer(build_version),
+            crate::skew::CLIENT_BUILD,
+        )),
+        HostPhase::VersionSkew {
+            peer_protocol,
+            peer_build,
+            our_protocol,
+            our_build,
+            ..
+        } if peer_protocol < our_protocol => Some(format!(
+            "this host runs farhelm {} (protocol {peer_protocol}); this helm runs {} (protocol {our_protocol}); update required; click to update this host to the helm's version",
+            display_peer(peer_build),
+            display_peer(our_build),
+        )),
+        _ => None,
+    }
+}
+
+/// Share current update availability between the fleet action and inline button.
+///
+/// A missing menu offer is not permission to start. The live provisioning busy
+/// flag closes the render gap before a panel withdraws its published offer.
+fn remote_update_available(host: &Host, menu: Option<&ProvisioningMenuState>, busy: bool) -> bool {
+    host.kind.updates_automatically()
+        && !runs_newer_version(&host.state)
+        && !busy
+        && menu.is_some_and(|state| state.update)
+}
+
 /// The CSS modifier the row status carries, grouping the phases by what a
 /// person watching the panel should do about them: nothing yet
 /// (`connecting`), nothing at all (`unreachable-reprobing` — it re-probes
@@ -331,10 +395,7 @@ fn available_remote_updates(
     hosts
         .iter()
         .filter(|host| {
-            host.kind.updates_automatically()
-                && !runs_newer_version(&host.state)
-                && !busy_hosts.contains(&host.id)
-                && menus.get(&host.id).is_some_and(|state| state.update)
+            remote_update_available(host, menus.get(&host.id), busy_hosts.contains(&host.id))
         })
         .map(|host| {
             (
@@ -1467,6 +1528,11 @@ pub(crate) fn HostsPanel(
                                 .get(&host.id)
                                 .copied()
                                 .unwrap_or_default(),
+                            remote_update_available: remote_update_available(
+                                &host,
+                                provisioning_menu_states.read().get(&host.id),
+                                provisioning_busy_hosts.read().contains(&host.id),
+                            ),
                             local_setup,
                             provisioning_section: rsx! {
                                 ProvisioningPanel {
@@ -2381,6 +2447,9 @@ fn HostRow(
     update_progress: Option<HostUpdateProgress>,
     /// Provisioning commands currently offered in this row's menu.
     provisioning_menu: ProvisioningMenuState,
+    /// The shared update eligibility, including the parent's live provisioning
+    /// busy flag; unrelated page operations do not disable update planning.
+    remote_update_available: bool,
     /// The feed-driven setup/update surface built by the panel.
     provisioning_section: Element,
     on_retry: EventHandler<HostId>,
@@ -2407,6 +2476,9 @@ fn HostRow(
     HOST_ROW_RENDERS.with(|renders| *renders.borrow_mut().entry(host.id).or_insert(0) += 1);
     let id = host.id;
     let update_is_active = update_progress.is_some();
+    let inline_update = (remote_update_available && !update_is_active)
+        .then(|| host_update_kind(&host.state))
+        .flatten();
     // The binding this row rendered with, captured for provisioning clicks:
     // a request queued behind a retarget must not become work against the
     // retargeted row, so each click site below clones this into its own
@@ -2671,7 +2743,8 @@ fn HostRow(
                     aria_label: if update_is_active {
                         None
                     } else {
-                        is_connected(&host.state).then(|| phase_display_label(&host.state))
+                        (is_connected(&host.state) || inline_update.is_some())
+                            .then(|| phase_display_label(&host.state))
                     },
                     span { class: "status-dot", "aria-hidden": "true" }
                     match update_progress {
@@ -2687,9 +2760,9 @@ fn HostRow(
                             UpdateProgressLabel { key: "{summary.run_id}", summary }
                         },
                         None => rsx! {
-                            if !is_connected(&host.state)
+                            if inline_update.is_none() && (!is_connected(&host.state)
                                 || matches!(&host.state, HostPhase::Connected { old_version: true, .. })
-                                || runs_newer_version(&host.state)
+                                || runs_newer_version(&host.state))
                             {
                                 span {
                                     class: "host-status-label",
@@ -2700,8 +2773,36 @@ fn HostRow(
                         },
                     }
                 }
-                // The line always keeps its three children, so the trailing
-                // gutter does not jump while a modal dialog takes over.
+                if let Some(urgency) = inline_update {
+                    // Outside the status region: the action has its own name,
+                    // while the status still announces the outdated-host words.
+                    button {
+                        r#type: "button",
+                        class: "btn host-update-button",
+                        "data-update-kind": urgency,
+                        title: host_update_title(&host.state),
+                        aria_label: format!("update {shown_name}"),
+                        onclick: {
+                            let binding = click_binding.clone();
+                            move |_| {
+                                on_provisioning.call((id, ActionRequest {
+                                    operation: ProvisioningOperation::Update,
+                                    binding: binding.clone(),
+                                }));
+                                // Progress unmounts this control. Keep keyboard
+                                // navigation on the same host instead of body.
+                                if let Some(handle) = toggle_handle.peek().clone() {
+                                    spawn(async move {
+                                        let _ = handle.set_focus(true).await;
+                                    });
+                                }
+                            }
+                        },
+                        span { "aria-hidden": "true", "↑" }
+                        "update"
+                    }
+                }
+                // The toggle stays mounted while a modal dialog takes over.
                 // `nowrap` remains load-bearing for the fixed-position panel
                 // (F2/COR-HOST-MENU-OFFSCREEN).
                     button {
@@ -4446,6 +4547,130 @@ mod tests {
         assert_eq!(too_new_title(&skew), None);
     }
 
+    /// Inline updates are only for older remote hosts whose menu can start one.
+    /// This crosses age with host kind and live availability so an old label
+    /// cannot become an action while setup is running or before options load.
+    #[farhelm_testtrace::test]
+    fn inline_update_eligibility_requires_age_and_remote_availability() {
+        let old = HostPhase::Connected {
+            identity: None,
+            build_version: "0.13.0".into(),
+            old_version: true,
+            newer_version: false,
+            refresh: RefreshHealth::Pending,
+        };
+        let required = HostPhase::VersionSkew {
+            peer_protocol: 1,
+            peer_build: "0.13.0".into(),
+            our_protocol: 2,
+            our_build: "0.14.0".into(),
+            remediation: "update".into(),
+        };
+        let menu = ProvisioningMenuState {
+            update: true,
+            ..Default::default()
+        };
+        let mut cases: Vec<_> = every_phase()
+            .into_iter()
+            .map(|state| (state, None))
+            .collect();
+        cases.extend([
+            (old.clone(), Some("optional")),
+            (required, Some("required")),
+        ]);
+        let mut newer = old.clone();
+        if let HostPhase::Connected { newer_version, .. } = &mut newer {
+            *newer_version = true;
+        }
+        let mut newer_host = row_specimen(1);
+        newer_host.state = newer.clone();
+        assert!(!remote_update_available(&newer_host, Some(&menu), false));
+        cases.push((newer, None));
+        cases.push((
+            HostPhase::VersionSkew {
+                peer_protocol: 8,
+                peer_build: "0.13.0".into(),
+                our_protocol: 8,
+                our_build: "0.14.0".into(),
+                remediation: "unknown skew".into(),
+            },
+            None,
+        ));
+        for (state, expected) in cases {
+            assert_eq!(host_update_kind(&state), expected, "{state:?}");
+            for kind in [HostKind::Ssh, HostKind::Local, HostKind::Unrecognized] {
+                let mut host = row_specimen(1);
+                host.kind = kind;
+                host.state = state.clone();
+                for (offer, busy, available) in [
+                    (Some(&menu), false, true),
+                    (None, false, false),
+                    (Some(&menu), true, false),
+                ] {
+                    let actual = remote_update_available(&host, offer, busy)
+                        .then(|| host_update_kind(&host.state))
+                        .flatten();
+                    assert_eq!(
+                        actual,
+                        if kind == HostKind::Ssh && available {
+                            expected
+                        } else {
+                            None
+                        }
+                    );
+                }
+                assert!(!remote_update_available(
+                    &host,
+                    Some(&ProvisioningMenuState::default()),
+                    false
+                ));
+            }
+        }
+    }
+
+    /// Tooltips must explain both urgency and the installed version, without
+    /// allowing a peer's control characters to disguise which side is older.
+    #[farhelm_testtrace::test]
+    fn inline_update_hover_names_versions_urgency_and_action() {
+        let old = HostPhase::Connected {
+            identity: None,
+            build_version: "old\u{202e}build".into(),
+            old_version: true,
+            newer_version: false,
+            refresh: RefreshHealth::Pending,
+        };
+        let hover = host_update_title(&old).unwrap();
+        for word in [
+            display_peer("old\u{202e}build").as_str(),
+            crate::skew::CLIENT_BUILD,
+            "optional",
+            "click to update this host to the helm's version",
+        ] {
+            assert!(hover.contains(word), "{hover}");
+        }
+        assert!(!hover.contains('\u{202e}'));
+        let skew = HostPhase::VersionSkew {
+            peer_protocol: 1,
+            peer_build: "peer\u{202e}build".into(),
+            our_protocol: 2,
+            our_build: "helm\u{202e}build".into(),
+            remediation: "update".into(),
+        };
+        let hover = host_update_title(&skew).unwrap();
+        for word in [
+            display_peer("peer\u{202e}build").as_str(),
+            display_peer("helm\u{202e}build").as_str(),
+            "protocol 1",
+            "protocol 2",
+            "required",
+            "click to update this host to the helm's version",
+        ] {
+            assert!(hover.contains(word), "{hover}");
+        }
+        assert!(!hover.contains('\u{202e}'));
+        assert_eq!(host_update_title(&HostPhase::Unrecognized), None);
+    }
+
     /// A host running a newer farhelm than the helm is labelled "too new",
     /// connected or skewed, and the label's hover carries both versions.
     ///
@@ -4686,6 +4911,7 @@ mod tests {
                     details_open: false,
                     update_progress: None,
                     provisioning_menu: ProvisioningMenuState::default(),
+                    remote_update_available: false,
                     provisioning_section: dioxus::core::VNode::empty(),
                     on_retry,
                     on_adopt,
@@ -4757,6 +4983,7 @@ mod tests {
                         },
                         details_open: false,
                         provisioning_menu: ProvisioningMenuState::default(),
+                        remote_update_available: false,
                         provisioning_section: dioxus::core::VNode::empty(),
                         on_retry,
                         on_adopt,
