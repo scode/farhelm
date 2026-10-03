@@ -24,7 +24,6 @@ One line per open item. This file must always match the feedback files in this d
   ListSessions on its host.
 - `probe-reregister-drops-terminals.md` — probing an already-registered healthy host forces a reconnect that drops every
   open terminal on it.
-- `attach-reports-generic-timeout.md` — the attach step spins 30 s on skew/identity states and reports only "timed out".
 - `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
   sidebar keeps deleted/stale rows.
 - `stop-restart-panic-no-reply.md` — a panicking stop or restart task sends no reply, leaving the UI or `farhelm agent`

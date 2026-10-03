@@ -5701,7 +5701,10 @@
   to the reconnect request current when its attempt started, with a deterministic test of an attempt in flight across
   the request; recorded as the TODO.md `Near term` entry "Name the real refusal when a provisioned host will not
   attach". Change `wmnrrwur`, bookmark `triage-1001e/08-attach-names-refusal`, PR
-  https://github.com/scode/farhelm/pull/1449.
+  https://github.com/scode/farhelm/pull/1449. Then complete (2026-10-02), executed through the plan
+  `plans/queue/attach-refusal-reason.md` after the user chose a connection-attempt sequence number (one counter for the
+  whole connection manager): jj change `yvmpupvllktu`, bookmark `plan/attach-refusal-reason/01-attach-names-refusal`,
+  https://github.com/scode/farhelm/pull/1498.
 
 ## folder-picker-skips-symlinks.md
 
