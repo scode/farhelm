@@ -149,16 +149,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   it. The message is also wrong for the case. The update action should be greyed out for this machine, in the host's
   pop-up menu and in the inline update button on host rows, so the refusal is never reached.
 
-- **A fresh-checkout end-to-end test fails on main, and Replace with logs a provenance error.** The e2e test
-  `lost_fresh_checkout_success_replays_after_settings_change_and_helm_restart` fails every time on main (reproduced on
-  2026-10-02 by the boundary-checks plan, on unmodified main): it expects the refusal that names changed checkout
-  settings and instead gets the refusal for a host connection that changed across the helm restart. Separately, while a
-  fresh checkout replaced another session (Replace with), the helm's periodic session-list refresh once failed with the
-  supervisor reporting "the session's fresh-checkout provenance does not match its registry evidence". The next refresh
-  succeeded and nothing visible followed; the same error appears in a 2026-09-30 browser run of the existing
-  Replace-with test. Both concern fresh-checkout bookkeeping, so they are investigated together; whether they share a
-  cause is unknown. Plan: `plans/queue/fresh-checkout-provenance.md`.
-
 - **Update Farhelm while it runs.** On a Mac, updating while Farhelm is open breaks session starts, agent reports and
   `farhelm spawn` until Farhelm is restarted, because the running Farhelm keeps starting the program the installer just
   replaced. Auto-update is coming and needs this to be safe. Decided 2026-10-03: side-by-side versions inside
