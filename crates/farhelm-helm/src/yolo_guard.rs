@@ -50,11 +50,8 @@ pub(crate) fn create_is_yolo(mode: &CreateMode) -> bool {
     }
 }
 
-/// Whether a raw invocation string is a YOLO launch. An invocation the shell
-/// splitter refuses is not classified here; the create itself refuses it.
-pub(crate) fn invocation_is_yolo(invocation: &str) -> bool {
-    shell_words::split(invocation).is_ok_and(|argv| farhelm_proto::yolo::argv_is_yolo(&argv))
-}
+/// The raw classifier lives in proto and is shared with the sidebar.
+pub(crate) use farhelm_proto::yolo::invocation_is_yolo;
 
 /// Refuse a YOLO launch on `host` unless the host allows YOLO without asking or the request
 /// carries the override. Reads the host's setting from the store at the moment of the

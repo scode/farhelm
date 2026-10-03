@@ -2680,9 +2680,8 @@ samp {
   flex: 0 0 auto;
 }
 
-/* Harness and qualifier glyphs share the text cap height but not one visual
-   vocabulary: a terminal is neutral, an open lock is a permission bypass,
-   and a closed lock explicitly says Codex full-auto remains sandboxed. */
+/* Harness and qualifier glyphs share the text cap height. Raw command lines
+   that are not recognized as YOLO remain unmarked, including Codex full-auto. */
 .sidebar-glyph {
   width: 10px;
   height: 12px;
@@ -2693,9 +2692,6 @@ samp {
   color: var(--warn);
 }
 
-.permission-glyph[data-glyph="full-auto"] {
-  color: var(--info);
-}
 
 .ended-status-glyph[data-glyph="exited"] {
   color: var(--fg-1);

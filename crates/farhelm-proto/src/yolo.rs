@@ -6,7 +6,7 @@
 //! that choice is YOLO or when its harness has no other mode
 //! ([`crate::LaunchHarness::sole_permission`], which makes every Pi launch
 //! YOLO). A raw command line or profile invocation carries only argv, so it
-//! is YOLO when its program is a recognized vendor CLI and a leading switch
+//! is YOLO when its program is a recognized vendor CLI and an argument before `--`
 //! is one of that vendor's permission-bypass flags or its options spell a
 //! YOLO mode (`--permission-mode bypassPermissions`, Codex's `-a never` with
 //! `-s danger-full-access`), or when its program is one whose only mode is
@@ -16,106 +16,29 @@
 //! ([`effective_program_index`]), but no argv classifier can see through an
 //! arbitrary wrapper such as a script or `sh -c`.
 //!
-//! The raw recognition is shared with the browser's session row, which
-//! badges the same flags; keeping one table here is what stops the badge and
-//! the helm's refusal from disagreeing about the same command line. Codex's
-//! `--full-auto` is recognized (the row badges it) but is not YOLO: it skips
-//! prompts but keeps Codex's sandbox.
+//! The raw recognition is shared with the browser's session row, which calls
+//! the same classifier as the helm. Codex's `--full-auto` is deliberately not
+//! YOLO: it skips prompts but keeps Codex's sandbox, so it remains unmarked.
 
 use crate::{LaunchPermission, LaunchSelection};
 
-/// A permission-changing flag recognized on a vendor CLI's command line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InvocationMarker {
-    /// A YOLO flag by that name (Codex's `--yolo`, Muse's, Cursor's).
-    Yolo,
-    /// A flag that bypasses approvals and the sandbox (Codex's long form).
-    NoSandbox,
-    /// A flag that skips every permission prompt (Claude Code's).
-    SkipPerms,
-    /// Codex's sandboxed auto-approval: prompts skipped, sandbox kept.
-    FullAuto,
-}
-
-impl InvocationMarker {
-    /// Whether this flag makes the launch a YOLO launch. Everything but the
-    /// sandboxed `--full-auto` does.
-    #[warn(clippy::wildcard_enum_match_arm)]
-    pub fn is_yolo(self) -> bool {
-        match self {
-            InvocationMarker::Yolo | InvocationMarker::NoSandbox | InvocationMarker::SkipPerms => {
-                true
-            }
-            InvocationMarker::FullAuto => false,
-        }
-    }
-}
-
-/// Vendor-recognized executables and the unattended-mode flags worth naming
-/// for each, most consequential first within a program's own list.
-///
-/// Keyed by the program's BASENAME rather than a flat flag table: `--yolo`
-/// belongs to Codex, and matching it against ANY program's argv would badge
-/// `echo --yolo` or a future tool that happens to share a flag spelling with
-/// a vendor it has nothing to do with. A basename absent from this table
-/// earns no marker no matter what its arguments look like — nothing here
-/// guesses at a command it does not recognize.
-///
-/// These flags share one property: they change what the agent is ALLOWED to
-/// do without asking, which is the one fact about a command line worth four
-/// characters of a sidebar row. Everything else — model pins, prompts,
-/// working-directory overrides — is argument noise at this size and stays
-/// in the `title` attribute with the rest of the line. Within one program's
-/// list, order is precedence: an invocation carrying two of that vendor's
-/// flags renders the first one listed.
-const INVOCATION_MARKERS: &[(&str, &[(&str, InvocationMarker)])] = &[
-    (
-        "claude",
-        &[
-            // Claude Code: skips every permission prompt.
-            (
-                "--dangerously-skip-permissions",
-                InvocationMarker::SkipPerms,
-            ),
-        ],
-    ),
+/// Permission-bypass flags, keyed by executable basename. A matching flag
+/// on an unrelated program says nothing about its permissions. Codex's
+/// sandboxed `--full-auto` is deliberately absent.
+const YOLO_FLAGS: &[(&str, &[&str])] = &[
+    ("claude", &["--dangerously-skip-permissions"]),
+    // Both spellings bypass approvals AND the sandbox; --full-auto keeps it.
     (
         "codex",
-        &[
-            // The unabbreviated flag: bypasses approvals AND the sandbox.
-            (
-                "--dangerously-bypass-approvals-and-sandbox",
-                InvocationMarker::NoSandbox,
-            ),
-            // `--yolo` is Codex's own alias for the flag directly above —
-            // same bypass of approvals AND sandbox, shorter to type. It is
-            // NOT the sandboxed auto mode; see `--full-auto` below for that
-            // one, and do not conflate the two in future edits here.
-            ("--yolo", InvocationMarker::Yolo),
-            // Full auto-approval, but SANDBOXED: prompts are skipped, the
-            // sandbox stays enforced. Strictly less permissive than the two
-            // flags above, which is exactly why it earns a marker of its
-            // own rather than collapsing into "yolo".
-            ("--full-auto", InvocationMarker::FullAuto),
-        ],
+        &["--dangerously-bypass-approvals-and-sandbox", "--yolo"],
     ),
-    ("muse", &[("--yolo", InvocationMarker::Yolo)]),
-    // OpenCode calls its permission-bypass mode `--auto`; it is a YOLO
-    // equivalent, unlike Codex's separately sandboxed `--full-auto`.
-    ("opencode", &[("--auto", InvocationMarker::Yolo)]),
-    // Cursor's CLI, by its own program name only. The generic name `agent`
-    // is deliberately absent: other tools install a command by that name
-    // too, so a flag after `agent` says nothing about which vendor's
-    // meaning applies. Farhelm launches Cursor as
-    // `cursor-agent` for the same reason.
-    (
-        "cursor-agent",
-        &[
-            ("--force", InvocationMarker::Yolo),
-            ("-f", InvocationMarker::Yolo),
-            ("--yolo", InvocationMarker::Yolo),
-        ],
-    ),
+    ("muse", &["--yolo"]),
+    // OpenCode's --auto bypasses permissions, unlike Codex's --full-auto.
+    ("opencode", &["--auto"]),
+    // Farhelm launches Cursor as cursor-agent; the generic agent name
+    // belongs to other tools too and cannot identify Cursor.
+    ("cursor-agent", &["--force", "-f", "--yolo"]),
+    ("grok", &["--always-approve"]),
 ];
 
 /// YOLO permission modes a vendor spells as an option with a value rather
@@ -124,11 +47,6 @@ const INVOCATION_MARKERS: &[(&str, &[(&str, InvocationMarker)])] = &[
 /// (its other values, `always-ask` and `write`, are not YOLO), and Claude
 /// Code's `--permission-mode bypassPermissions`, which its CLI reference
 /// documents as the same mode `--dangerously-skip-permissions` selects.
-///
-/// Guard-only, like [`GUARD_ONLY_YOLO_FLAGS`]: the badge does not consult
-/// it. [`YOLO_OPTION_SETS`] could express these rows too (one setting each),
-/// and folding them in would badge them; that change of what the sidebar
-/// shows is left for its own decision.
 const YOLO_OPTION_VALUES: &[(&str, &str, &str)] = &[
     ("omp", "--approval-mode", "yolo"),
     ("claude", "--permission-mode", "bypassPermissions"),
@@ -139,21 +57,20 @@ const YOLO_OPTION_VALUES: &[(&str, &str, &str)] = &[
 type SettingSpellings = &'static [(&'static str, &'static str)];
 
 /// YOLO modes a vendor spells as several valued settings that must ALL be
-/// present: `(program, marker, settings)`, where each setting lists the
+/// present: `(program, settings)`, where each setting lists the
 /// `(option, value)` spellings that set it, each in either the two-argument
 /// or the `option=value` form, in any order.
 ///
 /// Codex's never-ask approval policy together with its `danger-full-access`
 /// sandbox is the same mode as `--dangerously-bypass-approvals-and-sandbox`
-/// (its CLI help), so it carries that flag's marker. Either setting alone is
+/// (its CLI help), so it is YOLO too. Either setting alone is
 /// not YOLO: `-a never` keeps Codex's sandbox, like `--full-auto`, and
 /// `-s danger-full-access` keeps its approval prompts. The `-c`/`--config`
 /// spellings set the same two config keys; Codex reads a config value as
 /// TOML, so a quoted value (`approval_policy="never"`) is the same setting
 /// ([`setting_value_matches`]).
-const YOLO_OPTION_SETS: &[(&str, InvocationMarker, &[SettingSpellings])] = &[(
+const YOLO_OPTION_SETS: &[(&str, &[SettingSpellings])] = &[(
     "codex",
-    InvocationMarker::NoSandbox,
     &[
         &[
             ("-a", "never"),
@@ -196,33 +113,20 @@ fn setting_value_matches(found: &str, expected: &str) -> bool {
     key.trim() == expected_key && unquoted == expected_value
 }
 
-/// The markers of `program`'s [`YOLO_OPTION_SETS`] entries whose every
-/// setting appears among `values`, the `(option, value)` pairs read off a
-/// command line.
-fn satisfied_option_sets<'a>(
-    program: &'a str,
-    values: &'a [(&str, &str)],
-) -> impl Iterator<Item = InvocationMarker> + 'a {
-    YOLO_OPTION_SETS
-        .iter()
-        .filter(move |(vendor, _, _)| *vendor == program)
-        .filter(move |(_, _, settings)| {
-            settings.iter().all(|spellings| {
+/// Whether all settings of one vendor's compound YOLO mode are present.
+/// A partial Codex bypass still has an approval or sandbox boundary.
+fn satisfies_option_set(program: &str, values: &[(&str, &str)]) -> bool {
+    YOLO_OPTION_SETS.iter().any(|(vendor, settings)| {
+        *vendor == program
+            && settings.iter().all(|spellings| {
                 spellings.iter().any(|(option, expected)| {
                     values.iter().any(|(found_option, found)| {
                         found_option == option && setting_value_matches(found, expected)
                     })
                 })
             })
-        })
-        .map(|(_, marker, _)| *marker)
+    })
 }
-
-/// YOLO flags recognized only by the guard ([`argv_is_yolo`]), not by the
-/// row badge's [`invocation_marker`]: Grok's `--always-approve` follows its
-/// mandatory `--no-leader`, a switch the badge's leading-switch parser does
-/// not know and stops at.
-const GUARD_ONLY_YOLO_FLAGS: &[(&str, &str)] = &[("grok", "--always-approve")];
 
 /// Programs whose only permission mode is YOLO, so any invocation of them is
 /// a YOLO launch whatever its arguments. Pi has no tool-approval gate
@@ -292,67 +196,22 @@ pub fn is_env_program(program: &str) -> bool {
 /// Derived from the tables themselves so a program added to one of them is
 /// covered here without a second list to keep in step.
 fn is_classified_program(name: &str) -> bool {
-    INVOCATION_MARKERS
-        .iter()
-        .any(|(program, _)| *program == name)
+    YOLO_FLAGS.iter().any(|(program, _)| *program == name)
         || YOLO_OPTION_VALUES
             .iter()
             .any(|(program, _, _)| *program == name)
-        || YOLO_OPTION_SETS
-            .iter()
-            .any(|(program, _, _)| *program == name)
-        || GUARD_ONLY_YOLO_FLAGS
-            .iter()
-            .any(|(program, _)| *program == name)
+        || YOLO_OPTION_SETS.iter().any(|(program, _)| *program == name)
         || SOLE_YOLO_PROGRAMS.contains(&name)
 }
 
-/// The highest-precedence permission marker among argv's leading switches,
-/// or `None` for an unrecognized program or none recognized: a recognized
-/// flag, or a [`YOLO_OPTION_SETS`] mode whose settings all appear there,
-/// ranked where its marker's flag sits in the program's own order.
-///
-/// The program is the one behind a simple `env NAME=value` prefix, if any
-/// ([`effective_program_index`]). An `env` given an option earns no marker:
-/// the badge labels only a flag it actually recognizes, unlike the guard's
-/// [`argv_is_yolo`], which errs toward asking.
-pub fn invocation_marker(argv: &[String]) -> Option<InvocationMarker> {
-    let argv = &argv[effective_program_index(argv)?..];
-    let basename = program_basename(argv)?;
-    let (_, flags) = INVOCATION_MARKERS
-        .iter()
-        .find(|(vendor, _)| *vendor == basename)?;
-    let (leading_args, values) = invocation_switches(basename, &argv[1..], flags);
-    // A satisfied option set ranks where its marker's flag sits in the
-    // program's own precedence order, so it competes with the flags fairly.
-    let rank_of = |marker: InvocationMarker| {
-        flags
-            .iter()
-            .position(|(_, listed)| *listed == marker)
-            .unwrap_or(flags.len())
-    };
-    flags
-        .iter()
-        .enumerate()
-        .filter(|(_, (flag, _))| leading_args.contains(flag))
-        .map(|(rank, (_, marker))| (rank, *marker))
-        .chain(satisfied_option_sets(basename, &values).map(|marker| (rank_of(marker), marker)))
-        .min_by_key(|(rank, _)| *rank)
-        .map(|(_, marker)| marker)
-}
-
 /// Whether a raw command line (already split into argv) is a YOLO launch,
-/// for the helm's YOLO confirmation guard.
+/// shared by the helm confirmation guard and the sidebar.
 ///
-/// Deliberately broader than [`invocation_marker`]: any argument before a
-/// `--` that exactly equals one of the program's YOLO-class flags counts,
-/// wherever it sits, as does a YOLO option value such as OMP's
-/// `--approval-mode yolo`. The badge parser stops at the first option it does
-/// not know, which is right for a label and wrong for a guard: a user profile
-/// like `claude --effort high --dangerously-skip-permissions` would slip past
-/// it. The cost runs the other way here. A flag spelling that is really some
-/// other option's value (`codex -c --yolo`) is counted too, which only asks
-/// the user a question; a miss would start a YOLO session nobody confirmed.
+/// Every argument before `--` is checked against the program's YOLO-class
+/// flags, wherever it sits, as are option-spelled modes such as OMP's
+/// `--approval-mode yolo`. A flag spelling that is really another option's
+/// value (`codex -c --yolo`) is counted too, which only asks the user a
+/// question; a miss would start a YOLO session nobody confirmed.
 /// A mode spelled as several settings (Codex's `-a never` with
 /// `-s danger-full-access`, [`YOLO_OPTION_SETS`]) counts when every setting
 /// appears anywhere before the `--`.
@@ -387,18 +246,10 @@ fn program_argv_is_yolo(argv: &[String]) -> bool {
     if SOLE_YOLO_PROGRAMS.contains(&basename) {
         return true;
     }
-    let flags = INVOCATION_MARKERS
+    let flags = YOLO_FLAGS
         .iter()
         .filter(|(vendor, _)| *vendor == basename)
-        .flat_map(|(_, flags)| flags.iter())
-        .filter(|(_, marker)| marker.is_yolo())
-        .map(|(flag, _)| *flag)
-        .chain(
-            GUARD_ONLY_YOLO_FLAGS
-                .iter()
-                .filter(|(vendor, _)| *vendor == basename)
-                .map(|(_, flag)| *flag),
-        )
+        .flat_map(|(_, flags)| flags.iter().copied())
         .collect::<Vec<_>>();
     let options = YOLO_OPTION_VALUES
         .iter()
@@ -430,7 +281,14 @@ fn program_argv_is_yolo(argv: &[String]) -> bool {
                         .and_then(|rest| rest.strip_prefix('='))
                         == Some(value)
             })
-    }) || satisfied_option_sets(basename, &values).any(InvocationMarker::is_yolo)
+    }) || satisfies_option_set(basename, &values)
+}
+
+/// Classify a raw invocation with the same shell-word splitting used to launch
+/// profiles. Invalid quoting cannot establish a YOLO mode; validation reports
+/// the malformed command separately.
+pub fn invocation_is_yolo(invocation: &str) -> bool {
+    shell_words::split(invocation).is_ok_and(|argv| argv_is_yolo(&argv))
 }
 
 /// Whether a structured launch is a YOLO launch: its harness's only mode is
@@ -449,82 +307,6 @@ fn attached_short_value(arg: &str) -> Option<(&str, &str)> {
     }
     let (option, value) = (arg.get(..2)?, arg.get(2..)?);
     (!value.is_empty()).then_some((option, value))
-}
-
-/// Recognize only switches whose argv role is unambiguous, and read the
-/// values of the known valued options among them.
-///
-/// Shell quoting does not distinguish a switch from an option value after
-/// splitting. Treat the values of known options as values, never as
-/// switches, and stop at unknown syntax (including subcommands), rather than
-/// claiming that a prompt/config value changes permissions. This
-/// deliberately recognizes only a prefix of legacy commands; structured
-/// launch provenance does not need this approximation. Returns the
-/// recognized marker switches and the `(option, value)` pairs read, the
-/// latter for [`YOLO_OPTION_SETS`].
-fn invocation_switches<'a>(
-    vendor: &str,
-    args: &'a [String],
-    markers: &[(&str, InvocationMarker)],
-) -> (Vec<&'a str>, Vec<(&'a str, &'a str)>) {
-    let valued: &[&str] = match vendor {
-        "codex" => &[
-            "-c",
-            "--config",
-            "-m",
-            "--model",
-            "-p",
-            "--profile",
-            "-C",
-            "--cd",
-            "-s",
-            "--sandbox",
-            "-a",
-            "--ask-for-approval",
-            "--add-dir",
-            "--enable",
-            "--disable",
-            "-i",
-            "--image",
-        ],
-        "claude" => &[
-            "--model",
-            "--permission-mode",
-            "--output-format",
-            "--input-format",
-            "--system-prompt",
-            "--append-system-prompt",
-            "--settings",
-        ],
-        "muse" | "opencode" => &["--model", "-m"],
-        "cursor-agent" => &["--model"],
-        _ => &[],
-    };
-    let mut switches = Vec::new();
-    let mut values = Vec::new();
-    let mut args = args.iter();
-    while let Some(arg) = args.next() {
-        if markers.iter().any(|(flag, _)| arg == flag) {
-            switches.push(arg.as_str());
-        } else if valued.contains(&arg.as_str()) {
-            // A marker-looking value remains data, even when quoted.
-            match args.next() {
-                Some(value) if value != "--" => values.push((arg.as_str(), value.as_str())),
-                _ => break,
-            }
-        } else if let Some((key, value)) =
-            arg.split_once('=').filter(|(key, _)| valued.contains(key))
-        {
-            values.push((key, value));
-        } else if let Some((option, value)) =
-            attached_short_value(arg).filter(|(option, _)| valued.contains(option))
-        {
-            values.push((option, value));
-        } else {
-            break;
-        }
-    }
-    (switches, values)
 }
 
 #[cfg(test)]
@@ -557,7 +339,7 @@ mod tests {
     /// (every harness's YOLO spelling, after its other options) are the ones
     /// this has to get right first.
     #[test]
-    fn raw_command_lines_are_classified_by_program_and_leading_flag() {
+    fn raw_command_lines_are_classified_by_program_and_flag() {
         for yolo in [
             "claude --dangerously-skip-permissions",
             "/opt/bin/codex --yolo",
@@ -601,15 +383,6 @@ mod tests {
         ] {
             assert!(!argv_is_yolo(&argv(not_yolo)), "{not_yolo}");
         }
-        assert_eq!(
-            invocation_marker(&argv("codex --full-auto")),
-            Some(InvocationMarker::FullAuto)
-        );
-        assert_eq!(
-            invocation_marker(&argv("cursor-agent --model m -f")),
-            Some(InvocationMarker::Yolo)
-        );
-        assert_eq!(invocation_marker(&argv("agent --force")), None);
     }
 
     /// Spec: the classifier looks past a leading simple `env NAME=value`
@@ -618,7 +391,7 @@ mod tests {
     /// An `env` given an option is not interpreted: the guard counts it as
     /// YOLO when a later word, or a whitespace- or `=`-separated piece of one
     /// (`env -S`), names a program the classifier knows, and as not YOLO
-    /// otherwise, and the badge shows nothing for it.
+    /// otherwise. The row uses that same conservative classification.
     ///
     /// Why: an env prefix is an ordinary way to set an API key or config
     /// directory, and the supervisor already integrates the program behind it
@@ -655,27 +428,14 @@ mod tests {
         ] {
             assert!(!argv_is_yolo(&argv(not_yolo)), "{not_yolo}");
         }
-        assert_eq!(
-            invocation_marker(&argv("env A=1 claude --dangerously-skip-permissions")),
-            Some(InvocationMarker::SkipPerms)
-        );
-        assert_eq!(
-            invocation_marker(&argv("/usr/bin/env A=1 codex --yolo")),
-            Some(InvocationMarker::Yolo)
-        );
-        assert_eq!(
-            invocation_marker(&argv("env -i claude --dangerously-skip-permissions")),
-            None,
-            "the badge labels only what it recognizes, not an uninterpreted env"
-        );
     }
 
     /// Spec: Codex's never-ask approval policy together with its
     /// `danger-full-access` sandbox is a YOLO launch in every spelling: short
     /// and long options, two-argument, `=` and attached forms, either order,
     /// and the `-c`/`--config` settings with or without TOML quotes. Either
-    /// setting alone is not. The badge shows Codex's no-sandbox marker for the
-    /// pair among its leading switches and nothing for either one alone.
+    /// setting alone is not. The row marks the pair as YOLO wherever those
+    /// options appear before `--`.
     ///
     /// Why: Codex documents this pair as the same mode as
     /// `--dangerously-bypass-approvals-and-sandbox`. Before, it matched no
@@ -698,11 +458,6 @@ mod tests {
             "env A=1 codex -a never -s danger-full-access",
         ] {
             assert!(argv_is_yolo(&argv(yolo)), "{yolo}");
-            assert_eq!(
-                invocation_marker(&argv(yolo)),
-                Some(InvocationMarker::NoSandbox),
-                "{yolo}"
-            );
         }
         for not_yolo in [
             "codex -a never",
@@ -714,7 +469,6 @@ mod tests {
             "claude -a never -s danger-full-access",
         ] {
             assert!(!argv_is_yolo(&argv(not_yolo)), "{not_yolo}");
-            assert_eq!(invocation_marker(&argv(not_yolo)), None, "{not_yolo}");
         }
     }
 

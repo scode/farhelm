@@ -205,26 +205,27 @@ live dot's mark-read action. Noncompact ended details and qualifier words occupy
 title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without ellipsis,
 clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded ages such
 as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: declared structured launch metadata is
-authoritative, while a legacy row receives only conservative shell-word executable/flag recognition; a profile name is
-not proof of either. C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode uses its
-attributed inline mark, and an unknown command uses the neutral terminal glyph. A legacy row with no name leaves that
-fact absent. `list::shared::session_locality` decides among three answers rather than two — `Local` when the session's
-host id matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why), `Remote` when
-both ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a hosts read
-that has not landed). A confirmed local glyph uses the semantic red caution color, including selected, stale, and
-compact rows, to keep local execution conspicuous. The row draws the LOCAL glyph only for a confirmed `Local` verdict —
-an `Unknown` row draws no glyph at all, never the local one, because a glyph is a positive claim `session_locality` has
-no evidence to back. The 2026-08-23 rule's weaker promise survives underneath: unknown locality still never SUPPRESSES
-an available host label, it only ever leaves the row free to show one it already has, and the glyph rule adds a second
-promise on top rather than replacing the first. Legacy rows without a host name at all necessarily show none regardless
-— locality answers whether a name would be shown, not whether one exists to show. The agent track is rendered as glyphs:
-structured launch metadata decides the harness and permission mark when present, otherwise conservative recognition uses
-the program basename plus a permission glyph. Legacy recognition never reads a known option's value as a switch and
-stops at unknown syntax, subcommands, or `--`, so argument data cannot pose as a permission flag; it reads those values
-only to recognize a vendor's documented option-spelled mode (Codex's `-a never` with `-s danger-full-access`). The
-closed approval glyph distinguishes Goose's `approve`, `smart approve`, and `chat` metadata from the open YOLO warning;
-an omitted Pi permission is rendered as YOLO for compatibility with older snapshots, while an omitted OMP permission is
-rendered as an honest absence — OMP has no rewrite-to-default rule for the raw-invocation marker to inherit. The full
+authoritative, while a legacy row receives only shell-word executable recognition plus the shared YOLO classifier; a
+profile name is not proof of either. C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode
+uses its attributed inline mark, and an unknown command uses the neutral terminal glyph. A legacy row with no name
+leaves that fact absent. `list::shared::session_locality` decides among three answers rather than two — `Local` when the
+session's host id matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why),
+`Remote` when both ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a
+hosts read that has not landed). A confirmed local glyph uses the semantic red caution color, including selected, stale,
+and compact rows, to keep local execution conspicuous. The row draws the LOCAL glyph only for a confirmed `Local`
+verdict — an `Unknown` row draws no glyph at all, never the local one, because a glyph is a positive claim
+`session_locality` has no evidence to back. The 2026-08-23 rule's weaker promise survives underneath: unknown locality
+still never SUPPRESSES an available host label, it only ever leaves the row free to show one it already has, and the
+glyph rule adds a second promise on top rather than replacing the first. Legacy rows without a host name at all
+necessarily show none regardless — locality answers whether a name would be shown, not whether one exists to show. The
+agent track is rendered as glyphs: structured launch metadata decides the harness when present. The sidebar's YOLO mark
+and the helm's YOLO confirmation must agree on every launch by calling the same `farhelm_proto::yolo` functions:
+`selection_is_yolo` for structured launches and `invocation_is_yolo` for command lines and profile invocations. No other
+code re-derives that answer. Raw launches the guard would ask about are marked YOLO, including uninterpretable `env`
+prefixes naming a known agent. The classifier recognizes documented vendor flags and option-spelled modes, including
+Codex's `-a never` with `-s danger-full-access`, while preserving the rule that Codex's sandboxed `--full-auto` is not
+YOLO. Unknown command lines remain unknown rather than being inferred as safe. An omitted Pi permission is rendered as
+YOLO for compatibility with older snapshots, while an omitted OMP permission is rendered as an honest absence. The full
 invocation and a profile's snapshotted name remain in its accessible text and tooltip. The working directory is
 tilde-folded against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold
 against properly. Every one of those abbreviations is lossy, so the untouched string rides along in a `title` attribute

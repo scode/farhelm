@@ -3859,7 +3859,7 @@ test("compact rows retain distinct ended and harness glyphs within two character
     { id: "exited", invocation: "muse --yolo", harness: "muse", permission: "yolo", status: { state: "exited", exit_code: 7 }, annotation: null },
     { id: "interrupted", invocation: "claude --dangerously-skip-permissions", harness: "claude", permission: "yolo", status: { state: "interrupted" }, annotation: null },
     { id: "error", invocation: "opencode --auto", harness: "opencode", permission: "yolo", status: { state: "error", detail: "cannot launch" }, annotation: null },
-    { id: "full-auto", invocation: "codex --full-auto", harness: "codex", permission: "full-auto", status: { state: "idle" }, annotation: null },
+    { id: "full-auto", invocation: "codex --full-auto", harness: "codex", permission: null, status: { state: "idle" }, annotation: null },
     { id: "unknown", invocation: "sleep 300", harness: "terminal", permission: null, status: { state: "idle" }, annotation: null },
   ];
   await patchPreferences(request, { compact: true });
