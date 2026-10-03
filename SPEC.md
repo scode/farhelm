@@ -51,14 +51,15 @@ One control plane, two ways to face it:
    defines), finds it in the Homebrew prefixes itself because GUI apps do not inherit the shell `PATH`, and refuses to
    start — naming the binary, the version found, and the floor — when none acceptable exists; `FARHELM_TMUX` overrides
    the choice.
-2. **Web interface**: the helm — wherever it runs — always serves a browser UI with the same capabilities, so a helm
+2. **Web interface**: a standalone helm — wherever it runs — serves a browser UI with the same capabilities, so a helm
    running on a Linux host is fully usable with nothing installed on the client machine. The native app's embedded helm
-   serves the web UI too.
+   is an internal part of the app: it serves only its own window, on a loopback port chosen for that launch, and serves
+   no browser UI.
 
 The two client forms have the same capabilities: terminal, attachments, lifecycle operations, host registration, and
-profile management in the helm-owned catalog. They differ only in packaging. These are the only two faces the helm has —
-a web UI, or the local app embedding it. There is no remote native-app-to-helm mode: a helm running on a Linux host is
-reached through its web UI, period.
+profile management in the helm-owned catalog. They differ only in packaging. These are the only two faces the product
+has — a standalone helm's web UI, or the local app's internal window. There is no remote native-app-to-helm mode: a helm
+running on a Linux host is reached through its web UI, period.
 
 The Mac is not architecturally special: it runs a normal supervisor that any helm — the app's embedded one, or one on a
 Linux host — can register and drive. The supervisor is a plain command-line process on every platform:
@@ -1444,13 +1445,13 @@ The [maintainer-confirmed decisions](#maintainer-confirmed-decisions) below defi
 trust between hosts, and the exact temporary exceptions for agent-requested session creation and cloning. Apply those
 boundaries when interpreting the transport and credential rules here.
 
-Steady-state operation has exactly two network edges — the browser to the helm (token-authenticated) and the helm to
-each supervisor (SSH) — plus one deliberately local one.
+Steady-state operation has exactly two network edges — the browser to a standalone helm (token-authenticated) and the
+helm to each supervisor (SSH) — plus the desktop app's deliberately local loopback edge.
 
-- **Client to helm**: the helm serves its web UI over plain HTTP bound to loopback only, with a required token. The helm
-  refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine means an
-  SSH port forward the user sets up themselves — there is no built-in tunneling or Tailscale integration in v1. The
-  browser therefore always talks to the loopback literal `http://127.0.0.1:<port>`, which is conveniently a secure
+- **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
+  The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine
+  means an SSH port forward the user sets up themselves — there is no built-in tunneling or Tailscale integration in v1.
+  The browser therefore always talks to the loopback literal `http://127.0.0.1:<port>`, which is conveniently a secure
   context — the precondition the browser clipboard APIs require to be reachable at all. Eligibility is not the same as
   success: engine policy and per-request permission still apply on top of it, and a clipboard operation that the engine
   refuses fails silently by the Terminal experience section's own clipboard contract above, not with an error. The token
@@ -1461,27 +1462,33 @@ each supervisor (SSH) — plus one deliberately local one.
   directly rather than through the token, are exempt from rotation, and its open connections stay up through one.
   Existing terminal and event-feed connections may remain usable or close on rotation, whichever keeps the
   implementation simpler; reconnecting requires a current credential. Rotation does not stop running agent sessions. The
-  native app embeds its helm; that edge is local. The token keeps other users OUT of the helm; it does not let the
-  browser tell the helm apart from another local user's process that binds the same port while the helm is down. That
-  gap is accepted in v1: the browser UI is recommended only on a machine with no other, untrusted local users, and the
-  native app is the preferred client wherever it is available. `docs/security.md` records the reasoning. The UI is
-  served only under the IPv4 literal, never under the names `localhost` or `[::1]`: the helm binds only `127.0.0.1`, so
-  another local account can bind `[::1]` on the same port at any time, even while the helm runs, and a browser that
-  resolves `localhost` to `::1` would load that account's page under the origin holding the device secret. Refusing the
-  names keeps any device secret from being stored under an origin another account can serve; a plain page load that
-  names them and still reaches the helm is redirected to `127.0.0.1`. A device secret a browser stored under `localhost`
-  before this rule remains exposed to such a squatter until the token is rotated, and a squatter on `localhost` can
-  still show a lookalike token prompt, which falls under the gap accepted above. Whether the web token is stored in the
-  user's password manager is the user's choice: the browser prompt is an ordinary password field, and Farhelm does not
-  try to stop a browser from offering to save it or keep a synced store from holding it. A saved token being autofilled
-  into a lookalike prompt is the same port-squatter gap. The helm's Origin check is a browser-side defense: it keeps
-  pages in the user's browser, whose `Origin` the browser sets truthfully, away from the helm. The native app's webview
-  is exempted from it by custom URL schemes (`dioxus://`, and `wry://` for the webview library underneath), which every
-  desktop app built on that framework or library can present, so content displayed by another such application on the
-  machine also passes the Origin check. That is accepted, for the browser-facing check only: such content still has no
-  credential, and the check was never meant to recognize the native app. It is not accepted for the native app. Nothing
-  that establishes the native app as a client may rely on `Origin`; that rests on the credential the native process
-  obtains itself, and hardening that keeps other software from passing for the native app goes through that credential.
+  desktop app uses a different client boundary: its embedded helm serves no browser UI and exposes no token exchange. It
+  chooses a fresh loopback port at each launch and accepts only the two credentials minted in memory for that launch;
+  stored browser credentials in the shared state directory do not authenticate there. The token-control commands still
+  operate on the shared durable token for a standalone helm started later. Dioxus itself also keeps a loopback WebSocket
+  for its UI updates, protected by a random per-launch key. That framework listener is accepted; removing it would
+  require maintaining a Dioxus fork. The desktop app embeds its helm; that edge is local. The token keeps other users
+  OUT of a standalone helm; it does not let the browser tell the helm apart from another local user's process that binds
+  the same port while the helm is down. That gap is accepted in v1: the browser UI is recommended only on a machine with
+  no other, untrusted local users, and the native app is the preferred client wherever it is available.
+  `docs/security.md` records the reasoning. The UI is served only under the IPv4 literal, never under the names
+  `localhost` or `[::1]`: the helm binds only `127.0.0.1`, so another local account can bind `[::1]` on the same port at
+  any time, even while the helm runs, and a browser that resolves `localhost` to `::1` would load that account's page
+  under the origin holding the device secret. Refusing the names keeps any device secret from being stored under an
+  origin another account can serve; a plain page load that names them and still reaches the helm is redirected to
+  `127.0.0.1`. A device secret a browser stored under `localhost` before this rule remains exposed to such a squatter
+  until the token is rotated, and a squatter on `localhost` can still show a lookalike token prompt, which falls under
+  the gap accepted above. Whether the web token is stored in the user's password manager is the user's choice: the
+  browser prompt is an ordinary password field, and Farhelm does not try to stop a browser from offering to save it or
+  keep a synced store from holding it. A saved token being autofilled into a lookalike prompt is the same port-squatter
+  gap. The helm's Origin check is a browser-side defense: it keeps pages in the user's browser, whose `Origin` the
+  browser sets truthfully, away from the helm. The native app's webview is exempted from it by custom URL schemes
+  (`dioxus://`, and `wry://` for the webview library underneath), which every desktop app built on that framework or
+  library can present, so content displayed by another such application on the machine also passes the Origin check.
+  That is accepted for the browser-facing check only: such content still has no credential, and the check was never
+  meant to recognize the native app. It is not accepted for the native app. Nothing that establishes the native app as a
+  client may rely on `Origin`; that rests on the credential the native process obtains itself, and hardening that keeps
+  other software from passing for the native app goes through that credential.
 - **Helm to supervisor**: SSH, and only SSH, for every remote supervisor. Passwordless access from the helm's machine,
   as the user, is the requirement; authentication is the user's SSH keys, and supervisors listen on no network port of
   their own. Registering a host means giving the helm its SSH destination — there is no supervisor token to manage. The
@@ -1535,7 +1542,8 @@ The first usable version is complete when all of the following pass:
 1. From the helm on the Mac (native app) — with helm-side access to the configured release source (GitHub by default) or
    a staged payload directory — given nothing but passwordless SSH to a fresh Ubuntu host, provision it in one action:
    supervisor installed and started without root, host registered, sessions operable with no further network setup. Also
-   open the same helm's web UI from a browser (token-authenticated).
+   quit the app, start a standalone `farhelm helm run` on the same state directory, and open that helm's web UI from a
+   browser (token-authenticated). Stop the standalone helm and relaunch the app before continuing.
 2. Create and launch an official Claude Code session in one action, in an existing `jj` workspace where Git reports
    detached HEAD.
 3. Create a local (Mac) session the same way; both appear in one list.
@@ -1543,7 +1551,8 @@ The first usable version is complete when all of the following pass:
 5. Quit and relaunch the app: both sessions are still running, terminal state intact, exactly as left. Then reboot the
    Mac: the remote session is untouched; the local session shows interrupted, and opening it offers resume that restores
    the conversation.
-6. Attach to the remote session from the web UI; the native app visibly detaches.
+6. Quit the app and start a standalone `farhelm helm run` on the same state directory. Attach to the remote session from
+   one authenticated browser tab, then another; the first tab visibly detaches.
 7. Ask Claude to create a new `jj workspace` and spawn a child session via the provided CLI; the child appears in the
    client without refresh.
 8. Restart the Linux supervisor while its session runs: the terminal is uninterrupted and no state is lost.
@@ -1943,13 +1952,13 @@ the desktop app on a Mac.
 Viewing and rotating the browser sign-in token through `farhelm helm token show|rotate` on the helm's machine is
 sufficient for the current product. An app-UI token-management surface is not a current requirement.
 
-Browser sign-in token rotation prevents old browser credentials from admitting new requests to the helm (the desktop
-app's own credentials are exempt; see "Client to helm"). It does not require cancelling requests already admitted,
-including attachment uploads, or rolling back work already performed. Already-open terminal and event-feed connections
-may continue to work, including terminal input, or may close as a consequence of rotation. Both outcomes are explicitly
-acceptable; prefer the simpler implementation. Neither outcome alone is a defect or a reason to add cancellation or
-continuity machinery. Any new request or connection, including a reconnect, must authenticate with a current credential.
-Rotation does not stop the agent processes running in Farhelm sessions.
+Browser sign-in token rotation prevents old browser credentials from admitting new requests to a standalone helm. The
+desktop helm accepts only its own launch's credentials, which are exempt; see "Client to helm". It does not require
+cancelling requests already admitted, including attachment uploads, or rolling back work already performed. Already-open
+terminal and event-feed connections may continue to work, including terminal input, or may close as a consequence of
+rotation. Both outcomes are explicitly acceptable; prefer the simpler implementation. Neither outcome alone is a defect
+or a reason to add cancellation or continuity machinery. Any new request or connection, including a reconnect, must
+authenticate with a current credential. Rotation does not stop the agent processes running in Farhelm sessions.
 
 Supporting a range of historical data schemas and hardening every upgrade/downgrade path are not current design goals.
 During feature design, agents must alert the maintainer to potential loss of data or state and absence of a downgrade

@@ -40,8 +40,9 @@ include!(concat!(env!("OUT_DIR"), "/embedded_ui.rs"));
 /// to keep the desktop build's asset set and this tree's contents identical
 /// for exactly that reason.
 ///
-/// `--ui-dist` and `FARHELM_DESKTOP_UI_DIST` redirect only the HTTP side;
-/// neither changes what the native window renders.
+/// `--ui-dist` affects only standalone helm serving. The desktop window
+/// renders its component tree through the native asset handler, while its
+/// embedded helm serves no static UI at all.
 pub fn embedded_ui() -> Option<&'static include_dir::Dir<'static>> {
     #[cfg(farhelm_embedded_ui)]
     {

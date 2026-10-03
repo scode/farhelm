@@ -892,6 +892,7 @@ impl Harness {
                     _dir.path().to_path_buf(),
                     crate::provisioning::PayloadSelection::Default,
                     cfg!(farhelm_release_build),
+                    crate::ServingMode::Standalone,
                 )
                 .expect("build restarted app state"),
             ),
@@ -1167,6 +1168,7 @@ impl FleetBuilder {
                 state_dir,
                 crate::provisioning::PayloadSelection::Default,
                 cfg!(farhelm_release_build),
+                crate::ServingMode::Standalone,
             )
             .expect("build harness app state")
         });

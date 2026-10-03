@@ -2495,8 +2495,10 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   startup file that overwrote user edits every boot would make the two fight. Validation is all-or-nothing — a malformed
   file, an unusable destination, or a destination listed twice fails startup with the entry named and nothing written,
   since a helm that came up with three of five guaranteed hosts looks healthy and is not.
-- axum serving: REST for CRUD (sessions, profiles, hosts), a WebSocket event stream for live session-list updates, a
-  WebSocket per attached terminal, and the static UI bundle. Loopback bind enforced — refuses non-loopback per SPEC.md.
+- axum serving: REST for CRUD (sessions, profiles, hosts), a WebSocket event stream for live session-list updates, and a
+  WebSocket per attached terminal. A standalone helm also serves the static UI bundle; the desktop's embedded helm uses
+  the same API routes with no static fallback, no token-exchange route, and a fresh kernel-selected loopback port.
+  Loopback bind enforced — refuses non-loopback per SPEC.md.
 - Web token: random 128-bit value minted on the helm's first run and stored recoverably in helm.db so `token show` can
   print it. Browser auth exchanges it once for a random 128-bit device secret returned in the response body; the browser
   keeps that secret in origin-scoped localStorage, whose origin includes the loopback port, and sends it explicitly as a
@@ -2510,17 +2512,18 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   Origin guard remains defense in depth; no ambient browser credential remains, so this flow has no CSRF edge.
 - The desktop app's two credentials (one for native REST, one for the webview's localStorage and WebSocket subprotocols)
   bypass that exchange. The embedded helm mints them in memory at startup and hands them to the desktop process through
-  `run_embedded`'s readiness channel; it keeps only their SHA-256 digests, in memory, and checks them before the stored
-  rows. They are never device rows, so rotation's delete and the 64-row eviction cannot reach them, and sockets they
-  authenticate are not closed by rotation. No HTTP route mints one, so a browser on the same port cannot obtain a
-  credential rotation would not revoke. They die with the process, so nothing persists or accumulates across launches,
-  and the app keeps none on disk. With nothing to revoke, the desktop has no re-authentication path: a native 401 is
-  reported as an error, and the window's failure page with its Retry button is left for genuinely broken states, such as
-  a webview whose localStorage refuses the write (`desktop-auth.js` treats that as an authentication failure, since the
-  page's sockets read their credential from there). Like a browser's, the webview's secret is readable by script in the
-  window; unlike a browser's, a stolen one survives rotation and ends only when the app quits.
+  `run_embedded`'s readiness channel; it keeps only their SHA-256 digests, in memory, and checks them before any stored
+  rows. It rejects stored browser rows from the shared state directory, so only the current launch can authenticate.
+  They are never device rows, so rotation's delete and the 64-row eviction cannot reach them, and sockets they
+  authenticate are not closed by rotation. No HTTP route mints one, and the embedded helm serves no browser UI. They die
+  with the process, so nothing persists or accumulates across launches, and the app keeps none on disk. With nothing to
+  revoke, the desktop has no re-authentication path: a native 401 is reported as an error, and the window's failure page
+  with its Retry button is left for genuinely broken states, such as a webview whose localStorage refuses the write
+  (`desktop-auth.js` treats that as an authentication failure, since the page's sockets read their credential from
+  there). Like a browser's, the webview's secret is readable by script in the window; unlike a browser's, a stolen one
+  survives rotation and ends only when the app quits.
 - The loopback guard accepts `Host` and `Origin` only as the IPv4 literal `127.0.0.1:<port>` (bare `127.0.0.1` on port
-  80, where browsers omit the default port), plus the desktop webview's custom schemes as Origin. That exemption is a
+  80, where browsers omit the default port), or the native webview's custom schemes as Origin. That exemption is a
   scheme prefix and cannot be narrower in a useful way: dioxus-desktop hardcodes the page URL `dioxus://index.html/` on
   Linux and macOS, so every Dioxus desktop app sends the same Origin, and `wry://` is open to any app built on wry
   directly. Another such app's content passing the guard is the residual SPEC.md "Client to helm" accepts for this
@@ -2767,12 +2770,10 @@ record is gone.
 The dx-produced bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's
 `asset!()` files were the only thing that needed one. They are served instead from the UI tree compiled into
 `farhelm-helm`, through a `dioxus-desktop` asset handler registered on `/assets/*`, handed to the webview over the
-`dioxus://` scheme. By default — and in every release build — those are the same bytes the helm serves to a browser,
-since both read the compiled-in tree; `FARHELM_DESKTOP_UI_DIST` breaks that identity deliberately, pointing only the
-loopback helm at a directory on disk while the window keeps rendering from the embedded tree. Registering a handler for
-a path prefix takes precedence over dioxus's own filesystem resolver, so there is no bundle-directory fallback at all;
-the price is that the desktop build's asset set and the web bundle's must be identical, which
-`scripts/check-desktop-assets.sh` enforces on every change.
+`dioxus://` scheme. The embedded helm does not serve this tree to browsers; standalone helm builds may serve the
+compiled-in tree or an explicit `--ui-dist` directory. Registering a handler for a path prefix takes precedence over
+dioxus's own filesystem resolver, so there is no bundle-directory fallback at all; the price is that the desktop build's
+asset set and the web bundle's must be identical, which `scripts/check-desktop-assets.sh` enforces on every change.
 
 A releasable `farhelm-desktop` must be produced by `dx`, not by Cargo alone. The `asset!()` macro emits a placeholder
 into a `__ASSETS__` link section and dx rewrites those symbols with content-hashed names after linking; a plain
