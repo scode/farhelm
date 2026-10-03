@@ -414,6 +414,18 @@ Then, for each `[approved]` plan in queue order:
 5. `queue remove <slug> --merged <the PR numbers just landed>`, which refuses while any of the plan's PRs is still open
    and checks that each named PR merged.
 
+Validation during a landing never ends on a clock. Do not pass the recorder's `--timeout`, wrap a command in `timeout`,
+or give any other hard-coded deadline the power to kill a test run or a build. A deadline picked before the run starts
+is a guess about how slow the machine and the failures will be, and a run killed at that minute reports everything it
+had not reached as "did not run", which is evidence of nothing. Start a long run in the background with nothing that
+ends it on a timer. If you want to look at it after a while, arm something that only wakes you: a watcher on the run's
+log, or the harness's own scheduled wake-up. On waking, investigate: read the progress and the failures so far, then
+keep waiting, start a narrower run, or stop this one on purpose because what it is still doing no longer helps. Stopping
+a run is that decision, made with the evidence in hand, never a timer's. Time limits that belong to a suite itself, such
+as Playwright's per-test timeout or the nextest configuration's slow-test settings, are unaffected. Where the harness
+caps how long a background command may live, use the longest cap it allows and wake well before it, so the cap is never
+what ends the run.
+
 `queue status` flags an approved plan with no open PRs, with the merged PR numbers it can find, so a landing that
 stopped between the last merge and `remove` is finished by the next one. When it finds none merged (an interrupted
 abandon, or PRs the maintainer closed), it says to ask the maintainer: never `remove` a plan whose work did not land. An
