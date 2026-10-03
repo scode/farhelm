@@ -5320,6 +5320,25 @@ samp {
   overflow-x: auto;
 }
 
+/* The terminal text-size buttons (A-/A+), pushed to the strip's right end
+   by the auto margin while the strip has room. When it does not, they
+   scroll with everything else rather than covering a tab; the strip's own
+   `overflow-x: auto` is the one overflow rule for all of it. Neutral like
+   "+ terminal" (they are actions, not tabs) and sized like the tabs so the
+   strip keeps one height. */
+.terminal-text-size {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.tab-text-size {
+  font-size: 12px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
 /* One tab is TWO sibling buttons in a wrapper (HTML forbids nesting a
    button inside a button — see `TabStripItem` in lib.rs), visually joined
    so they still read as one control. */
