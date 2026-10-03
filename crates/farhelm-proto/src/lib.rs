@@ -4770,7 +4770,11 @@ mod tests {
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
         assert_eq!(skew.peer_protocol, 30);
-        assert_eq!(skew.our_protocol, 35);
+        // This build's own version, not a literal: the number itself is
+        // pinned once, by `protocol_version_is_pinned_at_*`, and a second
+        // literal here went stale at the 35 -> 36 bump and failed the
+        // v0.22.0-rc.3 release gate.
+        assert_eq!(skew.our_protocol, PROTOCOL_VERSION);
 
         // The reverse direction: a v30 receiver (the refusal rule itself,
         // modeled by its exact-version check) meets a v31 hello and hangs up.
