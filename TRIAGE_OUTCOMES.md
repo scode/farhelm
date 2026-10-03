@@ -6309,7 +6309,8 @@
   lines of: in the browser, an action still pending when the token prompt opens may lose its report; the helm still
   carries it out, and the list shows the result after sign-in. The desktop guarantee stays as specified (see the desktop
   credential decisions above). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-signin-recovery.md`.
+- Execution: complete — planned in `plans/queue/triage-signin-recovery.md`; jj change `syytzxqntspm`, bookmark
+  `plan/triage-signin-recovery/03-browser-carve-out`, https://github.com/scode/farhelm/pull/1489.
 
 ## list-ingress-id-validation-gap.md
 
