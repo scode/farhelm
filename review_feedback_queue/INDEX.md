@@ -7,8 +7,6 @@ One line per open item. This file must always match the feedback files in this d
 - `claude-clear-report-dropped-on-claim-timeout.md` — a Claude `/clear` report refused after a 1 s capture-claim wait is
   never resent, so Resume keeps reopening the cleared conversation.
 
-- `desktop-protocol-filesystem-fallback.md` — The desktop page can request files outside the embedded assets through the
-  framework protocol. No script-injection exploit was found; this is a native hardening concern.
 - `terminal-output-queue-missing-byte-budget.md` — Opening one hostile remote terminal can make the helm retain almost 2
   GiB of output before its message-count limit trips, affecting the process that serves all hosts.
 
