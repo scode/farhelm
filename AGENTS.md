@@ -374,6 +374,10 @@ named plan as variants), "drain the plans" (optionally "and keep monitoring"), "
 "land the approved plans", "release plan X", and "plan help" are defined in `plans/AGENTS.md`; read it before any of
 those, or before changing anything in the directory.
 
+Every planning-system flow starts on a clean working copy of the latest `main`, and a dirty working copy aborts the flow
+with a report to the maintainer. A drain returns to clean `main` between plans; `plans/AGENTS.md` defines the exact jj
+boundary and applies it to the related planning and landing flows as well.
+
 # review_feedback_queue/
 
 `review_feedback_queue/` holds review feedback that outlived its review: one file per finding, indexed by

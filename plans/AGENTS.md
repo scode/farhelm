@@ -114,6 +114,20 @@ redacted commands and recorder run ids, per root `AGENTS.md`. The script refuses
 `/private/` path or the host name, and names the line; rephrase and run it again. When that text is the maintainer's own
 words, agree the rephrasing with them.
 
+## Clean-main boundary
+
+Every planning-system flow starts from a clean working copy of the latest `main`. Run `jj status` first. If it reports
+changes, abort the flow and tell the maintainer which paths are dirty; do not stash, commit, claim a plan, or carry
+those changes into a plan checkout. Once the status is clean, fetch `origin`, start an empty working copy from
+`main@origin` with `jj new main@origin`, and verify clean status again before planning, picking, executing, draining,
+reviewing, or landing plans.
+
+After a plan closes, a drain must return to a clean working copy of the latest `main` before considering another plan.
+The same sequence applies: confirm the working copy is clean, fetch `origin`, run `jj new main@origin`, and verify clean
+status again. If the previous plan left uncommitted or otherwise unreconciled work, stop and report it instead of
+letting the next plan inherit it. The clean-main boundary applies between plans even when the earlier plan delivered,
+blocked, or gave up its claim; a monitor's baseline commit is not a reason to skip the reset.
+
 ## Sub-agents this file requires
 
 Three checks below run as fresh-context, read-only native sub-agents of the executing harness, on the executing
@@ -128,11 +142,11 @@ request identifies entries in bulk ("all the items in the near term bucket"). Wh
 related, you may propose merging them into one plan, but planning each entry alone is the default and merging needs the
 maintainer's agreement. A merged plan references every entry it covers, and each of those entries references the plan.
 
-Fetch first, and work from the latest `main@origin`. An entry that already references a plan is skipped and reported,
-not planned again; a request to revise an existing plan updates that plan's file in place, which is allowed only while
-the plan is `pending` or `blocked`. Never reuse a slug that has ever existed under `plans/`: `queue check-slug <slug>`
-refuses one, because an old plan's working log may still sit beside the checkouts and a new plan with that name would
-resume from it.
+Apply the clean-main boundary first, then work from the latest `main@origin`. An entry that already references a plan is
+skipped and reported, not planned again; a request to revise an existing plan updates that plan's file in place, which
+is allowed only while the plan is `pending` or `blocked`. Never reuse a slug that has ever existed under `plans/`:
+`queue check-slug <slug>` refuses one, because an old plan's working log may still sit beside the checkouts and a new
+plan with that name would resume from it.
 
 For each plan, run `scode-build-goal` with the entry's text (and whatever the maintainer said about it) as the goal,
 with these overrides on top of the skill's own rules:
@@ -241,7 +255,7 @@ its open PRs. Record the pick and its reasoning in the executor log.
 
    A released claim means: drop it from the executor log, push nothing more for that plan and write nothing more to its
    working log, notify, and continue with a fresh pick.
-2. `jj git fetch`, `queue status`, and pick (Picking above). Nothing picked: the round is over.
+2. Apply the clean-main boundary, then run `queue status` and pick (Picking above). Nothing picked: the round is over.
 3. Claim. Generate a claim id (`python3 -c 'import secrets; print(secrets.token_hex(3))'`), write slug, id and
    `claiming` to the executor log, then `queue claim <slug> --claim <id>`. Exit 10 means someone else got there first:
    pick again, reusing the analysis you already have for the remaining candidates. Exit 3 is ambiguous: run
@@ -250,12 +264,12 @@ its open PRs. Record the pick and its reasoning in the executor log.
 4. Re-check. Run `queue status` again. If a plan claimed since your pick is a strong conflict with this one, give the
    claim back (`queue unclaim`) and pick again.
 5. Read the plan file from `main@origin`, including any `## Decisions`.
-6. Set up the base. If the plan has open `plan/<slug>/*` PRs (a resume), track those bookmarks, rebase that stack onto
-   `main@origin` as a careful rebase (root `AGENTS.md`), and build on its tip; otherwise start a new change on
-   `main@origin`. Conflicts in the shared bookkeeping files listed under Picking are mechanical: keep both sides. A
-   conflict that needs a design decision is a block (step 10). A plan PR the maintainer closed without merging is the
-   maintainer rejecting it, unless a Decisions entry says otherwise: block with that as the question rather than
-   rebuilding it or carrying on above it.
+6. Set up the base from the clean `main@origin` working copy. If the plan has open `plan/<slug>/*` PRs (a resume), track
+   those bookmarks, rebase that stack onto `main@origin` as a careful rebase (root `AGENTS.md`), and build on its tip;
+   otherwise start a new change on `main@origin`. Conflicts in the shared bookkeeping files listed under Picking are
+   mechanical: keep both sides. A conflict that needs a design decision is a block (step 10). A plan PR the maintainer
+   closed without merging is the maintainer rejecting it, unless a Decisions entry says otherwise: block with that as
+   the question rather than rebuilding it or carrying on above it.
 7. Resume check, whenever the plan has a working log or open PRs. Read the whole working log, the open PRs, and the
    Decisions, then write a "where this stands" entry in the working log: what is built and pushed, what is half done,
    what the latest decision asks for, and what comes next. If the log names another checkout and its last recorded
@@ -318,8 +332,10 @@ dropped.
 
 ## Draining: "drain the plans"
 
-Execute one plan after another until a pick takes nothing. Finish by reporting what was delivered and what blocked, with
-PR links, restating any open questions the way Writing for the maintainer requires.
+Start by applying the clean-main boundary. Execute one plan after another, returning to a clean working copy of the
+latest `main` after each plan closes and before the next pick, until a pick takes nothing. If a boundary check finds a
+dirty working copy, abort the drain and tell the maintainer which paths are dirty. Finish by reporting what was
+delivered and what blocked, with PR links, restating any open questions the way Writing for the maintainer requires.
 
 Any number of executors may drain at once, each in its own checkout; claims keep them off each other's plans.
 
