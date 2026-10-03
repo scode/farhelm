@@ -5958,7 +5958,8 @@
   of clients the product targets.
 - Decision: discard (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `wtxkpwnv`, bookmark `triage-1001e/22-feed-cap`, PR
+  https://github.com/scode/farhelm/pull/1464.
 
 ## terminal-font-promise-leak.md
 

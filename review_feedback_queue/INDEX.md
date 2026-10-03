@@ -45,8 +45,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- `event-feed-cap-refusal-invisible.md` — the event feed's subscriber-cap refusal is a pre-upgrade 503 that browsers
-  cannot observe.
 - `host-write-lock-split-on-actor-respawn.md` — the per-host write lock lives on the actor handle, so a respawn lets
   edits run during provisioning.
 - `hostnotfound-refresh-keeps-serving.md` — an identity-less actor for a deleted host keeps serving, because its
