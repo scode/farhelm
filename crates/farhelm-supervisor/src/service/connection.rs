@@ -1009,7 +1009,7 @@ pub(crate) fn notify_detached(
 /// Take a management slot for one request without waiting, or refuse the
 /// request with [`farhelm_proto::HOST_BUSY_REFUSAL`] and return `None`.
 ///
-/// The admission step Stop and the requests admitted through
+/// The admission step Stop, Restart and the requests admitted through
 /// [`spawn_admitted`] take in a connection's read loop, so that loop never
 /// waits for their slot. Waiting there is what this replaced, and it was
 /// wrong: the same loop delivers every keystroke, resize and detach for
@@ -1056,16 +1056,16 @@ pub(crate) async fn admit_or_refuse(
     }
 }
 
-/// Admit one management request through [`admit_or_refuse`] and, if a slot
-/// was free, spawn the future `work` builds onto `tasks` holding it for the
-/// future's whole lifetime. `work` is handed its own sender for the reply,
-/// and is only called once the request is admitted: the shared admission-then-spawn shape of the management
-/// requests whose work all happens on the connection's tracked task
-/// (directory browse, repository search, tab open and close). Stop takes
-/// its slot through `admit_or_refuse` directly, because its work is owned
-/// by the supervisor rather than the connection, and Delete waits for its
-/// slot inside its own task after its agent-request fence; see their
-/// handlers.
+/// Admit one management request through [`admit_or_refuse`] and, if a slot was
+/// free, spawn the future `work` builds onto `tasks` holding it for the
+/// future's whole lifetime. `work` is handed its own sender for the reply, and
+/// is only called once the request is admitted: the shared admission-then-spawn
+/// shape of the management requests whose work all happens on the connection's
+/// tracked task (directory browse, repository search, tab open and close). Stop
+/// and Restart take their slot through `admit_or_refuse` directly, because
+/// their work is owned by the supervisor rather than the connection, and Delete
+/// waits for its slot inside its own task after its agent-request fence; see
+/// their handlers.
 ///
 /// Admission still happens BEFORE the spawn, so a refused request leaves
 /// no task behind and an admitted one never exists without its slot.

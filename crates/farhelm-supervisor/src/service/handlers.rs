@@ -2329,16 +2329,6 @@ async fn handle_resize(
     }
 }
 
-/// Spawned for the same reason `StopSession` is: a restart that
-/// has to stop a live agent first runs that handler's whole kill
-/// sweep — a grace period plus repeated `/proc` walks, real
-/// wall-clock seconds — and awaiting it inline would stall every
-/// other session's attach, input, and list behind this one
-/// request. Safe for the same reasons too: this handler resolves the
-/// session through the same lock-guarded map clone, and it never
-/// touches `input_routes` (connection-local state a spawned task
-/// must not see). Tracked and admitted exactly like the other
-/// slow handlers — see `HANDLER_ADMISSION_PERMITS`.
 /// Wire fields owned by the admitted restart task after the connection yields.
 ///
 /// Keeping the optional bundle together makes an ordinary restart's absent
@@ -2353,6 +2343,18 @@ struct RestartSessionRequest {
     resume_template: Option<Vec<String>>,
 }
 
+/// Spawned for the same reason `StopSession` is: a restart that
+/// has to stop a live agent first runs that handler's whole kill
+/// sweep — a grace period plus repeated `/proc` walks, real
+/// wall-clock seconds — and awaiting it inline would stall every
+/// other session's attach, input, and list behind this one
+/// request. Safe for the same reasons too: this handler resolves the
+/// session through the same lock-guarded map clone, and it never
+/// touches `input_routes` (connection-local state a spawned task
+/// must not see). Tracked and admitted like Stop — see
+/// `HANDLER_ADMISSION_PERMITS` — which means a restart on a host whose
+/// management slots are all taken is refused with a "try again" before
+/// anything happens to the session.
 async fn handle_restart_session(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
@@ -2369,10 +2371,13 @@ async fn handle_restart_session(
     // lifecycle claim released while signals were still in flight
     // (SPEC_impl.md "Who owns an accepted action"). The connection keeps
     // only the reply waiter.
-    let permit = Arc::clone(&sup.admission)
-        .acquire_owned()
-        .await
-        .expect("admission semaphore is never closed");
+    //
+    // Refused rather than waited for when every management slot is taken,
+    // exactly as Stop is: this runs in the connection's read loop, which
+    // must keep delivering input. See `admit_or_refuse`.
+    let Some(permit) = admit_or_refuse(&sup.admission, tx, request.req_id).await else {
+        return;
+    };
     let sup = Arc::clone(sup);
     let tx = tx.clone();
     let mutation = tokio::spawn(async move {
@@ -10419,6 +10424,41 @@ mod tests {
         host.type_and_see_echo("typed-after-the-tab-open").await;
         let reply = host.reply(2).await;
         assert_refused_as_busy(&reply, 2);
+
+        host.release().await;
+    }
+
+    /// Spec: with every management slot held, a Restart is refused at once
+    /// with a "try again" (`ErrorKind::Unavailable`), and typing on the same
+    /// connection keeps reaching its pane.
+    ///
+    /// Why: Restart took its management slot in the connection's read loop
+    /// on its own, apart from Stop and the shared helper, so fixing those
+    /// left one more request that could freeze every keystroke on a busy
+    /// host. The UI shows the refusal's text on the restart and
+    /// "restart with" controls like any other restart error.
+    #[farhelm_testtrace::test]
+    async fn a_restart_on_a_saturated_host_is_refused_and_typing_continues() {
+        let mut host = BusyHost::new().await;
+
+        host.send(ControlMsg::RestartSession {
+            req_id: 2,
+            session_id: "another-session".to_string(),
+            mode: RestartMode::Fresh,
+            stop_if_running: true,
+            invocation: None,
+            launch: None,
+            resume_template: None,
+        })
+        .await;
+        host.type_and_see_echo("typed-after-the-restart").await;
+        let reply = host.reply(2).await;
+        assert_refused_as_busy(&reply, 2);
+        assert_eq!(
+            host.sup.admission.available_permits(),
+            0,
+            "the refusal must have come while the parked Stops still held every slot"
+        );
 
         host.release().await;
     }
