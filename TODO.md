@@ -240,6 +240,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   wait stops early on a refusal stamped at or after that ticket; it needs a deterministic test of an attempt in flight
   across the nudge. Review item: `review_feedback_queue/attach-reports-generic-timeout.md` (`TRIAGE_OUTCOMES.md` heading
   of the same name). Plan: `plans/queue/attach-refusal-reason.md`.
+- **A fresh-checkout end-to-end test fails on main, and Replace with logs a provenance error.** The e2e test
+  `lost_fresh_checkout_success_replays_after_settings_change_and_helm_restart` fails every time on main (reproduced on
+  2026-10-02 by the boundary-checks plan, on unmodified main): it expects the refusal that names changed checkout
+  settings and instead gets the refusal for a host connection that changed across the helm restart. Separately, while a
+  fresh checkout replaced another session (Replace with), the helm's periodic session-list refresh once failed with the
+  supervisor reporting "the session's fresh-checkout provenance does not match its registry evidence". The next refresh
+  succeeded and nothing visible followed; the same error appears in a 2026-09-30 browser run of the existing
+  Replace-with test. Both concern fresh-checkout bookkeeping, so they are investigated together; whether they share a
+  cause is unknown.
 
 ## Doc todo
 
