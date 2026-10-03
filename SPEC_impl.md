@@ -443,22 +443,27 @@ existing bounded classification and pending-focus settlement.
 
 Hosts use one permanently mounted list beside the session list, not a compact summary plus a second management panel.
 Its one-row header gives the known host count, an unpersisted global details checkbox, and the secondary add control.
-Every row always shows its name, phase dot, and muted actions toggle in the same narrow trailing gutter as the
-session-row actions toggle; connected spends no visible word unless the helm marks a compatible older build, in which
-case the amber `old version` advisory is shown, or a newer one (`newer_version`), in which case the amber `too new`
-advisory is shown. A skew whose peer protocol is the higher one also reads `too new`, but keeps the red styling of every
-skew, since that host cannot be used until one side is updated. Either way the `too new` label's hover names both
-versions, and Update (and a rerun of a failed Update) is not offered. Other phases use humanized prose and retain the
-stable wire token in their data attribute. A protocol-incompatible supervisor remains the red `needs update` case; an
-unparseable build leaves a connected host's age unknown and keeps the ordinary connected label. Each row's effective
-disclosure is the global checkbox OR that row's automatic update disclosure: the checkbox is the user's preference and
-no update writes it, while an update keeps its row folded during planning and execution, shows a pending status until a
-progress snapshot is available, and then publishes compact step/count/elapsed progress beside the row status. A failed
-run or unresolved diagnostic opens that row; authoritative success clears the automatic half for the exact tracked run.
-Provisioning commands live in the row menu, but setup's confirmation and active or retained progress stay under the row
-because that lifecycle owns more context than a floating menu can safely hold. Starting setup opens details before
-planning, while a running or failed retained run leaves one short trace when details are closed. The one exception is an
-update whose status is showing inline: the trace would only repeat it, so it is left out until that status clears.
+Every row always shows its name, phase dot, and a muted actions toggle that appears on hover, keyboard focus, or a
+coarse pointer, in the same narrow trailing gutter as the session-row actions toggle; connected spends no visible word
+unless the helm marks a compatible older build, in which case the amber `old version` advisory is shown, or a newer one
+(`newer_version`), in which case the amber `too new` advisory is shown. A skew whose peer protocol is the higher one
+also reads `too new`, but keeps the red styling of every skew, since that host cannot be used until one side is updated.
+Either way the `too new` label's hover names both versions, and Update (and a rerun of a failed Update) is not offered.
+Other phases use humanized prose and retain the stable wire token in their data attribute. A protocol-incompatible
+supervisor remains the red `needs update` case; an unparseable build leaves a connected host's age unknown and keeps the
+ordinary connected label. Each row's effective disclosure is the global checkbox OR that row's automatic update
+disclosure: the checkbox is the user's preference and no update writes it, while an update keeps its row folded during
+planning and execution, shows a pending status until a progress snapshot is available, and then publishes compact
+step/count/elapsed progress beside the row status. A failed run or unresolved diagnostic opens that row; authoritative
+success clears the automatic half for the exact tracked run. Provisioning commands live in the row menu, but setup's
+confirmation and active or retained progress stay under the row because that lifecycle owns more context than a floating
+menu can safely hold. Starting setup opens details before planning, while a running or failed retained run leaves one
+short trace when details are closed. The one exception is an update whose status is showing inline: the trace would only
+repeat it, so it is left out until that status clears.
+
+The host actions menu follows the session menu's anchor, pointer, raised surface, header, grouped inset commands, line
+icons, muted descriptions, roving keyboard focus, and one-menu-at-a-time dismissal rules. Its Remove command remains a
+host-specific exception: it keeps the existing in-place confirmation until the host-removal dialog work lands.
 
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel opens just beyond the sidebar's right edge, with its top aligned to
