@@ -82,7 +82,9 @@ struct EnsureHost {
 /// registry and the API is how it is edited; a startup file that silently
 /// overwrote user edits every boot would make the two authorities fight,
 /// and the losing one would be the interactive one. Fix a registered
-/// host through `/api/hosts`, or remove it and let the file re-add it.
+/// host through `/api/hosts`, or remove it and let the file re-add it (a
+/// re-added entry is a new registration, held to the full remote-path rule;
+/// see [`HelmStore::ensure_ssh_hosts`]).
 ///
 /// ALL-OR-NOTHING, at the store: parsing and per-entry validation happen
 /// here, and the registration itself is one transaction
@@ -97,6 +99,17 @@ pub(crate) async fn ingest(store: &HelmStore, path: &Path) -> anyhow::Result<()>
     let parsed: EnsureFile = json5::from_str(&text)
         .with_context(|| format!("parsing the --ensure-hosts file {}", path.display()))?;
 
+    let entries: Vec<(String, Option<String>, Option<String>)> = parsed
+        .hosts
+        .iter()
+        .map(|host| {
+            (
+                host.ssh.clone(),
+                host.remote_farhelm.clone(),
+                host.remote_state_dir.clone(),
+            )
+        })
+        .collect();
     let added = store
         .ensure_ssh_hosts(
             parsed
@@ -118,12 +131,86 @@ pub(crate) async fn ingest(store: &HelmStore, path: &Path) -> anyhow::Result<()>
             "registered guaranteed hosts from --ensure-hosts"
         );
     }
+    warn_hosts_needing_correction(store, &entries).await;
     Ok(())
+}
+
+/// The already-registered hosts this file guarantees whose remote paths
+/// fail the registry's full rule, either as stored or as the file lists
+/// them, each with the `(farhelm, state dir)` pair that fails.
+///
+/// Both matter: the stored values are what the helm dials, and the file's
+/// values are what the next registration of the entry would use, which the
+/// full rule would refuse and so stop the helm from starting (after the host
+/// is removed, or on a fresh helm.db). Only registered entries are listed; a
+/// new one with such a value has already failed the batch.
+fn hosts_needing_correction(
+    rows: &[crate::store::HostRow],
+    entries: &[(String, Option<String>, Option<String>)],
+) -> Vec<(String, Option<String>, Option<String>)> {
+    let fails = |farhelm: Option<&str>, state_dir: Option<&str>| {
+        crate::store::require_usable_remote_paths(farhelm, state_dir).is_err()
+    };
+    let mut flagged = Vec::new();
+    for (destination, file_farhelm, file_state_dir) in entries {
+        let Some(row) = rows
+            .iter()
+            .find(|row| row.destination.as_deref() == Some(destination.as_str()))
+        else {
+            continue;
+        };
+        if fails(
+            row.remote_farhelm.as_deref(),
+            row.remote_state_dir.as_deref(),
+        ) {
+            flagged.push((
+                destination.clone(),
+                row.remote_farhelm.clone(),
+                row.remote_state_dir.clone(),
+            ));
+        } else if fails(file_farhelm.as_deref(), file_state_dir.as_deref()) {
+            flagged.push((
+                destination.clone(),
+                file_farhelm.clone(),
+                file_state_dir.clone(),
+            ));
+        }
+    }
+    flagged
+}
+
+/// Log [`hosts_needing_correction`] as warnings, best effort: the batch has
+/// already committed, so a failure to read the registry here must not stop
+/// the helm from starting.
+async fn warn_hosts_needing_correction(
+    store: &HelmStore,
+    entries: &[(String, Option<String>, Option<String>)],
+) {
+    let rows = match store.list_hosts().await {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(error = %format!("{error:#}"), "could not check --ensure-hosts remote paths");
+            return;
+        }
+    };
+    for (destination, remote_farhelm, remote_state_dir) in hosts_needing_correction(&rows, entries)
+    {
+        tracing::warn!(
+            destination,
+            remote_farhelm = ?remote_farhelm,
+            remote_state_dir = ?remote_state_dir,
+            "a host guaranteed by --ensure-hosts has a remote path that is not absolute (a leading \
+             ~ is not expanded); give absolute paths in the file, and repair the stored host with its \
+             set up action or by adding the same destination again in the hosts panel with absolute \
+             paths. Removing the host while the file still has such a path would stop the next start"
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::store::HostKind;
 
     /// A store on a fresh helm.db, with only the reserved local row in it.
@@ -151,6 +238,57 @@ mod tests {
             .filter(|row| row.kind == HostKind::Ssh)
             .map(|row| row.destination.expect("ssh rows always carry one"))
             .collect()
+    }
+
+    /// Why this matters: the startup warning is the only notice an operator
+    /// gets that a guaranteed host needs correcting before it causes a
+    /// failed start. Spec: a registered entry is flagged with its stored
+    /// values when those fail the full rule, otherwise with the file's own
+    /// values when those fail it; an entry that is fine both ways, and an
+    /// entry not yet registered, are not flagged.
+    #[farhelm_testtrace::test]
+    fn hosts_needing_correction_checks_stored_values_then_the_files() {
+        let row = |destination: &str, farhelm: Option<&str>, state_dir: Option<&str>| {
+            crate::store::HostRow {
+                id: 7,
+                kind: HostKind::Ssh,
+                destination: Some(destination.to_string()),
+                alias: None,
+                remote_farhelm: farhelm.map(str::to_string),
+                remote_state_dir: state_dir.map(str::to_string),
+                host_identity: None,
+                cache_truncated: false,
+                yolo_safe: false,
+            }
+        };
+        let rows = vec![
+            row("stored-bad@h", Some("~/farhelm"), None),
+            row("file-bad@h", Some("/opt/farhelm"), None),
+            row("fine@h", Some("farhelm"), Some("/srv/state")),
+        ];
+        let entry = |destination: &str, farhelm: Option<&str>, state_dir: Option<&str>| {
+            (
+                destination.to_string(),
+                farhelm.map(str::to_string),
+                state_dir.map(str::to_string),
+            )
+        };
+        let flagged = hosts_needing_correction(
+            &rows,
+            &[
+                entry("stored-bad@h", Some("/opt/farhelm"), None),
+                entry("file-bad@h", None, Some("~/state")),
+                entry("fine@h", Some("farhelm"), Some("/srv/state")),
+                entry("unregistered@h", Some("~/farhelm"), None),
+            ],
+        );
+        assert_eq!(
+            flagged,
+            vec![
+                entry("stored-bad@h", Some("~/farhelm"), None),
+                entry("file-bad@h", None, Some("~/state")),
+            ]
+        );
     }
 
     /// The feature's basic promise, plus the two JSON5 affordances the

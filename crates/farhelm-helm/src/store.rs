@@ -1295,19 +1295,19 @@ pub enum HostStoreError {
     /// literal sense: neither layer is load-bearing alone.
     #[error("{0:?} is not a usable ssh destination")]
     InvalidDestination(String),
-    /// A registered remote Farhelm value is empty, contains a NUL byte, or
-    /// has no file-name component. Relative executable names are deliberately
-    /// allowed here because SSH runs them through the remote PATH; this
-    /// refusal only prevents values that cannot later name a safe install
-    /// destination.
-    #[error("{0:?} is not a usable remote farhelm path")]
+    /// A registered remote Farhelm value is not an absolute path or a bare
+    /// program name: see [`remote_farhelm_is_usable`].
+    #[error(
+        "{0:?} is not a usable remote farhelm path; give an absolute path, or a bare program name \
+         the remote PATH finds (a leading ~ is not expanded)"
+    )]
     InvalidRemoteFarhelm(String),
-    /// A registered remote state directory is empty or contains a NUL byte.
-    /// It becomes the remote `--state-dir` argument on every dial, so an
-    /// empty value points the far side at its login directory and a NUL
-    /// fails the local ssh spawn; either way the host would register and
-    /// then never connect, with an error about something else.
-    #[error("{0:?} is not a usable remote state directory")]
+    /// A registered remote state directory is not an absolute path: see
+    /// [`remote_state_dir_is_usable`].
+    #[error(
+        "{0:?} is not a usable remote state directory; give an absolute path (a leading ~ is not \
+         expanded)"
+    )]
     InvalidRemoteStateDir(String),
     /// An alias failed a LOCAL, syntax-only rule — a control character, or
     /// the 64-character cap — checked before any comparison against other
@@ -1572,19 +1572,95 @@ pub(crate) fn destination_is_usable(destination: &str) -> bool {
     !destination.is_empty() && !destination.starts_with('-') && !destination.contains('\0')
 }
 
-/// Whether a remote executable value can be stored without making a later
-/// provisioning plan panic or lose its destination name. Bare relative names
-/// remain valid because the remote shell resolves them through PATH.
-fn remote_farhelm_is_usable(remote_farhelm: &str) -> bool {
+/// Whether a remote executable value names what the host will actually run:
+/// an absolute path, or a bare program name the remote shell finds through
+/// PATH (an existing, supported form).
+///
+/// Both remote fields reach the far side single-quoted, in the probe script
+/// and on the connection's command line, so no shell ever expands a leading
+/// `~`: `~/.local/bin/farhelm` probed as "not installed" on a host where
+/// Farhelm is installed, and offered to set it up again. A relative path
+/// with a `/` is refused for the same reason, since it would resolve against
+/// whatever directory the remote command happens to start in. Update already
+/// refused a non-absolute binary path; registration now agrees with it.
+/// Everything [`remote_farhelm_is_storable`] refuses is refused here too.
+pub(crate) fn remote_farhelm_is_usable(remote_farhelm: &str) -> bool {
+    remote_farhelm_is_storable(remote_farhelm)
+        && !remote_farhelm.starts_with('~')
+        && (remote_farhelm.starts_with('/') || !remote_farhelm.contains('/'))
+}
+
+/// The older, looser rule for a remote executable value: not empty, no NUL
+/// byte, and a file-name component, which a later provisioning plan needs to
+/// name its install destination.
+///
+/// Still applied on its own to values Farhelm already holds rather than
+/// values a person is entering now: see [`require_usable_remote_paths`].
+fn remote_farhelm_is_storable(remote_farhelm: &str) -> bool {
     !remote_farhelm.is_empty()
         && !remote_farhelm.contains('\0')
         && Path::new(remote_farhelm).file_name().is_some()
 }
 
-/// Whether a remote state directory can be stored and later passed as the
-/// remote `--state-dir` argument. See [`HostStoreError::InvalidRemoteStateDir`].
-fn remote_state_dir_is_usable(remote_state_dir: &str) -> bool {
+/// Whether a remote state directory is an absolute path, which is what the
+/// remote `--state-dir` argument needs: the value reaches the far side
+/// single-quoted, so `~/x` would become a directory literally named `~`
+/// under wherever the command starts. See [`remote_farhelm_is_usable`].
+pub(crate) fn remote_state_dir_is_usable(remote_state_dir: &str) -> bool {
+    remote_state_dir_is_storable(remote_state_dir) && remote_state_dir.starts_with('/')
+}
+
+/// The older, looser rule for a remote state directory: not empty and no
+/// NUL byte (an empty value points the far side at its login directory, a
+/// NUL fails the local ssh spawn). Kept for values Farhelm already holds, as
+/// [`require_usable_remote_paths`] explains.
+fn remote_state_dir_is_storable(remote_state_dir: &str) -> bool {
     !remote_state_dir.is_empty() && !remote_state_dir.contains('\0')
+}
+
+/// Refuse remote paths a person is entering now: the full rule
+/// ([`remote_farhelm_is_usable`], [`remote_state_dir_is_usable`]).
+///
+/// For values typed into the add form, sent to `POST /api/hosts`, or listed
+/// by a NEW `--ensure-hosts` entry. Values Farhelm already holds (a stored
+/// row merged into a probe, or what a probe reports it dialed) go through
+/// [`require_storable_remote_paths`] instead, so a row stored before the
+/// full rule existed can still be set up again, which is what repairs it.
+pub(crate) fn require_usable_remote_paths(
+    remote_farhelm: Option<&str>,
+    remote_state_dir: Option<&str>,
+) -> Result<(), HostStoreError> {
+    if let Some(value) = remote_farhelm
+        && !remote_farhelm_is_usable(value)
+    {
+        return Err(HostStoreError::InvalidRemoteFarhelm(value.to_string()));
+    }
+    if let Some(value) = remote_state_dir
+        && !remote_state_dir_is_usable(value)
+    {
+        return Err(HostStoreError::InvalidRemoteStateDir(value.to_string()));
+    }
+    Ok(())
+}
+
+/// Refuse remote paths that could not be stored at all: the older, looser
+/// rule ([`remote_farhelm_is_storable`], [`remote_state_dir_is_storable`]),
+/// for values Farhelm already holds. See [`require_usable_remote_paths`].
+fn require_storable_remote_paths(
+    remote_farhelm: Option<&str>,
+    remote_state_dir: Option<&str>,
+) -> Result<(), HostStoreError> {
+    if let Some(value) = remote_farhelm
+        && !remote_farhelm_is_storable(value)
+    {
+        return Err(HostStoreError::InvalidRemoteFarhelm(value.to_string()));
+    }
+    if let Some(value) = remote_state_dir
+        && !remote_state_dir_is_storable(value)
+    {
+        return Err(HostStoreError::InvalidRemoteStateDir(value.to_string()));
+    }
+    Ok(())
 }
 
 /// The non-error result of [`HelmStore::record_first_contact`] — a
@@ -3839,10 +3915,10 @@ impl HelmStore {
     /// see that variant's docs for why the registry, and not only the ssh
     /// argv builder, takes a position on this.
     ///
-    /// `remote_farhelm` is also checked before the write. Relative executable
-    /// names are valid because the remote shell resolves them through PATH,
-    /// but empty, NUL-containing, and component-less values cannot safely
-    /// become provisioning destinations later.
+    /// `remote_farhelm` and `remote_state_dir` are checked before the write
+    /// with the full rule, since this is a person entering them (see
+    /// [`require_usable_remote_paths`]): an absolute path, or for the
+    /// executable a bare program name the remote PATH finds.
     ///
     /// A destination matching another host's explicit alias or the
     /// unaliased local display name is refused as
@@ -3866,20 +3942,8 @@ impl HelmStore {
                 destination,
             )));
         }
-        if let Some(remote_farhelm) = remote_farhelm
-            && !remote_farhelm_is_usable(remote_farhelm)
-        {
-            return Err(anyhow::Error::new(HostStoreError::InvalidRemoteFarhelm(
-                remote_farhelm.to_string(),
-            )));
-        }
-        if let Some(remote_state_dir) = remote_state_dir
-            && !remote_state_dir_is_usable(remote_state_dir)
-        {
-            return Err(anyhow::Error::new(HostStoreError::InvalidRemoteStateDir(
-                remote_state_dir.to_string(),
-            )));
-        }
+        require_usable_remote_paths(remote_farhelm, remote_state_dir)
+            .map_err(anyhow::Error::new)?;
         let remote_farhelm = remote_farhelm.map(str::to_string);
         let remote_state_dir = remote_state_dir.map(str::to_string);
         tokio::task::spawn_blocking(move || -> anyhow::Result<HostId> {
@@ -3950,20 +4014,12 @@ impl HelmStore {
                 destination.to_string(),
             )));
         }
-        if let Some(remote_farhelm) = remote_farhelm
-            && !remote_farhelm_is_usable(remote_farhelm)
-        {
-            return Err(anyhow::Error::new(HostStoreError::InvalidRemoteFarhelm(
-                remote_farhelm.to_string(),
-            )));
-        }
-        if let Some(remote_state_dir) = remote_state_dir
-            && !remote_state_dir_is_usable(remote_state_dir)
-        {
-            return Err(anyhow::Error::new(HostStoreError::InvalidRemoteStateDir(
-                remote_state_dir.to_string(),
-            )));
-        }
+        // Lenient: these are values Farhelm already holds (the plan's
+        // install paths, what the probe dialed, or a stored row merged into
+        // the probe); a person's own input was checked in full when the
+        // probe started. See `require_usable_remote_paths`.
+        require_storable_remote_paths(remote_farhelm, remote_state_dir)
+            .map_err(anyhow::Error::new)?;
         let destination = destination.to_string();
         let remote_farhelm = remote_farhelm.map(str::to_string);
         let remote_state_dir = remote_state_dir.map(str::to_string);
@@ -4091,6 +4147,14 @@ impl HelmStore {
     /// silently letting the first win would make the file's meaning depend
     /// on line order.
     ///
+    /// Remote paths: every entry must pass the looser storable rule, and an
+    /// entry this call actually inserts must also pass the full rule a person
+    /// entering them now gets ([`require_usable_remote_paths`]), aborting the
+    /// whole batch otherwise. An already-registered entry is held only to the
+    /// looser rule, because it changes nothing and a file accepted before the
+    /// full rule existed must not stop the helm from starting (`ensure`
+    /// warns about such entries instead).
+    ///
     /// An entry that is ACTUALLY NEW (not already registered) is refused as
     /// [`HostStoreError::AliasTaken`], aborting the WHOLE batch, if its
     /// destination matches another host's explicit alias or unaliased local
@@ -4116,20 +4180,14 @@ impl HelmStore {
                  directory",
                 entry.destination
             );
-            if let Some(remote_farhelm) = entry.remote_farhelm.as_deref()
-                && !remote_farhelm_is_usable(remote_farhelm)
-            {
-                return Err(anyhow::Error::new(HostStoreError::InvalidRemoteFarhelm(
-                    remote_farhelm.to_string(),
-                )));
-            }
-            if let Some(remote_state_dir) = entry.remote_state_dir.as_deref()
-                && !remote_state_dir_is_usable(remote_state_dir)
-            {
-                return Err(anyhow::Error::new(HostStoreError::InvalidRemoteStateDir(
-                    remote_state_dir.to_string(),
-                )));
-            }
+            // Only the looser rule here: an entry already registered
+            // changes nothing, and the stricter one is applied below to the
+            // entries this call actually inserts.
+            require_storable_remote_paths(
+                entry.remote_farhelm.as_deref(),
+                entry.remote_state_dir.as_deref(),
+            )
+            .map_err(anyhow::Error::new)?;
         }
         self.conn
             .call(
@@ -4168,6 +4226,16 @@ impl HelmStore {
                             && let Some(name) = alias_collision(&tx, None, &entry.destination)?
                         {
                             return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
+                        }
+                        // A new row gets the full rule; failing it here
+                        // aborts the uncommitted transaction, so the batch
+                        // stays all-or-nothing.
+                        if !already_registered {
+                            require_usable_remote_paths(
+                                entry.remote_farhelm.as_deref(),
+                                entry.remote_state_dir.as_deref(),
+                            )
+                            .map_err(anyhow::Error::new)?;
                         }
                         // The same conditional insert `add_ssh_host` uses, for the
                         // same reason: "already registered" is the ordinary,
@@ -6530,6 +6598,32 @@ impl HelmStore {
                 },
             )
             .await
+    }
+}
+
+#[cfg(test)]
+impl HelmStore {
+    /// Overwrite a row's remote paths directly, bypassing every rule, so a
+    /// test can stand in a row stored before the current rule existed.
+    pub(crate) async fn plant_remote_paths_for_tests(
+        &self,
+        host: HostId,
+        remote_farhelm: &str,
+        remote_state_dir: &str,
+    ) -> usize {
+        let conn = self.conn.clone();
+        let (remote_farhelm, remote_state_dir) =
+            (remote_farhelm.to_string(), remote_state_dir.to_string());
+        tokio::task::spawn_blocking(move || {
+            conn.lock()
+                .execute(
+                    "UPDATE hosts SET remote_farhelm = ?1, remote_state_dir = ?2 WHERE id = ?3",
+                    rusqlite::params![remote_farhelm, remote_state_dir, host],
+                )
+                .expect("plant remote paths")
+        })
+        .await
+        .expect("plant task")
     }
 }
 
@@ -10852,12 +10946,28 @@ mod tests {
 
     /// Registration keeps both supported executable forms — an absolute path
     /// and a bare PATH name — while refusing values that cannot later name an
-    /// install destination. The typed refusal is important because the REST
-    /// layer maps it to a client error rather than an internal failure.
+    /// install destination, and paths the remote side would not resolve as
+    /// written: a leading `~` is never expanded (the value is single-quoted
+    /// on the far side, so `~/.local/bin/farhelm` probed as "not installed"
+    /// on a host that has it), and a relative path with a `/` depends on the
+    /// directory the remote command starts in. The typed refusal is important
+    /// because the REST layer maps it to a client error rather than an
+    /// internal failure.
     #[farhelm_testtrace::test]
     async fn remote_farhelm_values_are_validated_at_registration() {
         let (_dir, store) = fresh_store().await;
-        for (index, rejected) in ["", ".", "bad\0path"].into_iter().enumerate() {
+        for (index, rejected) in [
+            "",
+            ".",
+            "bad\0path",
+            "~/.local/bin/farhelm",
+            "~",
+            "bin/farhelm",
+            "./farhelm",
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let error = store
                 .add_ssh_host(&format!("invalid-{index}@host"), Some(rejected), None)
                 .await
@@ -10879,21 +10989,101 @@ mod tests {
         }
     }
 
+    /// Why this matters: `--ensure-hosts` re-applies its file on every helm
+    /// start, and a file whose hosts were registered with `~/...` paths
+    /// before those were refused must not stop a helm that started fine the
+    /// day before. Spec: an entry that is already registered passes even
+    /// with a value the current rule refuses, and its row is left as it was;
+    /// a NEW entry with such a value still aborts the whole batch.
+    #[farhelm_testtrace::test]
+    async fn ensure_tolerates_old_paths_on_registered_hosts_but_not_on_new_ones() {
+        let (_dir, store) = fresh_store().await;
+        store
+            .add_ssh_host("old@host", Some("/opt/farhelm"), Some("/srv/state"))
+            .await
+            .expect("register with absolute paths");
+        // A row stored before the rule existed, planted directly.
+        let old = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.destination.as_deref() == Some("old@host"))
+            .unwrap()
+            .id;
+        let planted = store
+            .plant_remote_paths_for_tests(old, "~/.local/bin/farhelm", "~/state")
+            .await;
+        assert_eq!(planted, 1, "test premise: the pre-rule values were planted");
+        let tilde = |destination: &str| EnsureHost {
+            destination: destination.to_string(),
+            remote_farhelm: Some("~/.local/bin/farhelm".to_string()),
+            remote_state_dir: Some("~/state".to_string()),
+        };
+
+        let added = store
+            .ensure_ssh_hosts(vec![tilde("old@host")])
+            .await
+            .expect("an already-registered entry must not fail startup");
+        assert!(added.is_empty());
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.destination.as_deref() == Some("old@host"))
+            .unwrap();
+        assert_eq!(row.remote_farhelm.as_deref(), Some("~/.local/bin/farhelm"));
+        assert_eq!(row.remote_state_dir.as_deref(), Some("~/state"));
+
+        let before = store.list_hosts().await.unwrap().len();
+        let error = store
+            .ensure_ssh_hosts(vec![
+                EnsureHost {
+                    destination: "fresh-good@host".to_string(),
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                },
+                tilde("fresh-bad@host"),
+            ])
+            .await
+            .expect_err("a new entry with a ~ path must be refused");
+        assert!(
+            matches!(
+                error.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::InvalidRemoteFarhelm(value)) if value == "~/.local/bin/farhelm"
+            ),
+            "{error:#}"
+        );
+        assert_eq!(
+            store.list_hosts().await.unwrap().len(),
+            before,
+            "the batch must stay all-or-nothing"
+        );
+    }
+
     /// Every registration path refuses a remote state directory that could
-    /// never be dialed, and writes nothing.
+    /// never be dialed as written, and writes nothing.
     ///
     /// Why it matters: the stored value becomes the remote `--state-dir` on
-    /// every dial. An empty one points the far side at its login directory
-    /// and a NUL fails the ssh spawn, so the host registered and then never
-    /// connected, and the only recovery was remove plus re-add (a new host
-    /// id, losing its cached sessions). Spec: add, probed registration, and
-    /// the ensure batch refuse with `InvalidRemoteStateDir`; the ensure batch
-    /// stays all-or-nothing.
+    /// every dial. An empty one points the far side at its login directory,
+    /// a NUL fails the ssh spawn, and a relative or `~`-prefixed one names a
+    /// directory under wherever the remote command starts (single-quoted, so
+    /// `~/x` is a folder literally named `~`), so the host registered and
+    /// then never found its state, and the only recovery was remove plus
+    /// re-add (a new host id, losing its cached sessions). Spec: add and the
+    /// ensure batch refuse anything but an absolute path with
+    /// `InvalidRemoteStateDir`, and the ensure batch stays all-or-nothing;
+    /// probed registration, which stores values Farhelm already holds, refuses
+    /// only an empty or NUL-containing one.
     #[farhelm_testtrace::test]
     async fn remote_state_dir_values_are_validated_at_registration() {
         let (_dir, store) = fresh_store().await;
         let before = store.list_hosts().await.unwrap().len();
-        for (index, rejected) in ["", "bad\0dir"].into_iter().enumerate() {
+        for (index, rejected) in ["", "bad\0dir", "~/state", "relative/state", "state"]
+            .into_iter()
+            .enumerate()
+        {
             let refused = |error: anyhow::Error| {
                 assert!(
                     matches!(
@@ -10909,17 +11099,30 @@ mod tests {
                     .await
                     .expect_err("add must refuse an unusable state directory"),
             );
-            refused(
+            // Probed registration stores values Farhelm already holds and so
+            // refuses only what could not be stored at all; a person's own
+            // input was checked in full when the probe started.
+            let probed = store
+                .register_probed_ssh_host(
+                    &format!("probe-{index}@host"),
+                    None,
+                    Some(rejected),
+                    None,
+                )
+                .await;
+            if rejected.is_empty() || rejected.contains('\0') {
+                refused(
+                    probed.expect_err(
+                        "probed registration must refuse an unstorable state directory",
+                    ),
+                );
+            } else {
+                let (host, _) = probed.expect("probed registration keeps a value it was handed");
                 store
-                    .register_probed_ssh_host(
-                        &format!("probe-{index}@host"),
-                        None,
-                        Some(rejected),
-                        None,
-                    )
+                    .remove_ssh_host(host)
                     .await
-                    .expect_err("probed registration must refuse an unusable state directory"),
-            );
+                    .expect("remove the probed fixture row");
+            }
             refused(
                 store
                     .ensure_ssh_hosts(vec![

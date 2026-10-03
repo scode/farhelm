@@ -5734,7 +5734,8 @@
 - Decision (plan time, 2026-10-01, refines the above): a bare program name in the remote farhelm field (resolved through
   the remote PATH) is an existing, tested form and stays valid; refuse a leading `~` and a relative value containing `/`
   there, and anything non-absolute in the remote state dir field.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `ltmkrwvy`, bookmark `triage-1001e/10-remote-paths-absolute`, PR
+  https://github.com/scode/farhelm/pull/1452.
 
 ## drop-on-hidden-terminal-navigates-away.md
 

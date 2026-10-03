@@ -1135,6 +1135,116 @@ mod tests {
         assert!(memory.busy.is_empty());
     }
 
+    /// Why this matters: the add-host form probes with the paths the user
+    /// typed, and a `~/...` path was probed literally, so a host with
+    /// Farhelm installed read as "not installed" and was offered setup.
+    /// Spec: an ssh probe whose remote farhelm path or state directory is not
+    /// absolute (a bare program name stays valid for the executable) is
+    /// refused as an invalid request naming the value and asking for an
+    /// absolute path, before anything is probed or registered.
+    #[farhelm_testtrace::test]
+    async fn a_probe_with_a_non_absolute_remote_path_is_refused_before_probing() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let hosts_before = harness.store.list_hosts().await.unwrap().len();
+        for (farhelm, state_dir, rejected) in [
+            (Some("~/.local/bin/farhelm"), None, "~/.local/bin/farhelm"),
+            (Some("bin/farhelm"), None, "bin/farhelm"),
+            (None, Some("~/state"), "~/state"),
+            (None, Some("state"), "state"),
+        ] {
+            let error = service
+                .probe(ProbeRequest {
+                    target: ProbeDestination::Ssh {
+                        destination: "tilde.example".to_string(),
+                    },
+                    remote_farhelm: farhelm.map(str::to_string),
+                    remote_state_dir: state_dir.map(str::to_string),
+                })
+                .await
+                .expect_err("a non-absolute remote path must be refused");
+            assert!(
+                matches!(
+                    error.downcast_ref::<http::ProvisioningRequestError>(),
+                    Some(http::ProvisioningRequestError::InvalidProbe(message))
+                        if message.contains(&format!("{rejected:?}"))
+                            && message.contains("absolute path")
+                ),
+                "{error:#}"
+            );
+        }
+        assert!(
+            backend.probe.lock().unwrap().is_some(),
+            "nothing may be probed with a refused path"
+        );
+        assert_eq!(
+            harness.store.list_hosts().await.unwrap().len(),
+            hosts_before
+        );
+    }
+
+    /// Why this matters: a host registered with a `~` path before such paths
+    /// were refused has no field to correct them, and running its set up
+    /// action again is what repairs it (the plan installs to absolute paths
+    /// and registration stores those). That action sends the row's stored
+    /// paths back as the request's own, so refusing them would leave the
+    /// host stuck. Spec: a probe for a destination whose stored row holds
+    /// `~` paths runs and offers a plan, both when the request repeats the
+    /// stored paths and when it omits them.
+    #[farhelm_testtrace::test]
+    async fn a_probe_of_a_row_stored_with_tilde_paths_still_runs() {
+        for repeats_stored in [true, false] {
+            let harness = harness().await;
+            let host = harness
+                .store
+                .add_ssh_host(
+                    "old-tilde.example",
+                    Some("/opt/farhelm"),
+                    Some("/srv/state"),
+                )
+                .await
+                .unwrap();
+            let planted = harness
+                .store
+                .plant_remote_paths_for_tests(host, "~/.local/bin/farhelm", "~/state")
+                .await;
+            assert_eq!(planted, 1, "test premise: the pre-rule values were planted");
+            let root = tempfile::tempdir().unwrap();
+            let backend = FakeBackend::absent(root.path().to_path_buf());
+            let service = service(&harness, backend.clone(), root.path());
+            let (remote_farhelm, remote_state_dir) = if repeats_stored {
+                (
+                    Some("~/.local/bin/farhelm".to_string()),
+                    Some("~/state".to_string()),
+                )
+            } else {
+                (None, None)
+            };
+            let response = service
+                .probe(ProbeRequest {
+                    target: ProbeDestination::Ssh {
+                        destination: "old-tilde.example".to_string(),
+                    },
+                    remote_farhelm,
+                    remote_state_dir,
+                })
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("repeats_stored={repeats_stored}: the stored row's own paths must not refuse its set up: {error:#}")
+                });
+            assert!(
+                matches!(response, ProbeResponse::Provisionable { .. }),
+                "repeats_stored={repeats_stored}: {response:?}"
+            );
+            assert!(
+                backend.probe.lock().unwrap().is_none(),
+                "repeats_stored={repeats_stored}: the host must have been probed"
+            );
+        }
+    }
+
     /// A development build resolves its absent payload before directories or
     /// any other host state changes, then releases the host for another run.
     #[farhelm_testtrace::test]
