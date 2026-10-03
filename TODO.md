@@ -97,17 +97,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
   restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.
 
-- Guard provisioning against pushing payloads older than the helm's own protocol. A release-shaped helm built from a
-  commit newer than the latest release (the local stable-binary flow does exactly this) provisions remote hosts with
-  DOWNLOADED released payloads by default (D13), so the freshly provisioned supervisor can speak an older protocol than
-  the helm that just installed it — and the helm then refuses it at the hello gate. Nothing is damaged (the refusal is
-  the version rule working), but the failure arrives one step late, as a skewed host instead of a refused provisioning
-  attempt. Possible shapes: compare the payload's version against the helm's `PROTOCOL_VERSION` before pushing and
-  refuse with a message naming the mismatch; or make the staged-payload path (`--payload-dir`,
-  `FARHELM_HELM_PAYLOAD_DIR`) the documented answer for from-main helms. Noted 2026-08-31 when upgrading the stable
-  install to a from-main build while the newest release was still 0.1.1. Plan:
-  `plans/queue/unreleased-download-message.md`.
-
 - **No network path for the desktop app.** The desktop app's webview talks to its embedded helm the way the browser
   does, over HTTP and WebSockets on a loopback port, so one UI code path serves both clients. That port can be reached
   by every process on the machine, including other accounts' (the credential stops them from using it), and the helm's

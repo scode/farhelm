@@ -2875,7 +2875,9 @@ The provisioning payloads — linux-musl `farhelm` binaries for both architectur
 longer embedded in the helm's own distribution (D2). This REVERSES the earlier "provisioning must work with no
 third-party downloads" posture: a release-shaped build (D13 — one that embedded the web UI) downloads them, on demand,
 from the GitHub release matching its own version, verifies them, and caches them under helm state before pushing them
-over SSH exactly as before. A developer build defaults to no payloads at all (`NoPayloads`, D13) rather than to a
+over SSH exactly as before. A release-shaped build of main, whose version is the development sentinel (see "Version and
+skew"), has no release to download from and refuses by default, naming `--payload-dir` and payloads built from the same
+commit (`UnreleasedPayloads`). A developer build defaults to no payloads at all (`NoPayloads`, D13) rather than to a
 download, and `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`) selects an operator-staged directory instead —
 files in an explicitly selected local directory are treated as operator-trusted and are not verified, on ANY build,
 developer or release. The downloading source is `ReleasePayloadSource` (`provisioning/release_payloads.rs`), which
@@ -3011,9 +3013,12 @@ silently, on both ends), and decode tolerance is why such a bump is required rat
 
 Outside the release commit a tag points at, that number is the fixed sentinel `0.0.0-unreleased`, and release commits
 never land on main. An untagged build therefore never claims to be a release: its version readout says so, and a
-release-shaped build's default payload download names a release that does not exist and fails instead of provisioning
-hosts with some real release's binaries. The cost is that two untagged builds carry the same build stamp, so the
-client↔helm check below cannot tell them apart; installs come from tags, which always differ.
+release-shaped build refuses its default payload download before any request instead of provisioning hosts with some
+real release's binaries. The refusal says it is an unreleased build and to pass `--payload-dir` with payloads built from
+the same commit, because a 404 for a release that will never exist would tell the user to retry. Any `0.0.0` version
+with a prerelease counts as such a build. `--release-base-url` is still honored on these builds (D18), since it names a
+source explicitly rather than this build's own release. The cost is that two untagged builds carry the same build stamp,
+so the client↔helm check below cannot tell them apart; installs come from tags, which always differ.
 
 The client↔helm edge has no hello to refuse at, so the helm stamps its build on every reply and the UI compares it
 against the one compiled into its bundle. A mismatch — including a helm that reports no build at all — surfaces a reload

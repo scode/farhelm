@@ -349,21 +349,32 @@ fn release_order(peer: &str, ours: &str) -> Option<std::cmp::Ordering> {
 /// precedence: the mirror of [`build_is_older`], with the same rules for
 /// prerelease, build metadata and an unparsable side (unknown, `false`).
 ///
-/// One more case reads as unknown here: `ours` being a development build,
-/// version `0.0.0` with any prerelease (`0.0.0-unreleased` is what every
-/// build from source reports until a release sets the version). It sorts
-/// below every release, so taken literally every released host would be
-/// "too new" for a development helm and Update would refuse them all; a
-/// development build has no place in the release order to compare from.
+/// One more case reads as unknown here: `ours` being a development build
+/// ([`is_development_build`]). It sorts below every release, so taken
+/// literally every released host would be "too new" for a development helm
+/// and Update would refuse them all; a development build has no place in
+/// the release order to compare from.
 ///
 /// Shared with provisioning, which refuses to Update a host whose build is
 /// newer than this helm's: an Update installs this helm's own build, so on
 /// such a host it would be a downgrade, and an older supervisor refuses a
 /// newer database schema and leaves the host unreachable.
 pub(crate) fn build_is_newer(peer: &str, ours: &str) -> bool {
-    let development = semver::Version::parse(ours)
-        .is_ok_and(|v| v.major == 0 && v.minor == 0 && v.patch == 0 && !v.pre.is_empty());
-    !development && release_order(peer, ours) == Some(std::cmp::Ordering::Greater)
+    !is_development_build(ours) && release_order(peer, ours) == Some(std::cmp::Ordering::Greater)
+}
+
+/// Whether `version` is a development build: `0.0.0` with any prerelease.
+///
+/// Every build of main reports `0.0.0-unreleased` (root `Cargo.toml`) until a
+/// release sets the version. This is the predicate `build_is_newer` already
+/// applied before the payload default needed it too, and it accepts any
+/// prerelease on `0.0.0`, not just that literal. Such a build is in no
+/// release: it has no place in the release order ([`build_is_newer`]) and
+/// no published release carries its payloads
+/// (`provisioning::payloads::production_payloads_with_key`).
+pub(crate) fn is_development_build(version: &str) -> bool {
+    semver::Version::parse(version)
+        .is_ok_and(|v| v.major == 0 && v.minor == 0 && v.patch == 0 && !v.pre.is_empty())
 }
 
 /// Join the manager's live snapshots with helm.db's registry rows into the
@@ -1067,6 +1078,29 @@ mod tests {
         assert!(!build_is_older("1.0.0", "1.0.0"));
         assert!(!build_is_older("peer-build", "1.0.0"));
         assert!(!build_is_older("1.0.0", "helm-build"));
+    }
+
+    /// Why: a development build has no place in the release order and no
+    /// release carrying its payloads, and both `build_is_newer` and the
+    /// payload default ask this one question. Spec: `0.0.0` with any
+    /// prerelease is a development build; `0.0.0` itself, any real release
+    /// or release candidate, and an unparsable version are not.
+    #[farhelm_testtrace::test]
+    fn a_development_build_is_zero_zero_zero_with_a_prerelease() {
+        use super::is_development_build;
+        for development in ["0.0.0-unreleased", "0.0.0-dev.1", "0.0.0-unreleased+abc"] {
+            assert!(is_development_build(development), "{development}");
+        }
+        for other in [
+            "0.0.0",
+            "0.1.1",
+            "0.14.0-rc.2",
+            "1.0.0-unreleased",
+            "garbage",
+            "",
+        ] {
+            assert!(!is_development_build(other), "{other}");
+        }
     }
 
     /// The newer-than order is the exact mirror of the older-than one, unknown
