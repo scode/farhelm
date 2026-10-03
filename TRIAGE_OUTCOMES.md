@@ -5608,7 +5608,8 @@
   `claude-scan-claims-foreign-record.md`, which also covers re-verification of records the scan captured earlier (user,
   2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `mppquzyn`, bookmark `triage-1001e/05-discard-transcript-warning`, PR
+  https://github.com/scode/farhelm/pull/1446.
 
 ## ssh-forwarding-inherited.md
 
