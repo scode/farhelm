@@ -20,8 +20,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- `browser-signin-loses-action-outcomes.md` — A browser token prompt can silently lose the results of actions already
-  running, including Delete, even though the server continues the work.
 - `host-write-lock-split-on-actor-respawn.md` — the per-host write lock lives on the actor handle, so a respawn lets
   edits run during provisioning.
 - `hostnotfound-refresh-keeps-serving.md` — an identity-less actor for a deleted host keeps serving, because its

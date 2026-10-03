@@ -1741,10 +1741,13 @@ the browser sign-in token was rotated or its device credential was evicted, that
 open forms, dialogs and drafts. Friction in the browser's token prompt is acceptable too. Do not spend significant
 complexity preserving UI state across a sign-in.
 
-Three things still hold. An action the user started is never lost silently: it either completes and reports its outcome,
-or reports that its outcome is unknown. Sign-in recovery never crashes the window or leaves it dead. If the desktop
-app's own authentication fails anyway, which takes something genuinely broken rather than a rotation or a busy browser,
-the window says so and offers a retry, without restarting the app. This principle may be revisited later.
+Three things still hold. In the desktop app, an action the user started is never lost silently: it either completes and
+reports its outcome, or reports that its outcome is unknown. The browser is excepted: an action still pending when its
+token prompt opens may lose its report. The helm still carries the action out, since accepted actions are the helm's,
+and the session list shows the result after sign-in. Decided 2026-10-02: the browser is best effort for rare problems
+that lose a report but not work. Sign-in recovery never crashes the window or leaves it dead. If the desktop app's own
+authentication fails anyway, which takes something genuinely broken rather than a rotation or a busy browser, the window
+says so and offers a retry, without restarting the app. This principle may be revisited later.
 
 ### One GUI at a time
 
