@@ -145,16 +145,16 @@ cannot clobber each other; the signal in the page is updated before the request 
 in force when the write fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot
 land on the helm in reverse order; the write queue is process state outside the remounted tree, and after the browser's
 credential recovery the gate overlays and replays any local choice whose write never got through, so reauthentication
-cannot roll the current client back to the helm's older row. Desktop recovery does not remount the tree: the native
-funnel retries the write itself under the refreshed credential. The seed read runs under a seconds-scale deadline of its
-own and expiry reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for the funnel's
-full sixty seconds. The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the
-write; the selection is a bare session id (the browser's old `{helm, id}` record was keyed by helm identity only because
-origin-scoped storage could outlive a state-directory swap, and a row in the helm's own database cannot describe another
-helm's fleet). An absent or unrecognized sort word still reads as the UI default (`activity`) on the client, because the
-row outlives the build that validated it. Nothing is kept per client: no localStorage key, no field in
-`desktop-client.json` (which now holds credentials only), no eval round trip. The visible consequences are the ones
-SPEC.md names — one answer shared by every client, and a second client attaching to whatever was selected most recently
+cannot roll the current client back to the helm's older row. The desktop app never signs in again, so nothing remounts
+its tree. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a
+stalled preference endpoint cannot blank the page for the funnel's full sixty seconds. The sort travels as the bare word
+`?sort=` takes and is validated against that vocabulary at the write; the selection is a bare session id (the browser's
+old `{helm, id}` record was keyed by helm identity only because origin-scoped storage could outlive a state-directory
+swap, and a row in the helm's own database cannot describe another helm's fleet). An absent or unrecognized sort word
+still reads as the UI default (`activity`) on the client, because the row outlives the build that validated it. Nothing
+is kept per client: no localStorage key, no field in `desktop-client.json` (which holds no credentials either, only the
+webview readiness counter the desktop smoke reads), no eval round trip. The visible consequences are the ones SPEC.md
+names — one answer shared by every client, and a second client attaching to whatever was selected most recently
 anywhere.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
@@ -751,11 +751,11 @@ that contract on some engines. Both of terminal.js's write paths (the copy-on-se
 `ClipboardAddon` provider) prefer `window.__farhelmNativeClipboardWrite` whenever it exists and fall back to
 `navigator.clipboard.writeText` otherwise, with every failure swallowed per the contract's best-effort clause. The
 global exists ONLY in the desktop app, installed by desktop authentication's success path (auth.rs's
-`arm_native_clipboard`, re-armed with fresh credentials on every reauthentication): it POSTs the text to the embedded
-helm's `POST /api/clipboard`, and the desktop shell — the only construction able to register a `ClipboardSink`
-(`run_embedded`'s parameter; `farhelm helm run` hardcodes none, deliberately without a flag) — writes the real
-pasteboard via arboard. The reason the desktop cannot use the web API at all: WKWebView does not treat the `dioxus://`
-page as a secure context, so `navigator.clipboard` is absent there — not denied, absent — which shipped as
+`arm_native_clipboard`, re-armed whenever that authentication runs again from the failure page's Retry): it POSTs the
+text to the embedded helm's `POST /api/clipboard`, and the desktop shell — the only construction able to register a
+`ClipboardSink` (`run_embedded`'s parameter; `farhelm helm run` hardcodes none, deliberately without a flag) — writes
+the real pasteboard via arboard. The reason the desktop cannot use the web API at all: WKWebView does not treat the
+`dioxus://` page as a secure context, so `navigator.clipboard` is absent there — not denied, absent — which shipped as
 copy-never-works until 2026-09 (the Dioxus-risks bullet above records the diagnosis; farhelm-helm's clipboard.rs owns
 the endpoint's contract: device-session auth with the desktop-webview CORS layering, one bounded text field, 404 on any
 helm without a sink so a remote browser can never write a server machine's clipboard, and a silent 204 whether the
@@ -2462,12 +2462,23 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   keeps that secret in origin-scoped localStorage, whose origin includes the loopback port, and sends it explicitly as a
   Bearer credential on REST requests and a credential-bearing WebSocket subprotocol during upgrades. The helm stores
   only the device secret's SHA-256 hash, and rotation deletes all device credential rows, rejecting their use on new
-  requests. Already-admitted HTTP requests may finish. The current implementation also closes terminal and event-feed
-  sockets on rotation; SPEC.md permits either closing or retaining those existing connections, so preserving that
-  behavior is not a reason to add cancellation machinery elsewhere. This deliberately gives up HttpOnly: script
+  requests. Already-admitted HTTP requests may finish. The current implementation also closes browser terminal and
+  event-feed sockets on rotation; SPEC.md permits either closing or retaining those existing connections, so preserving
+  that behavior is not a reason to add cancellation machinery elsewhere. This deliberately gives up HttpOnly: script
   execution in the authenticated origin can read the secret, but such a script can already drive the same API, while
   port scoping prevents an unrelated loopback service from receiving an ambient host-scoped credential. The loopback
   Origin guard remains defense in depth; no ambient browser credential remains, so this flow has no CSRF edge.
+- The desktop app's two credentials (one for native REST, one for the webview's localStorage and WebSocket subprotocols)
+  bypass that exchange. The embedded helm mints them in memory at startup and hands them to the desktop process through
+  `run_embedded`'s readiness channel; it keeps only their SHA-256 digests, in memory, and checks them before the stored
+  rows. They are never device rows, so rotation's delete and the 64-row eviction cannot reach them, and sockets they
+  authenticate are not closed by rotation. No HTTP route mints one, so a browser on the same port cannot obtain a
+  credential rotation would not revoke. They die with the process, so nothing persists or accumulates across launches,
+  and the app keeps none on disk. With nothing to revoke, the desktop has no re-authentication path: a native 401 is
+  reported as an error, and the window's failure page with its Retry button is left for genuinely broken states, such as
+  a webview whose localStorage refuses the write (`desktop-auth.js` treats that as an authentication failure, since the
+  page's sockets read their credential from there). Like a browser's, the webview's secret is readable by script in the
+  window; unlike a browser's, a stolen one survives rotation and ends only when the app quits.
 - The loopback guard accepts `Host` and `Origin` only as the IPv4 literal `127.0.0.1:<port>` (bare `127.0.0.1` on port
   80, where browsers omit the default port), plus the desktop webview's custom schemes as Origin. That exemption is a
   scheme prefix and cannot be narrower in a useful way: dioxus-desktop hardcodes the page URL `dioxus://index.html/` on

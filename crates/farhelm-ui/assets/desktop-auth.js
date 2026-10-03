@@ -1,26 +1,24 @@
 (function () {
-  // Authenticate the desktop webview: validate or mint the webview's own
-  // device credential and keep its localStorage copy current. The Dioxus
-  // eval and node tests execute this same state machine; injected browser
-  // primitives keep the contract testable without pretending Node has a
-  // webview or a WebSocket.
+  // Authenticate the desktop webview: install the credential native hands
+  // over where the page's own consumers read it, and prove the helm accepts
+  // it. The Dioxus eval and node tests execute this same state machine;
+  // injected browser primitives keep the contract testable without
+  // pretending Node has a webview or a WebSocket.
   //
-  // Authentication is ALL this script does. It once also seeded the list
-  // preference (sort order, last selection) into localStorage on behalf of
-  // the native side; that preference now lives in the helm and reaches the
-  // page through an ordinary authenticated fetch after `ready`, so nothing
-  // here touches any key but the device secret.
+  // The credential is an in-memory one the desktop app's embedded helm
+  // minted for this launch (farhelm_helm::EmbeddedReady). Token rotation and
+  // the helm's cap on remembered browser credentials never revoke it, so
+  // there is nothing to mint, refresh, or persist here: a refusal means
+  // something is broken and is reported as an error. The web token (the
+  // helm's root credential) never reaches this script at all (SPEC.md
+  // "Client hardening").
   //
-  // The web token (the helm's root credential, which can mint device logins)
-  // never reaches this script. When the stored device secret is missing or
-  // refused, the script asks native for a freshly minted one instead, so a
-  // script injected by content the window showed later has no token to
-  // intercept (SPEC.md "Client hardening").
+  // Authentication is ALL this script does, apart from scrubbing keys a
+  // retired feature left in localStorage.
   async function authenticate(channel, platform) {
     const bootstrap = await channel.recv();
     try {
       async function accepted(secret) {
-        if (!secret) return false;
         const wsBase = bootstrap.base.replace(/^http/, "ws");
         return await new Promise(function (resolve) {
           let settled = false;
@@ -42,66 +40,53 @@
         });
       }
 
-      let secret = bootstrap.persisted
-        || platform.storage.getItem("farhelm.device-secret")
-        || "";
-      let authenticated = false;
-      if (secret) {
-        // Bounded like the exchange below. Nothing else times this step
-        // out (the native side waits on this script without a deadline),
-        // so a helm that accepts the connection and never answers used to
-        // leave the window on "Starting Farhelm…" forever with no error.
-        // A timeout is reported through the ordinary error path instead.
-        const controller = new platform.AbortController();
-        const deadline = platform.setTimeout(function () {
-          controller.abort();
-        }, platform.validationTimeoutMs || 5000);
-        let validation;
-        try {
-          validation = await platform.fetch(`${bootstrap.base}/api/auth/device`, {
-            method: "GET",
-            headers: { "Authorization": `Bearer ${secret}` },
-            cache: "no-store",
-            signal: controller.signal,
-          });
-        } catch (error) {
-          if (controller.signal.aborted) {
-            throw new Error("webview device validation timed out");
-          }
-          throw error;
-        } finally {
-          platform.clearTimeout(deadline);
-        }
-        if (validation.ok) {
-          if (!(await accepted(secret))) {
-            throw new Error("webview event socket failed after device validation");
-          }
-          authenticated = true;
-        } else if (validation.status !== 401) {
-          throw new Error(`webview device validation failed with ${validation.status}`);
-        }
+      const secret = bootstrap.secret;
+      if (!secret) {
+        throw new Error("native handed over no webview credential");
       }
-      if (!authenticated) {
-        channel.send({ need_secret: true });
-        const minted = await channel.recv();
-        if (minted.error) {
-          throw new Error(minted.error);
-        }
-        secret = minted.secret;
-        if (!(await accepted(secret))) {
-          throw new Error("webview event socket failed after device exchange");
-        }
-      }
-      channel.send({ secret });
-      const commit = await channel.recv();
-      if (!commit.persisted) {
-        throw new Error("native credential persistence failed");
-      }
+      // Stored FIRST, and a write that does not take is fatal. The
+      // terminals, uploads and event feed read their credential from
+      // localStorage, not from this script, so a window that opened after a
+      // failed write would run them on a missing secret, or on a stale one
+      // an earlier launch left behind that the helm no longer accepts.
       try {
         platform.storage.setItem("farhelm.device-secret", secret);
-      } catch (_) {
-        // Native committed the credential first and can seed the next launch.
-        // Browser storage is a reusable cache, not an authentication commit.
+      } catch (error) {
+        throw new Error(`storing the webview credential failed: ${error && error.message ? error.message : error}`);
+      }
+      if (platform.storage.getItem("farhelm.device-secret") !== secret) {
+        throw new Error("storing the webview credential failed: it did not read back");
+      }
+
+      // Bounded, because nothing else times this step out (the native side
+      // waits on this script without a deadline): a helm that accepts the
+      // connection and never answers would otherwise leave the window on
+      // "Starting Farhelm…" forever with no error.
+      const controller = new platform.AbortController();
+      const deadline = platform.setTimeout(function () {
+        controller.abort();
+      }, platform.validationTimeoutMs || 5000);
+      let validation;
+      try {
+        validation = await platform.fetch(`${bootstrap.base}/api/auth/device`, {
+          method: "GET",
+          headers: { "Authorization": `Bearer ${secret}` },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (controller.signal.aborted) {
+          throw new Error("webview device validation timed out");
+        }
+        throw error;
+      } finally {
+        platform.clearTimeout(deadline);
+      }
+      if (!validation.ok) {
+        throw new Error(`webview device validation failed with ${validation.status}`);
+      }
+      if (!(await accepted(secret))) {
+        throw new Error("webview event socket failed after device validation");
       }
       // Scrub the keys the retired per-client preference persistence used.
       // An upgraded webview keeps whatever an old build stored there, and

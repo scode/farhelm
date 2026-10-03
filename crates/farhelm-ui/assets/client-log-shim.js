@@ -22,12 +22,13 @@
 // The shim captures into a bounded, in-memory queue from the moment it
 // installs — there is no "not yet ready" state for CAPTURE. What it does
 // NOT do before `arm()` is send anything anywhere. `arm()` runs once per
-// SUCCESSFUL desktop authentication — including each reauthentication after
-// a credential rotation — from `DesktopBootstrapGate`'s success path in
-// `auth.rs`, with the embedded helm's loopback origin and the freshly minted
-// webview device secret; `disarm()` runs when a reauthentication BEGINS, so
-// a revoked credential is never spent on log batches while its replacement
-// is negotiated (entries captured meanwhile just queue). This is the
+// SUCCESSFUL desktop authentication — the launch's, and any run the failure
+// page's Retry starts — from `DesktopBootstrapGate`'s success path in
+// `auth.rs`, with the embedded helm's loopback origin and the webview's
+// device secret; `disarm()` runs when such a run BEGINS, so nothing is sent
+// while the window's credential is in question (entries captured meanwhile
+// just queue). The desktop's credential cannot be revoked by token
+// rotation, so in ordinary operation it is armed once per launch. This is the
 // buffer-until-auth design PLAN_desktop_web_bug_triage.md calls for. The
 // honest cost, recorded there and worth repeating: an error thrown before
 // the first `arm()` is lost if the eval bridge itself dies before
@@ -286,7 +287,7 @@
   var queue = [];
   /**
    * `{base, secret}` once `arm()` accepted a loopback base; `null` while
-   * buffering (pre-auth, or disarmed during a reauthentication). The
+   * buffering (pre-auth, or disarmed while an authentication runs). The
    * device credential lives HERE, in shim memory, for as long as the shim
    * is armed — plus the `Authorization` header each flush sends. Nowhere
    * else, ever: not in a log line, not in an entry, not in an URL.
@@ -372,11 +373,12 @@
       signal: controller ? controller.signal : undefined,
     })
       .then(function (response) {
-        // `fetch` resolves for HTTP errors too. A 401 means THIS credential
-        // was revoked (rotation): put the batch back at the front (still
-        // bounded) and disarm until the reauthentication flow re-arms with
-        // the replacement — but only if a newer credential has not already
-        // been armed while this response was in flight. Every other
+        // `fetch` resolves for HTTP errors too. A 401 means the helm refused
+        // THIS credential, which for the desktop's unrevocable one means
+        // something is broken: put the batch back at the front (still
+        // bounded) and disarm until an authentication run (the failure
+        // page's Retry) re-arms — but only if a newer credential has not
+        // already been armed while this response was in flight. Every other
         // non-success is the server exercising a documented cap or refusal;
         // the drop policy for those is the same as a network failure below.
         if (response && response.status === 401) {
@@ -401,8 +403,8 @@
     /**
      * Arm with the embedded helm's origin and a device-session credential,
      * and start draining anything captured while unarmed. Called once per
-     * successful desktop authentication — including each reauthentication
-     * — from `auth.rs`. Refuses silently on a non-loopback `base`; an
+     * successful desktop authentication — the launch's, and any run Retry
+     * starts — from `auth.rs`. Refuses silently on a non-loopback `base`; an
      * existing armed state is left untouched by a refused call.
      *
      * `config.smokeMarker`, present only under
@@ -422,8 +424,8 @@
     },
     /**
      * Stop sending (capture continues into the bounded queue). Called when
-     * a reauthentication BEGINS, so a revoked credential is never spent on
-     * batches while its replacement is negotiated.
+     * an authentication run BEGINS, so nothing is sent while the window's
+     * credential is in question.
      */
     disarm: function () {
       armed = null;

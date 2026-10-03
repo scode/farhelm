@@ -1,16 +1,22 @@
-//! The desktop client's private state file, which holds the two device
-//! credentials, and the one atomic JSON write both desktop state files use.
+//! The desktop client's private state file, and the one atomic JSON write both
+//! desktop state files use.
+//!
+//! The file no longer holds credentials. The app's two device secrets are
+//! minted in memory by its embedded helm on every launch (see
+//! [`farhelm_helm::EmbeddedReady`]), so there is nothing durable to keep, and
+//! a secret left on disk would only be something to leak. Files written by
+//! older builds still carry `native_device_secret` and
+//! `webview_device_secret`; serde ignores the unknown fields on read, and the
+//! next write drops them.
 
 use super::*;
 
 pub(super) const APP_STATE_FILE: &str = "desktop-client.json";
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub(super) struct PersistedState {
-    pub(super) native_device_secret: Option<String>,
-    pub(super) webview_device_secret: Option<String>,
     /// Monotonic proof that the real webview JavaScript stack completed an
     /// authenticated WebSocket handshake. It survives restart so the smoke
-    /// gate can distinguish new readiness from old persisted credentials.
+    /// gate can tell a new launch's readiness from an earlier one's.
     #[serde(default)]
     pub(super) webview_auth_generation: u64,
 }
@@ -67,12 +73,10 @@ pub(super) fn read_state(path: &Path) -> anyhow::Result<PersistedState> {
 
 /// Serialize every read-modify-replace of the desktop state file.
 ///
-/// The native credential refresh and the webview credential commit can
-/// arrive concurrently. Locking the whole merge is what prevents either
-/// writer from reinstalling a snapshot that silently drops the field the
-/// other just committed. The file holds credentials and nothing else now:
-/// the list preference that once shared it lives in the helm (SPEC.md,
-/// Session list), so no non-credential writer ever contends here.
+/// Locking the whole merge is what prevents two writers from reinstalling a
+/// snapshot that silently drops a field the other just committed. Only the
+/// webview readiness record writes here today; the lock costs nothing and
+/// keeps that true if a second field returns.
 pub(super) fn update_state(
     path: &Path,
     mutate: impl FnOnce(&mut PersistedState),
@@ -90,8 +94,8 @@ pub(super) fn update_state(
 /// user, so that a crash at any point leaves either the previous record or
 /// the new one and never a mixture.
 ///
-/// The single write path for both desktop state files (the credentials here
-/// and the window frame in [`super::window_state`]). There used to be one copy
+/// The single write path for both desktop state files (the readiness record
+/// here and the window frame in [`super::window_state`]). There used to be one copy
 /// per file, and they had drifted: only one flushed the directory after the
 /// rename, and only the other removed its temporary file on failure and used
 /// [`replace_file`] rather than a bare rename. This keeps all of it: a private
@@ -161,8 +165,7 @@ mod tests {
         let path = dir.path().join(APP_STATE_FILE);
         std::fs::create_dir(&path).expect("occupy the destination");
         let state = PersistedState {
-            native_device_secret: Some("secret".to_string()),
-            ..PersistedState::default()
+            webview_auth_generation: 3,
         };
         assert!(atomic_write_json(&path, &state).is_err());
         assert!(path.is_dir(), "the occupied destination must be untouched");
@@ -175,27 +178,20 @@ mod tests {
     /// Spec: a successful write replaces the record in full and leaves it
     /// readable only by this user.
     ///
-    /// The file holds device credentials, so its mode is part of the
-    /// contract, and a second write must not merge with or append to the
-    /// first.
+    /// The window-frame file shares this writer, and private mode is the
+    /// writer's contract for both files whatever they hold; a second write
+    /// must not merge with or append to the first.
     #[farhelm_testtrace::test]
     fn a_write_replaces_the_record_privately() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join(APP_STATE_FILE);
         let first = PersistedState {
-            native_device_secret: Some("first".to_string()),
-            webview_device_secret: Some("webview".to_string()),
-            webview_auth_generation: 1,
+            webview_auth_generation: 5,
         };
         atomic_write_json(&path, &first).unwrap();
-        let second = PersistedState {
-            native_device_secret: Some("second".to_string()),
-            ..PersistedState::default()
-        };
+        let second = PersistedState::default();
         atomic_write_json(&path, &second).unwrap();
         let read = read_state(&path).unwrap();
-        assert_eq!(read.native_device_secret.as_deref(), Some("second"));
-        assert_eq!(read.webview_device_secret, None);
         assert_eq!(read.webview_auth_generation, 0);
         #[cfg(unix)]
         {
@@ -207,19 +203,20 @@ mod tests {
         }
     }
 
-    /// A state file written by a build that still kept the list preference
-    /// beside the credentials (`remembered_selection`, `list_sort`) must
-    /// decode as the credentials alone, and a rewrite must drop the stale
-    /// fields rather than carry them forward.
+    /// A state file written by an older build, which kept the desktop's
+    /// device secrets there (and, older still, the list preference), must
+    /// decode, and a rewrite must drop every retired field.
     ///
-    /// The preference moved into the helm (SPEC.md, Session list); a
-    /// relaunch after the upgrade reads exactly such a file, and refusing it
-    /// would log the operator out of the desktop app for no reason. The
-    /// dropped-on-rewrite half pins that the fields really are gone from
-    /// the type and not merely tolerated, so nothing can quietly revive a
-    /// per-client copy by reading them back.
+    /// A relaunch after the upgrade reads exactly such a file, and refusing
+    /// it would fail startup for no reason. Dropping the secrets on rewrite
+    /// matters more than tidiness: the desktop's credentials are now
+    /// in-memory ones minted per launch, and a stale secret left on disk is
+    /// only something to leak (the old stored rows it names stay valid
+    /// until a rotation or the cap removes them). The dropped-on-rewrite
+    /// half also pins that the fields are gone from the type, not merely
+    /// tolerated, so nothing can quietly start reading them again.
     #[farhelm_testtrace::test]
-    fn a_state_file_with_the_retired_preference_fields_decodes_as_credentials_only() {
+    fn a_state_file_from_an_older_build_decodes_and_loses_its_retired_fields() {
         let root = tempfile::tempdir().unwrap();
         let state_path = root.path().join(APP_STATE_FILE);
         std::fs::write(
@@ -235,22 +232,27 @@ mod tests {
         .unwrap();
 
         // `update_state` reads, mutates, and returns the decoded state, so
-        // one call both proves the credentials decoded and performs the
+        // one call both proves the old file decoded and performs the
         // rewrite whose output the raw-JSON assertions below inspect.
         let state = update_state(&state_path, |state| {
             state.webview_auth_generation += 1;
         })
         .unwrap();
-        assert_eq!(state.native_device_secret.as_deref(), Some("native-old"));
-        assert_eq!(state.webview_device_secret.as_deref(), Some("webview-old"));
         assert_eq!(state.webview_auth_generation, 8);
 
         let rewritten: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&state_path).unwrap()).unwrap();
         assert_eq!(rewritten["webview_auth_generation"], 8);
-        assert!(
-            rewritten.get("remembered_selection").is_none() && rewritten.get("list_sort").is_none(),
-            "the retired preference fields must not survive a rewrite: {rewritten}"
-        );
+        for retired in [
+            "native_device_secret",
+            "webview_device_secret",
+            "remembered_selection",
+            "list_sort",
+        ] {
+            assert!(
+                rewritten.get(retired).is_none(),
+                "the retired field {retired} must not survive a rewrite: {rewritten}"
+            );
+        }
     }
 }

@@ -165,10 +165,37 @@ fail() {
 # Curl reads the bearer header from this private file so the secret never
 # appears in a process listing. Every loopback request bypasses ambient proxy
 # configuration as the desktop clients do.
+#
+# The secret is the smoke's OWN browser credential, from the same bootstrap
+# exchange a browser uses. The desktop app's credentials are minted in
+# memory by its embedded helm and never written anywhere this script could
+# read them, which is part of what it checks.
 CURL_AUTH_CONFIG="$X/curl-auth.conf"
 write_curl_auth() {
-  printf 'header = "Authorization: Bearer %s"\n' "$NATIVE_SECRET" >"$CURL_AUTH_CONFIG"
+  printf 'header = "Authorization: Bearer %s"\n' "$SMOKE_SECRET" >"$CURL_AUTH_CONFIG"
   chmod 600 "$CURL_AUTH_CONFIG"
+}
+# Exchange the helm's current web token for a fresh browser credential and
+# point curl_auth at it.
+mint_smoke_credential() {
+  local token
+  token=$("$BUILT_FARHELM" helm token show --state-dir "$X/state") || fail "reading the helm's web token"
+  SMOKE_SECRET=$(python3 -c 'import json,sys; print(json.dumps({"token": sys.argv[1]}))' "$token" |
+    curl --noproxy '*' -sf --max-time 5 -H 'content-type: application/json' -d @- "$API/api/auth/token" |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["device_secret"])') || fail "exchanging the web token for the smoke's credential"
+  write_curl_auth
+}
+# The desktop app must never write a credential to its state file.
+assert_no_persisted_credentials() {
+  python3 -c '
+import json,sys
+state=json.load(open(sys.argv[1]))
+leaked=[k for k in ("native_device_secret","webview_device_secret") if k in state]
+sys.exit("desktop state file holds credentials: %s" % leaked if leaked else 0)
+' "$X/state/desktop-client.json" || fail "the desktop app persisted a credential ($1)"
+}
+device_rows() {
+  python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("select count(*) from device_sessions").fetchone()[0])' "$X/state/helm.db"
 }
 curl_local() {
   curl --noproxy '*' "$@"
@@ -187,6 +214,7 @@ curl_auth() {
 TEARDOWN_DONE=""
 SID="" # set once the create-form phase produces a session; read by teardown
 SID_NEWEST="" # second restart fixture; empty during the interaction-only create
+SID_ROTATED="" # post-rotation fixture: proves native REST still works; read by teardown
 # Set by the answering-supervisor leg, which starts its own supervisor, tmux
 # server and desktop outside the main launch's state directory. Each is
 # cleared once stop_answering has stopped what it names, so a pid is never
@@ -246,6 +274,7 @@ teardown() {
   # the request itself takes a little over 5 s; see the cleanup below.
   [ -n "$SID" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID" >/dev/null 2>&1
   [ -n "$SID_NEWEST" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID_NEWEST" >/dev/null 2>&1
+  [ -n "$SID_ROTATED" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID_ROTATED" >/dev/null 2>&1
 
   for p in desktop openbox xvfb; do
     [ -f "$X/$p.pid" ] && kill "$(cat "$X/$p.pid")" 2>/dev/null
@@ -599,13 +628,24 @@ for _ in $(seq 1 30); do
 done
 curl_local -sf --max-time 5 "$API/" | grep -q '<!DOCTYPE html>' || fail "embedded helm did not serve the bundled UI"
 
+# The state file appears when the webview records its first authenticated
+# readiness; until then there is nothing to read.
+WEBVIEW_GENERATION=0
 for _ in $(seq 1 30); do
-  [ -f "$X/state/desktop-client.json" ] && break
+  if [ -f "$X/state/desktop-client.json" ]; then
+    WEBVIEW_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
+    [ "$WEBVIEW_GENERATION" -ge 1 ] && break
+  fi
   sleep 1
 done
-[ -f "$X/state/desktop-client.json" ] || fail "desktop credentials were not persisted"
-NATIVE_SECRET=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_device_secret"])' "$X/state/desktop-client.json")
-write_curl_auth
+[ "$WEBVIEW_GENERATION" -ge 1 ] || fail "the webview JavaScript stack did not authenticate its event socket"
+assert_no_persisted_credentials "first launch"
+# Both desktop credentials are in-memory ones the embedded helm minted; a
+# stored row here would be a credential rotation or the client cap could
+# revoke, which is exactly the churn they exist to avoid.
+DEVICE_ROWS=$(device_rows)
+[ "$DEVICE_ROWS" = 0 ] || fail "desktop bootstrap stored $DEVICE_ROWS device rows instead of none"
+mint_smoke_credential
 LOCAL_READY=""
 for _ in $(seq 1 30); do
   if curl_auth -sf --max-time 5 "$API/api/hosts" | python3 -c '
@@ -634,16 +674,6 @@ done
 grep -qw 'start-server' "$X/tmux-override-used" ||
   fail "the sentinel tmux never ran an operational command (start-server); only version probes were logged"
 [ ! -e "$(dirname "$APP")/tmux" ] || fail "the app directory must not carry a tmux of its own"
-for _ in $(seq 1 30); do
-  WEBVIEW_SECRET=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_device_secret") or "")' "$X/state/desktop-client.json")
-  WEBVIEW_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
-  [ -n "$WEBVIEW_SECRET" ] && [ "$WEBVIEW_GENERATION" -ge 1 ] && break
-  sleep 1
-done
-[ -n "$WEBVIEW_SECRET" ] && [ "$WEBVIEW_GENERATION" -ge 1 ] || fail "the webview JavaScript stack did not authenticate its event socket"
-
-DEVICE_ROWS=$(python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("select count(*) from device_sessions").fetchone()[0])' "$X/state/helm.db")
-[ "$DEVICE_ROWS" = 2 ] || fail "desktop bootstrap minted $DEVICE_ROWS device rows instead of two"
 
 # Wait for the client-log marker to land in $1 (a log file), proving the
 # shim -> /api/client-log -> tracing pipeline for the process writing it.
@@ -767,7 +797,7 @@ done
 [ "$GEOM" = "1200x900" ] || fail "window never took a sane size (got: ${GEOM:-none})"
 sleep 3
 
-echo "== killing the app without Rust cleanup and reusing both device sessions"
+echo "== killing the app without Rust cleanup and relaunching it"
 OLD_DESKTOP_PID=$(cat "$X/desktop.pid")
 SUPERVISOR_PID=$(ps -eo pid=,ppid=,args= | awk -v parent="$OLD_DESKTOP_PID" '$2 == parent && /supervisor run/ { print $1; exit }')
 [ -n "$SUPERVISOR_PID" ] || fail "could not identify the managed supervisor child"
@@ -818,13 +848,12 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 [ "$RESTART_WEBVIEW_GENERATION" -gt "$WEBVIEW_GENERATION" ] || fail "restarted webview never completed authenticated readiness"
-curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "restarted app did not reuse native authentication"
-RESTART_ROWS=$(python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("select count(*) from device_sessions").fetchone()[0])' "$X/state/helm.db")
-[ "$RESTART_ROWS" = "$DEVICE_ROWS" ] || fail "restart minted device rows ($DEVICE_ROWS before, $RESTART_ROWS after)"
-RESTART_NATIVE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_device_secret"])' "$X/state/desktop-client.json")
-RESTART_WEBVIEW=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["webview_device_secret"])' "$X/state/desktop-client.json")
-[ "$RESTART_NATIVE" = "$NATIVE_SECRET" ] || fail "restart replaced the persisted native device session"
-[ "$RESTART_WEBVIEW" = "$WEBVIEW_SECRET" ] || fail "restart replaced the persisted webview device session"
+curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "the smoke's browser credential did not survive the app restart"
+assert_no_persisted_credentials "restart"
+# Exactly the smoke's own row: the relaunch minted fresh in-memory desktop
+# credentials and stored nothing, so nothing accumulates across launches.
+RESTART_ROWS=$(device_rows)
+[ "$RESTART_ROWS" = 1 ] || fail "restart left $RESTART_ROWS device rows instead of only the smoke's own"
 RESTART_PREFERENCES=$(curl_auth -sf --max-time 5 "$API/api/preferences") || fail "reading the shared preference after the restart"
 RESTART_SELECTION=$(printf '%s' "$RESTART_PREFERENCES" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("last_selected") or "")')
 RESTART_SORT=$(printf '%s' "$RESTART_PREFERENCES" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("list_sort") or "")')
@@ -866,33 +895,59 @@ done
 [ -n "$SESSION_REDISCOVERED" ] || fail "the restarted app did not rediscover the surviving session"
 
 # The RESTARTED process must prove the client-log pipeline too, before the
-# rotation below muddies the auth waters: restart arms the shim through the
-# persisted-credential path — a different flow from first launch — and a
-# regression there would leave logging silently dead after every ordinary
-# app restart while all the other restart assertions stayed green.
+# rotation below: a regression that left logging dead after every ordinary
+# app restart would otherwise slip past all the other restart assertions.
 echo "== waiting for the restarted app's client-log marker"
 wait_for_client_log_marker "$X/desktop-restart.log"
 
-echo "== rotating the token and refreshing both client stacks on 401"
+echo "== rotating the token: browser credentials end, the desktop window carries on"
+# Rotation revokes every browser credential and closes their sockets, but the
+# desktop app's credentials are exempt (SPEC.md "Signing in again"). The
+# observable proof is threefold: the smoke's browser credential is refused,
+# the webview never runs another authentication (its readiness generation
+# does not move), and the page's terminal output client on the remembered
+# session is the SAME tmux client afterwards, because its WebSocket was
+# never closed. Before the exemption, rotation closed that socket and the
+# page reattached with a new client.
+PAGE_CLIENT_BEFORE=$(tmux -S "$X/state/tmux.sock" list-clients -t "fh-$SID" -F '#{client_name} #{client_created}' 2>/dev/null | sort)
+[ -n "$PAGE_CLIENT_BEFORE" ] || fail "test premise: the page has no output client on the remembered session before rotation"
 "$BUILT_FARHELM" helm token rotate --state-dir "$X/state" >/dev/null || fail "rotating desktop helm token"
-ROTATED=""
+ROTATED_STATUS=$(curl_auth -s -o /dev/null -w '%{http_code}' --max-time 5 "$API/api/hosts")
+[ "$ROTATED_STATUS" = 401 ] || fail "rotation did not revoke the smoke's browser credential (status $ROTATED_STATUS)"
+# An observation window rather than a readiness wait: the claim is that
+# nothing happens, so the script has to give the old behavior (a webview
+# re-authentication within a second or two of rotation) time to show up.
+sleep 5
+AFTER_ROTATION_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
+[ "$AFTER_ROTATION_GENERATION" = "$RESTART_WEBVIEW_GENERATION" ] ||
+  fail "rotation made the webview authenticate again (generation $RESTART_WEBVIEW_GENERATION -> $AFTER_ROTATION_GENERATION)"
+PAGE_CLIENT_AFTER=$(tmux -S "$X/state/tmux.sock" list-clients -t "fh-$SID" -F '#{client_name} #{client_created}' 2>/dev/null | sort)
+[ "$PAGE_CLIENT_AFTER" = "$PAGE_CLIENT_BEFORE" ] ||
+  fail "rotation closed the page's terminal socket (clients before: '$PAGE_CLIENT_BEFORE', after: '$PAGE_CLIENT_AFTER')"
+ROTATED_ROWS=$(device_rows)
+[ "$ROTATED_ROWS" = 0 ] || fail "rotation left $ROTATED_ROWS device rows instead of none"
+assert_no_persisted_credentials "rotation"
+mint_smoke_credential
+curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "a fresh browser credential after rotation was not accepted"
+# And the app's own native client is still authenticated: a new session makes
+# the page list sessions again over native REST, and the smoke hook logs a
+# listing only once the helm has answered it with success. Counting answered
+# lines (rather than waiting for a fixed one) is what pins the answer to
+# after the rotation.
+ANSWERED_BEFORE=$(grep -c '^desktop_smoke: session listing answered ' "$X/desktop-restart.log")
+ROTATED_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "invocation": "bash", "title": "zzz-after-rotation"}))' "$X/work") || fail "encoding the post-rotation session"
+SID_ROTATED=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$ROTATED_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the post-rotation session"
+NATIVE_ANSWERED=""
 for _ in $(seq 1 30); do
-  NEXT_NATIVE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("native_device_secret") or "")' "$X/state/desktop-client.json")
-  NEXT_WEBVIEW=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_device_secret") or "")' "$X/state/desktop-client.json")
-  NEXT_WEBVIEW_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
-  if [ -n "$NEXT_NATIVE" ] && [ -n "$NEXT_WEBVIEW" ] && [ "$NEXT_NATIVE" != "$NATIVE_SECRET" ] && [ "$NEXT_WEBVIEW" != "$WEBVIEW_SECRET" ] && [ "$NEXT_WEBVIEW_GENERATION" -gt "$RESTART_WEBVIEW_GENERATION" ]; then
-    ROTATED=1
+  if [ "$(grep -c '^desktop_smoke: session listing answered ' "$X/desktop-restart.log")" -gt "$ANSWERED_BEFORE" ]; then
+    NATIVE_ANSWERED=1
     break
   fi
   sleep 1
 done
-[ -n "$ROTATED" ] || fail "both desktop client stacks did not exchange after rotation"
-NATIVE_SECRET="$NEXT_NATIVE"
-WEBVIEW_SECRET="$NEXT_WEBVIEW"
-write_curl_auth
-ROTATED_ROWS=$(python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("select count(*) from device_sessions").fetchone()[0])' "$X/state/helm.db")
-[ "$ROTATED_ROWS" = 2 ] || fail "rotation recovery left $ROTATED_ROWS device rows instead of two"
-curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "refreshed native credential was not accepted"
+[ -n "$NATIVE_ANSWERED" ] || fail "no native session listing succeeded after rotation (see $X/desktop-restart.log)"
+curl_auth -sf --max-time 30 -X DELETE "$API/api/sessions/$SID_ROTATED" >/dev/null || fail "cleaning up the post-rotation session"
+SID_ROTATED=""
 
 WID=""
 for _ in $(seq 1 20); do

@@ -1433,31 +1433,32 @@ each supervisor (SSH) — plus one deliberately local one.
   refuses fails silently by the Terminal experience section's own clipboard contract above, not with an error. The token
   still matters on loopback: it keeps other local processes and users out. The helm generates it on first run; the user
   views or rotates it on the helm's machine (`farhelm helm token show|rotate`), and the browser asks for it once per
-  device and keeps a session thereafter. Rotating the token invalidates every device credential for new requests;
-  already-admitted requests may finish. Existing terminal and event-feed connections may remain usable or close on
-  rotation, whichever keeps the implementation simpler; reconnecting requires a current credential. Rotation does not
-  stop running agent sessions. The native app embeds its helm; that edge is local. The token keeps other users OUT of
-  the helm; it does not let the browser tell the helm apart from another local user's process that binds the same port
-  while the helm is down. That gap is accepted in v1: the browser UI is recommended only on a machine with no other,
-  untrusted local users, and the native app is the preferred client wherever it is available. `docs/security.md` records
-  the reasoning. The UI is served only under the IPv4 literal, never under the names `localhost` or `[::1]`: the helm
-  binds only `127.0.0.1`, so another local account can bind `[::1]` on the same port at any time, even while the helm
-  runs, and a browser that resolves `localhost` to `::1` would load that account's page under the origin holding the
-  device secret. Refusing the names keeps any device secret from being stored under an origin another account can serve;
-  a plain page load that names them and still reaches the helm is redirected to `127.0.0.1`. A device secret a browser
-  stored under `localhost` before this rule remains exposed to such a squatter until the token is rotated, and a
-  squatter on `localhost` can still show a lookalike token prompt, which falls under the gap accepted above. Whether the
-  web token is stored in the user's password manager is the user's choice: the browser prompt is an ordinary password
-  field, and Farhelm does not try to stop a browser from offering to save it or keep a synced store from holding it. A
-  saved token being autofilled into a lookalike prompt is the same port-squatter gap. The helm's Origin check is a
-  browser-side defense: it keeps pages in the user's browser, whose `Origin` the browser sets truthfully, away from the
-  helm. The native app's webview is exempted from it by custom URL schemes (`dioxus://`, and `wry://` for the webview
-  library underneath), which every desktop app built on that framework or library can present, so content displayed by
-  another such application on the machine also passes the Origin check. That is accepted, for the browser-facing check
-  only: such content still has no credential, and the check was never meant to recognize the native app. It is not
-  accepted for the native app. Nothing that establishes the native app as a client may rely on `Origin`; that rests on
-  the credential the native process obtains itself, and hardening that keeps other software from passing for the native
-  app goes through that credential.
+  device and keeps a session thereafter. Rotating the token invalidates every browser device credential for new
+  requests; already-admitted requests may finish. The native app's own credentials, which its embedded helm issues to it
+  directly rather than through the token, are exempt from rotation, and its open connections stay up through one.
+  Existing terminal and event-feed connections may remain usable or close on rotation, whichever keeps the
+  implementation simpler; reconnecting requires a current credential. Rotation does not stop running agent sessions. The
+  native app embeds its helm; that edge is local. The token keeps other users OUT of the helm; it does not let the
+  browser tell the helm apart from another local user's process that binds the same port while the helm is down. That
+  gap is accepted in v1: the browser UI is recommended only on a machine with no other, untrusted local users, and the
+  native app is the preferred client wherever it is available. `docs/security.md` records the reasoning. The UI is
+  served only under the IPv4 literal, never under the names `localhost` or `[::1]`: the helm binds only `127.0.0.1`, so
+  another local account can bind `[::1]` on the same port at any time, even while the helm runs, and a browser that
+  resolves `localhost` to `::1` would load that account's page under the origin holding the device secret. Refusing the
+  names keeps any device secret from being stored under an origin another account can serve; a plain page load that
+  names them and still reaches the helm is redirected to `127.0.0.1`. A device secret a browser stored under `localhost`
+  before this rule remains exposed to such a squatter until the token is rotated, and a squatter on `localhost` can
+  still show a lookalike token prompt, which falls under the gap accepted above. Whether the web token is stored in the
+  user's password manager is the user's choice: the browser prompt is an ordinary password field, and Farhelm does not
+  try to stop a browser from offering to save it or keep a synced store from holding it. A saved token being autofilled
+  into a lookalike prompt is the same port-squatter gap. The helm's Origin check is a browser-side defense: it keeps
+  pages in the user's browser, whose `Origin` the browser sets truthfully, away from the helm. The native app's webview
+  is exempted from it by custom URL schemes (`dioxus://`, and `wry://` for the webview library underneath), which every
+  desktop app built on that framework or library can present, so content displayed by another such application on the
+  machine also passes the Origin check. That is accepted, for the browser-facing check only: such content still has no
+  credential, and the check was never meant to recognize the native app. It is not accepted for the native app. Nothing
+  that establishes the native app as a client may rely on `Origin`; that rests on the credential the native process
+  obtains itself, and hardening that keeps other software from passing for the native app goes through that credential.
 - **Helm to supervisor**: SSH, and only SSH, for every remote supervisor. Passwordless access from the helm's machine,
   as the user, is the requirement; authentication is the user's SSH keys, and supervisors listen on no network port of
   their own. Registering a host means giving the helm its SSH destination — there is no supervisor token to manage. The
@@ -1732,14 +1733,18 @@ as it stays proportionate.
 
 ### Signing in again
 
-Confirmed 2026-10-01: the desktop app is the primary supported surface. When a client has to sign in again, for example
-after the browser sign-in token was rotated or its device credential was evicted, that recovery may reset the page and
-lose open forms, dialogs and drafts. Friction in the browser's token prompt is acceptable too. Do not spend significant
+Confirmed 2026-10-01: the desktop app is the primary supported surface. Decided 2026-10-02: the desktop app never
+involves a user-visible credential, and the split between its embedded helm and its window is an implementation detail.
+Its own credentials are not revoked by browser sign-in token rotation or evicted by the cap on remembered client
+credentials, so in ordinary operation it never signs in again. When a browser has to sign in again, for example after
+the browser sign-in token was rotated or its device credential was evicted, that recovery may reset the page and lose
+open forms, dialogs and drafts. Friction in the browser's token prompt is acceptable too. Do not spend significant
 complexity preserving UI state across a sign-in.
 
 Three things still hold. An action the user started is never lost silently: it either completes and reports its outcome,
-or reports that its outcome is unknown. Sign-in recovery never crashes the window or leaves it dead. A failed desktop
-re-sign-in can be retried from the window, without restarting the app. This principle may be revisited later.
+or reports that its outcome is unknown. Sign-in recovery never crashes the window or leaves it dead. If the desktop
+app's own authentication fails anyway, which takes something genuinely broken rather than a rotation or a busy browser,
+the window says so and offers a retry, without restarting the app. This principle may be revisited later.
 
 ### One GUI at a time
 
@@ -1912,12 +1917,13 @@ the desktop app on a Mac.
 Viewing and rotating the browser sign-in token through `farhelm helm token show|rotate` on the helm's machine is
 sufficient for the current product. An app-UI token-management surface is not a current requirement.
 
-Browser sign-in token rotation prevents old credentials from admitting new requests to the helm. It does not require
-cancelling requests already admitted, including attachment uploads, or rolling back work already performed. Already-open
-terminal and event-feed connections may continue to work, including terminal input, or may close as a consequence of
-rotation. Both outcomes are explicitly acceptable; prefer the simpler implementation. Neither outcome alone is a defect
-or a reason to add cancellation or continuity machinery. Any new request or connection, including a reconnect, must
-authenticate with a current credential. Rotation does not stop the agent processes running in Farhelm sessions.
+Browser sign-in token rotation prevents old browser credentials from admitting new requests to the helm (the desktop
+app's own credentials are exempt; see "Client to helm"). It does not require cancelling requests already admitted,
+including attachment uploads, or rolling back work already performed. Already-open terminal and event-feed connections
+may continue to work, including terminal input, or may close as a consequence of rotation. Both outcomes are explicitly
+acceptable; prefer the simpler implementation. Neither outcome alone is a defect or a reason to add cancellation or
+continuity machinery. Any new request or connection, including a reconnect, must authenticate with a current credential.
+Rotation does not stop the agent processes running in Farhelm sessions.
 
 Supporting a range of historical data schemas and hardening every upgrade/downgrade path are not current design goals.
 During feature design, agents must alert the maintainer to potential loss of data or state and absence of a downgrade
@@ -1925,7 +1931,8 @@ path before proceeding. Compatibility is decided per feature; this is not blanke
 or ordinary runtime data loss. Revisit broader compatibility as the project matures, and record future breaking
 transitions when there is an expectation of users beyond the maintainer.
 
-The helm is optimized for a handful of browser/desktop clients, not a large device fleet. Retaining the 64 newest client
-credentials is acceptable even when an older credential is actively used. Beyond a few tens of enrollments,
-reauthentication friction is acceptable; activity-based eviction is not required. Enrollments are credentials, not
-physical devices, and eviction does not delete Farhelm sessions or terminate their agent processes.
+The helm is optimized for a handful of browser/desktop clients, not a large device fleet. Retaining the 64 newest
+browser credentials is acceptable even when an older credential is actively used. The desktop app's own credentials are
+not counted among them and are never evicted. Beyond a few tens of enrollments, reauthentication friction is acceptable;
+activity-based eviction is not required. Enrollments are credentials, not physical devices, and eviction does not delete
+Farhelm sessions or terminate their agent processes.
