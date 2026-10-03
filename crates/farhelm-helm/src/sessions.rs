@@ -2833,21 +2833,26 @@ pub(crate) async fn rename_session(
 
 /// The query string of `DELETE /api/sessions/{id}`.
 ///
-/// `only_if_nothing_alive` is passed straight to the supervisor (see
-/// `ControlMsg::DeleteSession::only_if_nothing_alive`): the browser sets it
-/// on a delete it did not confirm with the user, so a row that looked ended
-/// but is running again is refused rather than killed. Absent means false,
-/// the unconditional delete every other caller wants.
+/// Both flags are passed straight to the supervisor as
+/// `farhelm_proto::DeleteGuard`: the browser sets the one matching the
+/// confirmation it showed (none at all, or one that said nothing was alive,
+/// sets `only_if_nothing_alive`; one that warned only about open tabs sets
+/// `only_if_agent_ended`), so a row that looked ended but is running again is
+/// refused rather than killed. Absent means false, the unconditional delete
+/// every other caller wants.
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct DeleteQuery {
     #[serde(default)]
     only_if_nothing_alive: bool,
+    #[serde(default)]
+    only_if_agent_ended: bool,
 }
 
 /// `DELETE /api/sessions/{id}` — remove a session and all its stored state
 /// (SPEC.md's "delete"). The helm itself enforces nothing about liveness.
 /// SPEC.md's confirm-when-alive rule is the client's to ask; what the helm
-/// adds is the `?only_if_nothing_alive=true` precondition ([`DeleteQuery`]),
+/// adds is the `?only_if_nothing_alive=true` / `?only_if_agent_ended=true`
+/// precondition ([`DeleteQuery`]),
 /// which the supervisor checks at the moment of deletion so a client's
 /// stale "nothing is running" cannot turn into an unconfirmed kill.
 /// Same empty-object success body as `stop_session`, except that a delete
@@ -2887,7 +2892,13 @@ pub(crate) async fn delete_session(
             Err(e) => return http_error(e),
         };
         match client
-            .delete_session_with(&id, query.only_if_nothing_alive)
+            .delete_session_with(
+                &id,
+                farhelm_proto::DeleteGuard::from_flags(
+                    query.only_if_nothing_alive,
+                    query.only_if_agent_ended,
+                ),
+            )
             .await
         {
             Ok(notice) => {
@@ -3058,14 +3069,18 @@ pub(crate) struct ReplaceReq {
     ///   describing an ambiguity this route will not silently resolve by
     ///   picking one.
     with: Option<CreateReq>,
-    /// The same precondition as `DELETE ?only_if_nothing_alive=true`, applied
-    /// to the source delete that ends a successful replace. The browser sets
-    /// it on a Replace it did not confirm with the user. A refusal lands in
-    /// the existing "the replacement was created, the source could not be
-    /// deleted, both sessions exist" reply; nothing is rolled back and no
-    /// separate liveness check runs before the create.
+    /// The same preconditions as [`DeleteQuery`]'s, applied to the source
+    /// delete that ends a successful replace. The browser sets the one
+    /// matching the Replace prompt it showed, or `only_if_nothing_alive` when
+    /// it showed none. A refusal lands in the existing "the replacement was
+    /// created, the source could not be deleted, both sessions exist" reply;
+    /// nothing is rolled back and no separate liveness check runs before the
+    /// create.
     #[serde(default)]
     only_if_nothing_alive: bool,
+    /// See `only_if_nothing_alive`.
+    #[serde(default)]
+    only_if_agent_ended: bool,
 }
 
 /// One replace: a fresh session with the source's cwd, title, and agent
@@ -3135,7 +3150,7 @@ pub(crate) async fn do_replace_session(
     id: &str,
     intent_key: Option<String>,
     with: Option<CreateReq>,
-    only_if_nothing_alive: bool,
+    guard: farhelm_proto::DeleteGuard,
     allow_yolo_on_sensitive_host: bool,
 ) -> anyhow::Result<Replaced> {
     // A replace-with body may carry the confirmation itself (it is an
@@ -3238,7 +3253,7 @@ pub(crate) async fn do_replace_session(
             id,
             intent_key,
             with.expect("fresh body checked above"),
-            only_if_nothing_alive,
+            guard,
         )
         .await;
     }
@@ -3352,7 +3367,7 @@ pub(crate) async fn do_replace_session(
         },
     )
     .await?;
-    finish_replacement(state, &claim, &client, id, created, only_if_nothing_alive).await
+    finish_replacement(state, &claim, &client, id, created, guard).await
 }
 
 /// A replacement must leave a different session alive. Run this check through
@@ -3389,7 +3404,7 @@ async fn replace_with_fresh_checkout(
     id: &str,
     intent_key: Option<String>,
     req: CreateReq,
-    only_if_nothing_alive: bool,
+    guard: farhelm_proto::DeleteGuard,
 ) -> anyhow::Result<Replaced> {
     let client_identity = serde_json::to_string(&(
         "github_replace_request_v1",
@@ -3429,7 +3444,7 @@ async fn replace_with_fresh_checkout(
         Some(replacement_result_check(id)),
     )
     .await?;
-    finish_replacement(state, claim, client, id, created, only_if_nothing_alive).await
+    finish_replacement(state, claim, client, id, created, guard).await
 }
 
 /// Delete the source only after a replacement has passed acceptance. Both a
@@ -3441,13 +3456,13 @@ async fn finish_replacement(
     client: &SupervisorClient,
     id: &str,
     created: farhelm_proto::SessionInfo,
-    only_if_nothing_alive: bool,
+    guard: farhelm_proto::DeleteGuard,
 ) -> anyhow::Result<Replaced> {
     // A replacement in the same folder keeps its source's checkout, but one
     // with an overridden folder or a fresh checkout can release the source's
     // last reference, and that delete's notice must reach the user like any
     // other Delete's (SPEC.md "Fresh GitHub checkouts").
-    let delete_notice = match client.delete_session_with(id, only_if_nothing_alive).await {
+    let delete_notice = match client.delete_session_with(id, guard).await {
         Ok(notice) => notice,
         Err(delete_error) => {
             // Two shapes of failure here, and they earn different words because
@@ -3540,7 +3555,10 @@ pub(crate) async fn replace_session(
             &id,
             req.intent_key,
             req.with,
-            req.only_if_nothing_alive,
+            farhelm_proto::DeleteGuard::from_flags(
+                req.only_if_nothing_alive,
+                req.only_if_agent_ended,
+            ),
             req.allow_yolo_on_sensitive_host,
         )
         .await

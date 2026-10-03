@@ -373,10 +373,33 @@ fn confirm_consequence_for_agent(status: &SessionStatus) -> &'static str {
 /// Two things hang on it. Delete skips its confirmation only in this case,
 /// and whenever a delete or Replace goes ahead on the strength of it (no
 /// prompt at all, or a prompt that warned of nothing alive), the request
-/// carries `only_if_nothing_alive` so the supervisor refuses if the row was
-/// stale and something is running after all.
+/// carries `DeleteGuard::NothingAlive` (see [`delete_guard`]) so the
+/// supervisor refuses if the row was stale and something is running after
+/// all.
 pub(crate) fn shows_nothing_alive(status: &SessionStatus, tabs: usize) -> bool {
     status.has_ended() && tabs == 0
+}
+
+/// The precondition a delete or Replace sends when it goes ahead on a row
+/// showing `status` with `tabs` open: what the prompt drawn from that row
+/// (or the absence of one) told the user would be stopped.
+///
+/// SPEC.md "Lifecycle operations": a destructive confirmation authorizes only
+/// what the prompt the user answered said. Nothing alive (no prompt, or one
+/// that said nothing was running) is `NothingAlive`; an ended agent with tabs
+/// (a prompt that warned only about tabs) is `AgentEnded`; an agent that has
+/// not ended (a prompt that warned it runs, or may) is `Unconditional`. The
+/// caller must derive it from the same snapshot that drew the prompt, never
+/// from a fresh read at click time, or a prompt that drifted would be
+/// answered with a guard for a state the user was not shown.
+pub(crate) fn delete_guard(status: &SessionStatus, tabs: usize) -> crate::DeleteGuard {
+    if shows_nothing_alive(status, tabs) {
+        crate::DeleteGuard::NothingAlive
+    } else if status.has_ended() {
+        crate::DeleteGuard::AgentEnded
+    } else {
+        crate::DeleteGuard::Unconditional
+    }
 }
 
 /// The in-progress label a session shows between a committed delete and
@@ -516,6 +539,19 @@ pub(crate) fn restart_consequence(status: &SessionStatus) -> &'static str {
         }
         SessionStatus::Error { .. } => "the agent never started — nothing to stop; restart it:",
     }
+}
+
+/// Whether the restart prompt drawn from `status` told the user it would stop
+/// a running agent, which is the consent `stop_if_running` carries.
+///
+/// True exactly for the [`restart_consequence`] arms that say restarting
+/// stops the agent (or stops it if it is running, for `Unknown`). A prompt
+/// that drifted to an ended status while open did not say it stops the
+/// agent (it may still say restart reaps what an exited agent left behind),
+/// so its confirm must not consent to stopping an agent that started working
+/// again meanwhile: the supervisor then refuses, and the next attempt asks.
+pub(crate) fn restart_prompt_stops_agent(status: &SessionStatus) -> bool {
+    !status.has_ended()
 }
 
 #[cfg(test)]
@@ -902,6 +938,81 @@ mod tests {
             assert!(
                 wording.contains("nothing") && !wording.contains("still running"),
                 "{gone:?} -> {wording}"
+            );
+        }
+    }
+
+    /// Spec: a delete or Replace prompt's guard is the precondition matching
+    /// what that prompt said: nothing alive (the agent ended, no tabs) is
+    /// `NothingAlive`; tabs open beside an ended agent is `AgentEnded`; an
+    /// agent that has not ended, `Unknown` included, is `Unconditional`.
+    ///
+    /// Why it matters: SPEC.md "Lifecycle operations" lets a confirmation
+    /// authorize only what its prompt said. A tabs-only prompt that sent no
+    /// precondition would kill an agent restarted before the click, and one
+    /// that sent `NothingAlive` would refuse the very tabs it warned about.
+    #[farhelm_testtrace::test]
+    fn the_delete_guard_matches_what_the_prompt_said() {
+        let exited = SessionStatus::Exited { exit_code: Some(0) };
+        assert_eq!(delete_guard(&exited, 0), crate::DeleteGuard::NothingAlive);
+        assert_eq!(delete_guard(&exited, 2), crate::DeleteGuard::AgentEnded);
+        assert_eq!(
+            delete_guard(&SessionStatus::Interrupted, 1),
+            crate::DeleteGuard::AgentEnded
+        );
+        for live in [
+            SessionStatus::Running,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+            SessionStatus::Unknown,
+        ] {
+            for tabs in [0, 1] {
+                assert_eq!(
+                    delete_guard(&live, tabs),
+                    crate::DeleteGuard::Unconditional,
+                    "{live:?} with {tabs} tabs"
+                );
+            }
+        }
+        // The three levels line up with the three kinds of wording.
+        assert!(confirm_consequence(&exited, 2).contains("terminal tabs are still open"));
+        assert!(!confirm_consequence(&exited, 2).contains("still running"));
+        assert!(confirm_consequence(&SessionStatus::Running, 0).contains("still running"));
+    }
+
+    /// Spec: the restart confirm consents to stopping a running agent exactly
+    /// when its prompt said it would stop one: for live statuses and
+    /// `Unknown`, and never for an ended status a prompt drifted to.
+    ///
+    /// Why it matters: the confirm used to send `stop_if_running` whatever the
+    /// prompt said, so a prompt that drifted to "nothing left to stop" still
+    /// stopped an agent another client started before the click, where
+    /// SPEC.md asks for a refusal and a fresh question.
+    #[farhelm_testtrace::test]
+    fn the_restart_confirm_consents_only_to_the_stop_its_prompt_offered() {
+        for status in [
+            SessionStatus::Running,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+            SessionStatus::Unknown,
+        ] {
+            assert!(restart_prompt_stops_agent(&status), "{status:?}");
+            assert!(
+                restart_consequence(&status).contains("stops"),
+                "the prompt for {status:?} must say it stops the agent"
+            );
+        }
+        for status in [
+            SessionStatus::Exited { exit_code: Some(0) },
+            SessionStatus::Interrupted,
+            SessionStatus::Error {
+                detail: "exec_failed argv0=/nope errno=2".to_string(),
+            },
+        ] {
+            assert!(!restart_prompt_stops_agent(&status), "{status:?}");
+            assert!(
+                !restart_consequence(&status).contains("still running"),
+                "the prompt for {status:?} must not claim a running agent"
             );
         }
     }

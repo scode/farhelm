@@ -60,11 +60,9 @@ pub(crate) enum HeaderPrefillRequest {
 #[derive(Clone, PartialEq)]
 pub(crate) struct HeaderDeleteRequest {
     pub(crate) id: String,
-    /// Whether the header's prompt warned that nothing was alive, in which
-    /// case the request carries the supervisor-side precondition the same
-    /// way every delete or replace decided on "nothing alive" does (see
-    /// `status::shows_nothing_alive`).
-    pub(crate) only_if_nothing_alive: bool,
+    /// The precondition the header's prompt, as the user read it, covered
+    /// (see `status::delete_guard`).
+    pub(crate) guard: crate::DeleteGuard,
 }
 
 /// How long the pointer must rest completely still over the session list
@@ -476,7 +474,7 @@ fn leave_phase(row_phases: &mut HashMap<String, RowPhase>, id: &str, phase: RowP
 struct PendingYoloReplace {
     ask: crate::yolo_confirm::YoloAsk,
     source: Session,
-    only_if_nothing_alive: bool,
+    guard: crate::DeleteGuard,
 }
 
 /// The flat session list: host, title, cwd, invocation, and a truthful
@@ -1762,13 +1760,14 @@ pub(crate) fn ListView(
     // `delete_session` and `errors`'/`pending`'s "delete:"-prefixed entry
     // in place of `on_stop`'s "stop:" one.
     let delete_refresh = request_listing.clone();
-    // `only_if_nothing_alive` is set by the one caller that deletes without
-    // asking (see `on_delete`): the row it decided from can be stale, and the
-    // supervisor then refuses rather than kills what nobody confirmed.
+    // `guard` is what the prompt the user answered covered, or
+    // `NothingAlive` for the one caller that deletes without asking (see
+    // `on_delete`): the row it decided from can be stale, and the supervisor
+    // then refuses rather than kills what nobody confirmed.
     //
     // Returns whether the delete started. Only the header path reads it: the
     // row's own callers refuse busy rows before they get here.
-    let mut do_delete = move |id: String, only_if_nothing_alive: bool| -> bool {
+    let mut do_delete = move |id: String, guard: crate::DeleteGuard| -> bool {
         if !begin_row_op(&id) {
             return false;
         }
@@ -1779,7 +1778,7 @@ pub(crate) fn ListView(
         let base = delete_base.clone();
         let refresh = delete_refresh.clone();
         spawn(async move {
-            let outcome = delete_session(&base, &id, only_if_nothing_alive).await;
+            let outcome = delete_session(&base, &id, guard).await;
             if let Ok(notice) = &outcome {
                 delete_notice.publish(notice.clone());
             }
@@ -1928,10 +1927,7 @@ pub(crate) fn ListView(
             // spawned. There is no lingering process tree to worry about,
             // not because nothing ever ran, but because the one thing
             // that could have left descendants never got the chance to.
-            do_delete_on_confirm(
-                target.id,
-                DeleteClick::DeleteGuarded.only_if_nothing_alive(),
-            );
+            do_delete_on_confirm(target.id, crate::DeleteGuard::NothingAlive);
         } else {
             // Unknown must not borrow a live status's "is still running" claim
             // it has no basis for — SPEC.md's no-guessing rule means an
@@ -1967,7 +1963,9 @@ pub(crate) fn ListView(
     // `do_delete` regardless, which for the cancel-then-confirm race
     // would delete a session the user just told the UI to leave alone.
     let mut header_do_delete = do_delete.clone();
-    let confirm_delete = move |id: String| {
+    // `guard` comes from the row render that drew the prompt the user
+    // answered (`status::delete_guard`), not from the row as it reads now.
+    let confirm_delete = move |(id, guard): (String, crate::DeleteGuard)| {
         // Refused OUTRIGHT while the shared token is held, BEFORE the
         // confirming flag is touched: `do_delete`'s own `begin_row_op`
         // would refuse anyway, but by then the flag is gone and the
@@ -1980,7 +1978,7 @@ pub(crate) fn ListView(
         if !leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingDelete) {
             return;
         }
-        do_delete(id, false);
+        do_delete(id, guard);
     };
 
     // The inline prompt's cancel button: just drops the flag. No API
@@ -2003,7 +2001,7 @@ pub(crate) fn ListView(
             return;
         };
         header_delete.set(None);
-        if !header_do_delete(request.id.clone(), request.only_if_nothing_alive) {
+        if !header_do_delete(request.id.clone(), request.guard) {
             errors.write().insert(
                 request.id,
                 "delete: not started, another operation is in progress; try again".to_string(),
@@ -2046,13 +2044,13 @@ pub(crate) fn ListView(
     // which may have changed or gone since. It only ever comes with
     // `allow_yolo`.
     //
-    // `source` and `only_if_nothing_alive` are the row snapshot the confirmed
-    // prompt was drawn from and whether it said nothing is alive; see
+    // `source` and `guard` are the row snapshot the confirmed prompt was
+    // drawn from and the precondition that prompt covered; see
     // `PendingYoloReplace` for why they are passed in rather than looked up.
     let mut do_replace = move |allow_yolo: bool,
                                stop_asking: Option<(crate::HostId, String)>,
                                source: Session,
-                               only_if_nothing_alive: bool| {
+                               guard: crate::DeleteGuard| {
         let id = source.id.clone();
         if !begin_row_op(&id) {
             return;
@@ -2083,7 +2081,7 @@ pub(crate) fn ListView(
                     yolo_replace.set(None);
                 }
             }
-            match replace_session(&base, &id, only_if_nothing_alive, allow_yolo).await {
+            match replace_session(&base, &id, guard, allow_yolo).await {
                 Ok((session, notice)) => {
                     delete_notice.publish(notice);
                     // The source row's host fields: the reply is bare,
@@ -2118,7 +2116,7 @@ pub(crate) fn ListView(
                         yolo_replace.set(Some(PendingYoloReplace {
                             ask,
                             source: source.clone(),
-                            only_if_nothing_alive,
+                            guard,
                         }));
                     } else {
                         errors
@@ -2175,9 +2173,8 @@ pub(crate) fn ListView(
             &source.id,
             RowPhase::ConfirmingReplace,
         ) {
-            let only_if_nothing_alive =
-                crate::status::shows_nothing_alive(&source.status, source.tabs.len());
-            do_replace(false, None, source, only_if_nothing_alive);
+            let guard = crate::status::delete_guard(&source.status, source.tabs.len());
+            do_replace(false, None, source, guard);
         }
     };
     let cancel_replace = move |id: String| {
@@ -3251,7 +3248,7 @@ pub(crate) fn ListView(
                                     do_replace(true,
                                         None,
                                         pending.source.clone(),
-                                        pending.only_if_nothing_alive,
+                                        pending.guard,
                                     );
                                 }
                             },
@@ -3272,7 +3269,7 @@ pub(crate) fn ListView(
                                     do_replace(true,
                                         target.clone(),
                                         pending.source.clone(),
-                                        pending.only_if_nothing_alive,
+                                        pending.guard,
                                     );
                                 }
                             },

@@ -10,7 +10,7 @@
 
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { hideSeenState, localHostId, openRowMenu, SESSION_LISTING } from "./helpers/fleet";
+import { hideSeenState, localHostId, openRowMenu, SESSION_LISTING, stopSession } from "./helpers/fleet";
 import { cleanupSession, fillCreateForm, restartIdleAgent, termText, waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
@@ -730,6 +730,74 @@ test("restarting a working agent confirms first, and only then sends the request
         },
       )
       .toBeGreaterThanOrEqual(2);
+  } finally {
+    const id = await findSessionIdByTitle(request, title).catch(() => undefined);
+    if (id) {
+      await cleanupSession(request, id);
+    }
+  }
+});
+
+/**
+ * Why this matters: the header's restart prompt rewords itself while it
+ * stays open, and its confirm used to consent to stopping a running agent
+ * whatever it said by then. A prompt that came to say the agent had exited
+ * therefore stopped an agent started again before the click, unasked
+ * (SPEC.md "Lifecycle operations": a confirmation authorizes only what its
+ * prompt said). Spec: a prompt opened on a working agent that rewords to the
+ * exited case sends the restart without `stop_if_running`.
+ *
+ * The drift is real: the agent is stopped through the API while the prompt is
+ * open, and the view's own detail refresh rewords it. The restart request
+ * itself goes through, which is harmless for an exited agent.
+ */
+test("a restart prompt that drifted to an exited agent no longer consents to a stop", async ({
+  page,
+  request,
+}) => {
+  const title = `restart-drift-${Date.now()}`;
+  const bodies: any[] = [];
+  await page.route("**/api/sessions/*/restart", async (route) => {
+    bodies.push(route.request().postDataJSON());
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, {
+      cwd: "/tmp",
+      invocation: FAKE_AGENT_INVOCATION,
+      title,
+    });
+    await form.locator('button[type="submit"]').click();
+    const id = await sessionIdFor(rowByTitle(page, title));
+    await waitForSessionRevealed(page, id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    // `busy` keeps the agent reading working, the one status that opens
+    // the prompt (see the confirmation test above).
+    await page.locator("#terminal").click();
+    await page.keyboard.type("busy");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "busy-tick-");
+    const restartButton = page.locator(".restart-primary");
+    await expect(restartButton).toHaveAttribute("data-confirms", "true", { timeout: 15_000 });
+
+    // Premise: the prompt opens offering to stop the running agent.
+    await restartButton.click();
+    const consequence = page.locator(".restart-offer .confirm-consequence");
+    await expect(consequence).toContainText("still running");
+
+    // The agent ends behind the open prompt, which rewords to the exited case.
+    await stopSession(request, id);
+    await expect(consequence).toContainText("the agent has exited", { timeout: 20_000 });
+    expect(bodies, "premise: nothing was sent while the prompt was open").toHaveLength(0);
+
+    await page.locator(".restart-confirm").click();
+    await expect.poll(() => bodies.length).toBe(1);
+    expect(
+      bodies[0].stop_if_running,
+      "a prompt that no longer offered to stop a running agent must not consent to one",
+    ).toBe(false);
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {

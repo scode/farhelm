@@ -71,18 +71,12 @@ impl DeleteTarget {
 /// branch and a literal inside a component closure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DeleteClick {
-    /// Open the inline confirmation; a confirmed delete is unconditional.
+    /// Open the inline confirmation; the confirmed delete carries the guard
+    /// of the prompt the user answered (`status::delete_guard`).
     Confirm,
     /// Delete without asking, because the row shows nothing alive, and ask
     /// the supervisor to refuse if the row was stale.
     DeleteGuarded,
-}
-
-impl DeleteClick {
-    /// The `only_if_nothing_alive` flag the resulting delete request sends.
-    pub(super) fn only_if_nothing_alive(self) -> bool {
-        matches!(self, Self::DeleteGuarded)
-    }
 }
 
 /// The display state `ListView` derives for one `SessionRow` render.
@@ -576,16 +570,14 @@ pub(super) mod tests {
         // Premise: the specimen's agent has ended.
         assert!(exited_bare.status.has_ended());
 
-        // The click's action and the flag its request carries: only the
-        // unconfirmed delete sends the supervisor-side precondition.
+        // The click's action: only an ended agent with no tabs deletes at
+        // once (under `DeleteGuard::NothingAlive`); everything else asks.
         let bare = DeleteTarget::for_session(&exited_bare);
         assert_eq!(bare.click(), DeleteClick::DeleteGuarded);
-        assert!(bare.click().only_if_nothing_alive());
         assert_eq!(
             DeleteTarget::for_session(&running_bare).click(),
             DeleteClick::Confirm
         );
-        assert!(!DeleteClick::Confirm.only_if_nothing_alive());
 
         let with_tabs = DeleteTarget::for_session(&exited_with_tabs);
         assert_eq!(with_tabs.tabs, 2);

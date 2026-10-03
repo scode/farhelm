@@ -1175,21 +1175,30 @@ async fn delete_session_passes_the_supervisors_notice_to_the_caller() {
     peer.await.unwrap();
 }
 
-/// Why this matters: the browser's unconfirmed delete relies on the
-/// supervisor refusing a session that is alive after all, which only works
-/// if the helm forwards the precondition instead of dropping it. Spec:
-/// `?only_if_nothing_alive=true` reaches the supervisor as
-/// `DeleteSession::only_if_nothing_alive: true`, and a plain DELETE sends
-/// false (the unconditional delete).
+/// Why this matters: the browser's unconfirmed delete, and a confirmed one
+/// whose prompt promised less than what is alive by the time it lands, rely
+/// on the supervisor refusing, which only works if the helm forwards the
+/// precondition instead of dropping it. Spec: `?only_if_nothing_alive=true`
+/// and `?only_if_agent_ended=true` reach the supervisor as the matching
+/// `farhelm_proto::DeleteGuard`, and a plain DELETE sends neither (the
+/// unconditional delete).
 #[farhelm_testtrace::test]
-async fn delete_session_forwards_the_only_if_nothing_alive_precondition() {
+async fn delete_session_forwards_its_precondition() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use tower::ServiceExt;
 
+    use farhelm_proto::DeleteGuard;
     for (uri, expected) in [
-        ("/api/sessions/sess-1?only_if_nothing_alive=true", true),
-        ("/api/sessions/sess-1", false),
+        (
+            "/api/sessions/sess-1?only_if_nothing_alive=true",
+            DeleteGuard::NothingAlive,
+        ),
+        (
+            "/api/sessions/sess-1?only_if_agent_ended=true",
+            DeleteGuard::AgentEnded,
+        ),
+        ("/api/sessions/sess-1", DeleteGuard::Unconditional),
     ] {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let peer = tokio::spawn(async move {
@@ -1203,6 +1212,7 @@ async fn delete_session_forwards_the_only_if_nothing_alive_precondition() {
             let ControlMsg::DeleteSession {
                 req_id,
                 only_if_nothing_alive,
+                only_if_agent_ended,
                 ..
             } = request
             else {
@@ -1215,7 +1225,7 @@ async fn delete_session_forwards_the_only_if_nothing_alive_precondition() {
                 })
                 .await
                 .unwrap();
-            only_if_nothing_alive
+            DeleteGuard::from_flags(only_if_nothing_alive, only_if_agent_ended)
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;
@@ -2053,6 +2063,86 @@ async fn a_replace_reply_carries_the_source_deletes_notice() {
         body["delete_notice"], "The checkout at /work/bar was not archived",
         "the source delete's notice reaches the caller verbatim"
     );
+}
+
+/// Spec: the source delete that ends a successful Replace carries the
+/// precondition the request body asked for, as the matching
+/// `farhelm_proto::DeleteGuard`: `only_if_nothing_alive`, `only_if_agent_ended`,
+/// or neither.
+///
+/// Why: a Replace prompt that warned only about open tabs, or one that said
+/// nothing was alive, authorizes no more than that (SPEC.md "Lifecycle
+/// operations"). The supervisor can refuse a source that is running again
+/// only if the helm forwards the level instead of collapsing it.
+#[farhelm_testtrace::test]
+async fn a_replace_forwards_its_source_delete_precondition() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, DeleteGuard, Frame};
+
+    for (body, expected) in [
+        (
+            serde_json::json!({ "only_if_nothing_alive": true }),
+            DeleteGuard::NothingAlive,
+        ),
+        (
+            serde_json::json!({ "only_if_agent_ended": true }),
+            DeleteGuard::AgentEnded,
+        ),
+        (serde_json::json!({}), DeleteGuard::Unconditional),
+    ] {
+        let source = rest_harness::session("guarded-src", 1_700_000_000);
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+        let fleet = harness.fleet.clone();
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CreateSession { req_id, .. } = request else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            let created = rest_harness::session("guarded-new", 1_700_000_500);
+            fleet.edit(local, |script| script.sessions.push(created.clone()));
+            writer
+                .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                    req_id,
+                    session: created,
+                }))
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::DeleteSession {
+                req_id,
+                only_if_nothing_alive,
+                only_if_agent_ended,
+                ..
+            } = request
+            else {
+                panic!("expected DeleteSession, got {request:?}");
+            };
+            fleet.edit(local, |script| {
+                script.sessions.retain(|s| s.id != "guarded-src")
+            });
+            writer
+                .write_control(&ControlMsg::SessionDeleted {
+                    req_id,
+                    notice: None,
+                })
+                .await
+                .unwrap();
+            DeleteGuard::from_flags(only_if_nothing_alive, only_if_agent_ended)
+        });
+
+        harness.await_refreshed(local).await;
+        let (status, reply) =
+            post_text(&harness, "/api/sessions/guarded-src/replace", body.clone()).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}: {reply}");
+        assert_eq!(peer.await.unwrap(), expected, "{body}");
+    }
 }
 
 /// Spec: a plain Replace of a session the host lists as created from a

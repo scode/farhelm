@@ -864,7 +864,7 @@ pub(super) fn SessionRow(
     on_cancel_replace: EventHandler<String>,
     on_stop: EventHandler<String>,
     on_delete: EventHandler<DeleteTarget>,
-    on_confirm_delete: EventHandler<String>,
+    on_confirm_delete: EventHandler<(String, crate::DeleteGuard)>,
     on_cancel_delete: EventHandler<String>,
     /// The read/unread toggle's click, from either the menu item or the
     /// row's own dot (SPEC.md, Status): the session id and
@@ -1889,7 +1889,14 @@ pub(super) fn SessionRow(
                                 // refusal made visible. Cancel stays
                                 // enabled — backing out is always safe.
                                 disabled: busy,
-                                onclick: move |_| on_confirm_delete.call(confirm_id.clone()),
+                                // The guard comes from THIS render's
+                                // snapshot, the one the consequence text
+                                // above was drawn from, so a prompt that
+                                // drifted is answered for what it said.
+                                onclick: move |_| on_confirm_delete.call((
+                                    confirm_id.clone(),
+                                    crate::status::delete_guard(&session.status, session.tabs.len()),
+                                )),
                                 "confirm delete"
                             }
                             button {
@@ -2509,7 +2516,7 @@ mod tests {
             let on_cancel_replace = use_callback(|_: String| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
-            let on_confirm_delete = use_callback(|_: String| {});
+            let on_confirm_delete = use_callback(|_: (String, crate::DeleteGuard)| {});
             let on_cancel_delete = use_callback(|_: String| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
@@ -2638,7 +2645,7 @@ mod tests {
             let on_cancel_replace = use_callback(|_: String| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
-            let on_confirm_delete = use_callback(|_: String| {});
+            let on_confirm_delete = use_callback(|_: (String, crate::DeleteGuard)| {});
             let on_cancel_delete = use_callback(|_: String| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
@@ -2724,7 +2731,7 @@ mod tests {
             let on_cancel_replace = use_callback(|_: String| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
-            let on_confirm_delete = use_callback(|_: String| {});
+            let on_confirm_delete = use_callback(|_: (String, crate::DeleteGuard)| {});
             let on_cancel_delete = use_callback(|_: String| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});

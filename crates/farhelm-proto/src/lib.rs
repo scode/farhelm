@@ -175,7 +175,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered profile defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_34` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_35` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -186,7 +186,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 34;
+pub const PROTOCOL_VERSION: u32 = 35;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -2298,6 +2298,65 @@ pub enum ReportVendor {
     Grok,
 }
 
+/// How much of a session a delete may find still alive and go ahead anyway:
+/// the precondition a client derives from the confirmation it showed, or
+/// from showing none.
+///
+/// SPEC.md "Lifecycle operations": a destructive confirmation authorizes only
+/// what the prompt the user answered said would happen. Each level is what one
+/// kind of prompt covered, and the supervisor refuses, at the moment of the
+/// kill, when the session has more alive than that:
+///
+/// - [`DeleteGuard::NothingAlive`]: no prompt at all, or one that said nothing
+///   was alive. Any live agent or open tab refuses.
+/// - [`DeleteGuard::AgentEnded`]: a prompt that warned only about open tabs.
+///   An agent running again refuses; tabs, including one opened after the
+///   prompt, are closed (an accepted residual: the prompt need not name the
+///   exact tabs it showed).
+/// - [`DeleteGuard::Unconditional`]: a prompt that warned the agent was
+///   running. Nothing refuses.
+///
+/// It travels as `ControlMsg::DeleteSession`'s two flags rather than as one
+/// field, so the two levels that predate this type keep the wire shape they
+/// already had. `AgentEnded` is what moved the protocol
+/// to version 35: a supervisor that ignored its flag would delete
+/// unconditionally, killing the agent the prompt never mentioned, so an older
+/// supervisor is refused at the hello rather than trusted to honor it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DeleteGuard {
+    /// Delete whatever is alive.
+    #[default]
+    Unconditional,
+    /// Refuse while the agent has not ended; close any tabs.
+    AgentEnded,
+    /// Refuse while the agent has not ended or any tab is open.
+    NothingAlive,
+}
+
+impl DeleteGuard {
+    /// The guard a `DeleteSession`'s two flags ask for; the stricter wins
+    /// when both are set.
+    pub fn from_flags(only_if_nothing_alive: bool, only_if_agent_ended: bool) -> Self {
+        if only_if_nothing_alive {
+            Self::NothingAlive
+        } else if only_if_agent_ended {
+            Self::AgentEnded
+        } else {
+            Self::Unconditional
+        }
+    }
+
+    /// `DeleteSession::only_if_nothing_alive` for this guard.
+    pub fn only_if_nothing_alive(self) -> bool {
+        self == Self::NothingAlive
+    }
+
+    /// `DeleteSession::only_if_agent_ended` for this guard.
+    pub fn only_if_agent_ended(self) -> bool {
+        self == Self::AgentEnded
+    }
+}
+
 /// Compatibility posture: within one protocol version the set of messages
 /// is fixed; anything incompatible bumps `PROTOCOL_VERSION` rather than
 /// negotiating per-message.
@@ -2753,20 +2812,32 @@ pub enum ControlMsg {
         /// terminal to probe) or any open terminal tab.
         ///
         /// A client sets it on a delete it did NOT ask the user to confirm,
-        /// because its own row said nothing was running. That row can be
+        /// because its own row said nothing was running, and on a confirmed
+        /// delete whose prompt said nothing was alive. That row can be
         /// stale (another client or an agent restarted the session, a
         /// cached status right after a relaunch), and an unconditional
         /// delete would then kill a live agent nobody agreed to stop. It is
         /// the delete counterpart of `RestartSession::stop_if_running`: the
         /// supervisor, not the client's snapshot, decides at the moment of
-        /// the kill. `#[serde(default)]` false is today's unconditional
-        /// delete, so an older sender and a confirmed delete behave as
-        /// before, and an older supervisor that ignores the field gives
-        /// exactly the old behaviour rather than a failure. Serialized only
-        /// when true, so an unconditional delete keeps its original wire
-        /// shape.
+        /// the kill. `#[serde(default)]` false is the unconditional delete
+        /// (the confirmed delete of a prompt that warned the agent runs, and
+        /// any sender that does not set it). Serialized only when true, so
+        /// an unconditional delete keeps its original wire shape. See
+        /// [`DeleteGuard`] for how a client picks it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         only_if_nothing_alive: bool,
+        /// The narrower precondition: refuse, with `Conflict`, only when the
+        /// agent has not ended (the same agent test as
+        /// `only_if_nothing_alive`), and close any open terminal tab.
+        ///
+        /// A client sets it on a delete whose confirmation warned about open
+        /// tabs but said the agent had ended, so an agent restarted between
+        /// that prompt and the click is refused rather than killed. Serialized
+        /// only when true; when both flags are set the stricter one applies.
+        /// Unlike `only_if_nothing_alive`'s, this field's arrival bumped the
+        /// protocol (see [`DeleteGuard`]).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        only_if_agent_ended: bool,
     },
     /// Acknowledges `DeleteSession`: sent only once the row, the tmux
     /// session, and (if one existed) the process tree are all positively
@@ -4587,8 +4658,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_34() {
-        assert_eq!(PROTOCOL_VERSION, 34);
+    fn protocol_version_is_pinned_at_35() {
+        assert_eq!(PROTOCOL_VERSION, 35);
     }
 
     /// Pins the skew direction the detach-code bump exists to create, in
@@ -4652,7 +4723,7 @@ mod tests {
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
         assert_eq!(skew.peer_protocol, 30);
-        assert_eq!(skew.our_protocol, 34);
+        assert_eq!(skew.our_protocol, 35);
 
         // The reverse direction: a v30 receiver (the refusal rule itself,
         // modeled by its exact-version check) meets a v31 hello and hangs up.
@@ -4806,6 +4877,7 @@ mod tests {
             req_id: 12,
             session_id: "s1".to_string(),
             only_if_nothing_alive: false,
+            only_if_agent_ended: false,
         };
         assert_eq!(
             serde_json::to_value(&delete).unwrap(),
@@ -4823,6 +4895,7 @@ mod tests {
             req_id: 13,
             session_id: "s1".to_string(),
             only_if_nothing_alive: true,
+            only_if_agent_ended: false,
         };
         assert_eq!(
             serde_json::to_value(&guarded).unwrap(),
@@ -4896,6 +4969,7 @@ mod tests {
                 req_id: 2,
                 session_id: "s1".to_string(),
                 only_if_nothing_alive: false,
+                only_if_agent_ended: false,
             },
             ControlMsg::SessionDeleted {
                 req_id: 2,

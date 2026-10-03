@@ -4876,7 +4876,7 @@ async fn an_unconfirmed_delete_is_refused_while_anything_is_alive() {
     // A live agent: refused, and the session stays.
     let (kind, message) = conflict(
         h.client
-            .delete_session_with(&session.id, true)
+            .delete_session_with(&session.id, farhelm_proto::DeleteGuard::NothingAlive)
             .await
             .expect_err("a live agent must not be deleted unconfirmed"),
     );
@@ -4890,7 +4890,7 @@ async fn an_unconfirmed_delete_is_refused_while_anything_is_alive() {
     let tab = h.client.open_tab(&session.id).await.expect("open a tab");
     let (kind, message) = conflict(
         h.client
-            .delete_session_with(&session.id, true)
+            .delete_session_with(&session.id, farhelm_proto::DeleteGuard::NothingAlive)
             .await
             .expect_err("an open tab must not be deleted unconfirmed"),
     );
@@ -4903,7 +4903,7 @@ async fn an_unconfirmed_delete_is_refused_while_anything_is_alive() {
         .await
         .expect("close the tab");
     h.client
-        .delete_session_with(&session.id, true)
+        .delete_session_with(&session.id, farhelm_proto::DeleteGuard::NothingAlive)
         .await
         .expect("with nothing alive the precondition holds and the delete goes ahead");
     assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
@@ -4914,6 +4914,68 @@ async fn an_unconfirmed_delete_is_refused_while_anything_is_alive() {
         .delete_session(&live.id)
         .await
         .expect("an unflagged delete stays unconditional");
+    assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
+}
+
+/// Why this matters: a delete prompt that warned only about open tabs
+/// (the agent had ended) authorizes closing tabs, not killing an agent that
+/// another client or an agent restarted before the click. Spec
+/// (`farhelm_proto::DeleteGuard::AgentEnded`, SPEC.md "Lifecycle
+/// operations"): with that guard the supervisor refuses with `Conflict`
+/// while the agent is running, and once the agent has ended it deletes the
+/// session, closing an open tab, where `NothingAlive` would refuse.
+#[farhelm_testtrace::test]
+async fn a_tabs_only_confirmation_refuses_a_running_agent_but_closes_tabs() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let guard = farhelm_proto::DeleteGuard::AgentEnded;
+
+    // A live agent: refused, and the session stays.
+    let refused = h
+        .client
+        .delete_session_with(&session.id, guard)
+        .await
+        .expect_err("a running agent must not be deleted under a tabs-only confirmation");
+    let error = refused
+        .downcast_ref::<SupervisorError>()
+        .expect("a refused delete carries a SupervisorError");
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert!(
+        error.message.contains("agent is still running"),
+        "{}",
+        error.message
+    );
+    assert_eq!(h.client.list_sessions().await.unwrap().sessions.len(), 1);
+
+    // Agent ended, one tab open: the premise `NothingAlive` refuses ...
+    h.client.stop_session(&session.id).await.expect("stop");
+    wait_for_non_live_status(&h.client, &session.id, 15).await;
+    h.client.open_tab(&session.id).await.expect("open a tab");
+    let refused = h
+        .client
+        .delete_session_with(&session.id, farhelm_proto::DeleteGuard::NothingAlive)
+        .await
+        .expect_err("premise: the stricter guard refuses an open tab");
+    let error = refused
+        .downcast_ref::<SupervisorError>()
+        .expect("premise: the stricter guard's refusal carries a SupervisorError");
+    assert_eq!(
+        error.kind,
+        ErrorKind::Conflict,
+        "premise: {}",
+        error.message
+    );
+    assert!(
+        error.message.contains("1 terminal tab open"),
+        "premise: the stricter guard refuses because of the live tab, not for another reason: {}",
+        error.message
+    );
+
+    // ... and the tabs-only guard deletes, tab and all.
+    h.client
+        .delete_session_with(&session.id, guard)
+        .await
+        .expect("an ended agent satisfies the tabs-only guard, which closes the tab");
     assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
 }
 
