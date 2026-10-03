@@ -6374,7 +6374,8 @@
   `InvalidRequest`, plus create's template element cap. Test that a bundle with `{conversation}` as the template's
   program is refused, the row is unchanged, and a fresh supervisor still starts. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/triage-boundary-checks.md`.
+- Execution: complete: change `lkunzwkzyztx`, bookmark `plan/triage-boundary-checks/04-restart-with-checks`, PR
+  https://github.com/scode/farhelm/pull/1495.
 
 ## escape-token-clamp-too-short.md
 

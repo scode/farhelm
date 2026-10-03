@@ -36,8 +36,6 @@ One line per open item. This file must always match the feedback files in this d
   under `set -u`.
 - `delete-skips-scoped-tab-on-stale-verdict.md` — Delete skips a scoped tab's systemd scope on a stale "no user manager"
   verdict when the agent launch itself was unscoped.
-- `restart-with-skips-create-validation.md` — restart-with stores argv and resume templates without create's checks, so
-  a bad bundle can stop the supervisor from starting.
 - `create-rollback-orphans-unconfirmed-scope.md` — a failed create whose scope kill is unconfirmed still deletes the
   row, leaving processes nothing can reach.
 - `provisioning-update-replaces-binary-before-setup-guard.md` — remote UPDATE replaces the farhelm binary before

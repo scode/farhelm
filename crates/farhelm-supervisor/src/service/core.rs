@@ -3023,6 +3023,40 @@ fn canonical_cwd_text(cwd: &str, resolved: std::path::PathBuf) -> anyhow::Result
 const RELAUNCH_COLS: u16 = 80;
 const RELAUNCH_ROWS: u16 = 24;
 
+/// Parse a restart-with bundle's invocation and hold the bundle to create's
+/// input checks, before the session is looked up or anything is stopped.
+///
+/// SPEC_impl.md ("Restart-with backend wire and persistence") says
+/// restart-with uses create's checks: an executable argv, no `{cwd}` as the
+/// program, at most create's number of template elements, and a supplied
+/// template whose shape `ensure_resume_template` accepts. The new bundle is
+/// stored on success, and loading refuses a row that fails any of these, so
+/// one bad bundle accepted here would leave the supervisor unable to load its
+/// sessions after its next restart. All of them are the caller's to fix,
+/// hence `InvalidRequest`. These need nothing from the session; the check on
+/// the template a kind DERIVES from the invocation runs after resolution.
+fn restart_with_bundle_argv(
+    invocation: &str,
+    resume_template: Option<&[String]>,
+) -> Result<Vec<String>, RequestError> {
+    let invalid = |message: String| RequestError::new(ErrorKind::InvalidRequest, message);
+    let argv = shell_words::split(invocation)
+        .map_err(|error| invalid(format!("restart-with invocation does not parse: {error}")))?;
+    crate::agent_kind::ensure_executable_argv("restart-with invocation", &argv).map_err(invalid)?;
+    crate::agent_kind::ensure_no_cwd_program("restart-with invocation", &argv).map_err(invalid)?;
+    if let Some(template) = resume_template {
+        if template.len() > crate::store::RESUME_TEMPLATE_ELEMENT_CAP {
+            return Err(invalid(format!(
+                "resume template has {} elements, exceeding the {}-element limit",
+                template.len(),
+                crate::store::RESUME_TEMPLATE_ELEMENT_CAP
+            )));
+        }
+        crate::agent_kind::ensure_resume_template(template).map_err(invalid)?;
+    }
+    Ok(argv)
+}
+
 /// The command a restart runs, and the validation of `mode` against the
 /// session's CURRENT offer that decides whether there is one at all
 /// (PLAN_M3.md item 9; `ControlMsg::RestartSession`'s staleness contract).
@@ -10022,6 +10056,14 @@ impl Supervisor {
             )
             .into());
         }
+        // The bundle's argv rides with it from here, parsed and checked
+        // before the session is looked up (`restart_with_bundle_argv`).
+        let restart_with = restart_with
+            .map(|(invocation, launch, resume_template)| {
+                restart_with_bundle_argv(&invocation, resume_template.as_deref())
+                    .map(|argv| (invocation, launch, resume_template, argv))
+            })
+            .transpose()?;
         // R1.1: directory admission is taken BEFORE the lifecycle claim —
         // every create takes intent → directory → lifecycle, so a restart
         // that claimed lifecycle first could cycle against a restricted
@@ -10136,7 +10178,8 @@ impl Supervisor {
         {
             return Err(RequestError::new(ErrorKind::Conflict, refusal).into());
         }
-        let (argv, restart_with) = if let Some((invocation, launch, resume_template)) = restart_with
+        let (argv, restart_with) = if let Some((invocation, launch, resume_template, new_argv)) =
+            restart_with
         {
             if !entry
                 .info
@@ -10157,19 +10200,19 @@ impl Supervisor {
                 )
                 .into());
             }
-            let new_argv = shell_words::split(&invocation).map_err(|error| {
-                RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    format!("restart-with invocation does not parse: {error}"),
-                )
-            })?;
-            crate::agent_kind::ensure_executable_argv("restart-with invocation", &new_argv)
-                .map_err(|error| anyhow::anyhow!(error))?;
+            let invalid = |message: String| RequestError::new(ErrorKind::InvalidRequest, message);
             let integration = IntegrationSnapshot::resolve(
                 &new_argv,
                 Some(snapshot.kind),
                 resume_template.clone(),
-            )?;
+            )
+            .map_err(|error| invalid(error.to_string()))?;
+            // The RESOLVED template, which a kind may have derived from the
+            // invocation rather than taken from the request; see the same
+            // check in create.
+            if let Some(template) = integration.resume_template.as_deref() {
+                crate::agent_kind::ensure_resume_template(template).map_err(invalid)?;
+            }
             let conversation = snapshot
                 .captured_conversation
                 .as_deref()
@@ -15339,6 +15382,71 @@ pub(crate) mod tests {
             .expect_err("a lone template cannot be treated as plain restart");
         assert_eq!(error_kind(&error), ErrorKind::InvalidRequest);
         assert!(error.to_string().contains("invocation and launch together"));
+    }
+
+    /// Why: restart-with stored its new bundle without create's checks,
+    /// while loading refuses a row that fails them; the stored-row and
+    /// reload consequences are pinned end to end in the e2e
+    /// `restart_with_refuses_a_bundle_loading_would_refuse_and_stops_nothing`.
+    /// Spec pinned here: each input-only check (parse, `{cwd}` as the
+    /// program, the template element cap, `{conversation}` as the supplied
+    /// template's program) refuses as `InvalidRequest` before the session is
+    /// even looked up, so it cannot depend on, or disturb, any session.
+    #[farhelm_testtrace::test]
+    async fn restart_with_refuses_create_check_failures_before_lookup() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor for early refusal");
+        let launch = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        };
+        let too_many = vec!["x".to_string(); crate::store::RESUME_TEMPLATE_ELEMENT_CAP + 1];
+        let conversation = crate::agent_kind::CONVERSATION_PLACEHOLDER;
+        let cwd = crate::agent_kind::CWD_PLACEHOLDER;
+        for (invocation, template, says) in [
+            (
+                "claude".to_string(),
+                Some(vec![conversation.to_string(), "--resume".to_string()]),
+                format!("resume template's first element is {conversation}"),
+            ),
+            (
+                format!("{cwd} --flag"),
+                None,
+                format!("restart-with invocation's first element is {cwd}"),
+            ),
+            (
+                "claude".to_string(),
+                Some(too_many),
+                "-element limit".to_string(),
+            ),
+            (
+                "claude 'unterminated".to_string(),
+                None,
+                "does not parse".to_string(),
+            ),
+        ] {
+            let error = sup
+                .restart_session(
+                    "missing",
+                    RestartMode::Resume,
+                    true,
+                    Some(invocation.clone()),
+                    Some(launch.clone()),
+                    template,
+                )
+                .await
+                .expect_err("a bundle loading would refuse is refused");
+            assert_eq!(error_kind(&error), ErrorKind::InvalidRequest, "{error:#}");
+            assert!(
+                format!("{error:#}").contains(&says),
+                "{invocation}: {error:#}"
+            );
+        }
     }
 
     /// Which terminal-less rows an unconfirmed delete treats as possibly
