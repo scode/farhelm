@@ -6042,7 +6042,8 @@
   change.
 - Completion criteria: the TODO.md `Maybe later` entry "Close the desktop window's filesystem read fallback (hardening
   only)" exists (recorded during triage). Remove the feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-clipboard-terminal-limit.md`. The TODO.md entry was recorded during triage.
+- Execution: complete: change `uvznsnlv`, bookmark `plan/triage-clipboard-terminal-limit/02-fallback-queue-cleanup`,
+  draft PR [#1474](https://github.com/scode/farhelm/pull/1474/changes).
 
 ## terminal-output-queue-missing-byte-budget.md
 
