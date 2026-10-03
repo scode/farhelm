@@ -752,6 +752,9 @@ impl ProvisioningService {
             if inserted {
                 let rollback = self.store.remove_ssh_host(host).await;
                 self.manager.stop_actor(host).await;
+                if rollback.is_ok() {
+                    self.manager.forget_cache_lock(host);
+                }
                 if let Err(rollback) = rollback {
                     return Err(error.context(format!(
                         "the new host row could not be reconciled, and rolling it back also failed ({rollback:#})"
