@@ -3249,7 +3249,8 @@ samp {
   padding: 4px 0 4px 12px;
   /* `nowrap`, deliberately, and load-bearing rather than the default left
      alone (F2/COR-HOST-MENU-OFFSCREEN): this line holds the row's header —
-     the name, the phase status, and the always-present "⋯" toggle — and
+     the name, phase status, optional update button, and always-present
+     "⋯" toggle — and
      `.host-name`'s own ellipsis floor just below is what
      is supposed to absorb any width pressure. Host removal now lives in
      the modal layer, so this row never wraps to make room for dialog content;
@@ -3260,15 +3261,15 @@ samp {
 
 /* Same shrink discipline as the session row's fields: an ssh destination
    is user data of unbounded length, and without a floor plus ellipsis it
-   would push `.host-row-main`'s other two children — the phase status and
-   the "⋯" toggle — off the viewport. That used to be the live version of
+   would push `.host-row-main`'s status, optional update button, and
+   "⋯" toggle off the viewport. That used to be the live version of
    this hazard (TODO.md's near-term entry this row's menu closes): with
    `edit`/`remove`/`adopt`/`retry`/`profiles` all inline, a long
    destination plus every one of them ran past the 340px sidebar, and
    `remove` in particular rendered clipped off the right edge, invisible
    and unclickable. Folding those five into one "⋯" menu removed the
-   arithmetic that could ever run out of room again — three children,
-   whatever the destination's length — but the ellipsis floor stays: an
+   width taken by permanent actions. The inline update button replaces a
+   status word and stays compact, but the ellipsis floor stays: an
    unbounded name pushing even the toggle out of reach would trade one
    overflow bug for a smaller one.
 
@@ -3330,6 +3331,26 @@ samp {
    without borrowing the red refusal styling used by `needs-attention`. */
 .host-status.old-version {
   color: var(--warn);
+}
+
+/* The outline carries urgency without borrowing the destructive button's
+   fill. Keep this compact and nonshrinking; the host name retains its 4em
+   floor and gives up excess width before either action leaves the row. */
+.btn.host-update-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warn);
+  border: 1px solid currentColor;
+  background: transparent;
+}
+
+.btn.host-update-button[data-update-kind="required"] {
+  color: var(--danger-strong);
 }
 
 /* A host running a newer build than the helm is still usable, and the remedy
@@ -5696,8 +5717,8 @@ samp {
    beside it, because it starts the same YOLO session, but outlined rather
    than filled. A filled button draws the reflex click, and the answer that
    turns the question off for good should not be the reflex target; the
-   one-off keeps the fill. SPEC_impl.md's button tiers record this as the one
-   deliberate fourth look. */
+   one-off keeps the fill. SPEC_impl.md's button tiers record this as one
+   of the deliberate outlined looks. */
 .yolo-confirm-stop-asking {
   background: var(--bg-2);
   border-color: var(--danger);

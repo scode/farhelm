@@ -9,6 +9,11 @@ Farhelm keeps your hosts in one shared list. A host is your Mac or a Linux machi
 `⋯` menu to edit its SSH destination or display name, mark it safe for YOLO sessions, update Farhelm, or remove it from
 the list.
 
+An older remote host also shows an **↑ update** button beside its name when an update is available. Amber means the
+update is optional; red means it is required before the host can connect. Hover over the button to see the versions and
+what clicking will do. Clicking updates the host to your [helm's](/docs/how-it-works/the-pieces/) version without
+another confirmation, and progress takes the button's place. **Update** remains available in the host's menu too.
+
 Removing a host only makes Farhelm forget the entry. The supervisor and its sessions keep running, and adding the same
 destination again finds them. Farhelm asks before removing a host in a dialog; choose **remove, and don't ask again** if
 you want future removals from this helm to happen immediately. The choice is shared by every client after it reloads its
