@@ -6388,7 +6388,8 @@
 - Completion criteria: look back far enough for the longest token and back off to the nearest `<` (nearest matters: a
   complete token followed by a lone `<` must not match the earlier token), fix both doc comments, and test a cut inside
   a `<U+E00xx>` token. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-boundary-checks.md`.
+- Execution: complete: change `nlpllxozutlk`, bookmark `plan/triage-boundary-checks/05-escape-token-clamp`, PR
+  https://github.com/scode/farhelm/pull/1497.
 
 ## opencode-bare-model-rejected.md
 
