@@ -8,7 +8,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { cleanupProfile, cleanupSession, createProfile, createSession, FAKE_AGENT, localHostId } from "./helpers/fleet";
+import { cleanupProfile, cleanupSession, createProfile, createSession, FAKE_AGENT, localHostId, openRowMenu } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 import { attachSession, waitForTermText } from "./helpers/term";
 
@@ -540,6 +540,79 @@ test("replacement preserves borrowers and archives only the released checkout", 
     expect(await contents(path.join(archive, secondArchive!))).toEqual(freshBefore);
     await deleteSession(request, outside.id);
     expect(await fs.readFile(path.join(unmanaged, "foreign"), "utf8")).toBe("keep unrelated directory\n");
+  } finally {
+    for (const id of ids.reverse()) await cleanupSession(request, id);
+    await fixture.close();
+  }
+});
+
+/** Why: Replace with a fresh checkout of the source's own repository was
+ * refused every time, because the copied title named the source's checkout
+ * and an explicit name never gains a suffix. Spec (SPEC.md, Fresh GitHub
+ * checkouts): the copied, unedited title is not a name once a fresh checkout
+ * is the destination, so the assembled helm and supervisor allocate the next
+ * free `repo-N` as both directory and title. Replace takes a different helm
+ * path from create, so this is the one real-clone proof of the fix. */
+test("replace with into a fresh checkout of the source's repository gets the next free name", async ({ page, request }) => {
+  const fixture = await checkoutFixture("browser-replace-with");
+  const ids: string[] = [];
+  try {
+    const host = await localHostId(request);
+    // The source is set up through the API: the UI path to an unnamed
+    // checkout has its own test above, and this one is about Replace with.
+    const hosts = await request.get("/api/hosts");
+    expect(hosts.ok(), await hosts.text()).toBe(true);
+    const listed = (await hosts.json()).hosts;
+    const claim = listed.find((row: { id: number }) => row.id === host);
+    expect(claim, JSON.stringify(listed)).toBeTruthy();
+    expect(claim.state.phase).toBe("connected");
+    const previewResponse = await request.post("/api/github-checkout-preview", {
+      data: { host, expected_incarnation: claim.incarnation, repo: fixture.repo, title: null },
+    });
+    expect(previewResponse.ok(), await previewResponse.text()).toBe(true);
+    const preview = await previewResponse.json();
+    const first = path.join(fixture.root, `${fixture.repoName}-1`);
+    expect(preview.cwd).toBe(first);
+    const created = await request.post("/api/sessions", {
+      data: {
+        host, expected_incarnation: claim.incarnation, cwd: preview.cwd, title: null, invocation: FAKE_AGENT,
+        intent_key: `replace-with-source-${Date.now()}`, github_checkout: { repo: fixture.repo, title: null, preview },
+      },
+    });
+    expect(created.ok(), await created.text()).toBe(true);
+    const origin = await created.json();
+    ids.push(origin.id);
+    // Premise: the clone and hook finished, and the source's title is its own
+    // checkout's name, so treating the copy as typed would ask for that
+    // occupied directory.
+    await expect.poll(() => fs.readFile(path.join(first, "hook-count"), "utf8").catch(() => ""), { timeout: 20_000 })
+      .toBe("once\n");
+    expect((await sessionState(request, origin.id)).title).toBe(`${fixture.repoName}-1`);
+
+    await page.goto("/");
+    const sourceRow = page.locator(`.session-row[data-session-id="${origin.id}"]`);
+    await openRowMenu(sourceRow);
+    await sourceRow.locator(".session-row-replace-with").click();
+    const replaceForm = page.locator('.create-session-form[role="dialog"]');
+    await expect(replaceForm.getByLabel("name (optional)", { exact: true })).toHaveValue(`${fixture.repoName}-1`);
+    await selectRepo(replaceForm, fixture.repo);
+    const second = path.join(fixture.root, `${fixture.repoName}-2`);
+    await expect(replaceForm.locator(".launch-composer-checkout-preview")).toContainText(second);
+    await expect(replaceForm.getByLabel("name (optional)", { exact: true })).toHaveValue("");
+    await expect(replaceForm.getByLabel("name (optional)", { exact: true })).toHaveAttribute("placeholder", `${fixture.repoName}-2`);
+    await expect(replaceForm.locator(".create-session-submit")).toBeEnabled();
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith(`/api/sessions/${origin.id}/replace`)),
+      replaceForm.locator(".create-session-submit").click(),
+    ]);
+    expect(response.ok(), await response.text()).toBe(true);
+    const successor = await response.json();
+    ids.push(successor.id);
+    expect(response.request().postDataJSON().with).toMatchObject({ title: null, github_checkout: { repo: fixture.repo, title: "" } });
+    await page.goto("/");
+    const state = await assertCheckout(page, request, fixture, successor.id, second, false);
+    expect(state.title).toBe(`${fixture.repoName}-2`);
+    expect((await request.get(`/api/sessions/${origin.id}`)).status()).toBe(404);
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
     await fixture.close();

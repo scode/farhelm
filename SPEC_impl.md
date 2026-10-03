@@ -541,6 +541,11 @@ than being written in raw: shown escaped while untouched, so a directional overr
 make the field say something different from the bytes a submit would send, and an untouched submit still sends those
 ORIGINAL bytes rather than the escaped spelling on screen.
 
+The title is the exception once a fresh checkout is the destination: an untouched copied title is submitted empty and
+not displayed (SPEC.md, Fresh GitHub checkouts). The composer applies that rule wherever it reads the title for a launch
+(`create_form::submitted_title`) instead of clearing the field when a repository is picked, because the checkout
+preview's title must equal the create's, and choosing an existing folder again must bring the copied title back.
+
 The macOS desktop WindowBuilder retains native decorations while making the titlebar transparent, hiding its visible
 title text, and extending the webview into the full content area. Tao positions the native traffic lights in logical
 coordinates, and the root-mounted Wry webview retains the same inset because its content view replaces Tao's. The

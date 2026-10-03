@@ -515,7 +515,12 @@ empty slug or a component over 200 bytes is refused, and so is a checkout path t
 location adds up to 82 bytes to it, and the whole must stay within the system's path limit: 4096 bytes on Linux, 1024 on
 macOS). Existing files, directories and symlinks all occupy a name. If another create wins the displayed path, Launch
 reports the conflict and obtains a new preview; it never submits automatically or silently chooses another directory. An
-explicit name remains a conflict rather than gaining a suffix.
+explicit name remains a conflict rather than gaining a suffix. A title that Clone or Replace with copied from the source
+and the user has not edited is not an explicit name once a fresh checkout is the destination: the session is unnamed, so
+it gets the lowest available `repo-N` rather than showing the ignored copy. Whenever a checkout launch is unnamed, the
+name field shows the `repo-N` it will get as placeholder text. This includes a source renamed after creation and an
+ordinary session cloned into a checkout; both get `repo-N` rather than a name derived from the copied title. Choosing an
+existing folder again restores the copied title.
 
 Repository input is a GitHub owner/repository pair, not a URL, branch selector or shell fragment. The owner has 1–39
 ASCII letters, digits or hyphens, starts and ends alphanumeric, and has no consecutive hyphens. The repository has 1–100

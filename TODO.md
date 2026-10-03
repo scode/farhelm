@@ -100,22 +100,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   vanished directory in the step that deletes the app reverses that deliberate rule. Decide whether that leftover is
   worth a change, or drop this entry.
 
-- **"Replace with" a gh: checkout refused because the checkout path exists.** Using "replace with" to switch a session
-  to a `gh:` fresh checkout was refused with an error saying to pick a different session name because the git checkout
-  path already exists. Not yet investigated: it may fail like that every time, or something subtler about that session's
-  state may have triggered it. Reproduce first, then fix whichever it turns out to be. Plan:
-  `plans/queue/gh-clone-fresh-checkout.md`.
-
-- **Clone of a gh: checkout session reuses the same working copy.** Cloning a session launched on a `gh:` fresh
-  checkout, then renaming the clone, still left the clone on the original session's working copy rather than a checkout
-  of its own. The maintainer knows the cause and can fix it up by hand, but the clone flow for these sessions needs
-  improving. Details TBD. Plan: `plans/queue/gh-clone-fresh-checkout.md`.
-
-- **Clone then gh: should pick a fresh session name and checkout directory.** When the user clones a session and enters
-  `gh:some/repo` as the clone's target, Farhelm should allocate a new session name and checkout directory for it. Today
-  the default experience is an error saying the checkout conflicts with the existing one. Closely related to the entry
-  above on clones reusing the original working copy. Details TBD. Plan: `plans/queue/gh-clone-fresh-checkout.md`.
-
 - Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
   restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.
 
