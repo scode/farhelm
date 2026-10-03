@@ -661,6 +661,23 @@ above) applies the identical vendored face to the rest of the chrome, so the who
 terminal share the same two cached `.woff2` files rather than each vendoring its own copy; whichever surface asks first
 pays the fetch, and the other reads it back from the browser's cache.
 
+Terminal text size lives entirely in `terminal.js`. It reads the remembered size once, at script load, from the page's
+localStorage (`farhelm.terminal-font-size`; 9 to 28 in steps of 1, default 14; a missing or unreadable value, or
+anything but plain digits, means the default, and an out-of-range number is clamped) and constructs every terminal at
+it. `farhelmTerm.stepFontSize` clamps, stores, then sets `term.options.fontSize` on every mounted terminal and calls its
+fit: setting the option only makes xterm re-measure the font, and the fit is what recomputes rows and columns and sends
+the resize to the pty. Hidden tabs are mounted and sized like visible ones, so they take the change at once. A screen
+held aside during a reconnect or kept after a takeover keeps its old size: it is frozen, with no program to tell. The
+shortcut is one capture-phase `keydown` listener on `window`, matched on `event.code` (`Equal`, `Minus`, so the
+US-layout key positions) with Shift and Meta on macOS or Ctrl elsewhere, by a platform-string test that agrees with
+xterm.js's own Mac check; capture on `window` runs before xterm's handler, so its custom key handler is untouched, and
+preventDefault keeps the browser out. With no terminal mounted the listener lets the keys through. The tab strip's A− /
+A+ buttons are stateless Rust buttons that call the same function, which hands focus back to the terminal the view last
+focused when the click left it on a button; nothing about the size flows back to Rust, so they have no disabled state at
+the ends of the range. In the desktop app the size persists as far as the webview keeps its local storage across
+restarts; that was verified on Linux, not on macOS, where a webview that does not keep it would fall back to the default
+rather than earn a native state file.
+
 Motivation: xterm.js is the only battle-tested embeddable terminal (VS Code) and full escape-sequence fidelity is a
 SPEC.md requirement. Routing high-frequency PTY output through a reactive framework would be a performance disaster, so
 the bypass is load-bearing, not an optimization. A pure-Rust wasm terminal (alacritty_terminal grid + canvas renderer)

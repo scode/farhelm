@@ -1333,6 +1333,177 @@ test("an unselected terminal keeps real geometry while hidden", async ({
   }
 });
 
+/**
+ * Each mounted terminal's font size and grid, keyed by element id.
+ *
+ * Read off the islands themselves, because the grid is what the pty is
+ * told and the font size is what the user asked for; neither is visible in
+ * the DOM in a form worth asserting on.
+ */
+async function terminalSizes(
+  page: Page,
+): Promise<Record<string, { font: number; cols: number; rows: number }>> {
+  return page.evaluate(() => {
+    const out: Record<string, { font: number; cols: number; rows: number }> = {};
+    const islands = (window as any).__farhelmIslands ?? {};
+    for (const el of Object.keys(islands)) {
+      const term = islands[el].term;
+      out[el] = { font: term.options.fontSize, cols: term.cols, rows: term.rows };
+    }
+    return out;
+  });
+}
+
+// Terminal text size (SPEC.md, Terminal experience): Ctrl+Shift +/- (this
+// suite's engines run on Linux, so Ctrl rather than Cmd) and the strip's
+// A-/A+ buttons step EVERY mounted terminal together, hidden tabs included,
+// refit each one so its program sees the new rows and columns, and the size
+// survives a reload because it is remembered in the page's own storage.
+//
+// Why each half matters: setting xterm's font size without a refit changes
+// the glyphs but not the grid, so the pane and the pty would disagree about
+// how many rows exist (the garbage-rendering bug class the tab refit tests
+// above guard against); a hidden tab that missed the change would come up
+// at the old size when selected; and a size that did not survive a reload
+// would not be "remembered per device" at all. The pty half is checked with
+// the program's own answer (`stty size` in the tab's shell, the fake
+// agent's `size` reply), not with xterm's idea of it.
+//
+// What this cannot check: that the browser's own zoom does not also react,
+// which Playwright does not expose.
+test("terminal text size steps every terminal, reaches the pty, and is remembered", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  const title = `tab-text-size-${Date.now()}`;
+  let id: string | undefined;
+  try {
+    const session = await openSessionWithTabs(page, request, title, 1);
+    id = session.id;
+    const [tabId] = session.tabs;
+    const tabEl = `terminal-${tabId}`;
+
+    // The agent selected, so the TAB is the hidden one while the size moves.
+    await selectTerminal(page, "agent");
+    await expect(page.locator(`.terminal-pane[data-terminal="${tabId}"]`)).toBeHidden();
+    const before = await terminalSizes(page);
+    expect(before.terminal?.font, "test premise: a fresh browser starts at the default").toBe(14);
+    expect(before[tabEl]?.font, "test premise: the tab is mounted").toBe(14);
+
+    // The shortcut, with focus inside the agent terminal: it must step the
+    // size there too, which is the case where xterm would otherwise get the
+    // key first.
+    await page.locator("#terminal").click();
+    await expect
+      .poll(() => agentTerminalHasFocus(page), { message: "test premise: focus is in the agent terminal" })
+      .toBe(true);
+    await page.keyboard.press("Control+Shift+Equal");
+    await expect
+      .poll(async () => {
+        const now = await terminalSizes(page);
+        return [now.terminal.font, now[tabEl].font];
+      })
+      .toEqual([15, 15]);
+
+    // The buttons: two steps up, to 17. A click hands focus back to the
+    // terminal, or typing after it would go nowhere.
+    await page.locator('[data-text-size="larger"]').click();
+    await page.locator('[data-text-size="larger"]').click();
+    await expect
+      .poll(async () => {
+        const now = await terminalSizes(page);
+        return [now.terminal.font, now[tabEl].font];
+      })
+      .toEqual([17, 17]);
+    await expect
+      .poll(() => agentTerminalHasFocus(page), { message: "a button click must give focus back" })
+      .toBe(true);
+
+    // One step down with the shortcut, straight from the terminal: on Linux
+    // Ctrl+Shift+- is Ctrl+_, which must not reach the program. The agent's
+    // `size` reply below doubles as that check: a stray 0x1f in front of
+    // the line would make it a different command and get no size answer.
+    await page.keyboard.press("Control+Shift+Minus");
+    await expect
+      .poll(async () => {
+        const now = await terminalSizes(page);
+        return [now.terminal.font, now[tabEl].font];
+      })
+      .toEqual([16, 16]);
+
+    // Bigger text, same pane: both grids shrank, the hidden one included.
+    const after = await terminalSizes(page);
+    for (const el of ["terminal", tabEl]) {
+      expect(after[el].cols, `${el} columns`).toBeLessThan(before[el].cols);
+      expect(after[el].rows, `${el} rows`).toBeLessThan(before[el].rows);
+    }
+
+    // The programs see the new grids. The resize reaches the agent's pty
+    // asynchronously after the last step, so one `size` query can be
+    // answered with the previous step's grid; ask again until the reply
+    // names the final one rather than waiting on a reply that never changes.
+    await expect(async () => {
+      await page.keyboard.type("size");
+      await page.keyboard.press("Enter");
+      await waitForTermText(page, `size:${after.terminal.rows} ${after.terminal.cols}`, 2_000);
+    }).toPass({ timeout: 15_000 });
+    await selectTerminal(page, tabId);
+    await runInShell(
+      page,
+      tabEl,
+      "stty size",
+      new RegExp(`^${after[tabEl].rows} ${after[tabEl].cols}$`, "m"),
+    );
+
+    // Remembered: a reload constructs the terminals at the stepped size.
+    await page.reload();
+    await expect
+      .poll(async () => (await terminalSizes(page)).terminal?.font, { timeout: 20_000 })
+      .toBe(16);
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
+/** Whether keyboard focus is inside the agent terminal's element. */
+async function agentTerminalHasFocus(page: Page): Promise<boolean> {
+  return page.evaluate(() => document.activeElement?.closest("#terminal") !== null);
+}
+
+// On a Mac the text-size shortcut is Cmd+Shift, not Ctrl+Shift, and Ctrl
+// must be left alone there (Ctrl+Shift chords belong to the terminal on a
+// Mac). This suite's engines run on Linux, so the platform string is
+// faked before the page loads; terminal.js reads it once at load, the same
+// way it would read a real Mac's. Pressing Ctrl+Shift+= and then
+// Cmd+Shift+= must land on exactly one step: two would mean Ctrl also
+// stepped, none that Cmd did not.
+test("terminal text size uses Cmd, not Ctrl, on a Mac", async ({ page, request }) => {
+  test.setTimeout(60_000);
+  const title = `tab-text-size-mac-${Date.now()}`;
+  let id: string | undefined;
+  try {
+    await page.addInitScript(() => {
+      Object.defineProperty(Navigator.prototype, "platform", { get: () => "MacIntel" });
+    });
+    const session = await createTabSession(request, title);
+    id = session.id;
+    await page.goto("/");
+    await attachSession(page, session.id);
+    await page.locator("#terminal").click();
+    await expect
+      .poll(() => agentTerminalHasFocus(page), { message: "test premise: focus is in the agent terminal" })
+      .toBe(true);
+    expect((await terminalSizes(page)).terminal?.font, "test premise: default size").toBe(14);
+
+    await page.keyboard.press("Control+Shift+Equal");
+    await page.keyboard.press("Meta+Shift+Equal");
+    await expect.poll(async () => (await terminalSizes(page)).terminal.font).toBe(15);
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
 // The confirmation row and the tab-error lines sit above `.terminal-panes`
 // in the same flex column, so opening either resizes every terminal while
 // the window never moves. Before the per-island ResizeObserver, a terminal

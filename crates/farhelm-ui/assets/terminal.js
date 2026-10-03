@@ -374,6 +374,53 @@
 
   "use strict";
 
+  // ## Terminal text size
+  //
+  // The user steps every terminal's text size with Cmd+Shift +/- (Ctrl+Shift
+  // off macOS) or the A-/A+ buttons at the right end of the tab strip, and
+  // the size is remembered PER DEVICE in this origin's localStorage, not as
+  // a helm preference: it is about the screen in front of the user, which
+  // another client of the same helm does not share (SPEC.md, Terminal
+  // experience). Read once, at script load; every terminal mounted after
+  // that is constructed at the current size, and `stepFontSize` applies a
+  // change to the ones already mounted.
+  //
+  // A missing, unreadable, or non-numeric stored value (anything but plain
+  // digits, so not "", "1e1" or "0x10") means the default; a number outside
+  // the range is clamped into it, so an old or hand-edited value can never
+  // produce an unreadable terminal.
+  const FONT_SIZE_KEY = "farhelm.terminal-font-size";
+  const FONT_SIZE_DEFAULT = 14;
+  const FONT_SIZE_MIN = 9;
+  const FONT_SIZE_MAX = 28;
+
+  /** Clamp a candidate size into the supported range. */
+  function clampFontSize(size) {
+    return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, size));
+  }
+
+  /** The remembered size, or the default when there is none to read. */
+  function storedFontSize() {
+    try {
+      const raw = window.localStorage.getItem(FONT_SIZE_KEY);
+      return raw !== null && /^\d+$/.test(raw)
+        ? clampFontSize(Number(raw))
+        : FONT_SIZE_DEFAULT;
+    } catch (_error) {
+      return FONT_SIZE_DEFAULT;
+    }
+  }
+
+  let terminalFontSize = storedFontSize();
+
+  // Whether this is a Mac, read off the platform string like xterm.js's own
+  // `Browser.isMac` (which matches an exact list of Mac platform names; the
+  // two agree on every real platform string), so the shortcut's modifier
+  // agrees with the platform xterm already treats this page as running on.
+  const IS_MAC = /Mac/.test(
+    (typeof navigator !== "undefined" && navigator.platform) || "",
+  );
+
   // How long a mount will wait for the font before giving up and accepting
   // the fallback — also the outer bound on how long `pollFontWeight`'s own
   // empty-result retries may keep re-issuing `load()` calls for a
@@ -2648,7 +2695,78 @@
     status.style.display = "block";
   });
 
+  // The text-size shortcut: Cmd+Shift with = (or +) and - (or _) on macOS,
+  // Ctrl+Shift elsewhere. Matched on `event.code`, the physical key, so the
+  // character Shift produces does not matter; that ties the shortcut to the
+  // US-layout positions of those two keys (on a German layout it is the
+  // keys there, not the ones labelled + and -). Registered on
+  // `window` in the CAPTURE phase, which runs before xterm's own key
+  // handler on its hidden textarea, so the keys never reach the program in
+  // the terminal; preventDefault keeps the browser from acting on them too.
+  // Cmd/Ctrl with = or - and no Shift is left alone: that is the browser's
+  // own page zoom, which the user may still want. (Cmd/Ctrl+Shift+= is also
+  // a zoom-in chord in some browsers; it is the text-size shortcut here.)
+  // With no terminal mounted there is nothing to resize, so the keys are
+  // left to the browser then. On Linux this does take over
+  // Ctrl+Shift+- (Ctrl+_, undo in readline and emacs) inside the terminal,
+  // a trade the maintainer accepted (2026-10-02).
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (!event.shiftKey || event.altKey) return;
+      const modifier = IS_MAC
+        ? event.metaKey && !event.ctrlKey
+        : event.ctrlKey && !event.metaKey;
+      if (!modifier) return;
+      const delta = event.code === "Equal" ? 1 : event.code === "Minus" ? -1 : 0;
+      if (delta === 0 || islands.size === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      window.farhelmTerm.stepFontSize(delta);
+    },
+    true,
+  );
+
   window.farhelmTerm = {
+    /**
+     * Change every terminal's text size by `delta` points, within the
+     * supported range, remember it for this device, and refit every
+     * mounted terminal so the program inside sees the new rows and
+     * columns (the refit is what sends the resize to the pty; setting the
+     * option alone only re-measures the font). Hidden tabs are mounted
+     * and sized like visible ones, so they change too. Terminals that
+     * mount later are constructed at the new size. At either end of the
+     * range this does nothing.
+     *
+     * Called by the shortcut above and by the tab strip's A-/A+ buttons.
+     */
+    stepFontSize(delta) {
+      const next = clampFontSize(terminalFontSize + delta);
+      if (next === terminalFontSize) return;
+      terminalFontSize = next;
+      try {
+        window.localStorage.setItem(FONT_SIZE_KEY, String(next));
+      } catch (_error) {
+        // Unavailable storage costs only the memory across reloads; the
+        // size still applies to this page.
+      }
+      for (const island of islands.values()) {
+        island.term.options.fontSize = next;
+        island.fit.fit();
+      }
+      // A click on the A-/A+ buttons leaves focus on the button, and
+      // nothing else moves it back (the session view only refocuses a
+      // terminal when the selection changes), so typing would go nowhere
+      // and Enter would step the size again. Hand focus back to the
+      // terminal the view last focused, unless a dialog owns the page.
+      const active = document.activeElement;
+      if (active && active.closest && active.closest(".terminal-text-size")) {
+        const focused = focusedEl === null ? null : islands.get(focusedEl);
+        if (focused && !document.querySelector(OPEN_MODAL_SELECTOR)) focused.term.focus();
+      }
+    },
+
+
     /**
      * Reconcile the mounted terminals against `specs`, the FULL set the
      * session view currently wants (see this file's header for why the
@@ -3318,7 +3436,9 @@
           // `browser_scrollback_stays_within_the_product_floor_and_the_tmux_history_ceiling`,
           // which reads this literal.
           scrollback: 12000,
-          fontSize: 14,
+          // The user's remembered size (see "Terminal text size" above);
+          // `stepFontSize` changes it for terminals already mounted.
+          fontSize: terminalFontSize,
           cursorBlink: true,
           theme: window.farhelmTerminalTheme,
           // xterm's forced-selection gesture — the modifier that wins a
@@ -5313,6 +5433,9 @@
         islands.set(spec.el, {
           ws,
           term,
+          // For `stepFontSize`: a new size only takes effect once the
+          // terminal is refitted (see the font-swap backstop above).
+          fit,
           onWindowResize,
           paneObserver,
           attachments,

@@ -2531,6 +2531,7 @@ pub(crate) fn SessionView(
                         onclick: on_add_tab,
                         "+ terminal"
                     }
+                    TerminalTextSize {}
                 }
                 // The close confirmation, on its own row under the strip
                 // rather than in place of the tab's own controls: the strip is
@@ -2955,6 +2956,50 @@ fn copy_warning(what: &str, value: &str) -> Option<String> {
         .chars()
         .any(farhelm_proto::text::is_presentation_unsafe)
         .then(|| format!("⚠ the copied {what} contains hidden characters, shown above as <U+…>"))
+}
+
+/// The terminal text-size controls at the right end of the tab strip: A-
+/// and A+, the button form of the Cmd/Ctrl+Shift +/- shortcut.
+///
+/// Stateless on purpose. The size lives in terminal.js (remembered per
+/// device in the page's own storage, see its "Terminal text size" section),
+/// and each click only asks it to step; nothing about the size ever comes
+/// back to Rust, so there is no disabled state at the ends of the range (a
+/// step there simply does nothing). Each terminal refits when the size
+/// changes, which is what tells the program inside about its new rows and
+/// columns. A click hands focus back to the terminal (terminal.js does
+/// that), so typing carries on where it was. Neutral rather than ghost for
+/// the same reason "+ terminal" is: they are actions, and ghost buttons in
+/// this strip read as more tabs.
+#[component]
+fn TerminalTextSize() -> Element {
+    let step = |delta: i32| {
+        document::eval(&format!(
+            "if (window.farhelmTerm) {{ window.farhelmTerm.stepFontSize({delta}); }}"
+        ));
+    };
+    rsx! {
+        div { class: "terminal-text-size",
+            button {
+                r#type: "button",
+                class: "btn btn-neutral tab-text-size",
+                "data-text-size": "smaller",
+                title: "Smaller terminal text (Cmd/Ctrl+Shift+\u{2212})",
+                "aria-label": "Smaller terminal text",
+                onclick: move |_| step(-1),
+                "A\u{2212}"
+            }
+            button {
+                r#type: "button",
+                class: "btn btn-neutral tab-text-size",
+                "data-text-size": "larger",
+                title: "Larger terminal text (Cmd/Ctrl+Shift++)",
+                "aria-label": "Larger terminal text",
+                onclick: move |_| step(1),
+                "A+"
+            }
+        }
+    }
 }
 
 #[cfg(test)]

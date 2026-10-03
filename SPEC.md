@@ -758,7 +758,8 @@ remembered by the helm as one preference shared by every client, together with t
 choice, and most recent activity is what a client shows until someone picks otherwise. No client keeps its own copy:
 every client reads the helm's preference once after authenticating and writes it on change, so a browser tab and the
 desktop app open in the same order and on the same session. Per-client persistence — browser storage, a desktop state
-file, anything that lets two clients remember different answers — is not wanted. A client that asks the helm for no
+file, anything that lets two clients remember different answers — is not wanted for these shared preferences (terminal
+text size, by contrast, is deliberately per device; see Terminal experience). A client that asks the helm for no
 particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by
 the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
 `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
@@ -933,6 +934,15 @@ whatever the agent renders is what you see. There is no composer, no message abs
   submit (verified against both, 2026-08-19). Other programs receive the same bytes and interpret them per their own
   line editing — stock emacs-mode zsh inserts a newline, bash's default quietly ignores the pair — the same outcomes
   those shells give under a reference terminal that encodes the chord identically (Ghostty).
+- Terminal text size is adjustable: Cmd+Shift with + or − on macOS, Ctrl+Shift elsewhere, or the A− / A+ buttons at the
+  right end of the session's terminal tab strip, step every open terminal's text size together, hidden tabs included,
+  within a fixed range, and each terminal is resized so the program inside sees its new rows and columns. While a
+  terminal is open the shortcut works wherever focus is and never reaches the terminal's program or the browser;
+  Cmd/Ctrl with = or − and no Shift stay the browser's own page zoom. On Linux this takes over Ctrl+Shift+− (Ctrl+_,
+  undo in readline and emacs) inside the terminal, accepted 2026-10-02. The keys are the ones at the US-layout positions
+  of = and −. The size is remembered per device, deliberately unlike the session list's preference: it is about the
+  screen in front of the user, not a choice every client should share. Only the terminal text changes; the rest of the
+  UI keeps its size.
 - Scrollback is whatever the host-side terminal naturally retains, and it survives client disconnects: detach, reconnect
   a day later, and the buffer is still there. There is no separate history store — when a host reboots, terminal
   contents are gone, and recovering the conversation is the agent's job (resume). A stopped or exited session's terminal
