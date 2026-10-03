@@ -858,7 +858,9 @@ states keep their complete wording visible, including exit code, stop annotation
 mode uses distinct stopped, exited, interrupted, and error icons; those details remain in accessible text and tooltips
 without expanding the row. Ended icons do not have the live dot's mark-read action. The pulse is a claim about the
 present, so it stands down wherever the status is a last-known report rather than a live one: a session on an
-unreachable host shows a still dot whatever its status says.
+unreachable host shows a still dot whatever its status says. Looping indicators such as the running pulse change in a
+few discrete steps per second rather than continuously, and all of them stand still while the Farhelm window is not
+focused or not visible, to save CPU and battery.
 
 The dot's colour is one of four, not three: running pulses green; waiting is red, since it is the one live status that
 is a request directed at a human and belongs with the other attention colours rather than beside "nothing is wrong";
