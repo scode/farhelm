@@ -32,22 +32,13 @@
 //! recording rules on `Supervisor::record_outcome`/`record_stop`, and the
 //! boot comparison on `Supervisor::reload_sessions`.
 //!
-//! Every session carries an integration snapshot and, for the two
-//! integrated kinds, a captured conversation identity (PLAN_M3.md items 7
-//! and 8; the per-kind knowledge itself lives in `crate::agent_kind`).
-//! What this module owns is the plumbing around it: resolving the snapshot
-//! during create validation, recording the first-input timestamp capture
-//! correlates on, and running the rescan that claims an identity. The
-//! rescan deliberately has no watcher thread and no inotify — it is a
-//! POLLED pass (see `capture::capture_pass` for the cost envelope and why
-//! polling is sufficient here), driven from two cadences that answer
-//! different questions: the `ticker` task, which guarantees progress with
-//! nobody connected, and the `ListSessions`, restart, and reload passes,
-//! which guarantee a reply is fresh as of the request it answers. Which
-//! kind a given call is, and what each is allowed to skip, is
-//! `Supervisor::capture_pass_for`'s single scheduling rule; `ticker`'s own
-//! module doc owns the argument for why both cadences exist and what
-//! running both actually costs.
+//! Every session carries its integration snapshot and any stored conversation
+//! identity. `crate::agent_kind` owns per-kind report and Resume rules; this
+//! module authenticates reports, persists them, and reconciles their mirrors.
+//! Reply paths refresh before answering, while `ticker` provides progress with
+//! nobody connected. Each refresh takes the session's capture claim and verifies
+//! only the exact files its accepted report requires. Input starts an in-memory
+//! diagnostic timer for injected hooks; it never identifies a conversation.
 //!
 //! A data channel has a second meaning beyond terminal bytes: attachment
 //! bytes flowing client-toward-supervisor (PLAN_M4.md item 4). Each accepted

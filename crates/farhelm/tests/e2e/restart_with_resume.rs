@@ -4,7 +4,6 @@
 use crate::harness::*;
 
 use crate::boot_id_durable_outcome::{listed, wait_for_dead_pane};
-use crate::conversation_identity_capture::test_capture_bounds;
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::hook_identity::{
     ServeTask, attach_ready, hook_harness, hook_log, hook_log_at, hook_session,
@@ -27,8 +26,6 @@ async fn restart_with_harness() -> (Harness, FakeHarness, ServeTask) {
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            agent_home: Some(fixture.home().to_path_buf()),
-            capture_window: test_capture_bounds(),
             launch_env: vec![
                 (
                     "HOME".to_string(),
@@ -986,9 +983,11 @@ fn resumed_record_file(
     conversation: &str,
 ) -> std::path::PathBuf {
     let canonical = std::fs::canonicalize(work).expect("canonicalize the workdir");
-    std::fs::read_dir(home.join(".claude").join("projects").join(
-        farhelm_supervisor::agent_kind::munge_cwd(&canonical.to_string_lossy()),
-    ))
+    std::fs::read_dir(
+        home.join(".claude")
+            .join("projects")
+            .join(canonical.to_string_lossy().replace(['/', '.', '_'], "-")),
+    )
     .expect("project dir")
     .map(|entry| entry.expect("dir entry").path())
     .find(|path| path.to_string_lossy().contains(conversation))
@@ -1024,8 +1023,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
             let boot = boot.to_string();
             Arc::new(move || Ok(Some(boot.clone())))
         },
-        agent_home: Some(home.path().to_path_buf()),
-        capture_window: test_capture_bounds(),
+
         ..SupervisorSeams::default()
     };
 
@@ -1338,8 +1336,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
             let boot = boot.to_string();
             Arc::new(move || Ok(Some(boot.clone())))
         },
-        agent_home: Some(home.path().to_path_buf()),
-        capture_window: test_capture_bounds(),
+
         ..SupervisorSeams::default()
     };
     let claude = bin.path().join("claude");

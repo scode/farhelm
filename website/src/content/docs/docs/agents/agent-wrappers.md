@@ -36,11 +36,8 @@ the canonical identity it recorded when the session was created and hands over t
 enough to have no recorded identity has nothing to check against and gets the spelling again. Either way the wrapper is
 handed exactly the string tmux is handed for the pane — one string, which is not quite one directory: on a fresh create
 each side resolves that spelling for itself, so a symlink retargeted in between puts them in different places. That race
-is yours rather than farhelm's, and the recorded identity closes it from the first restart onwards. It matters for
-capture in one specific way: the record scan decides a conversation belongs to a session by comparing the `cwd` the
-AGENT recorded against the session's canonical directory, so a wrapper that runs the agent somewhere else takes that
-correlation with it. A hook-reported identity is authenticated by the session's credential and does not depend on the
-directory at all.
+is yours rather than farhelm's, and the recorded directory closes it from the first restart onwards. Resume depends on
+the agent reporting its conversation; Farhelm does not use the working directory to guess which one it is.
 
 ## A worked example with `sh`
 
@@ -85,17 +82,17 @@ it too — and the hook flags go on the end of it exactly as they go on the end 
 
 So the hook flags are what a wrapper must forward, and one that treats everything after its own arguments as the command
 to run, verbatim, does. A wrapper that parses trailing options as its own eats them first, and the symptom is indirect:
-the agent never reports its conversation, and the restart offer falls back to whatever the record scan can infer. NOTE:
-that is the one thing farhelm cannot check for you. Its own tests stand in `sh -c` for the real wrapper, so whether YOUR
-wrapper stops at the agent command and forwards the rest is something only you can verify — `ps -o args= -p <agent pid>`
-against a live session shows what actually reached the agent.
+the agent never reports its conversation, and a new session offers a fresh launch on restart. NOTE: that is the one
+thing farhelm cannot check for you. Its own tests stand in `sh -c` for the real wrapper, so whether YOUR wrapper stops
+at the agent command and forwards the rest is something only you can verify — `ps -o args= -p <agent pid>` against a
+live session shows what actually reached the agent.
 
 For Claude there is one more condition on the shape: the wrapper must start Claude as its own direct child. Farhelm only
 accepts a Claude report from the session's pane process or that process's direct child, which is what keeps a `claude`
 the session starts through its shell (a shelled-out sub-agent) from replacing the conversation you are in. A resident
 wrapper that runs Claude itself is exactly one level, so it keeps reporting. A chain of two resident launchers — a
 wrapper that runs a script, which in turn runs Claude without `exec` — puts Claude too far below the pane: its reports
-are refused, the hook log records a `refused conflict` line, and the restart offer falls back to the record scan. A
+are refused, the hook log records a `refused conflict` line, and a new session offers a fresh launch on restart. A
 launcher that `exec`s (as `env` does, and as a script ending in `exec claude "$@"` does) replaces itself rather than
 staying in the chain, so it adds no level.
 
@@ -177,6 +174,6 @@ arguments of the agent named inside the script string. Whether they reach the ag
 `"$@"`, with a dummy `$0` ahead of the real arguments exactly as the `sh` example does, forwards them like any other
 wrapper; `bash -c 'claude …'`, which names the agent and its arguments itself, drops them. Farhelm appends them and logs
 that it did — it is looking at an argv, not at the contents of your script — so the only sign the agent never saw them
-is the tripwire warning that no identity was reported. Capture falls back to the record scan and works as it did before
-hooks existed. If you want the hook, either forward the positional parameters or make the agent the profile's own
-command — `env`, or a real wrapper — rather than a string handed to `-c`.
+is the tripwire warning that no identity was reported. Without a report, a new session offers a fresh launch on restart.
+If you want the hook, either forward the positional parameters or make the agent the profile's own command — `env`, or a
+real wrapper — rather than a string handed to `-c`.

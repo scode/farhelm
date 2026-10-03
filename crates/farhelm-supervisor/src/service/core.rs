@@ -32,11 +32,7 @@ mod vendor;
 /// operator set on them, exactly as they were.
 const LOG_TARGET: &str = module_path!();
 
-#[cfg(test)]
-use super::capture::overlapping_windows_reason;
-use super::capture::{
-    CaptureCoordination, CaptureGate, CaptureHistory, CaptureState, CaptureStoreFault, FirstInput,
-};
+use super::capture::{CaptureGate, CaptureState, CaptureStoreFault};
 use super::connection::{handle_connection, notify_detached};
 use super::launch_artifacts::{
     best_effort_remove, cleanup_launch_artifacts, clear_launch_artifacts_fail_closed,
@@ -57,7 +53,7 @@ use super::ticker::{
     start_ticker,
 };
 use super::uploads::UploadHandle;
-use crate::agent_kind::{CaptureWindowBounds, IntegrationSnapshot, RecordStamp};
+use crate::agent_kind::IntegrationSnapshot;
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
 use crate::store::DedupScope;
 use crate::store::{
@@ -778,8 +774,6 @@ fault_hooks! {
     retained_refusal_fault: crate::store::RetainedRefusalFault,
     /// See [`CaptureStoreFault`]. `None` in production.
     capture_store_fault: CaptureStoreFault,
-    /// See `super::capture::CaptureGate`. `None` in production.
-    capture_gate: CaptureGate,
     /// Pause a Codex report before its capture transaction. Tests let a refresh
     /// promote the previous record before the report reads its binding.
     /// `None` in production.
@@ -874,37 +868,14 @@ pub struct SupervisorSeams {
     /// The fault and gate hooks tests install. See [`FaultHooks`]: without
     /// the `test-seams` feature it is empty and every hook reads as absent.
     pub faults: FaultHooks,
-    /// Where the agents' own record directories are rooted (PLAN_M3.md
-    /// item 8): `~/.claude/projects/...`, `~/.codex/sessions/...`.
-    ///
-    /// `None` means "resolve `$HOME` at construction", which is what
-    /// production does. Injected as a seam rather than read from the
-    /// environment at every scan for two reasons: the capture fixtures
-    /// need a private tree per test, and this repo's tests never mutate
-    /// the test process's environment — a per-process `HOME` override
-    /// would additionally be shared by every concurrently-running harness.
-    /// A supervisor that resolves to nothing at all (no `HOME`, no
-    /// override) simply performs no capture; see
-    /// [`Supervisor::agent_home`].
-    pub agent_home: Option<PathBuf>,
     /// The home directory a create's `~`-prefixed working directory expands
     /// against (see [`expand_tilde_cwd`]).
     ///
-    /// `None` means "resolve `$HOME` at construction", as `agent_home`
-    /// does, and it is a SEPARATE seam from `agent_home` on purpose: that
-    /// one names where agent record trees hang for conversation capture,
-    /// and tests point it at private fixture trees that would be nonsense
-    /// as a user's home. Injected for the same environment-hygiene reason —
+    /// `None` means "resolve `$HOME` at construction". Injected because
     /// this repo's tests never mutate the test process's environment. A
     /// supervisor that resolves to nothing refuses `~` creates with a
     /// clear error rather than guessing.
     pub user_home: Option<PathBuf>,
-    /// How wide a session's capture window is around its first-input time
-    /// (see [`CaptureWindowBounds`], and `crate::agent_kind`'s constants
-    /// for the trade the production values make). Shortened by tests so
-    /// proving two sessions in one directory do NOT overlap does not mean
-    /// waiting out a production minute.
-    pub capture_window: CaptureWindowBounds,
     /// How often the supervisor's own periodic task fires — see
     /// [`crate::service::ticker`] for what rides that cadence and
     /// [`TICKER_INTERVAL`] for why production picks the value it does.
@@ -956,8 +927,7 @@ pub struct SupervisorSeams {
     /// means a `HOME` the test controls, and mutating the test process's
     /// environment is forbidden here (and would be shared by every
     /// concurrently-running harness besides). Dependency injection is the
-    /// sanctioned alternative, and this is it — the same reasoning as
-    /// [`SupervisorSeams::agent_home`], one layer lower.
+    /// sanctioned alternative, and this seam keeps the override launch-local.
     ///
     /// Applied identically to a create and to a restart's relaunch, since
     /// a difference between the two would be exactly the divergence the
@@ -1068,9 +1038,7 @@ impl Default for SupervisorSeams {
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             faults: FaultHooks::default(),
-            agent_home: None,
             user_home: None,
-            capture_window: CaptureWindowBounds::default(),
             ticker_interval: TICKER_INTERVAL,
             activity_quantum: ACTIVITY_STAMP_QUANTUM,
             work_start_clock: Arc::new(work_start_now),
@@ -2106,9 +2074,8 @@ struct LaunchRequest {
     /// any side effect exists.
     snapshot: IntegrationSnapshot,
     /// `cwd` with symlinks, `.`/`..`, and a trailing slash resolved away
-    /// — the spelling every correlation uses (PLAN_M3.md item 8; see
-    /// `store::StoredSession::canonical_cwd` for why the user-facing one
-    /// cannot be). Resolved during validation because that is where the
+    /// — the identity used to refuse a later symlink repoint.
+    /// Resolved during validation because that is where the
     /// directory is already being stat'ed, and stored immutably with the
     /// session because re-resolving later could follow a symlink that has
     /// since been repointed.
@@ -2398,26 +2365,17 @@ pub struct SessionSnapshot {
     /// `RestartOffer::Resume` session always has one; that is what the
     /// offer means.
     pub resume_argv: Option<Vec<String>>,
-    /// When this session first had input CONFIRMED delivered, in seconds
-    /// since the Unix epoch — the correlator capture keys on. Exposed for
-    /// the capture tests, which need to distinguish "no record appeared"
-    /// from "no first input was ever recorded" when a capture does not
-    /// happen, and which wait on it to make their window arithmetic
-    /// deterministic rather than sleep-based.
+    /// Legacy input timestamp retained in this projection until schema cleanup.
     pub first_input_at: Option<i64>,
-    /// Whether correlation for this session was found ambiguous and no
-    /// identity will ever be claimed for this launch. Durable, so this is
-    /// also what a restart-after-ambiguity test asserts survived.
+    /// Legacy scan verdict retained in this projection until schema cleanup.
     pub capture_ambiguous: bool,
     /// The ownership provenance read beside `captured_conversation` from
     /// the same row. Restart conditions its claim on both (see
     /// [`OfferBasis`](crate::store::OfferBasis)): a version flip with an
     /// unchanged conversation still changes what may be offered.
     pub capture_ownership_version: i64,
-    /// The working directory correlation actually uses — resolved, not as
-    /// the user spelled it. Exposed so the symlink and dot-path tests can
-    /// assert the resolution happened rather than inferring it from a
-    /// capture that might have succeeded for another reason.
+    /// Resolved working directory, exposed so relaunch identity tests can assert
+    /// the stored path independently of process-launch success.
     pub canonical_cwd: Option<String>,
 }
 
@@ -2637,7 +2595,7 @@ pub(crate) fn hook_flag(raised: bool) -> Arc<std::sync::atomic::AtomicBool> {
 /// identical line on every launch of that kind forever.
 ///
 /// The remaining skips are all worth a line because they silently degrade
-/// identity capture: Claude falls back to scanning, while the report-only kinds
+/// identity capture: integrations without an accepted report
 /// gain no new exact target. The log is the only evidence for that choice.
 ///
 /// ## The instructions pointer rides along
@@ -2805,11 +2763,9 @@ fn republished_terminal(
 /// previous entry keeps describing the previous run, and its durable
 /// writes are rejected rather than silently landing on this one.
 ///
-/// `reset_capture` mirrors the durable decision
-/// [`SessionStore::begin_relaunch`] made: a relaunch that opened a fresh
-/// capture window must not carry the previous run's first-input anchor or
-/// verdict in memory either, or the very next capture pass would correlate
-/// the new run against a window that closed long ago.
+/// `reset_capture` mirrors [`SessionStore::begin_relaunch`]: a fresh launch
+/// loses the old identity, while Resume keeps the conversation it will enter.
+/// The first-input diagnostic anchor resets on every launch, including Resume.
 ///
 /// Every RUN-SCOPED mutable cell is fresh here — new `Arc`s, never the
 /// previous entry's — even where the VALUE is carried over. That isolation
@@ -2834,39 +2790,25 @@ fn relaunched_entry(
     outcome: LastOutcome,
     reset_capture: bool,
 ) -> Arc<SessionEntry> {
-    let (first_input, capture) = if reset_capture {
-        (
-            FirstInput {
-                at: None,
-                durable: true,
-            },
-            CaptureState::Unclaimed,
-        )
+    let capture = if reset_capture {
+        CaptureState::Unclaimed
     } else {
-        (
-            *entry
-                .run
-                .first_input
-                .lock()
-                .expect("first-input mutex poisoned"),
-            entry
-                .run
-                .capture
-                .lock()
-                .expect("capture mutex poisoned")
-                .clone(),
-        )
+        entry
+            .run
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone()
     };
     Arc::new(SessionEntry {
         info,
         terminal,
         run: RunCells {
             outcome: Arc::new(std::sync::Mutex::new(outcome)),
-            first_input: Arc::new(std::sync::Mutex::new(first_input)),
+            first_input: Arc::new(std::sync::Mutex::new(None)),
             capture: Arc::new(std::sync::Mutex::new(capture)),
             // Fresh cells with fresh VALUES, on every relaunch and whatever
-            // `reset_capture` says — the one pair here that does not follow the
-            // capture window. Both describe a LAUNCH's hook injection and the
+            // `reset_capture` says. Both describe a LAUNCH's hook injection and the
             // diagnostic spent on it, not the conversation: a launch this
             // process has not spawned yet is not hooked until `with_hook_argv`
             // says so, and `publish_relaunched` is what raises the flag when it
@@ -2928,10 +2870,8 @@ fn relaunched_entry(
 /// [`Supervisor::validate_retry`], and the second wants it for a reason
 /// worth stating separately: a pending retry carries the crashed attempt's
 /// `canonical_cwd` forward, so a symlink repointed between the two attempts
-/// would launch the agent in the NEW target while conversation capture went
-/// on correlating against the OLD one — no failure anywhere, just a session
-/// that never captures its conversation (or correlates against another
-/// project's records) for the rest of its life.
+/// would otherwise launch the agent in the new target while the stored
+/// working-directory identity still described the previous one.
 ///
 /// Sessions with no stored canonical path (rows predating the column) skip
 /// the check rather than fail it: there is nothing to compare, and
@@ -3634,7 +3574,7 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
 /// need OPPOSITE things from them.
 ///
 /// A RELAUNCH must isolate the run: the new generation gets a fresh
-/// [`RunCells`], so a list pass or capture scan still holding the previous
+/// [`RunCells`], so a list pass or report refresh still holding the previous
 /// entry writes its late conclusion into the abandoned run's cells and cannot
 /// contaminate the new one (the generation fence does the same job durably;
 /// this is its in-memory half). The [`SessionCells`] (the activity and
@@ -3645,13 +3585,9 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
 /// A RENAME must share both groups: it describes the SAME run, so its
 /// replacement clones them (cloning a group clones the `Arc`s). Anything still
 /// holding the pre-rename entry — an `InputRoute` pinned at attach time, a
-/// list pass mid-flight, a capture pass mid-scan — keeps writing into the very
-/// cells the published entry reads. Snapshotting the values instead silently
-/// split the session in two: a rename before first input would leave
-/// `super::capture::note_first_input` writing an anchor nobody would ever
-/// read, and the capture pass would scan forever against a window that never
-/// opened — SPEC.md's resume promise broken by renaming a session at the wrong
-/// moment, with nothing anywhere reporting it.
+/// list pass mid-flight, a report refresh in flight — keeps writing into the very
+/// cells the published entry reads. Snapshotting the values instead would
+/// strand input diagnostics and report updates in an entry no reply reads.
 pub(crate) struct SessionEntry {
     pub(crate) info: SessionInfo,
     pub(crate) terminal: Option<Terminal>,
@@ -3668,8 +3604,7 @@ pub(crate) struct SessionEntry {
     pub(crate) snapshot: IntegrationSnapshot,
     /// This session's working directory with symlinks, `.`/`..`, and a
     /// trailing slash resolved away, resolved at create and immutable
-    /// (`store::StoredSession::canonical_cwd` explains why correlation
-    /// cannot use the user-facing spelling). `None` only for a row that
+    /// so a relaunch can detect a repointed symlink. `None` only for a row that
     /// predates the column, which is necessarily non-integrated.
     pub(crate) canonical_cwd: Option<String>,
     /// Which LAUNCH of this session this entry describes
@@ -3678,7 +3613,7 @@ pub(crate) struct SessionEntry {
     /// Immutable per entry, which is the point: a restart PUBLISHES A NEW
     /// ENTRY rather than mutating this one, so anything still holding the
     /// old `Arc` — a `ListSessions` pass that already cloned it, a capture
-    /// pass mid-scan, an `Attach` that resolved before the restart — is
+    /// refresh in flight, an `Attach` that resolved before the restart — is
     /// holding, and can be recognized as holding, a description of the
     /// previous run. Every durable write those paths perform carries this
     /// value and is rejected by the store when it is no longer current
@@ -3749,18 +3684,13 @@ pub(crate) struct RunCells {
     /// Shared with any title-only replacement of this entry; see the
     /// struct's own docs for why sharing and isolation are both needed.
     pub(crate) outcome: Arc<std::sync::Mutex<LastOutcome>>,
-    /// When this supervisor first confirmed delivery of input to this
-    /// session (PLAN_M3.md item 8's correlator), and whether that fact has
-    /// reached the database yet. See [`FirstInput`] and
-    /// `super::capture::note_first_input`.
-    ///
-    /// The cell most exposed to the sharing rule above: its writer is the
-    /// INPUT path, which holds whatever entry its `InputRoute` pinned at
-    /// attach time and is never handed a newer one.
-    pub(crate) first_input: Arc<std::sync::Mutex<FirstInput>>,
+    /// First confirmed input to this launch, used only by the no-report warning.
+    /// Never persisted. Every relaunch resets it; a rename shares the cell because
+    /// the input route can still hold the pre-rename entry.
+    pub(crate) first_input: Arc<std::sync::Mutex<Option<std::time::Instant>>>,
     /// Where this session stands on conversation-identity capture. See
     /// [`CaptureState`]. Shared across title-only replacements like the
-    /// two cells above — a capture pass mid-scan must be advancing the
+    /// two cells above — a report refresh in flight must be advancing the
     /// same state the published entry is read from.
     pub(crate) capture: Arc<std::sync::Mutex<CaptureState>>,
     /// Whether THIS launch's argv carried the conversation-reporting hook
@@ -3773,22 +3703,11 @@ pub(crate) struct RunCells {
     /// restart — has nothing to say about it and correctly comes back with
     /// the flag clear.
     ///
-    /// Its one reader is the liveness tripwire in
-    /// [`crate::service::capture`]. A hooked launch that is still not
-    /// [`CaptureState::Reported`] well past its capture horizon means no
-    /// report was successfully ACCEPTED — which is a broader statement
-    /// than "the hook never ran", and the tripwire's message says so.
-    /// A hook that ran and was refused (a credential the store could not
-    /// validate, an implausible id, a supervisor that was not recording)
-    /// leaves exactly the same silence here; the hook's own trace file is
-    /// what separates the cases, which is why the two are diagnosed
-    /// together rather than from this flag alone.
-    ///
-    /// Either way the failure is otherwise INVISIBLE, because the scan
-    /// fallback keeps working and the session looks entirely ordinary — a
-    /// vendor that renamed its flag, a wrapper script that swallowed the
-    /// tail, a hook that never got to run. For those the tripwire is the
-    /// only place anything surfaces.
+    /// Its one reader is the liveness tripwire in [`crate::service::capture`].
+    /// A hooked launch that still holds no identity 65 seconds after first
+    /// input warns once. Refused and missing reports look the same here;
+    /// the hook's trace distinguishes them. A carried Resume identity
+    /// suppresses the warning even if this launch's hook stays silent.
     ///
     /// What it deliberately does NOT cover is the other half of the
     /// picture: a launch that was REFUSED injection in the first place —
@@ -3801,9 +3720,7 @@ pub(crate) struct RunCells {
     /// (the skip line answers it, at launch) and "were they put on and
     /// nothing came back" (this flag plus the tripwire, well after).
     ///
-    /// STRICTLY per-launch — and note that this is a narrower scope than
-    /// the capture window beside it, which is the one thing about this
-    /// field most likely to be "tidied" wrong. [`relaunched_entry`] mints
+    /// STRICTLY per-launch, unlike a stored identity carried by Resume. [`relaunched_entry`] mints
     /// it `false` on EVERY relaunch, including a Resume that keeps its
     /// capture state, because the question it answers is "was THIS launch's
     /// argv injected", and no previous launch can answer that. Injection
@@ -4432,30 +4349,12 @@ pub struct Supervisor {
     /// independent of directory admission: slow Git inspection must not hold
     /// up checkout allocation or last-reference deletion.
     repository_scanner: crate::repository_discovery::RepositoryScanner,
-    /// The home directory the agents' own record trees hang off
-    /// (PLAN_M3.md item 8), resolved once at construction from
-    /// `SupervisorSeams::agent_home` or `$HOME`.
-    ///
-    /// `None` disables conversation capture entirely, and that is the
-    /// honest behavior rather than a degraded one: with no home there is
-    /// no directory to observe, so every integrated session simply stays
-    /// uncaptured and takes SPEC.md's fresh-launch fallback. Resolved ONCE
-    /// so a supervisor cannot start capturing from a different tree
-    /// mid-life, which would let one session's identity be claimed from a
-    /// directory a later pass no longer looks at.
-    pub(super) agent_home: Option<PathBuf>,
     /// The home directory `~`-prefixed create cwds expand against,
     /// resolved once at construction from [`SupervisorSeams::user_home`]
     /// or `$HOME` (see [`expand_tilde_cwd`] for the contract). Resolved
-    /// once for the same reason `agent_home` is: what a `~` means must not
+    /// once because what a `~` means must not
     /// shift mid-life with the daemon's environment.
     user_home: Option<PathBuf>,
-    /// See [`SupervisorSeams::capture_window`].
-    pub(super) capture_window: CaptureWindowBounds,
-    /// Serializes and schedules conversation-capture passes (PLAN_M3.md
-    /// item 8, rescheduled by PLAN_M6_75.md item 1). See
-    /// [`CaptureCoordination`].
-    pub(super) capture: CaptureCoordination,
     /// Serializes each session's report/refresh capture transaction, across
     /// every kind and every capture mutation/readiness path.
     ///
@@ -5245,31 +5144,13 @@ impl Supervisor {
             }
         }
 
-        // Resolved before the first reload, because that reload already
-        // runs a capture pass: a session whose first input landed before a
-        // restart must be able to capture on the way back up, not only on
-        // the first list afterwards.
-        let agent_home = seams
-            .agent_home
-            .clone()
-            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
-            .filter(|home| !home.as_os_str().is_empty());
-        // Same resolution shape as `agent_home`, but no warning on absence:
-        // a missing home only matters if a `~` create ever arrives, and
-        // that request gets its own clear refusal.
+        // A missing home matters only when a `~` create arrives; that
+        // request receives its own refusal without disabling identity reports.
         let user_home = seams
             .user_home
             .clone()
             .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
             .filter(|home| !home.as_os_str().is_empty());
-        if agent_home.is_none() {
-            warn!(
-                "no HOME for this supervisor, so no agent record directory can be located; \
-                 conversation-identity capture is disabled and restart will offer a fresh \
-                 launch for every session"
-            );
-        }
-        let capture_window = seams.capture_window;
         let (sessions, may_record) =
             Self::reload_sessions(&state_dir, &store, &tmux, &seams, ownership.is_some()).await?;
 
@@ -5313,26 +5194,11 @@ impl Supervisor {
             agent_request_locks: Arc::new(KeyedLocks::default()),
             working_copy_operations: Arc::new(tokio::sync::Mutex::new(())),
             repository_scanner: crate::repository_discovery::RepositoryScanner::new("git"),
-            agent_home,
             user_home,
-            capture_window,
-            capture: CaptureCoordination {
-                lock: Mutex::new(()),
-                history: std::sync::Mutex::new(CaptureHistory::default()),
-            },
             capture_locks: Arc::new(KeyedLocks::default()),
         });
-        // Capture runs on the reload passes as well as the list path
-        // (PLAN_M3.md item 8), and not merely for symmetry: a session whose
-        // agent wrote its record while this supervisor was DOWN has no
-        // other moment to be noticed, and a session already holding an
-        // identity gets its record re-verified before anything is served
-        // from it. It runs HERE rather than inside `reload_sessions`
-        // because the pass needs the finished supervisor — its seams, its
-        // store, and its capture coordination. It is a `Reply`-shaped
-        // pass: nothing has swept yet, so it simply runs. (Note for
-        // anyone installing a `capture_gate` in a test: THIS is the pass
-        // it will meet first.)
+        // Reconcile reports and exact-file readiness before serving the
+        // reloaded sessions. This needs the completed supervisor and its claims.
         supervisor.capture_now().await;
         Ok(supervisor)
     }
@@ -5991,52 +5857,14 @@ impl Supervisor {
                 kind: row.agent_kind,
                 resume_template: row.resume_template,
             };
-            // The durable verdict comes back as a CLAIM, not as progress
-            // toward one: an ambiguity dominates (and survives precisely so
-            // a restart cannot re-decide it on thinner evidence), and a
-            // captured identity is re-verified against the record its
-            // locator hint names rather than re-derived from the directory
-            // — so an append confirms it and a fork's new id never
-            // displaces it.
-            //
-            // `conversation_source` is what separates the two identity
-            // cases sharing the `captured_conversation` column: `'hook'`
-            // means the agent reported it from inside its own process, so
-            // the session comes back as `Reported` and this supervisor
-            // neither scans nor re-verifies for it. Anything else means the
-            // scan concluded it.
-            //
-            // Testing ambiguity FIRST is only correct because the store
-            // guarantees `capture_ambiguous = 1` and
-            // `conversation_source = 'hook'` never coexist on a row:
-            // `record_reported_conversation` clears the ambiguity flag as
-            // it writes, and `record_capture_ambiguous` is fenced on
-            // `conversation_source IS NULL` so it cannot set the flag on a
-            // reported row. Were that pair ever allowed to coexist, this
-            // branch order would silently downgrade an exact answer to a
-            // refusal across every restart.
-            let ownership_version = row.capture_ownership_version;
-            let capture = if row.capture_ambiguous {
-                CaptureState::Ambiguous { durable: true }
-            } else {
-                match (
-                    row.captured_conversation,
-                    row.conversation_source.as_deref(),
-                ) {
-                    (Some(conversation), Some("hook")) => CaptureState::Reported {
-                        conversation,
-                        ownership_version,
-                    },
-                    (Some(conversation), _) => CaptureState::Captured {
-                        conversation,
-                        record: row.captured_record.map(PathBuf::from).unwrap_or_default(),
-                        stamp: RecordStamp {
-                            len: 0,
-                            mtime_unix: None,
-                        },
-                    },
-                    (None, _) => CaptureState::Unclaimed,
-                }
+            // Stored identities survive upgrades regardless of their source.
+            // Historical scan claims are not re-identified or re-verified.
+            let capture = match row.captured_conversation {
+                Some(conversation) => CaptureState::Reported {
+                    conversation,
+                    ownership_version: row.capture_ownership_version,
+                },
+                None => CaptureState::Unclaimed,
             };
             let restart_offer = snapshot.restart_offer(
                 capture.committed_conversation(),
@@ -6112,10 +5940,7 @@ impl Supervisor {
                         outcome: Arc::new(std::sync::Mutex::new(outcome)),
                         // Loaded FROM the database, so by definition
                         // already there.
-                        first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                            at: row.first_input_at,
-                            durable: row.first_input_at.is_some(),
-                        })),
+                        first_input: Arc::new(std::sync::Mutex::new(None)),
                         capture: Arc::new(std::sync::Mutex::new(capture)),
                         // Clear on a reload, whatever the previous supervisor
                         // did: `hooked` records that THIS process appended the
@@ -6426,7 +6251,7 @@ impl Supervisor {
         let integration = crate::agent_kind::integration_for(snapshot.kind)
             .expect("a locator-reporting kind has a report-only integration");
         let verified = match crate::agent_kind::read_record(Path::new(path), integration).await {
-            Ok(Some((record, _))) => record.conversation == locator.session_id,
+            Ok(Some(record)) => record.conversation == locator.session_id,
             Ok(None) | Err(_) => false,
         };
         if verified {
@@ -6580,14 +6405,7 @@ impl Supervisor {
         // last because this is where initialization ENDS: the session map
         // is the one this process will serve, the socket is bound, and the
         // startup reconciliation has already decided what on-disk state
-        // was debris. (An earlier version of this comment claimed the
-        // ticker had to follow the sweeps to avoid reading files they were
-        // unlinking; that was wrong and is worth recording as wrong — the
-        // capture pass scans the AGENTS' record roots under `agent_home`,
-        // while the sweeps unlink launch specs, snapshots, and tmux config
-        // temporaries under the state dir. The two never touch the same
-        // file. What the ordering actually buys is that no tick can
-        // observe a half-initialized supervisor.)
+        // was debris. No tick may observe a half-initialized supervisor.
         //
         // Bound to a name rather than discarded: the handle owns the task,
         // so `let _ = ...` would stop the ticker at the instant it started
@@ -7361,10 +7179,7 @@ impl Supervisor {
             crate::agent_kind::ensure_resume_template(template)
                 .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
         }
-        // The agent will report its own `getcwd()`, which the kernel has
-        // already resolved, so correlation has to compare against the
-        // resolved spelling or a session created through a symlink could
-        // never match its own records. The canonical spelling is also the
+        // The canonical spelling is the
         // directory's IDENTITY: every restart and keyed retry re-resolves
         // `cwd` and refuses unless it equals the stored value exactly
         // (`ensure_cwd_identity`). So a failure here FAILS the create, even
@@ -7721,8 +7536,7 @@ impl Supervisor {
     ///   repointed between the two attempts leaves a path that stats fine
     ///   and now resolves somewhere else, and this retry would launch there
     ///   while carrying the crashed attempt's `canonical_cwd` — so the
-    ///   agent runs in one directory and conversation capture correlates
-    ///   against another, silently and for the life of the session. The
+    ///   agent would run in a directory the session never authorized. The
     ///   VERIFIED path is what the launch is then aimed at
     ///   ([`LaunchRequest::launch_cwd`]), so the same link cannot be
     ///   repointed again between this check and the tmux call.
@@ -8488,10 +8302,7 @@ impl Supervisor {
                 terminal,
                 run: RunCells {
                     outcome: Arc::new(std::sync::Mutex::new(outcome)),
-                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                        at: None,
-                        durable: true,
-                    })),
+                    first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
                     // The tmux error path does not return whether hook flags
                     // reached the attempted argv. This flag is diagnostic only,
@@ -8944,11 +8755,7 @@ impl Supervisor {
                 // value lands right after the exclusive mkdir
                 // wins, via `accept_working_directory`.
                 canonical_cwd: canonical_cwd.clone(),
-                // Every capture column is written by its own later,
-                // write-once path: nothing has been captured for a
-                // session that has not launched, nothing has been
-                // typed into it, and no correlation has been
-                // attempted, let alone found ambiguous.
+                // No launched process has reported an identity yet.
                 captured_conversation: None,
                 captured_record: None,
                 capture_ambiguous: false,
@@ -9791,13 +9598,8 @@ impl Supervisor {
                 terminal: Some(Terminal { tmux_name, pane }),
                 run: RunCells {
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
-                    // Nothing has been typed into this session yet, so capture
-                    // has no correlator to key on and correctly stays idle
-                    // until the input path supplies one.
-                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                        at: None,
-                        durable: true,
-                    })),
+                    // Input starts only the diagnostic timer, never identity admission.
+                    first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
                     // What `spawn_agent` actually did to this launch's argv,
                     // recorded on the entry that describes that launch. A
@@ -9987,8 +9789,7 @@ impl Supervisor {
     ///   what lets a client refresh and re-present rather than retry blindly
     ///   (`ControlMsg::RestartSession`'s staleness contract). The check is
     ///   made ATOMIC with the relaunch by the capture pass being awaited —
-    ///   a `CaptureReason::Reply` pass, so it cannot be answered by a
-    ///   sweep that began before this request — and by the
+    ///   a new reconciliation of reported rows — and by the
     ///   generation claim being conditional on the same two fields the
     ///   validation read (`SessionStore::begin_relaunch`).
     /// - **A vanished or repointed working directory**, named in the error.
@@ -10157,7 +9958,7 @@ impl Supervisor {
         // sweep still in flight may be one commit away from changing that
         // offer, and validating against the pre-commit answer is the
         // staleness this whole contract exists to exclude. A restart is a
-        // rare, user-initiated operation; waiting out one filesystem scan
+        // rare, user-initiated operation; waiting out report reconciliation
         // is free.
         self.capture_now().await;
         let entry = self.sessions.lock().await.get(session_id).cloned();
@@ -10500,12 +10301,8 @@ impl Supervisor {
             restart_with,
         } = plan;
         let id = entry.info.id.clone();
-        // A relaunch that is not resuming a captured identity opens a FRESH
-        // capture window: `first_input_at` and the correlation verdict
-        // belong to one run, not to the session (see
-        // `SessionStore::begin_relaunch`). `Resume` keeps them, because
-        // reverifying the identity it is resuming is exactly what the
-        // capture pass must go on doing.
+        // Resume keeps the exact conversation it enters; every other mode
+        // starts without an identity until its own agent reports one.
         let reset_capture = mode != RestartMode::Resume;
         let claim = self
             .store
@@ -10532,8 +10329,7 @@ impl Supervisor {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
                     "this session's restart offer changed while the restart was being \
-                     prepared (its conversation identity was just captured, or its \
-                     correlation was just found ambiguous); nothing was relaunched — refresh \
+                     prepared (its conversation identity or readiness changed); nothing was relaunched — refresh \
                      the session and re-present the offer",
                 )
                 .into());
@@ -13170,7 +12966,7 @@ impl Supervisor {
     /// rather than inferred: the agent itself reports the id it is
     /// actually using, which is the only thing that survives a `/clear`.
     /// Everything this function can refuse leaves the launch runnable.
-    /// Claude then uses its record scan; Codex, Goose, Pi, and OMP gain no
+    /// Without an accepted report, automatically hooked kinds gain no
     /// new exact target because their integrations are report-only.
     ///
     /// Returns the argv to spawn and whether it was hooked; see
@@ -13771,31 +13567,12 @@ impl Supervisor {
             github_repo: None,
             working_copy: None,
         };
-        let capture = if row.capture_ambiguous {
-            CaptureState::Ambiguous { durable: true }
-        } else {
-            match (
-                row.captured_conversation.as_deref(),
-                row.conversation_source.as_deref(),
-            ) {
-                (Some(conversation), Some("hook")) => CaptureState::Reported {
-                    conversation: conversation.to_string(),
-                    ownership_version: row.capture_ownership_version,
-                },
-                (Some(conversation), _) => CaptureState::Captured {
-                    conversation: conversation.to_string(),
-                    record: row
-                        .captured_record
-                        .clone()
-                        .map(PathBuf::from)
-                        .unwrap_or_default(),
-                    stamp: RecordStamp {
-                        len: 0,
-                        mtime_unix: None,
-                    },
-                },
-                (None, _) => CaptureState::Unclaimed,
-            }
+        let capture = match row.captured_conversation.as_deref() {
+            Some(conversation) => CaptureState::Reported {
+                conversation: conversation.to_string(),
+                ownership_version: row.capture_ownership_version,
+            },
+            None => CaptureState::Unclaimed,
         };
         let mut sessions = self.sessions.lock().await;
         // A validation refusal holds this session's lifecycle claim. If a
@@ -13811,10 +13588,7 @@ impl Supervisor {
                 terminal: None,
                 run: RunCells {
                     outcome: Arc::new(std::sync::Mutex::new(row.outcome.clone())),
-                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                        at: row.first_input_at,
-                        durable: row.first_input_at.is_some(),
-                    })),
+                    first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(capture)),
                     hooked: hook_flag(false),
                     hook_warned: hook_flag(false),
@@ -14016,8 +13790,7 @@ impl Supervisor {
     /// Record the conversation identity a session's own agent reported
     /// from inside its process, through the launch hook.
     ///
-    /// An accepted report dominates every scan-derived verdict (see
-    /// [`CaptureState`]'s ladder). For Codex, the credential alone does not
+    /// Reports are the only source of new identities. For Codex, the credential alone does not
     /// establish authority: the reporter must belong to the current foreground
     /// process. Becoming resumable additionally requires the exact transcript
     /// to identify its root conversation. For Claude, the hook must have been
@@ -14030,7 +13803,7 @@ impl Supervisor {
     ///
     /// ## The durable write decides what is claimed
     ///
-    /// Modelled on `super::capture::commit_capture`: the in-memory
+    /// The in-memory
     /// [`CaptureState::Reported`] is entered only AFTER the store write
     /// has landed. Resume construction then applies the kind's readiness
     /// rules: a Codex pending-clear locator is durable but is not a resume
@@ -14038,7 +13811,7 @@ impl Supervisor {
     /// nothing in memory and has no supervisor-owned retry queue. The hook can
     /// retry transport loss before admission answers, but a failed admission
     /// is not replayed by the supervisor: another lifecycle event may send a
-    /// fresh report, and only Claude can recover through a scan. A store that
+    /// fresh report. A store that
     /// cannot write is a supervisor in trouble, not a state to engineer a
     /// queue around.
     ///
@@ -14087,24 +13860,17 @@ impl Supervisor {
     /// they stay that way for a while. That divergence is accepted rather
     /// than repaired, on three legs:
     ///
-    /// - **Nothing can spoil the row in the meantime.** Both scan writers
-    ///   are fenced against exactly this shape:
-    ///   [`crate::store::SessionStore::record_captured_conversation`]
-    ///   demands `captured_conversation IS NULL` and
-    ///   [`crate::store::SessionStore::record_capture_ambiguous`] demands
-    ///   `conversation_source IS NULL`. A hook-written row fails both, so
-    ///   an `Unclaimed` mirror cannot talk a pass into overwriting the
-    ///   reported identity or into recording an ambiguity over it.
+    /// - **Only accepted reports introduce identities.** No observer derives
+    ///   another id from records while the in-memory mirror catches up.
     /// - **Everything that ACTS on the identity reads the row, not the
     ///   mirror.** `session_snapshot` builds `resume_argv` and the restart
     ///   mode validation from `captured_conversation` in SQLite, so a
     ///   restart landing inside the divergence resumes the reported
     ///   conversation regardless of what memory holds.
-    /// - **The mirror catches up on its own.** Report-only kinds reconcile
-    ///   their durable row before capture replies; Codex also verifies its exact
-    ///   attributed file. Claude's next scan commit reads back the reported row
-    ///   after its write-once UPDATE is refused. A reload restores the durable
-    ///   report directly. Neither path substitutes another conversation.
+    /// - **The mirror catches up on its own.** All integrated kinds reconcile
+    ///   their durable row before replies and on the ticker. Exact-file
+    ///   verification stays part of that refresh where the kind requires it.
+    ///   A reload restores the stored identity directly.
     ///
     /// What the divergence costs is one thing only: `session_restart_offer`
     /// reads the ENTRY, so `ListSessions` advertises `FreshOnly` for the
@@ -14165,7 +13931,7 @@ impl Supervisor {
         report: ReportedConversation,
     ) -> Result<(), RequestError> {
         let entry = self.sessions.lock().await.get(id).cloned();
-        // The same gate every scan write honours. A supervisor that is not
+        // Report writes require durable standing. A supervisor that is not
         // recording is shutting down or has been replaced, and a report it
         // accepted would be a conclusion it has no standing to draw. It is
         // not parked for later either: queuing a write past this gate is
@@ -14455,7 +14221,7 @@ impl Supervisor {
                     session = %id, conversation = %conversation, source = %source,
                     error = %format!("{e:#}"),
                     "could not record the conversation identity this session's agent \
-                     reported; a later report or supported vendor scan may recover it"
+                     reported; a later report may recover it"
                 );
                 return Err(RequestError::new(
                     ErrorKind::Internal,
@@ -16854,10 +16620,7 @@ pub(crate) mod tests {
             terminal,
             run: RunCells {
                 outcome: Arc::new(std::sync::Mutex::new(outcome)),
-                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                    at: None,
-                    durable: true,
-                })),
+                first_input: Arc::new(std::sync::Mutex::new(None)),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
                 hooked: hook_flag(false),
                 hook_warned: hook_flag(false),
@@ -17069,20 +16832,22 @@ pub(crate) mod tests {
             "an outcome recorded through the old entry must be what the published one reports"
         );
 
-        old.run.first_input.lock().unwrap().at = Some(1_700_000_000);
+        let first_input = std::time::Instant::now();
+        *old.run.first_input.lock().unwrap() = Some(first_input);
         assert_eq!(
-            renamed.run.first_input.lock().unwrap().at,
-            Some(1_700_000_000),
+            *renamed.run.first_input.lock().unwrap(),
+            Some(first_input),
             "the first-input anchor is written through whichever entry the input path pinned"
         );
 
-        *old.run.capture.lock().unwrap() = CaptureState::Provisional {
+        *old.run.capture.lock().unwrap() = CaptureState::Reported {
+            ownership_version: 0,
             conversation: "conv-x".to_string(),
         };
         assert!(
             matches!(
                 &*renamed.run.capture.lock().unwrap(),
-                CaptureState::Provisional { conversation } if conversation == "conv-x"
+                CaptureState::Reported { conversation, .. } if conversation == "conv-x"
             ),
             "capture progress must not be split in two by a rename"
         );
@@ -17110,7 +16875,7 @@ pub(crate) mod tests {
         // generation. A rename is not a generation, so copying the values
         // instead of sharing the cells would split the tripwire's latch in
         // two — `with_hook_argv` raises `hooked` on the entry it launched,
-        // and a rename landing between the launch and the horizon would
+        // and a rename landing between the launch and the warning deadline would
         // leave the published entry claiming an unhooked launch (no warning
         // ever, for a hook that really is broken), or leave `hook_warned`
         // unspent so the tripwire re-warns once per tick forever.
@@ -17173,8 +16938,10 @@ pub(crate) mod tests {
     fn a_relaunched_entry_gets_fresh_cells_even_when_it_carries_the_values_over() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         old.run.activity.lock().unwrap().pending_work_started_at = Some(123_456);
-        old.run.first_input.lock().unwrap().at = Some(1_700_000_000);
-        *old.run.capture.lock().unwrap() = CaptureState::Provisional {
+        let first_input = std::time::Instant::now();
+        *old.run.first_input.lock().unwrap() = Some(first_input);
+        *old.run.capture.lock().unwrap() = CaptureState::Reported {
+            ownership_version: 0,
             conversation: "conv-old".to_string(),
         };
 
@@ -17209,27 +16976,24 @@ pub(crate) mod tests {
             "discarding an obsolete sample must not clear the replacement's retry"
         );
         assert_eq!(
-            relaunched.run.first_input.lock().unwrap().at,
-            Some(1_700_000_000),
-            "test premise: a relaunch that keeps its capture window carries the anchor over"
+            *relaunched.run.first_input.lock().unwrap(),
+            None,
+            "a relaunch starts a new diagnostic deadline, even when it keeps an identity"
         );
 
         // The previous run's observers write on: none of it may reach the
         // entry describing the new one.
         *old.run.outcome.lock().unwrap() = LastOutcome::Interrupted;
-        old.run.first_input.lock().unwrap().at = Some(1_800_000_000);
-        *old.run.capture.lock().unwrap() = CaptureState::UncapturedFinal;
+        *old.run.first_input.lock().unwrap() = Some(first_input + Duration::from_secs(1));
+        *old.run.capture.lock().unwrap() = CaptureState::Unclaimed;
         assert_eq!(
             *relaunched.run.outcome.lock().unwrap(),
             LastOutcome::Launching
         );
-        assert_eq!(
-            relaunched.run.first_input.lock().unwrap().at,
-            Some(1_700_000_000)
-        );
+        assert_eq!(*relaunched.run.first_input.lock().unwrap(), None);
         assert!(matches!(
             &*relaunched.run.capture.lock().unwrap(),
-            CaptureState::Provisional { conversation } if conversation == "conv-old"
+            CaptureState::Reported { conversation, .. } if conversation == "conv-old"
         ));
 
         // And the exception, by identity rather than by value: a late
@@ -17272,93 +17036,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The other half of the same rule: a relaunch that OPENED a fresh
-    /// capture window discards whatever the previous run concluded, from
-    /// every state including [`CaptureState::Reported`].
-    ///
-    /// `Reported` is the state most tempting to special-case here, because
-    /// it is the only one the ladder treats as authoritative rather than
-    /// inferred — and special-casing it would be a bug. The authority is
-    /// over the RUN that reported it: a non-Resume relaunch starts a
-    /// different agent process, and the conversation the old process was in
-    /// says nothing about the new one. Carrying it over would leave the
-    /// session advertising a resume of a conversation the fresh launch is
-    /// not in, and — because nothing but another report may displace
-    /// `Reported` — the scan could never correct it either. The durable
-    /// half of the same decision is `begin_relaunch` clearing
-    /// `conversation_source` along with the captured columns.
-    ///
-    /// Asserted across every variant rather than just `Reported` so the
-    /// rule reads as "the reset is unconditional", which is the property
-    /// that has to survive the next variant somebody adds.
-    #[farhelm_testtrace::test]
-    fn a_relaunch_that_reopens_the_capture_window_discards_every_prior_verdict() {
-        for prior in [
-            CaptureState::Provisional {
-                conversation: "conv-prov".to_string(),
-            },
-            // The retry state, included because it is the one variant that
-            // carries an outstanding INTENTION rather than a conclusion,
-            // and because nothing downstream would catch it. A pending
-            // claim carried into the published entry is retried by the very
-            // next pass, and that retry reads the generation off the entry
-            // it is holding — the NEW one — so the store's generation fence
-            // sees a current write and lets it through. The previous run's
-            // conversation would land durably on the fresh launch. This
-            // reset is the only thing standing in the way, which is exactly
-            // why the variant is asserted here rather than assumed safe.
-            CaptureState::PendingCommit {
-                conversation: "conv-pending".to_string(),
-                record: PathBuf::from("/tmp/pending.jsonl"),
-                stamp: RecordStamp {
-                    len: 0,
-                    mtime_unix: None,
-                },
-            },
-            CaptureState::UncapturedFinal,
-            CaptureState::Captured {
-                conversation: "conv-scan".to_string(),
-                record: PathBuf::from("/tmp/record.jsonl"),
-                stamp: RecordStamp {
-                    len: 0,
-                    mtime_unix: None,
-                },
-            },
-            CaptureState::Ambiguous { durable: true },
-            CaptureState::Reported {
-                conversation: "conv-reported".to_string(),
-                ownership_version: 1,
-            },
-        ] {
-            let old = entry_with(Some(a_terminal()), LastOutcome::Running);
-            old.run.first_input.lock().unwrap().at = Some(1_700_000_000);
-            *old.run.capture.lock().unwrap() = prior.clone();
-
-            let relaunched = relaunched_entry(
-                &old,
-                old.info.clone(),
-                old.terminal.clone(),
-                old.generation + 1,
-                None,
-                LastOutcome::Launching,
-                true,
-            );
-            assert!(
-                matches!(
-                    &*relaunched.run.capture.lock().unwrap(),
-                    CaptureState::Unclaimed
-                ),
-                "a reopened capture window must start from Unclaimed, whatever the previous \
-                 run concluded (was {prior:?})"
-            );
-            assert_eq!(
-                relaunched.run.first_input.lock().unwrap().at,
-                None,
-                "and the anchor the verdict was derived from goes with it"
-            );
-        }
-    }
-
     /// A RESUME relaunch keeps a reported identity, which is the whole
     /// point of resuming: the new process is asked to re-enter the very
     /// conversation the previous one named.
@@ -17369,12 +17046,12 @@ pub(crate) mod tests {
     /// re-earned. Dropping it here would not merely lose a diagnostic: the
     /// entry's capture state is what `session_restart_offer` computes the
     /// Resume offer from, so a session that had just been resumed would
-    /// immediately stop offering to resume — and, with no record locator to
-    /// re-verify from, the scan could not put it back either.
+    /// immediately stop offering to resume until another report arrived.
     #[farhelm_testtrace::test]
     fn a_resume_relaunch_keeps_the_identity_the_agent_reported() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
-        old.run.first_input.lock().unwrap().at = Some(1_700_000_000);
+        let first_input = std::time::Instant::now();
+        *old.run.first_input.lock().unwrap() = Some(first_input);
         *old.run.capture.lock().unwrap() = CaptureState::Reported {
             conversation: "conv-reported".to_string(),
             ownership_version: 1,
@@ -17403,9 +17080,40 @@ pub(crate) mod tests {
         );
     }
 
+    /// Fresh restart discards the old identity and diagnostic deadline together.
+    /// Retaining either would associate the new process with the old conversation
+    /// or warn before the replacement had received its first input.
+    #[test]
+    fn a_fresh_relaunch_clears_identity_and_input_deadline() {
+        let old = entry_with(Some(a_terminal()), LastOutcome::Running);
+        *old.run.first_input.lock().unwrap() = Some(std::time::Instant::now());
+        *old.run.capture.lock().unwrap() = CaptureState::Reported {
+            conversation: "previous-conversation".into(),
+            ownership_version: 1,
+        };
+        let new = relaunched_entry(
+            &old,
+            old.info.clone(),
+            old.terminal.clone(),
+            old.generation + 1,
+            None,
+            LastOutcome::Launching,
+            true,
+        );
+        assert!(matches!(
+            *new.run.capture.lock().unwrap(),
+            CaptureState::Unclaimed
+        ));
+        assert_eq!(*new.run.first_input.lock().unwrap(), None);
+        assert_eq!(
+            old.run.capture.lock().unwrap().committed_conversation(),
+            Some("previous-conversation")
+        );
+    }
+
     /// The hook tripwire cells are minted fresh on EVERY relaunch, a
-    /// Resume included — the one pair here that does not follow the
-    /// capture window.
+    /// Resume included. The identity may carry over, but injection and its
+    /// diagnostic latch describe only the new launch.
     ///
     /// The distinction is subtle enough to be worth a test of its own,
     /// because the neighbouring rule is so nearly right: a Resume keeps its
@@ -17422,7 +17130,7 @@ pub(crate) mod tests {
     /// silence the wire for the next broken launch — exactly the restart a
     /// user performs when trying to fix the thing the warning is about.
     #[farhelm_testtrace::test]
-    fn a_relaunch_mints_fresh_hook_cells_even_when_it_keeps_the_capture_window() {
+    fn a_relaunch_mints_fresh_hook_cells_even_when_it_keeps_the_identity() {
         let ordering = std::sync::atomic::Ordering::Relaxed;
         for reset_capture in [true, false] {
             let old = entry_with(Some(a_terminal()), LastOutcome::Running);
@@ -17455,19 +17163,10 @@ pub(crate) mod tests {
         }
     }
 
-    /// The activity sample is the one cell a relaunch resets outright
-    /// rather than carrying over, whatever the capture window decided.
-    ///
-    /// Separate from the test above because the RULE is different, not
-    /// merely the field: `first_input`/`capture` carry their VALUES across
-    /// a relaunch that kept its window, while a sample describes a process
-    /// that no longer exists. Inheriting it would let the previous
-    /// generation's sampled tail and its unchanged-sample streak contaminate
-    /// the replacement — the new pane classified `Idle` because the OLD one
-    /// stopped changing, or read as `Waiting` from a dialog the dead
-    /// run was showing, on evidence gathered from a process that is gone.
-    /// That cross-generation contamination is exactly what the fence exists
-    /// to prevent.
+    /// Activity classification resets on every relaunch, even Resume.
+    /// The old screen and quiet-sample streak describe a process that no
+    /// longer exists; inheriting them would classify the replacement from
+    /// its predecessor's output. This is independent of carrying its identity.
     #[farhelm_testtrace::test]
     fn a_relaunch_resets_the_activity_sample_rather_than_inheriting_the_dead_runs_screen() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
@@ -18925,31 +18624,9 @@ pub(crate) mod tests {
         );
     }
 
-    /// Reload reads `conversation_source` as the discriminator between the
-    /// two writers that share the `captured_conversation` column, so an
-    /// identity the AGENT reported comes back as
-    /// [`CaptureState::Reported`] and one the SCAN concluded comes back as
-    /// `Captured`.
-    ///
-    /// The distinction survives a restart or it is not a distinction. A
-    /// reported session must not be re-scanned, must not be re-verified
-    /// against a record file, and must keep dominating any later ambiguity
-    /// the scan would otherwise reach for — all of which follow from the
-    /// state it reloads into and none of which follow from the id alone.
-    /// Reloading a reported row as `Captured` would put the session back
-    /// under scan authority and reopen exactly the `/clear` hole the report
-    /// exists to close.
-    ///
-    /// Both rows are asserted in one pass because the risk is a mapping
-    /// that ignores the new column entirely: a test that only planted a
-    /// hook row would still pass against code that returned `Reported` for
-    /// every captured id.
-    ///
-    /// Driven through the real `reload_sessions`, like its siblings above,
-    /// because the row-to-state mapping only exists inside that pass.
-    /// Seed one Codex row the way history leaves them: an optional
-    /// pre-contract identity, never ownership-proven, with a launchable
-    /// template so reload has no unrelated reason to refuse it.
+    /// Seed a Codex row as history leaves it: an optional pre-contract identity,
+    /// without ownership proof. A launchable template keeps reload refusal
+    /// independent of unrelated template validation.
     async fn seed_codex_row(
         sup: &Arc<Supervisor>,
         id: &str,
@@ -19718,7 +19395,7 @@ pub(crate) mod tests {
     }
 
     #[farhelm_testtrace::test]
-    async fn reload_distinguishes_a_reported_identity_from_a_scanned_one() {
+    async fn reload_preserves_identities_regardless_of_source() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -19794,17 +19471,16 @@ pub(crate) mod tests {
                 &reported,
                 CaptureState::Reported { conversation, .. } if *conversation == format!("conv-{reported_id}")
             ),
-            "a row whose identity came from the agent's own hook must reload as Reported, \
-             not back under the scan's authority: {reported:?}"
+            "a reported identity must survive reload: {reported:?}"
         );
         let scanned = sessions[&scanned_id].run.capture.lock().unwrap().clone();
         assert!(
             matches!(
                 &scanned,
-                CaptureState::Captured { conversation, .. }
+                CaptureState::Reported { conversation, .. }
                     if *conversation == format!("conv-{scanned_id}")
             ),
-            "a row with no conversation source is still the scan's claim: {scanned:?}"
+            "a historical identity must survive reload regardless of its source: {scanned:?}"
         );
 
         // Both are committed identities whatever produced them, so both
@@ -23615,36 +23291,6 @@ exit 0
         );
     }
 
-    /// SPEC.md owes the user an explanation whenever it offers the
-    /// fallback instead of a resume, so the two ambiguity diagnostics are
-    /// part of the contract rather than debug output. This pins the
-    /// overlapping-windows one; its sibling — two records inside one
-    /// window — is `agent_kind::choose`'s own payload and is pinned there.
-    ///
-    /// Asserted on the message-BUILDING function rather than by capturing
-    /// the `tracing` event, deliberately and with a cost: capturing events
-    /// needs a subscriber, and this crate carries no subscriber
-    /// dependency, so a capture harness would mean hand-rolling one in
-    /// test code. Extracting the message into a named function instead is
-    /// what makes it assertable at all — the emission itself is exercised
-    /// by the e2e ambiguity tests, which prove the behavior the message
-    /// describes.
-    #[farhelm_testtrace::test]
-    fn the_overlap_diagnostic_explains_the_refusal_it_accompanies() {
-        let reason = overlapping_windows_reason("sess-a", "sess-b", "/work/repo");
-        for needle in [
-            "sess-a",
-            "sess-b",
-            "/work/repo",
-            // Not just the ids: a log line that named two sessions without
-            // saying what follows from the collision would leave the user
-            // no better off than the silent fallback.
-            "conversation identity captured for this launch",
-        ] {
-            assert!(reason.contains(needle), "{needle:?} missing from: {reason}");
-        }
-    }
-
     /// A brand-new session's activity stamp equals its creation time in
     /// all FOUR places the value lives, before anything has watched it.
     ///
@@ -24030,9 +23676,8 @@ exit 0
             assert_eq!(snapshot.captured_conversation, None);
             assert_eq!(snapshot.restart_offer, RestartOffer::FreshOnly);
 
-            // Inject the capture result through its normal durable writer.
-            // Record discovery is outside this regression; no record file is
-            // read by this seam, and the fake path stays in the owned fixture.
+            // The resume-argv contract needs a durable identity, not a running
+            // reporter. Admission itself is covered by the hook tests.
             let generation = sup
                 .store
                 .session(&created.id)
@@ -24042,15 +23687,10 @@ exit 0
                 .generation;
             let captured = sup
                 .store
-                .record_captured_conversation(
-                    &created.id,
-                    generation,
-                    "conversation-1",
-                    &work.path().join("record.jsonl"),
-                )
+                .record_reported_conversation(&created.id, generation, "conversation-1")
                 .await
                 .expect("persist captured identity");
-            assert_eq!(captured.as_deref(), Some("conversation-1"));
+            assert!(captured, "the report committed its identity");
             let snapshot = sup
                 .session_snapshot(&created.id)
                 .await
@@ -25638,11 +25278,8 @@ exit 0
     /// repointed between the crash and the retry leaves `ensure_cwd_usable`
     /// perfectly satisfied while the directory underneath is somebody
     /// else's, and the retry carries the crashed attempt's `canonical_cwd`
-    /// forward: so the agent would run in the NEW target while conversation
-    /// capture correlated against the OLD one. Nothing fails, no log line
-    /// appears, and the session simply never captures its conversation —
-    /// or, where the old target is another live project, correlates against
-    /// records that are not its own.
+    /// forward. Relaunching into the new target would run the agent in a
+    /// directory the user never authorized for this session.
     ///
     /// The refusal names both paths, because "working directory does not
     /// exist" would send the user looking for a typo when the directory is
@@ -25685,7 +25322,7 @@ exit 0
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     resume_template: None,
                     // What the crashed attempt resolved, and what capture
-                    // would go on correlating against.
+                    // would still identify as the authorized directory.
                     canonical_cwd: Some(
                         std::fs::canonicalize(&original)
                             .expect("canonicalize")
@@ -26218,8 +25855,8 @@ exit 0
     /// first external side effect, and repoints the link from there. A build
     /// that passed the original path through would put the agent in the
     /// attacker's directory — with the permissive flags agents are commonly
-    /// launched with — while the session went on recording, and correlating
-    /// against, the directory it thought it had checked.
+    /// launched with — while the session still named the directory it
+    /// thought it had checked.
     ///
     /// The agent itself reports where it landed, because that is the only
     /// answer that matters: a stub shim writes its own `pwd` and then sits

@@ -26,16 +26,12 @@
 //!    [`CWD_PLACEHOLDER`] at spawn time in `Supervisor::spawn_agent`,
 //!    which is the only place the launch's working directory is known on
 //!    every path.
-//! 2. **Conversation-identity capture** (item 8). Claude can correlate
-//!    discoverable records as a fallback to its per-launch hook.
-//!    Codex requires an attributed foreground report and exact root metadata.
-//!    Codex, Goose, Pi, and OMP are report-only integrations: they never expose a
-//!    record root for Farhelm to scan, and a locator reported under one
-//!    vendor's prefix is never accepted for another's. Reporter artifacts
-//!    stay in Farhelm's state; Goose alone retains the credential-free
-//!    reporter declaration in its conversation metadata. An exact report
-//!    always wins
-//!    over a scan-derived inference for the kinds that have both.
+//! 2. **Conversation identity from reports.** Each integrated agent names its
+//!    own conversation through a hook, plugin, or extension. Exact-file checks
+//!    verify a reported target; they never discover an identity. Locator
+//!    vocabularies stay vendor-specific. Reporter artifacts stay in Farhelm's
+//!    state; Goose alone retains its credential-free reporter declaration in
+//!    conversation metadata.
 //! 3. **Activity interpretation** (PLAN_M6_75.md item 2). The generic
 //!    classifier can compare successive screens, but it cannot know which
 //!    redraws are vendor-owned decoration or which still screen proves a
@@ -118,48 +114,11 @@
 //! and stay exhaustive by review. Give a new per-kind decision its own small
 //! function with the attribute rather than burying the match in a larger one.
 //!
-//! ## Where the line between this file and `capture` is drawn
+//! ## Shared record readers
 //!
-//! The submodule is not "the second half". The split is by AXIS: `capture`
-//! holds what is the same no matter which agent wrote the record — window
-//! arithmetic, the bounded directory walk and its budgets, the ambiguity
-//! rule, timestamp parsing — and this file holds everything a reader has to
-//! check against a VENDOR. That is why [`AgentIntegration::parse_record`]
-//! is here while `scan_records` is not, and why a new agent kind is an
-//! `impl` in this file rather than an edit spread across both.
-//!
-//! It also means the two files fail differently, which is worth knowing
-//! before touching either. A bug in `capture` is a correctness bug about
-//! which conversation gets resumed; a bug here is usually a bug about
-//! whether this build still recognizes what the vendor currently emits —
-//! silent, version-dependent, and fixed by re-auditing the agent rather
-//! than by reasoning about the code.
-//!
-//! ## The audited constraints this module is shaped by
-//!
-//! SPEC_impl.md's "Supervisor internals" records four facts about the real
-//! agents that were established by audit, and each one shows up here as a
-//! design decision rather than as a comment:
-//!
-//! - **The record appears at first prompt submission, not at launch.** So
-//!   correlation keys on FIRST-INPUT time ([`CaptureWindow`]), and the
-//!   launch-to-first-input gap is unbounded and simply tolerated. There is
-//!   no timeout anywhere in this module measured from a session's creation.
-//! - **The cwd munging is non-injective** (`/`, `.`, and `_` all become
-//!   `-`). So the munged directory name is only ever used to FIND candidate
-//!   files cheaply; whether a record belongs to a session is decided by the
-//!   `cwd` FIELD inside it ([`RecordCorrelators::cwd`]), never by the
-//!   directory it was found in.
-//! - **Per-line JSON fields are the reliable correlators.** File birth
-//!   times can postdate content after rewrites, so nothing here derives a
-//!   record's creation time from the filesystem; the timestamp comes out of
-//!   the record's own leading JSON. Filesystem mtime is used, but only as
-//!   a monotone LOWER BOUND that lets a scan skip files it could not
-//!   possibly need to open (see [`scan_records`]) — never as an answer.
-//! - **A plain resume appends under the same id; a new id appears only on
-//!   an explicit fork.** So an append is treated as a re-verification
-//!   signal ([`read_record`]) rather than as a new conversation, and a
-//!   fork's new file never displaces an identity already claimed.
+//! `records` owns bounded, regular-file-only reads and timestamp parsing.
+//! Vendor modules decide what an exact reported record means. Reading a file
+//! verifies a report, never identifies a conversation from nearby files.
 //!
 //! ## Screen reading is allowed to be wrong; capture is not
 //!
@@ -167,8 +126,7 @@
 //! other's instincts is the mistake this section exists to prevent.
 //!
 //! Capture's uncertainty is unrecoverable (resuming the wrong conversation
-//! is silent and permanent), so it refuses to guess at all — see
-//! `capture`'s own docs. A screen reader's uncertainty is a badge in a
+//! is silent and permanent), so it accepts only explicit reports. A screen reader's uncertainty is a badge in a
 //! list: SPEC.md fixes the waiting/idle boundary as heuristic BY CONTRACT
 //! and forbids anything about interaction from waiting on a status, so a
 //! reader that misses a prompt costs a session that reads idle while it
@@ -189,7 +147,7 @@
 
 use farhelm_proto::{AgentKind, RestartOffer};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Locate the executable behind the launcher's simple `env NAME=value` prefix.
 /// Option-bearing `env` commands have different parsing rules and are deliberately
@@ -198,27 +156,22 @@ use std::path::{Path, PathBuf};
 /// `farhelm-proto` beside the YOLO classifier.
 pub(crate) use farhelm_proto::yolo::effective_program_index;
 
-mod capture;
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod goose;
 pub(crate) mod grok;
 pub(crate) mod omp;
 pub(crate) mod pi;
+mod records;
 #[cfg(test)]
 mod screen_fixtures;
 pub(crate) mod screen_reader;
-pub use capture::{
-    CAPTURE_PUBLICATION_GRACE, CAPTURE_WINDOW_AFTER, CAPTURE_WINDOW_BEFORE, Candidate,
-    CaptureVerdict, CaptureWindow, CaptureWindowBounds, RecordCorrelators, RecordStamp,
-    ScanOutcome, choose, format_rfc3339, now_unix, parse_rfc3339, read_record, scan_records,
-    stamp_of,
-};
-pub(crate) use capture::{
-    read_complete as read_complete_bounded_regular_file, read_prefix as read_bounded_regular_file,
-};
 pub use grok::{
     encode_report as encode_grok_report, validate_event_time as validate_grok_event_time,
+};
+pub use records::{RecordCorrelators, format_rfc3339, now_unix, parse_rfc3339, read_record};
+pub(crate) use records::{
+    read_complete as read_complete_bounded_regular_file, read_prefix as read_bounded_regular_file,
 };
 
 /// The one argv element a resume template may use to mean "substitute the
@@ -238,10 +191,8 @@ pub const CONVERSATION_PLACEHOLDER: &str = "{conversation}";
 /// Exists for wrapper launchers shaped like `wrapper run <dir> <agent...>`,
 /// which need the directory as an ARGUMENT rather than as an ambient
 /// value. Without it, one profile could only ever launch into a single
-/// hardcoded directory — and a profile whose baked-in directory disagreed
-/// with the session's real cwd would silently break capture correlation,
-/// since the agent would report the wrapper's directory while capture
-/// matches against the session's own canonical cwd.
+/// hardcoded directory. `{cwd}` keeps that argument aligned with the launch's
+/// actual working directory, including when one profile serves many projects.
 ///
 /// Same rules as [`CONVERSATION_PLACEHOLDER`], for the same reasons: EXACT
 /// whole-element equality (`--dir={cwd}` is literal text, not a match),
@@ -284,30 +235,14 @@ pub fn is_reserved_placeholder(value: &str) -> bool {
 /// additive instruction channel.
 pub const INSTRUCTIONS_POINTER: &str = "farhelm: when the user writes \"$farhelm ...\", run `farhelm agent instructions` and follow its output.";
 
-/// How much of a record file is read while looking for its correlators.
-///
-/// Both agents put the identifying fields in the record's first line, and
-/// a long-running conversation's file grows without bound — so reading the
-/// whole thing to learn something the first kilobyte already said would
-/// make every rescan proportional to conversation length. A record whose
-/// correlators are not inside this prefix is a PARSE FAILURE, which marks
-/// the whole scan incomplete rather than quietly dropping one candidate:
-/// see the module docs on why incomplete evidence may not produce a claim.
+/// Maximum prefix read when verifying a reported record.
+/// Conversation files grow without bound, so verification must not read their
+/// whole history. Missing required metadata inside this prefix is a refusal.
 const RECORD_PREFIX_BYTES: usize = 64 * 1024;
 
-/// How many leading lines of a record are examined for correlators. Same
-/// bound as [`RECORD_PREFIX_BYTES`] from the other direction — a file of
-/// many tiny lines must not turn a scan into a JSON-parsing marathon.
-const RECORD_PREFIX_LINES: usize = 64;
-
-/// Longest conversation identifier this module will retain.
-///
-/// A record's id comes off disk rather than from this process, and it ends
-/// up in a durable column, in log lines, and eventually on an agent's
-/// command line. Both vendors use UUIDs; 128 bytes is generous headroom
-/// while still being a bound. An id over it is a parse failure, which —
-/// like every other parse failure — marks the scan incomplete rather than
-/// silently dropping a candidate that might have been the ambiguity.
+/// Maximum retained conversation identifier length.
+/// An identifier crosses from untrusted input into the store, logs and argv;
+/// length and character validation keep that boundary bounded and literal.
 const MAX_CONVERSATION_ID_LEN: usize = 128;
 
 /// Largest vendor session-file path accepted from an injected extension.
@@ -435,13 +370,12 @@ fn validate_locator(vendor: LocatorVendor, locator: &SessionLocator) -> anyhow::
 ///
 /// Object-safe and implemented by unit structs with `'static` instances
 /// ([`integration_for`]) because there is nothing per-session to carry: a
-/// session's own state (cwd, first-input time, captured identity, sampled
+/// session's own state (cwd, captured identity, sampled
 /// tail) lives with the session, and what remains here is pure per-KIND
 /// knowledge.
 ///
 /// Every method is required so each kind makes its capture and resume
-/// policy explicit. Returning no scan root is a real policy: report-only
-/// kinds must not infer ownership from nearby files. Status recognition is
+/// policy explicit. Status recognition is
 /// not part of this trait; a kind's screen reader lives in
 /// [`screen_reader`], so a kind can have one without an integration and the
 /// reverse.
@@ -465,33 +399,11 @@ pub trait AgentIntegration: Send + Sync {
     /// kind decides whether its derived shape has such a case.
     fn ambiguous_derived_resume(&self, original_argv: &[String]) -> Option<SnapshotError>;
 
-    /// An eligible scan root for this kind and working directory, if scanning
-    /// can establish ownership. Claude uses its munged-cwd project directory;
-    /// report-only kinds return `None` rather than guessing from nearby files.
-    fn record_root(&self, home: &Path, canonical_cwd: &str) -> Option<PathBuf>;
-
-    /// How many directory levels below [`AgentIntegration::record_root`]
-    /// records may be nested. Bounds the walk so a stray deep tree cannot
-    /// turn a rescan into a filesystem crawl.
-    fn record_depth(&self) -> usize;
-
-    /// Whether a file name could be a record at all — a cheap pre-filter
-    /// applied before anything is opened.
-    fn is_record_file(&self, name: &str) -> bool;
-
-    /// Pull the correlators out of a record's leading text.
+    /// Parse the bounded header of an exact reported record.
     ///
-    /// `Ok(None)` means "this is a well-formed file that is positively not
-    /// a record of mine"; anything the implementation cannot make sense of
-    /// is an `Err`, which marks the whole scan incomplete. The asymmetry
-    /// is the module's no-guessing rule applied at the parse boundary: a
-    /// file this build cannot read might be the second candidate that
-    /// should have forced an ambiguity bail.
-    ///
-    /// `text` is a bounded PREFIX of the file (see [`RECORD_PREFIX_BYTES`]),
-    /// not necessarily the whole of it, and may end mid-line — so an
-    /// implementation must tolerate a truncated final line rather than
-    /// treating it as corruption.
+    /// Pi and OMP use this seam to verify their file locators; kinds without that
+    /// verification return no record. Invalid required metadata is an error. The
+    /// prefix can end mid-line, so parsers must tolerate an incomplete final line.
     fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>>;
 
     /// Command-line elements that make THIS launch report its conversation
@@ -767,8 +679,8 @@ pub fn reads_as_waiting(kind: AgentKind, screen: &str) -> bool {
         == ScreenState::Waiting
 }
 
-/// Claude Code: one JSONL record per conversation, under a project
-/// directory named after the munged working directory.
+/// Claude reports through its injected SessionStart hook; the integration
+/// supplies the settings argument and the conversation-specific Resume template.
 struct ClaudeIntegration;
 
 /// Codex binds an attributed foreground report to its exact root rollout.
@@ -811,18 +723,6 @@ impl AgentIntegration for GooseIntegration {
         template
     }
 
-    fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
-        None
-    }
-
-    fn record_depth(&self) -> usize {
-        0
-    }
-
-    fn is_record_file(&self, _name: &str) -> bool {
-        false
-    }
-
     fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
         Ok(None)
     }
@@ -844,18 +744,6 @@ impl AgentIntegration for PiIntegration {
             CONVERSATION_PLACEHOLDER.to_string(),
         ]);
         template
-    }
-
-    fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
-        None
-    }
-
-    fn record_depth(&self) -> usize {
-        0
-    }
-
-    fn is_record_file(&self, _name: &str) -> bool {
-        false
     }
 
     fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
@@ -907,18 +795,6 @@ impl AgentIntegration for GrokIntegration {
         }
         template.extend(["--resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
         template
-    }
-
-    fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
-        None
-    }
-
-    fn record_depth(&self) -> usize {
-        0
-    }
-
-    fn is_record_file(&self, _name: &str) -> bool {
-        false
     }
 
     fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
@@ -1382,18 +1258,6 @@ impl AgentIntegration for OmpIntegration {
         template
     }
 
-    fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
-        None
-    }
-
-    fn record_depth(&self) -> usize {
-        0
-    }
-
-    fn is_record_file(&self, _name: &str) -> bool {
-        false
-    }
-
     fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
         let conversation = parse_omp_session_header(text)?;
         Ok(Some(RecordCorrelators {
@@ -1507,53 +1371,8 @@ impl AgentIntegration for ClaudeIntegration {
         template
     }
 
-    fn record_root(&self, home: &Path, canonical_cwd: &str) -> Option<PathBuf> {
-        Some(
-            home.join(".claude")
-                .join("projects")
-                .join(munge_cwd(canonical_cwd)),
-        )
-    }
-
-    fn record_depth(&self) -> usize {
-        0
-    }
-
-    fn is_record_file(&self, name: &str) -> bool {
-        name.ends_with(".jsonl")
-    }
-
-    /// Claude puts `sessionId`, `cwd`, and `timestamp` at the TOP level of
-    /// every line, so the first line carrying all three answers all three
-    /// questions at once. Lines are scanned rather than only the first
-    /// taken because a record can legitimately open with a line that
-    /// carries only some of them (a summary or a meta entry) — and a line
-    /// missing one of the three CONTINUES to the next rather than failing
-    /// the file, since that is the ordinary shape rather than corruption.
-    ///
-    /// What does fail: a file whose prefix contains no such line at all
-    /// (`Ok(None)` would claim positively that this is not a Claude
-    /// record, which no amount of a 64 KiB prefix can establish), and a
-    /// line whose fields are present but unusable — an unparseable
-    /// timestamp or an implausible id. Both mark the scan incomplete.
-    fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
-        for line in leading_json_lines(text) {
-            let Some(object) = line.as_object() else {
-                continue;
-            };
-            let (Some(conversation), Some(cwd), Some(timestamp)) = (
-                object.get("sessionId").and_then(|v| v.as_str()),
-                object.get("cwd").and_then(|v| v.as_str()),
-                object.get("timestamp").and_then(|v| v.as_str()),
-            ) else {
-                continue;
-            };
-            return Ok(Some(correlators_from(conversation, cwd, timestamp)?));
-        }
-        anyhow::bail!(
-            "no line in this file's first {RECORD_PREFIX_BYTES} bytes carries Claude's \
-             sessionId/cwd/timestamp correlators"
-        )
+    fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
+        Ok(None)
     }
 
     /// `--settings <json>` carrying one SessionStart hook. Claude Code
@@ -1612,20 +1431,6 @@ impl AgentIntegration for CodexIntegration {
         let mut template = original_argv.to_vec();
         template.extend(["resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
         template
-    }
-
-    // A lone nested conversation can be the only file in a capture window.
-    // Only an attributed foreground report can select a Codex record.
-    fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
-        None
-    }
-
-    fn record_depth(&self) -> usize {
-        0
-    }
-
-    fn is_record_file(&self, _name: &str) -> bool {
-        false
     }
 
     fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
@@ -1969,10 +1774,9 @@ fn is_codex_elapsed(elapsed: &str) -> bool {
 /// Assemble validated correlators, refusing anything this module is not
 /// willing to retain.
 ///
-/// The refusals are `Err`, not a silent skip, because both of them mean
-/// "there is a record here that I cannot represent" — and a record that
-/// goes unseen is exactly the second candidate whose absence turns an
-/// ambiguity into a wrong claim.
+/// A reported file is accepted only when its identity and timestamp are
+/// representable under this contract. Refuse malformed metadata instead of
+/// treating a partially parsed record as evidence for the reported binding.
 fn correlators_from(
     conversation: &str,
     cwd: &str,
@@ -2073,37 +1877,6 @@ pub(crate) fn is_plausible_conversation_id(id: &str) -> bool {
         && id
             .chars()
             .all(|c| c.is_ascii_graphic() && c != '"' && c != '\'' && c != '\\')
-}
-
-/// The leading lines of a record prefix, parsed as JSON, skipping anything
-/// unparseable.
-///
-/// A truncated trailing line (the prefix may end mid-line) simply fails to
-/// parse and is skipped, which is why this never needs to know whether the
-/// text it was handed was complete. `serde_json` skips surrounding
-/// whitespace itself, so nothing is trimmed here.
-fn leading_json_lines(text: &str) -> impl Iterator<Item = serde_json::Value> + '_ {
-    text.lines()
-        .take(RECORD_PREFIX_LINES)
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-}
-
-/// Claude's project-directory name for a working directory.
-///
-/// NON-INJECTIVE by construction (`/tmp/a.b` and `/tmp/a-b` both become
-/// `-tmp-a-b`), which is the whole reason this function's result is only
-/// ever used to LOCATE files and never to decide that one belongs to a
-/// session. Always applied to a session's CANONICAL cwd, because that is
-/// what the agent itself munges: it munges its own `getcwd()`, which the
-/// kernel has already resolved.
-pub fn munge_cwd(canonical_cwd: &str) -> String {
-    canonical_cwd
-        .chars()
-        .map(|c| match c {
-            '/' | '.' | '_' => '-',
-            other => other,
-        })
-        .collect()
 }
 
 /// The per-session integration settings (PLAN_M3.md item 7): a fixed agent
@@ -2876,13 +2649,12 @@ pub enum AgentHooks {
     /// written `fn default()` could.
     #[default]
     All,
-    /// No automatically installed reporter runs. Claude falls back to its
-    /// record scan; Codex, Goose, Pi, and OMP gain no new exact target.
+    /// No automatically installed reporter runs, so those integrations gain
+    /// no new identity through automatic reporting.
     /// Manually configured Grok callbacks are unaffected.
     None,
     /// Exactly these automatically configured kinds get their reporter. A
-    /// disabled Claude falls back to scanning; a disabled Codex, Goose, Pi,
-    /// or OMP does not. An [`AgentKind::Generic`] entry would be inert rather
+    /// disabled kind gains no new identity through automatic reporting. An [`AgentKind::Generic`] entry would be inert rather
     /// than rejected —
     /// `allows` is never asked about it because the caller skips kinds with
     /// no integration before consulting this value.
@@ -2997,8 +2769,7 @@ pub fn parse_agent_hooks(value: &str) -> AgentHooks {
 ///
 /// It is deliberately NOT folded into `AgentHooks`. The two answer
 /// different questions and fail in different directions: turning hooks off
-/// costs identity capture (a scan fallback for Claude, no new target for
-/// Codex, Goose, Pi, or OMP, and no effect on manual Grok callbacks),
+/// costs automatic identity reporting (with no effect on manual Grok callbacks),
 /// while turning instructions off costs an
 /// agent knowing the CLI exists and nothing else. Someone who wants a silent
 /// launch but working resume must be able to say so.
@@ -4753,7 +4524,7 @@ mod tests {
                 .expect("a regular file's read completes, bounded")
                 .expect("a regular file reads")
                 .expect("a well-formed OMP header is a record");
-        assert_eq!(parsed.0.conversation, "omp-id-1");
+        assert_eq!(parsed.conversation, "omp-id-1");
 
         let link = dir.path().join("link.jsonl");
         std::os::unix::fs::symlink(&real, &link).expect("symlink fixture");
@@ -4828,47 +4599,6 @@ mod tests {
         assert_eq!(unfillable.restart_offer(None, 0), RestartOffer::FreshOnly);
     }
 
-    /// The munging is the audited reason correlation cannot use directory
-    /// names, so the collision is pinned as a PROPERTY rather than left as
-    /// prose: `/tmp/a.b` and `/tmp/a-b` genuinely land in one directory,
-    /// and any change that made this function injective would silently
-    /// stop matching the real agent's own layout.
-    #[farhelm_testtrace::test]
-    fn cwd_munging_is_non_injective_by_construction() {
-        assert_eq!(munge_cwd("/tmp/a.b"), "-tmp-a-b");
-        assert_eq!(munge_cwd("/tmp/a-b"), "-tmp-a-b");
-        assert_eq!(munge_cwd("/tmp/a_b"), "-tmp-a-b");
-        assert_eq!(munge_cwd("/home/u/work"), "-home-u-work");
-    }
-    /// Claude's correlators are top-level per-line JSON fields, and the
-    /// FIRST line need not carry all of them — real records open with
-    /// summary/meta lines. Pinned because taking line 1 unconditionally is
-    /// the obvious-looking implementation that silently captures nothing.
-    /// A file with no correlator line at all is an ERROR, not `Ok(None)`:
-    /// a 64 KiB prefix cannot establish that a file is not a record.
-    #[farhelm_testtrace::test]
-    fn claude_records_are_parsed_from_the_first_line_carrying_all_correlators() {
-        let text = "{\"type\":\"summary\",\"summary\":\"x\"}\n\
-                    {\"sessionId\":\"conv-7\",\"cwd\":\"/work\",\
-                    \"timestamp\":\"2026-07-29T12:00:05.123Z\"}\n";
-        let parsed = ClaudeIntegration.parse_record(text).unwrap().unwrap();
-        assert_eq!(
-            parsed,
-            RecordCorrelators {
-                conversation: "conv-7".to_string(),
-                cwd: "/work".to_string(),
-                created_at: parse_rfc3339("2026-07-29T12:00:05Z").unwrap(),
-            }
-        );
-        assert!(ClaudeIntegration.parse_record("not json at all").is_err());
-        assert!(
-            ClaudeIntegration
-                .parse_record("{\"sessionId\":\"a\",\"cwd\":\"/w\",\"timestamp\":\"nope\"}")
-                .is_err(),
-            "a correlator line with an unusable timestamp is a failure, not a skip"
-        );
-    }
-
     /// Codex's transcript contains events from internal work as well as the
     /// root conversation. A resumable locator needs the root session metadata
     /// payload; accepting a flat or mixed-level record would fabricate an
@@ -4908,12 +4638,9 @@ mod tests {
         assert!(CodexIntegration.parse_record(text).is_err());
     }
 
-    /// A conversation id crosses from an on-disk file into a durable
-    /// column, a log line, and eventually an agent's argv. Anything that
-    /// is not an identifier under any plausible vendor format is refused —
-    /// and refused LOUDLY (an error, marking the scan incomplete) rather
-    /// than dropped, since a dropped candidate is exactly the second one
-    /// whose absence would turn an ambiguity into a wrong claim.
+    /// An identifier eventually reaches durable storage and agent argv. Reject
+    /// malformed, oversized and substitution-shaped values at the parse boundary
+    /// so they cannot change the meaning of a later Resume invocation.
     #[farhelm_testtrace::test]
     fn implausible_conversation_identifiers_are_refused() {
         assert!(is_plausible_conversation_id("0b0a3d65-a742-4b0e-bda5-c59"));
@@ -4929,11 +4656,6 @@ mod tests {
         assert!(!is_plausible_conversation_id(
             &"x".repeat(MAX_CONVERSATION_ID_LEN + 1)
         ));
-        let long = format!(
-            "{{\"sessionId\":\"{}\",\"cwd\":\"/w\",\"timestamp\":\"2026-07-29T12:00:05Z\"}}",
-            "x".repeat(MAX_CONVERSATION_ID_LEN + 1)
-        );
-        assert!(ClaudeIntegration.parse_record(&long).is_err());
     }
 
     // -------------------------------------------------------------------
@@ -4951,7 +4673,7 @@ mod tests {
     fn generic_kind_has_no_integration_and_therefore_no_hook() {
         assert!(
             integration_for(AgentKind::Generic).is_none(),
-            "a generic session must fall through to the scan unconditionally; there is no \
+            "a generic session has no identity integration; there is no \
              hook_argv to even ask"
         );
     }

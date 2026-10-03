@@ -18,14 +18,13 @@
 pub(crate) use farhelm_helm::{Detach, SupervisorClient, SupervisorError, TermEvent, TermStream};
 pub(crate) use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 pub(crate) use farhelm_proto::{
-    ControlMsg, ErrorKind, Frame, FrameKind, LIST_SESSIONS_CAP, SessionInfo, SessionStatus,
-    TerminalSelector, UPLOAD_ABORT_REASON_STALLED, UPLOAD_CHUNK_BYTES,
+    ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, SessionStatus, TerminalSelector,
+    UPLOAD_ABORT_REASON_STALLED, UPLOAD_CHUNK_BYTES,
 };
-pub(crate) use farhelm_supervisor::agent_kind::{CaptureWindow, CaptureWindowBounds, now_unix};
 pub(crate) use farhelm_supervisor::launch::{spec_path_for_launch, status_path_for_spec};
 pub(crate) use farhelm_supervisor::service::{
-    CaptureStoreFault, CreateCrashSeam, CreateStage, FaultHooks, SessionSnapshot, Supervisor,
-    SupervisorSeams, SupervisorTimeouts, handle_connection,
+    CreateCrashSeam, CreateStage, FaultHooks, SessionSnapshot, Supervisor, SupervisorSeams,
+    SupervisorTimeouts, handle_connection,
 };
 pub(crate) use farhelm_supervisor::store::{
     LastOutcome, Reservation, ReservationOutcome, SessionStore, StoredSession,
@@ -40,8 +39,7 @@ pub(crate) use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 /// Private files and kind-named entry points shared by tests that need to
 /// launch a realistic Claude or Codex fixture. The directory is deliberately
-/// owned by the harness so report-driven tests do not depend on the record
-/// scanner's capture module.
+/// owned by the harness so it outlives every child that uses those paths.
 pub(crate) struct CaptureFixtures {
     home: farhelm_teststate::TestDir,
     bin: farhelm_teststate::TestDir,
@@ -67,20 +65,6 @@ pub(crate) fn marker_value(transcript: &[u8], marker: &str) -> String {
     let text = String::from_utf8_lossy(transcript);
     let start = text
         .find(marker)
-        .unwrap_or_else(|| panic!("no {marker} in transcript:\n{text}"))
-        + marker.len();
-    text[start..]
-        .chars()
-        .take_while(|c| !c.is_whitespace())
-        .collect()
-}
-
-/// Extract the token after the final marker occurrence in a transcript that
-/// contains output replayed from an earlier terminal generation.
-pub(crate) fn last_marker_value(transcript: &[u8], marker: &str) -> String {
-    let text = String::from_utf8_lossy(transcript);
-    let start = text
-        .rfind(marker)
         .unwrap_or_else(|| panic!("no {marker} in transcript:\n{text}"))
         + marker.len();
     text[start..]
@@ -1538,10 +1522,8 @@ fn floor_suite_timeouts(mut timeouts: SupervisorTimeouts) -> SupervisorTimeouts 
 }
 
 /// Like [`harness_with_timeouts`], but with the supervisor's injection
-/// points supplied too — the conversation-capture tests' entry point,
-/// since they need both a private agent home and a capture window short
-/// enough to prove two sessions in one directory do NOT overlap without
-/// waiting out a production minute.
+/// points supplied too. Tests use these seams to control lifecycle boundaries
+/// and injected failures without altering the test runner's environment.
 ///
 /// Every entry point above funnels through here, which is where the tmux
 /// control-mode budgets are floored (see [`floor_suite_timeouts`]) —
@@ -1575,13 +1557,9 @@ pub(crate) async fn harness_with_seams(
 
 /// Build a harness with private kind-named fixture executables and agent home.
 ///
-/// The fixture directories are neutral e2e infrastructure: callers choose
-/// whether a test drives record scanning, explicit hook reports, or another
-/// agent lifecycle. Keeping their construction here lets the scan-specific
-/// test module disappear without taking report-driven fixtures with it.
-/// The private home is forced after `adjust` so a caller that replaces the
-/// seams cannot point the still-running scan at real agent records. That
-/// override disappears when the record scan is removed.
+/// The private fixture directories isolate vendor records and executables
+/// from the developer's agents. Callers choose the reporting and lifecycle
+/// seams without changing where the fake agent writes its own files.
 pub(crate) async fn fixture_harness_with_seams(
     adjust: impl FnOnce(&mut SupervisorSeams),
 ) -> (Harness, CaptureFixtures) {
@@ -1596,7 +1574,6 @@ pub(crate) async fn fixture_harness_with_seams(
         ..SupervisorSeams::default()
     };
     adjust(&mut seams);
-    seams.agent_home = Some(home.path().to_path_buf());
     let h = harness_with_seams(SupervisorTimeouts::default(), seams).await;
     (h, CaptureFixtures { home, bin })
 }

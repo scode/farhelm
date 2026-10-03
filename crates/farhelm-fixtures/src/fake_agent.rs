@@ -161,9 +161,8 @@ pub enum Script {
     /// started. That is precisely the part CI cannot have, and precisely
     /// the part the `#[ignore]`d real-agent tests exist to keep honest.
     ///
-    /// Being built on `ClaudeRecord` rather than beside it is what lets one
-    /// session hold BOTH kinds of evidence — a scan-visible record on disk
-    /// and a report — which is the only way to test that a report wins.
+    /// Sharing `ClaudeRecord` keeps argv, input and record markers identical
+    /// for report-driven tests and plain launch fixtures.
     ///
     /// See [`hook_report`] for the markers and what each one proves.
     ///
@@ -824,41 +823,16 @@ enum RecordShape {
     Codex,
 }
 
-/// Prompt-and-echo like `basic`, but writing a conversation record the way
-/// the real agents do — the deterministic fixture PLAN_M3.md item 8's
-/// capture tests are built on.
+/// Run a deterministic vendor-shaped conversation with explicit input markers.
 ///
-/// Every property here exists to make one audited constraint reproducible
-/// in CI rather than only reasoned about:
+/// The first ordinary input creates a record; `append` preserves its identity,
+/// and `fork` writes another without changing the current conversation. Resume
+/// fixtures select their existing record through `RESUME_ENV_VAR`. Markers
+/// follow the completed write, so tests can wait on evidence rather than time.
 ///
-/// - **The record appears on FIRST INPUT, not at launch.** This is the
-///   constraint that forces correlation onto first-input time and forbids
-///   any timeout measured from creation, so the fixture must not write
-///   anything until a line arrives. A test can therefore create a session,
-///   wait as long as it likes, and only then provoke the record.
-/// - **The correlators are per-line JSON**, including the working
-///   directory as a FIELD — which is what lets the munged-cwd-collision
-///   test put two records for two different directories in one project
-///   directory and still expect them told apart.
-/// - **`append` appends under the SAME id**, standing in for a plain
-///   resume, so re-verification has something to confirm.
-/// - **`fork` writes a NEW id** in the same place, standing in for an
-///   explicit fork, so the "a fork must not displace the captured
-///   identity" test has a real second record to be ignored.
-///
-/// Markers (`RECORD-WRITTEN:`, `RECORD-APPENDED:`, `RECORD-FORKED:`) are
-/// printed so tests key on the record genuinely existing rather than on a
-/// sleep — the same discipline `FAKE-AGENT READY` established.
-///
-/// `hook_reports` adds two extra input forms and nothing else
-/// ([`Script::HookReport`]): `report <id>`, the foreground's own hook, and
-/// `nested-report <id>`, the same hook fired by a shelled-out child (see
-/// [`nested_hook_report`]). It is a flag rather than a second copy of
-/// this function because every property above has to hold for a hooked
-/// session too: the whole point of the hook tests is that a session can
-/// hold a scan-visible record AND a report at the same time, and a
-/// divergent second implementation of the record half would be testing the
-/// wrong fixture.
+/// `hook_reports` adds foreground and nested-child report commands through the
+/// real hook binary. Only those commands report an identity to the supervisor;
+/// writing a record by itself grants no identity.
 fn record_agent(
     shape: RecordShape,
     home: Option<std::path::PathBuf>,
@@ -1364,7 +1338,7 @@ fn record_path(
         RecordShape::Claude => home
             .join(".claude")
             .join("projects")
-            .join(farhelm_supervisor::agent_kind::munge_cwd(cwd))
+            .join(cwd.replace(['/', '.', '_'], "-"))
             .join(format!("{id}.jsonl")),
         RecordShape::Codex => {
             // `YYYY-MM-DDT...` — the date components the real rollout tree

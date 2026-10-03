@@ -44,7 +44,6 @@ mod boot_id_durable_outcome;
 mod launch_sentinel_error_status;
 
 mod codex_identity;
-mod conversation_identity_capture;
 mod create_idempotency;
 mod github_checkouts;
 mod hook_identity;

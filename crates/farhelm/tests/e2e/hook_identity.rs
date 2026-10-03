@@ -1,14 +1,9 @@
 //! Agent-reported conversation identity: the `SessionStart` hook path, end
 //! to end against a real supervisor.
 //!
-//! The record scan these tests sit next to
-//! (`conversation_identity_capture`) infers identity by watching the agent
-//! from outside, and it cannot see a conversation that starts mid-process:
-//! Claude's `/clear` and Codex's `/new` mint a new id with no new session,
-//! no new first input, and nothing to correlate against. The hook is the
-//! answer — the agent tells us its id from inside its own process — and
-//! these tests are where that claim is checked against the real machinery
-//! rather than against a mock.
+//! The agent reports its own identity, including a conversation created by
+//! `/clear` or `/new` inside an existing process. These tests exercise that
+//! report through the real launch credential, socket, handler, and store.
 //!
 //! ## What is real here, and the one thing that is not
 //!
@@ -32,11 +27,6 @@
 //! reports through the hook must bind an accept loop before creating its
 //! session; "these tests serve" is a property of the hook, not of this file.
 
-use crate::boot_id_durable_outcome::listed;
-use crate::conversation_identity_capture::{
-    assert_windows_disjoint, assert_windows_overlap, settle_past_horizon, test_capture_bounds,
-    wait_for_first_input, wait_until_window_disjoint_from,
-};
 use crate::harness::*;
 use farhelm_teststate::thread::FixtureThread;
 
@@ -56,10 +46,7 @@ use farhelm_teststate::thread::FixtureThread;
 /// Returns the [`ServeTask`] the caller must keep alive for as long as it
 /// expects hooks to work.
 pub(crate) async fn hook_harness() -> (Harness, CaptureFixtures, ServeTask) {
-    let (h, fixtures) = fixture_harness_with_seams(|seams| {
-        seams.capture_window = test_capture_bounds();
-    })
-    .await;
+    let (h, fixtures) = fixture_harness_with_seams(|_| {}).await;
     let task = ServeTask::spawn(&h.sup, h.state.path()).await;
     (h, fixtures, task)
 }
@@ -433,8 +420,7 @@ fn assert_declares_session_start_hook(settings: &serde_json::Value) {
 ///
 /// Needed because `conversation_source` is deliberately not on the wire:
 /// the UI has no use for which writer set the identity (plan §2.7), so the
-/// only place a test can observe the scan-versus-report distinction is the
-/// column itself.
+/// column itself is where tests can verify report provenance.
 async fn stored_row(h: &Harness, session_id: &str) -> StoredSession {
     let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
@@ -444,37 +430,6 @@ async fn stored_row(h: &Harness, session_id: &str) -> StoredSession {
         .await
         .expect("read the session row")
         .expect("the session exists")
-}
-
-/// The instant stored INSIDE a Claude record, as unix seconds.
-///
-/// This is the number capture windows are compared against — the record's
-/// own header, written by the agent — so a test whose premise is "this
-/// record lands in that window" has to read it rather than time the write
-/// from outside. The two can differ: the fixture stamps the record before
-/// it prints its marker, and a busy machine can put a second between them.
-fn record_timestamp(home: &std::path::Path, cwd: &std::path::Path, conversation: &str) -> i64 {
-    let canonical = std::fs::canonicalize(cwd).expect("canonicalize the working directory");
-    let path = home
-        .join(".claude")
-        .join("projects")
-        .join(farhelm_supervisor::agent_kind::munge_cwd(
-            &canonical.to_string_lossy(),
-        ))
-        .join(format!("{conversation}.jsonl"));
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("no record for {conversation} at {}: {e}", path.display()));
-    let line = text
-        .lines()
-        .next()
-        .unwrap_or_else(|| panic!("the record at {} is empty", path.display()));
-    let value: serde_json::Value = serde_json::from_str(line)
-        .unwrap_or_else(|e| panic!("the fixture writes JSONL ({e}): {line}"));
-    let stamp = value["timestamp"]
-        .as_str()
-        .unwrap_or_else(|| panic!("a record carries an RFC 3339 timestamp: {line}"));
-    farhelm_supervisor::agent_kind::parse_rfc3339(stamp)
-        .unwrap_or_else(|| panic!("the supervisor's own parser must read {stamp:?}"))
 }
 
 // ---------------------------------------------------------------------
@@ -762,363 +717,6 @@ async fn a_repeated_report_of_one_id_is_two_hook_runs() {
     serving.stop().await;
 }
 
-/// A record on disk cannot overwrite what the agent said about itself.
-///
-/// The scan is evidence ABOUT which conversation is ours; a report IS the
-/// answer. So when one session produces both — a real record the scan can
-/// see, and a later report naming something else — the report has to win,
-/// permanently, and the scan's write has to become a no-op rather than a
-/// race. The `/clear` case makes this the normal state of affairs, not a
-/// corner: the record on disk is the pre-clear conversation and resuming it
-/// would drop the user into the wrong history.
-///
-/// `conversation_source` is asserted directly because it is the only thing
-/// that distinguishes "the report won" from "the scan happened to agree":
-/// it is also what a supervisor restart reloads the state from, so a right
-/// answer stored under the wrong provenance would come back wrong.
-#[farhelm_testtrace::test]
-async fn a_scan_cannot_override_a_report() {
-    let (h, fixtures, serving) = hook_harness().await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = hook_session(&h, &fixtures, work.path()).await;
-    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
-
-    h.client.send_input(chan, b"first prompt\r".to_vec()).await;
-    wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
-    let scanned = marker_value(&seen, "RECORD-WRITTEN:");
-    report(&h, chan, &mut rx, &mut seen, "conv-other").await;
-    assert_ne!(
-        scanned, "conv-other",
-        "the premise is that the two writers disagree"
-    );
-
-    settle_past_horizon(&h).await;
-
-    let snapshot = snapshot_of(&h, &session.id).await;
-    assert_eq!(
-        snapshot.captured_conversation.as_deref(),
-        Some("conv-other"),
-        "the scan's own record was on disk and in window, and still lost; {}",
-        hook_log(&h, &session.id)
-    );
-    assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
-    assert_eq!(
-        stored_row(&h, &session.id).await.conversation_source,
-        Some("hook".to_string()),
-        "provenance is what a reload reads the capture state back from"
-    );
-    serving.stop().await;
-}
-
-/// A report that arrives BEFORE the scan's evidence does is not clobbered
-/// when that evidence finally lands — in either of the two ways the scan
-/// writes.
-///
-/// The orderings matter because they are the real ones. Claude fires its
-/// hook at process START, so the report reliably beats the first record to
-/// the supervisor; the scan then finds a record and would, without the
-/// fence, overwrite an identity that is strictly better than what it
-/// deduced. The second half covers the other write: ambiguity. Two sessions
-/// in one directory poison each other's windows, and a pass that computed
-/// "ambiguous" for a session and persisted it after a report had landed
-/// would erase the report on disk while memory still advertised a resume —
-/// a divergence that only shows up after a supervisor restart.
-///
-/// Both halves run in their own working directory: the second half's whole
-/// point is a shared directory, and the first half's session must not be
-/// dragged into it.
-#[farhelm_testtrace::test]
-async fn a_report_before_the_scan_lands_is_not_clobbered() {
-    let (h, fixtures, serving) = hook_harness().await;
-
-    // --- The plain scan write, reported before any record exists. ---
-    let solo_work = farhelm_teststate::tempdir().expect("workdir");
-    let solo = hook_session(&h, &fixtures, solo_work.path()).await;
-    let (chan, mut rx, mut seen) = attach_ready(&h, &solo).await;
-    report(&h, chan, &mut rx, &mut seen, "conv-early").await;
-    h.client.send_input(chan, b"first prompt\r".to_vec()).await;
-    wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
-
-    settle_past_horizon(&h).await;
-    assert_eq!(
-        snapshot_of(&h, &solo.id)
-            .await
-            .captured_conversation
-            .as_deref(),
-        Some("conv-early"),
-        "a record appearing after a report is later evidence, not better evidence; {}",
-        hook_log(&h, &solo.id)
-    );
-
-    // --- The ambiguity write, reported before the horizon closes. ---
-    let shared_work = farhelm_teststate::tempdir().expect("workdir");
-    let reporter = hook_session(&h, &fixtures, shared_work.path()).await;
-    let rival = hook_session(&h, &fixtures, shared_work.path()).await;
-    let (chan_r, mut rx_r, mut seen_r) = attach_ready(&h, &reporter).await;
-    let (chan_v, mut rx_v, mut seen_v) = attach_ready(&h, &rival).await;
-    // Both first inputs go out together. The premise is asserted below
-    // either way, but the correlator truncates to whole seconds and the
-    // test window is short: sending sequentially puts a round trip
-    // between the two anchors, which on a loaded machine is enough to
-    // straddle a second boundary and turn the premise assertion into a
-    // failure about nothing.
-    tokio::join!(
-        h.client.send_input(chan_r, b"first prompt\r".to_vec()),
-        h.client.send_input(chan_v, b"first prompt\r".to_vec()),
-    );
-    wait_for(&mut rx_r, &mut seen_r, "RECORD-WRITTEN:", 20).await;
-    wait_for(&mut rx_v, &mut seen_v, "RECORD-WRITTEN:", 20).await;
-    let at_reporter = wait_for_first_input(&h, &reporter.id, 20).await;
-    let at_rival = wait_for_first_input(&h, &rival.id, 20).await;
-    assert_windows_overlap(at_reporter, at_rival);
-
-    // Reported while both windows are still open, so a later pass has
-    // every opportunity to compute ambiguity for this session and persist
-    // it over the report.
-    report(&h, chan_r, &mut rx_r, &mut seen_r, "conv-reported").await;
-    settle_past_horizon(&h).await;
-
-    let reported = snapshot_of(&h, &reporter.id).await;
-    assert_eq!(
-        reported.captured_conversation.as_deref(),
-        Some("conv-reported"),
-        "an ambiguity pass must not erase an answer the agent gave directly; {}",
-        hook_log(&h, &reporter.id)
-    );
-    assert!(
-        !reported.capture_ambiguous,
-        "the row must not carry both an identity and the flag that says there is none"
-    );
-    assert_eq!(reported.restart_offer, farhelm_proto::RestartOffer::Resume);
-    assert_eq!(
-        stored_row(&h, &reporter.id).await.conversation_source,
-        Some("hook".to_string())
-    );
-
-    let untouched = snapshot_of(&h, &rival.id).await;
-    assert_eq!(
-        untouched.captured_conversation, None,
-        "the rival never reported anything, so its own ambiguity stands"
-    );
-    assert!(untouched.capture_ambiguous);
-    assert_eq!(
-        listed(&h.client, &rival.id).await.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly
-    );
-    serving.stop().await;
-}
-
-/// A record another session has been TOLD is its own drops out of this
-/// session's candidate list — which is the one thing a report buys a rival.
-///
-/// The scenario is the realistic one and not a contrivance: session A takes
-/// its first input, later runs `/clear` (the fixture's `fork`, which mints a
-/// new conversation record with a CURRENT timestamp), and reports the new
-/// id. That fresh record lands squarely inside a much later session B's
-/// capture window even though A's own window closed long ago. Without the
-/// exclusion B sees two in-window candidates and bails; with it, B is left
-/// with exactly the one record still unspoken for.
-///
-/// Both variants matter, and they fail differently:
-///
-/// - B has its own record: the exclusion turns a needless bail into an
-///   honest capture. Losing it costs a resume offer.
-/// - B has no record yet: the exclusion is what stops B from claiming A's
-///   post-`/clear` conversation as its own. Losing it costs CORRECTNESS —
-///   a session resuming somebody else's history, the exact failure the
-///   whole capture design exists to exclude.
-///
-/// ## Why the windows are disjoint rather than overlapping
-///
-/// The candidate exclusion can only be observed with disjoint windows.
-/// Sessions holding `Reported` deliberately stay in the pass's `occupied`
-/// grouping (plan §2.5), and that grouping's overlap bail runs BEFORE any
-/// scan — so an overlapping rival is declared ambiguous without its
-/// candidate list ever being built. Disjoint windows plus a record minted
-/// late is the only shape in which the filter decides anything.
-#[farhelm_testtrace::test]
-async fn a_reported_id_is_excluded_from_a_rivals_candidates() {
-    let (h, fixtures, serving) = hook_harness().await;
-
-    for rival_writes_a_record in [true, false] {
-        // A private directory per variant: the two rivals would otherwise
-        // poison each other's windows and both would bail for a reason
-        // this test is not about.
-        let work = farhelm_teststate::tempdir().expect("workdir");
-        let reporter = hook_session(&h, &fixtures, work.path()).await;
-        let (chan_a, mut rx_a, mut seen_a) = attach_ready(&h, &reporter).await;
-        h.client
-            .send_input(chan_a, b"first prompt\r".to_vec())
-            .await;
-        wait_for(&mut rx_a, &mut seen_a, "RECORD-WRITTEN:", 20).await;
-        let at_reporter = wait_for_first_input(&h, &reporter.id, 20).await;
-
-        wait_until_window_disjoint_from(at_reporter).await;
-
-        // The rival: either the record-writing fixture or a claude-kind
-        // session that takes input and writes nothing at all. `basic` is
-        // what gives the second variant a session with a real capture
-        // window and no record of its own — the state a session is in
-        // between its first keystroke and its agent's first write.
-        let rival = if rival_writes_a_record {
-            hook_session(&h, &fixtures, work.path()).await
-        } else {
-            h.client
-                .create_session(
-                    &work.path().to_string_lossy(),
-                    &fixture_invocation(&fixtures, "claude", "basic"),
-                    None,
-                    WIDE_COLS,
-                    ROWS,
-                )
-                .await
-                .expect("create a recordless claude-kind rival")
-        };
-        let (chan_b, mut rx_b, mut seen_b) = attach_ready(&h, &rival).await;
-        h.client
-            .send_input(chan_b, b"first prompt\r".to_vec())
-            .await;
-        let rival_conversation = if rival_writes_a_record {
-            wait_for(&mut rx_b, &mut seen_b, "RECORD-WRITTEN:", 20).await;
-            Some(marker_value(&seen_b, "RECORD-WRITTEN:"))
-        } else {
-            wait_for(&mut rx_b, &mut seen_b, "echo:", 20).await;
-            None
-        };
-        let at_rival = wait_for_first_input(&h, &rival.id, 20).await;
-        assert_windows_disjoint(at_reporter, at_rival);
-
-        // A's `/clear`: a brand-new conversation record, minted now — which
-        // is to say inside B's window and nowhere near A's. The premise is
-        // asserted from the record's OWN stored timestamp, because that is
-        // the value the correlator compares against a window; wall-clock
-        // readings taken around the marker only bound when the fixture
-        // said it was done, which is a different number on a loaded
-        // machine and a different number again if the fixture ever stamps
-        // its records any other way.
-        h.client.send_input(chan_a, b"fork\r".to_vec()).await;
-        wait_for(&mut rx_a, &mut seen_a, "RECORD-FORKED:", 20).await;
-        let cleared = marker_value(&seen_a, "RECORD-FORKED:");
-        let minted_at = record_timestamp(fixtures.home(), work.path(), &cleared);
-        let rival_window = CaptureWindow::around(at_rival, test_capture_bounds());
-        assert!(
-            rival_window.contains(minted_at),
-            "this test's premise is that the post-clear record lands in the rival's window \
-             {rival_window:?}, but it is stamped {minted_at}"
-        );
-        report(&h, chan_a, &mut rx_a, &mut seen_a, &cleared).await;
-
-        settle_past_horizon(&h).await;
-
-        assert_eq!(
-            snapshot_of(&h, &reporter.id).await.captured_conversation,
-            Some(cleared.clone()),
-            "the reporter holds the conversation it reported; {}",
-            hook_log(&h, &reporter.id)
-        );
-        let rival_snapshot = snapshot_of(&h, &rival.id).await;
-        assert_ne!(
-            rival_snapshot.captured_conversation.as_deref(),
-            Some(cleared.as_str()),
-            "a rival may never claim a conversation another session was told is its own"
-        );
-        match rival_conversation {
-            Some(own) => assert_eq!(
-                rival_snapshot.captured_conversation.as_deref(),
-                Some(own.as_str()),
-                "with the spoken-for record filtered out the rival's own is the lone \
-                 candidate, so it must capture rather than bail"
-            ),
-            None => {
-                assert_eq!(
-                    rival_snapshot.captured_conversation, None,
-                    "a rival with no record of its own must stay uncaptured"
-                );
-                assert_eq!(
-                    listed(&h.client, &rival.id).await.restart_offer,
-                    farhelm_proto::RestartOffer::FreshOnly
-                );
-            }
-        }
-    }
-    serving.stop().await;
-}
-
-/// A report clears an ambiguity that has already been declared and made
-/// durable — the one place this design deliberately weakens an existing
-/// guarantee.
-///
-/// Ambiguity is otherwise permanent for a launch, and rightly so: it means
-/// the scan cannot tell two sessions' records apart, and no amount of
-/// further scanning makes that better (see
-/// `two_near_simultaneous_sessions_in_one_directory_stay_uncaptured`, whose
-/// setup this reuses). A report is not more scan evidence, though — it is
-/// the agent's own answer — so it must dominate. The guarantee existed
-/// because scan evidence could not be trusted, and this is precisely the
-/// input that is not scan evidence.
-///
-/// The rival is asserted to stay uncaptured in the same breath: one
-/// session answering for itself says nothing about which record belongs to
-/// the other, and a report that resolved the WHOLE group would be exactly
-/// the guess this design refuses to make.
-#[farhelm_testtrace::test]
-async fn a_report_clears_ambiguity() {
-    let (h, fixtures, serving) = hook_harness().await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let first = hook_session(&h, &fixtures, work.path()).await;
-    let second = hook_session(&h, &fixtures, work.path()).await;
-    let (chan_1, mut rx_1, mut seen_1) = attach_ready(&h, &first).await;
-    let (chan_2, mut rx_2, mut seen_2) = attach_ready(&h, &second).await;
-    // Together, for the reason the sibling overlap test gives: a round
-    // trip between the two anchors can straddle a second boundary, and
-    // the premise here is that they land in the same window.
-    tokio::join!(
-        h.client.send_input(chan_1, b"first prompt\r".to_vec()),
-        h.client.send_input(chan_2, b"first prompt\r".to_vec()),
-    );
-    wait_for(&mut rx_1, &mut seen_1, "RECORD-WRITTEN:", 20).await;
-    wait_for(&mut rx_2, &mut seen_2, "RECORD-WRITTEN:", 20).await;
-    let at_first = wait_for_first_input(&h, &first.id, 20).await;
-    let at_second = wait_for_first_input(&h, &second.id, 20).await;
-    assert_windows_overlap(at_first, at_second);
-
-    // The ambiguity is DURABLE before the report, not merely pending: this
-    // test is about overriding a decision that has already been written
-    // down, which is the harder direction.
-    settle_past_horizon(&h).await;
-    for session in [&first, &second] {
-        let snapshot = snapshot_of(&h, &session.id).await;
-        assert!(
-            snapshot.capture_ambiguous,
-            "the premise is that both sessions bailed before either reported"
-        );
-        assert_eq!(snapshot.captured_conversation, None);
-    }
-
-    report(&h, chan_1, &mut rx_1, &mut seen_1, "conv-cleared").await;
-
-    let cleared = snapshot_of(&h, &first.id).await;
-    assert_eq!(
-        cleared.captured_conversation.as_deref(),
-        Some("conv-cleared"),
-        "a report dominates a durable ambiguity; {}",
-        hook_log(&h, &first.id)
-    );
-    assert!(
-        !cleared.capture_ambiguous,
-        "the flag must be cleared with the claim, or a reload contradicts the offer"
-    );
-    assert_eq!(cleared.restart_offer, farhelm_proto::RestartOffer::Resume);
-
-    let still_ambiguous = snapshot_of(&h, &second.id).await;
-    assert_eq!(
-        still_ambiguous.captured_conversation, None,
-        "one session's answer is not evidence about the other's"
-    );
-    assert!(still_ambiguous.capture_ambiguous);
-    serving.stop().await;
-}
-
 /// A reported identity survives the supervisor that recorded it.
 ///
 /// The whole reason capture is worth doing is the session that outlives its
@@ -1127,15 +725,9 @@ async fn a_report_clears_ambiguity() {
 /// and a successor rebuilds capture state from stored columns alone, so a
 /// report that was never written down would simply be gone here.
 ///
-/// What this can and cannot see is worth being exact about. The identity,
-/// the offer, the filled resume argv and the stored provenance are all
-/// observable, and all are asserted. The in-memory `CaptureState` the
-/// successor rebuilt is NOT: nothing on the wire or in the snapshot
-/// distinguishes a reloaded `Reported` from a reloaded scan claim, and
-/// adding a seam to expose it would be instrumenting production for a test.
-/// So this pins that the stored facts survive intact, not that the
-/// successor classified them correctly — the classification is covered
-/// where it is decided, in farhelm-supervisor's own reload tests.
+/// The identity, offer, filled Resume argv, and stored report provenance must
+/// all survive reconstruction. The row is also read directly because the
+/// public snapshot deliberately omits where an identity originally came from.
 ///
 /// The successor is deliberately built only after the predecessor has been
 /// dropped and its accept loop stopped: an overlapping successor starts
@@ -1183,11 +775,7 @@ async fn a_report_survives_a_supervisor_restart() {
         state.path(),
         farhelm_bin().into(),
         SupervisorTimeouts::default(),
-        SupervisorSeams {
-            agent_home: Some(fixtures.home().to_path_buf()),
-            capture_window: test_capture_bounds(),
-            ..SupervisorSeams::default()
-        },
+        SupervisorSeams::default(),
     )
     .await
     .expect("restarted supervisor");
@@ -1212,8 +800,7 @@ async fn a_report_survives_a_supervisor_restart() {
         "conv-durable"
     );
     // The provenance the successor reloads FROM, read back after it did:
-    // it is not on the wire, so the column is the only place a reload that
-    // quietly downgraded a report to a scan claim could be seen at all.
+    // it is not on the wire, so inspect the stored source directly.
     let store = SessionStore::open(&state.path().join("supervisor.db"), false)
         .await
         .expect("open the store directly");
@@ -1225,7 +812,7 @@ async fn a_report_survives_a_supervisor_restart() {
             .expect("the session exists")
             .conversation_source,
         Some("hook".to_string()),
-        "a restart must not launder a report into a scan claim"
+        "a restart must preserve the stored report source"
     );
 }
 
@@ -1243,9 +830,7 @@ async fn a_report_survives_a_supervisor_restart() {
 /// `conversation_source`) is pinned where it is reachable: the store's own
 /// `begin_relaunch_clears_conversation_source_only_when_resetting_capture`.
 ///
-/// What is worth pinning here is that a report joins the offer contract on
-/// exactly the same terms a scan capture does — the sibling test for the
-/// scan path is `restart_with_resume`'s stale-offer refusal. A report that
+/// An accepted report is part of the offer contract. A report that
 /// moved the offer without also moving what the offer is VALIDATED against
 /// would let a client's cached `FreshOnly` blow away a live conversation,
 /// which is precisely what the exact-match rule exists to prevent.
@@ -1306,7 +891,7 @@ async fn a_fresh_restart_is_refused_while_a_report_stands() {
 /// Claude Code applies only the LAST `--settings` flag, so appending ours
 /// after the user's would silently discard theirs — turning an identity
 /// improvement into lost configuration, which is a strictly worse trade
-/// than falling back to the record scan.
+/// than offering a fresh restart when no identity has been reported.
 ///
 /// The assertion is on the surviving VALUE, not on a count of one: a merge
 /// attempt that rewrote the user's settings in place would keep the count
@@ -2242,5 +1827,139 @@ async fn farhelm_agent_instructions_non_utf8_falls_back_to_default_through_the_r
     assert!(
         claude_hook_command_carries_announce(&supervisor).await,
         "a non-UTF-8 FARHELM_AGENT_INSTRUCTIONS must fall back to the default (on), not to off"
+    );
+}
+
+/// An unhooked Claude launch offers and performs a fresh restart after input
+/// creates an on-disk record. The replacement must start a different conversation.
+/// This pins the fallback; removal of the scanner establishes that later input
+/// cannot turn a nearby record into an identity.
+#[farhelm_testtrace::test]
+async fn an_unhooked_claude_session_restarts_fresh_after_input() {
+    let (h, fixtures) = fixture_harness_with_seams(|seams| {
+        seams.agent_hooks = farhelm_supervisor::agent_kind::AgentHooks::Only(vec![]);
+    })
+    .await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = hook_session(&h, &fixtures, work.path()).await;
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    assert!(
+        !argv_marker(&seen).contains("--settings"),
+        "fixture must be unhooked"
+    );
+    assert_eq!(
+        snapshot_of(&h, &session.id).await.kind,
+        farhelm_proto::AgentKind::Claude
+    );
+    h.client.send_input(chan, b"first prompt\r".to_vec()).await;
+    wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
+    let first_record = marker_value(&seen, "RECORD-WRITTEN:");
+    let before = snapshot_of(&h, &session.id).await;
+    assert_eq!(before.captured_conversation, None);
+    assert_eq!(before.restart_offer, farhelm_proto::RestartOffer::FreshOnly);
+    let restarted = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .await
+        .expect("fresh restart is the available fallback");
+    assert_eq!(
+        restarted.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly
+    );
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    let from = seen.len();
+    h.client
+        .send_input(chan, b"replacement prompt\r".to_vec())
+        .await;
+    wait_for_after_from(
+        &mut rx,
+        &mut seen,
+        from,
+        "RECORD-WRITTEN:",
+        "replacement prompt",
+        20,
+    )
+    .await;
+    assert_ne!(
+        marker_value(&seen[from..], "RECORD-WRITTEN:"),
+        first_record,
+        "fresh restart must actually launch a new conversation"
+    );
+    let after = snapshot_of(&h, &session.id).await;
+    assert_eq!(after.captured_conversation, None);
+    assert_eq!(after.restart_offer, farhelm_proto::RestartOffer::FreshOnly);
+}
+
+/// Removing heuristic identification must not erase older stored identities.
+/// Seed a historical row with no hook provenance, reconstruct the supervisor,
+/// then observe the actual replacement process receiving that exact Resume id.
+#[farhelm_testtrace::test]
+async fn a_historical_identity_survives_restart_and_reaches_resume_argv() {
+    let (h, fixtures, serving) = hook_harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = hook_session(&h, &fixtures, work.path()).await;
+    let (_chan, _rx, _seen) = attach_ready(&h, &session).await;
+    let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .expect("open fixture store");
+    let mut legacy = store.session(&session.id).await.unwrap().unwrap();
+    legacy.id = uuid::Uuid::new_v4().to_string();
+    legacy.tmux_name = format!("fh-{}", legacy.id);
+    legacy.pane = String::new();
+    legacy.outcome = LastOutcome::Interrupted;
+    legacy.captured_conversation = Some("historical-conversation".to_string());
+    legacy.conversation_source = None;
+    legacy.capture_ownership_version = 0;
+    legacy.resume_template = Some(vec![
+        fixtures.bin().join("claude").to_string_lossy().into_owned(),
+        "fake-agent".into(),
+        "--script".into(),
+        "hook-report".into(),
+        "--record-home".into(),
+        fixtures.home().to_string_lossy().into_owned(),
+        "--resume".into(),
+        "{conversation}".into(),
+    ]);
+    store
+        .insert_session(legacy.clone(), None)
+        .await
+        .expect("seed historical identity");
+    let seeded = store.session(&legacy.id).await.unwrap().unwrap();
+    assert_eq!(seeded.conversation_source, None);
+    assert_eq!(
+        seeded.captured_conversation.as_deref(),
+        Some("historical-conversation")
+    );
+    drop(store);
+
+    let Harness {
+        client,
+        sup,
+        state,
+        _tmux,
+        _slot,
+    } = h;
+    serving.stop().await;
+    let sup = crate::create_idempotency::handoff_to_new_supervisor(state.path(), sup, client).await;
+    let after = sup.session_snapshot(&legacy.id).await.unwrap().unwrap();
+    assert_eq!(after.restart_offer, farhelm_proto::RestartOffer::Resume);
+    assert_eq!(
+        after.captured_conversation.as_deref(),
+        Some("historical-conversation")
+    );
+    let client = connect_client(&sup).await;
+    client
+        .restart_session(&legacy.id, farhelm_proto::RestartMode::Resume, false)
+        .await
+        .expect("resume historical conversation");
+    let (_chan, mut seen, mut rx) = client
+        .attach_live(&legacy.id, WIDE_COLS, ROWS)
+        .await
+        .unwrap();
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    assert!(
+        argv_marker(&seen).contains("--resume historical-conversation"),
+        "the actual child must receive the historical id: {}",
+        argv_marker(&seen)
     );
 }
