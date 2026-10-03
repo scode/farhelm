@@ -15,8 +15,6 @@ One line per open item. This file must always match the feedback files in this d
   Codex, so the session starts with a different agent and configuration.
 - `tab-cleanup-blocks-status-sampling.md` — Automatic cleanup of an exited terminal tab can leave every session on that
   host showing stale status for seconds while background processes stop.
-- `desktop-reauth-failure-loses-action-outcomes.md` — If desktop sign-in recovery fails while an action is pending, the
-  action can still finish on the server while its result disappears without an unknown-outcome notice.
 - `upload-cancellation-drops-final-reply.md` — Delete can discard an upload result during temporary connection
   backpressure, leaving the upload waiting forever even after the connection resumes normal traffic.
 
