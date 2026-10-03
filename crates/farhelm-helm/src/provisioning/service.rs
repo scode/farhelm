@@ -13,7 +13,7 @@ use super::payloads::{PayloadSelection, PayloadSource, production_payloads};
 use super::plan::{
     PlanLayout, ProvisioningAction, ProvisioningOperation, ProvisioningPlan, ProvisioningTarget,
 };
-use crate::manager::{ConnectionManager, HostState};
+use crate::manager::{ConnectionManager, HostState, peer_text};
 use crate::store::{
     DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow, HostStoreError,
 };
@@ -34,6 +34,7 @@ const LOCAL_SETUP_HANDOFF: &str = "this is the helm's own machine; run farhelm h
      the panel";
 
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(30);
+
 const MAX_PENDING_PLANS: usize = 64;
 const MAX_CONCURRENT_RUNS: usize = 4;
 const MAX_CONCURRENT_PLANS: usize = 4;
@@ -145,6 +146,64 @@ pub(super) struct RegistrySyncGate {
     pub(super) reached: tokio::sync::Notify,
     /// Notified by the test to let the reconcile run.
     pub(super) release: tokio::sync::Notify,
+}
+
+/// The attach step's failure for a state in which the helm answered the
+/// supervisor this run installed and refused it, or `None` for any other
+/// state.
+///
+/// The four refusals are the connection manager's answers to a supervisor
+/// that does respond: another protocol version, an identity other than the
+/// one on record, no identity at all, or an identity another registry entry
+/// holds. Each message names the refusal and what to do about it, reusing
+/// the wording the hosts panel and the update step's trust check already
+/// use, so the run fails with the reason the panel shows instead of a bare
+/// "timed out". The whole sentence is the failure's context with an empty
+/// second half, because [`BackendFailure::rendered`] labels that half as
+/// host stderr, which this is not. Builds and identities came from the
+/// peer, so they go through [`peer_text`] (escaped and bounded).
+///
+/// `Unreachable` and `Retired` deliberately get no early stop: the attach
+/// step's fresh window outlasts an unreachable verdict, and anything else is
+/// left to its ordinary 30-second budget.
+fn attach_refusal(state: &HostState) -> Option<BackendFailure> {
+    const REFUSED: &str = "the helm refused the supervisor this run installed";
+    let sentence = match state {
+        HostState::VersionSkew {
+            peer_protocol,
+            peer_build,
+            our_protocol,
+            our_build,
+            remediation,
+        } => {
+            let skew = farhelm_proto::io::VersionSkew {
+                peer_protocol: *peer_protocol,
+                peer_build: peer_text(peer_build),
+                our_protocol: *our_protocol,
+                our_build: our_build.clone(),
+            };
+            format!("{REFUSED}: {skew}; {remediation}")
+        }
+        HostState::IdentityMismatch { recorded, reported } => format!(
+            "{REFUSED}: it reports identity {}, but this host's recorded identity is {}; adopt the \
+             identity or fix the destination",
+            peer_text(reported),
+            peer_text(recorded),
+        ),
+        HostState::IdentityUnverified { recorded } => format!(
+            "{REFUSED}: it answered without an identity, but this host has identity {} on \
+             record; wait until it reports its identity again, or change this entry's destination \
+             or remove the entry",
+            peer_text(recorded),
+        ),
+        HostState::Duplicate { twin, identity } => format!(
+            "{REFUSED}: identity {} belongs to host {twin}; remove that entry or change this \
+             one's destination, then press Retry",
+            peer_text(identity),
+        ),
+        _ => return None,
+    };
+    Some(BackendFailure::new(sentence, ""))
 }
 
 /// Why Update must not run against a host whose supervisor reports
@@ -1693,7 +1752,17 @@ impl ProvisioningService {
                 // so the host is coming back by our own action — and a
                 // single probe would race that start latency, then sit out
                 // a full re-probe past this step's own deadline.
-                self.manager
+                //
+                // The ticket separates the helm refusing the supervisor this
+                // run just installed from a refusal the host already held
+                // before this step, often the very protocol skew an update
+                // is fixing: only a refusal from a dial numbered after the
+                // ticket stops the wait (see
+                // `ConnectionManager::retry_now_with_fresh_window`). `None`
+                // (no such host) stops nothing early; the loop below then
+                // reports the host as gone, as before.
+                let ticket = self
+                    .manager
                     .retry_now_with_fresh_window(host)
                     .await
                     .map_err(|error| {
@@ -1706,7 +1775,12 @@ impl ProvisioningService {
                             && status.client.is_some()
                             && Some(status.incarnation) != previous_incarnation
                         {
-                            return Some(status.state);
+                            return Some(Ok(()));
+                        }
+                        if ticket.is_some_and(|ticket| status.refusal_attempt > ticket)
+                            && let Some(failure) = attach_refusal(&status.state)
+                        {
+                            return Some(Err(failure));
                         }
                         tokio::time::sleep(Duration::from_millis(20)).await;
                     }
@@ -1720,7 +1794,7 @@ impl ProvisioningService {
                         "waiting for the provisioned supervisor",
                         "the registered host actor disappeared",
                     )
-                })?;
+                })??;
                 Ok(ActionOutcome::Completed)
             }
         }

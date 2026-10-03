@@ -1102,9 +1102,23 @@ impl FleetBuilder {
     /// Register an ssh host at `destination` and script it. Returns the
     /// builder and the new host's id.
     pub(crate) async fn ssh(self, destination: &str, script: HostScript) -> (FleetBuilder, HostId) {
+        self.ssh_at(destination, None, None, script).await
+    }
+
+    /// [`Self::ssh`] with the row's install paths set, for a test whose
+    /// later steps must find the row already pointing where they would
+    /// point it (a provisioning run otherwise rewrites the paths, and that
+    /// rewrite reconnects the host).
+    pub(crate) async fn ssh_at(
+        self,
+        destination: &str,
+        remote_farhelm: Option<&str>,
+        remote_state_dir: Option<&str>,
+        script: HostScript,
+    ) -> (FleetBuilder, HostId) {
         let id = self
             .store
-            .add_ssh_host(destination, None, None)
+            .add_ssh_host(destination, remote_farhelm, remote_state_dir)
             .await
             .expect("register ssh host");
         self.script(id, script);

@@ -322,7 +322,16 @@ mod tests {
         release: tokio::sync::Notify,
         block_first: std::sync::atomic::AtomicBool,
         stateful: std::sync::atomic::AtomicBool,
+        /// Run once when the named operation is recorded: what that step
+        /// "did" to the far side, for a test that needs the host to change
+        /// at a specific point in the run (the new supervisor coming up at
+        /// `restart-supervisor`, say) rather than before the run starts.
+        on_operation: Mutex<Option<OperationHook>>,
     }
+
+    /// An operation name and what to run when [`FakeBackend`] records it; see
+    /// `FakeBackend::on_operation`.
+    type OperationHook = (&'static str, Box<dyn FnOnce() + Send>);
 
     impl FakeBackend {
         fn absent(home: PathBuf) -> Arc<Self> {
@@ -348,6 +357,7 @@ mod tests {
                 release: tokio::sync::Notify::new(),
                 block_first: std::sync::atomic::AtomicBool::new(false),
                 stateful: std::sync::atomic::AtomicBool::new(false),
+                on_operation: Mutex::new(None),
             })
         }
 
@@ -390,6 +400,17 @@ mod tests {
 
         fn record(&self, operation: &str) -> Result<ActionOutcome, BackendFailure> {
             self.operations.lock().unwrap().push(operation.to_string());
+            let hook = {
+                let mut slot = self.on_operation.lock().unwrap();
+                if slot.as_ref().is_some_and(|(name, _)| *name == operation) {
+                    slot.take()
+                } else {
+                    None
+                }
+            };
+            if let Some((_, hook)) = hook {
+                hook();
+            }
             if self.fail.lock().unwrap().as_deref() == Some(operation) {
                 return Err(BackendFailure::new(
                     format!("planted failure in {operation}"),
@@ -1762,6 +1783,220 @@ mod tests {
             Some("recorded-identity"),
             "an unverifiable skewed probe must neither clear nor replace the recorded identity"
         );
+    }
+
+    /// Run UPDATE against `host` through to the end with a skewed fake
+    /// probe, the way an outdated host's update is planned and confirmed,
+    /// and return the finished run. What the helm sees when the attach
+    /// step reconnects is whatever the fleet script says by then;
+    /// `on_operation` can change it at a chosen step.
+    async fn run_update_to_the_end(
+        harness: &Harness,
+        host: HostId,
+        root: &std::path::Path,
+        on_operation: Option<OperationHook>,
+    ) -> ProvisioningView {
+        let backend = FakeBackend::skewed(root.to_path_buf());
+        *backend.on_operation.lock().unwrap() = on_operation;
+        let service = service(harness, backend.clone(), root);
+        let preview = service.plan_update(host).await.unwrap();
+        *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            peer_build: "0.1.1-old".to_string(),
+            dial_farhelm: root.join("farhelm"),
+            dial_state_dir: Some(root.join("state")),
+        }));
+        service
+            .start_update(
+                host,
+                ProvisionRequest {
+                    probe_id: preview.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        wait_finished(&service, host).await
+    }
+
+    /// Updating a host the helm currently holds as protocol-skewed completes
+    /// once the new supervisor speaks the right protocol: the skew refusal
+    /// the host held BEFORE the attach step never stops that step.
+    ///
+    /// Why it matters: the attach step now stops early when the helm refuses
+    /// the supervisor it just installed. An outdated host's update is the
+    /// main reason to run UPDATE at all, and its pre-update skew is still
+    /// published when the step starts; if that stale refusal counted, every
+    /// such update would fail at once. Specified: the far side keeps the old
+    /// protocol until the run's own supervisor restart, which is when the
+    /// script switches to the current one (as a real update's new binary
+    /// would), and the run completes.
+    ///
+    /// Switching at the restart step rather than before the run is what
+    /// keeps the premise reliable: every dial before that step, whatever
+    /// caused it, still sees the old protocol and can only republish the
+    /// stale refusal. The row is registered with the install paths the
+    /// update's probe reports, so the run has no reason to rewrite them
+    /// either.
+    #[farhelm_testtrace::test]
+    async fn updating_a_skewed_host_is_not_stopped_by_its_old_refusal() {
+        let root = tempfile::tempdir().unwrap();
+        let farhelm = root.path().join("farhelm").display().to_string();
+        let state_dir = root.path().join("state").display().to_string();
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh_at(
+                "outdated.example",
+                Some(&farhelm),
+                Some(&state_dir),
+                HostScript {
+                    protocol: farhelm_proto::PROTOCOL_VERSION - 1,
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::VersionSkew { .. }))
+            .await
+            .expect("actor is running");
+
+        let fleet = Arc::clone(&harness.fleet);
+        let manager = Arc::clone(&harness.manager);
+        let premise = Arc::new(Mutex::new(None));
+        let premise_seen = Arc::clone(&premise);
+        let finished = run_update_to_the_end(
+            &harness,
+            host,
+            root.path(),
+            Some((
+                "restart-supervisor",
+                Box::new(move || {
+                    *premise_seen.lock().unwrap() = manager.state(host);
+                    fleet.edit(host, |script| {
+                        script.protocol = farhelm_proto::PROTOCOL_VERSION;
+                    });
+                }),
+            )),
+        )
+        .await;
+        assert!(
+            matches!(
+                *premise.lock().unwrap(),
+                Some(HostState::VersionSkew { .. })
+            ),
+            "test premise: the stale refusal was published when the new supervisor came up: {:?}",
+            premise.lock().unwrap()
+        );
+        assert_eq!(
+            finished.status,
+            RunStatus::Completed,
+            "the update must attach to the fixed supervisor: {:?}",
+            finished.message
+        );
+    }
+
+    /// When the helm refuses the supervisor an UPDATE just installed, the
+    /// run fails at once with that refusal and its remedy, for each of the
+    /// four ways a supervisor can answer and still be refused.
+    ///
+    /// Why it matters: the attach step used to recognize only success, so a
+    /// refused supervisor (another protocol version, a reinstalled machine's
+    /// new identity, no identity, another entry's identity) held the host
+    /// busy for the full 30 seconds and then failed as "timed out", while
+    /// the hosts panel already showed the real reason. Specified: each
+    /// refusal ends the run as failed, with a message naming it, not
+    /// labeled as host stderr, and not the timeout. The run must finish
+    /// inside `wait_finished`'s few seconds, which the 30-second timeout
+    /// could not; no elapsed time is asserted beyond that.
+    #[farhelm_testtrace::test]
+    async fn a_refused_supervisor_fails_the_update_with_the_refusal() {
+        struct Case {
+            name: &'static str,
+            refuse: fn(&mut HostScript),
+            expect: &'static [&'static str],
+        }
+        let cases = [
+            Case {
+                name: "skew",
+                refuse: |script| script.protocol = farhelm_proto::PROTOCOL_VERSION + 1,
+                expect: &["protocol version mismatch", "\"9.9.9-new\""],
+            },
+            Case {
+                name: "mismatch",
+                refuse: |script| script.identity = Some("reinstalled-identity".to_string()),
+                expect: &[
+                    "reports identity \"reinstalled-identity\"",
+                    "adopt the identity or fix the destination",
+                ],
+            },
+            Case {
+                name: "unverified",
+                refuse: |script| script.identity = None,
+                expect: &["answered without an identity", "\"recorded-identity\""],
+            },
+            Case {
+                name: "duplicate",
+                refuse: |script| script.identity = Some("twin-identity".to_string()),
+                expect: &["\"twin-identity\" belongs to host", "remove that entry"],
+            },
+        ];
+        for case in cases {
+            let (builder, host) = FleetBuilder::new()
+                .await
+                .ssh(
+                    "refused.example",
+                    HostScript {
+                        identity: Some("recorded-identity".to_string()),
+                        ..HostScript::default()
+                    },
+                )
+                .await;
+            let (builder, twin) = builder
+                .ssh(
+                    "twin.example",
+                    HostScript {
+                        identity: Some("twin-identity".to_string()),
+                        ..HostScript::default()
+                    },
+                )
+                .await;
+            let harness = builder.start().await;
+            harness
+                .await_refreshed_as(host, "recorded-identity", 0)
+                .await;
+            harness.await_refreshed_as(twin, "twin-identity", 0).await;
+            harness.fleet.edit(host, |script| {
+                script.build = "9.9.9-new".to_string();
+                (case.refuse)(script);
+            });
+
+            let root = tempfile::tempdir().unwrap();
+            let finished = run_update_to_the_end(&harness, host, root.path(), None).await;
+            let message = finished.message.clone().unwrap_or_default();
+            assert_eq!(
+                finished.status,
+                RunStatus::Failed,
+                "{}: {message}",
+                case.name
+            );
+            assert!(
+                message.contains("the helm refused the supervisor this run installed"),
+                "{}: the failure must name the refusal: {message}",
+                case.name
+            );
+            for expected in case.expect {
+                assert!(
+                    message.contains(expected),
+                    "{}: expected {expected:?} in {message}",
+                    case.name
+                );
+            }
+            assert!(
+                !message.contains("timed out") && !message.contains("host stderr"),
+                "{}: not the timeout, and not labeled as host output: {message}",
+                case.name
+            );
+        }
     }
 
     /// ADD discovery of a skewed supervisor registers the host instead of

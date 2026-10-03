@@ -202,22 +202,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   replacement is TBD. The marks are drawn by `PermissionIcon` in `crates/farhelm-ui/src/icons.rs`. Plan:
   `plans/queue/yolo-icon.md`.
 
-- **Name the real refusal when a provisioned host will not attach.** After setting up or updating a host, the last step
-  waits for the helm to connect to the new supervisor and recognizes only success. A supervisor that answers and refuses
-  (another protocol version, a different or missing identity, another registered host's identity) keeps it waiting the
-  full 30 seconds, with the host busy, and the run fails as "timed out" while the hosts panel already shows the real
-  state; setting up or updating an existing entry whose machine was reinstalled is the likely trigger. Deferred from
-  triage execution 2026-10-02 because the fix is bigger than it looked: the attach step must tell a refusal that answers
-  its own reconnect from the one the host held before (often the very skew an update fixes), and the connection manager
-  publishes no evidence of which reconnect request an attempt answered. Watching the host's status feed for `Connecting`
-  and then a refusal was tried and reviewed; it misses coalesced updates, can accept a refusal from an attempt already
-  in flight, and goes blind when the nudge revives a stopped actor (it had subscribed to the old actor's feed; polling
-  the manager's status, as the step does today, follows a revived actor). A design one reviewer proposed: the actor
-  stamps each attempt with the nudge revision current when it starts and publishes that stamp with any refusal, the
-  fresh-window retry returns the revision its nudge set (a revived actor counting from its own start), and the attach
-  wait stops early on a refusal stamped at or after that ticket; it needs a deterministic test of an attempt in flight
-  across the nudge. Review item: `review_feedback_queue/attach-reports-generic-timeout.md` (`TRIAGE_OUTCOMES.md` heading
-  of the same name). Plan: `plans/queue/attach-refusal-reason.md`.
 - **A fresh-checkout end-to-end test fails on main, and Replace with logs a provenance error.** The e2e test
   `lost_fresh_checkout_success_replays_after_settings_change_and_helm_restart` fails every time on main (reproduced on
   2026-10-02 by the boundary-checks plan, on unmodified main): it expects the refusal that names changed checkout

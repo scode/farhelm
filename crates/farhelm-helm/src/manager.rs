@@ -913,6 +913,27 @@ struct ActorStatus {
     /// "the same connection" mean the same thing across the manager's whole
     /// life rather than within one actor's.
     incarnation: u64,
+    /// The manager-wide number of the dial whose answer the current state
+    /// is, when the state is a refusal (`VersionSkew`, `IdentityMismatch`,
+    /// `IdentityUnverified`, `Duplicate`). Meaningless beside any other
+    /// state, and only ever read beside a refusal.
+    ///
+    /// It lets provisioning's attach step tell a refusal that answers its
+    /// own reconnect from one the host held before it, often the very
+    /// protocol skew an update is fixing: see
+    /// [`ConnectionManager::retry_now_with_fresh_window`] for the ticket it
+    /// is compared against, and [`HostActor::connect_phase`] for where the
+    /// number is drawn. Every publication the actor makes writes it (zero
+    /// for a non-refusal), in the same `send_modify` as the state, so a
+    /// reader can never pair a refusal with another publication's number.
+    /// The manager's own status writes (a retarget, an adoption, a
+    /// retirement) leave it alone; none of them writes a refusal state, so
+    /// whatever number they leave behind sits beside a state nobody reads
+    /// it with. Deliberately not inside
+    /// [`HostState`]: there it would reach REST and the UI, and a skewed
+    /// host's every re-probe would wake every client for a number nobody
+    /// shows.
+    refusal_attempt: u64,
 }
 
 /// An out-of-band request from the manager to one actor: stop whatever you
@@ -1035,6 +1056,16 @@ pub struct ConnectionManager {
     /// a zero can only ever be an uninitialized value, not a real
     /// connection, and two helm processes do not hand out the same numbers.
     incarnations: Arc<std::sync::atomic::AtomicU64>,
+    /// Source of connection-attempt numbers, shared by every actor: each
+    /// dial draws the next one (see [`HostActor::connect_phase`]), and a
+    /// refusal is published with the number of the dial it answers
+    /// ([`ActorStatus::refusal_attempt`]).
+    ///
+    /// One counter for the whole manager rather than one per actor, so an
+    /// actor revived by a retry continues the same sequence and the ticket
+    /// [`Self::retry_now_with_fresh_window`] hands out needs no special
+    /// case for it. Starts at zero, so a stamp of zero never names a dial.
+    attempts: Arc<std::sync::atomic::AtomicU64>,
     store: HelmStore,
     transport: Arc<dyn HostTransport>,
     cadence: Cadence,
@@ -1050,6 +1081,10 @@ pub struct ConnectionManager {
     /// connection's first publish; see [`HostActor::before_connect_publication`].
     #[cfg(test)]
     connect_gate: DuplicateGateSlot,
+    /// The test gate every actor of this manager checks before publishing a
+    /// refusal; see [`HostActor::before_refusal_publication`].
+    #[cfg(test)]
+    refusal_gate: DuplicateGateSlot,
     /// The fleet's "something changed" counter, shared with every actor
     /// this manager spawns and with the REST edge (see [`FleetEvents`]).
     ///
@@ -1177,6 +1212,9 @@ pub struct HostStatus {
     /// above, so a mutation can capture it alongside the client it is about
     /// to use and present it back when it records the reply.
     pub incarnation: u64,
+    /// See [`ActorStatus::refusal_attempt`]: which dial a refusal `state`
+    /// answers, from the same borrow as `state`.
+    pub refusal_attempt: u64,
 }
 
 /// A manager operation refused for a reason a caller must act on rather
@@ -1332,6 +1370,7 @@ impl ConnectionManager {
     ) -> Arc<ConnectionManager> {
         Arc::new(ConnectionManager {
             incarnations: Arc::new(std::sync::atomic::AtomicU64::new(initial_incarnation())),
+            attempts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             store,
             transport,
             cadence,
@@ -1341,6 +1380,8 @@ impl ConnectionManager {
             refresh_gate: DuplicateGateSlot::default(),
             #[cfg(test)]
             connect_gate: DuplicateGateSlot::default(),
+            #[cfg(test)]
+            refusal_gate: DuplicateGateSlot::default(),
             events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
@@ -1626,6 +1667,7 @@ impl ConnectionManager {
             // Zero is "never connected": no claim can ever carry it,
             // because a claim is only made against a published client.
             incarnation: 0,
+            refusal_attempt: 0,
             contested: Arc::new(Vec::new()),
             list_truncated: false,
         }));
@@ -1655,10 +1697,13 @@ impl ConnectionManager {
             refresh_gate: Arc::clone(&self.refresh_gate),
             #[cfg(test)]
             connect_gate: Arc::clone(&self.connect_gate),
+            #[cfg(test)]
+            refusal_gate: Arc::clone(&self.refusal_gate),
             destination: Mutex::new(display_destination(&row)),
             cache_lock: Arc::clone(&cache_lock),
             seed_epoch: Arc::clone(&seed_epoch),
             incarnations: Arc::clone(&self.incarnations),
+            attempts: Arc::clone(&self.attempts),
             events: Arc::clone(&self.events),
             agent_requests: Arc::clone(&self.agent_requests),
         };
@@ -1818,6 +1863,7 @@ impl ConnectionManager {
             contested: Arc::clone(&published.contested),
             list_truncated: published.list_truncated,
             incarnation: published.incarnation,
+            refusal_attempt: published.refusal_attempt,
         })
     }
 
@@ -2325,6 +2371,7 @@ impl ConnectionManager {
                             contested: Arc::clone(&published.contested),
                             list_truncated: published.list_truncated,
                             incarnation: published.incarnation,
+                            refusal_attempt: published.refusal_attempt,
                         },
                     ))
                 })
@@ -2582,7 +2629,7 @@ impl ConnectionManager {
     /// registry entry, which the REST edge reports as a 404 rather than
     /// answering 200 to a retry that could not possibly have happened.
     pub async fn retry_now(&self, host: HostId) -> anyhow::Result<bool> {
-        self.nudge_now(host, false).await
+        Ok(self.nudge_now(host, false).await?.is_some())
     }
 
     /// Reconnect `host` now with a fresh active-retry window: drop whatever
@@ -2599,16 +2646,35 @@ impl ConnectionManager {
     /// supervisor that is back within a second or two, exactly the case
     /// they exist for.
     ///
-    /// Returns whether a host was actually found, like [`Self::retry_now`].
-    pub async fn retry_now_with_fresh_window(&self, host: HostId) -> anyhow::Result<bool> {
+    /// Returns `None` when no host was found (where [`Self::retry_now`]
+    /// returns `false`), and otherwise a TICKET: the highest connection
+    /// attempt number drawn before this retry did anything. A refusal whose
+    /// [`HostStatus::refusal_attempt`] is greater than the ticket answers a
+    /// dial that began after this call, so it is about the supervisor that
+    /// is there now; one at or below it may be a stale answer from before,
+    /// such as the very protocol skew an update is fixing, and the attach
+    /// step keeps waiting through it.
+    ///
+    /// The one case the ticket cannot help with is a revival someone else
+    /// already performed, where this call nudges nothing; it is never a
+    /// false early stop, only the attach step's ordinary timeout.
+    pub async fn retry_now_with_fresh_window(&self, host: HostId) -> anyhow::Result<Option<u64>> {
         self.nudge_now(host, true).await
     }
 
     /// The shared body of [`Self::retry_now`] and
     /// [`Self::retry_now_with_fresh_window`]: interrupt the live actor, or
     /// revive a dead entry, exactly as `retry_now` documents. Only the
-    /// window the nudge carries differs.
-    async fn nudge_now(&self, host: HostId, fresh_window: bool) -> anyhow::Result<bool> {
+    /// window the nudge carries differs. Returns the attempt ticket
+    /// [`Self::retry_now_with_fresh_window`] documents, or `None` when there
+    /// is no such host.
+    async fn nudge_now(&self, host: HostId, fresh_window: bool) -> anyhow::Result<Option<u64>> {
+        // Read FIRST, before deciding between the live and the revive
+        // branch and before any nudge is sent. Read after the nudge, a dial
+        // the nudge itself started could already have drawn a number at or
+        // below the ticket, and its refusal (a frozen mismatch or duplicate
+        // publishes only once per nudge) would then never count.
+        let ticket = self.attempts.load(std::sync::atomic::Ordering::SeqCst);
         // A nudge is only meaningful to a LIVE actor. Two things make one
         // meaningless, and both used to be reported as success: a retired
         // entry (its task is gone), and an entry whose nudge receiver has
@@ -2619,7 +2685,7 @@ impl ConnectionManager {
         let needs_revival = {
             let map = self.actors.lock().expect("actor map mutex poisoned");
             let Some(handle) = map.actors.get(&host) else {
-                return Ok(false);
+                return Ok(None);
             };
             let retired = matches!(handle.status.borrow().state, HostState::Retired { .. });
             let unreachable_actor = handle.nudge.is_closed() || handle.task.is_finished();
@@ -2632,12 +2698,12 @@ impl ConnectionManager {
                     // along.
                     nudge.fresh_window = fresh_window;
                 });
-                return Ok(true);
+                return Ok(Some(ticket));
             }
             true
         };
         debug_assert!(needs_revival);
-        self.revive(host).await
+        Ok(self.revive(host).await?.then_some(ticket))
     }
 
     /// Replace a dead entry's actor with a fresh one, from the registry row
@@ -2843,6 +2909,10 @@ struct HostActor {
     /// [`HostActor::before_connect_publication`].
     #[cfg(test)]
     connect_gate: DuplicateGateSlot,
+    /// This actor's manager's refusal-publication gate; see
+    /// [`HostActor::before_refusal_publication`].
+    #[cfg(test)]
+    refusal_gate: DuplicateGateSlot,
     /// The destination this actor is currently working against, in display
     /// form, refreshed every time the row is reloaded.
     ///
@@ -2864,6 +2934,9 @@ struct HostActor {
     /// connection draws the next token from it (see
     /// [`ActorStatus::incarnation`]).
     incarnations: Arc<std::sync::atomic::AtomicU64>,
+    /// The manager's attempt-number source, shared by every actor (see
+    /// [`ConnectionManager::attempts`]).
+    attempts: Arc<std::sync::atomic::AtomicU64>,
     /// The fleet's revision counter, shared by every actor.
     ///
     /// This actor is the busiest publisher in the helm and the one where
@@ -3082,6 +3155,31 @@ impl HostActor {
         hold_at_gate(&self.connect_gate, &self.destination()).await;
     }
 
+    /// Hold here if this actor's manager has a refusal-publication gate
+    /// installed for this actor's destination: the boundary after a refusal
+    /// has settled (and survived [`take_settled_outcome`]'s retarget check),
+    /// before it is published. A retry landing in this interval is the one
+    /// whose ticket the refusal's attempt number must not pass, and a test
+    /// cannot otherwise time one into it.
+    #[cfg(test)]
+    async fn before_refusal_publication(&self) {
+        hold_at_gate(&self.refusal_gate, &self.destination()).await;
+    }
+
+    /// Publish a refusal state together with the number of the dial it
+    /// answers. See [`ActorStatus::refusal_attempt`].
+    fn set_refusal(&self, state: HostState, attempt: u64) {
+        self.publish_refresh(
+            state,
+            None,
+            LiveSessions::Clear,
+            None,
+            None,
+            PublishGuard::Always,
+            attempt,
+        );
+    }
+
     /// Run this host's connection until the task is aborted, or until this
     /// entry's registry row disappears.
     ///
@@ -3160,12 +3258,22 @@ impl HostActor {
             } else {
                 &[]
             };
-            let outcome = self.connect_phase(&row, ladder, active, &mut nudge).await;
+            let (outcome, attempt) = self.connect_phase(&row, ladder, active, &mut nudge).await;
             let Some(outcome) = take_settled_outcome(outcome, &mut active, &mut nudge) else {
                 // The manager already published the retargeted row. Reload
                 // it before doing anything with the old dial's answer.
                 continue;
             };
+            #[cfg(test)]
+            if matches!(
+                outcome,
+                AttemptOutcome::Skew(_)
+                    | AttemptOutcome::Mismatch { .. }
+                    | AttemptOutcome::Unverified { .. }
+                    | AttemptOutcome::Duplicate { .. }
+            ) {
+                self.before_refusal_publication().await;
+            }
             match outcome {
                 AttemptOutcome::Connected {
                     client,
@@ -3200,17 +3308,24 @@ impl HostActor {
                     // Debug-quoted value would just be an ugly one. The
                     // escaping belongs where the hazard is — a terminal —
                     // and that is the log site below.
-                    self.set_state(HostState::VersionSkew {
-                        peer_protocol: skew.peer_protocol,
-                        peer_build: skew.peer_build,
-                        our_protocol: skew.our_protocol,
-                        our_build: skew.our_build,
-                        remediation: skew_remediation(&row, skew.peer_protocol, skew.our_protocol),
-                    });
+                    self.set_refusal(
+                        HostState::VersionSkew {
+                            peer_protocol: skew.peer_protocol,
+                            peer_build: skew.peer_build,
+                            our_protocol: skew.our_protocol,
+                            our_build: skew.our_build,
+                            remediation: skew_remediation(
+                                &row,
+                                skew.peer_protocol,
+                                skew.our_protocol,
+                            ),
+                        },
+                        attempt,
+                    );
                     active = self.hold(&mut nudge, self.cadence.reprobe).await;
                 }
                 AttemptOutcome::Mismatch { recorded, reported } => {
-                    self.set_state(HostState::IdentityMismatch { recorded, reported });
+                    self.set_refusal(HostState::IdentityMismatch { recorded, reported }, attempt);
                     // Frozen with NO timer: only a user decision
                     // (adopt, or a fixed destination) can resolve this,
                     // and re-probing would churn the trail with a
@@ -3224,7 +3339,7 @@ impl HostActor {
                     active = true;
                 }
                 AttemptOutcome::Unverified { recorded } => {
-                    self.set_state(HostState::IdentityUnverified { recorded });
+                    self.set_refusal(HostState::IdentityUnverified { recorded }, attempt);
                     // Re-probed, unlike a mismatch: there is no decision to
                     // wait for here, only a host that might start reporting
                     // its identity again. See `HostState::IdentityUnverified`.
@@ -3242,7 +3357,7 @@ impl HostActor {
                         active |= request.fresh_window;
                         continue;
                     }
-                    self.set_state(HostState::Duplicate { twin, identity });
+                    self.set_refusal(HostState::Duplicate { twin, identity }, attempt);
                     // Frozen with NO timer, like a mismatch: only the user's
                     // Retry or edit (or a restart) asks again. See
                     // `HostState::Duplicate`.
@@ -3306,8 +3421,12 @@ impl HostActor {
         ladder: &[Duration],
         active: bool,
         nudge: &mut watch::Receiver<Nudge>,
-    ) -> AttemptOutcome {
+    ) -> (AttemptOutcome, u64) {
         let mut last: Option<AttemptOutcome> = None;
+        // The number of the most recent dial. Every path out of the loop
+        // below has dialed at least once (the immediate attempt has no wait
+        // in front of it), so it is never zero on return.
+        let mut number = 0;
         for attempt in 0..=ladder.len() as u32 {
             if attempt > 0 {
                 let wait = ladder[attempt as usize - 1];
@@ -3321,9 +3440,12 @@ impl HostActor {
                     });
                 }
                 if let Some(nudge) = self.wait_or_nudge(nudge, wait).await {
-                    return AttemptOutcome::Interrupted {
-                        fresh_window: nudge.fresh_window,
-                    };
+                    return (
+                        AttemptOutcome::Interrupted {
+                            fresh_window: nudge.fresh_window,
+                        },
+                        number,
+                    );
                 }
             } else if active {
                 self.set_state(HostState::Connecting {
@@ -3336,6 +3458,19 @@ impl HostActor {
                 destination = %self.destination(),
                 "opening a connection to the host supervisor"
             );
+            // Drawn immediately before the dial races the next nudge, and
+            // that placement is the whole contract with
+            // `ConnectionManager::retry_now_with_fresh_window`'s ticket: a
+            // dial that began before a retry read its ticket holds a number
+            // at or below it, so its answer (a refusal from the supervisor
+            // that was there BEFORE) can never pass for the retry's own.
+            // Drawing the number after the dial, or at settlement, would let
+            // a dial that started against the old supervisor carry a
+            // post-ticket number.
+            number = self
+                .attempts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
             let outcome = tokio::select! {
                 nudge = next_nudge(nudge) => AttemptOutcome::Interrupted {
                     fresh_window: nudge.fresh_window,
@@ -3352,10 +3487,13 @@ impl HostActor {
                     );
                     last = Some(outcome);
                 }
-                _ => return outcome,
+                _ => return (outcome, number),
             }
         }
-        last.expect("the loop always runs at least the immediate attempt")
+        (
+            last.expect("the loop always runs at least the immediate attempt"),
+            number,
+        )
     }
 
     /// One attempt, bounded by [`Cadence::attempt_timeout`].
@@ -3697,6 +3835,7 @@ impl HostActor {
             None,
             None,
             PublishGuard::WhileIncarnation(incarnation),
+            0,
         );
         let mut ended = "the peer closed the connection";
         // Change hints (`ControlMsg::SessionsChanged`): the supervisor saying
@@ -3790,6 +3929,7 @@ impl HostActor {
                 step.contested,
                 step.truncated,
                 PublishGuard::WhileCurrent,
+                0,
             );
             // AFTER the publish, so a client that re-reads on this
             // revision sees a hosts list and a session list that already
@@ -4204,7 +4344,7 @@ impl HostActor {
         client: Option<Arc<SupervisorClient>>,
         live: LiveSessions,
     ) {
-        self.publish_refresh(state, client, live, None, None, PublishGuard::Always);
+        self.publish_refresh(state, client, live, None, None, PublishGuard::Always, 0);
     }
 
     /// [`Self::publish_with_live`] plus this refresh's contested set.
@@ -4242,6 +4382,10 @@ impl HostActor {
     /// with fresh rows in the same reply. Closing the interval here would not
     /// help — a reader that sampled the revision before this call would still
     /// see the newer list — which is why the fix belongs on the reading side.
+    // Every argument is one field of the single `send_modify` this function
+    // exists to make atomic; bundling them into a struct would only rename
+    // them at each of the few call sites.
+    #[allow(clippy::too_many_arguments)]
     fn publish_refresh(
         &self,
         state: HostState,
@@ -4250,6 +4394,7 @@ impl HostActor {
         contested: Option<Arc<Vec<String>>>,
         truncated: Option<bool>,
         guard: PublishGuard,
+        refusal_attempt: u64,
     ) {
         let previous = self.status.borrow().state.phase();
         let next = state.phase();
@@ -4360,6 +4505,9 @@ impl HostActor {
             status.state = state;
             status.client = client;
             status.live_sessions = live_sessions;
+            // Not part of `observable_change`: nothing outside the manager
+            // shows it. See `ActorStatus::refusal_attempt`.
+            status.refusal_attempt = refusal_attempt;
         });
         retire_withdrawn(withdrawn);
         // Logged only for a publish that happened, so a dropped one cannot
@@ -4633,6 +4781,14 @@ mod tests {
             .duplicate_gate
             .lock()
             .expect("duplicate publication gate mutex poisoned") = None;
+    }
+
+    /// [`install_gate`] at the refusal publication boundary.
+    fn install_refusal_gate(
+        manager: &ConnectionManager,
+        destination: &str,
+    ) -> Arc<DuplicatePublicationGate> {
+        install_gate(&manager.refusal_gate, destination)
     }
 
     /// Subscribe to one actor's status without exposing the watch channel in
@@ -7528,6 +7684,164 @@ mod tests {
             .expect("actor is running");
     }
 
+    /// A refusal that settled before a retry took its ticket never passes
+    /// that ticket, even when it is published after the retry; the next
+    /// dial's refusal does.
+    ///
+    /// Why it matters: provisioning's attach step stops early on a refusal
+    /// only if it answers the step's own reconnect. A refusal the host held
+    /// before the step (typically the protocol skew an update is fixing)
+    /// must never stop it, or every update of an outdated host would fail at
+    /// once. The dangerous window is exactly this one: the old dial has
+    /// settled and is about to publish when the retry lands. Specified: an
+    /// outcome held at the refusal-publication gate while the retry reads
+    /// its ticket is published with a number at or below the ticket, and the
+    /// dial the retry caused publishes one above it.
+    ///
+    /// The retry here is a plain nudge on purpose. A fresh-window retry
+    /// publishes `Connecting` before its first dial, which would overwrite
+    /// the stale refusal before the second gate lets the test look at it, so
+    /// a wrongly numbered stale refusal would go unseen. The ticket is the
+    /// same either way (`nudge_now` reads it before sending either kind).
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_refusal_settled_before_a_retry_never_passes_its_ticket() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("skew.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    protocol: PROTOCOL_VERSION - 1,
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::VersionSkew { .. }))
+            .await
+            .expect("actor is running");
+
+        // Hold the NEXT refusal after it settles, before it publishes.
+        let held = install_refusal_gate(&fixture.manager, "skew.example");
+        assert!(fixture.manager.retry_now(host).await.unwrap());
+        held.reached.notified().await;
+        let stale_dials = fixture.transport.attempts(host).len();
+
+        // The retry under test lands in that window.
+        let ticket = fixture
+            .manager
+            .nudge_now(host, false)
+            .await
+            .unwrap()
+            .expect("the host exists");
+
+        // Catch the dial the retry causes at the same gate, so the stale
+        // publication in between is what the status holds.
+        let next = install_refusal_gate(&fixture.manager, "skew.example");
+        held.release.notify_one();
+        next.reached.notified().await;
+        assert_eq!(
+            fixture.transport.attempts(host).len(),
+            stale_dials + 1,
+            "test premise: the retry caused exactly one new dial"
+        );
+        let stale = fixture.manager.status(host).expect("actor is running");
+        assert!(
+            matches!(stale.state, HostState::VersionSkew { .. }),
+            "test premise: the stale refusal is what is published: {:?}",
+            stale.state
+        );
+        assert!(
+            stale.refusal_attempt > 0 && stale.refusal_attempt <= ticket,
+            "a refusal from a dial that began before the retry must not pass its ticket \
+             (stamp {}, ticket {ticket})",
+            stale.refusal_attempt
+        );
+
+        *fixture
+            .manager
+            .refusal_gate
+            .lock()
+            .expect("refusal gate mutex poisoned") = None;
+        next.release.notify_one();
+        let mut status = status_receiver(&fixture.manager, host);
+        let fresh = status
+            .wait_for(|status| status.refusal_attempt != stale.refusal_attempt)
+            .await
+            .expect("actor is running")
+            .clone();
+        assert!(matches!(fresh.state, HostState::VersionSkew { .. }));
+        assert!(
+            fresh.refusal_attempt > ticket,
+            "the retry's own dial must pass the ticket (stamp {}, ticket {ticket})",
+            fresh.refusal_attempt
+        );
+    }
+
+    /// A retry that has to revive a dead actor still hands out a ticket the
+    /// revived actor's refusals pass.
+    ///
+    /// Why it matters: the attach step's retry revives an actor that died,
+    /// and the replacement is a new actor. With a counter per actor its
+    /// numbers would restart and could sit below the ticket forever, so the
+    /// step would fall back to its timeout. Specified: after a panicked
+    /// (retired) actor, a fresh-window retry returns a ticket, and the
+    /// revived actor's skew refusal is stamped above it.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_revived_actors_refusal_passes_the_retry_ticket() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("revive.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    panic_on_dial: true,
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Retired { .. }))
+            .await
+            .expect("the actor's supervisor must publish for it");
+
+        fixture.transport.edit(host, |script| {
+            script.panic_on_dial = false;
+            script.protocol = PROTOCOL_VERSION - 1;
+        });
+        let ticket = fixture
+            .manager
+            .retry_now_with_fresh_window(host)
+            .await
+            .unwrap()
+            .expect("the retired entry is revived");
+        assert!(
+            ticket > 0,
+            "test premise: the panicked dial drew a number, so the ticket is not vacuous"
+        );
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::VersionSkew { .. }))
+            .await
+            .expect("the revived actor is running");
+        let status = fixture.manager.status(host).expect("actor is running");
+        assert!(
+            status.refusal_attempt > ticket,
+            "the revived actor continues the manager's sequence (stamp {}, ticket {ticket})",
+            status.refusal_attempt
+        );
+    }
+
     /// An attach retry against a host that comes back mid-ladder connects
     /// instead of dialing out the window.
     ///
@@ -9733,12 +10047,14 @@ mod tests {
         // Build the manager before registry reconciliation starts any actors.
         let manager = ConnectionManager {
             incarnations: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            attempts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             store,
             transport: ScriptedTransport::new(),
             cadence: Cadence::default(),
             duplicate_gate: DuplicateGateSlot::default(),
             refresh_gate: DuplicateGateSlot::default(),
             connect_gate: DuplicateGateSlot::default(),
+            refusal_gate: DuplicateGateSlot::default(),
             events: Arc::new(FleetEvents::new()),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
