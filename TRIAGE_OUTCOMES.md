@@ -6125,7 +6125,9 @@
   TODO.md entry asks the rollback to keep the session when the scope kill is unconfirmed.
 - Completion criteria: the TODO.md entry names this case and that the rollback must fail visibly and keep the session
   (done during triage). Remove the feedback file and its index entry, with no code or spec change.
-- Execution: planned in `plans/queue/triage-crash-replies-and-locks.md`.
+- Execution: complete: change `xwyuwksvluqvqqpmqoyklrtnzkwnqzyk`, bookmark
+  `plan/triage-crash-replies-and-locks/02-rollback-cleanup`, draft PR
+  [#1511](https://github.com/scode/farhelm/pull/1511/changes).
 
 ## desktop-auth-ready-with-stale-webview-credential.md
 

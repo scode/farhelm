@@ -32,8 +32,6 @@ One line per open item. This file must always match the feedback files in this d
   failures stop exited tabs from being reaped host-wide.
 - `tmux-build-script-bash32.md` — build-private-tmux.sh's macOS branch aborts under bash 3.2 because of empty arrays
   under `set -u`.
-- `create-rollback-orphans-unconfirmed-scope.md` — a failed create whose scope kill is unconfirmed still deletes the
-  row, leaving processes nothing can reach.
 - `provisioning-update-replaces-binary-before-setup-guard.md` — remote UPDATE replaces the farhelm binary before
   checking whether `farhelm helm setup` took the host over.
 
