@@ -127,7 +127,21 @@ pub(super) fn return_focus_to_row(id: HostId) {
 /// It also starts remembering the last control inside the dialog that had
 /// focus, for `refocus_after_write`.
 fn install_dialog() {
+    install_dialog_with_initial_focus("button, input");
+}
+
+/// Install modal isolation while putting the destructive dialog's safe escape
+/// hatch first in the focus order. The shared settings dialog focuses its
+/// first editor, but removal must start on Cancel so an accidental Enter
+/// cannot immediately forget the host.
+fn install_remove_dialog() {
+    install_dialog_with_initial_focus(".host-settings-close");
+}
+
+/// Apply the shared modal setup and choose the first control explicitly.
+fn install_dialog_with_initial_focus(initial_focus: &str) {
     let dialog = serde_json::to_string(DIALOG_SELECTOR).expect("a string always serializes");
+    let initial_focus = serde_json::to_string(initial_focus).expect("a string always serializes");
     document::eval(&format!(
         r#"(() => {{
             const dialog = document.querySelector({dialog});
@@ -138,7 +152,7 @@ fn install_dialog() {
                     if (event.target !== dialog) dialog.__farhelmLastFocus = event.target;
                 }});
             }}
-            (dialog.querySelector('button, input') ?? dialog).focus({{ preventScroll: true }});
+            (dialog.querySelector({initial_focus}) ?? dialog).focus({{ preventScroll: true }});
         }})(); {}"#,
         // The first match in document order wins: an open field's cancel
         // button when there is one, so Escape with focus lost mid-save does
@@ -447,6 +461,69 @@ pub(super) fn HostSettingsDialog(
                         class: "btn btn-neutral host-settings-close",
                         onclick: move |_| on_close.call(()),
                         "close"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Ask before forgetting a host, keeping the explanation and the safe default
+/// in the same modal surface as host settings.
+#[component]
+pub(super) fn HostRemoveDialog(
+    host: Host,
+    busy: bool,
+    on_remove: EventHandler<bool>,
+    on_cancel: EventHandler<()>,
+) -> Element {
+    let shown_name = gui_host_name(&host.name, host.kind.is_this_machine());
+    rsx! {
+        div { class: "host-settings-backdrop", role: "presentation",
+            div {
+                class: "host-settings-dialog host-remove-dialog",
+                role: "dialog",
+                aria_modal: "true",
+                aria_label: "remove host · {shown_name}",
+                tabindex: "-1",
+                onmounted: move |_| install_remove_dialog(),
+                onkeydown: move |evt: KeyboardEvent| {
+                    if evt.key() == Key::Escape && !evt.is_composing() && !busy {
+                        return_focus_to_row(host.id);
+                        on_cancel.call(());
+                    }
+                },
+                h2 { class: "host-settings-title",
+                    "remove host · "
+                    span { class: "peer-value", dir: "ltr", "{shown_name}" }
+                }
+                p { class: "host-remove-explanation",
+                    "Farhelm will forget this host. Its supervisor and sessions keep running, and adding the destination again finds them."
+                }
+                div { class: "host-settings-actions host-remove-actions",
+                    button {
+                        r#type: "button",
+                        class: "btn btn-danger",
+                        disabled: busy,
+                        onclick: move |_| on_remove.call(false),
+                        "remove"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn btn-danger btn-outline",
+                        disabled: busy,
+                        onclick: move |_| on_remove.call(true),
+                        "remove, and don't ask again"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn btn-neutral host-settings-close",
+                        autofocus: true,
+                        onclick: move |_| {
+                            return_focus_to_row(host.id);
+                            on_cancel.call(())
+                        },
+                        "cancel"
                     }
                 }
             }

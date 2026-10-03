@@ -139,12 +139,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   sidebar. Instead, adding a host should show a clean, well-designed dialog that explains what will happen, and let the
   user answer either "yes" or "yes, and don't ask in the future". Plan: `plans/queue/host-dialogs-and-menu.md`.
 
-- **A proper dialog for removing a host.** Removing a host from the sidebar today asks inline, in the host's row: a
-  block of text ("forgetting a host leaves its supervisor and sessions running; re-adding the destination finds them
-  again", then the quoted host name) above "confirm remove" and "cancel" buttons. Replace it with a clean, modern pop-up
-  dialog that explains what removal will do, and add a "don't ask again in the future" option. Same direction as the
-  host-add dialog entry above. Plan: `plans/queue/host-dialogs-and-menu.md`.
-
 - **A way to turn host add and remove confirmations back on.** The host dialogs plan adds "yes, and don't ask in the
   future" to the add-host dialog and "remove, and don't ask again" to the remove-host dialog, both kept as helm
   preferences shared by every client, but no way in the UI to undo either answer: decided 2026-10-02 to leave that out
