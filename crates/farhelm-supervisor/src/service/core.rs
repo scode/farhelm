@@ -1295,30 +1295,45 @@ impl StateDirOwnership {
     }
 }
 
-/// Cap on slow handler tasks (`StopSession`/`DeleteSession` and the other
-/// management requests — see their own arms' comments in `handle_control` on
-/// why they're spawned rather than awaited inline; the session list has its
-/// own limit, [`LIST_ADMISSION_PERMITS`]) allowed in flight AT ONCE across
-/// the WHOLE supervisor process (`Supervisor::admission`), not per
-/// connection: the resource actually being bounded — tmux subprocesses,
-/// `/proc` sweeps — is process-global, and a per-connection cap would let
-/// every additional helm connection multiply the real concurrency by
-/// another 8, defeating the point of having a bound at all. A permit is
-/// acquired (via `spawn_admitted`) BEFORE spawning each task — in the
-/// caller's own await point, which for every real caller is
-/// `handle_control`, itself driven directly from `handle_connection`'s
-/// read loop — so an unbounded flood of slow requests backpressures
-/// whichever connection sent them once the cap is hit, rather than
-/// spawning an unbounded number of tasks each holding a tmux subprocess or
-/// a multi-second kill sweep open. Delete is the deliberate exception: it
-/// must claim its agent-request fence before admission, so a retained
-/// mutation cannot strand all eight permits while the reply that releases it
-/// is waiting for dispatch. Its task is tracked before that wait and acquires
-/// a permit only after the fence clears; the other slow handlers retain the
-/// admission-before-spawn rule. 8 is generous headroom for
-/// ordinary use while still being a REAL bound against a
-/// pathological flood or a buggy client that fires requests without
-/// waiting for replies.
+/// Cap on management requests in flight AT ONCE across the WHOLE
+/// supervisor process (`Supervisor::admission`): Stop, Restart, Delete,
+/// Rename, tab open and close, directory browse and repository search, each
+/// spawned rather than awaited inline (see their handlers for why). The
+/// session list has its own limit, [`LIST_ADMISSION_PERMITS`].
+///
+/// Per process, not per connection: the resource actually being bounded —
+/// tmux subprocesses, `/proc` sweeps — is process-global, and a
+/// per-connection cap would let every additional helm connection multiply
+/// the real concurrency by another 8, defeating the point of having a
+/// bound at all. 8 is generous headroom for ordinary use while still being
+/// a REAL bound against a pathological flood or a buggy client that fires
+/// requests without waiting for replies.
+///
+/// ## A full cap refuses rather than waiting in the read loop
+///
+/// Stop and the requests admitted through `spawn_admitted` take their slot
+/// in a connection's read loop with `admit_or_refuse`, which answers "this
+/// host is busy, try again" (`ErrorKind::Unavailable`) when no slot is
+/// free. That loop also delivers every keystroke, resize and detach for
+/// every session on the connection, and SPEC.md "Waiting between
+/// operations on one host" says those must never wait on management
+/// operations. Waiting for a slot there used to freeze typing on the whole
+/// host until one of eight in-flight Stops or Deletes finished, kill grace
+/// period included, which could outlast the helm's 30-second list timeout
+/// and cost the connection.
+///
+/// Delete is the exception, and it does not touch the loop either: it must
+/// claim its agent-request fence before admission, so a retained mutation
+/// cannot strand all eight permits while the reply that releases it is
+/// waiting for dispatch. Its task is spawned and tracked first, then waits
+/// for the fence and afterwards for a slot, inside the task.
+///
+/// A consequence of combining the two, accepted rather than engineered
+/// around: tokio's semaphore serves waiters first come, first served, so a
+/// slot that frees while Deletes are waiting goes to the next Delete, not
+/// to the pool. While a batch of more than eight Deletes drains, every
+/// other management request is refused for the whole batch, not just at
+/// its peak.
 pub(crate) const HANDLER_ADMISSION_PERMITS: usize = 8;
 
 /// Cap on session-list builds in flight at once across the whole supervisor
@@ -4149,9 +4164,10 @@ pub struct Supervisor {
     /// ([`crate::launch::window_command`]), so such a path broke every
     /// launch.
     farhelm_exe_str: String,
-    /// Admission control for the slow management handlers spawned by
+    /// Admission control for the management requests spawned by
     /// `handle_control` (`StopSession`/`DeleteSession` and the rest — see
-    /// `HANDLER_ADMISSION_PERMITS`'s own docs). Deliberately
+    /// `HANDLER_ADMISSION_PERMITS`'s own docs, including why a full cap
+    /// refuses instead of waiting). Deliberately
     /// SUPERVISOR-wide, not per-connection: the resource being bounded is
     /// tmux subprocesses and `/proc` sweeps, which are global to this
     /// process regardless of how many helm connections are open at once.

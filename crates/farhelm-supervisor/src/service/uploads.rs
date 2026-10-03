@@ -368,7 +368,8 @@ async fn reply(
 /// semaphore bounds concurrent SLOW REQUESTS (kill sweeps, tmux round
 /// trips) at eight supervisor-wide, and a transfer lives as long as the
 /// user's file takes to arrive — holding a permit for that would let eight
-/// pasted screenshots stall every session's list, stop, and delete. The
+/// pasted screenshots starve every management request and every delete on
+/// the host for as long as they took to arrive. The
 /// bound that applies here is [`MAX_UPLOADS_PER_CONNECTION`] instead, and
 /// every exit path of this task is bounded by either the client, the
 /// progress timeout, or a delete.

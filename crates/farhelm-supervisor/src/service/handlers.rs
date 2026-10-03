@@ -17,8 +17,8 @@
 
 use super::agent_relay::NO_HELM_ATTACHED;
 use super::connection::{
-    ConnectionCtx, Forwarder, notify_detached, reply_frame, send_reply, set_attachment_paused,
-    spawn_admitted,
+    ConnectionCtx, Forwarder, admit_or_refuse, notify_detached, reply_frame, send_reply,
+    set_attachment_paused, spawn_admitted,
 };
 use super::core::{
     CreateInputs, CreateMode, RequestError, SessionEntry, Supervisor, create_fingerprint,
@@ -1126,8 +1126,7 @@ async fn handle_browse_directory(
     cwd: String,
 ) {
     let sup2 = Arc::clone(sup);
-    let tx = tx.clone();
-    spawn_admitted(&sup.admission, tasks, async move {
+    spawn_admitted(&sup.admission, tasks, tx, req_id, |tx| async move {
         let reply = directory_browse_reply(
             req_id,
             DIRECTORY_BROWSE_TIMEOUT,
@@ -1177,6 +1176,10 @@ where
 /// permit until intent, sweep, and outcome are complete; the connection's
 /// `JoinSet` tracks only a reply waiter, so disconnect cleanup cannot strand a
 /// SIGSTOPped tree.
+///
+/// When every management slot is taken the stop is refused with a "try
+/// again" before anything happens to the session, rather than waiting for a
+/// slot in the connection's read loop (see `admit_or_refuse`).
 async fn handle_stop_session(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
@@ -1184,10 +1187,12 @@ async fn handle_stop_session(
     req_id: u64,
     session_id: String,
 ) {
-    let permit = Arc::clone(&sup.admission)
-        .acquire_owned()
-        .await
-        .expect("admission semaphore is never closed");
+    // Refused rather than waited for when every management slot is taken:
+    // this runs in the connection's read loop, which must keep delivering
+    // input. See `admit_or_refuse`.
+    let Some(permit) = admit_or_refuse(&sup.admission, tx, req_id).await else {
+        return;
+    };
     let mutation_sup = Arc::clone(sup);
     let mutation_id = session_id.clone();
     let tx = tx.clone();
@@ -2435,8 +2440,8 @@ async fn handle_restart_session(
 /// cancellation rules — the commit must outlive its connection,
 /// the reply must not — so it cannot simply wrap the whole thing
 /// in [`spawn_admitted`]. What it does instead is acquire ONE
-/// owned permit here (this read loop waits for capacity, exactly
-/// as `spawn_admitted` would) and then move it: into
+/// owned permit here (this read loop waits for capacity) and
+/// then move it: into
 /// [`Supervisor::rename_session`]'s supervisor-owned commit task,
 /// which hands it back with a successful result, and from there
 /// into the reply build.
@@ -2549,8 +2554,7 @@ async fn handle_open_tab(
     session_id: String,
 ) {
     let sup2 = Arc::clone(sup);
-    let tx = tx.clone();
-    spawn_admitted(&sup.admission, tasks, async move {
+    spawn_admitted(&sup.admission, tasks, tx, req_id, |tx| async move {
         let sup = sup2;
         match sup.open_tab(&session_id).await {
             Ok(tab) => send_reply(&tx, &ControlMsg::TabOpened { req_id, tab }).await,
@@ -2574,8 +2578,7 @@ async fn handle_close_tab(
     tab_id: String,
 ) {
     let sup2 = Arc::clone(sup);
-    let tx = tx.clone();
-    spawn_admitted(&sup.admission, tasks, async move {
+    spawn_admitted(&sup.admission, tasks, tx, req_id, |tx| async move {
         let sup = sup2;
         match sup.close_tab(&session_id, &tab_id).await {
             Ok(()) => send_reply(&tx, &ControlMsg::TabClosed { req_id }).await,
@@ -2993,11 +2996,11 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         } => {
             // Git can consume the full discovery deadline. Keep this work in
             // the connection's tracked task set, with shared handler admission
-            // and the scanner's separate two-child budget. Never hold directory
+            // (refused while the host is busy, see `admit_or_refuse`) and the
+            // scanner's separate two-child budget. Never hold directory
             // admission across inspection subprocesses.
             let sup2 = Arc::clone(sup);
-            let tx = ctx.tx.clone();
-            spawn_admitted(&sup.admission, ctx.tasks, async move {
+            spawn_admitted(&sup.admission, ctx.tasks, ctx.tx, req_id, |tx| async move {
                 let reply = match sup2.github_repo_search(root.as_deref(), &query).await {
                     Ok(result) => ControlMsg::GithubRepoResults {
                         req_id,
@@ -10349,6 +10352,73 @@ mod tests {
             matches!(listed, ControlMsg::SessionList { .. }),
             "the waiting list must be answered once a list permit frees, got {listed:?}"
         );
+
+        host.release().await;
+    }
+
+    /// Assert that `reply` is the busy-host refusal for `req_id`.
+    fn assert_refused_as_busy(reply: &ControlMsg, req_id: u64) {
+        assert_eq!(
+            reply,
+            &ControlMsg::Error {
+                req_id,
+                kind: ErrorKind::Unavailable,
+                message: farhelm_proto::HOST_BUSY_REFUSAL.to_string(),
+            },
+            "a management request on a saturated host must be refused as busy"
+        );
+    }
+
+    /// Spec: with every management slot held, a Stop is refused at once with
+    /// a "try again" (`ErrorKind::Unavailable`), and typing on the same
+    /// connection keeps reaching its pane.
+    ///
+    /// Why: Stop used to wait for a slot in the connection's read loop, so
+    /// one more Stop on a busy host froze every keystroke to every session
+    /// on it until a running Stop or Delete finished its kill grace period.
+    /// The refusal arriving while the parked Stops still hold every slot,
+    /// followed by an echo of input typed after it, is what shows the loop
+    /// never waited.
+    #[farhelm_testtrace::test]
+    async fn a_stop_on_a_saturated_host_is_refused_and_typing_continues() {
+        let mut host = BusyHost::new().await;
+
+        host.send(ControlMsg::StopSession {
+            req_id: 2,
+            session_id: "another-session".to_string(),
+        })
+        .await;
+        host.type_and_see_echo("typed-after-the-stop").await;
+        let reply = host.reply(2).await;
+        assert_refused_as_busy(&reply, 2);
+        assert_eq!(
+            host.sup.admission.available_permits(),
+            0,
+            "the refusal must have come while the parked Stops still held every slot"
+        );
+
+        host.release().await;
+    }
+
+    /// Spec: the requests admitted through `spawn_admitted` (tab open and
+    /// close, directory browse, repository search) are refused the same way
+    /// on a saturated host, and typing continues.
+    ///
+    /// Why: `spawn_admitted` is the shared helper, and it waited for a slot
+    /// in the read loop exactly as Stop did. Opening a tab stands in for all
+    /// of them because it needs nothing but a session id.
+    #[farhelm_testtrace::test]
+    async fn a_tab_open_on_a_saturated_host_is_refused_and_typing_continues() {
+        let mut host = BusyHost::new().await;
+
+        host.send(ControlMsg::OpenTab {
+            req_id: 2,
+            session_id: "another-session".to_string(),
+        })
+        .await;
+        host.type_and_see_echo("typed-after-the-tab-open").await;
+        let reply = host.reply(2).await;
+        assert_refused_as_busy(&reply, 2);
 
         host.release().await;
     }

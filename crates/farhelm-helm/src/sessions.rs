@@ -189,6 +189,28 @@ struct GithubRepositoriesBody {
     scan_error: Option<String>,
 }
 
+/// The status a failed repository search shows, chosen by the helm.
+///
+/// The supervisor's own error text never reaches the browser here (it may
+/// carry config text or URLs), so the helm picks one of its own sentences.
+/// A supervisor that refused the search because every management slot was
+/// taken gets the shared busy sentence, since "verify Git" would send the
+/// user to fix something that is not broken; every other failure keeps the
+/// Git and checkout-root hint. Only the kind of a supervisor's reply is
+/// read, never its text, so a supervisor that lies about being busy can
+/// only choose between two helm-written sentences.
+fn repository_discovery_failure(error: &anyhow::Error) -> String {
+    let busy = crate::find_cause::<SupervisorError>(error).is_some_and(|e| {
+        e.origin == crate::client::ErrorOrigin::SupervisorReply && e.kind == ErrorKind::Unavailable
+    });
+    if busy {
+        farhelm_proto::HOST_BUSY_REFUSAL.to_string()
+    } else {
+        "repository discovery is unavailable on this host; verify Git and the configured checkout root"
+            .to_string()
+    }
+}
+
 /// Ask the selected target to inspect local clone origins using helm-owned
 /// configuration. Missing configuration and scan failure are explicit incomplete
 /// observations, rather than a successful empty inventory or an error affecting
@@ -279,7 +301,7 @@ pub(crate) async fn github_repositories(
             // A remote diagnostic may contain arbitrary config text or URLs.
             // Keep discovery's public response limited to identities and a
             // bounded actionable status, including when the scan itself fails.
-            .map_err(|_| "repository discovery is unavailable on this host; verify Git and the configured checkout root".to_string())
+            .map_err(|error| repository_discovery_failure(&error))
     } else if config.root.is_none() {
         Err(
             "no checkout root is configured; set one with `farhelm helm checkout-config set-root`"

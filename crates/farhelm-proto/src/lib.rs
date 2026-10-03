@@ -332,6 +332,12 @@ pub enum ErrorKind {
     /// which is precisely wrong for a condition an operator fixes by
     /// opening the session in the UI. Retry-when-the-fleet-changes is the
     /// action, and no existing kind carries it.
+    ///
+    /// A supervisor also answers a management request (a stop, tab open or
+    /// close, directory browse or repository search) with this kind, and
+    /// [`HOST_BUSY_REFUSAL`], when every one of its management slots is
+    /// taken. That is the same promise: nothing happened, and the same
+    /// request works once the host is less busy.
     Unavailable,
     /// The request was forwarded and the answer did not arrive inside the
     /// relay's budget. Added with `PROTOCOL_VERSION` 13.
@@ -2117,6 +2123,17 @@ pub enum AgentReply {
         source_profile: ProfileSnapshot,
     },
 }
+
+/// What a supervisor tells a management request it refuses because every
+/// one of its management slots is taken (see [`ErrorKind::Unavailable`]).
+///
+/// One constant across the supervisor, which sends it, and the helm, which
+/// shows the same sentence where it deliberately replaces a supervisor's
+/// own error text with words of its own (repository search). It names the
+/// problem in the user's terms and the whole remedy: the refusal comes
+/// before the request changes anything, so trying again is safe.
+pub const HOST_BUSY_REFUSAL: &str =
+    "this host is busy with other session operations; try again in a moment";
 
 /// The recovery sentence every relay-produced [`ErrorKind::Unavailable`]
 /// ends with.
