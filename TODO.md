@@ -92,10 +92,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   held or failed app lock) rewrites the directory's record but not the app's, and uninstall then refuses the app.
   Porting the installer's moved-here rule to the uninstaller was considered and stopped, since accepting an alias or a
   vanished directory in the step that deletes the app reverses that deliberate rule. Decide whether that leftover is
-  worth a change, or drop this entry.
+  worth a change, or drop this entry. Plan: `plans/queue/install-output-layout.md`.
 
 - Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
   restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.
+  Plan: `plans/queue/install-output-layout.md`.
 
 - **No network path for the desktop app.** The desktop app's webview talks to its embedded helm the way the browser
   does, over HTTP and WebSockets on a loopback port, so one UI code path serves both clients. That port can be reached
@@ -168,7 +169,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   supervisor reporting "the session's fresh-checkout provenance does not match its registry evidence". The next refresh
   succeeded and nothing visible followed; the same error appears in a 2026-09-30 browser run of the existing
   Replace-with test. Both concern fresh-checkout bookkeeping, so they are investigated together; whether they share a
-  cause is unknown.
+  cause is unknown. Plan: `plans/queue/fresh-checkout-provenance.md`.
 
 ## Doc todo
 
