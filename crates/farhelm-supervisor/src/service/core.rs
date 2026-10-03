@@ -1295,9 +1295,10 @@ impl StateDirOwnership {
     }
 }
 
-/// Cap on slow handler tasks (`ListSessions`/`StopSession`/`DeleteSession`
-/// — see their own arms' comments in `handle_control` on why they're
-/// spawned rather than awaited inline) allowed in flight AT ONCE across
+/// Cap on slow handler tasks (`StopSession`/`DeleteSession` and the other
+/// management requests — see their own arms' comments in `handle_control` on
+/// why they're spawned rather than awaited inline; the session list has its
+/// own limit, [`LIST_ADMISSION_PERMITS`]) allowed in flight AT ONCE across
 /// the WHOLE supervisor process (`Supervisor::admission`), not per
 /// connection: the resource actually being bounded — tmux subprocesses,
 /// `/proc` sweeps — is process-global, and a per-connection cap would let
@@ -1315,11 +1316,31 @@ impl StateDirOwnership {
 /// is waiting for dispatch. Its task is tracked before that wait and acquires
 /// a permit only after the fence clears; the other slow handlers retain the
 /// admission-before-spawn rule. 8 is generous headroom for
-/// ordinary use (a polling UI keeps at most one `ListSessions` in flight
-/// per connection at a time) while still being a REAL bound against a
+/// ordinary use while still being a REAL bound against a
 /// pathological flood or a buggy client that fires requests without
 /// waiting for replies.
-const HANDLER_ADMISSION_PERMITS: usize = 8;
+pub(crate) const HANDLER_ADMISSION_PERMITS: usize = 8;
+
+/// Cap on session-list builds in flight at once across the whole supervisor
+/// (`Supervisor::list_admission`), kept apart from
+/// [`HANDLER_ADMISSION_PERMITS`] on purpose.
+///
+/// SPEC.md "Waiting between operations on one host" says the session list
+/// must not wait on management operations. Sharing the management slots
+/// broke that: eight Stops, Restarts or Deletes sitting out their kill grace
+/// periods held every slot, and the next list request either waited for one
+/// or, refused, would have left the UI showing stale rows for as long as
+/// management stayed busy. Listing needs no management slot for
+/// correctness (it holds the session map only briefly and takes no
+/// lifecycle, intent or directory lock), so this limit only bounds what a
+/// list build costs: its tmux subprocesses and its capture sweep. The status
+/// sampler's `sampling_admission` is the precedent for giving periodic or
+/// read-only work its own limiter rather than a share of the request pool.
+///
+/// Two rather than one so the helm's periodic refresh does not queue behind
+/// a session-detail read or an agent's listing that happens to be building
+/// at the same moment.
+pub(crate) const LIST_ADMISSION_PERMITS: usize = 2;
 
 /// The actual filesystem operations behind directory browsing may remain in
 /// the kernel after the caller has received its timeout reply. This smaller,
@@ -3942,6 +3963,10 @@ pub(crate) struct SessionCells {
 ///   lifecycle claim (delete's teardown aborts the session's uploads), and
 ///   is never held alongside `attachments`, `sessions`, or `sinks`.
 /// - `helm_links`: taken only after releasing `attachments`.
+/// - `list_admission`: taken at the top of a list build with nothing else
+///   held, and kept while the build takes `sessions` and runs its tmux and
+///   capture work, then released before the reply is sent. Never held
+///   alongside `admission`.
 /// - `sampling_admission`: taken at the top of a ticker pass with nothing
 ///   else held, and kept across the pass, which takes `sessions`, lifecycle
 ///   claims (work-start persistence, tab reaping), and `capture.lock`.
@@ -4124,9 +4149,9 @@ pub struct Supervisor {
     /// ([`crate::launch::window_command`]), so such a path broke every
     /// launch.
     farhelm_exe_str: String,
-    /// Admission control for the slow handlers spawned by
-    /// `handle_control` (`ListSessions`/`StopSession`/`DeleteSession` —
-    /// see `HANDLER_ADMISSION_PERMITS`'s own docs). Deliberately
+    /// Admission control for the slow management handlers spawned by
+    /// `handle_control` (`StopSession`/`DeleteSession` and the rest — see
+    /// `HANDLER_ADMISSION_PERMITS`'s own docs). Deliberately
     /// SUPERVISOR-wide, not per-connection: the resource being bounded is
     /// tmux subprocesses and `/proc` sweeps, which are global to this
     /// process regardless of how many helm connections are open at once.
@@ -4139,6 +4164,12 @@ pub struct Supervisor {
     /// globally would buy nothing and would entangle unrelated
     /// connections' teardowns.
     pub(crate) admission: Arc<tokio::sync::Semaphore>,
+    /// The session list's own limit, disjoint from `admission` so management
+    /// work can never hold up a listing; see [`LIST_ADMISSION_PERMITS`].
+    /// Supervisor-wide for the same reason `admission` is: the cost it
+    /// bounds is this process's tmux subprocesses, whichever connection
+    /// asked.
+    pub(crate) list_admission: Arc<tokio::sync::Semaphore>,
     /// Bounds filesystem workers independently from request replies. A
     /// request may time out and release its handler permit while its blocking
     /// `stat`/directory read continues; the worker keeps this permit until
@@ -5208,6 +5239,7 @@ impl Supervisor {
             farhelm_exe,
             farhelm_exe_str,
             admission: Arc::new(tokio::sync::Semaphore::new(HANDLER_ADMISSION_PERMITS)),
+            list_admission: Arc::new(tokio::sync::Semaphore::new(LIST_ADMISSION_PERMITS)),
             directory_browse_workers: Arc::new(tokio::sync::Semaphore::new(
                 DIRECTORY_BROWSE_WORKER_PERMITS,
             )),

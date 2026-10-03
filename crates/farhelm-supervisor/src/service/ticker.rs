@@ -5557,7 +5557,7 @@ mod tests {
         )
         .await
         .expect("a request must not wait on the sampler's limiter");
-        // `ListSessions` is admitted then SPAWNED, so the reply arrives on
+        // `ListSessions` is SPAWNED, so the reply arrives on
         // the writer channel rather than from `handle_control` itself.
         let frame = tokio::time::timeout(Duration::from_secs(10), rx.recv())
             .await
