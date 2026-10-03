@@ -2,15 +2,14 @@
 # Serve the docs site from this checkout at a fixed local address, for reviewing drafts while they are written.
 #
 # Usage:
-#   website/scripts/preview.sh [start]      start the server if needed, wait until it answers, print its URL
-#   website/scripts/preview.sh takeover     stop another checkout's preview server on the port (or one whose checkout
-#                                           was deleted), then start this one
+#   website/scripts/preview.sh [start]      start the server if needed (taking the port from another checkout's
+#                                           preview), wait until it answers, print its URL
 #   website/scripts/preview.sh stop         stop this checkout's server
 #   website/scripts/preview.sh status       say whether the port is served, and from which checkout
 #   website/scripts/preview.sh url <file>   print the preview URL of a page source file under src/content/docs/
 #
-# Exit status: 0 on success. `start` exits 1 when the port is held by something other than this checkout's server, and
-# prints nothing on stdout then, so no link to the wrong checkout's pages can come out of it. `status` exits 0 when
+# Exit status: 0 on success. `start` exits 1 when the port is held by something that is not a preview server, and prints
+# nothing on stdout then, so no link to the wrong pages can come out of it. `status` exits 0 when
 # this checkout is serving, 1 when something else holds the port, and 3 when nothing does. Usage errors exit 2.
 #
 # The server is Astro's dev server in its background mode, not `vercel dev`: the site is plain static Astro, so `vercel
@@ -22,9 +21,10 @@
 #
 # NOTE: The port is fixed on purpose, unlike every test harness in this repository. The maintainer reads the preview
 # through a port forward they set up once, and a port that changed per run would need a new forward every time. The
-# cost is that only one checkout on the machine can serve a preview at a time. `start` refuses rather than taking the
-# port from another checkout's server, which belongs to whoever started it; `takeover` exists for when the maintainer
-# says to take it anyway.
+# cost is that only one checkout on the machine can serve a preview at a time. The maintainer drafts in one session at a
+# time, so `start` takes the port from another checkout's preview server (or from one whose checkout was deleted)
+# without asking: whatever that server shows is a draft nobody is reading any more. Anything on the port that is not a
+# preview server is left alone, because there is no telling what it is.
 #
 # Which checkout a process belongs to is decided by comparing its working directory with the website directory by
 # device and inode (ss and /proc, so Linux only), never by matching process names or path strings. Strings would fail
@@ -39,7 +39,7 @@ website=$(cd "$(dirname "$0")/.." && pwd -P) || exit 1
 astro="$website/node_modules/.bin/astro"
 
 usage() {
-  echo "usage: $0 [start|takeover|stop|status|url <file>]" >&2
+  echo "usage: $0 [start|stop|status|url <file>]" >&2
   exit 2
 }
 
@@ -134,20 +134,50 @@ orphaned_astro() {
   tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null | grep -q 'astro/bin/astro\.mjs dev '
 }
 
+# Free the port from another checkout's preview server: an Astro background server whose own checkout's lock names it,
+# or an Astro server whose checkout no longer exists. Exits 1, touching nothing, when the holder is anything else.
+take_port() {
+  tpid=$(listener_pid)
+  if orphaned_astro "$tpid"; then
+    echo "preview: stopping pid $tpid, a preview server whose checkout no longer exists" >&2
+    kill -TERM "$tpid" 2>/dev/null
+    tries=0
+    while kill -0 "$tpid" 2>/dev/null && [ $tries -lt 50 ]; do
+      tries=$((tries + 1))
+      sleep 0.1
+    done
+    kill -0 "$tpid" 2>/dev/null && kill -KILL "$tpid" 2>/dev/null
+    return 0
+  fi
+  other=$(readlink "/proc/$tpid/cwd" 2>/dev/null)
+  if [ -z "$tpid" ] || [ -z "$other" ] || [ "$(lock_pid "$other/.astro/dev.json")" != "$tpid" ] \
+    || ! runs_in "$tpid" "$other"; then
+    echo "preview: $(describe_listener), and it is not a preview server; not touching it." >&2
+    echo "preview: hand out no preview links; tell the maintainer what holds the port." >&2
+    exit 1
+  fi
+  echo "preview: taking port $port from the preview server of $other" >&2
+  stop_server_in "$other"
+}
+
 start() {
   if ours_is_serving; then
     echo "$base_url/docs/"
     return 0
   fi
   if port_in_use; then
-    echo "preview: $(describe_listener)." >&2
-    echo "preview: that is not this checkout's server, so its pages are not your draft; hand out no preview links." >&2
-    if orphaned_astro "$(listener_pid)"; then
-      echo "preview: its checkout is gone, so it is no one's; '$0 takeover' clears it without asking." >&2
-    else
-      echo "preview: tell the maintainer, and run '$0 takeover' only if they say to." >&2
+    take_port
+    # The other server's own stop can fail quietly (its node_modules gone,
+    # say); starting anyway would land on another port and be misreported.
+    tries=0
+    while port_in_use && [ $tries -lt 50 ]; do
+      tries=$((tries + 1))
+      sleep 0.1
+    done
+    if port_in_use; then
+      echo "preview: could not free port $port: $(describe_listener). Hand out no preview links; tell the maintainer." >&2
+      exit 1
     fi
-    exit 1
   fi
 
   cd "$website" || exit 1
@@ -177,34 +207,6 @@ start() {
     exit 1
   fi
   echo "$base_url/docs/"
-}
-
-# Take the port from another checkout's preview server. Only an Astro background server whose own checkout's lock names
-# it, or an Astro server whose checkout no longer exists, is stopped; anything else on the port is left alone, because
-# there is no telling what it is.
-takeover() {
-  if port_in_use && ! ours_is_serving; then
-    tpid=$(listener_pid)
-    if orphaned_astro "$tpid"; then
-      echo "preview: stopping pid $tpid, a preview server whose checkout no longer exists" >&2
-      kill -TERM "$tpid" 2>/dev/null
-      tries=0
-      while kill -0 "$tpid" 2>/dev/null && [ $tries -lt 50 ]; do
-        tries=$((tries + 1))
-        sleep 0.1
-      done
-    else
-      other=$(readlink "/proc/$tpid/cwd" 2>/dev/null)
-      if [ -z "$tpid" ] || [ -z "$other" ] || [ "$(lock_pid "$other/.astro/dev.json")" != "$tpid" ] \
-        || ! runs_in "$tpid" "$other"; then
-        echo "preview: $(describe_listener), and it is not another checkout's preview server; not touching it." >&2
-        exit 1
-      fi
-      echo "preview: stopping the preview server of $other" >&2
-      stop_server_in "$other"
-    fi
-  fi
-  start
 }
 
 stop() {
@@ -259,7 +261,6 @@ url() {
 
 case "${1:-start}" in
   start) [ $# -le 1 ] || usage; start ;;
-  takeover) [ $# -eq 1 ] || usage; takeover ;;
   stop) [ $# -eq 1 ] || usage; stop ;;
   status) [ $# -eq 1 ] || usage; status ;;
   url) [ $# -eq 2 ] || usage; url "$2" ;;
