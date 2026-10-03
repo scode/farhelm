@@ -1751,7 +1751,7 @@ pub struct EmbeddedReady {
     pub addr: SocketAddr,
     /// The credential for the desktop's native REST client.
     pub native_device_secret: String,
-    /// The credential for the desktop's webview (its localStorage and
+    /// The credential for the desktop's webview (its page-memory global and
     /// WebSocket subprotocols).
     pub webview_device_secret: String,
 }

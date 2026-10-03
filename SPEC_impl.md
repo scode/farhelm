@@ -2557,7 +2557,7 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   Origin guard remains defense in depth; no ambient browser credential remains, so this flow has no CSRF edge. The
   `dioxus://` and `wry://` Origin exemption exists only on the embedded helm; a standalone helm has no custom-scheme
   page to authorize and refuses those origins.
-- The desktop app's two credentials (one for native REST, one for the webview's localStorage and WebSocket subprotocols)
+- The desktop app's two credentials (one for native REST, one for the webview's page memory and WebSocket subprotocols)
   bypass that exchange. The embedded helm mints them in memory at startup and hands them to the desktop process through
   `run_embedded`'s readiness channel; it keeps only their SHA-256 digests, in memory, and checks them before any stored
   rows. It rejects stored browser rows from the shared state directory, so only the current launch can authenticate.
@@ -2565,10 +2565,14 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   authenticate are not closed by rotation. No HTTP route mints one, and the embedded helm serves no browser UI. They die
   with the process, so nothing persists or accumulates across launches, and the app keeps none on disk. With nothing to
   revoke, the desktop has no re-authentication path: a native 401 is reported as an error, and the window's failure page
-  with its Retry button is left for genuinely broken states, such as a webview whose localStorage refuses the write
-  (`desktop-auth.js` treats that as an authentication failure, since the page's sockets read their credential from
-  there). Like a browser's, the webview's secret is readable by script in the window; unlike a browser's, a stolen one
-  survives rotation and ends only when the app quits.
+  with its Retry button is left for genuinely broken states, such as a webview credential that fails validation or the
+  event-socket probe. The page keeps its secret in memory for the life of the window, and removes any legacy
+  `farhelm.device-secret` key on each credentialed authentication attempt as best effort. A debug page reload discards
+  that page copy; nothing hands the page its credential again, so its terminals, attachment uploads and event feed
+  cannot authenticate until the app is relaunched. The shipped release desktop configuration does not expose the debug
+  context-menu reload control, so that debug-only behavior is outside the supported product lifetime. Like a browser's,
+  the webview's secret is readable by script in the window; unlike a browser's, a stolen one survives rotation and ends
+  only when the app quits.
 - The loopback guard accepts `Host` and `Origin` only as the IPv4 literal `127.0.0.1:<port>` (bare `127.0.0.1` on port
   80, where browsers omit the default port), or (in embedded mode only) the native webview's custom schemes as Origin.
   That exemption is a scheme prefix and cannot be narrower in a useful way: dioxus-desktop hardcodes the page URL

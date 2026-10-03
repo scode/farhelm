@@ -4,8 +4,9 @@
 //! 401, and every successful exchange remounts the active surface and feed so
 //! no reader retains revoked state. The desktop app never signs in: its
 //! embedded helm mints two in-memory credentials at startup, one that native
-//! REST holds as process state and one the webview receives over IPC for
-//! localStorage and WebSocket subprotocols (see [`DesktopBootstrapGate`]).
+//! REST holds as process state and one the webview receives over IPC for its
+//! page-memory credential and WebSocket subprotocols (see
+//! [`DesktopBootstrapGate`]).
 //! Token rotation and the helm's cap on remembered browser credentials do not
 //! apply to them, so nothing in ordinary operation makes the window
 //! authenticate again (SPEC.md "Signing in again").
@@ -43,11 +44,12 @@ pub(crate) fn require_desktop_webview_reauth() {
 /// webview gets its own in-memory credential, minted by the embedded helm for
 /// this launch, over the eval IPC channel; it never travels through a URL or
 /// rendered DOM, and the web token never enters JavaScript at all (SPEC.md
-/// "Client hardening"). The page script stores it where the terminals,
-/// uploads and event feed read it, proves the helm accepts it, and reports
-/// `ready`; any failure, including a localStorage write that does not take,
-/// lands on the failure page rather than opening a window whose sockets
-/// cannot authenticate.
+/// "Client hardening"). The page script keeps it in a page global where the
+/// terminals, attachment uploads and event feed read it, proves the helm
+/// accepts it, and reports `ready`; any failure lands on the failure page
+/// rather than opening a window whose sockets cannot authenticate.
+/// A debug page reload is the exception: it discards the page copy, and no
+/// current path sends it again until the app is relaunched (see `SPEC_impl.md`).
 ///
 /// The failure page and its Retry button remain as a last resort for
 /// something genuinely broken. Ordinary operation, including `farhelm helm
@@ -349,7 +351,10 @@ fn arm_native_clipboard_script(base: &str, secret: &str) -> String {
 ///
 /// localStorage is scoped to the complete origin, including its port. That is
 /// the security property a host-scoped cookie cannot provide when unrelated
-/// loopback services share `127.0.0.1`.
+/// loopback services share `127.0.0.1`. The same key string is read by
+/// `terminal.js` and `events.js`, which the desktop webview also runs. The
+/// desktop never writes it: those readers fall back to it only when the page
+/// global is missing after a reload, and the embedded helm rejects old values.
 #[cfg(target_arch = "wasm32")]
 pub(crate) const DEVICE_SECRET_KEY: &str = "farhelm.device-secret";
 

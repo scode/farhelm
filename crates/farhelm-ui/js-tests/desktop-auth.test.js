@@ -13,30 +13,37 @@ function channel(replies) {
   };
 }
 
-// The browser primitives the script is handed, with an in-memory
-// localStorage whose contents (`values`) the tests read back directly.
-// `options.throwRemove` makes removeItem throw, for the tests that pin
-// cleanup as best-effort; `options.throwSet` makes setItem throw, and
-// `options.dropSet` makes it silently keep the old value.
+// The browser primitives the script is handed, with an in-memory page global
+// and localStorage whose contents (`values`) the tests read back directly.
+// `options.storage: null` simulates unavailable storage, and
+// `options.throwRemove` makes removeItem throw so the tests can pin cleanup
+// as best-effort.
 function platform(fetch, WebSocket, options = {}) {
   const values = new Map();
+  const removals = [];
+  const writes = [];
+  const page = {};
+  const storage = options.storage === null ? null : {
+    getItem: (key) => values.get(key) || null,
+    setItem: (key, value) => {
+      writes.push([key, value]);
+      values.set(key, value);
+    },
+    removeItem: (key) => {
+      removals.push(key);
+      if (options.throwRemove) throw new Error("removeItem refused");
+      values.delete(key);
+    },
+  };
   return {
     fetch,
     WebSocket,
+    page,
     AbortController,
     values,
-    storage: {
-      getItem: (key) => values.get(key) || null,
-      setItem: (key, value) => {
-        if (options.throwSet) throw new Error("QuotaExceededError");
-        if (options.dropSet) return;
-        values.set(key, value);
-      },
-      removeItem: (key) => {
-        if (options.throwRemove) throw new Error("removeItem refused");
-        values.delete(key);
-      },
-    },
+    removals,
+    writes,
+    storage,
     setTimeout,
     clearTimeout,
   };
@@ -61,12 +68,12 @@ class UnusedSocket {
 
 const BOOTSTRAP = { base: "http://127.0.0.1:7433", secret: "launch-device" };
 
-// The ordinary launch: the handed-over credential lands where the page's
-// terminals, uploads and event feed read it, the helm accepts it, and the
-// script reports ready. Nothing is minted and nothing is sent back but
-// `ready`: the credential is the embedded helm's in-memory one, so there is
-// no exchange to run and no commit to make.
-test("a launch stores the handed-over credential, validates it, and reports ready", async () => {
+// The ordinary launch: the handed-over credential lands in page memory where
+// the page's terminals, attachment uploads and event feed read it, the helm
+// accepts it, and the script reports ready. Nothing is minted and nothing is
+// sent back but `ready`: the credential is the embedded helm's in-memory one,
+// so there is no exchange to run and no disk write to make.
+test("a launch keeps the handed-over credential in page memory", async () => {
   const requests = [];
   const ipc = channel([BOOTSTRAP]);
   const browser = platform(async (url, options) => {
@@ -76,52 +83,64 @@ test("a launch stores the handed-over credential, validates it, and reports read
 
   await authenticate(ipc, browser);
 
-  assert.equal(browser.values.get("farhelm.device-secret"), "launch-device");
+  assert.equal(browser.page.__farhelmWebviewDeviceSecret, "launch-device");
+  assert.deepEqual(browser.writes, [], "desktop authentication never persists the credential");
   assert.deepEqual(requests.map(([url]) => url), ["http://127.0.0.1:7433/api/auth/device"]);
   assert.equal(requests[0][1].headers.Authorization, "Bearer launch-device");
   assert.deepEqual(ipc.sent, [{ ready: true }]);
 });
 
-// A localStorage write that fails is an authentication failure, not a
-// shrug. The page's consumers read their credential from storage, so a
-// window opened after a failed write would run its terminals and event feed
-// on no credential, or on a stale one from an earlier launch that the helm
-// no longer accepts, while reporting itself ready. This used to be swallowed.
-test("a throwing localStorage write fails authentication, even over a stale value", async () => {
+// A legacy secret is removed during authentication. A storage implementation
+// that refuses that cleanup cannot make a valid in-memory credential fail.
+test("legacy desktop storage cleanup is best effort", async () => {
   for (const stale of [null, "previous-launch-device"]) {
     const ipc = channel([BOOTSTRAP]);
-    const browser = platform(async () => ({ ok: true, status: 204 }), UnusedSocket, {
-      throwSet: true,
+    const browser = platform(async () => ({ ok: true, status: 204 }), AcceptingSocket, {
+      throwRemove: true,
     });
     if (stale) browser.values.set("farhelm.device-secret", stale);
 
     await authenticate(ipc, browser);
 
-    assert.equal(ipc.sent.length, 1, `stale=${stale}`);
-    assert.match(ipc.sent[0].error, /^storing the webview credential failed: QuotaExceededError/);
+    assert.deepEqual(ipc.sent, [{ ready: true }], `stale=${stale}`);
+    assert.ok(browser.removals.includes("farhelm.device-secret"), `stale=${stale}`);
+    assert.equal(browser.page.__farhelmWebviewDeviceSecret, "launch-device");
     assert.equal(
       browser.values.get("farhelm.device-secret"),
       stale || undefined,
-      "the test premise: storage still holds whatever was there before",
+      "the test premise: refused cleanup leaves the legacy value in place",
     );
   }
 });
 
-// A write that throws nothing but does not take is the same failure: what
-// matters is what the consumers will read back, not whether setItem
-// complained.
-test("a localStorage write that does not read back fails authentication", async () => {
+// Storage is only a migration cleanup path now. A webview that disables or
+// rejects localStorage must still be able to authenticate from page memory.
+test("unavailable localStorage does not block authentication", async () => {
   const ipc = channel([BOOTSTRAP]);
-  const browser = platform(async () => ({ ok: true, status: 204 }), UnusedSocket, {
-    dropSet: true,
+  const browser = platform(async () => ({ ok: true, status: 204 }), AcceptingSocket, {
+    storage: null,
   });
-  browser.values.set("farhelm.device-secret", "previous-launch-device");
 
   await authenticate(ipc, browser);
 
-  assert.deepEqual(ipc.sent, [{
-    error: "storing the webview credential failed: it did not read back",
-  }]);
+  assert.equal(browser.page.__farhelmWebviewDeviceSecret, "launch-device");
+  assert.deepEqual(ipc.sent, [{ ready: true }]);
+});
+
+// Successful cleanup removes the old key without touching unrelated page
+// storage. The page global remains the sole desktop credential source.
+test("authentication removes the legacy desktop secret", async () => {
+  const ipc = channel([BOOTSTRAP]);
+  const browser = platform(async () => ({ ok: true, status: 204 }), AcceptingSocket);
+  browser.values.set("farhelm.device-secret", "previous-launch-device");
+  browser.values.set("farhelm.unrelated", "kept");
+
+  await authenticate(ipc, browser);
+
+  assert.equal(browser.values.has("farhelm.device-secret"), false);
+  assert.equal(browser.values.get("farhelm.unrelated"), "kept");
+  assert.equal(browser.page.__farhelmWebviewDeviceSecret, "launch-device");
+  assert.deepEqual(ipc.sent, [{ ready: true }]);
 });
 
 // The helm refusing the credential is reported, never repaired. There is no
@@ -152,7 +171,7 @@ test("a hand-off without a credential is reported", async () => {
 
   await authenticate(ipc, browser);
 
-  assert.equal(browser.values.has("farhelm.device-secret"), false);
+  assert.equal(browser.page.__farhelmWebviewDeviceSecret, undefined);
   assert.deepEqual(ipc.sent, [{ error: "native handed over no webview credential" }]);
 });
 
@@ -177,8 +196,8 @@ test("a WebSocket failure after successful validation is reported", async () => 
 // An upgraded webview still carries the localStorage keys the retired
 // per-client preference persistence wrote. The preference lives in the helm
 // now with no client-side copy wanted (SPEC.md, Session list), so a
-// successful authentication is also the upgrade point that scrubs exactly
-// those keys — and nothing else.
+// successful authentication also scrubs those preference keys and leaves
+// unrelated keys alone.
 test("authentication scrubs the retired preference keys and keeps the rest", async () => {
   const ipc = channel([BOOTSTRAP]);
   const browser = platform(async () => ({ ok: true, status: 204 }), AcceptingSocket);

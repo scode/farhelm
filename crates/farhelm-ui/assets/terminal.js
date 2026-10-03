@@ -356,9 +356,19 @@
 
 (function () {
   const DEVICE_SECRET_KEY = "farhelm.device-secret";
+  const WEBVIEW_DEVICE_SECRET = "__farhelmWebviewDeviceSecret";
 
-  /** Read the current origin-scoped credential for HTTP and WS requests. */
+  /**
+   * Read the current credential for HTTP and WS requests.
+   *
+   * The desktop authentication handoff keeps its per-launch secret on the
+   * page so WebKit cannot persist it. Browser pages have no handoff global,
+   * so they retain the origin-scoped localStorage behavior.
+   */
   function deviceSecret() {
+    if (typeof window[WEBVIEW_DEVICE_SECRET] === "string") {
+      return window[WEBVIEW_DEVICE_SECRET];
+    }
     try {
       return window.localStorage.getItem(DEVICE_SECRET_KEY) || "";
     } catch (_error) {
