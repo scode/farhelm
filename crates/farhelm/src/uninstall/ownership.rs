@@ -72,9 +72,8 @@ pub(crate) enum BundleInspection {
     /// this path. Nothing proves Farhelm installed it (installers before
     /// receipts existed, or a self-built app), so uninstall leaves it in place
     /// and says so, and still removes the verified flat installation.
-    /// Refusing instead left no documented way forward: the advised
-    /// reinstall does nothing under `FARHELM_NO_APP_BUNDLE` and otherwise
-    /// replaces the user's own app.
+    /// Removal must not depend on reinstalling: rebuilding a recognized
+    /// legacy app could replace it, while a foreign app is refused.
     RetainedWithoutReceipt(PathBuf),
     Recognized(BundlePlan),
 }

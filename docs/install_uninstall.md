@@ -5,10 +5,13 @@ removing software from hosts provisioned by a helm is a separate operation.
 
 ## Installation and updates
 
-The installer supports Linux on x86-64 or ARM64 and macOS on Apple silicon, including when invoked under Rosetta. Intel
-Macs and other platforms are unsupported. Installation needs `curl`, `tar` with gzip support, and one of `sha256sum`,
-`shasum` or `openssl` for checksum verification. Machines that run sessions also need tmux 3.7c or newer, installed
-separately; missing tmux does not prevent installation itself.
+The installer temporarily supports only the macOS desktop app on Apple silicon, including when invoked under Rosetta.
+Intel Macs and other platforms are refused. Only the installer is limited: Linux remains supported for helms and session
+hosts, and a helm sets up its remote hosts over SSH.
+
+Installation needs `curl`, `tar` with gzip support, and one of `sha256sum`, `shasum` or `openssl` for checksum
+verification. The Mac also needs tmux 3.7c or newer to run sessions, installed separately; missing tmux does not prevent
+installation itself.
 
 Run the installer as your normal user:
 
@@ -16,30 +19,24 @@ Run the installer as your normal user:
 curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | sh
 ```
 
-It downloads release archives for your platform and checks their checksums before installing the executables. The
-default location is `~/.local/bin/farhelm`. On macOS, it also installs `~/.local/bin/farhelm-desktop` and creates
-`~/Applications/Farhelm.app`, with copies of the executables inside the bundle.
+The installer checks the release archives' checksums, installs `~/.local/bin/farhelm` and
+`~/.local/bin/farhelm-desktop`, and builds `~/Applications/Farhelm.app` with copies of both executables. Those locations
+are fixed, and app assembly cannot be skipped. Keep the directories writable only by you: the update and recovery
+safeguards assume another account cannot create or replace files there.
 
-Set `FARHELM_INSTALL_DIR` to an absolute path to choose another executable directory (a relative path, or a quoted `~`
-the shell did not expand, is refused), one only you can write to: the installer's update and crash-recovery safeguards
-assume no other account can create or replace files there, and a directory shared with other local accounts
-(group-writable, or a sticky `/tmp`-style one) is not supported. The macOS app still goes in `~/Applications`;
-`FARHELM_NO_APP_BUNDLE=1` skips creating or updating that bundle. Set installer options on the `sh` side of the pipe,
-for example:
+Re-run the installer to update. It defaults to the latest stable release; `FARHELM_VERSION` selects a specific version,
+including a prerelease. Set it on the `sh` side of the pipe:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | FARHELM_INSTALL_DIR="$HOME/bin" sh
+curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | FARHELM_VERSION=0.2.1 sh
 ```
 
-Re-run the installer to update, using the same custom directory if you chose one. It defaults to the latest stable
-release; `FARHELM_VERSION` selects a specific version, including a prerelease. There is no automatic updater. Updates
-preserve user data, but already-running processes need restarting to use the new executables. Quit the desktop app
-before updating and relaunch it afterward. Follow the installer's restart guidance for services and other processes.
+There is no automatic updater. Updates preserve user data; quit and reopen Farhelm to use the new version.
 
-On macOS the installer rebuilds `~/Applications/Farhelm.app` on every run, replacing the whole bundle, but only when it
-can tell the bundle is its own: the bundle's record (see below) names this install directory, or it names a directory
-this installation moved from (one that now resolves to this install directory, such as an old `~/.local/bin` replaced by
-a symlink to its new home, or one that no longer holds a Farhelm installation at all), or it is the recordless bundle
+The installer rebuilds `~/Applications/Farhelm.app` on every run, replacing the whole bundle, but only when it can tell
+the bundle is its own: the bundle's record (see below) names this install directory, or it names a directory this
+installation moved from (one that now resolves to this install directory, such as an old `~/.local/bin` replaced by a
+symlink to its new home, or one that no longer holds a Farhelm installation at all), or it is the recordless bundle
 releases from early September 2026 built, recognised by its exact layout and bundle identifier. The record alone is
 enough, so a bundle that an interrupted uninstall half emptied is still rebuilt, and edits or extra files inside a
 bundle whose record matches are not kept. Any other `Farhelm.app`, such as one you built or customised, or one recorded
@@ -49,24 +46,23 @@ recorded for another installation, the error names that installation's directory
 uninstall the other installation, and re-run the installer to get the app. The uninstaller's own check is unchanged: it
 still removes only a bundle recorded for the installation it is uninstalling.
 
-Only one installer run assembles `Farhelm.app` at a time, whatever install directory it uses, and it replaces the old
-bundle by moving it aside rather than deleting it in place. A run that finds another one assembling the bundle, or finds
-`~/Applications/.farhelm-app.lock` left behind by an interrupted run, exits with an error after the executables are
-already updated. Re-run the installer; if the error persists and no installer is running, remove that lock by hand.
+Only one installer run assembles `Farhelm.app` at a time, including older installers using another directory, and it
+replaces the old bundle by moving it aside rather than deleting it in place. A run that finds another one assembling the
+bundle, or finds `~/Applications/.farhelm-app.lock` left behind by an interrupted run, exits with an error after the
+executables are already updated. Re-run the installer; if the error persists and no installer is running, remove that
+lock by hand.
 
-The installer only replaces a `farhelm` (or, on macOS, `farhelm-desktop`) in the install directory when its checksum
-matches the executable-directory record below, meaning it is the file the installer itself last put there. Any other
-file with that name, such as a wrapper script of your own or a Farhelm installed before these records existed, is kept
-under a visible name like `farhelm.replaced-20260928T221500Z` in the same directory, and the installer's closing message
-names it. Delete the kept copy once you no longer need it.
+The installer only replaces a `farhelm` or `farhelm-desktop` in the install directory when its checksum matches the
+executable-directory record below, meaning it is the file the installer itself last put there. Any other file with that
+name, such as a wrapper script of your own or a Farhelm installed before these records existed, is kept under a visible
+name like `farhelm.replaced-20260928T221500Z` in the same directory, and the installer's closing message names it.
+Delete the kept copy once you no longer need it.
 
-Older releases without app-bundle resources install the executables but leave any existing app bundle unchanged. After
-selecting such a release, launching that existing app can therefore still run its previous version. The app-bundle
-opt-out also leaves an existing bundle unchanged.
+Releases without the Mac app resources are refused before any installed file changes. Pick 0.2.1 or newer, or leave
+`FARHELM_VERSION` unset for the latest stable release. The installer may create `~/.local/bin` for staging an old
+release; it removes the staging files on exit.
 
-Installation does not start Farhelm or register services. On Linux, `farhelm helm setup` is a separate operation that
-installs and starts systemd user services for a machine intended to run a helm and supervisor. Desktop users do not need
-that setup: the desktop app manages its own helm and local supervisor.
+Installation does not start Farhelm or register services. The desktop app manages its own helm and local supervisor.
 
 ## Installation records
 
@@ -76,14 +72,14 @@ sessions.
 
 | Record file                                                 | Contents, in field order                                                                                                                                                                                                                           |
 | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `~/.local/bin/.farhelm-installation`                        | The identifier `farhelm-standalone`; the absolute executable-directory path with symlinks resolved; the SHA-256 checksum of `farhelm`; the checksum of `farhelm-desktop`, or an empty field on Linux.                                              |
+| `~/.local/bin/.farhelm-installation`                        | The identifier `farhelm-standalone`; the absolute executable-directory path with symlinks resolved; the SHA-256 checksum of `farhelm`; the checksum of `farhelm-desktop` (empty in older Linux installations).                                     |
 | `~/Applications/Farhelm.app/Contents/.farhelm-installation` | The identifier `farhelm-app`; the absolute executable-directory path this bundle came from; checksums of the bundle's own `Contents/MacOS/farhelm`, `Contents/MacOS/farhelm-desktop`, `Contents/Info.plist` and `Contents/Resources/Farhelm.icns`. |
 | `~/Applications/.Farhelm.app.uninstall-receipt`             | A temporary copy of the bundle record, created during uninstall so an interrupted removal can be retried after the internal record has gone.                                                                                                       |
 
-With a custom `FARHELM_INSTALL_DIR`, the first record lives in that directory, beside `farhelm`. The app paths remain
-the same. The records contain NUL-separated fields, including a final NUL; checksums are lowercase SHA-256 hex strings.
-They are not line-oriented text files. The installer creates its records with owner-only read/write permissions
-(`0600`). Uninstall requires records to belong to the invoking user and refuses records writable by other users.
+Older installations in custom directories keep their first record beside `farhelm`. The app paths stay the same. The
+records contain NUL-separated fields, including a final NUL; checksums are lowercase SHA-256 hex strings. They are not
+line-oriented text files. The installer creates its records with owner-only read/write permissions (`0600`). Uninstall
+requires records to belong to the invoking user and refuses records writable by other users.
 
 The executable-directory record is refreshed when the installer replaces the executables; the bundle record describes
 the copies inside that bundle. If an update leaves an older bundle untouched, its record continues to describe those
@@ -111,7 +107,8 @@ farhelm uninstall --dry-run
 ```
 
 Then run `farhelm uninstall` and confirm once. For noninteractive use, `farhelm uninstall --yes` skips the prompt; the
-same ownership checks still apply. If your release has no uninstall command, update with the installer once to get it.
+same ownership checks still apply. If your macOS release has no uninstall command, update with the installer once to get
+it. The installer cannot provide that upgrade on Linux.
 
 The command selects the installation containing the CLI you invoked. With multiple installations, invoke the intended
 executable by its full path and check the preview. A symlink used to invoke the CLI resolves to its installation. Use

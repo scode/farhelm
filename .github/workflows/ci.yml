@@ -252,7 +252,7 @@ jobs:
   # checks (sh -n, shellcheck) run first and are near-instant; the real
   # weight is test-install-sh.sh, which drives install.sh as a child
   # process against a real HTTP server serving synthetic release fixtures
-  # — platform detection, download, checksum and archive verification,
+  # — macOS-shaped download, checksum and archive verification,
   # replacement (including a forced-failure rollback), and the exact
   # closing-message contract, all without touching this runner's real
   # $HOME or $PATH.
@@ -281,7 +281,8 @@ jobs:
       # harness's own sha256sum/shasum/openssl fallback coverage something
       # real to fall back to, not because install.sh itself needs them.
       # Confirmed empirically before landing this: install.sh needed no
-      # changes at all to pass its full suite here.
+      # changes at all to pass its full suite here. The uname shim now models
+      # macOS: this checks shell/tool portability, not Linux installation.
       - name: Alpine/BusyBox portability check
         run: |
           docker run --rm -v "$PWD":/w -w /w alpine:3 sh -c '

@@ -81,19 +81,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   launch at create time unless it brings its own resume command). First step: walk through the launch paths with the
   maintainer.
 
-- **Uninstall after a move when the installer skipped the app.** On macOS, after the install directory moves
-  (`~/.local/bin` replaced by a symlink, a renamed home, a different `FARHELM_INSTALL_DIR`), `farhelm uninstall` refuses
-  until the installer is re-run from the new directory: the install directory's own ownership record, and the app's
-  record (or the receipt an interrupted uninstall leaves beside it), name the old path, and the uninstaller requires
-  each to name this installation's directory in its exact physical spelling (`field_path` and `inspect_bundle_at` in
-  `crates/farhelm/src/uninstall/ownership.rs`; `receipt_paths_require_exact_physical_spelling` pins it). Re-running the
-  installer rewrites both records (the app's by its moved-here rule, extended to the leftover receipt on 2026-09-30), so
-  the documented remedy works. What is left: a re-run that skips or fails the app step (`FARHELM_NO_APP_BUNDLE=1`, a
-  held or failed app lock) rewrites the directory's record but not the app's, and uninstall then refuses the app.
-  Porting the installer's moved-here rule to the uninstaller was considered and stopped, since accepting an alias or a
-  vanished directory in the step that deletes the app reverses that deliberate rule. Decide whether that leftover is
-  worth a change, or drop this entry. Plan: `plans/queue/install-output-layout.md`.
-
 - Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
   restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.
   Plan: `plans/queue/install-output-layout.md`.

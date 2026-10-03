@@ -135,20 +135,19 @@ that its required systemd or SSH substrate ran.
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
   POSIX `sh` (it is never piped into a stranger's shell, so nothing forces the same portability constraint), which is
   why only `install.sh` goes through `sh -n`.
-- `bash scripts/test-install-sh.sh` — drives `install.sh` as a real child process against a fixture HTTP server: fresh
-  install, update, a forced-failure rollback (macOS-shaped, via a `uname` shim), 404, checksum mismatch, two
-  malformed-archive shapes, version normalization (including `-rc.N` and `-dev.N` prereleases), invalid versions,
-  missing prerequisites (via an isolated `PATH`), the exact closing-message contract across five tmux fixtures, the
-  `Farhelm.app` bundle a macOS-shaped install assembles (layout, rebuild on update, the pre-icon/opt-out/foreign-bundle
-  edge shapes), and that nothing outside `FARHELM_INSTALL_DIR` and that bundle — no `systemctl`/`launchctl` call,
-  nothing else under `$HOME` — ever changes. Every invocation goes through `env -i` with an explicit environment, never
-  this process's own.
+- `bash scripts/test-install-sh.sh` — drives the macOS-only installer as a real child against a fixture HTTP server,
+  using a Darwin/arm64 `uname` shim on Linux and BusyBox. Covers fresh install, update, rollback, 404, checksums,
+  malformed archives, version normalization, missing prerequisites, closing messages and tmux advice, app layout and
+  ownership/recovery. Linux refuses before downloading or writing; old releases without app resources refuse before
+  replacement. Nothing outside `~/.local/bin` and `~/Applications/Farhelm.app` changes, and no service manager runs.
+  Every invocation uses `env -i` with an explicit environment, never the harness process's own.
 - `python3 scripts/record-test-run.py --kind development --selection 'installed uninstall acceptance' --concurrency 'one fixture at a time' --tmux none -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh`
-  — after building the CLI, runs the actual installer and installed uninstaller against private fixture homes and local
-  release archives. Covers updates, confirmation, dry-run preservation, foreign files and native macOS bundles. Linux
-  children use a fixture service-manager command; actual service tests must use an owned systemd container. The focused
-  macOS CI job and macOS release gate also run `cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'`
-  through the recorder with four slots and `--tmux none`.
+  — macOS-only, after building the CLI: runs the actual installer and installed uninstaller against private fixture
+  homes and release archives. Covers updates, confirmation, dry-run preservation, foreign files and native bundles.
+  Other platforms report a skip; Linux no longer has end-to-end coverage of installer-made installations because the
+  installer refuses Linux. The focused macOS CI job and release gate also run
+  `cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'` through the recorder with four slots and
+  `--tmux none`.
 - `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
   the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
   own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,

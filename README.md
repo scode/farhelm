@@ -73,6 +73,9 @@ nothing goes through a relay, and every box in the diagram can restart without l
 
 ## Install
 
+The installer currently installs the desktop app on Apple silicon Macs only. Linux remains supported for helms and
+session hosts; this temporary limitation applies only to the installer.
+
 ```
 curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | sh
 ```
@@ -80,14 +83,14 @@ curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.
 See [installation and uninstall](docs/install_uninstall.md) for more detail about what installation does and how to
 uninstall.
 
-Installs `farhelm` into `~/.local/bin`. On macOS it also installs `farhelm-desktop` and a macOS app bundle
-(`~/Applications/Farhelm.app`). Does NOT auto-upgrade (yet) — re-run the same command to update.
+Installs `farhelm` and `farhelm-desktop` into `~/.local/bin` and builds `~/Applications/Farhelm.app`. Does NOT
+auto-upgrade (yet) — re-run the same command to update.
 
 To uninstall, stop local sessions and their additional terminals, quit the desktop app, and stop manually started
 Farhelm processes. Run `farhelm uninstall` and confirm once, or use `farhelm uninstall --dry-run` to preview removal.
 The command removes this installation's files and its setup-owned Linux services, preserving all user data and custom
-service configuration. Releases without the command need one installer update first. Keep installation, updates, setup
-and Farhelm startup stopped until uninstall finishes.
+service configuration. On macOS, releases without the command need one installer update first; the installer cannot
+provide that upgrade on Linux. Keep installation, updates, setup and Farhelm startup stopped until uninstall finishes.
 
 ## More info
 
