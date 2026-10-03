@@ -3475,8 +3475,13 @@ fn mirror_submitted_launch(
     let Some(launch) = submitted else {
         return;
     };
+    // The helm normalizes omitted permissions before returning the session.
+    // A harness whose omitted mode is already YOLO must not seed that value
+    // into the next dialog as an explicit choice; its default supplies the
+    // same behavior without spilling into harnesses with a real default.
     preferences.remembered_permissions = launch
         .permissions
+        .filter(|permission| Some(*permission) != launch.harness.omitted_permission())
         .map(|permission| permission.wire_word().to_string());
     if launch.harness.offers_workspace_trust()
         && let Some(trust) = launch.workspace_trust
@@ -3643,6 +3648,19 @@ mod tests {
             preferences.remembered_workspace_trust,
             Some(false),
             "a submission that leaves trust unset keeps the remembered trust"
+        );
+
+        let omitted_yolo_default = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Goose,
+            model: None,
+            effort: None,
+            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            workspace_trust: None,
+        };
+        mirror_submitted_launch(&mut preferences, Some(&omitted_yolo_default));
+        assert_eq!(
+            preferences.remembered_permissions, None,
+            "a harness default that normalizes to YOLO must not become a remembered override"
         );
     }
 

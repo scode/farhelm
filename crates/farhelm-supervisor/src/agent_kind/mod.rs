@@ -56,7 +56,7 @@
 //! - **What a launch can choose.** Exhaustive `LaunchHarness` methods in
 //!   `farhelm-proto/src/launch.rs` (`agent_kind`, `offers_model`,
 //!   `offers_effort`, `offers_permission`, `offers_workspace_trust`,
-//!   `sole_permission`). The built-in launch profiles (Claude, Codex, Muse,
+//!   `offers_only_yolo`). The built-in launch profiles (Claude, Codex, Muse,
 //!   Cursor and their YOLO variants, with their resume templates) are
 //!   `builtin_profiles` in `farhelm-helm/src/store.rs`. The helm's release
 //!   catalog and argv compiler stay in

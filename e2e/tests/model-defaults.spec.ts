@@ -1,4 +1,5 @@
 import { expect, test } from "./helpers/evidence";
+import { patchPreferences } from "./helpers/fleet";
 
 /** The composer must serialize an omitted model for every harness whose CLI
  * can use a configured default. The helm compiler tests pin the corresponding
@@ -20,6 +21,7 @@ for (const [label, harness] of [
       headers: { "content-type": "application/json", "x-farhelm-build": build },
       body: JSON.stringify({ launches: [], folders: [] }),
     }));
+    await patchPreferences(request, { remembered_permissions: null });
     await page.goto("/");
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
@@ -27,6 +29,9 @@ for (const [label, harness] of [
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: label, exact: true }).click();
     await form.getByLabel("folder", { exact: true }).fill("/tmp");
     await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue("harness default");
+    const permissions = form.locator(".launch-composer-permissions-choice");
+    await expect(permissions.getByRole("button", { name: "default", exact: true })).toHaveCount(0);
+    await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.locator(".create-session-submit")).toBeEnabled();
 
     await page.route("**/api/sessions", async (route) => {
@@ -37,7 +42,7 @@ for (const [label, harness] of [
       new URL(entry.url()).pathname === "/api/sessions" && entry.method() === "POST"
     );
     await form.locator(".create-session-submit").click();
-    expect((await submitted).postDataJSON().launch).toMatchObject({ harness, model: null });
+    expect((await submitted).postDataJSON().launch).toMatchObject({ harness, model: null, permissions: "yolo" });
     await expect(form).toContainText("fixture captured launch");
   });
 }

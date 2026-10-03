@@ -209,3 +209,46 @@ test("a create reply claiming yolo does not change what the next New dialog pres
     for (const id of created) await cleanupSession(request, id);
   }
 });
+
+/** A harness's own YOLO default must not become a request to bypass another
+ * harness's approvals, either through switching or after a successful launch.
+ * Use real creates so the browser mirror and helm preference are both checked. */
+for (const [label, harness] of [["Pi", "pi"], ["OpenCode", "open_code"], ["OMP", "omp"], ["Goose", "goose"]] as const) {
+  test(`${label}'s default YOLO does not spill into the next harness`, async ({ page, request }) => {
+    const created: string[] = [];
+    await setLocalYoloWithoutAsking(request, true);
+    try {
+      await patchPreferences(request, { remembered_permissions: null });
+      expect((await readPreferences(request)).remembered_permissions).toBeUndefined();
+      await page.goto("/");
+      await page.locator(".new-session-button").click();
+      const form = page.locator(".create-session-form");
+      const harnesses = form.locator(".launch-composer-harness-choice");
+      const permissions = form.locator(".launch-composer-permissions-choice");
+      await harnesses.getByRole("button", { name: label, exact: true }).click();
+      await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await harnesses.getByRole("button", { name: "Codex", exact: true }).click();
+      await expect(permissions.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await harnesses.getByRole("button", { name: label, exact: true }).click();
+      await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await form.getByLabel("folder", { exact: true }).fill(stackScratchDir("default-yolo-memory-"));
+      const [response] = await Promise.all([
+        page.waitForResponse((entry) => entry.request().method() === "POST" && new URL(entry.url()).pathname === "/api/sessions"),
+        form.locator(".create-session-submit").click(),
+      ]);
+      expect(response.ok(), await response.text()).toBe(true);
+      const session = await response.json();
+      created.push(session.id);
+      expect(session.launch).toMatchObject({ harness, permissions: "yolo" });
+      await expect(form).toHaveCount(0);
+      expect((await readPreferences(request)).remembered_permissions).toBeUndefined();
+      await page.locator(".new-session-button").click();
+      await expect(form).toBeVisible();
+      await harnesses.getByRole("button", { name: "Codex", exact: true }).click();
+      await expect(permissions.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+    } finally {
+      await setLocalYoloWithoutAsking(request, false);
+      for (const id of created) await cleanupSession(request, id);
+    }
+  });
+}

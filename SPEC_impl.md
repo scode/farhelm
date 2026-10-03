@@ -224,12 +224,12 @@ and the helm's YOLO confirmation must agree on every launch by calling the same 
 code re-derives that answer. Raw launches the guard would ask about are marked YOLO, including uninterpretable `env`
 prefixes naming a known agent. The classifier recognizes documented vendor flags and option-spelled modes, including
 Codex's `-a never` with `-s danger-full-access`, while preserving the rule that Codex's sandboxed `--full-auto` is not
-YOLO. Unknown command lines remain unknown rather than being inferred as safe. An omitted Pi permission is rendered as
-YOLO for compatibility with older snapshots, while an omitted OMP permission is rendered as an honest absence. The full
-invocation and a profile's snapshotted name remain in its accessible text and tooltip. The working directory is
-tilde-folded against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold
-against properly. Every one of those abbreviations is lossy, so the untouched string rides along in a `title` attribute
-— the row is a summary, and the full truth stays one hover away.
+YOLO. Unknown command lines remain unknown rather than being inferred as safe. An omitted Pi, OpenCode, OMP or Goose
+permission is rendered as YOLO for compatibility with older snapshots. The full invocation and a profile's snapshotted
+name remain in its accessible text and tooltip. The working directory is tilde-folded against the `/home/<user>` and
+`/Users/<user>` shapes, since no home directory is on the wire to fold against properly. Every one of those
+abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the full
+truth stays one hover away.
 
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
 The agent and permission SVGs sit in separate `title` targets, so hovering the open lock explains its permission mode
@@ -533,16 +533,16 @@ click. A `use_effect` inside the form compares that generation against the last 
 whenever the two disagree; comparing generations rather than mere presence is what makes cloning the SAME row twice in a
 row reseed a second time, since an unrelated rerender of that effect (a host reconnect, a catalog refresh) must not
 overwrite an edit in progress. A structured source seeds the shared composer from its stored declarative selection,
-preserving omitted harness defaults rather than parsing the compiled invocation. A legacy source selects
-`other / command` in that same composer and seeds the raw invocation there, including when profile mode is selected and
-displays the selected profile's invocation. Destination, folder browser, optional name, search, and submission remain
-shared; only the structured model, effort, and permission controls are replaced by the profile picker and raw command
-field. For legacy sources, the profile choice is used only when the row's own profile snapshot is `Present` — the
-catalog still holds that id under the SAME name — which is deliberately STRICTER than an ordinary create's
-remembered-default rule (an id that merely still exists, under a new name, is not evidence that cloning it again is what
-today's catalog would still offer); every other answer falls back to the raw command. Trusting the id at all is still a
-snapshot decision, not a live one: submitting a profile-backed clone resolves that id against whatever definition the
-catalog holds at that moment, exactly like any other profile-backed create.
+resolving omitted permissions through `LaunchHarness::effective_permission` rather than parsing the compiled invocation.
+A legacy source selects `other / command` in that same composer and seeds the raw invocation there, including when
+profile mode is selected and displays the selected profile's invocation. Destination, folder browser, optional name,
+search, and submission remain shared; only the structured model, effort, and permission controls are replaced by the
+profile picker and raw command field. For legacy sources, the profile choice is used only when the row's own profile
+snapshot is `Present` — the catalog still holds that id under the SAME name — which is deliberately STRICTER than an
+ordinary create's remembered-default rule (an id that merely still exists, under a new name, is not evidence that
+cloning it again is what today's catalog would still offer); every other answer falls back to the raw command. Trusting
+the id at all is still a snapshot decision, not a live one: submitting a profile-backed clone resolves that id against
+whatever definition the catalog holds at that moment, exactly like any other profile-backed create.
 
 Search is the composer's one initial and post-selection focus target in both modes. Its command-mode result set is built
 without the retained structured harness or model, so it can expose globally owned models but cannot offer an effort that
@@ -2107,6 +2107,16 @@ diagnostics but skip the folder projection. Repository setups group by destinati
 complete selection, independently of their previous ephemeral cwd. Adoption purges the old install's repository
 suggestions with its other history; ordinary history rows retain their existing semantics.
 
+`LaunchHarness::omitted_permission` is the one per-harness fact for default permission modes. The helm fills omissions
+before validation and still refuses unsupported explicit choices; display and reconciliation use `effective_permission`,
+which falls back to the harness default for unsupported older values. The classifier and browser share that helper. The
+helm's remembered permission and the browser's local mirror discard a permission equal to the harness's omitted mode.
+This prevents default or forced YOLO from becoming another harness's preselection while preserving explicit YOLO on
+harnesses with a non-YOLO default. Harness switching applies the same boundary: passing through a default-YOLO harness
+loses any earlier explicit YOLO provenance, so switching back selects the real default. Preferences written before
+this change retain their value until the next structured launch; the stored word does not say which harness supplied
+it. No second default-mode table or preference provenance is kept.
+
 Schema 30 adds nullable `remembered_workspace_trust` to the preference row. The helm updates it in the same admitted
 create transaction as structured launch history, only for an explicit Codex, Muse, or Pi choice from a user-originated
 create. Both are written from the selection the user submitted (`CreateAcceptance::explicit_selection`), never from the
@@ -2125,11 +2135,12 @@ sequence eviction cutoff, which cannot be converted into a safe timestamp/ID fro
 disagree. Schema 25 records both frontiers from the start; resetting bounded suggestion data is the only honest upgrade
 because the missing eviction history cannot be reconstructed.
 
-Ordinary recents and search-result recents group a complete selection by the same per-launch canonical destination.
-Legacy launch rows without that fact keep their own spelling distinct instead of consulting a mutable folder projection
-or guessing aliases. Frequency sorts descending and the newest retained occurrence breaks ties. An omitted model,
-effort, or permission remains the saved harness default and is part of the complete selection identity, not a wildcard
-that merges explicit choices.
+Ordinary recents and search-result recents group a complete selection by the same per-launch canonical destination and
+by normalized effective permission, so an omitted YOLO default and an explicit stored YOLO row do not duplicate one
+another. Legacy launch rows without that fact keep their own spelling distinct instead of consulting a mutable folder
+projection or guessing aliases. Frequency sorts descending and the newest retained occurrence breaks ties. An omitted
+model, or effort remains the saved harness default and is part of the complete selection identity, not a wildcard that
+merges explicit choices. Permission identity uses the effective mode, including an omitted YOLO default.
 
 The composer retains the installation claim when a recent setup or saved folder is applied, not only while offering the
 suggestion. A replacement under the same registry row disables Launch and requires an explicit host or folder choice.
@@ -2176,12 +2187,12 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   is not a promise of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and
   `:suffix` interpretations on the id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`).
   `--thinking <effort>` carries the seven-level list (`off` through `max`; OMP's `auto` is not offered), and
-  `--approval-mode yolo|always-ask` carries the YOLO/Approve choices while `default` adds no flag and stays omitted in
-  the stored selection — unlike Pi, no YOLO default is rewritten on. SmartApprove and Chat are refused for OMP; the row
-  glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at sidebar size. Resolving `SourceProfile`
-  snapshots while draining remote sessions discovers catalog state only: those observations never select the helm-wide
-  remembered default. A successful profile-backed create through the user's REST surface alone writes that default;
-  agent-relay creates and clones do not, so an agent's work cannot change the profile the user's next dialog suggests.
+  `--approval-mode yolo|always-ask` carries the YOLO/Approve choices. An omitted permission normalizes to YOLO, as for
+  Pi, OpenCode and Goose; explicit Approve remains Approve. SmartApprove and Chat are refused for OMP; the row glyph is
+  the Greek capital omega, chosen so it cannot read as Pi's "P" at sidebar size. Resolving `SourceProfile` snapshots
+  while draining remote sessions discovers catalog state only: those observations never select the helm-wide remembered
+  default. A successful profile-backed create through the user's REST surface alone writes that default; agent-relay
+  creates and clones do not, so an agent's work cannot change the profile the user's next dialog suggests.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter

@@ -192,27 +192,59 @@ impl LaunchHarness {
         }
     }
 
-    /// The one permission mode this harness has, for a harness that has only
-    /// one; `None` for every harness with a real default.
+    /// The permission implied when a structured launch omits its permission.
     ///
-    /// Pi has no tool-approval gate, so its only mode is YOLO (SPEC.md). The
-    /// fact is stated here once; its consumers apply it with deliberately
-    /// different strength. The helm fills it in only when a selection omits
-    /// the permission and still rejects an explicit unsupported one; the
-    /// browser displays and submits it whatever an older stored selection
-    /// said; the composer shows it as the only permission button. This is
-    /// also what makes every Pi launch a YOLO launch.
-    pub const fn sole_permission(self) -> Option<LaunchPermission> {
+    /// Pi, OpenCode, OMP, and Goose start in approval-free modes according to
+    /// their stock behavior, so Farhelm records an omitted choice as YOLO for
+    /// those harnesses. Keeping this exhaustive table beside the offered
+    /// permission table gives the helm, browser, and saved selections one
+    /// source of truth for the effective mode.
+    pub const fn omitted_permission(self) -> Option<LaunchPermission> {
         match self {
-            LaunchHarness::Pi => Some(LaunchPermission::Yolo),
+            LaunchHarness::Pi
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Omp
+            | LaunchHarness::Goose => Some(LaunchPermission::Yolo),
             LaunchHarness::Cursor
             | LaunchHarness::Codex
             | LaunchHarness::Claude
             | LaunchHarness::Muse
-            | LaunchHarness::Goose
-            | LaunchHarness::Omp
-            | LaunchHarness::OpenCode
             | LaunchHarness::Grok => None,
+        }
+    }
+
+    /// Whether YOLO is the only approval mode this harness offers.
+    ///
+    /// This is derived from the exhaustive permission table rather than kept
+    /// as another per-harness list, so the composer and confirmation cannot
+    /// drift when a mode is added or removed.
+    pub const fn offers_only_yolo(self) -> bool {
+        if !matches!(self.omitted_permission(), Some(LaunchPermission::Yolo)) {
+            return false;
+        }
+        let mut index = 0;
+        while index < LaunchPermission::ALL.len() {
+            let permission = LaunchPermission::ALL[index];
+            if !matches!(permission, LaunchPermission::Yolo) && self.offers_permission(permission) {
+                return false;
+            }
+            index += 1;
+        }
+        self.offers_permission(LaunchPermission::Yolo)
+    }
+
+    /// Resolve a displayed or stored permission against this harness's choices.
+    ///
+    /// Unsupported older values fall back to the omitted mode. The helm uses
+    /// stricter admission: it fills omissions but rejects unsupported explicit
+    /// values instead of silently accepting this display fallback.
+    pub const fn effective_permission(
+        self,
+        permission: Option<LaunchPermission>,
+    ) -> Option<LaunchPermission> {
+        match permission {
+            Some(value) if self.offers_permission(value) => Some(value),
+            _ => self.omitted_permission(),
         }
     }
 
@@ -227,9 +259,9 @@ impl LaunchHarness {
     /// than inheriting a catch-all.
     ///
     /// The harness default (`None`) is not a question for this function: every
-    /// harness accepts it. Pi's rule that an omitted permission MEANS YOLO is
-    /// also separate (the helm rewrites it before validating, and the browser
-    /// displays it that way); here Pi simply offers YOLO and nothing else.
+    /// harness accepts it. Harnesses whose omitted mode means YOLO are listed
+    /// separately by [`Self::omitted_permission`]; this table only describes
+    /// explicit permission buttons.
     pub const fn offers_permission(self, permission: LaunchPermission) -> bool {
         match self {
             LaunchHarness::Goose => true,
@@ -412,7 +444,7 @@ mod tests {
     }
 
     /// Spec: Grok alone offers no model; Cursor, OpenCode, and Grok offer no
-    /// effort; Pi alone has a sole permission, YOLO (SPEC.md's structured
+    /// effort; Pi and OpenCode offer only YOLO (SPEC.md's structured
     /// launch rules for each harness).
     ///
     /// Why: these predicates replaced per-harness checks scattered through
@@ -423,23 +455,28 @@ mod tests {
     #[test]
     fn each_harness_offers_exactly_its_launch_choices() {
         use LaunchHarness::*;
-        // (harness, offers model, offers effort, sole permission)
+        // (harness, offers model, offers effort, omitted permission, only YOLO)
         let expected = [
-            (Cursor, true, false, None),
-            (Codex, true, true, None),
-            (Claude, true, true, None),
-            (Muse, true, true, None),
-            (Goose, true, true, None),
-            (Pi, true, true, Some(LaunchPermission::Yolo)),
-            (Omp, true, true, None),
-            (OpenCode, true, false, None),
-            (Grok, false, false, None),
+            (Cursor, true, false, None, false),
+            (Codex, true, true, None, false),
+            (Claude, true, true, None, false),
+            (Muse, true, true, None, false),
+            (Goose, true, true, Some(LaunchPermission::Yolo), false),
+            (Pi, true, true, Some(LaunchPermission::Yolo), true),
+            (Omp, true, true, Some(LaunchPermission::Yolo), false),
+            (OpenCode, true, false, Some(LaunchPermission::Yolo), true),
+            (Grok, false, false, None, false),
         ];
         assert_eq!(expected.len(), LaunchHarness::ALL.len());
-        for (harness, model, effort, sole) in expected {
+        for (harness, model, effort, omitted, only_yolo) in expected {
             assert_eq!(harness.offers_model(), model, "{harness:?} model");
             assert_eq!(harness.offers_effort(), effort, "{harness:?} effort");
-            assert_eq!(harness.sole_permission(), sole, "{harness:?} permission");
+            assert_eq!(harness.omitted_permission(), omitted, "{harness:?} default");
+            assert_eq!(
+                harness.offers_only_yolo(),
+                only_yolo,
+                "{harness:?} only YOLO"
+            );
         }
     }
 

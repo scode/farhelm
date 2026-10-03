@@ -310,12 +310,11 @@ fn apply_composer_search_result(
                 permissions: structured_permissions(),
                 workspace_trust: structured_workspace_trust(),
             };
+            // Retain the source harness until reconciliation has removed its
+            // default permission; the selected model belongs to the target.
             let selection = LaunchSelection {
-                harness,
                 model: Some(id),
-                effort: structured_effort(),
-                permissions: structured_permissions(),
-                workspace_trust: structured_workspace_trust(),
+                ..before.clone()
             };
             let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
                 selection,
@@ -2756,11 +2755,8 @@ pub(super) fn CreateSessionForm(
                         let (selection, owner) =
                             crate::launch_composer::reconcile_harness_for_catalog_read(
                                 LaunchSelection {
-                                    harness,
                                     model: Some(id),
-                                    effort: structured_effort(),
-                                    permissions: structured_permissions(),
-                                    workspace_trust: structured_workspace_trust(),
+                                    ..before.clone()
                                 },
                                 None,
                                 harness,

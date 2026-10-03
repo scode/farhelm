@@ -164,10 +164,11 @@ impl FakeHarness {
             }
         }
         // OMP carries its permission as one explicit approval-mode flag; the
-        // harness default adds nothing, mirroring the compiler's shape.
+        // omitted default is YOLO. This fixture builds supervisor inputs, not
+        // helm requests; compiler tests separately prove helm normalization.
         if selection.harness == LaunchHarness::Omp {
             match selection.permissions {
-                Some(LaunchPermission::Yolo) => {
+                Some(LaunchPermission::Yolo) | None => {
                     argv.extend(["--approval-mode".to_string(), "yolo".to_string()])
                 }
                 Some(LaunchPermission::Approve) => {
@@ -617,11 +618,10 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
     // OMP's permission rides `--approval-mode` with a VALUE, so the pair —
     // not a bare flag — is the process-boundary witness; `always-ask` must
     // never be misread as yolo by a bare-flag check. An omitted permission
-    // is the harness default and must contribute NO approval-mode option at
-    // all, so absence is asserted rather than computed from `expected`.
+    // requires an explicit yolo pair too, independent of compiler output.
     if selection.harness == LaunchHarness::Omp {
         let expected = match selection.permissions {
-            Some(LaunchPermission::Yolo) => Some("yolo"),
+            Some(LaunchPermission::Yolo) | None => Some("yolo"),
             Some(LaunchPermission::Approve) => Some("always-ask"),
             _ => None,
         };
@@ -641,7 +641,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             None => {
                 assert!(
                     modes.is_empty(),
-                    "an omitted OMP permission must add no approval-mode option: {words:?}"
+                    "an unsupported OMP permission must add no approval-mode option: {words:?}"
                 );
             }
         }
@@ -1275,7 +1275,7 @@ mod decoder_tests {
     }
     /// The OMP approval-mode witness must reject every wrong shape, not only
     /// accept the right one (review finding 1): an omitted permission means
-    /// NO approval-mode option at all, an explicit mode means exactly one
+    /// one explicit yolo pair, an explicit mode means exactly one
     /// pair with the selection's value, and a conflicting second pair is a
     /// failure even when a correct pair is also present.
     #[test]
@@ -1288,8 +1288,11 @@ mod decoder_tests {
             workspace_trust: None,
         };
 
-        // Omitted permission: no approval-mode option may exist.
-        assert_forwarded("omp --provider openrouter --model z-ai/glm-5.3", &base);
+        // Omitted permission: exactly the default yolo pair.
+        assert_forwarded(
+            "omp --provider openrouter --model z-ai/glm-5.3 --approval-mode yolo",
+            &base,
+        );
 
         // Approve: exactly the always-ask pair.
         let approve = LaunchSelection {
@@ -1321,13 +1324,13 @@ mod decoder_tests {
             "a yolo pair must not satisfy an Approve selection"
         );
 
-        // An unexpected approval-mode option must fail the omitted case.
+        // An explicit nondefault mode must fail the omitted case.
         let unexpected =
             "omp --provider openrouter --model z-ai/glm-5.3 --approval-mode always-ask";
         let panicked = std::panic::catch_unwind(|| assert_forwarded(unexpected, &base));
         assert!(
             panicked.is_err(),
-            "an omitted permission must reject any approval-mode option"
+            "an omitted permission must reject a non-YOLO approval mode"
         );
 
         // A conflicting second pair must fail even with a correct pair present.

@@ -2,7 +2,7 @@ import { expect, test } from "./helpers/evidence";
 import { patchPreferences } from "./helpers/fleet";
 
 /**
- * Pi's sole mode is a normalized draft value, not a display-only label. This
+ * Pi's only mode is a normalized draft value, not a display-only label. This
  * drives the real signal handlers because a pure reconciliation test cannot
  * catch the original failure where handlers discarded the returned
  * permission while applying the returned model and effort.
@@ -41,7 +41,7 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
     "true",
   );
   await expect(status).toHaveText(
-    "the selected permission is unavailable because Pi supports only YOLO, so it was replaced",
+    "the selected permission is unavailable for this harness, so it was replaced by YOLO, this harness's default",
   );
 
   // Search activation uses a separate handler from the harness buttons. Its

@@ -2,10 +2,10 @@
 //! asking for approval.
 //!
 //! Two shapes of launch reach a helm. A structured launch carries its
-//! permission choice ([`LaunchSelection::permissions`]), so it is YOLO when
-//! that choice is YOLO or when its harness has no other mode
-//! ([`crate::LaunchHarness::sole_permission`], which makes every Pi launch
-//! YOLO). A raw command line or profile invocation carries only argv, so it
+//! permission choice ([`LaunchSelection::permissions`]), resolved through
+//! [`crate::LaunchHarness::effective_permission`]. An omitted Pi, OpenCode,
+//! OMP or Goose permission means YOLO; supported approval choices still win.
+//! A raw command line or profile invocation carries only argv, so it
 //! is YOLO when its program is a recognized vendor CLI and an argument before `--`
 //! is one of that vendor's permission-bypass flags or its options spell a
 //! YOLO mode (`--permission-mode bypassPermissions`, Codex's `-a never` with
@@ -130,7 +130,7 @@ fn satisfies_option_set(program: &str, values: &[(&str, &str)]) -> bool {
 
 /// Programs whose only permission mode is YOLO, so any invocation of them is
 /// a YOLO launch whatever its arguments. Pi has no tool-approval gate
-/// ([`crate::LaunchHarness::sole_permission`]).
+/// ([`crate::LaunchHarness::offers_only_yolo`]).
 const SOLE_YOLO_PROGRAMS: &[&str] = &["pi"];
 
 /// The basename of argv's program, the key both tables above use: the
@@ -291,11 +291,13 @@ pub fn invocation_is_yolo(invocation: &str) -> bool {
     shell_words::split(invocation).is_ok_and(|argv| argv_is_yolo(&argv))
 }
 
-/// Whether a structured launch is a YOLO launch: its harness's only mode is
-/// YOLO, or its permission choice is YOLO.
+/// Whether a structured launch has an effective YOLO permission, including
+/// older snapshots that omitted a now-explicit default.
 pub fn selection_is_yolo(selection: &LaunchSelection) -> bool {
-    selection.harness.sole_permission() == Some(LaunchPermission::Yolo)
-        || selection.permissions == Some(LaunchPermission::Yolo)
+    selection
+        .harness
+        .effective_permission(selection.permissions)
+        == Some(LaunchPermission::Yolo)
 }
 
 /// Split a single-dash word into its short option and an attached value
@@ -496,8 +498,8 @@ mod tests {
     }
 
     /// Spec: a structured launch is YOLO when its permission choice is YOLO,
-    /// or when its harness's only mode is YOLO (Pi, even with the permission
-    /// omitted); any other choice, including none, is not.
+    /// or when omission implies YOLO. Explicit supported approval modes must
+    /// remain non-YOLO even on a harness with a YOLO default.
     ///
     /// Why: structured launches never pass through the argv classifier on
     /// their way to the guard, so this is their whole classification.
@@ -514,7 +516,25 @@ mod tests {
             LaunchHarness::Codex,
             Some(LaunchPermission::Yolo)
         )));
-        assert!(selection_is_yolo(&selection(LaunchHarness::Pi, None)));
+        for harness in [
+            LaunchHarness::Pi,
+            LaunchHarness::OpenCode,
+            LaunchHarness::Omp,
+            LaunchHarness::Goose,
+        ] {
+            assert!(selection_is_yolo(&selection(harness, None)), "{harness:?}");
+        }
+        for permission in [
+            LaunchPermission::Approve,
+            LaunchPermission::SmartApprove,
+            LaunchPermission::Chat,
+        ] {
+            assert!(!selection_is_yolo(&selection(
+                LaunchHarness::Goose,
+                Some(permission)
+            )));
+        }
+
         assert!(!selection_is_yolo(&selection(LaunchHarness::Codex, None)));
         assert!(!selection_is_yolo(&selection(
             LaunchHarness::Omp,

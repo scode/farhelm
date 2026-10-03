@@ -31,8 +31,8 @@ const SESSION_ID = "77777777-2222-3333-4444-555555555555";
 const TITLE = "restart-with-browser-fixture";
 const BASELINE = {
   harness: "codex",
-  model: "gpt-6-astra",
-  effort: "high",
+  model: "gpt-6-astra" as string | null,
+  effort: "high" as string | null,
   permissions: null,
   workspace_trust: null,
 };
@@ -887,4 +887,32 @@ test("restart with makes the page inert while open and restores it exactly", asy
   await expect(dialog).toHaveCount(0);
   expect(bodies, "premise: the dialog closed through a successful restart").toHaveLength(1);
   expect(await inertSet(), "after a successful restart").toEqual(["sidebar"]);
+});
+
+/**
+ * Older default-YOLO sessions stored an omitted permission. Pressing their
+ * already-selected YOLO button must not invent an edit or enable a restart.
+ */
+test("restart with compares an older omitted permission by its effective mode", async ({ page }) => {
+  await injectSession(page, { ...BASELINE, harness: "omp", model: null, effort: null }, "resume");
+  await page.goto("/");
+  const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
+  await expect(row).toBeVisible();
+  await row.locator(".session-row-open").click();
+  await page.locator(".restart-with-trigger").click();
+  const dialog = page.locator(".restart-with-dialog");
+  await expect(dialog).toBeVisible();
+  const permissions = dialog.locator(".launch-composer-permissions-choice");
+  const yolo = permissions.getByRole("button", { name: "yolo", exact: true });
+  await expect(yolo).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.locator(".restart-with-submit")).toBeDisabled();
+  // A real edit establishes that compatibility permits submission. Returning
+  // to YOLO must then disable it, giving the negative marker check a completed
+  // state transition to observe rather than racing the click's render.
+  await permissions.getByRole("button", { name: "approve", exact: true }).click();
+  await expect(dialog.locator(".restart-with-submit")).toBeEnabled();
+  await yolo.click();
+  await expect(dialog.locator(".restart-with-submit")).toBeDisabled();
+  await expect(permissions.locator(".launch-composer-changed-marker")).toHaveCount(0);
+  await expect(dialog.locator(".restart-with-submit")).toBeDisabled();
 });

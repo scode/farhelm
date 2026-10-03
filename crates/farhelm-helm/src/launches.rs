@@ -317,15 +317,15 @@ pub(crate) struct CompiledLaunch {
 /// The durable form of a submitted structured selection: what history,
 /// remembered defaults, and retries record for it.
 ///
-/// Pi has no vendor approval mode. Its only offered safety label records
-/// that absence, so an omitted Pi choice becomes `yolo` here. Shared by
+/// An omitted permission becomes the harness's effective default, including
+/// YOLO for Pi, OpenCode, OMP and Goose. Shared by
 /// [`compile`] and by acceptance paths that never compile (a fresh-checkout
 /// create reconciled after a lost reply), so the same request records the
 /// same selection whichever path accepts it. Pure: no catalog lookup, so a
 /// previously accepted request stays recoverable after catalog changes.
 pub(crate) fn normalize_selection(mut selection: LaunchSelection) -> LaunchSelection {
     if selection.permissions.is_none() {
-        selection.permissions = selection.harness.sole_permission();
+        selection.permissions = selection.harness.omitted_permission();
     }
     selection
 }
@@ -415,9 +415,8 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, Stri
             LaunchHarness::Grok => unreachable!("Grok has no supported effort"),
         }
     }
-    // OMP carries its permission as one explicit approval-mode flag; the
-    // harness default adds NOTHING, so an omitted OMP permission stays
-    // omitted rather than being rewritten the way Pi's is above.
+    // OMP carries its effective permission as one explicit approval-mode flag,
+    // including the YOLO default selected when the caller omits it.
     if selection.harness == LaunchHarness::Omp {
         match selection.permissions {
             Some(LaunchPermission::Yolo) => {
@@ -798,7 +797,7 @@ mod tests {
         assert_eq!(default.selection.model, None);
         assert_eq!(
             shell_words::split(&default.invocation).unwrap(),
-            ["opencode"]
+            ["opencode", "--auto"]
         );
 
         let bare = LaunchSelection {
@@ -810,12 +809,21 @@ mod tests {
         };
         let compiled = compile(bare.clone()).expect("bare Zen model");
         assert_eq!(
-            compiled.selection, bare,
+            compiled.selection,
+            LaunchSelection {
+                permissions: Some(LaunchPermission::Yolo),
+                ..bare.clone()
+            },
             "the selection records typed intent"
         );
         assert_eq!(
             shell_words::split(&compiled.invocation).unwrap(),
-            ["opencode", "--model", "opencode/private-zen-model"]
+            [
+                "opencode",
+                "--model",
+                "opencode/private-zen-model",
+                "--auto"
+            ]
         );
 
         let other_provider = LaunchSelection {
@@ -858,10 +866,17 @@ mod tests {
                 };
                 let compiled = compile(opencode.clone())
                     .unwrap_or_else(|error| panic!("OpenCode {typed}: {error}"));
-                assert_eq!(compiled.selection, opencode, "typed intent kept");
+                assert_eq!(
+                    compiled.selection,
+                    LaunchSelection {
+                        permissions: Some(LaunchPermission::Yolo),
+                        ..opencode
+                    },
+                    "typed model intent kept with effective permission"
+                );
                 assert_eq!(
                     shell_words::split(&compiled.invocation).unwrap(),
-                    ["opencode", "--model", &format!("opencode/{bare}")]
+                    ["opencode", "--model", &format!("opencode/{bare}"), "--auto"]
                 );
             }
             let owner = CATALOG
@@ -924,7 +939,7 @@ mod tests {
             .expect("every suggested model compiles");
             assert_eq!(
                 shell_words::split(&compiled.invocation).unwrap(),
-                ["opencode", "--model", row.id]
+                ["opencode", "--model", row.id, "--auto"]
             );
         }
     }
@@ -939,10 +954,21 @@ mod tests {
                 ..selection(LaunchHarness::OpenCode)
             };
             let compiled = compile(input.clone()).expect("literal custom Zen model");
-            assert_eq!(compiled.selection, input);
+            assert_eq!(
+                compiled.selection,
+                LaunchSelection {
+                    permissions: Some(LaunchPermission::Yolo),
+                    ..input
+                }
+            );
             assert_eq!(
                 shell_words::split(&compiled.invocation).unwrap(),
-                ["opencode", "--model", "opencode/custom'42;$literal"]
+                [
+                    "opencode",
+                    "--model",
+                    "opencode/custom'42;$literal",
+                    "--auto"
+                ]
             );
         }
     }
@@ -1071,7 +1097,7 @@ mod tests {
     }
 
     /// Goose's four visible permission modes are environment values, while
-    /// an omitted mode and effort must leave the process environment alone.
+    /// an omitted mode now selects Goose's stock autonomous mode explicitly.
     /// This pins the full mapping rather than one representative mode.
     #[test]
     fn goose_maps_every_permission_without_unsolicited_overrides() {
@@ -1085,6 +1111,8 @@ mod tests {
         assert_eq!(
             shell_words::split(&compile(base.clone()).unwrap().invocation).unwrap(),
             [
+                "env",
+                "GOOSE_MODE=auto",
                 "goose",
                 "session",
                 "--provider",
@@ -1092,7 +1120,7 @@ mod tests {
                 "--model",
                 "z-ai/glm-5.3"
             ],
-            "omitted choices must not write Goose environment overrides"
+            "an omitted Goose permission uses its stock autonomous mode"
         );
         for (permission, mode) in [
             (LaunchPermission::Yolo, "auto"),
@@ -1219,8 +1247,7 @@ mod tests {
             ]
         );
 
-        // The harness default is real: an omitted permission adds NO flag —
-        // the selection keeps recording the omission, never a rewrite.
+        // An omitted OMP permission is Farhelm's explicit YOLO default.
         let omitted = compile(LaunchSelection {
             harness: LaunchHarness::Omp,
             model: Some("z-ai/glm-5.3".into()),
@@ -1230,12 +1257,21 @@ mod tests {
         })
         .expect("OMP default compiles");
         assert_eq!(
-            omitted.selection.permissions, None,
-            "an omitted OMP permission must stay omitted, unlike Pi's rewrite"
+            omitted.selection.permissions,
+            Some(LaunchPermission::Yolo),
+            "an omitted OMP permission normalizes to YOLO"
         );
         assert_eq!(
             shell_words::split(&omitted.invocation).unwrap(),
-            ["omp", "--provider", "openrouter", "--model", "z-ai/glm-5.3"]
+            [
+                "omp",
+                "--provider",
+                "openrouter",
+                "--model",
+                "z-ai/glm-5.3",
+                "--approval-mode",
+                "yolo"
+            ]
         );
     }
 
@@ -1275,13 +1311,18 @@ mod tests {
                 "--provider",
                 "openrouter",
                 "--model",
-                "release/candidate'42;$literal"
+                "release/candidate'42;$literal",
+                "--approval-mode",
+                "yolo"
             ]
         );
 
         let default = compile(selection(LaunchHarness::Omp)).expect("OMP default");
         assert_eq!(default.selection.model, None);
-        assert_eq!(shell_words::split(&default.invocation).unwrap(), ["omp"]);
+        assert_eq!(
+            shell_words::split(&default.invocation).unwrap(),
+            ["omp", "--approval-mode", "yolo"]
+        );
         // OMP's own effort vocabulary is OMP_EFFORTS: `ultra` (the shared
         // enum's extra level) is refused; every listed level compiles.
         for effort in super::OMP_EFFORTS {
@@ -1331,17 +1372,18 @@ mod tests {
     #[test]
     fn omitted_models_use_vendor_default_argv() {
         for (harness, expected) in [
-            (LaunchHarness::OpenCode, vec!["opencode"]),
-            (LaunchHarness::Goose, vec!["goose", "session"]),
+            (LaunchHarness::OpenCode, vec!["opencode", "--auto"]),
+            (
+                LaunchHarness::Goose,
+                vec!["env", "GOOSE_MODE=auto", "goose", "session"],
+            ),
             (LaunchHarness::Pi, vec!["pi"]),
-            (LaunchHarness::Omp, vec!["omp"]),
+            (LaunchHarness::Omp, vec!["omp", "--approval-mode", "yolo"]),
         ] {
             let compiled = compile(selection(harness)).expect("model omission is valid");
             assert_eq!(compiled.selection.model, None);
             assert_eq!(shell_words::split(&compiled.invocation).unwrap(), expected);
-            if harness == LaunchHarness::Pi {
-                assert_eq!(compiled.selection.permissions, Some(LaunchPermission::Yolo));
-            }
+            assert_eq!(compiled.selection.permissions, harness.omitted_permission());
         }
     }
 
@@ -1465,9 +1507,7 @@ mod tests {
                     }
                 );
             }
-            if harness == LaunchHarness::Pi {
-                assert_eq!(compiled.selection.permissions, Some(LaunchPermission::Yolo));
-            }
+            assert_eq!(compiled.selection.permissions, harness.omitted_permission());
         }
         for harness in [LaunchHarness::Claude, LaunchHarness::Goose] {
             let mut choice = selection(harness);
