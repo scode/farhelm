@@ -1196,7 +1196,10 @@ test.describe("multi-host", () => {
     const row = page.locator('[data-host-kind="local"]');
     await expect(row.locator(".provisioning-error")).toContainText("automatic setup needs retry");
     await openHostMenu(row);
-    const items = row.getByRole("menuitem");
+    // Each item now carries a muted description beside its verb, like the
+    // session menu's; the order under test is the verbs', so read only the
+    // label span rather than the item's whole text.
+    const items = row.getByRole("menuitem").locator(".session-row-menu-label");
     await expect(items).toHaveText(["retry", "set up automatically", "settings"]);
     const retry = row.locator(".host-retry");
     const automatic = row.locator(".provisioning-auto-setup");
@@ -1881,8 +1884,12 @@ test.describe("multi-host", () => {
     // The control names what adopting would accept, so the click and the
     // sentence above it cannot disagree. `.host-adopt` now lives inside
     // the row's "⋯" menu.
+    // The label span alone: the item also carries a generic description,
+    // which is not where the identity is named.
     await openHostMenu(row);
-    await expect(row.locator(".host-adopt")).toHaveText("adopt identity-after");
+    await expect(row.locator(".host-adopt .session-row-menu-label")).toHaveText(
+      "adopt identity-after",
+    );
   });
 
   // An identity-UNVERIFIED host must offer no adopt at all. It looks

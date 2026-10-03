@@ -1158,7 +1158,8 @@ async function openMenuPanel(
   // could be racing that measurement.
   //
   // Detected by reading the surface's own inline `style` for the marker
-  // its placement emits: `left: auto` for hosts and `--menu-left` for
+  // its placement emits: `--menu-left` for both host and session flyouts;
+  // the shared side anchor no longer has a host-only `left: auto` marker.
   // sessions. Neither appears in `Unmeasured` or the failure fallback —
   // rather than by comparing the panel's box to the toggle's own. Geometry
   // would be the wrong test here: a genuinely MEASURED panel can still be
@@ -1223,9 +1224,9 @@ export async function openHostMenu(row: Locator): Promise<void> {
   await openMenuPanel(
     row,
     ".host-row-menu",
-    ".host-row-menu-panel",
+    ".host-row-menu-flyout",
     "waiting for the host actions panel to finish measuring against its own toggle",
-    "left: auto",
+    "left: var(--menu-left)",
   );
 }
 

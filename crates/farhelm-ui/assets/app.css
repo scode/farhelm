@@ -1589,8 +1589,8 @@ samp {
    `click()` is not a shortcut here, it is the only check that means
    anything. This rule only changes what a SIGHTED mouse user sees at rest.
 
-   The host control stays at full opacity because host rows have no selected
-   state that would otherwise reveal where their management actions live. */
+   Host controls follow the same reveal rules: hover, keyboard focus, an open
+   menu, or a coarse pointer keeps the action discoverable. */
 .session-row-menu,
 .host-row-menu {
   flex: 0 0 auto;
@@ -1612,10 +1612,6 @@ samp {
   opacity: 0;
 }
 
-.host-row-menu {
-  opacity: 1;
-}
-
 /* Session controls are revealed by hover or keyboard focus in the row (including on
    the toggle itself, via `:focus-within` on its own ancestor — no separate
    `:focus` selector needed), by the row being the current selection, or by
@@ -1630,13 +1626,15 @@ samp {
    whatever keeps the toggle visible after that falls to the other three
    conditions above.
 
-   Host controls do not participate in this reveal rule. Their muted toggle
-   is always visible because a host has no selected-row state to make the
-   action discoverable later. */
+   Host rows have no selected state, so hover/focus/open are their reveal
+   signals. */
 .session-row:hover .session-row-menu,
 .session-row:focus-within .session-row-menu,
 .session-row.selected .session-row-menu,
-.session-row-menu[aria-expanded="true"] {
+.session-row-menu[aria-expanded="true"],
+.host-row:hover .host-row-menu,
+.host-row:focus-within .host-row-menu,
+.host-row-menu[aria-expanded="true"] {
   opacity: 1;
 }
 
@@ -1680,7 +1678,8 @@ samp {
    which is what determines whether touch is a real path to this control,
    not merely "which pointer is primary right now". */
 @media (hover: none), (any-pointer: coarse) {
-  .session-row-menu {
+  .session-row-menu,
+  .host-row-menu {
     opacity: 1;
   }
 }
@@ -1771,6 +1770,43 @@ samp {
   max-height: calc(100vh - 16px);
 }
 
+/* Hosts use the same side anchor and pointer as session rows. Keeping a
+   host-specific wrapper class avoids making the host panel look like a
+   session in selectors that need to identify the owning row, while the
+   inner panel deliberately shares the same geometry and command styling. */
+.host-row-menu-flyout {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: 246px;
+  max-width: 288px;
+  max-height: calc(100vh - 16px);
+}
+
+.host-row-menu-flyout > .host-row-menu-panel {
+  position: relative;
+  inset: auto;
+  z-index: 1;
+  width: 100%;
+  max-width: none;
+  max-height: inherit;
+  overflow-y: auto;
+}
+
+.host-row-menu-pointer {
+  position: absolute;
+  z-index: 0;
+  width: 10px;
+  height: 10px;
+  background: var(--bg-2);
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  transform: rotate(45deg);
+  left: -5px;
+  pointer-events: none;
+}
+
 .session-row-menu-flyout > .session-row-menu-panel {
   position: relative;
   inset: auto;
@@ -1805,7 +1841,8 @@ samp {
    the clamped panel overlaps the list, so a left-edge notch would point
    away from the toggle it claims to identify. Placement stays the same. */
 @media (max-width: 601px) {
-  .session-row-menu-pointer {
+  .session-row-menu-pointer,
+  .host-row-menu-pointer {
     display: none;
   }
 }
@@ -1981,6 +2018,22 @@ samp {
   padding: 5px 7px;
   border-radius: var(--radius-sm);
   line-height: 1.25;
+}
+
+.host-row-menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: calc(100% - 8px);
+  margin: 0 4px;
+  padding: 5px 7px;
+  border-radius: var(--radius-sm);
+  line-height: 1.25;
+}
+
+.host-row-menu-item:hover,
+.host-row-menu-item:focus {
+  background: var(--control-hover-bg);
 }
 
 .session-row-menu-item:hover,
