@@ -6102,7 +6102,9 @@
 - Completion criteria: the TODO.md entry "Require a systemd user manager on Linux, with no fallback" records the
   decision and names this case (done during triage). Remove the feedback file and its index entry, with no code or spec
   change.
-- Execution: planned in `plans/queue/triage-crash-replies-and-locks.md`.
+- Execution: complete: change `ymronmkkrlwuouwrtsruqmrvpsorylut`, bookmark
+  `plan/triage-crash-replies-and-locks/01-scope-cleanup`, draft PR
+  [#1508](https://github.com/scode/farhelm/pull/1508/changes).
 
 ## create-rollback-orphans-unconfirmed-scope.md
 
