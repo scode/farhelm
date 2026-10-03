@@ -4771,6 +4771,7 @@ mod tests {
                 "an id carrying a control character",
                 "sess\nforged".to_string(),
             ),
+            ("a dot segment", "..".to_string()),
         ] {
             let (client_side, peer) = tokio::io::duplex(64 * 1024);
             spawn_created_id_responder(peer, id.clone());

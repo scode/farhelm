@@ -32,15 +32,50 @@ use std::cmp::Reverse;
 /// ingestion check cannot drift from the handshake's auth-session check.
 pub const MAX_SESSION_ID_BYTES: usize = farhelm_proto::MAX_SESSION_ID_BYTES;
 
-/// Refuse a mutation's reply whose session id is past
-/// [`MAX_SESSION_ID_BYTES`], before either cache records it.
+/// What is wrong with a session id a peer sent, or `None` for one this helm
+/// can record and address.
+///
+/// The one rule every peer ingress applies: a listing
+/// (`manager::drain_sessions`), a create's reply
+/// (`client::created_session_from`), and a mutation reply before either
+/// cache records it ([`ensure_recordable_id`]). A supervisor mints UUIDs,
+/// so anything this refuses comes from a broken or hostile peer, and each
+/// clause is about what the id goes on to do on this side:
+///
+/// - empty: no REST path or `parent` filter can name it;
+/// - past [`MAX_SESSION_ID_BYTES`]: no request head could carry it;
+/// - a control character: the agent relay prints ids on a CLI's stdout,
+///   where a newline forges a second line and an ESC reaches a terminal;
+/// - `.` or `..`: the browser percent-encodes an id into a path segment,
+///   but under the WHATWG URL Standard `%2E` still counts as a dot, so a
+///   request about such a session would resolve to a different helm route.
+///
+/// Only those. A UUID-only character set was considered and not adopted:
+/// nothing on this side needs it, and it would refuse ids from any
+/// supervisor that ever minted something else.
+pub fn session_id_problem(id: &str) -> Option<&'static str> {
+    if id.is_empty() {
+        Some("the session id is empty")
+    } else if id.len() > MAX_SESSION_ID_BYTES {
+        Some("the session id is past the ingress cap")
+    } else if id.chars().any(char::is_control) {
+        Some("the session id contains control characters")
+    } else if id == "." || id == ".." {
+        Some("the session id is a dot segment")
+    } else {
+        None
+    }
+}
+
+/// Refuse a mutation's reply whose session id breaks
+/// [`session_id_problem`]'s rule, before either cache records it.
 pub fn ensure_recordable_id(id: &str) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        id.len() <= MAX_SESSION_ID_BYTES,
-        "session id of {} bytes exceeds the {} this helm can build resumable cursors over",
-        id.len(),
-        MAX_SESSION_ID_BYTES
-    );
+    if let Some(problem) = session_id_problem(id) {
+        anyhow::bail!(
+            "{problem} ({} bytes); this helm cannot record or address it",
+            id.len()
+        );
+    }
     Ok(())
 }
 
@@ -204,5 +239,20 @@ mod tests {
     fn the_id_bound_is_inclusive() {
         assert!(ensure_recordable_id(&"x".repeat(MAX_SESSION_ID_BYTES)).is_ok());
         assert!(ensure_recordable_id(&"x".repeat(MAX_SESSION_ID_BYTES + 1)).is_err());
+    }
+
+    /// Why: list and create ingress used to apply different id rules, and
+    /// neither refused a dot segment the browser cannot keep from
+    /// resolving. Spec: the one rule refuses an empty id, a control
+    /// character and exactly `.` or `..`, and nothing else a supervisor
+    /// could plausibly mint, so ids that merely contain dots still pass.
+    #[farhelm_testtrace::test]
+    fn the_id_rule_refuses_only_unaddressable_shapes() {
+        for bad in ["", ".", "..", "a\nb", "a\u{1b}b"] {
+            assert!(ensure_recordable_id(bad).is_err(), "{bad:?}");
+        }
+        for good in ["...", ".x", "a.b", "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d"] {
+            assert!(ensure_recordable_id(good).is_ok(), "{good:?}");
+        }
     }
 }

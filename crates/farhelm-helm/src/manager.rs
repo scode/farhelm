@@ -70,8 +70,7 @@ pub use crate::transport::{
 
 use crate::client::{SessionListing, SupervisorClient, SupervisorError};
 use crate::session_cache::{
-    MAX_SESSION_ID_BYTES, creation_order, ensure_recordable_id, eviction_victim,
-    merge_cached_session, merged_status,
+    creation_order, ensure_recordable_id, eviction_victim, merge_cached_session, merged_status,
 };
 use crate::store::{
     CacheReplacement, DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow,
@@ -719,11 +718,13 @@ pub fn peer_text_capped(text: &str, cap: usize) -> String {
 ///
 /// What is checked is what this side goes on to BUILD ON, and every
 /// refusal is an ordinary failed refresh that keeps the previous cache
-/// (see [`HostActor::refresh_once`]): a session id past
-/// [`MAX_SESSION_ID_BYTES`] (nothing could ever address it), an id listed
-/// twice (a list that contradicts itself has no single truth to cache),
-/// and a reply longer than the cap the protocol fixes (a peer ignoring
-/// the one bound on what this side retains). Order is NOT checked: the
+/// (see [`HostActor::refresh_once`]): a session id that breaks
+/// [`crate::session_cache::session_id_problem`]'s rule (empty, past
+/// [`crate::session_cache::MAX_SESSION_ID_BYTES`], carrying a control
+/// character, or a dot segment: nothing could address it safely), an id
+/// listed twice (a list that contradicts itself has no single truth to
+/// cache), and a reply longer than the cap the protocol fixes (a peer
+/// ignoring the one bound on what this side retains). Order is NOT checked: the
 /// helm sorts every host's rows itself, in memory, for whichever order a
 /// client asks, so nothing here depends on the sequence the host chose.
 pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<SessionListing> {
@@ -741,12 +742,15 @@ pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<Session
     }
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for entry in &listing.sessions {
-        // Bounded at ingress, where the value first enters this process,
-        // rather than at each of the places it is later embedded.
-        if entry.id.len() > MAX_SESSION_ID_BYTES {
+        // Checked at ingress, where the value first enters this process,
+        // rather than at each of the places it is later embedded, and by the
+        // same rule a create's reply gets. One bad row refuses the whole
+        // list: dropping just that row would make the cache read the
+        // session as ended.
+        if let Some(problem) = crate::session_cache::session_id_problem(&entry.id) {
             anyhow::bail!(
-                "the host reported a session id of {} bytes (cap {MAX_SESSION_ID_BYTES}); \
-                 refusing a list this side could not address",
+                "the host reported an unusable session id ({problem}, {} bytes); refusing a \
+                 list this side could not address",
                 entry.id.len()
             );
         }
@@ -1823,10 +1827,11 @@ impl ConnectionManager {
     /// actor, or its published generation has moved on. The alternative is
     /// worse than a missed write, which merely costs one refresh interval.
     ///
-    /// Refuses an id past [`MAX_SESSION_ID_BYTES`] before either cache path
-    /// can publish it. The mutation caller records this best-effort failure
-    /// separately, so refusing a local seed does not revise the remote
-    /// mutation's successful result.
+    /// Refuses an id [`ensure_recordable_id`] refuses (empty, past
+    /// [`crate::session_cache::MAX_SESSION_ID_BYTES`], a control character,
+    /// a dot segment) before either cache path can publish it. The mutation
+    /// caller records this best-effort failure separately, so refusing a
+    /// local seed does not revise the remote mutation's successful result.
     ///
     /// Takes this host's cache lock and bumps its seed epoch, which is how
     /// a refresh whose drain predates this write learns not to overwrite it
@@ -4433,6 +4438,7 @@ fn skew_remediation(row: &HostRow, peer_protocol: u32, our_protocol: u32) -> Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session_cache::MAX_SESSION_ID_BYTES;
 
     use crate::transport::classify_local_dial;
     use farhelm_proto::io::{FrameReader, FrameWriter, parse_control};
@@ -8847,6 +8853,107 @@ mod tests {
             .map(|s| s.id)
             .collect();
         assert_eq!(ids, vec!["kept"], "the previous cache must survive intact");
+    }
+
+    /// Why: a list refresh used to check only an id's length and
+    /// uniqueness, while a create's reply also refused empty and
+    /// control-character ids, and neither refused `.` or `..`, which the
+    /// browser's percent-encoding cannot keep from resolving as a dot
+    /// segment. Spec: a listing that contains any id breaking
+    /// `session_cache::session_id_problem`'s rule is a refused refresh,
+    /// naming the problem, and the host's previous cache survives intact
+    /// (dropping just the bad row would read that session as ended).
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_refresh_listing_an_unusable_session_id_keeps_the_previous_cache() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("badid.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    sessions: vec![session("kept", 100)],
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        let refreshed_ok = |state: &HostState| {
+            matches!(
+                state,
+                HostState::Connected {
+                    last_refresh: RefreshHealth::Ok { .. },
+                    ..
+                }
+            )
+        };
+        fixture
+            .manager
+            .wait_for_state(host, refreshed_ok)
+            .await
+            .expect("actor is running");
+
+        for (bad, problem) in [
+            ("", "empty"),
+            ("a\nb", "control characters"),
+            (".", "dot segment"),
+            ("..", "dot segment"),
+        ] {
+            fixture.transport.edit(host, |script| {
+                // A good row the cache does not have yet, beside the bad
+                // one: a cache of only "kept" afterwards then means the
+                // list was refused whole, not filtered.
+                script.sessions = vec![
+                    session("kept", 100),
+                    session("fresh", 150),
+                    session(bad, 200),
+                ];
+            });
+            let state = fixture
+                .manager
+                .wait_for_state(host, |state| {
+                    matches!(
+                        state,
+                        HostState::Connected {
+                            last_refresh: RefreshHealth::Failed { .. },
+                            ..
+                        }
+                    )
+                })
+                .await
+                .expect("actor is running");
+            assert!(
+                matches!(&state, HostState::Connected { last_refresh: RefreshHealth::Failed { error }, .. }
+                    if error.contains(problem)),
+                "the refusal of {bad:?} must name the problem: {state:?}"
+            );
+            let ids: Vec<String> = fixture
+                .store
+                .cached_sessions(host)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|s| s.id)
+                .collect();
+            assert_eq!(
+                ids,
+                vec!["kept"],
+                "{bad:?}: the previous cache must survive intact"
+            );
+
+            // Back to a clean list so the next case starts from a healthy
+            // refresh rather than an already-failed one.
+            fixture.transport.edit(host, |script| {
+                script.sessions = vec![session("kept", 100)];
+            });
+            fixture
+                .manager
+                .wait_for_state(host, refreshed_ok)
+                .await
+                .expect("actor is running");
+        }
     }
 
     /// A live host's list is replaced WHOLESALE on the next refresh tick,

@@ -324,13 +324,13 @@ pub enum SupervisorTransportError {
     /// one step later, and it is here for exactly that reason: the facts a
     /// caller can act on are identical. The request went out, something
     /// came back, and nothing that came back says what became of it. A
-    /// `SessionCreated` whose id is empty, over the ingress cap, or
-    /// carrying control characters is the case this exists for — the target
-    /// has in all likelihood STARTED the session, and the one thing that
-    /// could address it afterwards is the id this client just refused. A
-    /// caller told "internal error" retries an unkeyed create and gets a
-    /// second real session; a caller told "outcome unknown, go look" does
-    /// not.
+    /// `SessionCreated` whose id breaks the ingress rule (empty, over the
+    /// cap, carrying control characters, a dot segment) is the case this
+    /// exists for — the target has in all likelihood STARTED the session,
+    /// and the one thing that could address it afterwards is the id this
+    /// client just refused. A caller told "internal error" retries an
+    /// unkeyed create and gets a second real session; a caller told
+    /// "outcome unknown, go look" does not.
     ///
     /// Refusing the payload rather than sanitizing it is
     /// [`created_session`]'s decision and its docs carry the reasoning;
@@ -361,17 +361,14 @@ pub enum SupervisorTransportError {
 /// Bound and sanity-check a session a supervisor says it just created,
 /// before it is cached, projected, or printed.
 ///
-/// The same ingress rule `manager::drain_sessions` applies to every id in a
-/// LISTING, applied to the one id that never travels through a listing.
+/// The ingress rule `manager::drain_sessions` applies to every id in a
+/// LISTING ([`crate::session_cache::session_id_problem`], one function for
+/// both), applied to the one id that never travels through a listing.
 /// Nothing before this point checks a `SessionCreated` reply's id at all,
 /// and the value goes on to three places that each assume it is well
-/// formed: the helm's own cache and REST paths (an id near the frame
-/// limit produces a URL no client could send), a REST body, and — through
+/// formed: the helm's own cache and REST paths, a REST body, and — through
 /// the agent relay — a CLI that prints it on stdout as its machine-readable
-/// answer.
-/// That last one is why the control-character rule is here and not only the
-/// length one: an id carrying a newline forges a second line of output in
-/// whatever captured it, and an ESC reaches the terminal that captured it.
+/// answer. The rule's own doc says which clause protects which of those.
 ///
 /// Refused rather than sanitized. A truncated or scrubbed id is not the
 /// session's id, and every later use of it — stopping it, naming it as a
@@ -431,22 +428,14 @@ fn created_session_from(
     request: &'static str,
     reply: &'static str,
 ) -> anyhow::Result<SessionInfo> {
-    use crate::session_cache::MAX_SESSION_ID_BYTES;
-    let refuse = |problem: &'static str| {
-        anyhow::Error::new(SupervisorTransportError::SentInvalidReply {
-            request,
-            reply,
-            problem,
-        })
-    };
-    if session.id.is_empty() {
-        return Err(refuse("the session id is empty"));
-    }
-    if session.id.len() > MAX_SESSION_ID_BYTES {
-        return Err(refuse("the session id is past the ingress cap"));
-    }
-    if session.id.chars().any(char::is_control) {
-        return Err(refuse("the session id contains control characters"));
+    if let Some(problem) = crate::session_cache::session_id_problem(&session.id) {
+        return Err(anyhow::Error::new(
+            SupervisorTransportError::SentInvalidReply {
+                request,
+                reply,
+                problem,
+            },
+        ));
     }
     Ok(session)
 }

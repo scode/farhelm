@@ -22,8 +22,6 @@ One line per open item. This file must always match the feedback files in this d
   refreshes never write the store and so never see the row is gone.
 - `session-detail-drains-full-list.md` — every fleet-revision bump makes each open session view trigger a full
   ListSessions on its host.
-- `list-ingress-id-validation-gap.md` — session-list ingress admits empty, control-character and dot-segment ids, and
-  the UI's %2E guard does not hold.
 - `probe-reregister-drops-terminals.md` — probing an already-registered healthy host forces a reconnect that drops every
   open terminal on it.
 - `attach-reports-generic-timeout.md` — the attach step spins 30 s on skew/identity states and reports only "timed out".

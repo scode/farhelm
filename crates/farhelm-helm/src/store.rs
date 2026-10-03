@@ -5062,11 +5062,11 @@ impl HelmStore {
     /// [`HostStoreError::SessionOwnerAmbiguous`], because a create cannot be
     /// the thing that resolves a collision — see that variant's docs.
     ///
-    /// The id is bounded like every other peer-supplied one
-    /// ([`crate::session_cache::MAX_SESSION_ID_BYTES`]): a create's reply is a peer
-    /// ingress point exactly as a drain's rows are, and an id no later
-    /// request could carry in its frame head must not enter the cache
-    /// through either.
+    /// The id is checked like every other peer-supplied one
+    /// ([`crate::session_cache::session_id_problem`]'s rule, through
+    /// [`crate::session_cache::ensure_recordable_id`]): a create's reply is a
+    /// peer ingress point exactly as a drain's rows are, and an id no later
+    /// request could address must not enter the cache through either.
     ///
     /// The cap holds here by EVICTION: a seed that would leave the slice
     /// past `farhelm_proto::LIST_SESSIONS_CAP` rows drops the oldest OTHER

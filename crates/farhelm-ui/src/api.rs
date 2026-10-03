@@ -852,12 +852,19 @@ pub(crate) fn encode_query_value(value: &str) -> String {
 ///   deletes. Not theoretical: URL parsers resolve dot segments before the
 ///   request is ever sent, so the traversal happens client-side, below
 ///   anything the helm could refuse.
-/// - `.` passes through the query-value set, but a segment that is exactly
-///   `.` or `..` is *itself* a dot segment and gets resolved away even
-///   with no slash in sight — `.../tabs/..` normalizes to the session
-///   route. Encoding `.` everywhere in a segment is the cheap way to make
-///   that impossible without special-casing two literals, and costs
-///   nothing for the ids this actually carries (UUIDs contain none).
+/// - `.` is encoded too, but that does NOT stop a segment of exactly `.`
+///   or `..` from resolving as a dot segment: the WHATWG URL Standard,
+///   which browsers and webviews follow, treats `%2E` and `%2e` as dots
+///   when it resolves a path, so `/api/sessions/%2E%2E/stop` becomes
+///   `/api/stop`. For SESSION ids the boundary is the helm, which refuses
+///   an empty, `.` or `..` session id from a supervisor before any client
+///   sees it (`session_cache::session_id_problem` in `farhelm-helm`). Tab
+///   ids get no such check, so a supervisor-supplied tab id of `..` still
+///   resolves away here: `DELETE /api/sessions/S/tabs/%2E%2E` reaches
+///   `/api/sessions/S/`. No route answers that today; a new route shaped
+///   like `/api/sessions/{id}/` or `/api/sessions/{id}/tabs/` would have
+///   to account for it. Encoding `.` itself prevents nothing and is
+///   harmless for the ids this carries (UUIDs contain none).
 ///
 /// Not a claim that the resulting id EXISTS — an id that survives escaping
 /// and names nothing is an ordinary 404, which is the honest outcome.
@@ -4253,10 +4260,11 @@ mod tests {
     /// request names. `../../victim` is the concrete attack: unescaped, a
     /// URL parser resolves the dot segments before the request is ever
     /// sent, turning a tab close into `DELETE /api/sessions/victim` — a
-    /// remote supervisor deleting a local session. Both offenders are
-    /// pinned, because either alone is enough: `/` ends the segment, and a
-    /// segment that is exactly `..` is resolved away even with no slash in
-    /// it at all.
+    /// remote supervisor deleting a local session. Encoding `/` is what
+    /// stops that one. The encoding of a bare `..` is pinned as well, but
+    /// as a spelling only: URL parsers still resolve `%2E%2E` as a dot
+    /// segment, so this encoder does not keep a `..` tab id from resolving
+    /// away (see `encode_path_segment`'s doc for what does and does not).
     #[farhelm_testtrace::test]
     fn path_segments_cannot_escape_their_segment() {
         assert_eq!(
@@ -4267,7 +4275,7 @@ mod tests {
         assert_eq!(
             encode_path_segment(".."),
             "%2E%2E",
-            "a bare dot segment resolves away without any slash, so the dots themselves have to go"
+            "the dots are encoded, which alone does not stop dot-segment resolution"
         );
         assert_eq!(
             encode_path_segment("9c3d5a71-0000-4000-8000-0000000000ff"),
