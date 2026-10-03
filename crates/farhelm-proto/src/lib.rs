@@ -358,6 +358,19 @@ pub enum ErrorKind {
 /// corrupted length prefix cannot make the reader allocate gigabytes.
 pub const MAX_FRAME_LEN: u32 = 8 * 1024 * 1024;
 
+/// Maximum payload in one incoming terminal data frame.
+///
+/// The helm applies this smaller bound before admitting a frame to an
+/// attachment's `TERM_EVENT_QUEUE`. That queue has 256 event slots, so this
+/// limit implies roughly 16 MiB of terminal payload per attachment even when
+/// a supervisor ignores flow control. The supervisor's `REPLAY_CHUNK` must
+/// stay at or below this value: older helms enforce the limit, so raising the
+/// chunk above this value needs a `PROTOCOL_VERSION` bump, because helms from
+/// this release on enforce the limit and would detach every terminal that
+/// receives a larger frame. Never lower this below the chunk any same-version
+/// supervisor sends (32 KiB today) without the same bump.
+pub const MAX_TERMINAL_DATA_LEN: usize = 64 * 1024;
+
 /// The `reason` string a `ControlMsg::Detached` carries when a stalled
 /// viewer is given up on (PLAN_M2_5.md's stall-detach contract). Two
 /// emitters send it: the supervisor, when a single pause lasts

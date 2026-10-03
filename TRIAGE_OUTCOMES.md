@@ -6077,7 +6077,8 @@
   oversized data frame before `Attached` and shows it is refused, without a multi-gigabyte fixture. Rewrite
   `TERM_EVENT_QUEUE`'s comment so the memory bound it now implies (256 × the limit) is stated rather than disclaimed.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-clipboard-terminal-limit.md`.
+- Execution: complete: change `nztunrsk`, bookmark `plan/triage-clipboard-terminal-limit/03-terminal-data-limit`, draft
+  PR [#1477](https://github.com/scode/farhelm/pull/1477/changes).
 
 ## delete-skips-scoped-tab-on-stale-verdict.md
 

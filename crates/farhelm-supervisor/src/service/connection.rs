@@ -29,8 +29,13 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
-/// Data-frame chunk size for replay. Well under MAX_FRAME_LEN; small
-/// enough that the first screenful renders while the rest streams.
+/// Data-frame chunk size for replay.
+///
+/// This must stay at or below `farhelm_proto::MAX_TERMINAL_DATA_LEN`: helms
+/// from the limit's release onward reject a larger incoming frame and detach
+/// the terminal as stalled. The shared limit leaves headroom above this 32 KiB
+/// chunk, while keeping the first screenful small enough to render before the
+/// rest streams.
 const REPLAY_CHUNK: usize = 32 * 1024;
 
 /// Depth of the per-connection writer queue — the single queue every
@@ -1803,6 +1808,23 @@ mod tests {
     use super::super::core::{CreateInputs, CreateMode};
     use super::*;
     use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus};
+
+    /// Keep the honest supervisor's output chunk within the smallest terminal
+    /// data frame a supported helm accepts. The failure text points at the
+    /// shared limit's documentation so a future chunk-size change does not
+    /// silently detach every terminal on older helms.
+    #[allow(
+        clippy::assertions_on_constants,
+        reason = "this test keeps the cross-crate chunk-size contract visible"
+    )]
+    #[farhelm_testtrace::test]
+    fn replay_chunk_stays_within_the_helm_terminal_data_limit() {
+        assert!(
+            REPLAY_CHUNK <= farhelm_proto::MAX_TERMINAL_DATA_LEN,
+            "REPLAY_CHUNK ({REPLAY_CHUNK}) exceeds MAX_TERMINAL_DATA_LEN ({}); read the shared limit's doc comment before raising either constant",
+            farhelm_proto::MAX_TERMINAL_DATA_LEN
+        );
+    }
 
     /// A pane's final write must reach the already-live attachment even when
     /// the control stream loses it at EOF. The fault drops all live bytes after

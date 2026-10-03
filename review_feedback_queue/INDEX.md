@@ -7,9 +7,6 @@ One line per open item. This file must always match the feedback files in this d
 - `claude-clear-report-dropped-on-claim-timeout.md` — a Claude `/clear` report refused after a 1 s capture-claim wait is
   never resent, so Resume keeps reopening the cleared conversation.
 
-- `terminal-output-queue-missing-byte-budget.md` — Opening one hostile remote terminal can make the helm retain almost 2
-  GiB of output before its message-count limit trips, affecting the process that serves all hosts.
-
 ## High priority: material UX degradation
 
 - `opencode-bare-model-rejected.md` — Some documented bare OpenCode model names fail to launch, even though the same
