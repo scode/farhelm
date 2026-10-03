@@ -177,7 +177,7 @@ fn install_dialog_with_initial_focus(initial_focus: &str) {
 /// The add-host dialog shares this helper but has a different cancel control;
 /// keeping the selector beside the dialog setup prevents the document-level
 /// Escape fallback from silently swallowing Escape when focus has escaped.
-fn install_dialog_with_selector(
+pub(crate) fn install_dialog_with_selector(
     dialog_selector: &str,
     initial_focus: &str,
     escape_selector: Option<&str>,
@@ -510,7 +510,8 @@ pub(super) fn HostSettingsDialog(
 }
 
 /// Ask before forgetting a host, keeping the explanation and the safe default
-/// in the same modal surface as host settings.
+/// in the same modal surface as host settings. The permanent answer names the
+/// app-wide gear so users can find how to restore this confirmation.
 #[component]
 pub(super) fn HostRemoveDialog(
     host: Host,
@@ -549,12 +550,18 @@ pub(super) fn HostRemoveDialog(
                         onclick: move |_| on_remove.call(false),
                         "remove"
                     }
-                    button {
-                        r#type: "button",
-                        class: "btn btn-danger btn-outline",
-                        disabled: busy,
-                        onclick: move |_| on_remove.call(true),
-                        "remove, and don't ask again"
+                    div { class: "host-permanent-answer",
+                        button {
+                            r#type: "button",
+                            class: "btn btn-danger btn-outline",
+                            aria_describedby: "host-remove-permanent-hint",
+                            disabled: busy,
+                            onclick: move |_| on_remove.call(true),
+                            "remove, and don't ask again"
+                        }
+                        p { id: "host-remove-permanent-hint", class: "host-settings-help",
+                            "You can turn this back on with the gear at the top of the sidebar."
+                        }
                     }
                     button {
                         r#type: "button",

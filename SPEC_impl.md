@@ -477,6 +477,14 @@ details before planning, while a running or failed retained run leaves one short
 exception is an update whose status is showing inline: the trace would only repeat it, so it is left out until that
 status clears.
 
+The app bar's gear opens a modal `settings` dialog as a sibling of the sticky bar, so the bar's stacking context cannot
+cap the backdrop below main-pane surfaces. It holds only the two app-wide host-confirmation choices, with state-specific
+help and an explanation that other open clients see changes on reload. Each reads `Some(true)` as without asking,
+updates `SharedPreferences` immediately and sends an explicit boolean through the existing sparse preference queue.
+Preference failures retain that queue's silent behavior. The dialog uses the host dialogs' shared focus/isolation helper
+with its own selector; opening focuses the first checkbox, Escape or `close` releases isolation and returns focus to the
+gear. The host setup and removal permanent answers each name that gear as the way to turn confirmation back on.
+
 The host actions menu follows the session menu's anchor, pointer, raised surface, header, grouped inset commands, line
 icons, muted descriptions, roving keyboard focus, and one-menu-at-a-time dismissal rules. The add-host fields, probe
 outcomes, and setup confirmation live in a modal dialog; a permanent setup answer is shared through the helm preference
@@ -3067,7 +3075,8 @@ working. The sidebar's app bar shows the helm's build at all times: the client's
 stamp is reported (agreement means the two are the same string), and the reported stamp from then on. The bar leads with
 the Farhelm wordmark, inlined at compile time from `packaging/farhelm-desktop/wordmark-dark.svg` (the brand file every
 use of the name as a mark shares) rather than served as an asset, so both the web bundle and the desktop build carry it
-without a desktop asset-parity entry.
+without a desktop asset-parity entry. A nonshrinking settings gear follows the version, outside the macOS drag region;
+long versions ellipsize before it or the wordmark shrinks.
 
 ### Restart-with backend wire and persistence
 

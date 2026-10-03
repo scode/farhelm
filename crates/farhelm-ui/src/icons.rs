@@ -372,3 +372,19 @@ pub(crate) fn RemoteHostIcon() -> Element {
         }
     }
 }
+
+/// The app-wide settings affordance; its button supplies the accessible name.
+/// Inline geometry keeps the browser and desktop bundle on the same asset path.
+#[component]
+pub(crate) fn SettingsIcon() -> Element {
+    rsx! {
+        svg {
+            width: "16", height: "16", view_box: "-1 0 16 16",
+            fill: "none", stroke: "currentColor", stroke_width: "1.2",
+            stroke_linecap: "round", stroke_linejoin: "round",
+            "aria-hidden": "true",
+            path { d: "M5.2 2.2 H8.8 L9.3 4.1 L11 5.1 L12.7 4.2 L14 6.5 L12.5 7.8 V9.8 L14 11.1 L12.7 13.4 L11 12.5 L9.3 13.5 H5.2 L4.7 11.6 L3 10.6 L1.3 11.5 L0 9.2 L1.5 7.9 V5.9 L0 4.6 L1.3 2.3 L3 3.2 L4.7 2.2 Z" }
+            circle { cx: "7", cy: "7.9", r: "1.7" }
+        }
+    }
+}

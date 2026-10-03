@@ -19,5 +19,10 @@ destination again finds them. Farhelm asks before removing a host in a dialog; c
 you want future removals from this helm to happen immediately. The choice is shared by every client after it reloads its
 preferences. **Cancel** or press **Escape** to leave the host untouched.
 
+To bring the question back, select the gear beside the version number at the top of the sidebar. In **settings**, untick
+**remove hosts without asking**. The other checkbox, **set up new hosts without asking**, controls the question shown
+when a new host needs setup. Ticking either box skips its question. Your next action follows the change immediately;
+other open clients pick it up when they reload. These choices apply to all hosts on your helm.
+
 Adding a remote host is described in [Add a remote host](/docs/get-started/add-a-remote-host/), including the SSH
 prerequisite and setup details.

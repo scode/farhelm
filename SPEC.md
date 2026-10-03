@@ -764,14 +764,20 @@ can be ordered independently by most recent activity, by creation time, or by ti
 remembered by the helm as one preference shared by every client, together with the last-selected session and compact-row
 choice, and most recent activity is what a client shows until someone picks otherwise. The same shared preference row
 carries whether host setup or host removal confirmation should be skipped after an explicit permanent answer; a client
-that has already loaded its preferences keeps asking until it reloads. No client keeps its own copy: every client reads
-the helm's preference once after authenticating and writes it on change, so a browser tab and the desktop app open in
-the same order and on the same session. Per-client persistence — browser storage, a desktop state file, anything that
-lets two clients remember different answers — is not wanted for these shared preferences (terminal text size, by
-contrast, is deliberately per device; see Terminal experience). A client that asks the helm for no particular order gets
-creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
-does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
-`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
+that has already loaded its preferences keeps its previous behavior until it reloads. The gear immediately to the right
+of the sidebar version opens a settings dialog with exactly two checkboxes: `set up new hosts without asking` and
+`remove hosts without asking`, ticked when the respective confirmation is skipped. Unticking one restores that
+confirmation; ticking one makes the same choice as the host dialog's permanent answer. Changes take effect immediately
+in the current client. Each checkbox explains the current behavior, and each host dialog's permanent answer points to
+the gear as the place to undo it. These choices apply to every host and client of this helm; existing controls with a
+natural place in the main UI stay there. No client keeps its own copy: every client reads the helm's preference once
+after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on the
+same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients remember
+different answers — is not wanted for these shared preferences (terminal text size, by contrast, is deliberately per
+device; see Terminal experience). A client that asks the helm for no particular order gets creation time. No mandatory
+hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
+implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
+`farhelm agent create` and `clone` need not record the asking session.
 
 The option labelled most recent activity sorts connected running and waiting sessions first, then every other session —
 idle, unclassified, ended, and anything on an unreachable host. Inside each group the order is the most recent observed

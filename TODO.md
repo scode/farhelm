@@ -136,12 +136,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   ask by default, and let the user turn asking off for a host. Related to the Maybe later entry on closing the
   cross-host execution hole in agent-requested session creation and cloning.
 
-- **A way to turn host add and remove confirmations back on.** The host dialogs plan adds "yes, and don't ask in the
-  future" to the add-host dialog and "remove, and don't ask again" to the remove-host dialog, both kept as helm
-  preferences shared by every client, but no way in the UI to undo either answer: decided 2026-10-02 to leave that out
-  of the plan and add it later. Farhelm has no app-wide settings screen to put it in, so where the switch lives is the
-  first question. Plan: `plans/queue/host-confirmations-toggle.md`.
-
 - **Install Claude and Codex on a host for the user.** Offer to install Claude Code and Codex (only those two) on a host
   on the user's behalf, always through each vendor's one-line curl installer, and optionally copy the user's credentials
   for them over to the host. Choosing to copy credentials must come with a warning that it is the user's call, including

@@ -396,16 +396,21 @@ test("real discovery offers one peer-safe concrete plan and mutates nothing befo
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect"]);
 });
 
-test("a permanent setup answer submits the next setup-needed add after probing", async ({
+/** The host answer skips the next setup question, and the app-wide checkbox
+ * restores that question in this same client without a preference reload.
+ */
+test("a permanent setup answer is reversible through settings after the next add", async ({
   page,
   request,
 }, testInfo) => {
   const first = destination(testInfo, "remember-setup-first");
   const second = destination(testInfo, "remember-setup-second");
+  const third = destination(testInfo, "remember-setup-third");
   await configureBackend({
     targets: {
       [target(first)]: {},
       [target(second)]: {},
+      [target(third)]: {},
     },
   });
   await patchPreferences(request, { skip_host_setup_confirmation: null });
@@ -425,6 +430,29 @@ test("a permanent setup answer submits the next setup-needed add after probing",
   await page.locator(".add-host-submit").click();
   await expect(hostRowByName(page, second)).toBeVisible();
   await expect(page.getByRole("button", { name: "yes", exact: true })).toHaveCount(0);
+  await expect(page.locator(".add-host-form")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "settings", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "settings", exact: true });
+  const toggle = settings.getByRole("checkbox", { name: "set up new hosts without asking", exact: true });
+  await expect(toggle).toBeChecked();
+  await toggle.uncheck();
+  await expect(settings.locator("#host-setup-preference-help")).toContainText("asks before doing it");
+  await expect.poll(async () => (await readPreferences(request)).skip_host_setup_confirmation).toBe(false);
+  await settings.getByRole("button", { name: "close", exact: true }).click();
+  await probeRemote(page, third);
+  await expect(page.locator(".provisioning-plan")).toBeVisible();
+  await expect(page.getByText("You can turn this back on with the gear at the top of the sidebar.")).toBeVisible();
+  expect((await hosts(request)).some((host) => host.destination === third)).toBe(false);
+  await page.getByRole("button", { name: "cancel", exact: true }).click();
+  await page.getByRole("button", { name: "settings", exact: true }).click();
+  await toggle.check();
+  await expect.poll(async () => (await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
+  await settings.getByRole("button", { name: "close", exact: true }).click();
+  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".add-host-ssh").fill(third);
+  await page.locator(".add-host-submit").click();
+  await expect(hostRowByName(page, third)).toBeVisible();
   await expect(page.locator(".add-host-form")).toHaveCount(0);
 });
 
