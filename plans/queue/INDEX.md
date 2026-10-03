@@ -8,7 +8,7 @@ One line per plan, in queue order, oldest first. `plans/AGENTS.md` describes the
 - [pending] `host-update-button.md` — an amber or red outlined update button on hosts that run an older Farhelm, in place of the `old version` / `needs update` word (after `host-dialogs-and-menu.md`)
 - [approved] `claude-background-wait-status.md` — Claude reads as working, not idle, while its screen says it is waiting for background work to finish.
 - [in-flight bb108d] `gh-clone-fresh-checkout.md` — Clone or Replace with into a fresh GitHub checkout uses the next free `repo-N` instead of refusing the copied title as taken.
-- [in-flight 9cc8e5] `stepped-animations.md` — looping indicators (the running pulse and its kin) step at most 10 times a second instead of redrawing every frame, and pause while the window is not active, with the rule written into the specs.
+- [in review] `stepped-animations.md` — looping indicators (the running pulse and its kin) step at most 10 times a second instead of redrawing every frame, and pause while the window is not active, with the rule written into the specs.
 - [in-flight 23ee35] `triage-busy-host-refusal.md` — refuse Stop, Restart, Rename and other management requests with "try again" when a host is busy instead of freezing typing on it, and take the session list off the management limit.
 - [pending] `triage-signin-recovery.md` — exempt the desktop app's own credentials from token rotation and the client cap so it never re-signs in, and let the browser lose an in-flight action's result across its sign-in prompt.
 - [pending] `triage-opencode-model-names.md` — OpenCode accepts model names without the `opencode/` prefix, and typing a model name never switches the selected harness.
