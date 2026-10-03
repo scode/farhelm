@@ -89,7 +89,7 @@ use subtle::ConstantTimeEq;
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 23;
+const SCHEMA_VERSION: i64 = 24;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -780,8 +780,8 @@ pub enum RetryClaim {
 /// them when it validated the requested mode — the condition
 /// [`SessionStore::begin_relaunch`] claims under.
 ///
-/// The offer check covers capture evidence: a newly claimed identity or
-/// ambiguity verdict can change which restart modes are available. The
+/// The offer check covers identity and ownership evidence, since either can
+/// change which restart modes are available. The
 /// integration kind stays fixed, while restart-with may replace the template
 /// only as part of a relaunch. Conditioning on capture evidence keeps an
 /// unrelated row write from rejecting the relaunch.
@@ -791,9 +791,6 @@ pub struct OfferBasis {
     /// Accepted reports replace this value within the same launch generation.
     /// Historical identities remain usable regardless of conversation_source.
     pub captured_conversation: Option<String>,
-    /// Historical scan verdict; no longer used to choose an identity.
-    /// Retained only until the following schema migration removes it.
-    pub capture_ambiguous: bool,
     /// The ownership provenance beside the identity: a version flip with
     /// an unchanged conversation still changes the offer (an unproven
     /// binding newly proven, or a proven one replaced across the
@@ -826,13 +823,13 @@ pub struct PriorRun {
 
 /// The columns [`SessionStore::begin_relaunch`] reads before deciding
 /// whether it may open a new generation: the outcome quartet, the pane,
-/// the current generation, the captured conversation, the ambiguity flag,
-/// and the current launch's scope selection — in that positional order.
+/// the current generation, the captured conversation, the current launch's
+/// scope selection, and ownership provenance — in that positional order.
 ///
 /// Named only because the tuple is wide enough that clippy (rightly) asks
 /// for it; it has exactly one producer and one consumer, both inside that
 /// function's transaction.
-type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i64, i64);
+type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i64);
 
 /// The columns [`SessionStore::restart_pending_launch`] reads inside its
 /// transaction: the outcome state, the pane, `created_at`, the title, the
@@ -876,7 +873,7 @@ pub struct RelaunchClaim {
 pub enum RelaunchDecision {
     /// The generation is open and this caller owns the relaunch.
     Claimed(RelaunchClaim),
-    /// The session's captured identity or ambiguity verdict changed since
+    /// The session's captured identity or ownership provenance changed since
     /// the caller validated the requested mode against them, so the mode
     /// may no longer be the one the session's offer authorizes. Nothing was
     /// written.
@@ -1251,14 +1248,6 @@ pub struct StoredSession {
     /// replace it within the same launch; historical identities remain usable
     /// regardless of their provenance.
     pub captured_conversation: Option<String>,
-    /// Historical record locator; no longer read for identity or verification.
-    /// Retained only until the following schema migration removes it.
-    pub captured_record: Option<String>,
-    /// Legacy scan verdict, inert until the following migration drops it.
-    pub capture_ambiguous: bool,
-    /// Historical input timestamp; the report diagnostic now uses an in-memory instant.
-    /// Retained only until the following schema migration removes it.
-    pub first_input_at: Option<i64>,
     /// Which LAUNCH of this session the row currently describes: 0 for the
     /// session's original launch, incremented once by every relaunch
     /// ([`SessionStore::begin_relaunch`]).
@@ -1474,7 +1463,7 @@ pub struct SessionStore {
 ///   the session's.
 /// - 4: PLAN_M3.md items 7 and 8 — the per-session integration snapshot
 ///   (`agent_kind`, `resume_template`), the conversation identity captured
-///   against it, and the first-input timestamp that capture correlates on.
+///   against it, and the first-input timestamp the former scan correlated on.
 ///   Columns on `sessions` rather than a side table because all four have
 ///   exactly the session's lifetime and are read on the same paths that
 ///   already load the row; a join would buy nothing and would let a
@@ -1517,23 +1506,10 @@ pub struct SessionStore {
 ///   fallback where it belongs: a concession to OLDER senders, not
 ///   something every local read has to keep applying forever. See
 ///   [`StoredSession::last_activity_at`].
-/// - 14: `sessions.conversation_source` — which of the two writers last set
-///   `captured_conversation`: `NULL` for the record-scan correlator (or
-///   nothing claimed yet), `'hook'` for the agent's own `SessionStart`
-///   report. No `CHECK` constraint restricting it to those two values —
-///   and unlike version 8's snapshot pair, that is a CHOICE rather than a
-///   limitation. The pair's argument (`ALTER TABLE ADD COLUMN` cannot add
-///   a table-level `CHECK`, so one would make a migrated database diverge
-///   from a fresh one) does not carry over: this is a single column, and a
-///   column-level `CHECK` referring only to itself is legal in an `ADD
-///   COLUMN`. It is omitted anyway, to keep the invariant where every
-///   other cross-column invariant in this table lives — in the code that
-///   writes it, which is the only place that can also state WHY. Adding
-///   the constraint later would buy a redundant second statement of a rule
-///   [`SessionStore::record_reported_conversation`] is already the sole
-///   enforcer of. The column exists so a report can dominate and fence out
-///   the scan (see that method) without the two writers racing each other
-///   on disk.
+/// - 14: `sessions.conversation_source` — which writer last set the identity.
+///   Originally this let reports fence out the scan. Report provenance still
+///   serves as launch evidence and controls exact-file reconciliation, while
+///   a historical identity remains resumable without that provenance.
 /// - 18: the working-copy registry — `working_copies` (one row per
 ///   supervisor-managed directory under a canonical repo root) and
 ///   `working_copy_members` (which sessions currently own its lifetime).
@@ -1545,6 +1521,9 @@ pub struct SessionStore {
 ///   session listing; the migration does not launch or recreate anything.
 /// - 20: capture ownership provenance. Historical bindings remain intact
 ///   with version 0 because their writers did not establish ownership.
+/// - 24: remove the scan's record locator, ambiguity flag, and first-input
+///   timestamp. The conversation identity, source, and ownership proof remain;
+///   the no-report diagnostic now keeps its own launch-scoped timer in memory.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1590,9 +1569,6 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  resume_template       TEXT,
                  canonical_cwd         TEXT,
                  captured_conversation TEXT,
-                 captured_record       TEXT,
-                 capture_ambiguous     INTEGER NOT NULL DEFAULT 0,
-                 first_input_at        INTEGER,
                  generation            INTEGER NOT NULL DEFAULT 0,
                  launch_scoped         INTEGER NOT NULL DEFAULT 0,
                  source_profile_id     TEXT,
@@ -1653,7 +1629,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  working_copy_id TEXT NOT NULL,
                  PRIMARY KEY (session_id, working_copy_id)
              ) STRICT;
-             PRAGMA user_version = 23;
+             PRAGMA user_version = 24;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2217,6 +2193,21 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 22 to 23")?;
         version = 23;
     }
+    if version == 23 {
+        // Reports own conversation identity now. These columns described the
+        // removed scan, not the stored identity or its ownership proof; dropping
+        // them must leave every historical Resume target intact.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions DROP COLUMN captured_record;
+             ALTER TABLE sessions DROP COLUMN capture_ambiguous;
+             ALTER TABLE sessions DROP COLUMN first_input_at;
+             PRAGMA user_version = 24;
+             COMMIT;",
+        )
+        .context("migrating schema from version 23 to 24")?;
+        version = 24;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2356,12 +2347,12 @@ fn insert_session_row(
          (id, title, cwd, invocation, tmux_name, pane, created_at, creation_seq, \
           outcome_state, exit_code, annotation, error_detail, \
           agent_kind, resume_template, canonical_cwd, captured_conversation, \
-          captured_record, capture_ambiguous, first_input_at, generation, launch_scoped, \
+          generation, launch_scoped, \
           source_profile_id, source_profile_name, parent, session_token, \
           last_activity_at, last_work_started_at, conversation_source, launch, \
           capture_ownership_version, omp_reporter_asset, omp_launch_program) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2379,9 +2370,6 @@ fn insert_session_row(
             resume_template_column(row.resume_template.as_deref()),
             row.canonical_cwd,
             row.captured_conversation,
-            row.captured_record,
-            i64::from(row.capture_ambiguous),
-            row.first_input_at,
             row.generation,
             i64::from(row.launch_scoped),
             // Both or neither, from one `Option` — see `ProfileSnapshot`
@@ -2415,21 +2403,15 @@ fn insert_session_row(
 /// [`decode_session_row`] expects. Named so the two readers cannot drift
 /// apart by one column and start decoding each other's fields.
 ///
-/// Every column added since the original projection was APPENDED here —
-/// `created_at`, for instance, sits near the end of this list even though
-/// the schema puts it right after `pane` (see the `CREATE TABLE` above) —
-/// because this list's order does NOT need to match the table's. What it must
-/// match is [`read_session_columns`]'s positional `r.get(N)` calls: every
-/// position before a given column is load-bearing for every index after
-/// it, so inserting a new column in the MIDDLE of this projection would
-/// silently shift every existing index by one. Appending is the one
-/// change that cannot do that, regardless of where the column actually
-/// sits in the table.
+/// New columns are appended here; removing obsolete columns requires updating
+/// every later positional read in the same change. This order need not match
+/// the table: `created_at` sits near the end even though the schema places it
+/// after `pane`. It must match [`read_session_columns`]'s positional reads,
+/// since one misplaced column shifts every later field.
 const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                outcome_state, exit_code, annotation, error_detail, \
                                agent_kind, resume_template, canonical_cwd, \
-                               captured_conversation, captured_record, capture_ambiguous, \
-                               first_input_at, generation, launch_scoped, created_at, \
+                               captured_conversation, generation, launch_scoped, created_at, \
                                source_profile_id, source_profile_name, parent, creation_seq, \
                                last_activity_at, last_work_started_at, conversation_source, launch, \
                                capture_ownership_version, omp_reporter_asset, omp_launch_program";
@@ -2463,7 +2445,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
     Ok((
         StoredSession {
             id: r.get(0)?,
-            parent: r.get(22)?,
+            parent: r.get(19)?,
             title: r.get(1)?,
             cwd: r.get(2)?,
             invocation: r.get(3)?,
@@ -2475,27 +2457,24 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             resume_template: None,
             canonical_cwd: r.get(12)?,
             captured_conversation: r.get(13)?,
-            captured_record: r.get(14)?,
-            capture_ambiguous: r.get::<_, i64>(15)? != 0,
-            first_input_at: r.get(16)?,
-            generation: r.get(17)?,
-            launch_scoped: r.get::<_, i64>(18)? != 0,
-            created_at: r.get(19)?,
-            last_activity_at: r.get(24)?,
-            last_work_started_at: r.get(25)?,
+            generation: r.get(14)?,
+            launch_scoped: r.get::<_, i64>(15)? != 0,
+            created_at: r.get(16)?,
+            last_activity_at: r.get(21)?,
+            last_work_started_at: r.get(22)?,
             creation_seq: 0,
             source_profile: None,
-            conversation_source: r.get(26)?,
-            capture_ownership_version: r.get(28)?,
-            omp_reporter_asset: r.get(29)?,
-            omp_launch_program: r.get(30)?,
+            conversation_source: r.get(23)?,
+            capture_ownership_version: r.get(25)?,
+            omp_reporter_asset: r.get(26)?,
+            omp_launch_program: r.get(27)?,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
         r.get(11)?,
-        (r.get(20)?, r.get(21)?),
-        r.get::<_, i64>(23)?,
-        r.get(27)?,
+        (r.get(17)?, r.get(18)?),
+        r.get::<_, i64>(20)?,
+        r.get(24)?,
     ))
 }
 
@@ -3923,9 +3902,9 @@ impl SessionStore {
     /// ## The offer condition
     ///
     /// `basis` is what the caller's mode validation was decided against:
-    /// the captured identity, its ownership provenance, and the ambiguity
-    /// verdict. These can change as capture evidence arrives; a template
-    /// replacement belongs to a relaunch instead. The claim is CONDITIONAL
+    /// the captured identity and its ownership provenance. These can change
+    /// as report evidence arrives; a template replacement belongs to a relaunch
+    /// instead. The claim is CONDITIONAL
     /// on that evidence still holding, which makes "validate the offer, then relaunch"
     /// atomic rather than merely sequential: a capture pass that commits
     /// `Resume` in between turns this into [`RelaunchDecision::OfferChanged`]
@@ -3956,7 +3935,6 @@ impl SessionStore {
     /// - `reset_capture` clears the identity and its ownership and source.
     ///   A fresh launch starts a new conversation; Resume preserves the
     ///   exact identity it will enter, whether historical or reported.
-    ///   The legacy scan columns follow the same reset until their migration.
     /// - `omp_reporter_asset` and `omp_launch_program` clear UNCONDITIONALLY
     ///   — on a `Resume` relaunch as much as a fresh one. They describe the
     ///   LAUNCH (which argv started, which reporter it installed), not the
@@ -3991,7 +3969,7 @@ impl SessionStore {
                     let current: Option<RelaunchBasisColumns> = tx
                         .query_row(
                             "SELECT outcome_state, exit_code, annotation, error_detail, pane, \
-                     generation, captured_conversation, capture_ambiguous, launch_scoped, \
+                     generation, captured_conversation, launch_scoped, \
                      capture_ownership_version \
                      FROM sessions WHERE id = ?1",
                             rusqlite::params![id],
@@ -4003,7 +3981,6 @@ impl SessionStore {
                                     r.get(6)?,
                                     r.get(7)?,
                                     r.get(8)?,
-                                    r.get(9)?,
                                 ))
                             },
                         )
@@ -4014,7 +3991,6 @@ impl SessionStore {
                         pane,
                         generation,
                         captured_conversation,
-                        capture_ambiguous,
                         scoped,
                         capture_ownership_version,
                     )) = current
@@ -4022,7 +3998,6 @@ impl SessionStore {
                         return Ok(RelaunchDecision::Gone);
                     };
                     if captured_conversation != basis.captured_conversation
-                        || (capture_ambiguous != 0) != basis.capture_ambiguous
                         || capture_ownership_version != basis.capture_ownership_version
                     {
                         return Ok(RelaunchDecision::OfferChanged);
@@ -4052,11 +4027,8 @@ impl SessionStore {
                         "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
                  omp_reporter_asset = NULL, omp_launch_program = NULL, \
-                 first_input_at = CASE WHEN ?8 THEN NULL ELSE first_input_at END, \
                  captured_conversation = \
                      CASE WHEN ?8 THEN NULL ELSE captured_conversation END, \
-                 captured_record = CASE WHEN ?8 THEN NULL ELSE captured_record END, \
-                 capture_ambiguous = CASE WHEN ?8 THEN 0 ELSE capture_ambiguous END, \
                  conversation_source = \
                      CASE WHEN ?8 THEN NULL ELSE conversation_source END, \
                  capture_ownership_version = \
@@ -4104,8 +4076,16 @@ impl SessionStore {
     /// Conditional on `generation` still being current, so a restore can
     /// never step on a LATER restart that has since claimed the session:
     /// by the time this loses that race, the newer generation's own outcome
-    /// is the truth and this one's prior run is ancient history. The
-    /// generation itself is deliberately NOT rolled back — it is monotonic,
+    /// is the truth and this one's prior run is ancient history.
+    ///
+    /// Identity is not restored: Resume never clears its identity, and a
+    /// validated non-Resume restart has no usable Resume target to restore.
+    /// The OMP reporter asset and launch program also stay cleared: they
+    /// authorize one launch, not the conversation, so a later launch must
+    /// establish its own pair. The outcome, pane, and scope selection describe
+    /// the prior run; they are the facts this operation restores.
+    ///
+    /// The generation itself is deliberately NOT rolled back — it is monotonic,
     /// and a reused number is exactly what would let a stale sentinel or a
     /// stale observation land on a future launch.
     ///
@@ -4723,8 +4703,7 @@ impl SessionStore {
     /// replaced is then exactly the one that must never be resumed again.
     /// Making the write idempotent in the first case is what makes it
     /// correct in the second, without this method having to know which
-    /// event it is serving. Legacy scan columns are cleared alongside it
-    /// until the schema migration removes them.
+    /// event it is serving.
     ///
     /// The vendor event name is logged, not persisted. `conversation_source`
     /// records report provenance, independent of which event sent it. Every
@@ -4751,13 +4730,13 @@ impl SessionStore {
                 "reported-conversation record task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
                     let changed = conn
-                .execute(
-                    "UPDATE sessions SET captured_conversation = ?2, captured_record = NULL, \
-                     conversation_source = 'hook', capture_ambiguous = 0 \
+                        .execute(
+                            "UPDATE sessions SET captured_conversation = ?2, \
+                     conversation_source = 'hook' \
                      WHERE id = ?1 AND generation = ?3",
-                    rusqlite::params![id, conversation, generation],
-                )
-                .context("recording a reported conversation identity")?;
+                            rusqlite::params![id, conversation, generation],
+                        )
+                        .context("recording a reported conversation identity")?;
                     Ok(changed > 0)
                 },
             )
@@ -4786,13 +4765,13 @@ impl SessionStore {
                 "stale reported-conversation replacement task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
                     let changed = conn
-                .execute(
-                    "UPDATE sessions SET captured_conversation = ?4, captured_record = NULL, \
-                     conversation_source = 'hook', capture_ambiguous = 0 \
+                        .execute(
+                            "UPDATE sessions SET captured_conversation = ?4, \
+                     conversation_source = 'hook' \
                      WHERE id = ?1 AND generation = ?2 AND captured_conversation IS ?3",
-                    rusqlite::params![id, generation, expected, replacement],
-                )
-                .context("replacing a stale reported conversation locator")?;
+                            rusqlite::params![id, generation, expected, replacement],
+                        )
+                        .context("replacing a stale reported conversation locator")?;
                     Ok(changed > 0)
                 },
             )
@@ -4800,7 +4779,7 @@ impl SessionStore {
     }
 
     /// Commit an ownership-proven identity: conversation, exact locator,
-    /// proof version, source, readiness, and ambiguity reset, atomically.
+    /// proof version and source, atomically.
     ///
     /// The ONLY writer that establishes `capture_ownership_version = 1`,
     /// and only the authoritative admission path calls it, after the
@@ -4828,21 +4807,21 @@ impl SessionStore {
                 "ownership-proven admission task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
                     let changed = conn
-                .execute(
-                    "UPDATE sessions SET captured_conversation = ?5, captured_record = NULL, \
-                     conversation_source = 'hook', capture_ambiguous = 0, \
+                        .execute(
+                            "UPDATE sessions SET captured_conversation = ?5, \
+                     conversation_source = 'hook', \
                      capture_ownership_version = 1 \
                      WHERE id = ?1 AND generation = ?2 AND captured_conversation IS ?3 \
                      AND capture_ownership_version = ?4",
-                    rusqlite::params![
-                        id,
-                        generation,
-                        expected_conversation,
-                        expected_version,
-                        replacement
-                    ],
-                )
-                .context("admitting an ownership-proven conversation identity")?;
+                            rusqlite::params![
+                                id,
+                                generation,
+                                expected_conversation,
+                                expected_version,
+                                replacement
+                            ],
+                        )
+                        .context("admitting an ownership-proven conversation identity")?;
                     Ok(changed > 0)
                 },
             )
@@ -5760,9 +5739,6 @@ mod tests {
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: scoped,
                     source_profile: None,
@@ -6558,8 +6534,160 @@ mod tests {
         }
     }
 
+    /// Removing scan bookkeeping must not erase the identities users already
+    /// resume. A frozen v23 schema supplies reported, historical scan-claimed,
+    /// and ambiguous rows; all retained values and their offers survive, while
+    /// the three obsolete columns disappear and fresh/migrated schemas agree.
+    #[farhelm_testtrace::test]
+    async fn migration_24_preserves_identities_and_drops_only_scan_bookkeeping() {
+        use crate::agent_kind::IntegrationSnapshot;
+        use farhelm_proto::{AgentKind, RestartOffer};
+        use rusqlite::types::Value;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("supervisor.db");
+        let before = {
+            let conn = Connection::open(&path).expect("create v23 fixture");
+            conn.execute_batch(include_str!("../tests/fixtures/supervisor-v23.sql"))
+                .expect("frozen v23 DDL");
+            for (sequence, (id, identity, source, ambiguous)) in [
+                ("reported", Some("reported-id"), Some("hook"), 0),
+                ("historical", Some("historical-id"), None, 0),
+                ("ambiguous", None, None, 1),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                conn.execute(
+                    "INSERT INTO sessions
+                     (id,title,cwd,invocation,tmux_name,pane,created_at,outcome_state,
+                      agent_kind,resume_template,canonical_cwd,captured_conversation,
+                      captured_record,capture_ambiguous,first_input_at,generation,
+                      launch_scoped,session_token,creation_seq,last_activity_at,
+                      conversation_source,last_work_started_at,capture_ownership_version)
+                     VALUES (?1,?1,'/work','claude',?1,'',123,'exited','claude',
+                             '[\"claude\",\"--resume\",\"{conversation}\"]','/work',?2,
+                             CASE WHEN ?3 = 'hook' OR ?4 = 1 THEN NULL ELSE '/records/old.jsonl' END,
+                             ?4,124,7,1,?1,?5,125,?3,125000,0)",
+                    rusqlite::params![id, identity, source, ambiguous, sequence as i64 + 1],
+                )
+                .expect("seed historical row");
+            }
+            assert_eq!(
+                conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                23
+            );
+            let old_columns = columns_of(&path);
+            for name in ["captured_record", "capture_ambiguous", "first_input_at"] {
+                assert!(
+                    old_columns
+                        .iter()
+                        .any(|column| column.0 == "sessions" && column.1 == name)
+                );
+            }
+            assert_eq!(
+                conn.query_row(
+                    "SELECT capture_ambiguous FROM sessions WHERE id = 'ambiguous'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+            // Named columns are independent of table order. Compare every
+            // retained session value, not only the identity under discussion.
+            let retained = old_columns
+                .iter()
+                .filter(|column| {
+                    column.0 == "sessions"
+                        && !matches!(
+                            column.1.as_str(),
+                            "captured_record" | "capture_ambiguous" | "first_input_at"
+                        )
+                })
+                .map(|column| column.1.clone())
+                .collect::<Vec<_>>()
+                .join(",");
+            let mut statement = conn
+                .prepare(&format!("SELECT {retained} FROM sessions ORDER BY id"))
+                .unwrap();
+            let count = statement.column_count();
+            let values = statement
+                .query_map([], |row| {
+                    (0..count)
+                        .map(|i| row.get(i))
+                        .collect::<rusqlite::Result<Vec<Value>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            (retained, values)
+        };
+        let migrated = SessionStore::open(&path, true).await.expect("migrate v23");
+        assert_eq!(migrated.load_all().await.unwrap().len(), 3);
+        for (id, identity, offer) in [
+            ("reported", Some("reported-id"), RestartOffer::Resume),
+            ("historical", Some("historical-id"), RestartOffer::Resume),
+            ("ambiguous", None, RestartOffer::FreshOnly),
+        ] {
+            let row = migrated.session(id).await.unwrap().expect("row survives");
+            assert_eq!(row.captured_conversation.as_deref(), identity);
+            let integration = IntegrationSnapshot {
+                kind: AgentKind::Claude,
+                resume_template: row.resume_template,
+            };
+            assert_eq!(
+                integration.restart_offer(
+                    row.captured_conversation.as_deref(),
+                    row.capture_ownership_version
+                ),
+                offer
+            );
+            if let Some(identity) = identity {
+                assert_eq!(
+                    integration.filled_resume_argv(identity).unwrap(),
+                    ["claude", "--resume", identity]
+                );
+            }
+        }
+        {
+            let conn = Connection::open(&path).unwrap();
+            let mut statement = conn
+                .prepare(&format!("SELECT {} FROM sessions ORDER BY id", before.0))
+                .unwrap();
+            let count = statement.column_count();
+            let after = statement
+                .query_map([], |row| {
+                    (0..count)
+                        .map(|i| row.get(i))
+                        .collect::<rusqlite::Result<Vec<Value>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(after, before.1, "every retained value survives");
+            assert_eq!(
+                conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                24
+            );
+        }
+        let fresh_path = dir.path().join("fresh.db");
+        let _fresh = SessionStore::open(&fresh_path, true).await.unwrap();
+        assert_eq!(columns_of(&path), columns_of(&fresh_path));
+        assert_eq!(indexes_of(&path), indexes_of(&fresh_path));
+        for name in ["captured_record", "capture_ambiguous", "first_input_at"] {
+            assert!(
+                !columns_of(&path)
+                    .iter()
+                    .any(|column| column.0 == "sessions" && column.1 == name)
+            );
+        }
+    }
+
     /// Migration 20 lands ownership provenance at 0 for every old row
-    /// and preserves the rest of the binding byte-for-byte.
+    /// and preserves the identity and source byte-for-byte.
     ///
     /// Why this test matters: this is the converted pre-fix
     /// reproduction — before the column existed, a historical capture
@@ -6576,7 +6704,6 @@ mod tests {
         let mut row = launching_row("old-capture");
         row.captured_conversation = Some("conv-old".to_string());
         row.conversation_source = Some("hook".to_string());
-        row.capture_ambiguous = true;
         store
             .insert_session(row, None)
             .await
@@ -6590,6 +6717,9 @@ mod tests {
                  ALTER TABLE sessions DROP COLUMN omp_launch_program;
                  ALTER TABLE working_copies DROP COLUMN root_birth_ns;
                  ALTER TABLE working_copies DROP COLUMN path_birth_ns;
+                 ALTER TABLE sessions ADD COLUMN captured_record TEXT;
+                 ALTER TABLE sessions ADD COLUMN capture_ambiguous INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sessions ADD COLUMN first_input_at INTEGER;
                  PRAGMA user_version = 19;",
             )
             .expect("downgrade the fixture to the pre-provenance schema");
@@ -6623,10 +6753,6 @@ mod tests {
             row.conversation_source.as_deref(),
             Some("hook"),
             "the source migrates byte-preserved"
-        );
-        assert!(
-            row.capture_ambiguous,
-            "the ambiguity verdict migrates byte-preserved"
         );
         let version: i64 = Connection::open(&db_path)
             .expect("open raw")
@@ -6680,10 +6806,6 @@ mod tests {
             row.conversation_source.as_deref(),
             Some("hook"),
             "the source commits alongside"
-        );
-        assert!(
-            !row.capture_ambiguous,
-            "the ambiguity reset commits alongside"
         );
 
         // A stale locator no longer matches the binding verification saw.
@@ -6742,7 +6864,6 @@ mod tests {
 
         let basis = OfferBasis {
             captured_conversation: Some("conv-proven".to_string()),
-            capture_ambiguous: false,
             capture_ownership_version: 1,
         };
         store
@@ -6780,7 +6901,6 @@ mod tests {
         // the row stands at 1, like an identity change.
         let stale = OfferBasis {
             captured_conversation: Some("conv-proven".to_string()),
-            capture_ambiguous: false,
             capture_ownership_version: 0,
         };
         assert!(
@@ -6836,7 +6956,6 @@ mod tests {
         }
         let basis = OfferBasis {
             captured_conversation: Some("conv-old".to_string()),
-            capture_ambiguous: false,
             capture_ownership_version: 0,
         };
         for (id, reset_capture, kept_conversation) in [
@@ -7007,9 +7126,6 @@ mod tests {
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -7062,9 +7178,6 @@ mod tests {
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -7671,9 +7784,6 @@ mod tests {
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -7742,9 +7852,6 @@ mod tests {
                     ]),
                     canonical_cwd: Some("/tmp/work".to_string()),
                     captured_conversation: Some("conversation-7".to_string()),
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -7833,9 +7940,6 @@ mod tests {
                         resume_template: resume_template.clone(),
                         canonical_cwd: None,
                         captured_conversation: None,
-                        captured_record: None,
-                        capture_ambiguous: false,
-                        first_input_at: None,
                         generation: 0,
                         launch_scoped: false,
                         source_profile: None,
@@ -7908,6 +8012,9 @@ mod tests {
                  ALTER TABLE sessions DROP COLUMN capture_ownership_version;
                  ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
                  ALTER TABLE sessions DROP COLUMN omp_launch_program;
+                 ALTER TABLE sessions ADD COLUMN captured_record TEXT;
+                 ALTER TABLE sessions ADD COLUMN capture_ambiguous INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sessions ADD COLUMN first_input_at INTEGER;
                  PRAGMA user_version = 17;",
             )
             .expect("restore pre-checkout schema");
@@ -7994,6 +8101,9 @@ mod tests {
                  );
                  INSERT INTO working_copy_members (session_id, working_copy_id)
                  VALUES ('retained', 'checkout');
+                 ALTER TABLE sessions ADD COLUMN captured_record TEXT;
+                 ALTER TABLE sessions ADD COLUMN capture_ambiguous INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sessions ADD COLUMN first_input_at INTEGER;
                  PRAGMA user_version = 18;",
             )
             .expect("restore the schema-18 archive column");
@@ -8349,9 +8459,6 @@ mod tests {
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -8396,8 +8503,6 @@ mod tests {
             omp_reporter_asset: None,
             omp_launch_program: None,
             canonical_cwd: None,
-            captured_record: None,
-            capture_ambiguous: false,
             id: id.to_string(),
             parent: None,
             title: id.to_string(),
@@ -8414,7 +8519,6 @@ mod tests {
             agent_kind: farhelm_proto::AgentKind::Generic,
             resume_template: None,
             captured_conversation: None,
-            first_input_at: None,
             generation: 0,
             launch_scoped: false,
             source_profile: None,
@@ -9851,9 +9955,6 @@ mod tests {
                     resume_template: Some(template.clone()),
                     canonical_cwd: Some("/tmp/work".to_string()),
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -9908,10 +10009,6 @@ mod tests {
         let row = store.session("s1").await.expect("read").expect("present");
         assert_eq!(row.captured_conversation.as_deref(), Some("conv-reported"));
         assert_eq!(row.conversation_source.as_deref(), Some("hook"));
-        assert_eq!(
-            row.captured_record, None,
-            "a reported id has no scan-discovered record path to keep around"
-        );
     }
 
     /// A second report replaces the first. What makes that necessary is
@@ -10096,9 +10193,7 @@ mod tests {
 
     /// A database written before item 7 has no snapshot at all, and the
     /// migration must NOT invent one: re-deriving a kind from the stored
-    /// invocation is exactly the later re-guessing item 7 forbids, and a
-    /// pre-M3 session additionally has no first-input time, so capture
-    /// could never run for it even if it looked integrated. `generic` with
+    /// invocation is exactly the later re-guessing item 7 forbids. `generic` with
     /// no template is the honest reading — restart can only offer it a
     /// fresh launch.
     #[farhelm_testtrace::test]
@@ -10125,7 +10220,6 @@ mod tests {
         );
         assert_eq!(row.resume_template, None);
         assert_eq!(row.captured_conversation, None);
-        assert_eq!(row.first_input_at, None);
     }
 
     /// The database is a trust boundary: a row is whatever the last writer
@@ -10282,9 +10376,6 @@ mod tests {
                     resume_template: Some(template.clone()),
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -10349,7 +10440,6 @@ mod tests {
     fn uncaptured_basis() -> OfferBasis {
         OfferBasis {
             captured_conversation: None,
-            capture_ambiguous: false,
             capture_ownership_version: 0,
         }
     }
@@ -10499,6 +10589,9 @@ mod tests {
                  DROP TABLE working_copies;
                  DROP TABLE working_copy_members;
                  ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sessions ADD COLUMN captured_record TEXT;
+                 ALTER TABLE sessions ADD COLUMN capture_ambiguous INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sessions ADD COLUMN first_input_at INTEGER;
                  PRAGMA user_version = 16;",
             )
             .expect("remove the v17, v18, v19, and v20 additions from the fixture");
@@ -10610,6 +10703,9 @@ mod tests {
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE sessions ADD COLUMN captured_record TEXT;
+             ALTER TABLE sessions ADD COLUMN capture_ambiguous INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE sessions ADD COLUMN first_input_at INTEGER;
              PRAGMA user_version = 12;",
         )
         .expect("downgrade the fixture to the pre-activity schema");
@@ -10707,6 +10803,9 @@ mod tests {
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE sessions ADD COLUMN captured_record TEXT;
+             ALTER TABLE sessions ADD COLUMN capture_ambiguous INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE sessions ADD COLUMN first_input_at INTEGER;
              PRAGMA user_version = 13;",
         )
         .expect("downgrade the fixture to the pre-report schema");
@@ -11052,7 +11151,6 @@ mod tests {
                     "s1",
                     OfferBasis {
                         captured_conversation: Some("conv-1".to_string()),
-                        capture_ambiguous: false,
                         capture_ownership_version: 0,
                     },
                     false,
@@ -11096,7 +11194,6 @@ mod tests {
                     "s1",
                     OfferBasis {
                         captured_conversation: Some("conv-1".to_string()),
-                        capture_ambiguous: false,
                         capture_ownership_version: 0,
                     },
                     true,
@@ -11122,7 +11219,6 @@ mod tests {
                     "s1",
                     OfferBasis {
                         captured_conversation: Some("conv-2".to_string()),
-                        capture_ambiguous: false,
                         capture_ownership_version: 0,
                     },
                     false,
@@ -11254,9 +11350,6 @@ mod tests {
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: Some(ProfileSnapshot {
@@ -11465,9 +11558,6 @@ mod tests {
             resume_template: None,
             canonical_cwd: None,
             captured_conversation: None,
-            captured_record: None,
-            capture_ambiguous: false,
-            first_input_at: None,
             generation: 0,
             launch_scoped: false,
             source_profile: None,

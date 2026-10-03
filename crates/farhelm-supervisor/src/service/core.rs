@@ -2365,10 +2365,6 @@ pub struct SessionSnapshot {
     /// `RestartOffer::Resume` session always has one; that is what the
     /// offer means.
     pub resume_argv: Option<Vec<String>>,
-    /// Legacy input timestamp retained in this projection until schema cleanup.
-    pub first_input_at: Option<i64>,
-    /// Legacy scan verdict retained in this projection until schema cleanup.
-    pub capture_ambiguous: bool,
     /// The ownership provenance read beside `captured_conversation` from
     /// the same row. Restart conditions its claim on both (see
     /// [`OfferBasis`](crate::store::OfferBasis)): a version flip with an
@@ -6130,8 +6126,6 @@ impl Supervisor {
             resume_template: snapshot.resume_template,
             captured_conversation: captured,
             generation: row.generation,
-            first_input_at: row.first_input_at,
-            capture_ambiguous: row.capture_ambiguous,
             canonical_cwd: row.canonical_cwd,
             capture_ownership_version: row.capture_ownership_version,
         }))
@@ -8607,9 +8601,6 @@ impl Supervisor {
                 resume_template: snapshot.resume_template.clone(),
                 canonical_cwd: canonical_cwd.clone(),
                 captured_conversation: None,
-                captured_record: None,
-                capture_ambiguous: false,
-                first_input_at: None,
                 // Fallback for the invariant-breaking no-row case. A row
                 // found by the transaction supplies its own generation and
                 // overwrites this value before reinsertion.
@@ -8757,9 +8748,6 @@ impl Supervisor {
                 canonical_cwd: canonical_cwd.clone(),
                 // No launched process has reported an identity yet.
                 captured_conversation: None,
-                captured_record: None,
-                capture_ambiguous: false,
-                first_input_at: None,
                 generation: 0,
                 launch_scoped: scoped,
                 // Written once, with the row, and never rewritten:
@@ -10310,7 +10298,6 @@ impl Supervisor {
                 &id,
                 crate::store::OfferBasis {
                     captured_conversation: snapshot.captured_conversation.clone(),
-                    capture_ambiguous: snapshot.capture_ambiguous,
                     capture_ownership_version: snapshot.capture_ownership_version,
                 },
                 reset_capture,
@@ -14841,8 +14828,6 @@ pub(crate) mod tests {
             generation: 0,
             restart_offer: offer,
             resume_argv,
-            first_input_at: None,
-            capture_ambiguous: false,
             canonical_cwd: None,
             capture_ownership_version: 0,
         }
@@ -15349,9 +15334,6 @@ pub(crate) mod tests {
                     resume_template: None,
                     canonical_cwd: Some(canonical.clone()),
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -15449,9 +15431,6 @@ pub(crate) mod tests {
                     resume_template: None,
                     canonical_cwd: Some(canonical.clone()),
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: true,
                     source_profile: None,
@@ -16674,9 +16653,6 @@ pub(crate) mod tests {
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -18050,9 +18026,6 @@ pub(crate) mod tests {
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -18150,9 +18123,6 @@ pub(crate) mod tests {
                         resume_template: None,
                         canonical_cwd: None,
                         captured_conversation: None,
-                        captured_record: None,
-                        capture_ambiguous: false,
-                        first_input_at: None,
                         generation: 0,
                         launch_scoped: false,
                         source_profile: None,
@@ -18304,9 +18274,6 @@ pub(crate) mod tests {
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -18461,9 +18428,6 @@ pub(crate) mod tests {
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: true,
                     source_profile: None,
@@ -18596,9 +18560,6 @@ pub(crate) mod tests {
                     ]),
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -18663,9 +18624,6 @@ pub(crate) mod tests {
                     resume_template: integration.resume_template.clone(),
                     canonical_cwd: None,
                     captured_conversation: captured.map(str::to_string),
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -18710,9 +18668,6 @@ pub(crate) mod tests {
                     resume_template: integration.resume_template.clone(),
                     canonical_cwd: None,
                     captured_conversation: Some(captured.to_string()),
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -18768,9 +18723,6 @@ pub(crate) mod tests {
                     resume_template: integration.resume_template.clone(),
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -18918,9 +18870,6 @@ pub(crate) mod tests {
                     resume_template: integration.resume_template,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -19442,9 +19391,6 @@ pub(crate) mod tests {
                         ]),
                         canonical_cwd: Some("/tmp".to_string()),
                         captured_conversation: Some(format!("conv-{id}")),
-                        captured_record: None,
-                        capture_ambiguous: false,
-                        first_input_at: Some(now_unix()),
                         generation: 0,
                         launch_scoped: false,
                         source_profile: None,
@@ -19541,9 +19487,6 @@ pub(crate) mod tests {
                     resume_template: integration.resume_template.clone(),
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -20144,9 +20087,6 @@ exit 0
                         resume_template: Some(template),
                         canonical_cwd: None,
                         captured_conversation: None,
-                        captured_record: None,
-                        capture_ambiguous: false,
-                        first_input_at: None,
                         generation: 0,
                         launch_scoped: false,
                         source_profile: None,
@@ -21391,9 +21331,6 @@ exit 0
                     ]),
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -21616,9 +21553,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: Some("/tmp".to_string()),
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -21712,9 +21646,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -21791,9 +21722,6 @@ exit 0
                         resume_template: None,
                         canonical_cwd: None,
                         captured_conversation: None,
-                        captured_record: None,
-                        capture_ambiguous: false,
-                        first_input_at: None,
                         generation: 0,
                         launch_scoped: false,
                         source_profile: None,
@@ -21893,9 +21821,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -21988,9 +21913,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -22080,9 +22002,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -22882,7 +22801,7 @@ exit 0
     const V9_STORED_FINGERPRINT: &str = r#"["/","agent",null,null,null]"#;
 
     /// B2/R1.4: upgrading a populated historical database must preserve all
-    /// old session columns and the literal request fingerprints of live
+    /// surviving session columns and the literal request fingerprints of live
     /// sessions. A deleted session's fingerprint is reduced to its digest on
     /// open (see `store::tombstone_fingerprint`), yet its key still behaves
     /// as before: successful keys still replay their original session,
@@ -22897,7 +22816,7 @@ exit 0
     async fn populated_v17_upgrade_preserves_sessions_and_literal_key_semantics() {
         use rusqlite::{Connection, types::Value};
 
-        /// Capture every historical column without deriving the fixture's
+        /// Capture every retained historical column without deriving the fixture's
         /// schema from current code. The same named projection after migration
         /// detects loss in fields outside the narrower wire reply assertions.
         fn historical_rows(conn: &Connection, columns: &str) -> Vec<Vec<Value>> {
@@ -22977,7 +22896,12 @@ exit 0
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap()
                 .into_iter()
-                .filter(|column| column != "archived")
+                .filter(|column| {
+                    !matches!(
+                        column.as_str(),
+                        "archived" | "captured_record" | "capture_ambiguous" | "first_input_at"
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(",");
             let rows = historical_rows(&conn, &columns);
@@ -22991,9 +22915,8 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                23,
-                "the v17 fixture now migrates through the provenance, OMP asset, OMP program, and \
-                 working-copy birth-time migrations too"
+                24,
+                "the v17 fixture migrates through scan-column removal too"
             );
             assert_eq!(
                 conn.query_row(
@@ -23254,9 +23177,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -23424,7 +23344,6 @@ exit 0
         );
         assert_eq!(snapshot.captured_conversation, None);
         assert_eq!(snapshot.resume_argv, None);
-        assert_eq!(snapshot.first_input_at, None);
 
         // The validation invariant, refused before anything is stored.
         let before = sup.store.load_all().await.expect("load").len();
@@ -24168,9 +24087,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -24257,9 +24173,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -24793,9 +24706,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -24891,9 +24801,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: None,
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -25330,9 +25237,6 @@ exit 0
                             .into_owned(),
                     ),
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -25476,9 +25380,6 @@ exit 0
             resume_template: None,
             canonical_cwd: Some(cwd.clone()),
             captured_conversation: None,
-            captured_record: None,
-            capture_ambiguous: false,
-            first_input_at: None,
             generation: 7,
             launch_scoped: false,
             source_profile: None,
@@ -25647,9 +25548,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: Some(cwd.clone()),
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -25952,9 +25850,6 @@ exit 0
                     resume_template: None,
                     canonical_cwd: Some(canonical_original.clone()),
                     captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,

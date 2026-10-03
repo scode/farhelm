@@ -44,17 +44,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Remove heuristic conversation-identity fallbacks.** Decided 2026-10-01: Farhelm identifies an agent's conversation
-  only from the harness's own explicit report (a hook, plugin, extension, or whatever reporting mechanism that harness
-  needs), never from heuristics that cannot be relied upon. Remove Claude's record scan (`agent_kind/capture.rs`,
-  `service/capture.rs`, and their e2e suites; roughly 6k lines) and the re-verification of records it captured earlier,
-  plus any other heuristic identity fallback found along the way. Launches without a report (a profile already passing
-  `--settings`, a bare `--`, `FARHELM_AGENT_HOOKS` opting out, a hook that failed) take the fallback SPEC.md already
-  defines for an uncaptured identity. Review feedback that is only true because this code still exists is discarded
-  rather than fixed. Alert the maintainer before landing if existing scan-captured sessions would lose a valid Resume
-  offer. Earlier write-up: https://claude.ai/code/artifact/554790ce-c744-4daa-b9a5-151facdb1f42. Plan:
-  `plans/queue/remove-identity-heuristics.md`.
-
 - **Re-examine and simplify how launches are represented.** The maintainer wants to interrogate how launches are handled
   end to end and reconsider the design with simplification in mind. Today a session can be launched from a structured
   selection, a built-in profile, a user profile, or a raw command line, and a profile or raw create can carry a separate
@@ -302,10 +291,6 @@ Real enough to keep, not established enough to act on. Each names what would set
   Relaxed before the pending-table lock, then retires the connection on a miss. Nothing in-process establishes a
   happens-before, but the proposed Acquire/Release swap does not either, since the reader never synchronizes with the
   issuer. Either document the real ordering argument or make the check consult the pending table.
-- **Capture columns after a failed non-Resume restart.** `A6-C5`. `begin_relaunch` clears five capture columns and
-  `PriorRun` restores four other fields; the headline loss of a usable conversation is unreachable because the mode is
-  validated against a non-Resume offer, leaving unrestored `first_input_at` and `capture_ambiguous` plus overbroad
-  restore prose. Confirm a reachable consequence first; otherwise correct the prose.
 - **Local install path without fsync.** `A2-C19`. backend.rs:620-644 renames a payload into place after `flush()` with
   no `sync_all`; the panel refuses local provisioning outright, so production reachability is doubtful. Trivial if ever
   wanted; no blanket power-loss guarantee and no remote-branch change.
