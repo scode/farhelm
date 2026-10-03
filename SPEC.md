@@ -1567,6 +1567,12 @@ likewise wait for an install or update running on that host. These waits are exp
 or update, as long as it runs. Queueing of this kind is accepted and is not a defect on its own; do not add
 finer-grained locking solely to remove it.
 
+Instead of making a management request wait, a supervisor may refuse it at once when the host already has as many in
+progress as the supervisor allows. The refusal says the host is busy and to try again, and it comes before the request
+has changed anything, so trying again is safe. Like the wait it replaces, this is accepted and is not a defect on its
+own, including when requests that do wait (a large batch of deletes, say) keep the host at its limit for a while and
+everything else is refused until they drain. Nothing has to retry a refused request automatically.
+
 The following must not wait on any of those operations, on a host install or update, or on other slow work such as
 release downloads or clipboard writes:
 
