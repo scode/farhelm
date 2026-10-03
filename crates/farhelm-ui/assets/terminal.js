@@ -5,7 +5,7 @@
 // output through a vdom would be a performance disaster).
 //
 // Loaded as plain scripts (xterm.js, addon-fit.js, term-bytes.js,
-// clipboard-name.js, shift-enter-key.js, this — that is REGISTRATION order;
+// clipboard-name.js, shift-enter-key.js, clipboard-writer.js, this — that is REGISTRATION order;
 // Dioxus injects scripts asynchronously, so mountWhenReady gates on the
 // globals themselves, never on order) — no bundler, no CDN: the UI must be
 // fully self-contained.
@@ -955,11 +955,7 @@
      * per SPEC.md's best-effort clipboard contract. */
     writeText(selection, text) {
       if (selection !== "c") return;
-      if (typeof window.__farhelmNativeClipboardWrite === "function") {
-        window.__farhelmNativeClipboardWrite(text);
-        return;
-      }
-      navigator.clipboard?.writeText?.(text)?.catch(() => {});
+      enqueueClipboardWrite(text);
     },
   };
 
@@ -1049,6 +1045,28 @@
   // tab whose element has not rendered yet cannot hold up the agent
   // terminal's mount.
   const pendings = new Map();
+
+  // One queue is shared by every terminal island and both page-side copy
+  // paths. Creating it lazily keeps script loading order irrelevant while the
+  // mount gate still guarantees the factory asset exists before use.
+  let clipboardWriter = null;
+
+  /**
+   * Enqueue a page-wide clipboard write using the route available at call
+   * time. Authentication can install or refresh the native bridge after a
+   * terminal has mounted, while browser pages use the web API.
+   */
+  function enqueueClipboardWrite(text) {
+    if (!clipboardWriter) {
+      clipboardWriter = window.farhelmClipboardWriter.createClipboardWriter((value) => {
+        if (typeof window.__farhelmNativeClipboardWrite === "function") {
+          return window.__farhelmNativeClipboardWrite(value);
+        }
+        return navigator.clipboard?.writeText?.(value)?.catch(() => {});
+      });
+    }
+    clipboardWriter(text);
+  }
 
   // Which island keyboard focus belongs to, by element id (`null` for
   // none). Tracked across `sync()` calls rather than derived per call so
@@ -3081,6 +3099,7 @@
           window.farhelmClipboardNames &&
           window.farhelmShiftEnterKey &&
           window.farhelmCopyOnSelect &&
+          window.farhelmClipboardWriter &&
           window.farhelmTerminalLinks &&
           fontSettled &&
           document.getElementById(spec.el)
@@ -5050,32 +5069,10 @@
             ) {
               return;
             }
-            // The native route first, same preference as the OSC 52
-            // provider's `writeText` (see `clipboardProvider`): on the
-            // desktop this global — installed by auth.rs after
-            // authentication — is the only path that reaches a clipboard,
-            // because WKWebView's `dioxus://` page has no
-            // `navigator.clipboard` at all. It also sidesteps the OTHER
-            // WebKit trap this deferred callback would hit even with the
-            // API present: running in a `setTimeout` after mouseup, it has
-            // no transient user activation left to spend.
-            if (typeof window.__farhelmNativeClipboardWrite === "function") {
-              window.__farhelmNativeClipboardWrite(selectionText);
-              return;
-            }
-            // Never awaited, and every way it can fail is swallowed rather
-            // than logged or surfaced: the optional chaining covers an
-            // engine (or a non-secure context) with no `navigator.clipboard`
-            // or no `writeText` at all, and the trailing `.catch` covers a
-            // present API that REJECTS — no trusted user gesture, a denied
-            // permission. Either way the terminal must keep working exactly
-            // as before, with the system clipboard simply unchanged and no
-            // UI anywhere saying so — the same silent-failure contract the
-            // OSC 52 half above carries. The selection itself is
-            // deliberately left in place (`term.clearSelection()` is never
-            // called here): copying must not visibly disturb what the user
-            // just selected.
-            navigator.clipboard?.writeText?.(selectionText)?.catch(() => {});
+            // The same page-wide queue as OSC 52 owns admission here. The
+            // selection itself remains in place; copying must not visibly
+            // disturb what the user just selected.
+            enqueueClipboardWrite(selectionText);
           }, 0);
         };
         term.element.addEventListener("mousedown", handleTerminalMouseDown);

@@ -1103,6 +1103,9 @@ declare_assets! {
     // the three helpers above: `node --test` must run the exact shipped
     // function, and terminal.js treats this global as a mount precondition.
     const COPY_ON_SELECT_JS: Asset = asset!("/assets/copy-on-select.js");
+    // The page-wide clipboard single-flight queue. It is separate from the
+    // terminal's route selection so OSC 52 and copy-on-select share one bound.
+    const CLIPBOARD_WRITER_JS: Asset = asset!("/assets/clipboard-writer.js");
     // The shared link opener plus the plain-text URL allowlist terminal.js's
     // two link adapters call — OSC 8's `linkHandler` and the WebLinks
     // addon's activation callback. Its own asset for the same reason as the
@@ -1266,6 +1269,7 @@ fn AppBody() -> Element {
         document::Script { src: CLIPBOARD_NAME_JS }
         document::Script { src: SHIFT_ENTER_KEY_JS }
         document::Script { src: COPY_ON_SELECT_JS }
+        document::Script { src: CLIPBOARD_WRITER_JS }
         document::Script { src: TERMINAL_LINKS_JS }
         document::Script { src: TERMINAL_JS }
         document::Script { src: EVENTS_JS }

@@ -6013,7 +6013,8 @@
   browser's `navigator.clipboard` path (terminal.js's provider) if that stays simple. Add a test that bursts writes
   against a write that never settles and asserts retained and submitted work stays bounded, and that the latest value is
   the one written once the write settles. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-clipboard-terminal-limit.md`.
+- Execution: complete: change `ttqlnmrk`, bookmark `plan/triage-clipboard-terminal-limit/01-clipboard-bound`, draft PR
+  [#1473](https://github.com/scode/farhelm/pull/1473/changes).
 
 ## desktop-protocol-filesystem-fallback.md
 

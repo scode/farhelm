@@ -428,7 +428,7 @@ fn arm_native_clipboard_script(base: &str, secret: &str) -> String {
          window.__farhelmNativeClipboardWrite = function (text) {{ \
            try {{ \
              var config = window.__farhelmNativeClipboardConfig; \
-             fetch(config.base + \"/api/clipboard\", {{ \
+             return fetch(config.base + \"/api/clipboard\", {{ \
                method: \"POST\", \
                headers: {{ \
                  \"content-type\": \"application/json\", \
@@ -681,6 +681,10 @@ with `newline` and ${interpolation}"#,
         assert!(
             script.contains("window.__farhelmNativeClipboardWrite = function"),
             "the script must install the writer terminal.js prefers: {script}"
+        );
+        assert!(
+            script.contains("return fetch("),
+            "the native writer must return its swallowed fetch promise so the page can bound in-flight writes: {script}"
         );
     }
 }
