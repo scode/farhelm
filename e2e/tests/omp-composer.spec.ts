@@ -2,8 +2,8 @@ import { expect, test } from "./helpers/evidence";
 
 /**
  * OMP can use its configured model while keeping its own effort and permission
- * vocabularies. Its permission default is real: an omitted choice survives as
- * absent, never be displayed as Pi's rewritten yolo. The composer half pins
+ * vocabularies. Its omitted permission means YOLO, while an explicit Approve
+ * must survive without being overwritten by that default. The composer half pins
  * the serialized POST selection; argv compilation belongs to the helm tests
  * and stored-selection decoding to the supervisor test, so a composer that
  * offered the right controls but serialized the wrong selection is what
@@ -61,10 +61,10 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   }
   await expect(efforts.getByRole("button", { name: "ultra", exact: true })).toHaveCount(0);
 
-  // The three permission choices: default, yolo, approve — the harness
-  // default is a real choice, and the Goose-only labels are not offered.
-  await expect(permissions.getByRole("button")).toHaveCount(3);
-  for (const choice of ["default", "yolo", "approve"]) {
+  // OMP offers YOLO and Approve; omission selects YOLO. Goose-only
+  // approval modes are not offered.
+  await expect(permissions.getByRole("button")).toHaveCount(2);
+  for (const choice of ["yolo", "approve"]) {
     await expect(permissions.getByRole("button", { name: choice, exact: true })).toBeVisible();
   }
   await expect(
@@ -147,10 +147,9 @@ test("an OMP session row shows the OMP glyph and its actual permission", async (
     approveRow.locator(".session-agent svg.permission-glyph[data-glyph='approve']"),
   ).toBeVisible();
 
-  // The omitted-permission row is the rule this harness exists for: the OMP
-  // glyph renders, and NO permission mark is invented for the harness
-  // default — unlike Pi, whose omitted snapshot is displayed as yolo.
+  // Old snapshots with no permission use the same YOLO default as a new
+  // structured OMP launch; explicit Approve above remains distinct.
   const omittedRow = page.locator(".session-row", { hasText: "omp default row" });
   await expect(omittedRow.locator(".session-agent svg[data-glyph='omp']")).toBeVisible();
-  await expect(omittedRow.locator(".session-agent svg.permission-glyph")).toHaveCount(0);
+  await expect(omittedRow.locator(".session-agent svg.permission-glyph[data-glyph='yolo']")).toBeVisible();
 });

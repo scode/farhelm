@@ -7943,3 +7943,35 @@ test("a manual mark-unread is visible to a second client that never touched the 
     await cleanupSession(request, session.id);
   }
 });
+
+/**
+ * Picking a model from another harness must discard the source's default
+ * YOLO. The model picker has its own signal handler, independent of the
+ * harness buttons, and must not silently choose bypass permissions too.
+ */
+test("model picks discard another harness's default YOLO", async ({ page, request }) => {
+  await installComposerChoices(page, request, [], [
+    { id: "codex-offered", harness: "codex", efforts: ["high"] },
+    { id: "goose-offered", harness: "goose", efforts: ["high"] },
+  ]);
+  await page.goto("/");
+  for (const label of ["Pi", "OpenCode", "OMP", "Goose"]) {
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    const harnesses = form.locator(".launch-composer-harness-choice");
+    const permissions = form.locator(".launch-composer-permissions-choice");
+    const model = form.getByRole("combobox", { name: "model", exact: true });
+    await harnesses.getByRole("button", { name: label, exact: true }).click();
+    await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await model.focus();
+    await form.locator("#launch-composer-model-results").getByRole("option", { name: "show every harness's models", exact: true }).click();
+    const target = form.getByRole("option", { name: "codex-offered (Codex)", exact: true });
+    await expect(target).toBeVisible();
+    await target.click();
+    await expect(harnesses.getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(model).toHaveValue("codex-offered");
+    await expect(permissions.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(form).toHaveCount(0);
+  }
+});

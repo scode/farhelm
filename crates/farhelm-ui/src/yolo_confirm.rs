@@ -32,7 +32,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
+#[cfg(test)]
+use farhelm_proto::LaunchPermission;
+use farhelm_proto::{LaunchHarness, LaunchSelection};
 
 use crate::HostId;
 use crate::peer::{DetailPart, PeerLine, display_peer};
@@ -45,8 +47,7 @@ pub(crate) enum YoloReason {
     /// A structured launch whose harness offers other permission modes, with
     /// YOLO chosen.
     ChosenPermission,
-    /// A structured launch on a harness whose only permission mode is YOLO
-    /// (`LaunchHarness::sole_permission`).
+    /// A structured launch on a harness that offers only YOLO.
     OnlyMode(LaunchHarness),
     /// A raw command line or a profile, whose invocation turns the agent's
     /// approval prompts off.
@@ -57,17 +58,15 @@ impl YoloReason {
     /// The reason for a launch described by its structured selection, or by
     /// `None` for a raw command line or profile.
     ///
-    /// Asks the harness through `sole_permission` rather than naming one, so
-    /// a harness added later with a single YOLO mode gets the right sentence
-    /// without touching this. A raw `pi …` command line is explained as a
+    /// Derives the wording from the harness capability table rather than
+    /// naming harnesses here, so adding a single-mode harness gets the right
+    /// sentence without touching this. A raw `pi …` command line is explained as a
     /// command line: the GUI does not re-parse argv to find out which rule
     /// the helm applied, and the sentence it gets is still true.
     pub(crate) fn of_launch(selection: Option<&LaunchSelection>) -> Self {
         match selection {
             None => YoloReason::CommandLine,
-            Some(selection)
-                if selection.harness.sole_permission() == Some(LaunchPermission::Yolo) =>
-            {
+            Some(selection) if selection.harness.offers_only_yolo() => {
                 YoloReason::OnlyMode(selection.harness)
             }
             Some(_) => YoloReason::ChosenPermission,
@@ -80,7 +79,7 @@ impl YoloReason {
             YoloReason::ChosenPermission => "This launch uses YOLO permissions. Another permission mode would ask for approval instead.".to_string(),
             YoloReason::OnlyMode(harness) => {
                 let name = crate::launch_composer::harness_label(harness);
-                format!("{name} has no approval prompts, so every {name} session runs this way.")
+                format!("Farhelm offers {name} only in YOLO mode, so every {name} session runs this way.")
             }
             YoloReason::CommandLine => {
                 "Its command line turns off the agent's approval prompts.".to_string()
@@ -291,7 +290,7 @@ mod tests {
 
     /// The confirmation tells the user WHY the launch is YOLO, and the three
     /// reasons call for different reactions: pick another permission mode,
-    /// accept that this harness has none, or fix the command line. A wrong
+    /// accept that this harness offers only YOLO, or fix the command line. A wrong
     /// reason sends the user looking for a setting that does not exist.
     /// Specifies: no selection means a command line or profile; a harness
     /// whose only mode is YOLO gets the only-mode sentence naming it; any
@@ -313,7 +312,11 @@ mod tests {
         );
         assert_eq!(
             YoloReason::OnlyMode(LaunchHarness::Pi).sentence(),
-            "Pi has no approval prompts, so every Pi session runs this way."
+            "Farhelm offers Pi only in YOLO mode, so every Pi session runs this way."
+        );
+        assert_eq!(
+            YoloReason::of_launch(Some(&selection(LaunchHarness::OpenCode, None))),
+            YoloReason::OnlyMode(LaunchHarness::OpenCode)
         );
     }
 }

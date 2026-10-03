@@ -212,8 +212,16 @@ fn record_launch_history(
     };
     // Captured from the same admitted selection `launch_history` is about to
     // record, not from a separately re-read one.
+    //
+    // An omitted permission is normalized before this point so the stored
+    // launch can describe its effective mode. Do not let that normalization
+    // turn a harness's own YOLO default into a remembered choice: the next
+    // dialog already starts there, and remembering it would spill into a
+    // harness with a real non-YOLO default. Explicit YOLO remains remembered
+    // for those real-choice harnesses because their omitted value is `None`.
     let permissions_word = selection
         .permissions
+        .filter(|permission| Some(*permission) != selection.harness.omitted_permission())
         .map(farhelm_proto::LaunchPermission::wire_word);
     let workspace_trust = if selection.harness.offers_workspace_trust() {
         selection.workspace_trust

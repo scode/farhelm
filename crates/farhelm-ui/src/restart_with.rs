@@ -171,9 +171,12 @@ pub(crate) fn RestartWithDialog(
     on_yolo_cancel: EventHandler<()>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    let Some(baseline) = session.launch.clone() else {
+    let Some(mut baseline) = session.launch.clone() else {
         return rsx! {};
     };
+    // Old sessions can omit a permission that now means YOLO. Compare the
+    // effective choices, so pressing the already-selected mode is not a change.
+    baseline.permissions = baseline.harness.effective_permission(baseline.permissions);
     let base = use_context::<ApiBase>().0;
     let catalog_base = base.clone();
     let catalog_resource = use_resource(move || {

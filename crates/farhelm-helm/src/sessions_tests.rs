@@ -653,8 +653,9 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
             .expect("complete supervisor handshake");
         // One scripted reply per create below, in the exact order the test
         // drives them: yolo, then a legacy raw create, then an
-        // explicit-default structured create.
-        let replies: [(&str, Option<LaunchSelection>); 3] = [
+        // explicit-default structured create, then Goose's omitted YOLO
+        // default.
+        let replies: [(&str, Option<LaunchSelection>); 4] = [
             (
                 "yolo-launch",
                 Some(LaunchSelection {
@@ -673,6 +674,16 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                     model: None,
                     effort: None,
                     permissions: None,
+                    workspace_trust: None,
+                }),
+            ),
+            (
+                "goose-default-launch",
+                Some(LaunchSelection {
+                    harness: farhelm_proto::LaunchHarness::Goose,
+                    model: None,
+                    effort: None,
+                    permissions: Some(LaunchPermission::Yolo),
                     workspace_trust: None,
                 }),
             ),
@@ -772,6 +783,23 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
         preferences.get("remembered_permissions"),
         None,
         "a following structured launch with default permissions clears the memory"
+    );
+
+    let (status, _) = post_text(
+        &harness,
+        "/api/sessions",
+        serde_json::json!({
+            "cwd": "/work",
+            "launch": { "harness": "goose", "model": null, "effort": null, "permissions": null },
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let (_, preferences) = get_json(&harness, "/api/preferences").await;
+    assert_eq!(
+        preferences.get("remembered_permissions"),
+        None,
+        "a harness's omitted YOLO default must not become a remembered override"
     );
 
     peer.await.expect("join scripted supervisor");

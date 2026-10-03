@@ -470,17 +470,22 @@ fn agent_badge(session: &Session) -> AgentBadge {
             LaunchHarness::Grok => HarnessGlyph::Grok,
             LaunchHarness::OpenCode => HarnessGlyph::OpenCode,
         };
-        // The shared classifier owns the YOLO decision; other marks describe
-        // the recorded approval mode without inferring another bypass rule.
+        // The shared classifier decides YOLO; the effective permission helper
+        // also handles older omitted or unsupported choices for mode display.
         let permission = if farhelm_proto::yolo::selection_is_yolo(launch) {
             Some(PermissionGlyph::Yolo)
         } else {
-            launch.permissions.map(|permission| match permission {
-                crate::LaunchPermission::Yolo => unreachable!("the shared classifier handled YOLO"),
-                crate::LaunchPermission::Approve => PermissionGlyph::Approve,
-                crate::LaunchPermission::SmartApprove => PermissionGlyph::SmartApprove,
-                crate::LaunchPermission::Chat => PermissionGlyph::Chat,
-            })
+            launch
+                .harness
+                .effective_permission(launch.permissions)
+                .map(|permission| match permission {
+                    crate::LaunchPermission::Yolo => {
+                        unreachable!("the shared classifier handled YOLO")
+                    }
+                    crate::LaunchPermission::Approve => PermissionGlyph::Approve,
+                    crate::LaunchPermission::SmartApprove => PermissionGlyph::SmartApprove,
+                    crate::LaunchPermission::Chat => PermissionGlyph::Chat,
+                })
         };
         let mut description = match harness {
             HarnessGlyph::Codex => "Codex".to_string(),

@@ -60,24 +60,27 @@ pub(crate) const fn permission_value(permission: LaunchPermission) -> &'static s
 
 /// Normalize a permission to the modes the selected harness can represent.
 ///
-/// Pi's missing tool gate is deliberately represented as YOLO even when an
-/// older stored selection omitted the optional field. Every other harness
-/// keeps the modes `LaunchHarness::offers_permission` gives it (Goose all
-/// three approval modes, OMP Approve, everyone YOLO), and moving to a harness
-/// that does not offer the current mode clears it rather than letting an
-/// unsupported hidden choice reach launch.
+/// Older saved selections resolve omissions through the same proto fact as
+/// the helm and sidebar. Unsupported explicit values fall back to the harness
+/// default, so no hidden unsupported choice reaches submit. This wrapper keeps
+/// browser call sites brief; the proto helper owns the normalization rule.
 pub(crate) const fn normalized_permissions(
     harness: LaunchHarness,
     permissions: Option<LaunchPermission>,
 ) -> Option<LaunchPermission> {
-    match harness.sole_permission() {
-        Some(sole) => Some(sole),
-        // `Option::filter` is not const, hence the spelled-out match.
-        None => match permissions {
-            Some(permission) if !harness.offers_permission(permission) => None,
-            permissions => permissions,
-        },
-    }
+    harness.effective_permission(permissions)
+}
+
+/// Normalize the effective permission before comparing saved setups.
+///
+/// Older history rows stored an omitted permission while newer launches store
+/// the default explicitly for harnesses whose stock mode is YOLO. Treating
+/// those representations as equal keeps the recent-setups list from showing
+/// two buttons for one user-visible launch.
+fn normalized_selection(selection: &LaunchSelection) -> LaunchSelection {
+    let mut normalized = selection.clone();
+    normalized.permissions = normalized_permissions(selection.harness, selection.permissions);
+    normalized
 }
 
 /// Keep a trust choice only on harnesses with a supported launch mapping.
@@ -1032,9 +1035,9 @@ pub(crate) fn matches_filter(selection: &LaunchSelection, filter: &ComposerFilte
         && filter
             .effort
             .is_none_or(|effort| selection.effort == Some(effort))
-        && filter
-            .permissions
-            .is_none_or(|permissions| selection.permissions == Some(permissions))
+        && filter.permissions.is_none_or(|permissions| {
+            normalized_permissions(selection.harness, selection.permissions) == Some(permissions)
+        })
         && filter
             .workspace_trust
             .is_none_or(|trust| selection.workspace_trust == Some(trust))
@@ -1070,7 +1073,7 @@ fn ranked_recents<'a>(
             // helm's history order is stable. Later duplicates contribute
             // frequency but do not get their own row.
             if candidates[..index].iter().any(|prior| {
-                prior.selection == entry.selection
+                normalized_selection(&prior.selection) == normalized_selection(&entry.selection)
                     && launch_destination(prior) == launch_destination(entry)
             }) {
                 None
@@ -1078,7 +1081,8 @@ fn ranked_recents<'a>(
                 let frequency = candidates
                     .iter()
                     .filter(|candidate| {
-                        candidate.selection == entry.selection
+                        normalized_selection(&candidate.selection)
+                            == normalized_selection(&entry.selection)
                             && launch_destination(candidate) == launch_destination(entry)
                     })
                     .count();
@@ -1201,8 +1205,8 @@ pub(crate) fn select_recent(entry: &LaunchHistoryEntry) -> LaunchSelection {
 /// owning harness. They cannot have model-specific effort constraints locally,
 /// so this applies the harness-wide vocabulary. It also rejects Goose-only
 /// permission modes on every other harness and hidden workspace-trust choices,
-/// while accepting an omitted Pi permission as the older spelling of YOLO and
-/// OMP's own default/Approve choices. The helm
+/// while accepting an omitted default-YOLO permission as its older spelling and
+/// OMP's YOLO/Approve choices. The helm
 /// validates the final request again, including Zen provider syntax for
 /// custom OpenCode IDs.
 pub(crate) fn selection_is_compatible(
@@ -1350,8 +1354,10 @@ pub(crate) fn reconcile_harness_for_catalog_read(
 /// harness on which it was entered. The caller passes that ownership so a
 /// harness click and a search result make exactly the same reconciliation.
 /// Effort is independent when the new harness still offers it; only an effort
-/// the new model or harness cannot accept is cleared. Goose-only permissions
-/// clear elsewhere, while Pi always becomes YOLO because it has no tool gate.
+/// the new model or harness cannot accept is cleared. Unsupported permissions
+/// fall back to the destination's default; default YOLO from the source never
+/// becomes an explicit approval preference for another harness. Callers must
+/// retain the source harness in `selection` even when picking a target model.
 /// Workspace trust clears when the destination harness has no per-run switch.
 pub(crate) fn reconcile_harness_selection(
     mut selection: LaunchSelection,
@@ -1360,6 +1366,14 @@ pub(crate) fn reconcile_harness_selection(
     catalog: &[LaunchCatalogModel],
 ) -> (LaunchSelection, Option<LaunchHarness>) {
     let source = selection.harness;
+    // A harness's default YOLO does not express an approval preference for a
+    // different harness. Keep explicit approval choices, and explicit YOLO
+    // from harnesses whose omitted mode is non-YOLO.
+    if selection.harness != harness
+        && selection.permissions == selection.harness.omitted_permission()
+    {
+        selection.permissions = None;
+    }
     selection.harness = harness;
     if !harness.offers_model() {
         // Grok exposes neither field. Clear retained values at the harness
@@ -1438,24 +1452,17 @@ pub(crate) fn reconciliation_reset_reason(
     if !cleared.is_empty() {
         notices.push(format!("{}, so it was cleared", cleared.join("; ")));
     }
-    match (before.permissions, after.harness, after.permissions) {
-        (
-            Some(
-                LaunchPermission::Approve
-                | LaunchPermission::SmartApprove
-                | LaunchPermission::Chat,
-            ),
-            LaunchHarness::Pi,
-            Some(LaunchPermission::Yolo),
-        ) => notices.push(
-            "the selected permission is unavailable because Pi supports only YOLO, so it was replaced"
-                .to_string(),
-        ),
-        (Some(_), _, None) if before.permissions != after.permissions => notices.push(
-            "the selected permission is unavailable for this harness, so it was cleared"
-                .to_string(),
-        ),
-        _ => {}
+    if let Some(permission) = before.permissions
+        && !after.harness.offers_permission(permission)
+    {
+        let disposition = if after.permissions.is_some() {
+            "replaced by YOLO, this harness's default"
+        } else {
+            "cleared"
+        };
+        notices.push(format!(
+            "the selected permission is unavailable for this harness, so it was {disposition}"
+        ));
     }
     (!notices.is_empty()).then(|| notices.join("; "))
 }
@@ -2461,7 +2468,7 @@ mod tests {
         assert_eq!(
             reconciliation_reset_reason(&goose, &pi).as_deref(),
             Some(
-                "the selected permission is unavailable because Pi supports only YOLO, so it was replaced"
+                "the selected permission is unavailable for this harness, so it was replaced by YOLO, this harness's default"
             )
         );
 
@@ -2479,7 +2486,7 @@ mod tests {
         );
 
         let (codex, _) = reconcile_harness_selection(pi, None, LaunchHarness::Codex, &[]);
-        assert_eq!(codex.permissions, Some(LaunchPermission::Yolo));
+        assert_eq!(codex.permissions, None);
 
         let (codex_from_goose, _) =
             reconcile_harness_selection(goose.clone(), None, LaunchHarness::Codex, &[]);
@@ -2544,11 +2551,9 @@ mod tests {
         }
     }
 
-    /// OMP's permission surface mirrors the helm boundary: the harness
-    /// default, YOLO, and Approve are real choices that survive
-    /// reconciliation, while the Goose-only labels clear with an explanation.
-    /// An omitted OMP permission stays absent — unlike Pi, the row must never
-    /// display a default as YOLO.
+    /// OMP's permission surface mirrors the helm boundary: an omitted choice
+    /// resolves to YOLO, while explicit YOLO and Approve survive
+    /// reconciliation. Goose-only labels clear with an explanation.
     #[test]
     fn omp_permissions_keep_their_own_vocabulary() {
         for permissions in [
@@ -2568,7 +2573,11 @@ mod tests {
                 LaunchHarness::Omp,
                 &[],
             );
-            assert_eq!(omp.permissions, permissions, "OMP keeps {permissions:?}");
+            assert_eq!(
+                omp.permissions,
+                Some(permissions.unwrap_or(LaunchPermission::Yolo)),
+                "OMP keeps the effective {permissions:?} mode"
+            );
         }
         for cleared in [LaunchPermission::SmartApprove, LaunchPermission::Chat] {
             let goose = LaunchSelection {
@@ -2580,10 +2589,12 @@ mod tests {
             };
             let (omp, _) =
                 reconcile_harness_selection(goose.clone(), None, LaunchHarness::Omp, &[]);
-            assert_eq!(omp.permissions, None);
+            assert_eq!(omp.permissions, Some(LaunchPermission::Yolo));
             assert_eq!(
                 reconciliation_reset_reason(&goose, &omp).as_deref(),
-                Some("the selected permission is unavailable for this harness, so it was cleared")
+                Some(
+                    "the selected permission is unavailable for this harness, so it was replaced by YOLO, this harness's default"
+                )
             );
             assert!(
                 !selection_is_compatible(
@@ -2609,8 +2620,7 @@ mod tests {
             },
             &[],
         ));
-        // An OMP default leaves both the model and permission choices to the
-        // harness; the composer must accept the same omission as the helm.
+        // An OMP omission uses its effective YOLO default, as the helm does.
         assert!(selection_is_compatible(
             &LaunchSelection {
                 harness: LaunchHarness::Omp,
@@ -2621,8 +2631,8 @@ mod tests {
             },
             &[],
         ));
-        // The displayed permission is the ACTUAL selection: an omitted OMP
-        // permission reads as "default", never as Pi's rewritten yolo.
+        // The displayed permission is the effective selection: an omitted OMP
+        // permission reads as YOLO, matching the launch compiler.
         let omitted = LaunchSelection {
             harness: LaunchHarness::Omp,
             model: Some("z-ai/glm-5.3".into()),
@@ -2630,8 +2640,8 @@ mod tests {
             permissions: None,
             workspace_trust: None,
         };
-        assert_eq!(selection_permission_value(&omitted), "default");
-        assert!(selection_summary(&omitted).ends_with("permissions: default"));
+        assert_eq!(selection_permission_value(&omitted), "yolo");
+        assert!(selection_summary(&omitted).ends_with("permissions: yolo"));
         let approve = LaunchSelection {
             permissions: Some(LaunchPermission::Approve),
             workspace_trust: None,
@@ -2640,11 +2650,25 @@ mod tests {
         assert_eq!(selection_permission_value(&approve), "approve");
     }
 
-    /// Older Pi snapshots omitted the optional field. Their summaries still
-    /// have to name Pi's sole effective mode, while Goose modes use the same
-    /// readable words as the controls.
+    /// Goose's omitted mode is YOLO, but an explicit approval choice must
+    /// remain approval instead of being overwritten by that default.
     #[test]
-    fn permission_summaries_are_readable_and_pi_omission_means_yolo() {
+    fn omitted_yolo_defaults_do_not_override_explicit_permissions() {
+        assert_eq!(
+            normalized_permissions(LaunchHarness::Goose, None),
+            Some(LaunchPermission::Yolo)
+        );
+        assert_eq!(
+            normalized_permissions(LaunchHarness::Goose, Some(LaunchPermission::Approve)),
+            Some(LaunchPermission::Approve)
+        );
+    }
+
+    /// Older snapshots omitted the optional field. Their summaries still have
+    /// to name the harness's effective default mode, while Goose modes use
+    /// the same readable words as the controls.
+    #[test]
+    fn permission_summaries_resolve_omitted_modes() {
         let pi = LaunchSelection {
             harness: LaunchHarness::Pi,
             model: Some("x-ai/grok-4.6".into()),
@@ -2663,6 +2687,73 @@ mod tests {
         };
         assert_eq!(selection_permission_value(&goose), "smart approve");
         assert!(selection_summary(&goose).ends_with("permissions: smart approve"));
+    }
+
+    /// A harness's default YOLO is not a choice to bypass another harness's
+    /// approvals. An explicit YOLO choice on Codex remains portable.
+    #[test]
+    fn default_yolo_does_not_spill_across_harness_switches() {
+        for harness in [
+            LaunchHarness::Pi,
+            LaunchHarness::OpenCode,
+            LaunchHarness::Omp,
+            LaunchHarness::Goose,
+        ] {
+            for permission in [None, Some(LaunchPermission::Yolo)] {
+                let mut before = selection(harness, None, None);
+                before.permissions = permission;
+                let (after, _) =
+                    reconcile_harness_selection(before, None, LaunchHarness::Codex, &[]);
+                assert_eq!(after.permissions, None, "{harness:?} {permission:?}");
+            }
+            assert!(
+                search_results(
+                    &LaunchHistory::default(),
+                    &[],
+                    "perms:default",
+                    Some(harness),
+                    None
+                )
+                .is_empty()
+            );
+        }
+        let mut codex = selection(LaunchHarness::Codex, None, None);
+        codex.permissions = Some(LaunchPermission::Yolo);
+        let (claude, _) = reconcile_harness_selection(codex, None, LaunchHarness::Claude, &[]);
+        assert_eq!(claude.permissions, Some(LaunchPermission::Yolo));
+    }
+
+    /// An old omitted default and its explicit YOLO representation are one
+    /// recent setup, including when filtering by the displayed YOLO mode.
+    #[test]
+    fn omitted_yolo_recents_group_and_filter_by_effective_mode() {
+        let older = LaunchHistoryEntry {
+            host: HostId::default(),
+            github_repo: None,
+            canonical_cwd: None,
+            cwd: "/work/project".into(),
+            selection: selection(LaunchHarness::Omp, None, None),
+            created_at: 1,
+            creation_seq: Some(1),
+        };
+        let mut newer = older.clone();
+        newer.created_at = 2;
+        newer.creation_seq = Some(2);
+        newer.selection.permissions = Some(LaunchPermission::Yolo);
+        let history = LaunchHistory {
+            checkout_config_revision: 0,
+            launches: vec![newer, older],
+            folders: vec![],
+        };
+        let filter = ComposerFilter {
+            permissions: Some(LaunchPermission::Yolo),
+            ..ComposerFilter::default()
+        };
+        assert!(matches_filter(&history.launches[1].selection, &filter));
+        assert_eq!(
+            ranked_recents(&history, &filter, None),
+            vec![&history.launches[0]]
+        );
     }
 
     /// A model-specific effort restriction must be reflected before submit.

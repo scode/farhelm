@@ -77,6 +77,7 @@ pub(crate) fn LaunchControls(
     on_permissions: EventHandler<Option<LaunchPermission>>,
     on_workspace_trust: EventHandler<Option<bool>>,
 ) -> Element {
+    let omitted_permission = harness.and_then(LaunchHarness::omitted_permission);
     let efforts = harness
         .map(|harness| {
             launch_composer::displayed_efforts(
@@ -311,18 +312,7 @@ pub(crate) fn LaunchControls(
                 span { class: "launch-composer-section-label", "permissions" }
                 if let Some(parts) = permission_change { PeerLine { class: "launch-composer-changed-marker", parts } }
                 div { class: "launch-composer-segmented",
-                    if harness.and_then(LaunchHarness::sole_permission) == Some(LaunchPermission::Yolo) {
-                        // Pi has no tool-approval gate. Its sole mode cannot
-                        // expose the unrelated workspace `--approve` flag.
-                        button {
-                            r#type: "button",
-                            class: "selected launch-composer-segment-danger",
-                            aria_pressed: true,
-                            disabled: busy,
-                            onclick: move |_| on_permissions.call(Some(LaunchPermission::Yolo)),
-                            "yolo"
-                        }
-                    } else {
+                    if omitted_permission.is_none() {
                         button {
                             r#type: "button",
                             class: if permissions.is_none() { "selected" } else { "" },
@@ -331,14 +321,18 @@ pub(crate) fn LaunchControls(
                             onclick: move |_| on_permissions.call(None),
                             "default"
                         }
+                    }
+                    if harness.is_none_or(|harness| harness.offers_permission(LaunchPermission::Yolo)) {
                         button {
                             r#type: "button",
-                            class: if permissions == Some(LaunchPermission::Yolo) {
+                            class: if permissions == Some(LaunchPermission::Yolo)
+                                || (permissions.is_none() && omitted_permission == Some(LaunchPermission::Yolo)) {
                                 "selected launch-composer-segment-danger"
                             } else {
                                 "launch-composer-segment-danger"
                             },
-                            aria_pressed: permissions == Some(LaunchPermission::Yolo),
+                            aria_pressed: permissions == Some(LaunchPermission::Yolo)
+                                || (permissions.is_none() && omitted_permission == Some(LaunchPermission::Yolo)),
                             disabled: busy,
                             onclick: move |_| on_permissions.call(Some(LaunchPermission::Yolo)),
                             "yolo"
@@ -346,8 +340,7 @@ pub(crate) fn LaunchControls(
                     }
                     // The approval modes after default and YOLO, in their
                     // fixed order, shown for whichever harness offers them
-                    // (Goose all three, OMP Approve alone). Pi yields nothing
-                    // here; its sole YOLO button is above. Filtered in the
+                    // (Goose all three, OMP Approve alone). Filtered in the
                     // iterator so each keyed button stays the loop's root.
                     for permission in [
                         LaunchPermission::Approve,

@@ -196,24 +196,24 @@ when omitted. For an explicit choice, Farhelm suggests `opencode/glm-5.3-flash`,
 `opencode/gpt-6-astra`. The custom-model field also accepts a bare Zen model name or an `opencode/<model>` value. A bare
 value is passed as `opencode/<model>`, and either spelling of a suggested model is that OpenCode model even where
 another harness offers the same bare name; another provider prefix is refused. OpenCode has no offered effort choices.
-Its default permission mode adds no flag, and YOLO uses OpenCode's `--auto`, which auto-approves only permissions not
-explicitly denied. OpenCode uses generic activity status with no hooks, conversation capture/resume, or waiting-state
-recognition.
+Its only offered permission is YOLO, including when omitted, and compiles to `--auto`, which auto-approves permissions
+not explicitly denied. OpenCode uses generic activity status with no hooks, conversation capture/resume, or
+waiting-state recognition.
 
 Goose, Pi, and OMP are structured harnesses, not built-in profiles. Each uses its configured model when none is chosen.
 For an explicit OpenRouter choice, Farhelm suggests `z-ai/glm-5.3-flash`, `x-ai/grok-4.5`, `x-ai/grok-4.6`,
 `z-ai/glm-5.3`, `openai/gpt-6-luna`, `openai/gpt-5.6-terra`, `openai/gpt-6.1-sol`, and `openai/gpt-6-astra`; a literal
 custom OpenRouter id remains available after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or
-`max` thinking and offers `approve`, `smart approve`, `chat`, and `yolo` modes. Pi requests `off`, `minimal`, `low`,
-`medium`, `high`, `xhigh`, or `max` thinking and has only the visibly labelled YOLO mode; this describes the absence of
-Pi's built-in tool gate, not its project-resource `--approve` flag. Pi stores that mode as `yolo`; an older snapshot
-that omitted the formerly optional permission field reads and displays as YOLO too. OMP requests `off`, `minimal`,
-`low`, `medium`, `high`, `xhigh`, or `max` thinking (OMP's `auto` level is not offered) and offers `default` (which adds
-no flag), `approve` (`--approval-mode always-ask`), and `yolo` (`--approval-mode yolo`); its `write` mode is not
-offered, and `smart approve`/`chat` are refused. An omitted OMP permission stays omitted in both argv and stored
-selection — unlike Pi, no default is rewritten onto it, and the session row displays exactly that absence. OMP gets no
-waiting-state recognition: an OMP approval prompt shows the generic running/idle status, a settled scope decision rather
-than a detection gap. Provider capabilities may clamp or reject a requested effort.
+`max` thinking and offers `yolo` (preselected), `approve`, `smart approve`, and `chat` modes. An omitted Goose
+permission means YOLO and explicitly sets `GOOSE_MODE=auto`. Pi requests `off`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, or `max` thinking and has only the visibly labelled YOLO mode; this describes the absence of Pi's built-in tool
+gate, not its project-resource `--approve` flag. Pi stores that mode as `yolo`; an older snapshot that omitted the
+formerly optional permission field reads and displays as YOLO too. OMP requests `off`, `minimal`, `low`, `medium`,
+`high`, `xhigh`, or `max` thinking (OMP's `auto` level is not offered) and offers `yolo` (preselected,
+`--approval-mode yolo`) and `approve` (`--approval-mode always-ask`); its `write` mode is not offered, and
+`smart approve`/`chat` are refused. OMP gets no waiting-state recognition: an OMP approval prompt shows the generic
+running/idle status, a settled scope decision rather than a detection gap. Provider capabilities may clamp or reject a
+requested effort.
 
 Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
 transport, web-token bootstrap, bringing up the helm's own machine, and starting the v1 Mac supervisor by hand when a
@@ -389,35 +389,37 @@ checkout; the agent choice is independent of that destination:
 - Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, Cursor, Grok, Goose, Pi,
   OpenCode, and OMP launches carry a harness plus model, effort, permission, and workspace-trust choices where that
   harness supports them; visible permission vocabulary is `default`, `approve`, `smart approve`, `chat`, and `yolo`.
-  Absent optional choices mean the selected harness's defaults and omit their flags, except an omitted Pi permission
-  means its mandatory YOLO mode. Model selection is optional for every harness; OpenCode, Cursor, and Grok offer no
-  effort choice, and Grok accepts no model choice. The helm owns the released model catalog and validates every
-  structured choice, so the browser never turns a model identifier into an argv fragment. Typing a model never changes a
-  selected harness: the typed id is read as that harness spells it (for OpenCode, a bare Zen name means
+  Absent optional choices mean the selected harness's defaults and omit their flags, except an omitted Pi, OpenCode,
+  OMP, or Goose permission means its YOLO mode. Model selection is optional for every harness; OpenCode, Cursor, and
+  Grok offer no effort choice, and Grok accepts no model choice. The helm owns the released model catalog and validates
+  every structured choice, so the browser never turns a model identifier into an argv fragment. Typing a model never
+  changes a selected harness: the typed id is read as that harness spells it (for OpenCode, a bare Zen name means
   `opencode/<model>`), a model only other harnesses offer is refused with a message naming them, and choosing another
   harness's model from the full model list switches the harness on purpose. With no harness selected yet, a typed known
   model fills in its owning harness (a bare `gpt-6-luna` picks Codex); a custom model needs an explicit harness, and an
-  id several harnesses offer asks for one. Replacing a harness clears only choices that are incompatible with it. An
-  invalid combination cannot launch. New normally preselects no harness or model. The permissions mode remembers the
-  last successful structured launch, helm-wide across every client; an explicit workspace-trust choice on Codex, Muse,
-  or Pi is remembered separately after a successful user launch. `trust:true` and `trust:false` are single search
-  actions on those harnesses. Codex true and false set that launch's exact working directory to `trusted` and
-  `untrusted` through its per-run project configuration; a fresh checkout's path is filled only after the supervisor has
-  resolved it. Muse true uses `--trust-workspace`; Pi true and false use `--approve` and `--no-approve` respectively.
-  Each setting applies to one launch and never writes vendor trust state; Muse false adds no flag and cannot revoke
-  trust from YOLO or vendor settings. Without a choice, the harness retains its own trust behavior; Codex, Muse, and
-  Claude may still ask for directory trust. Farhelm does not silently answer their prompts. Claude, Goose, OMP, and
-  Cursor have no supported interactive workspace-trust switch. "reset choices" returns both segments to their remembered
-  values rather than to harness defaults, and a recent-setup row's own saved choice overrides it when used. The
-  launch-composer search matches harnesses, `other / command`, models scoped by the chosen harness, effort words offered
-  by that harness and model, `yolo` plus the `perms:yolo` and `perms:default` permission actions, supported trust
-  actions, host and name actions, folders, and recent setups. Permission actions are offered only when the selected
-  harness can represent them; `perms:default` is not offered for Pi's mandatory YOLO mode. `name:foo` applies the entire
-  value as the session name. `host:foo` filters host choices, and `host:local` selects the helm-local host even if it
-  has an alias. The default local host label in the GUI is `local (this machine)`. Accepting a result applies it and
-  clears the box while keeping focus there. Enter on an empty box launches only a complete, valid selection through the
-  ordinary Launch path; Enter on a non-empty query with no result never launches, and Escape closes the result list
-  without clearing the query, so Enter after Escape does nothing until the box is emptied.
+  id several harnesses offer asks for one. Replacing a harness clears incompatible choices and a YOLO permission that
+  was the previous harness's default. An invalid combination cannot launch. New normally preselects no harness or model.
+  The permissions mode remembers the last successful structured launch, helm-wide across every client, except that a
+  harness's default or forced YOLO clears that memory instead of preselecting YOLO for another harness. Explicit YOLO on
+  a harness with a non-YOLO default is remembered; an explicit workspace-trust choice on Codex, Muse, or Pi is
+  remembered separately after a successful user launch. `trust:true` and `trust:false` are single search actions on
+  those harnesses. Codex true and false set that launch's exact working directory to `trusted` and `untrusted` through
+  its per-run project configuration; a fresh checkout's path is filled only after the supervisor has resolved it. Muse
+  true uses `--trust-workspace`; Pi true and false use `--approve` and `--no-approve` respectively. Each setting applies
+  to one launch and never writes vendor trust state; Muse false adds no flag and cannot revoke trust from YOLO or vendor
+  settings. Without a choice, the harness retains its own trust behavior; Codex, Muse, and Claude may still ask for
+  directory trust. Farhelm does not silently answer their prompts. Claude, Goose, OMP, and Cursor have no supported
+  interactive workspace-trust switch. "reset choices" returns both segments to their remembered values rather than to
+  harness defaults, and a recent-setup row's own saved choice overrides it when used. The launch-composer search matches
+  harnesses, `other / command`, models scoped by the chosen harness, effort words offered by that harness and model,
+  `yolo` plus the `perms:yolo` and `perms:default` permission actions, supported trust actions, host and name actions,
+  folders, and recent setups. Permission actions are offered only when the selected harness can represent them;
+  `perms:default` is not offered when the harness's omitted mode is YOLO. `name:foo` applies the entire value as the
+  session name. `host:foo` filters host choices, and `host:local` selects the helm-local host even if it has an alias.
+  The default local host label in the GUI is `local (this machine)`. Accepting a result applies it and clears the box
+  while keeping focus there. Enter on an empty box launches only a complete, valid selection through the ordinary Launch
+  path; Enter on a non-empty query with no result never launches, and Escape closes the result list without clearing the
+  query, so Enter after Escape does nothing until the box is emptied.
 - Legacy agent profile or arbitrary command: `other / command` is a harness-picker choice in the same composer. It
   replaces only the model, effort, permissions, and workspace-trust controls with the profile picker and raw invocation
   field. Existing callers, profiles, and their helm-wide last-used profile behavior remain compatible, but New does not
@@ -460,14 +462,16 @@ yields one session or a clear error, never two silently. Deliberately creating s
 parameters — same directory, same profile — is a sanctioned workflow, not a duplicate to be suppressed.
 
 A YOLO launch on a host that asks before YOLO launches (see the host settings under Topology) needs an explicit
-confirmation. A launch counts as YOLO when its structured permission is YOLO, which makes every Pi launch one, or when
-its command line carries a flag its vendor documents as skipping approval prompts, such as
-`claude --dangerously-skip-permissions` or `codex --yolo`, or the same mode spelled as options, such as Codex's
+confirmation. A launch counts as YOLO when its effective structured permission is YOLO (including omitted permissions on
+Pi, OpenCode, OMP and Goose), or when its command line carries a flag its vendor documents as skipping approval prompts,
+such as `claude --dangerously-skip-permissions` or `codex --yolo`, or the same mode spelled as options, such as Codex's
 `-a never` together with `-s danger-full-access`. Codex's sandboxed `--full-auto` does not count, and neither does
 `-a never` alone, which keeps the sandbox, or `-s danger-full-access` alone, which keeps the approval prompts.
-Structured launches are classified exactly. For a custom launch (a typed command line or a profile's invocation)
-recognition is best effort: Farhelm covers the common documented shapes, including an agent started behind an
-`env NAME=value` prefix, and counts an `env` given options it does not interpret as YOLO when it goes on to name an
+Structured launches are classified exactly. Cloning or replacing an older OpenCode, OMP or Goose session with an omitted
+permission now counts as YOLO too. Raw `omp`, `goose` and `opencode` commands without a recognized YOLO flag remain
+unknown: vendor defaults are not inferred from command lines. For a custom launch (a typed command line or a profile's
+invocation) recognition is best effort: Farhelm covers the common documented shapes, including an agent started behind
+an `env NAME=value` prefix, and counts an `env` given options it does not interpret as YOLO when it goes on to name an
 agent program Farhelm knows, but it cannot promise to recognize every command line that turns approval prompts off. An
 arbitrary wrapper, such as a script or `sh -c`, is not guaranteed to be detected. A custom command line is recognized by
 its vendor's standard program name (`cursor-agent` for Cursor, `grok` for Grok, `pi` for Pi, and so on). The generic
