@@ -56,7 +56,7 @@ const REPLAY_CHUNK: usize = 32 * 1024;
 /// arrives in far smaller notifications, so the typical backlog is a
 /// fraction of that. Control frames are capped only by `MAX_FRAME_LEN`,
 /// and large replies CAN queue back to back: `ListSessions` handlers are
-/// spawned tasks (up to `HANDLER_ADMISSION_PERMITS` of them building
+/// spawned tasks (up to `LIST_ADMISSION_PERMITS` of them building
 /// concurrently), and a helm's refresh drain, a live detail read, and
 /// agent verbs can each enqueue a whole-list reply on one connection. The
 /// paper worst case is therefore this bound times `MAX_FRAME_LEN` — half
@@ -327,7 +327,8 @@ where
 
     // Tracking (not admission — that is now `sup.admission`, shared
     // across every connection this supervisor serves; see its own docs
-    // for why it must NOT be per-connection) for the slow handlers
+    // for why it must NOT be per-connection; the session list has its own
+    // `sup.list_admission`) for the slow handlers
     // (`ListSessions`/`StopSession`/`DeleteSession`) that `handle_control`
     // spawns instead of awaiting inline. `HANDLER_SHUTDOWN_TIMEOUT`'s own
     // docs cover why leaving these untracked is not safe: without a

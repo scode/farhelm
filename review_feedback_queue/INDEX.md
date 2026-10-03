@@ -19,8 +19,6 @@ One line per open item. This file must always match the feedback files in this d
   action can still finish on the server while its result disappears without an unknown-outcome notice.
 - `desktop-auth-ready-with-stale-webview-credential.md` — Desktop sign-in can appear successful while terminals, uploads
   and the event feed remain unusable because the window kept a revoked or missing credential.
-- `list-admission-blocks-terminal-reader.md` — When eight management operations occupy the host, a session-list request
-  can stop later keystrokes and terminal control messages from being dispatched.
 - `stop-admission-blocks-terminal-reader.md` — A Stop waiting for management capacity can freeze input to unrelated
   sessions on the same host.
 - `restart-admission-blocks-terminal-reader.md` — A Restart waiting for management capacity can freeze input to

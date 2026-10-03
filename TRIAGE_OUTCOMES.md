@@ -6267,7 +6267,8 @@
   bound, documented with the reason, caps concurrent list work. Test: all management slots held by controlled lifecycle
   operations, then a list request and terminal input on the same connection both progress. Remove the feedback file and
   its index entry.
-- Execution: planned in `plans/queue/triage-busy-host-refusal.md`.
+- Execution: complete: change `vnzttzst`, bookmark `plan/triage-busy-host-refusal/01-list-limit`, PR
+  https://github.com/scode/farhelm/pull/1483.
 
 ## checkout-reconciliation-blocks-terminal-reader.md
 

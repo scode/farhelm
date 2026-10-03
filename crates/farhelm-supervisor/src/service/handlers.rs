@@ -1039,11 +1039,31 @@ async fn session_info_now(
 /// correlated by `req_id` rather than by arrival or completion
 /// order (already true of every request on this connection).
 ///
-/// Tracked in `tasks` (a `JoinSet`) and admitted through
-/// `spawn_admitted` rather than a bare `tokio::spawn`: see
-/// `HANDLER_ADMISSION_PERMITS`/`HANDLER_SHUTDOWN_TIMEOUT`'s own
-/// docs for why an unbounded, untracked spawn per slow request
-/// is not safe to leave unmanaged.
+/// Tracked in `tasks` (a `JoinSet`) rather than a bare `tokio::spawn`, so
+/// the connection's shutdown tail drains or reaps it; see
+/// `HANDLER_SHUTDOWN_TIMEOUT`'s docs.
+///
+/// ## Its own limit, waited for inside the task
+///
+/// A listing is not a management operation and does not take one of the
+/// management slots (`HANDLER_ADMISSION_PERMITS`): with eight Stops,
+/// Restarts or Deletes sitting out their kill grace periods, waiting for a
+/// slot here froze this connection's read loop, and with it every
+/// keystroke to every session on the host, until one of them finished.
+/// SPEC.md "Waiting between operations on one host" forbids the list from
+/// waiting on those operations at all. It takes a permit from
+/// `Supervisor::list_admission` instead, and waits for it INSIDE the
+/// spawned task, the way Delete waits for its management slot, so the read
+/// loop moves on at once whatever the limit's state.
+///
+/// Waiting inside the task means a list request queued behind a busy
+/// limit is a tracked task that already exists. Nothing caps how many of
+/// those there can be except how many list requests the peer has
+/// outstanding on this connection, and that is small but more than one:
+/// the helm's periodic refresh, its session-detail reads, replace-with and
+/// an agent's clone each send their own. The peer is an authenticated
+/// helm with that fixed set of callers, so that is not a number worth a
+/// second cap.
 ///
 /// ## The reply is the whole list
 ///
@@ -1062,8 +1082,12 @@ async fn handle_list_sessions(
 ) {
     let sup2 = Arc::clone(sup);
     let tx = tx.clone();
-    spawn_admitted(&sup.admission, tasks, async move {
+    tasks.spawn(async move {
         let sup = sup2;
+        let permit = Arc::clone(&sup.list_admission)
+            .acquire_owned()
+            .await
+            .expect("list admission semaphore is never closed");
         let reply = match list_all(&sup).await {
             Ok(list) => ControlMsg::SessionList {
                 req_id,
@@ -1081,9 +1105,14 @@ async fn handle_list_sessions(
                 kind: ErrorKind::Internal,
             },
         };
+        // The limit bounds what building a list costs, not delivering it.
+        // Sending awaits this connection's bounded writer queue, and a peer
+        // that has stopped reading would otherwise hold every list permit
+        // in the supervisor behind its own full queue, so that lists on
+        // every other connection waited too.
+        drop(permit);
         send_reply(&tx, &reply).await;
-    })
-    .await;
+    });
 }
 
 /// Run host-directory browsing outside the connection loop. The supervisor
@@ -4041,12 +4070,15 @@ mod tests {
     use super::super::capture::{CaptureState, FirstInput};
     use super::super::connection::CONNECTION_WRITER_QUEUE;
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
+    use super::super::core::{HANDLER_ADMISSION_PERMITS, LIST_ADMISSION_PERMITS};
     use super::super::core::{RunCells, SessionCells};
     use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::super::terminals::Terminal;
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
     use farhelm_proto::LaunchHarness;
+    use farhelm_proto::io::{FrameReader, FrameWriter, parse_control};
+    use farhelm_proto::{Frame, FrameKind};
     use farhelm_proto::{ReportVendor, RestartOffer, SessionStatus};
     use std::sync::atomic::AtomicBool;
 
@@ -5479,9 +5511,11 @@ mod tests {
     /// A retained agent fence must not consume the whole handler admission
     /// pool. Eight deletes are enough to exhaust that pool in the old order,
     /// so this test holds one fence, parks eight deletes on it, and proves an
-    /// unrelated list still gets a permit and a reply. Releasing the fence
-    /// then proves the parked deletes were waiting on the fence rather than
-    /// lost before dispatch.
+    /// unrelated management request still gets a permit and a reply. Opening
+    /// a tab is that request because it takes a management slot; the
+    /// session list has its own limit and would pass whatever the deletes
+    /// held. Releasing the fence then proves the parked deletes were waiting
+    /// on the fence rather than lost before dispatch.
     #[farhelm_testtrace::test]
     async fn fenced_deletes_do_not_starve_unrelated_handler_admission() {
         let state = StateDir::new();
@@ -5517,18 +5551,31 @@ mod tests {
             "fenced deletes must not consume handler admission permits"
         );
 
-        let (mut list_tasks, mut list_rx) =
-            dispatch_for_test(&sup, ControlMsg::ListSessions { req_id: 100 }).await;
-        let list_reply = tokio::time::timeout(Duration::from_secs(5), list_rx.recv())
+        let (mut open_tasks, mut open_rx) = dispatch_for_test(
+            &sup,
+            ControlMsg::OpenTab {
+                req_id: 100,
+                session_id: "unrelated".to_string(),
+            },
+        )
+        .await;
+        let open_reply = tokio::time::timeout(Duration::from_secs(5), open_rx.recv())
             .await
-            .expect("unrelated list must be admitted while deletes wait")
-            .expect("unrelated list reply channel closed");
-        let list_reply: ControlMsg = serde_json::from_slice(&list_reply.body).unwrap();
+            .expect("unrelated tab open must be admitted while deletes wait")
+            .expect("unrelated tab open reply channel closed");
+        let open_reply: ControlMsg = serde_json::from_slice(&open_reply.body).unwrap();
         assert!(
-            matches!(list_reply, ControlMsg::SessionList { req_id: 100, .. }),
-            "unrelated list must receive its normal reply, got {list_reply:?}"
+            matches!(
+                open_reply,
+                ControlMsg::Error {
+                    req_id: 100,
+                    kind: ErrorKind::NotFound,
+                    ..
+                }
+            ),
+            "unrelated tab open must be admitted and answered normally, got {open_reply:?}"
         );
-        list_tasks.join_next().await.unwrap().unwrap();
+        open_tasks.join_next().await.unwrap().unwrap();
 
         drop(fence);
         for (mut delete_tasks, mut delete_rx) in deletes {
@@ -10011,5 +10058,298 @@ mod tests {
             sessions[0].status,
             SessionStatus::Exited { exit_code: None }
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // A busy host: every management slot held, seen through one connection
+    // ---------------------------------------------------------------------
+
+    /// The session id the busy-host fixture's parked Stops name. No such
+    /// session exists; the Stops only ever reach its lifecycle claim.
+    const BUSY_STOP_TARGET: &str = "busy-host-stop-target";
+
+    /// A host whose management slots are all held, seen through one real
+    /// helm connection: the fixture the busy-host tests share.
+    ///
+    /// The bug these tests pin is the connection's single read loop waiting
+    /// for a management slot, which freezes every keystroke queued behind
+    /// the waiting request. Only a real `handle_connection` has that loop,
+    /// and only real terminal input shows whether it is still moving, so the
+    /// fixture drives both over an in-memory duplex: a pane running `cat` is
+    /// attached on channel 1, and typing into it echoes back.
+    ///
+    /// The slots are held by eight real Stops sent on the same connection,
+    /// for a session id whose lifecycle claim the fixture holds. Each Stop
+    /// takes its slot, spawns, and parks on that claim, which is the shape
+    /// the triage found (management operations sitting out a slow teardown)
+    /// with no timing in it. [`BusyHost::release`] drops the claim and lets
+    /// them finish, as not-found refusals since the session does not exist.
+    struct BusyHost {
+        sup: Arc<Supervisor>,
+        reader: FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        writer: FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+        /// The claim the eight Stops park on; `None` once released.
+        stop_claim: Option<super::super::core::KeyedGuard>,
+        /// Control replies read while waiting for something else, kept so a
+        /// later [`BusyHost::reply`] still finds them.
+        replies: Vec<ControlMsg>,
+        /// Everything the attached `cat` pane has written on channel 1.
+        echoed: Vec<u8>,
+        _state: StateDir,
+    }
+
+    /// How long any one observation in the busy-host tests may take. A
+    /// healthy run answers in milliseconds; the bound only turns a frozen
+    /// read loop into a failure instead of a parked suite.
+    const BUSY_HOST_WAIT: Duration = Duration::from_secs(20);
+
+    impl BusyHost {
+        /// Build the fixture: the attached `cat` session, then all eight
+        /// management slots held by parked Stops.
+        async fn new() -> Self {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .expect("supervisor");
+            let id = uuid::Uuid::new_v4().to_string();
+            let tmux_name = format!("fh-{id}");
+            let pane = sup
+                .tmux
+                .create_session(&tmux_name, "/", 80, 24, &[], &["cat".into()])
+                .await
+                .expect("fixture premise: a tmux pane running cat");
+            let mut entry = entry_with(Some(Terminal { tmux_name, pane }), LastOutcome::Running);
+            entry.info.id = id.clone();
+            sup.sessions
+                .lock()
+                .await
+                .insert(id.clone(), Arc::new(entry));
+
+            let (client_side, server_side) = tokio::io::duplex(1 << 20);
+            let server_sup = Arc::clone(&sup);
+            tokio::spawn(async move {
+                let _ = super::super::connection::handle_connection(server_sup, server_side, None)
+                    .await;
+            });
+            let (read_half, write_half) = tokio::io::split(client_side);
+            let mut host = BusyHost {
+                sup,
+                reader: FrameReader::new(read_half),
+                writer: FrameWriter::new(write_half),
+                stop_claim: None,
+                replies: Vec::new(),
+                echoed: Vec::new(),
+                _state: state,
+            };
+            farhelm_proto::io::handshake(&mut host.reader, &mut host.writer, "helm")
+                .await
+                .expect("handshake");
+            host.send(ControlMsg::Attach {
+                req_id: 1,
+                session_id: id,
+                channel: 1,
+                cols: 80,
+                rows: 24,
+                terminal: TerminalSelector::default(),
+                lease: "busy-host".to_string(),
+                if_unowned: false,
+            })
+            .await;
+            let attached = host.reply(1).await;
+            assert!(
+                matches!(attached, ControlMsg::Attached { channel: 1, .. }),
+                "fixture premise: the cat pane attaches, got {attached:?}"
+            );
+            host.type_and_see_echo("before-saturation").await;
+
+            host.stop_claim = Some(host.sup.lifecycle_locks.claim(BUSY_STOP_TARGET).await);
+            for req_id in 1001..1001 + HANDLER_ADMISSION_PERMITS as u64 {
+                host.send(ControlMsg::StopSession {
+                    req_id,
+                    session_id: BUSY_STOP_TARGET.to_string(),
+                })
+                .await;
+            }
+            tokio::time::timeout(
+                BUSY_HOST_WAIT,
+                host.sup.lifecycle_locks.claims_reached_for_test(
+                    BUSY_STOP_TARGET,
+                    1 + HANDLER_ADMISSION_PERMITS as u64,
+                ),
+            )
+            .await
+            .expect("fixture premise: every Stop reaches the held lifecycle claim");
+            assert_eq!(
+                host.sup.admission.available_permits(),
+                0,
+                "fixture premise: the parked Stops hold every management slot"
+            );
+            host
+        }
+
+        async fn send(&mut self, message: ControlMsg) {
+            self.writer
+                .write_control(&message)
+                .await
+                .expect("write a control frame to the supervisor");
+        }
+
+        /// Read one frame, filing it as a control reply or as `cat` output.
+        async fn read_one(&mut self, what: &str) {
+            let frame = tokio::time::timeout(BUSY_HOST_WAIT, self.reader.read_frame())
+                .await
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "the supervisor went silent waiting for {what} ({} of \
+                         {HANDLER_ADMISSION_PERMITS} management slots free; the fixture holds \
+                         them all until release)",
+                        self.sup.admission.available_permits()
+                    )
+                })
+                .expect("read a frame")
+                .unwrap_or_else(|| panic!("the connection closed waiting for {what}"));
+            match frame.kind {
+                FrameKind::Data if frame.channel == 1 => self.echoed.extend_from_slice(&frame.body),
+                FrameKind::Data => {}
+                FrameKind::Control => self
+                    .replies
+                    .push(parse_control(&frame).expect("decode a control frame")),
+            }
+        }
+
+        /// The reply to `req_id`, read off the connection if it has not
+        /// already arrived.
+        async fn reply(&mut self, req_id: u64) -> ControlMsg {
+            loop {
+                if let Some(at) = self
+                    .replies
+                    .iter()
+                    .position(|reply| reply.reply_req_id() == Some(req_id))
+                {
+                    return self.replies.remove(at);
+                }
+                self.read_one(&format!("the reply to request {req_id}"))
+                    .await;
+            }
+        }
+
+        /// Type `marker` into the attached pane and wait for its echo: the
+        /// proof that this connection's read loop is still dispatching input.
+        async fn type_and_see_echo(&mut self, marker: &str) {
+            self.writer
+                .write_frame(&Frame::data(1, format!("{marker}\r").into_bytes()))
+                .await
+                .expect("write terminal input");
+            while !String::from_utf8_lossy(&self.echoed).contains(marker) {
+                self.read_one(&format!("the echo of {marker:?}")).await;
+            }
+        }
+
+        /// Let the parked Stops finish, and check they did so cleanly: each
+        /// answers not-found and gives its slot back.
+        async fn release(&mut self) {
+            drop(self.stop_claim.take());
+            for req_id in 1001..1001 + HANDLER_ADMISSION_PERMITS as u64 {
+                let reply = self.reply(req_id).await;
+                assert!(
+                    matches!(
+                        reply,
+                        ControlMsg::Error {
+                            kind: ErrorKind::NotFound,
+                            ..
+                        }
+                    ),
+                    "a parked Stop must finish once released, got {reply:?}"
+                );
+            }
+            // Every slot back at once is the observable: a Stop that
+            // replied but leaked its permit would leave this waiting.
+            let all_slots = tokio::time::timeout(
+                BUSY_HOST_WAIT,
+                self.sup
+                    .admission
+                    .acquire_many(HANDLER_ADMISSION_PERMITS as u32),
+            )
+            .await
+            .expect("the released Stops must give their management slots back")
+            .expect("admission semaphore is never closed");
+            drop(all_slots);
+        }
+    }
+
+    /// Spec (SPEC.md "Waiting between operations on one host"): the session
+    /// list and terminal input keep working while every management slot is
+    /// held.
+    ///
+    /// Why: the list used to take a management slot, waiting for it in the
+    /// connection's read loop. Eight Stops sitting out their kill grace
+    /// periods were enough to freeze that loop, so a routine list request
+    /// stopped every keystroke to every session on the host until a Stop
+    /// finished, and a long enough freeze made the helm drop the whole
+    /// connection. The list now has its own limit, so here it is answered,
+    /// and input typed after it reaches the pane, while the Stops still
+    /// hold every slot.
+    #[farhelm_testtrace::test]
+    async fn the_session_list_and_typing_work_while_management_slots_are_full() {
+        let mut host = BusyHost::new().await;
+
+        host.send(ControlMsg::ListSessions { req_id: 2 }).await;
+        host.type_and_see_echo("typed-after-the-list").await;
+        let listed = host.reply(2).await;
+        assert!(
+            matches!(listed, ControlMsg::SessionList { .. }),
+            "the list must be answered while management is saturated, got {listed:?}"
+        );
+        assert_eq!(
+            host.sup.admission.available_permits(),
+            0,
+            "both observations must have happened while the Stops still held every slot"
+        );
+
+        host.release().await;
+    }
+
+    /// Spec: a list request that has to wait for the list's own limit waits
+    /// in its own task, never in the connection's read loop, and is answered
+    /// once a list permit frees.
+    ///
+    /// Why: the list's limit exists to bound the tmux cost of building
+    /// lists, and the easy way to take it, before spawning the task the way
+    /// the management requests used to, would put every keystroke on the
+    /// connection back behind a burst of lists. The test holds both list
+    /// permits itself, so the only thing the request can wait on is that
+    /// limit; the echo arriving while its reply has not is what tells the
+    /// two shapes apart.
+    #[farhelm_testtrace::test]
+    async fn a_list_waiting_for_its_own_limit_does_not_hold_up_typing() {
+        let mut host = BusyHost::new().await;
+        let held = Arc::clone(&host.sup.list_admission)
+            .acquire_many_owned(LIST_ADMISSION_PERMITS as u32)
+            .await
+            .expect("list admission semaphore is never closed");
+        assert_eq!(
+            host.sup.list_admission.available_permits(),
+            0,
+            "fixture premise: every list permit is held by the test"
+        );
+
+        host.send(ControlMsg::ListSessions { req_id: 3 }).await;
+        host.type_and_see_echo("typed-while-the-list-waits").await;
+        assert!(
+            host.replies
+                .iter()
+                .all(|reply| reply.reply_req_id() != Some(3)),
+            "the list must still be waiting for a list permit when the echo arrives, got {:?}",
+            host.replies
+        );
+
+        drop(held);
+        let listed = host.reply(3).await;
+        assert!(
+            matches!(listed, ControlMsg::SessionList { .. }),
+            "the waiting list must be answered once a list permit frees, got {listed:?}"
+        );
+
+        host.release().await;
     }
 }
