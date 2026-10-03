@@ -1108,23 +1108,29 @@ chooses and confirms. The system must not presume the original OS process surviv
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.
 `claude --resume <conversation-id>`) — even when several sessions share a working directory. Claude Code, Codex, Goose,
-Pi, and Grok integrations at this level are required. Identity is reported by the agent itself when its kind supports a
-launch reporter, and scanned from the outside — the agent's terminal, its own on-disk session records — otherwise; a
-report wins over a scan, because it is the agent's own answer rather than a correlation over what the agent happened to
-leave on disk. What capture never does is write to the agent's own configuration or record directories. A hook passed on
-the command line for one launch is allowed because it writes nothing the vendor owns — no configuration file, no
-conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
-absolute: the report it delivers lands in farhelm's own database, and every run leaves a line in farhelm's own hook log.
-Vendor-owned state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own
-example — hooks written into the agent's configuration — still stands. Grok is the documented opt-in exception: the user
-installs its hook entries, and Farhelm itself never writes, edits, or removes them. Claude retains scanning as its
-fallback when no report has been accepted. Codex, Goose, Pi, OMP, and Grok are report-only integrations: Farhelm never
-selects their conversation by scanning vendor state. A reporting credential alone does not establish which Codex
-conversation is in the foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses
-it on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
-session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact
-file without following symlinks and requires its session ID to match. A failed check changes the durable offer to fresh
-and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that request.
+Pi, and Grok integrations at this level are required. Confirmed 2026-10-01: Farhelm identifies an agent's conversation
+only from the harness's own explicit report, through a hook, plugin, extension, or whatever reporting mechanism that
+harness needs. Heuristics that cannot be relied upon, such as correlating the vendor's files on disk with a launch, are
+not supported, because a wrong match resumes, and appends to, a conversation that is not the session's own. Checking the
+exact file a report names is verification of that report, not identification. A launch whose harness cannot report, or
+whose report never arrived, has no captured identity and takes the uncaptured-identity fallback below: restart says so,
+and offers a fresh launch when its resume invocation needs the identity. What capture never does is write to the agent's
+own configuration or record directories. A hook passed on the command line for one launch is allowed because it writes
+nothing the vendor owns — no configuration file, no conversation record, no trust state — and cannot outlive the launch
+that carried it. It is not invisible in the absolute: the report it delivers lands in farhelm's own database, and every
+run leaves a line in farhelm's own hook log. Vendor-owned state is the boundary the no-agent-configuration rule from
+Status is protecting, and that rule's own example — hooks written into the agent's configuration — still stands. Grok is
+the documented opt-in exception: the user installs its hook entries, and Farhelm itself never writes, edits, or removes
+them. Claude's record scan, which still claims an identity from Claude's on-disk records when no report has been
+accepted, is existing behavior pending removal (TODO.md, "Remove heuristic conversation-identity fallbacks"), not
+supported behavior; an accepted report always wins over it. Codex, Goose, Pi, OMP, and Grok are report-only
+integrations: Farhelm never selects their conversation by scanning vendor state. A reporting credential alone does not
+establish which Codex conversation is in the foreground. Goose persists a credential-free named MCP reporter with the
+conversation and reuses it on resume; Pi loads a private static extension from Farhelm's state directory on every
+launch. A Pi report without a session file withdraws the old resume target. Before a Pi resume, Farhelm reads the
+bounded first record of that exact file without following symlinks and requires its session ID to match. A failed check
+changes the durable offer to fresh and rejects the stale Resume request so the user can refresh; it never silently
+launches fresh under that request.
 
 Codex reports must come from the foreground native Codex process under the session's owned pane, not a nested Codex
 process that inherited its credential. Farhelm also verifies the exact reported transcript's root-session metadata;
@@ -1143,9 +1149,9 @@ reporting hook from its own settings — cannot replace or withdraw the foregrou
 Farhelm does not recognize Claude's executable and does not read the injected hook out of anyone's command line, because
 both are vendor details that change independently of Farhelm. A plain launch makes the pane process Claude itself and a
 one-level wrapper profile makes Claude its direct child, so both keep reporting; a wrapper chain deeper than that loses
-hook capture and falls back to Claude's record scan. Native sub-agents never report: Claude fires no `SessionStart` for
-them, and any report naming a sub-agent is refused for every kind. Claude takes no versioned ownership proof, so its
-existing captures stay resumable across the change.
+hook capture, and with it a supported identity (until its removal, the record scan may still claim one). Native
+sub-agents never report: Claude fires no `SessionStart` for them, and any report naming a sub-agent is refused for every
+kind. Claude takes no versioned ownership proof, so its existing captures stay resumable across the change.
 
 Grok reports must come from one native `grok` process under the owned pane, launched with `--no-leader` before any real
 end-of-options boundary. The only admitted descendants are the documented reporter command and its narrow shell

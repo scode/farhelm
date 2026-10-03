@@ -5582,7 +5582,8 @@
   report never arrived, has no captured identity and takes the existing uncaptured-identity fallback; the Claude record
   scan is named as pending removal under TODO.md's near-term entry rather than as supported behavior. Remove this
   feedback file and its index entry. The code removal itself is the TODO entry, not this item.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`. The near-term TODO entry was recorded during triage.
+- Execution: complete: change `rosywsko`, bookmark `triage-1001e/03-identity-only-reported`, PR
+  https://github.com/scode/farhelm/pull/1444.
 
 ## claude-scan-budget-never-settles.md
 
