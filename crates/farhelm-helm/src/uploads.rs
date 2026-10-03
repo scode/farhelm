@@ -586,7 +586,7 @@ mod tests {
     async fn attachment_preflight_answers_the_desktop_webview_origin() {
         use tower::ServiceExt;
 
-        let harness = rest_harness::idle_helm().await;
+        let harness = rest_harness::idle_helm().await.embedded();
 
         let app = harness.unauthenticated_router();
         let request = axum::http::Request::builder()
@@ -688,7 +688,7 @@ mod tests {
             }
         });
 
-        let harness = rest_harness::spliced_helm(client_side).await;
+        let harness = rest_harness::spliced_helm(client_side).await.embedded();
         let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
@@ -746,7 +746,7 @@ mod tests {
             .await;
         });
 
-        let harness = rest_harness::spliced_helm(client_side).await;
+        let harness = rest_harness::spliced_helm(client_side).await.embedded();
         let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")

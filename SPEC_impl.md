@@ -2554,7 +2554,9 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   that behavior is not a reason to add cancellation machinery elsewhere. This deliberately gives up HttpOnly: script
   execution in the authenticated origin can read the secret, but such a script can already drive the same API, while
   port scoping prevents an unrelated loopback service from receiving an ambient host-scoped credential. The loopback
-  Origin guard remains defense in depth; no ambient browser credential remains, so this flow has no CSRF edge.
+  Origin guard remains defense in depth; no ambient browser credential remains, so this flow has no CSRF edge. The
+  `dioxus://` and `wry://` Origin exemption exists only on the embedded helm; a standalone helm has no custom-scheme
+  page to authorize and refuses those origins.
 - The desktop app's two credentials (one for native REST, one for the webview's localStorage and WebSocket subprotocols)
   bypass that exchange. The embedded helm mints them in memory at startup and hands them to the desktop process through
   `run_embedded`'s readiness channel; it keeps only their SHA-256 digests, in memory, and checks them before any stored
@@ -2568,10 +2570,11 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   there). Like a browser's, the webview's secret is readable by script in the window; unlike a browser's, a stolen one
   survives rotation and ends only when the app quits.
 - The loopback guard accepts `Host` and `Origin` only as the IPv4 literal `127.0.0.1:<port>` (bare `127.0.0.1` on port
-  80, where browsers omit the default port), or the native webview's custom schemes as Origin. That exemption is a
-  scheme prefix and cannot be narrower in a useful way: dioxus-desktop hardcodes the page URL `dioxus://index.html/` on
-  Linux and macOS, so every Dioxus desktop app sends the same Origin, and `wry://` is open to any app built on wry
-  directly. Another such app's content passing the guard is the residual SPEC.md "Client to helm" accepts for this
+  80, where browsers omit the default port), or (in embedded mode only) the native webview's custom schemes as Origin.
+  That exemption is a scheme prefix and cannot be narrower in a useful way: dioxus-desktop hardcodes the page URL
+  `dioxus://index.html/` on Linux and macOS, so every Dioxus desktop app sends the same Origin, and `wry://` is open to
+  any app built on wry directly. A standalone helm has no custom-scheme page to authorize and refuses those origins.
+  Another such app's content passing the embedded guard is the residual SPEC.md "Client to helm" accepts for this
   browser-facing check. `localhost` and `[::1]` are refused because the helm binds only IPv4 loopback, leaving
   `[::1]:<port>` free for another local account to bind; a `localhost` origin could then be served by that account and
   read whatever the UI stored there. Binding `[::1]` as well was rejected: IPv6 loopback can be enabled after the helm

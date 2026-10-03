@@ -669,9 +669,9 @@ pub(crate) struct Harness {
     pub(crate) manager: Arc<ConnectionManager>,
     pub(crate) fleet: Arc<ScriptedFleet>,
     pub(crate) state: Arc<AppState>,
-    /// A real device credential persisted in this harness's helm.db.
-    /// [`Self::router`] and [`Self::serve`] apply it by default so the
-    /// existing suite continues to exercise handlers behind auth, while the
+    /// The credential used by [`Self::router`] and [`Self::serve`] by default:
+    /// a browser credential persisted in `helm.db` on a standalone fixture,
+    /// or an in-memory embedded credential after [`Self::embedded`]. The
     /// explicit unauthenticated variants expose the enforcement boundary.
     device_secret: String,
     port: u16,
@@ -740,6 +740,40 @@ impl Harness {
     /// The real router without the harness's synthetic device secret.
     pub(crate) fn unauthenticated_router(&self) -> axum::Router {
         crate::build_router(Arc::clone(&self.state), crate::UiSource::None, self.port)
+    }
+
+    /// Reuse this fixture's fleet and store with the embedded helm boundary.
+    ///
+    /// CORS tests need the same router shape the desktop window uses: custom
+    /// webview origins are admitted only in embedded mode, while the fixture
+    /// still supplies the real manager, provisioning service, and clipboard
+    /// sink it had before the mode switch. The old stored device row remains
+    /// in the database deliberately; embedded authentication must ignore it.
+    /// This is a terminal mode switch for the fixture: [`Self::restart_with`]
+    /// intentionally rebuilds standalone state and therefore must not follow
+    /// this call.
+    pub(crate) fn embedded(mut self) -> Harness {
+        assert!(
+            self.served.is_empty(),
+            "switch the fixture to embedded mode before starting a server"
+        );
+        let old_state = Arc::clone(&self.state);
+        let mut state = AppState::with_provisioning(
+            Arc::clone(&self.manager),
+            self.store.clone(),
+            Arc::clone(&old_state.provisioning),
+            crate::ServingMode::Embedded,
+        );
+        state.event_subscriber_cap = old_state.event_subscriber_cap;
+        state.clipboard_sink = old_state.clipboard_sink.clone();
+        let state = Arc::new(state);
+        let device_secret = state
+            .auth
+            .mint_embedded_device()
+            .expect("mint the embedded fixture credential");
+        self.state = state;
+        self.device_secret = device_secret;
+        self
     }
 
     /// Serve the real router on a loopback port, for the tests that need a
@@ -852,6 +886,11 @@ impl Harness {
     /// "hosts" are the far side of the network and do not restart just
     /// because the helm did.
     pub(crate) async fn restart_with(self, rescript: impl FnOnce(&ScriptedFleet)) -> Harness {
+        assert_eq!(
+            self.state.mode,
+            crate::ServingMode::Standalone,
+            "restart_with only supports standalone fixtures"
+        );
         rescript(&self.fleet);
         let Harness {
             served,

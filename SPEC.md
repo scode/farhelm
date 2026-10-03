@@ -1511,13 +1511,15 @@ helm to each supervisor (SSH) — plus the desktop app's deliberately local loop
   browser prompt is an ordinary password field, and Farhelm does not try to stop a browser from offering to save it or
   keep a synced store from holding it. A saved token being autofilled into a lookalike prompt is the same port-squatter
   gap. The helm's Origin check is a browser-side defense: it keeps pages in the user's browser, whose `Origin` the
-  browser sets truthfully, away from the helm. The native app's webview is exempted from it by custom URL schemes
+  browser sets truthfully, away from the helm. The desktop app's embedded helm admits its webview's custom URL schemes
   (`dioxus://`, and `wry://` for the webview library underneath), which every desktop app built on that framework or
-  library can present, so content displayed by another such application on the machine also passes the Origin check.
-  That is accepted for the browser-facing check only: such content still has no credential, and the check was never
-  meant to recognize the native app. It is not accepted for the native app. Nothing that establishes the native app as a
-  client may rely on `Origin`; that rests on the credential the native process obtains itself, and hardening that keeps
-  other software from passing for the native app goes through that credential.
+  library can present. A standalone helm does not admit those schemes: it has no custom-scheme page that needs a
+  cross-origin API. Content displayed by another such application can still pass the embedded helm's Origin check. That
+  is accepted for this browser-facing check only, because such content still has no credential; the embedded helm needs
+  the exemption because the window's page is `dioxus://index.html`, cross-origin to the helm. That check is not the
+  desktop app's identity. Nothing that establishes the native app as a client may rely on `Origin`; that rests on the
+  credential the native process obtains itself, and hardening that keeps other software from passing for the native app
+  goes through that credential.
 - **Helm to supervisor**: SSH, and only SSH, for every remote supervisor. Passwordless access from the helm's machine,
   as the user, is the requirement; authentication is the user's SSH keys, and supervisors listen on no network port of
   their own. Registering a host means giving the helm its SSH destination — there is no supervisor token to manage. The

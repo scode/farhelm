@@ -650,6 +650,23 @@ mod tests {
             "the independent SHA-256 digest must be the sole stored credential form"
         );
 
+        let validation = Request::builder()
+            .uri("/api/auth/device")
+            .header(header::HOST, "127.0.0.1:7433")
+            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+            .body(Body::empty())
+            .unwrap();
+        let response = harness
+            .unauthenticated_router()
+            .oneshot(validation)
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::NO_CONTENT,
+            "standalone validation must accept the exchanged credential"
+        );
+
         let read = Request::builder()
             .uri("/api/sessions")
             .header(header::HOST, "127.0.0.1:7433")
@@ -663,53 +680,49 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        let validate = Request::builder()
-            .uri("/api/auth/device")
-            .header(header::HOST, "127.0.0.1:7433")
-            .header(header::ORIGIN, "dioxus://index.html")
-            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
-            .body(Body::empty())
-            .unwrap();
-        let response = harness
-            .unauthenticated_router()
-            .oneshot(validate)
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        assert_eq!(
-            response
-                .headers()
-                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-                .unwrap(),
-            "dioxus://index.html"
-        );
-
-        let rejected = Request::builder()
-            .uri("/api/auth/device")
-            .header(header::HOST, "127.0.0.1:7433")
-            .header(header::ORIGIN, "dioxus://index.html")
-            .header(header::AUTHORIZATION, "Bearer rejected")
-            .body(Body::empty())
-            .unwrap();
-        let response = harness
-            .unauthenticated_router()
-            .oneshot(rejected)
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(
-            response
-                .headers()
-                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-                .unwrap(),
-            "dioxus://index.html",
-            "the webview must be allowed to distinguish auth rejection from transport failure"
-        );
         assert_eq!(
             harness.store.device_session_count().await.unwrap(),
             1,
-            "validation must never mint a replacement device row"
+            "validation must not mint a replacement device row"
         );
+    }
+
+    /// The desktop webview's credential-validation route keeps readable
+    /// success and failure answers on the embedded helm. This pins both
+    /// outcomes because the UI must distinguish an expired credential from a
+    /// valid one. Standalone refusal of the same custom-scheme Origin is
+    /// pinned by `embedded_mode_has_no_browser_ui_or_token_exchange`.
+    #[farhelm_testtrace::test]
+    async fn embedded_device_validation_cors_is_readable_for_success_and_failure() {
+        let harness = rest_harness::idle_helm().await.embedded();
+        let secret = harness.state.auth.mint_embedded_device().unwrap();
+        for (label, credential, status) in [
+            ("valid embedded credential", secret, StatusCode::NO_CONTENT),
+            (
+                "rejected embedded credential",
+                "rejected".into(),
+                StatusCode::UNAUTHORIZED,
+            ),
+        ] {
+            let request = Request::builder()
+                .uri("/api/auth/device")
+                .header(header::HOST, "127.0.0.1:7433")
+                .header(header::ORIGIN, "dioxus://index.html")
+                .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                .body(Body::empty())
+                .unwrap();
+            let response = harness
+                .unauthenticated_router()
+                .oneshot(request)
+                .await
+                .unwrap();
+            assert_eq!(response.status(), status, "unexpected status for {label}");
+            assert_eq!(
+                response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+                "dioxus://index.html",
+                "credential case {label} must have readable CORS headers"
+            );
+        }
     }
 
     /// A browser must be able to load the application before it has a credential;
