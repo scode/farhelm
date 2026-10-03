@@ -58,19 +58,20 @@ receive a 401, and the browser prompts for the token again when it encounters th
 
 The desktop app skips the exchange. Its embedded helm mints two device secrets in memory at startup and hands them to
 the desktop process directly: one for its native reqwest client, kept in process memory and never handed to JavaScript,
-and one passed to the webview over IPC so that the webview's `localStorage` and WebSocket subprotocol carry a credential
-of their own. The helm keeps only their digests, in memory; they are never `device_sessions` rows, so rotation and the
-64-row cap do not revoke them, rotation does not close the sockets they authenticate, and no HTTP route can mint one.
-The embedded helm serves no browser UI, chooses a fresh loopback port at every launch, and rejects stored browser rows
-from the shared state directory. The two credentials die with the process, and the app writes neither to disk: every
-launch gets a fresh pair, and the web token never enters the desktop process's JavaScript. The webview checks its secret
-via `GET /api/auth/device` before the window opens. The webview's origin is a custom scheme (`dioxus://`, `wry://`), so
-its fetches to the loopback helm are cross-origin; CORS headers remain attached to the desktop routes that need them.
-The standalone helm keeps the browser exchange and UI. Every Dioxus desktop app presents the same `dioxus://index.html`
-origin, and any wry-based app can present `wry://`; only the embedded helm admits those schemes, because its page needs
-cross-origin access to its loopback API. A standalone helm refuses them. Another such app's content can still pass the
-embedded helm's browser-facing check; that is accepted only because it has no credential, and the desktop app's identity
-rests on its credential, never on its Origin.
+and one passed to the webview over IPC so the page-memory global and WebSocket subprotocol carry a credential of their
+own. The helm keeps only their digests, in memory; they are never `device_sessions` rows, so rotation and the 64-row cap
+do not revoke them, rotation does not close the sockets they authenticate, and no HTTP route can mint one. An older
+`farhelm.device-secret` localStorage value is removed on authentication as best effort, but the desktop credential is
+never written there. The embedded helm serves no browser UI, chooses a fresh loopback port at every launch, and rejects
+stored browser rows from the shared state directory. The two credentials die with the process, and the app writes
+neither to disk: every launch gets a fresh pair, and the web token never enters the desktop process's JavaScript. The
+webview checks its secret via `GET /api/auth/device` before the window opens. The webview's origin is a custom scheme
+(`dioxus://`, `wry://`), so its fetches to the loopback helm are cross-origin; CORS headers remain attached to the
+desktop routes that need them. The standalone helm keeps the browser exchange and UI. Every Dioxus desktop app presents
+the same `dioxus://index.html` origin, and any wry-based app can present `wry://`; only the embedded helm admits those
+schemes, because its page needs cross-origin access to its loopback API. A standalone helm refuses them. Another such
+app's content can still pass the embedded helm's browser-facing check; that is accepted only because it has no
+credential, and the desktop app's identity rests on its credential, never on its Origin.
 
 Two things sit beside the credential and are worth knowing about because the tradeoff below leans on them. The loopback
 origin guard (`require_loopback_origin`) refuses any request whose `Host` is not this helm's own loopback authority, any
@@ -94,19 +95,19 @@ included, and an explicit header or subprotocol is only ever sent where the page
 switch bought, and it also removed the ambient credential that makes CSRF a category at all.
 
 What it gave up is HttpOnly. Script running in the helm's origin — the app's own bundle, or anything that reaches script
-execution there through an injection — can read the device secret out of `localStorage`. The judgment recorded in
-SPEC_impl.md is that this adds little, because such a script can already call every API the secret authorizes from
+execution there through an injection — can read the browser device secret out of `localStorage`. The judgment recorded
+in SPEC_impl.md is that this adds little, because such a script can already call every API the secret authorizes from
 inside the page; the credential is full authority and nothing is gated behind a second factor, so the injection has the
 authority whether or not it can read the bytes. What HttpOnly would still have prevented is _exfiltration_: with
 `localStorage`, an injection can send the secret out and the attacker then holds a standalone credential that can
 authenticate new requests from any client until rotation or eviction from the 64 retained enrollments, rather than only
 for as long as their script runs in the user's tab. For the desktop window the window is different, and rotation is no
-remedy: its webview secret is exempt from rotation and the cap, so a stolen one stays valid until the desktop app quits,
-which is what revokes it. That follows from the decision that the desktop app never has a credential to renew (SPEC.md
-"Signing in again"); it is narrower than the stored desktop secrets it replaced, which survived restarts until a
-rotation. That is the residual, and it is why every path from untrusted text into the DOM (session titles, cwds, host
-and provisioning output, anything a terminal can turn into a link) has to be treated as a security boundary rather than
-a rendering concern.
+remedy: its webview secret is in page memory and exempt from rotation and the cap, so a stolen one stays valid until the
+desktop app quits, which is what revokes it. That follows from the decision that the desktop app never has a credential
+to renew (SPEC.md "Signing in again"); it is narrower than the stored desktop secrets it replaced, which survived
+restarts until a rotation. That is the residual, and it is why every path from untrusted text into the DOM (session
+titles, cwds, host and provisioning output, anything a terminal can turn into a link) has to be treated as a security
+boundary rather than a rendering concern.
 
 Other properties of the current design, stated without judgment: device secrets have no time-based expiry; rotation
 revokes all browser ones at once (the desktop app's in-memory pair is exempt and ends with its process), and retaining

@@ -1,9 +1,9 @@
 (function () {
   // Authenticate the desktop webview: install the credential native hands
-  // over where the page's own consumers read it, and prove the helm accepts
-  // it. The Dioxus eval and node tests execute this same state machine;
-  // injected browser primitives keep the contract testable without
-  // pretending Node has a webview or a WebSocket.
+  // over in page memory where the page's own consumers read it, and prove
+  // the helm accepts it. The Dioxus eval and node tests execute this same
+  // state machine; injected browser primitives keep the contract testable
+  // without pretending Node has a webview or a WebSocket.
   //
   // The credential is an in-memory one the desktop app's embedded helm
   // minted for this launch (farhelm_helm::EmbeddedReady). Token rotation and
@@ -13,8 +13,9 @@
   // helm's root credential) never reaches this script at all (SPEC.md
   // "Client hardening").
   //
-  // Authentication is ALL this script does, apart from scrubbing keys a
-  // retired feature left in localStorage.
+  // Authentication is ALL this script does, apart from scrubbing keys older
+  // builds left in localStorage (a stored webview credential and retired
+  // preference keys).
   async function authenticate(channel, platform) {
     const bootstrap = await channel.recv();
     try {
@@ -44,18 +45,19 @@
       if (!secret) {
         throw new Error("native handed over no webview credential");
       }
-      // Stored FIRST, and a write that does not take is fatal. The
-      // terminals, uploads and event feed read their credential from
-      // localStorage, not from this script, so a window that opened after a
-      // failed write would run them on a missing secret, or on a stale one
-      // an earlier launch left behind that the helm no longer accepts.
+      // Keep the launch credential in the page's memory. WebKit persists
+      // localStorage to disk, which would make an embedded helm's
+      // per-launch secret survive the process that minted it. terminal.js
+      // and events.js consult this global before their browser storage
+      // fallback, so desktop requests never need to write the secret.
+      platform.page.__farhelmWebviewDeviceSecret = secret;
+      // Older builds wrote this key. Remove it on every credentialed
+      // authentication attempt (a no-op once it is gone), but do not let a storage
+      // implementation that refuses cleanup strand an otherwise valid launch.
       try {
-        platform.storage.setItem("farhelm.device-secret", secret);
-      } catch (error) {
-        throw new Error(`storing the webview credential failed: ${error && error.message ? error.message : error}`);
-      }
-      if (platform.storage.getItem("farhelm.device-secret") !== secret) {
-        throw new Error("storing the webview credential failed: it did not read back");
+        platform.storage.removeItem("farhelm.device-secret");
+      } catch (_error) {
+        // Legacy data is only hygiene; validation below remains authoritative.
       }
 
       // Bounded, because nothing else times this step out (the native side
@@ -120,7 +122,14 @@
         fetch: window.fetch.bind(window),
         AbortController: window.AbortController,
         WebSocket: window.WebSocket,
-        storage: window.localStorage,
+        page: window,
+        storage: (function () {
+          try {
+            return window.localStorage;
+          } catch (_error) {
+            return null;
+          }
+        })(),
         setTimeout: window.setTimeout.bind(window),
         clearTimeout: window.clearTimeout.bind(window),
       },

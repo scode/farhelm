@@ -71,16 +71,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   profiles are removed, launches become agent or command launches with named templates, and the spec change is
   https://github.com/scode/farhelm/pull/1537. Plan: `plans/queue/launch-representation.md`.
 
-- **No network path for the desktop app.** The desktop app's webview talks to its embedded helm the way the browser
-  does, over HTTP and WebSockets on a loopback port, so one UI code path serves both clients. That port can be reached
-  by every process on the machine, including other accounts' (the credential stops them from using it), and the helm's
-  browser defenses need a scheme-level exemption for the webview's `dioxus://` origin, which every Dioxus desktop app
-  shares. Consider moving the desktop client to an in-process transport instead, as Tauri commands or Electron IPC do:
-  with nothing listening, nothing else on the machine can reach the desktop's API, and neither the port nor the origin
-  exemption is needed. The hard part is streaming: wry's custom-scheme handler answers each request with one complete
-  response, so terminal output and the event feed would have to travel over the webview's IPC channel, and the UI's
-  network layer would need a second transport beside HTTP. Plan: `plans/queue/desktop-internal-helm.md`.
-
 - **Audio signal when an agent is waiting on input.** Play a sound when a session's agent gets stuck waiting for the
   user (a question, an approval prompt), so a user looking at something else notices without watching the sidebar.
   Possibly other events too; which ones, and the sound, volume, and any setting to turn it off, are to be decided when

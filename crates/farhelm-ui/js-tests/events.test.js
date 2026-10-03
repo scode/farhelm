@@ -91,12 +91,16 @@ function fakeClock() {
  * `withdrawnUpFront` seeds `window.farhelmFeedWithdrawn` BEFORE the file
  * executes, which is the ordering the withdrawal latch exists for: the Rust
  * side can stand the page down before this file has been injected at all.
+ * `pageSecret` and `storageSecret` exercise the desktop page-global and
+ * browser localStorage credential paths; the returned storage map is kept
+ * inside the sandbox because the tests only need to seed it.
  */
 function loadIsland(options) {
   const clock = fakeClock();
   const sockets = [];
-  function FakeSocket(url) {
+  function FakeSocket(url, protocols) {
     this.url = url;
+    this.protocols = protocols;
     this.closed = false;
     this.onmessage = null;
     this.onclose = null;
@@ -106,13 +110,24 @@ function loadIsland(options) {
   FakeSocket.prototype.close = function () {
     this.closed = true;
   };
+  const storage = new Map();
   const sandbox = {
-    window: {},
+    window: {
+      localStorage: {
+        getItem: (key) => storage.get(key) || null,
+      },
+    },
     WebSocket: FakeSocket,
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
   };
   if (options && options.withdrawnUpFront) sandbox.window.farhelmFeedWithdrawn = true;
+  if (options && options.pageSecret !== undefined) {
+    sandbox.window.__farhelmWebviewDeviceSecret = options.pageSecret;
+  }
+  if (options && options.storageSecret !== undefined) {
+    storage.set("farhelm.device-secret", options.storageSecret);
+  }
   vm.createContext(sandbox);
   vm.runInContext(SOURCE, sandbox);
   // The OTHER ordering the latch has to survive: the file has executed and
@@ -229,6 +244,38 @@ test("the feed URL swaps the scheme and keeps the origin", () => {
 // ---------------------------------------------------------------------
 // The stateful half
 // ---------------------------------------------------------------------
+
+// A desktop launch may have a stale key left by an older build. The current
+// launch's page-memory credential must win so its sockets cannot authenticate
+// with a credential from a previous process.
+test("desktop feed sockets use the page-memory credential before storage", () => {
+  const island = loadIsland({ pageSecret: "in-memory", storageSecret: "stale" });
+  assert.deepEqual(Array.from(island.sockets[0].protocols), ["farhelm", "farhelm-device-in-memory"]);
+  island.events.stop();
+  return island.parked;
+});
+
+// Browser pages do not receive the desktop handoff global, so their existing
+// origin-scoped storage credential remains the upgrade path.
+test("browser feed sockets fall back to the stored credential", () => {
+  const island = loadIsland({ storageSecret: "browser-device" });
+  assert.deepEqual(Array.from(island.sockets[0].protocols), ["farhelm", "farhelm-device-browser-device"]);
+  island.events.stop();
+  return island.parked;
+});
+
+// The credential is read per attempt rather than captured at subscription;
+// a reconnect must see whatever value was installed after the feed started.
+test("desktop feed sockets reread the page credential on reconnect", () => {
+  const island = loadIsland({ pageSecret: "first", storageSecret: "stale" });
+  assert.deepEqual(Array.from(island.sockets[0].protocols), ["farhelm", "farhelm-device-first"]);
+  island.sockets[0].onclose();
+  island.window.__farhelmWebviewDeviceSecret = "second";
+  assert.equal(island.clock.fireOnly(), 500);
+  assert.deepEqual(Array.from(island.sockets[1].protocols), ["farhelm", "farhelm-device-second"]);
+  island.events.stop();
+  return island.parked;
+});
 
 test("a message resets the ladder; consecutive failures walk it", () => {
   // The attempt counter is reset by a MESSAGE, never by a socket opening —

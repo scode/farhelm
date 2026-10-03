@@ -162,6 +162,13 @@ pub fn run() -> anyhow::Result<()> {
         .with_cfg(
             dioxus::desktop::Config::new()
                 .with_window(desktop_window())
+                // The webview credential is page-memory-only. Keep the
+                // context-menu reload control out of release windows so the
+                // supported credential lifetime is the app window, not an
+                // exposed page reload. This repeats Dioxus's release default
+                // deliberately, and keeps its developer-tools path debug-only
+                // across dependency upgrades.
+                .with_disable_context_menu(!cfg!(debug_assertions))
                 .with_on_window(move |window, _| {
                     restore_tracker
                         .lock()

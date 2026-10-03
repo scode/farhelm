@@ -55,17 +55,22 @@
 // `WebSocket` and fake timers — see that file's header.
 (function () {
   const DEVICE_SECRET_KEY = "farhelm.device-secret";
+  const WEBVIEW_DEVICE_SECRET = "__farhelmWebviewDeviceSecret";
 
   /**
    * Protocols for an authenticated browser upgrade.
    *
    * The secret is read at each attempt rather than captured at subscription:
    * token rotation keeps the same retrying feed object alive while the auth
-   * surface replaces its localStorage value.
+   * surface replaces its credential. Desktop auth keeps the launch secret in
+   * this page global so WebKit does not persist it; browser pages use their
+   * origin-scoped localStorage fallback.
    */
   function deviceProtocols() {
     try {
-      const secret = window.localStorage.getItem(DEVICE_SECRET_KEY);
+      const secret = typeof window[WEBVIEW_DEVICE_SECRET] === "string"
+        ? window[WEBVIEW_DEVICE_SECRET]
+        : window.localStorage.getItem(DEVICE_SECRET_KEY);
       return secret ? ["farhelm", `farhelm-device-${secret}`] : ["farhelm"];
     } catch (_error) {
       return ["farhelm"];
