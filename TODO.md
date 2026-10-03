@@ -81,10 +81,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   launch at create time unless it brings its own resume command). First step: walk through the launch paths with the
   maintainer.
 
-- Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
-  restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.
-  Plan: `plans/queue/install-output-layout.md`.
-
 - **No network path for the desktop app.** The desktop app's webview talks to its embedded helm the way the browser
   does, over HTTP and WebSockets on a loopback port, so one UI code path serves both clients. That port can be reached
   by every process on the machine, including other accounts' (the credential stops them from using it), and the helm's
