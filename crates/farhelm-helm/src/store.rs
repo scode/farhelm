@@ -311,7 +311,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 32;
+const SCHEMA_VERSION: i64 = 33;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -1052,7 +1052,9 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 /// origin-gating them to user-initiated launches matters. The wire route still
 /// accepts them on `PUT` like the others (kept uniform with the rest of this
 /// type rather than carved into a read-only exception), but no shipped
-/// client sends either one.
+/// client sends either one. Host setup and removal confirmation choices are
+/// helm-wide opt-outs: an explicit permanent answer is shared by every
+/// client, while an unset field keeps asking.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
@@ -1077,6 +1079,9 @@ pub struct Preferences {
     /// Whether host removal skips its confirmation dialog for this helm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_host_remove_confirmation: Option<bool>,
+    /// Whether host setup skips its confirmation dialog for this helm.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_host_setup_confirmation: Option<bool>,
 }
 
 /// A sparse change to [`Preferences`]: each field is absent (leave it as
@@ -1134,6 +1139,12 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub skip_host_remove_confirmation: Option<Option<bool>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub skip_host_setup_confirmation: Option<Option<bool>>,
 }
 
 /// Deserialize a PRESENT field of [`PreferencePatch`] — serde only calls
@@ -1880,6 +1891,8 @@ pub struct HelmStore {
 ///   sensitive until the user explicitly marks it safe for YOLO launches.
 /// - 32: `preferences.skip_host_remove_confirmation`, unset so existing
 ///   clients continue to ask before forgetting a host.
+/// - 33: `preferences.skip_host_setup_confirmation`, unset so existing
+///   clients continue to ask before setting up a host.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2096,7 +2109,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  compact                INTEGER CHECK (compact IN (0, 1)),
                  remembered_permissions TEXT,
                  remembered_workspace_trust INTEGER CHECK (remembered_workspace_trust IN (0, 1)),
-                 skip_host_remove_confirmation INTEGER CHECK (skip_host_remove_confirmation IN (0, 1))
+                 skip_host_remove_confirmation INTEGER CHECK (skip_host_remove_confirmation IN (0, 1)),
+                 skip_host_setup_confirmation INTEGER CHECK (skip_host_setup_confirmation IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2183,7 +2197,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 32;",
+              PRAGMA user_version = 33;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2990,6 +3004,15 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         .context("migrating helm.db to schema version 32")?;
         version = 32;
     }
+    if version == 32 {
+        tx.execute_batch(
+            "ALTER TABLE preferences ADD COLUMN skip_host_setup_confirmation INTEGER \
+             CHECK (skip_host_setup_confirmation IN (0, 1)); \
+             PRAGMA user_version = 33;",
+        )
+        .context("migrating helm.db to schema version 33")?;
+        version = 33;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -3610,7 +3633,7 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -3631,6 +3654,7 @@ impl HelmStore {
                                 .filter(|word| is_known_remembered_permissions_word(word)),
                             remembered_workspace_trust: row.get(4)?,
                             skip_host_remove_confirmation: row.get(5)?,
+                            skip_host_setup_confirmation: row.get(6)?,
                         })
                     },
                 )
@@ -3667,28 +3691,32 @@ impl HelmStore {
             let remembered_permissions_present = patch.remembered_permissions.is_some();
             let remembered_workspace_trust_present = patch.remembered_workspace_trust.is_some();
             let skip_host_remove_confirmation_present = patch.skip_host_remove_confirmation.is_some();
+            let skip_host_setup_confirmation_present = patch.skip_host_setup_confirmation.is_some();
             let sort = patch.list_sort.flatten();
             let selected = patch.last_selected.flatten();
             let compact = patch.compact.flatten();
             let remembered_permissions = patch.remembered_permissions.flatten();
             let remembered_workspace_trust = patch.remembered_workspace_trust.flatten();
             let skip_host_remove_confirmation = patch.skip_host_remove_confirmation.flatten();
+            let skip_host_setup_confirmation = patch.skip_host_setup_confirmation.flatten();
             conn
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7) \
                      ON CONFLICT (singleton) DO UPDATE SET \
-                         list_sort = CASE WHEN ?7 THEN excluded.list_sort ELSE list_sort END, \
-                         last_selected = CASE WHEN ?8 THEN excluded.last_selected \
+                         list_sort = CASE WHEN ?8 THEN excluded.list_sort ELSE list_sort END, \
+                         last_selected = CASE WHEN ?9 THEN excluded.last_selected \
                                               ELSE last_selected END, \
-                         compact = CASE WHEN ?9 THEN excluded.compact ELSE compact END, \
-                         remembered_permissions = CASE WHEN ?10 \
+                         compact = CASE WHEN ?10 THEN excluded.compact ELSE compact END, \
+                         remembered_permissions = CASE WHEN ?11 \
                              THEN excluded.remembered_permissions ELSE remembered_permissions END, \
-                         remembered_workspace_trust = CASE WHEN ?11 \
+                         remembered_workspace_trust = CASE WHEN ?12 \
                              THEN excluded.remembered_workspace_trust ELSE remembered_workspace_trust END, \
-                         skip_host_remove_confirmation = CASE WHEN ?12 \
-                             THEN excluded.skip_host_remove_confirmation ELSE skip_host_remove_confirmation END",
+                         skip_host_remove_confirmation = CASE WHEN ?13 \
+                             THEN excluded.skip_host_remove_confirmation ELSE skip_host_remove_confirmation END, \
+                         skip_host_setup_confirmation = CASE WHEN ?14 \
+                             THEN excluded.skip_host_setup_confirmation ELSE skip_host_setup_confirmation END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -3696,12 +3724,14 @@ impl HelmStore {
                         remembered_permissions,
                         remembered_workspace_trust,
                         skip_host_remove_confirmation,
+                        skip_host_setup_confirmation,
                         sort_present,
                         selected_present,
                         compact_present,
                         remembered_permissions_present,
                         remembered_workspace_trust_present,
-                        skip_host_remove_confirmation_present
+                        skip_host_remove_confirmation_present,
+                        skip_host_setup_confirmation_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -7104,6 +7134,7 @@ mod tests {
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
+                 ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE hosts DROP COLUMN yolo_safe;
                  PRAGMA user_version = 27;",
             )
@@ -9084,6 +9115,10 @@ mod tests {
             .update_preferences(patch(r#"{"skip_host_remove_confirmation":true}"#))
             .await
             .unwrap();
+        store
+            .update_preferences(patch(r#"{"skip_host_setup_confirmation":true}"#))
+            .await
+            .unwrap();
         assert_eq!(
             store.preferences().await.unwrap(),
             Preferences {
@@ -9093,6 +9128,7 @@ mod tests {
                 remembered_permissions: None,
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
+                skip_host_setup_confirmation: Some(true),
             },
             "a selection write must not discard the sort written before it"
         );
@@ -9111,6 +9147,7 @@ mod tests {
                 remembered_permissions: None,
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
+                skip_host_setup_confirmation: Some(true),
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -9128,6 +9165,7 @@ mod tests {
                 remembered_permissions: None,
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
+                skip_host_setup_confirmation: Some(true),
             },
             "an explicit null clears exactly the field it names"
         );
@@ -9194,6 +9232,7 @@ mod tests {
                 remembered_permissions: None,
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
+                skip_host_setup_confirmation: Some(true),
             },
             "null clears exactly the permissions memory and disturbs nothing else"
         );
@@ -9374,6 +9413,7 @@ mod tests {
                 "ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
+                 ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE hosts DROP COLUMN yolo_safe;
                  PRAGMA user_version = 28;",
             )
@@ -9884,6 +9924,7 @@ mod tests {
                  -- warns about.
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
+                 ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE hosts DROP COLUMN yolo_safe;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  DROP TABLE checkout_config_host;
@@ -10000,6 +10041,7 @@ mod tests {
                 "ALTER TABLE preferences DROP COLUMN compact;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
+                 ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE hosts DROP COLUMN yolo_safe;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  INSERT INTO preferences (singleton, list_sort, last_selected)
@@ -10025,6 +10067,7 @@ mod tests {
                 remembered_permissions: None,
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: None,
+                skip_host_setup_confirmation: None,
             },
             "the new field defaults absent while both existing choices survive"
         );
@@ -10051,6 +10094,7 @@ mod tests {
                 ALTER TABLE hosts DROP COLUMN yolo_safe;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
+                 ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  INSERT INTO preferences (singleton, list_sort, last_selected, compact)
                  VALUES (1, 'title', 'session-before-permissions-memory', 1);
                  -- Down to schema 25, so the checkout-config tables added
@@ -10075,8 +10119,64 @@ mod tests {
                 remembered_permissions: None,
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: None,
+                skip_host_setup_confirmation: None,
             },
             "the new field defaults absent while every existing choice survives"
+        );
+    }
+
+    /// Schema 33 adds the shared add-host confirmation choice without
+    /// disturbing the removal choice introduced one migration earlier.
+    /// Downgrading a real current database keeps this focused on the
+    /// migration boundary rather than on fresh-schema creation alone.
+    #[farhelm_testtrace::test]
+    async fn schema_33_preserves_the_version_32_preference_row() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("helm.db");
+        {
+            let store = HelmStore::open(&path).await.expect("create current schema");
+            store
+                .update_preferences(PreferencePatch {
+                    skip_host_remove_confirmation: Some(Some(true)),
+                    ..PreferencePatch::default()
+                })
+                .await
+                .expect("write the version-32 choice");
+            drop(store);
+            let conn = Connection::open(&path).expect("reopen raw");
+            conn.execute_batch(
+                "ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 PRAGMA user_version = 32;",
+            )
+            .expect("plant schema-32 preferences");
+        }
+
+        let migrated = HelmStore::open(&path).await.expect("migrate schema 32");
+        assert_eq!(
+            migrated.preferences().await.unwrap(),
+            Preferences {
+                skip_host_remove_confirmation: Some(true),
+                skip_host_setup_confirmation: None,
+                ..Preferences::default()
+            }
+        );
+        migrated
+            .update_preferences(PreferencePatch {
+                skip_host_setup_confirmation: Some(Some(true)),
+                ..PreferencePatch::default()
+            })
+            .await
+            .expect("write the new choice");
+        drop(migrated);
+
+        let reopened = HelmStore::open(&path).await.expect("reopen schema 33");
+        assert_eq!(
+            reopened
+                .preferences()
+                .await
+                .unwrap()
+                .skip_host_setup_confirmation,
+            Some(true)
         );
     }
 
@@ -10355,6 +10455,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN compact;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
+                 ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE hosts DROP COLUMN yolo_safe;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  DROP TABLE checkout_config_host;
@@ -11828,6 +11929,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN compact;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
+                 ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE hosts DROP COLUMN yolo_safe;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  ALTER TABLE hosts DROP COLUMN alias;

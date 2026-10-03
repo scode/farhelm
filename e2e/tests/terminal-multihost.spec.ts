@@ -36,6 +36,7 @@ import {
   cleanupProfile,
   createProfile,
   createSession,
+  hostRowByName,
   openHostMenu,
   openHostsPanel,
   patchPreferences,
@@ -167,15 +168,21 @@ async function apiHosts(request: APIRequestContext): Promise<any[]> {
 /**
  * The fleet's ssh row — the harness's second supervisor.
  *
- * Found by KIND rather than by id, because its id changes whenever a test
- * removes and re-adds it (a fresh registry row is exactly what SPEC.md's
- * remove-then-re-add contract produces), and by kind rather than by name
- * because the local row is the only other one and is never `ssh`.
+ * Found by destination rather than by id, because its id changes whenever a
+ * test removes and re-adds it (a fresh registry row is exactly what
+ * SPEC.md's remove-then-re-add contract produces). Not merely the first ssh
+ * row: this suite shares its helm with other specs, and a host one of them
+ * leaked would otherwise be taken for the harness's own, removed as a stray
+ * by `restoreFleetRow`, and leave every later fleet test waiting on a host
+ * that can never connect.
  */
 async function apiRemoteHost(
   request: APIRequestContext,
 ): Promise<any | undefined> {
-  return (await apiHosts(request)).find((host: any) => host.kind === "ssh");
+  const remote = stackInfo().remote_ssh;
+  return (await apiHosts(request)).find(
+    (host: any) => host.kind === "ssh" && host.destination === remote,
+  );
 }
 
 /** Wait until the fleet's ssh row reports `phase`, or fail the test. */
@@ -208,34 +215,6 @@ function remoteReachesPhase(
   );
 }
 
-/**
- * Escape a literal for use inside a `RegExp`.
- *
- * Host names here are ssh DESTINATIONS, which routinely contain regex
- * metacharacters — a dotted hostname is the common case, and `.` matches
- * anything. Interpolating one raw builds a pattern that quietly matches more
- * rows than it names, so `user@a.b` would also select `user@axb`; with a
- * bracket or a paren in a name it stops being a valid pattern at all and the
- * test fails for a reason that has nothing to do with what it asserts.
- */
-function escapeRegExp(literal: string): string {
-  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Locator for one host's row in the panel, matched against `.host-name`
- * exactly — the same anchoring `rowByTitle` uses and for the same reason:
- * a row's full text contains its state detail too, which mentions other
- * hosts (a duplicate names its twin), so `hasText` on the row would match
- * rows that merely refer to the wanted host.
- */
-function hostRowByName(page: Page, name: string) {
-  return page.locator(".host-row").filter({
-    has: page.locator(".host-name", {
-      hasText: new RegExp(`^${escapeRegExp(name)}$`),
-    }),
-  });
-}
 
 /**
  * Assert that `locator`'s element is not merely present in the DOM and
@@ -998,6 +977,14 @@ test.describe("multi-host", () => {
     const row = hostRowByName(page, "user@manageable");
     await openHostMenu(row);
     await expect(row.locator(".host-row-menu-panel")).toBeVisible();
+
+    await page.locator(".add-host-button").click();
+    await expect(page.locator(".add-host-form")).toBeVisible();
+    await expect(page.locator('.host-add-dialog[role="dialog"]')).toBeVisible();
+    await expect(page.locator(".add-host-ssh")).toBeFocused();
+    await page.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(page.locator(".add-host-form")).toHaveCount(0);
+    await expect(page.locator(".add-host-button")).toBeFocused();
 
     await page.locator(".add-host-button").click();
     await expect(page.locator(".add-host-form")).toBeVisible();

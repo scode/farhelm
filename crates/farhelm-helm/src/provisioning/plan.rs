@@ -158,71 +158,47 @@ impl ProvisioningAction {
         }
     }
 
-    fn confirmation_line(&self) -> String {
+    /// Describe only a user-visible change on the host.
+    ///
+    /// Transfer staging, digest checks, atomic renames, daemon reloads, and
+    /// attaching the resulting supervisor are execution details. They remain
+    /// in the frozen action list, but the add-host question names the durable
+    /// host changes the user is deciding to authorize.
+    fn confirmation_line(&self) -> Option<String> {
         match self {
-            Self::EnsureDirectories { directories } => format!(
-                "create or reuse directories {}",
+            Self::EnsureDirectories { directories } => Some(
                 directories
                     .iter()
-                    .map(|directory| {
-                        if directory.shared {
-                            format!(
-                                "{} (created with mode {:04o} if missing; an existing directory keeps its permissions)",
-                                directory.path.display(),
-                                directory.mode
-                            )
-                        } else {
-                            format!("{} (mode {:04o})", directory.path.display(), directory.mode)
-                        }
-                    })
+                    .map(|directory| format!("create or reuse directory {}", directory.path.display()))
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join("\n"),
             ),
-            Self::UploadPayload {
-                payload, temporary, ..
-            } => format!(
-                "upload {payload:?} to temporary file {} and verify its digest",
-                temporary.display()
-            ),
+            Self::UploadPayload { .. } | Self::DaemonReload | Self::AttachSupervisor => None,
             Self::InstallPayload {
                 payload,
                 destination,
-                temporary,
                 ..
-            } => format!(
-                "install {payload:?} at {} via temporary file {} and atomic rename",
-                destination.display(),
-                temporary.display()
-            ),
+            } => Some(format!(
+                "place {} at {}",
+                match payload {
+                    PayloadKind::Farhelm => "Farhelm",
+                    PayloadKind::Tmux => "tmux",
+                },
+                destination.display()
+            )),
             Self::WriteUnit {
-                unit,
-                destination,
-                temporary,
-                ..
-            } => format!(
-                "write user unit {unit} at {} via temporary file {} and atomic rename",
-                destination.display(),
-                temporary.display()
-            ),
-            Self::DaemonReload => "reload the systemd user manager".to_string(),
+                unit, destination, ..
+            } => Some(format!("write user service {unit} at {}", destination.display())),
             Self::EnableSupervisor {
                 unit,
                 persistent_run,
                 ..
-            } => format!("enable and start {unit}; {persistent_run}"),
-            Self::EnableLinger {
-                boot_start_if_enabled,
-                login_start_if_refused,
-            } => format!(
-                "optionally enable linger: {boot_start_if_enabled}; if privilege is refused, \
-                 continue and report that it {login_start_if_refused}"
+            } => Some(format!("enable and start {unit}; {persistent_run}")),
+            Self::EnableLinger { .. } => Some(
+                "start the supervisor at boot when user lingering is enabled; if lingering is refused, start it at login instead"
+                    .to_string(),
             ),
-            Self::RestartSupervisor { unit } => format!(
-                "restart {unit}; tmux keeps existing sessions running during the supervisor restart"
-            ),
-            Self::AttachSupervisor => {
-                "dial the supervisor and attach it to the already-registered host row".to_string()
-            }
+            Self::RestartSupervisor { unit } => Some(format!("restart {unit}")),
         }
     }
 }
@@ -248,29 +224,31 @@ pub(crate) struct ProvisioningPlan {
 impl ProvisioningPlan {
     /// Render the plan without maintaining a second list of promises.
     ///
-    /// The host line right after the header exists so setup confirmation
-    /// shows, in the one place SPEC.md's "states exactly what it is
-    /// about to do" promise puts everything else, which distribution and
-    /// architecture the reach probe actually found — without that line,
-    /// distro-agnostic provisioning would still work but would give the
-    /// user no way to notice they are about to run it against a host
-    /// they did not expect.
+    /// The heading names the destination, distribution, and architecture so
+    /// distro-agnostic provisioning still gives the user a chance to notice
+    /// an unexpected host before authorizing its durable changes.
     pub(super) fn confirmation(&self) -> String {
         let mut rendered = format!(
-            "Farhelm will perform these steps for {}:\n",
+            "Farhelm will set up {} ({}, {}):\n",
             match &self.target {
                 ProvisioningTarget::Local => "the local host".to_string(),
                 ProvisioningTarget::Ssh { destination } => destination.clone(),
-            }
+            },
+            if self.host_distro_id.is_empty() {
+                "unknown distribution"
+            } else {
+                &self.host_distro_id
+            },
+            self.host_arch,
         );
-        let distro = if self.host_distro_id.is_empty() {
-            "unknown distribution"
-        } else {
-            &self.host_distro_id
-        };
-        rendered.push_str(&format!("host: {distro}, {}\n", self.host_arch));
-        for (index, action) in self.actions.iter().enumerate() {
-            rendered.push_str(&format!("{}. {}\n", index + 1, action.confirmation_line()));
+        for action in &self.actions {
+            if let Some(line) = action.confirmation_line() {
+                for line in line.lines() {
+                    rendered.push_str("- ");
+                    rendered.push_str(line);
+                    rendered.push('\n');
+                }
+            }
         }
         rendered
     }

@@ -5232,6 +5232,7 @@ mod tests {
             remembered_permissions: word.map(str::to_string),
             remembered_workspace_trust: None,
             skip_host_remove_confirmation: None,
+            skip_host_setup_confirmation: None,
         };
         assert_eq!(
             super::initial_structured_permissions(&with(Some("yolo"))),
