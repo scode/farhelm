@@ -5665,7 +5665,8 @@
   carve-out: a misbehaving host may crowd or clutter what the helm and GUI show, including pushing other hosts' sessions
   out of the merged list, and removing it is the remedy; it must still not break the helm or affect other hosts'
   security. Remove this feedback file and its index entry.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `nvrutkop`, bookmark `triage-1001e/07-crowding-accepted`, PR
+  https://github.com/scode/farhelm/pull/1448.
 
 ## output-client-shutdown-can-retry-forever.md
 
