@@ -26,20 +26,28 @@ combination of: durable remote execution, real-terminal fidelity, VCS neutrality
   affects sessions nor empties the list.
 - **Client**: a UI surface attached to the helm — the native Mac app's window or a browser tab on the helm's web UI.
   Killing a client, or the helm itself, never affects a session.
-- **Session**: the unit of supervision. A session has a working directory, an agent invocation, a title, and a live
-  terminal. A session is agent-centric: it has one main agent terminal, plus optional additional terminal tabs (plain
-  shells) that open in the same working directory. Session metadata — title, parent reference, stop annotations,
-  captured conversation identity — is durable and lives with the session's supervisor, so it survives helm loss and
+- **Session**: the unit of supervision. A session has a working directory, a launch, a title, and a live terminal. A
+  session is agent-centric: it has one main agent terminal, plus optional additional terminal tabs (plain shells) that
+  open in the same working directory. Session metadata — title, parent reference, stop annotations, captured
+  conversation identity — is durable and lives with the session's supervisor, so it survives helm loss and
   re-registration; terminal contents live only as long as the host-side terminal does (see Terminal experience).
-- **Agent profile**: a named definition of how to run an agent. Stored profiles are user-editable; release-owned
-  built-ins are read-only. Its fields: the launch invocation (command line including arguments, e.g. `claude`,
-  `claude --dangerously-skip-permissions`, `codex`); an optional resume invocation, a template that may reference the
-  captured conversation identity (e.g. `claude --resume {conversation}`); and optional agent-specific integrations
-  (status heuristics, conversation-identity capture — see Status and Durability). Both invocations may reference the
-  session's working directory as `{cwd}`, for launchers that take the directory as an argument. The user controls stored
-  invocations completely; the integrations are the only per-agent machinery Farhelm itself carries. Profile edits are
-  last-write-wins: two clients editing the same profile at once is not a case Farhelm guards, because it is one user's
-  rare action, and no optimistic-concurrency check on profile writes is wanted.
+- **Launch**: what a session runs, as the user chose it in the launcher. Every launch has one of two launch kinds. An
+  **agent launch** names an agent type Farhelm knows (Claude Code, Codex, and the other harnesses under Topology) plus
+  that agent type's own choices, such as model and permissions, and nothing else: no custom arguments. Farhelm composes
+  the command, and the command it uses to resume a conversation, from those choices when the session is created (and
+  again on Restart with), and stores them; Replace and agent clone copy the stored commands rather than composing them
+  anew, while Clone and Replace with compose from the choices. A **command launch** is a command line the user writes,
+  with the user's own assertion of whether it runs without approval prompts (YOLO). A command launch may also declare
+  that it runs a given agent type, which buys that agent type's status reading and conversation reporting, and, with a
+  resume command the user writes, Resume (see Creation and Durability). The agent type is the field the two kinds share:
+  required for an agent launch, optional for a command launch. This spec also calls an agent type a harness, after the
+  vendor program behind it.
+- **Launch template**: a named, partial set of launcher edits. Applying a template is exactly the same as making its
+  edits by hand in the launcher, and nothing more: a template sets only the fields it contains, the result can be edited
+  further before launching, and several templates can be applied one after another. A session records the launch that
+  resulted, never which templates produced it, so editing or deleting a template cannot affect any session. Template
+  edits are last-write-wins: two clients editing the same template at once is not a case Farhelm guards, because it is
+  one user's rare action, and no optimistic-concurrency check on template writes is wanted.
 
 ## Topology
 
@@ -57,9 +65,9 @@ One control plane, two ways to face it:
    no browser UI.
 
 The two client forms have the same capabilities: terminal, attachments, lifecycle operations, host registration, and
-profile management in the helm-owned catalog. They differ only in packaging. These are the only two faces the product
-has — a standalone helm's web UI, or the local app's internal window. There is no remote native-app-to-helm mode: a helm
-running on a Linux host is reached through its web UI, period.
+launch-template management in the helm-owned catalog. They differ only in packaging. These are the only two faces the
+product has — a standalone helm's web UI, or the local app's internal window. There is no remote native-app-to-helm
+mode: a helm running on a Linux host is reached through its web UI, period.
 
 The Mac is not architecturally special: it runs a normal supervisor that any helm — the app's embedded one, or one on a
 Linux host — can register and drive. The supervisor is a plain command-line process on every platform:
@@ -176,61 +184,56 @@ The helm is a plain command-line process too, with the same layering as supervis
 systemd units for it, so a reboot of the helm's machine brings the web UI back; on the Mac, the helm lives and dies with
 the app.
 
-Agent profiles belong to the helm: one catalog applies to every host the helm manages, while the invocation still has to
-exist on the host that runs it. Every release supplies read-only built-in Claude Code, Codex, Muse, and Cursor profiles,
-each in a plain and a permission-skipping ("yolo") variant: `claude`, `claude-yolo`, `codex`, `codex-yolo`, `muse`,
-`muse-yolo`, `cursor`, and `cursor-yolo`. They appear beside the user's stored, editable definitions and are identified
-as Built-in; historical stored starter rows remain editable and deletable. Integrations are not user-authored — a
-profile optionally names an agent kind from Farhelm's built-in v1 catalog (Claude Code, Codex), which selects that
-kind's status heuristics and conversation-identity capture; profiles without a kind get generic treatment.
+Launch templates belong to the helm: one catalog applies to every host the helm manages, while a command a template
+carries still has to exist on the host that runs it. Farhelm ships no built-in templates; the agent types themselves are
+what a release supplies. Integrations are not user-authored: an agent type selects Farhelm's own status reading and
+conversation-identity reporting for that harness, and a command launch with no declared agent type gets generic
+treatment.
 
-Cursor is a structured harness with `cursor` and `cursor-yolo` built-in profiles invoking `cursor-agent` and
-`cursor-agent --force`; Farhelm launches Cursor by that name, never as the generic `agent`, which other tools also use.
-Its model is optional, with `auto`, `composer-2.5` and literal custom IDs supported. Default permissions add no flag;
-YOLO preserves explicit Cursor denies. There is no separate effort selector. Cursor uses generic activity status and has
-no conversation tracking, automatic Resume, configuration editing, hooks or instruction injection. The launcher states
-that tracking and Resume are unsupported. Restart starts fresh; history and clone preserve launch intent. See
+Cursor is an agent type launched as `cursor-agent`, and YOLO adds `--force`; Farhelm launches Cursor by that name, never
+as the generic `agent`, which other tools also use. Its model is optional, with `auto`, `composer-2.5` and literal
+custom IDs supported. Default permissions add no flag; YOLO preserves explicit Cursor denies. There is no separate
+effort selector. Cursor uses generic activity status and has no conversation tracking, automatic Resume, configuration
+editing, hooks or instruction injection. The launcher states that tracking and Resume are unsupported, so a Cursor
+session cannot be restarted; Replace starts it over, and clone preserves launch intent. See
 [Cursor](website/src/content/docs/docs/agents/cursor.md).
 
-Grok is a structured harness for the official `grok` CLI. A normal launch is `grok --no-leader`; YOLO adds
-`--always-approve`. Farhelm exposes neither a Grok model picker nor an effort picker because those command-line
-contracts have not been verified. Every generated fresh and resume command retains `--no-leader`: the shared leader is
-outside the tracked process's ownership boundary, while a private leader still permits Grok's native subagents. Grok
-uses generic activity status. The launch layer preserves its exact `grok --no-leader --resume <conversation-id>` argv,
-but it does not offer Resume until the capture integration has verified an exact conversation. See
+Grok is an agent type for the official `grok` CLI. A normal launch is `grok --no-leader`; YOLO adds `--always-approve`.
+Farhelm exposes neither a Grok model picker nor an effort picker because those command-line contracts have not been
+verified. Every generated fresh and resume command retains `--no-leader`: the shared leader is outside the tracked
+process's ownership boundary, while a private leader still permits Grok's native subagents. Grok uses generic activity
+status. The launch layer preserves its exact `grok --no-leader --resume <conversation-id>` argv, but it does not offer
+Resume until the capture integration has verified an exact conversation. See
 [Grok](website/src/content/docs/docs/agents/grok.md).
 
 Muse support uses `muse` and `muse --yolo` with generic activity status. The yolo variant skips approval prompts and
 sandboxing and trusts the workspace for the run. Muse-specific hooks, conversation capture/resume, and waiting-state
-recognition are not implemented; no Muse integration kind is implied by the presence of its built-in profiles.
-Structured Muse launches also offer a workspace-trust choice separate from tool permissions: true adds
-`--trust-workspace` for that launch; false adds no trust flag. False does not undo trust already implied by `--yolo` or
-vendor configuration, so a prompt is possible only when neither has granted trust.
+recognition are not implemented. Muse agent launches also offer a workspace-trust choice separate from tool permissions:
+true adds `--trust-workspace` for that launch; false adds no trust flag. False does not undo trust already implied by
+`--yolo` or vendor configuration, so a prompt is possible only when neither has granted trust.
 
-OpenCode is a structured harness, not a built-in profile. Its model is optional and uses OpenCode's configured default
-when omitted. For an explicit choice, Farhelm suggests `opencode/glm-5.3-flash`, `opencode/grok-4.5`,
-`opencode/grok-4.6`, `opencode/glm-5.3`, `opencode/gpt-6-luna`, `opencode/gpt-5.6-terra`, `opencode/gpt-6.1-sol`, and
-`opencode/gpt-6-astra`. The custom-model field also accepts a bare Zen model name or an `opencode/<model>` value. A bare
-value is passed as `opencode/<model>`, and either spelling of a suggested model is that OpenCode model even where
-another harness offers the same bare name; another provider prefix is refused. OpenCode has no offered effort choices.
-Its only offered permission is YOLO, including when omitted, and compiles to `--auto`, which auto-approves permissions
-not explicitly denied. OpenCode uses generic activity status with no hooks, conversation capture/resume, or
-waiting-state recognition.
+OpenCode is an agent type. Its model is optional and uses OpenCode's configured default when omitted. For an explicit
+choice, Farhelm suggests `opencode/glm-5.3-flash`, `opencode/grok-4.5`, `opencode/grok-4.6`, `opencode/glm-5.3`,
+`opencode/gpt-6-luna`, `opencode/gpt-5.6-terra`, `opencode/gpt-6.1-sol`, and `opencode/gpt-6-astra`. The custom-model
+field also accepts a bare Zen model name or an `opencode/<model>` value. A bare value is passed as `opencode/<model>`,
+and either spelling of a suggested model is that OpenCode model even where another harness offers the same bare name;
+another provider prefix is refused. OpenCode has no offered effort choices. Its only offered permission is YOLO,
+including when omitted, and compiles to `--auto`, which auto-approves permissions not explicitly denied. OpenCode uses
+generic activity status with no hooks, conversation capture/resume, or waiting-state recognition.
 
-Goose, Pi, and OMP are structured harnesses, not built-in profiles. Each uses its configured model when none is chosen.
-For an explicit OpenRouter choice, Farhelm suggests `z-ai/glm-5.3-flash`, `x-ai/grok-4.5`, `x-ai/grok-4.6`,
-`z-ai/glm-5.3`, `openai/gpt-6-luna`, `openai/gpt-5.6-terra`, `openai/gpt-6.1-sol`, and `openai/gpt-6-astra`; a literal
-custom OpenRouter id remains available after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or
-`max` thinking and offers `yolo` (preselected), `approve`, `smart approve`, and `chat` modes. An omitted Goose
-permission means YOLO and explicitly sets `GOOSE_MODE=auto`. Pi requests `off`, `minimal`, `low`, `medium`, `high`,
-`xhigh`, or `max` thinking and has only the visibly labelled YOLO mode; this describes the absence of Pi's built-in tool
-gate, not its project-resource `--approve` flag. Pi stores that mode as `yolo`; an older snapshot that omitted the
-formerly optional permission field reads and displays as YOLO too. OMP requests `off`, `minimal`, `low`, `medium`,
-`high`, `xhigh`, or `max` thinking (OMP's `auto` level is not offered) and offers `yolo` (preselected,
-`--approval-mode yolo`) and `approve` (`--approval-mode always-ask`); its `write` mode is not offered, and
-`smart approve`/`chat` are refused. OMP gets no waiting-state recognition: an OMP approval prompt shows the generic
-running/idle status, a settled scope decision rather than a detection gap. Provider capabilities may clamp or reject a
-requested effort.
+Goose, Pi, and OMP are agent types. Each uses its configured model when none is chosen. For an explicit OpenRouter
+choice, Farhelm suggests `z-ai/glm-5.3-flash`, `x-ai/grok-4.5`, `x-ai/grok-4.6`, `z-ai/glm-5.3`, `openai/gpt-6-luna`,
+`openai/gpt-5.6-terra`, `openai/gpt-6.1-sol`, and `openai/gpt-6-astra`; a literal custom OpenRouter id remains available
+after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or `max` thinking and offers `yolo`
+(preselected), `approve`, `smart approve`, and `chat` modes. An omitted Goose permission means YOLO and explicitly sets
+`GOOSE_MODE=auto`. Pi requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` thinking and has only the
+visibly labelled YOLO mode; this describes the absence of Pi's built-in tool gate, not its project-resource `--approve`
+flag. Pi stores that mode as `yolo`; an older snapshot that omitted the formerly optional permission field reads and
+displays as YOLO too. OMP requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` thinking (OMP's `auto`
+level is not offered) and offers `yolo` (preselected, `--approval-mode yolo`) and `approve`
+(`--approval-mode always-ask`); its `write` mode is not offered, and `smart approve`/`chat` are refused. OMP gets no
+waiting-state recognition: an OMP approval prompt shows the generic running/idle status, a settled scope decision rather
+than a detection gap. Provider capabilities may clamp or reject a requested effort.
 
 Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
 transport, web-token bootstrap, bringing up the helm's own machine, and starting the v1 Mac supervisor by hand when a
@@ -240,8 +243,8 @@ rotating that UI's token happens on the helm's machine (see Security) — accept
 units are written by one owner rather than by whichever surface got there first, which is why the hosts panel refers to
 it instead of installing a supervisor locally (see Topology). On provisionable hosts, install and updates are the helm's
 job (over the user's SSH access); what may legitimately require manual host-side work is that same transport and token
-pair, on hosts provisioning does not cover. Everything else — session operations, profile management, directory browsing
-— must work from the client. SSH otherwise remains an escape hatch, never a requirement.
+pair, on hosts provisioning does not cover. Everything else — session operations, template management, directory
+browsing — must work from the client. SSH otherwise remains an escape hatch, never a requirement.
 
 ## Install and uninstall
 
@@ -412,55 +415,88 @@ checkout; the agent choice is independent of that destination:
   is refused if it contains control characters (escape sequences, newlines, tabs); an auto-generated one has any such
   character replaced with U+FFFD rather than being refused, since the directory it comes from is legitimate and you did
   not choose the label. A supplied title is bounded in size too, and by the same rule for both verbs: the text you send
-  on creation — working directory, invocation, title, and any invocation override — must fit in 64 KiB between them, and
-  a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames of one session both
-  succeed, and the later write is the title that sticks.
-- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, Cursor, Grok, Goose, Pi,
-  OpenCode, and OMP launches carry a harness plus model, effort, permission, and workspace-trust choices where that
-  harness supports them; visible permission vocabulary is `default`, `approve`, `smart approve`, `chat`, and `yolo`.
-  Absent optional choices mean the selected harness's defaults and omit their flags, except an omitted Pi, OpenCode,
-  OMP, or Goose permission means its YOLO mode. Model selection is optional for every harness; OpenCode, Cursor, and
-  Grok offer no effort choice, and Grok accepts no model choice. The helm owns the released model catalog and validates
-  every structured choice, so the browser never turns a model identifier into an argv fragment. Typing a model never
-  changes a selected harness: the typed id is read as that harness spells it (for OpenCode, a bare Zen name means
-  `opencode/<model>`), a model only other harnesses offer is refused with a message naming them, and choosing another
-  harness's model from the full model list switches the harness on purpose. With no harness selected yet, a typed known
-  model fills in its owning harness (a bare `gpt-6-luna` picks Codex); a custom model needs an explicit harness, and an
-  id several harnesses offer asks for one. Replacing a harness clears incompatible choices and a YOLO permission that
-  was the previous harness's default. An invalid combination cannot launch. New normally preselects no harness or model.
-  The permissions mode remembers the last successful structured launch, helm-wide across every client, except that a
-  harness's default or forced YOLO clears that memory instead of preselecting YOLO for another harness. Explicit YOLO on
-  a harness with a non-YOLO default is remembered; an explicit workspace-trust choice on Codex, Muse, or Pi is
-  remembered separately after a successful user launch. `trust:true` and `trust:false` are single search actions on
-  those harnesses. Codex true and false set that launch's exact working directory to `trusted` and `untrusted` through
-  its per-run project configuration; a fresh checkout's path is filled only after the supervisor has resolved it. Muse
-  true uses `--trust-workspace`; Pi true and false use `--approve` and `--no-approve` respectively. Each setting applies
-  to one launch and never writes vendor trust state; Muse false adds no flag and cannot revoke trust from YOLO or vendor
-  settings. Without a choice, the harness retains its own trust behavior; Codex, Muse, and Claude may still ask for
-  directory trust. Farhelm does not silently answer their prompts. Claude, Goose, OMP, and Cursor have no supported
-  interactive workspace-trust switch. "reset choices" returns both segments to their remembered values rather than to
-  harness defaults, and a recent-setup row's own saved choice overrides it when used. The launch-composer search matches
-  harnesses, `other / command`, models scoped by the chosen harness, effort words offered by that harness and model,
-  `yolo` plus the `perms:yolo` and `perms:default` permission actions, supported trust actions, host and name actions,
-  folders, and recent setups. Permission actions are offered only when the selected harness can represent them;
-  `perms:default` is not offered when the harness's omitted mode is YOLO. `name:foo` applies the entire value as the
-  session name. `host:foo` filters host choices, and `host:local` selects the helm-local host even if it has an alias.
-  The default local host label in the GUI is `local (this machine)`. Accepting a result applies it and clears the box
-  while keeping focus there. Enter on an empty box launches only a complete, valid selection through the ordinary Launch
-  path; Enter on a non-empty query with no result never launches, and Escape closes the result list without clearing the
-  query, so Enter after Escape does nothing until the box is emptied.
-- Legacy agent profile or arbitrary command: `other / command` is a harness-picker choice in the same composer. It
-  replaces only the model, effort, permissions, and workspace-trust controls with the profile picker and raw invocation
-  field. Existing callers, profiles, and their helm-wide last-used profile behavior remain compatible, but New does not
-  silently choose a remembered profile. Values from this mode cannot affect a structured request or its idempotency key.
-  The helm owns the remembered profile default: remote supervisor metadata must not override an explicit user choice or
-  indefinitely determine the default profile for sessions on other hosts. Choosing this mode does not make the
-  structured composer preselect a harness or profile. Search in this mode ignores the retained structured draft:
-  harnesses and known models remain available globally, while effort actions are absent until a structured harness is
-  active. Accepting a harness, model, or recent setup activates the structured launch it names; accepting a folder keeps
-  the current mode. The structured model/effort/permissions/trust summary is absent while a profile or command is
-  active. See the maintainer-confirmed decisions below.
-- Recent setups: the helm remembers bounded successful structured combinations and used folders per target-install
+  on creation — working directory, command and resume command, title, and the rest of the launch — must fit in 64 KiB
+  between them, and a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames
+  of one session both succeed, and the later write is the title that sticks.
+- Launch composer: New opens a dialog on the agent launch kind with no selected agent type. The two launch kinds are
+  shown as two tabs, agent and command, each showing only its own fields; switching tabs keeps each tab's draft. Codex,
+  Claude, Muse, Cursor, Grok, Goose, Pi, OpenCode, and OMP agent launches carry an agent type plus model, effort,
+  permission, and workspace-trust choices where that agent type supports them, and nothing else: an agent launch takes
+  no custom arguments, and a launch that needs them is a command launch; visible permission vocabulary is `default`,
+  `approve`, `smart approve`, `chat`, and `yolo`. Absent optional choices mean the selected harness's defaults and omit
+  their flags, except an omitted Pi, OpenCode, OMP, or Goose permission means its YOLO mode. Model selection is optional
+  for every harness; OpenCode, Cursor, and Grok offer no effort choice, and Grok accepts no model choice. The helm owns
+  the released model catalog and validates every agent-launch choice, so the browser never turns a model identifier into
+  an argv fragment. Typing a model never changes a selected harness: the typed id is read as that harness spells it (for
+  OpenCode, a bare Zen name means `opencode/<model>`), a model only other harnesses offer is refused with a message
+  naming them, and choosing another harness's model from the full model list switches the harness on purpose. With no
+  harness selected yet, a typed known model fills in its owning harness (a bare `gpt-6-luna` picks Codex); a custom
+  model needs an explicit harness, and an id several harnesses offer asks for one. Replacing a harness clears
+  incompatible choices and a YOLO permission that was the previous harness's default. An invalid combination cannot
+  launch. New normally preselects no harness or model. The permissions mode remembers the last successful agent launch,
+  helm-wide across every client, except that a harness's default or forced YOLO clears that memory instead of
+  preselecting YOLO for another harness. Explicit YOLO on a harness with a non-YOLO default is remembered; an explicit
+  workspace-trust choice on Codex, Muse, or Pi is remembered separately after a successful user launch. `trust:true` and
+  `trust:false` are single search actions on those harnesses. Codex true and false set that launch's exact working
+  directory to `trusted` and `untrusted` through its per-run project configuration; a fresh checkout's path is filled
+  only after the supervisor has resolved it. Muse true uses `--trust-workspace`; Pi true and false use `--approve` and
+  `--no-approve` respectively. Each setting applies to one launch and never writes vendor trust state; Muse false adds
+  no flag and cannot revoke trust from YOLO or vendor settings. Without a choice, the harness retains its own trust
+  behavior; Codex, Muse, and Claude may still ask for directory trust. Farhelm does not silently answer their prompts.
+  Claude, Goose, OMP, and Cursor have no supported interactive workspace-trust switch. "reset choices" returns both
+  segments to their remembered values rather than to harness defaults, and a recent-setup row's own saved choice
+  overrides it when used. The launch-composer search matches harnesses, launch templates (`tl:name`), models scoped by
+  the chosen harness, effort words offered by that harness and model, `yolo` plus the `perms:yolo` and `perms:default`
+  permission actions, supported trust actions, host and name actions, folders, and recent setups. Permission actions are
+  offered only when the selected harness can represent them; `perms:default` is not offered when the harness's omitted
+  mode is YOLO. `name:foo` applies the entire value as the session name. `host:foo` filters host choices, and
+  `host:local` selects the helm-local host even if it has an alias. The default local host label in the GUI is
+  `local (this machine)`. Accepting a result applies it and clears the box while keeping focus there. Enter on an empty
+  box launches only a complete, valid selection through the ordinary Launch path; Enter on a non-empty query with no
+  result never launches, and Escape closes the result list without clearing the query, so Enter after Escape does
+  nothing until the box is emptied.
+- Command launch: a command launch takes a command line, which may reference the session's working directory as `{cwd}`
+  as a whole argument, and a required YOLO assertion: the user states whether the command runs without approval prompts,
+  and Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it
+  runs, or how to resume it. A command launch may optionally declare the agent type it runs. A declared agent type
+  requires `{farhelm_args}` as a whole argument exactly once in the command, which marks where Farhelm places that agent
+  type's own launch arguments (the conversation-reporting hook and the instructions pointer, see Durability); it is
+  replaced by nothing for an agent type that takes no such arguments, so the rule never depends on which agent type was
+  declared. `{farhelm_args}` without a declared agent type is refused. Farhelm passes whatever turns its integration on
+  as arguments, never through the environment: every process the agent starts inherits the environment, including
+  another agent of the same type that it shells out to, so a hook carried there would reach runs that are not the
+  session's. The environment carries only settings that Farhelm's own reporter reads once an argument has turned it on,
+  set on the launched process directly and never written into the command. Declaring an agent type gives the session
+  that agent type's status reading and conversation reporting. It also allows opting into Resume, which requires a
+  resume command containing `{conversation}` and `{farhelm_args}`, each as a whole argument exactly once; Farhelm fills
+  those and `{cwd}` in and otherwise runs the resume command as written. `{conversation}` in the start command is
+  refused. A command launch with no declared agent type, or one that does not opt into Resume, can never be restarted
+  (see Lifecycle operations). The YOLO assertion covers the resume command too. Search while the command launch kind is
+  active still offers agent types, models, and recent setups, and accepting one switches to the agent launch kind;
+  accepting a folder, host, or name keeps the current launch kind, and a template keeps it unless the template sets one.
+  The declared agent type is chosen in the command tab's own field, not through search.
+- Launch templates: `tl:name` in the search box offers templates by name, and accepting one applies it. Applying a
+  template makes the edits it contains, in the same way and with the same effects as making them by hand, in a fixed
+  order: launch kind first, then agent type, then every other field. It can switch the launch kind, and choosing an
+  agent type clears the choices incompatible with it exactly as picking that agent type by hand does. A template's
+  agent-launch fields and command-launch fields apply to the launch kind active once its own launch kind, if any, is
+  applied. A template may set any launcher field: launch kind, agent type, model, effort, permissions, workspace trust,
+  command, YOLO assertion, resume command, host, destination (a folder or a fresh GitHub checkout), and session name.
+  Fields a template leaves out keep whatever the launcher already holds, so templates stack: applying `my-codex` and
+  then `myproject-webbuilder` applies both, the later one winning where they overlap. A template whose field does not
+  apply to what the launcher holds when it is applied, such as a model while the launch kind is command or a model the
+  chosen agent type does not offer, is refused with a message naming the field, and nothing from it is applied. So is a
+  template that sets a field the current dialog holds fixed, such as the host in Replace with; Restart with does not
+  offer templates. A template names its host by the host's recorded install identity, exactly like the host default
+  below, so a registry row retargeted to another install makes the template's host field inapplicable rather than
+  silently aiming at the successor. A launch made after applying templates is, for remembered defaults, recent setups,
+  and fresh-checkout previews, exactly the launch the same hand edits would have made: the resulting choices count as
+  the user's explicit selection, and a template that changes host, installation, destination, title, or agent
+  invalidates a pending checkout preview as the equivalent hand edit does. Because a template pins only what it
+  contains, a field the launch requires and no template set still has to be filled in by hand; that friction is
+  accepted. Templates are created, edited, and deleted in a Templates panel whose control sits beside New; its form
+  offers every launcher field, each optional. Template names are unique.
+- Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the
   replaced install's history. Folder search uses that bounded history, not a recursive filesystem walk; explicit
@@ -476,66 +512,53 @@ checkout; the agent choice is independent of that destination:
 
 Creation launches the agent; you type your first prompt into its terminal. Automatic initial-prompt delivery is post-v1.
 The expected shape when it comes: for agents that accept an initial prompt on the command line (Claude Code and Codex
-both do), substitute the prompt into the profile's invocation — no readiness detection needed. Injecting a prompt into
-the terminal of an already-running agent requires reliably detecting that it is ready for input, which is the same hard
-problem as status detection; that route is only for agents without the argv affordance. Either way it is an additive
-change (an optional field on create/spawn), which is why v1 can skip it safely.
+both do), add the prompt to the composed command — no readiness detection needed. Injecting a prompt into the terminal
+of an already-running agent requires reliably detecting that it is ready for input, which is the same hard problem as
+status detection; that route is only for agents without the argv affordance. Either way it is an additive change (an
+optional field on create/spawn), which is why v1 can skip it safely.
 
 A custom model id is typed into the model field and applied with Enter; it needs a chosen harness. The optional session
 name sits in the destination block under host and folder, visible without any disclosure. Launch and Cancel are the
-first controls in the launcher, above everything else, and Launch's label names the chosen harness, host, and folder.
-Project registration (associating metadata with a directory) is optional convenience and never a prerequisite.
+first controls in the launcher, above everything else, and Launch's label names the chosen agent type (or command),
+host, and folder. Project registration (associating metadata with a directory) is optional convenience and never a
+prerequisite.
 
 Creation guards against accidental double submission (a double-click, a retry after a timeout): one intended create
 yields one session or a clear error, never two silently. Deliberately creating several sessions with identical
-parameters — same directory, same profile — is a sanctioned workflow, not a duplicate to be suppressed.
+parameters — same directory, same launch — is a sanctioned workflow, not a duplicate to be suppressed.
 
 A YOLO launch on a host that asks before YOLO launches (see the host settings under Topology) needs an explicit
-confirmation. A launch counts as YOLO when its effective structured permission is YOLO (including omitted permissions on
-Pi, OpenCode, OMP and Goose), or when its command line carries a flag its vendor documents as skipping approval prompts,
-such as `claude --dangerously-skip-permissions` or `codex --yolo`, or the same mode spelled as options, such as Codex's
-`-a never` together with `-s danger-full-access`. Codex's sandboxed `--full-auto` does not count, and neither does
-`-a never` alone, which keeps the sandbox, or `-s danger-full-access` alone, which keeps the approval prompts.
-Structured launches are classified exactly. Cloning or replacing an older OpenCode, OMP or Goose session with an omitted
-permission now counts as YOLO too. Raw `omp`, `goose` and `opencode` commands without a recognized YOLO flag remain
-unknown: vendor defaults are not inferred from command lines. For a custom launch (a typed command line or a profile's
-invocation) recognition is best effort: Farhelm covers the common documented shapes, including an agent started behind
-an `env NAME=value` prefix, and counts an `env` given options it does not interpret as YOLO when it goes on to name an
-agent program Farhelm knows, but it cannot promise to recognize every command line that turns approval prompts off. An
-arbitrary wrapper, such as a script or `sh -c`, is not guaranteed to be detected. A custom command line is recognized by
-its vendor's standard program name (`cursor-agent` for Cursor, `grok` for Grok, `pi` for Pi, and so on). The generic
-name `agent` is not interpreted, and an agent installed or launched under any other name, including a launch that
-declares the Pi kind (in a profile or a create request) for a program not named `pi`, is not detected. Only a custom
-launch's start command is classified: a separate resume command it carries (a profile's or a create request's) is not
-checked, so a plain Resume or Restart that runs a resume command turning approval prompts off is not asked. The helm
-enforces the confirmation, so no client can skip it: every create, clone, replace, replace with, and restart with that
-reaches it on such a host without the override is refused before any supervisor is contacted, and nothing is started.
-The GUI answers that refusal with a prominent confirmation, shown with the control or surface that started the launch
-and scrolled into view, that names the host, says what YOLO means and why this launch is one (YOLO was chosen where the
-harness offers other modes, the harness has no mode with approval prompts, or the command line turns them off), and
-retries with the override only when the user confirms. Besides a one-off confirmation it offers to stop asking for that
-host: that answer first sets the host to start YOLO sessions without asking, exactly as its settings would, and then
-retries with the override; if changing that setting fails, nothing is started and the confirmation stays up with the
-reason. `farhelm agent create`, `farhelm agent clone`, and `farhelm spawn` with a catalog selector take `--confirm-yolo`
-as the override (its earlier name, `--allow-yolo-on-sensitive-host`, is still accepted but no longer shown in help). A
+confirmation. An agent launch counts as YOLO when its effective permission is YOLO, including omitted permissions on Pi,
+OpenCode, OMP and Goose, and is classified exactly. A command launch counts as YOLO when its YOLO assertion says so, and
+only then: Farhelm does not parse command lines to second-guess the assertion, for the user or for an agent. Confirmed
+2026-10-03: an agent can therefore start a YOLO command on such a host by asserting that it is not YOLO. This is
+accepted until the permission prompts for actions requested through the `farhelm` CLI land (TODO.md); with them, an
+agent's command launch on such a host asks whatever its assertion says. The helm enforces the confirmation, so no client
+can skip it: every create, clone, replace, replace with, and restart with that reaches it on such a host without the
+override is refused before any supervisor is contacted, and nothing is started. The GUI answers that refusal with a
+prominent confirmation, shown with the control or surface that started the launch and scrolled into view, that names the
+host, says what YOLO means and why this launch is one (YOLO was chosen where the agent type offers other modes, the
+agent type has no mode with approval prompts, or the command was asserted to be YOLO), and retries with the override
+only when the user confirms. Besides a one-off confirmation it offers to stop asking for that host: that answer first
+sets the host to start YOLO sessions without asking, exactly as its settings would, and then retries with the override;
+if changing that setting fails, nothing is started and the confirmation stays up with the reason.
+`farhelm agent create`, `farhelm agent clone`, and `farhelm spawn` other than `--inherit-agent` take `--confirm-yolo` as
+the override (its earlier name, `--allow-yolo-on-sensitive-host`, is still accepted but no longer shown in help). A
 plain restart relaunches the session's own stored launch and is not asked again, and so does
 `farhelm spawn --inherit-agent`, which reuses the asking session's launch and is answered by its own supervisor with no
 helm involved.
 
-A session snapshots its profile at creation — launch and resume invocations and integration selection alike. Editing or
-deleting a profile affects future sessions only; existing sessions keep working unchanged.
-
-Failures split cleanly in two: precondition failures (nonexistent directory, unknown profile, unreachable host) fail the
-create with a visible error and no session; launch failures of a session that was successfully created surface on the
-session itself — **error** when the agent process could not be started at all (exec failure, command not found),
+Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
+the create with a visible error and no session; launch failures of a session that was successfully created surface on
+the session itself — **error** when the agent process could not be started at all (exec failure, command not found),
 **exited** when it started and then ended, however quickly, with its exit code visible.
 
 ### Fresh GitHub checkouts
 
-Selecting `gh:owner/repo` in the composer explicitly requests a new checkout on the selected host. It works with
-structured harness choices, legacy profiles, and raw commands. Selecting a folder or editing the ordinary directory
-returns to an existing-directory launch without changing the agent choice. Ordinary Clone and Replace start from the
-source session's actual directory; a new checkout requires an explicit repository selection or a saved repository setup.
+Selecting `gh:owner/repo` in the composer explicitly requests a new checkout on the selected host. It works with both
+launch kinds. Selecting a folder or editing the ordinary directory returns to an existing-directory launch without
+changing the agent choice. Ordinary Clone and Replace start from the source session's actual directory; a new checkout
+requires an explicit repository selection, a saved repository setup, or a template that sets one.
 
 The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. There is no default
 root and no configuration GUI. The root must already exist on the target host; `~` expands there, using the supervisor's
@@ -619,11 +642,11 @@ creates a new checkout, rather than reopening its prior directory. Fresh creates
 with ephemeral paths; an explicit existing-directory launch can still do so.
 
 Unlabelled search retains ordinary matching. Leading `name:`, `host:`, `harness:`, `model:`, `effort:`, `perms:`,
-`trust:`, `folder:`, `recent:` and `gh:` labels offer or filter their respective actions, case-insensitively; unknown
-labels and colons inside model IDs retain ordinary meaning. Accepting a name or host action clears search without
-launching. Invalid `gh:` input cannot launch a hidden existing directory. Host, installation, destination, title, agent
-choice and observed configuration changes invalidate an undispatched preview. Late responses cannot restore its
-authority or steal focus. An already ambiguous submission remains bound to its original request.
+`trust:`, `folder:`, `recent:`, `tl:` and `gh:` labels offer or filter their respective actions, case-insensitively;
+unknown labels and colons inside model IDs retain ordinary meaning. Accepting a name or host action clears search
+without launching. Invalid `gh:` input cannot launch a hidden existing directory. Host, installation, destination,
+title, agent choice and observed configuration changes invalidate an undispatched preview. Late responses cannot restore
+its authority or steal focus. An already ambiguous submission remains bound to its original request.
 
 ### Lifecycle operations
 
@@ -637,12 +660,17 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
 
 - **Stop** terminates the agent and its entire process tree — MCP servers, dev servers, and other descendants included.
   Terminal tabs keep running, and the session remains with its terminal still viewable.
-- **Restart** relaunches the agent in the same working directory, resuming the session's own conversation where
-  supported (see Durability for the exact promise). This is the only relaunch mechanism: the resume offered when opening
-  an interrupted session is this same operation, not a separate feature. There is no fresh-restart variant in v1 — for a
-  clean conversation, create a new session in the same directory. Restart on a session whose agent is working (its
-  status reads working) confirms, stops the agent, then relaunches; a live agent that is idle, waiting for input, or
-  whose status is unknown is stopped and relaunched without asking, because a prompt shown on every live agent gets
+- **Restart** relaunches the agent in the same working directory and resumes the session's own conversation (see
+  Durability for the exact promise). Confirmed 2026-10-03: Restart always means the conversation is preserved. It is
+  offered only when Farhelm knows the session's agent type, has captured its conversation, and can resume it: an agent
+  launch of an agent type with conversation reporting, or a command launch that declared such an agent type and opted
+  into Resume. When Farhelm knows it cannot resume, Restart is unavailable rather than starting fresh or running some
+  other command, and Replace or Replace with is how such a session starts over: a Restart that silently loses the
+  conversation is a bug, not a fallback. This is the only relaunch mechanism: the resume offered when opening an
+  interrupted session is this same operation, not a separate feature. There is no fresh-restart variant — for a clean
+  conversation, use Replace, or create a new session in the same directory. Restart on a session whose agent is working
+  (its status reads working) confirms, stops the agent, then relaunches; a live agent that is idle, waiting for input,
+  or whose status is unknown is stopped and relaunched without asking, because a prompt shown on every live agent gets
   clicked through unread. Harnesses with weak activity detection may therefore restart a busy agent unasked; that cost
   is accepted. The supervisor applies the same rule from its own reading at the moment of the restart, so an agent that
   started working after the user clicked is refused rather than stopped unconfirmed, and the next attempt asks. Replace
@@ -653,37 +681,37 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   gone. Losing it is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched
   terminal ahead of the new process — a frame with no process behind it looks live, accepts typing, and is overwritten
   when the real program draws, which is worse than blank. Restart touches the agent terminal only; terminal tabs are
-  unaffected. Restart may carry changed structured launch settings for a structured session with a resumable captured
-  conversation; the harness, host, and working directory remain fixed. Legacy profile and raw-command sessions do not
-  support this override because they have no stored structured selection. If a harness rejects a changed model or other
-  setting while resuming, that is an ordinary launch failure; restart again with settings the harness accepts. The
-  general split between launch-only and resume-safe arguments remains deferred.
-- **Restart with** opens a dialog for changing the model, effort, permissions, or workspace trust before resuming the
-  session's own conversation. The harness, host, and folder stay fixed; Replace with can change the harness or folder,
-  and Clone can change the host. The dialog shows the current settings and marks edited fields, and its primary action
-  is inactive until a setting changes. A working agent is stopped first with the user's confirmation on that action; a
-  live agent in any other status is stopped first without it, as for Restart. A refusal leaves the dialog and its edits
-  visible with the reason. This action is available only for a session launched from structured settings with a current
-  resume offer. Its header button remains visible but greyed out otherwise, with a hover tooltip and accessible
-  description explaining why.
+  unaffected. Restart may carry changed launch settings (Restart with, below); the launch kind, agent type, host, and
+  working directory remain fixed. If a harness rejects a changed model or other setting while resuming, that is an
+  ordinary launch failure; restart again with settings the harness accepts.
+- **Restart with** opens a dialog for changing the launch before resuming the session's own conversation: the model,
+  effort, permissions, or workspace trust of an agent launch, or the command, resume command, and YOLO assertion of a
+  command launch. The launch kind, agent type, host, and folder stay fixed; Replace with can change the harness or
+  folder, and Clone can change the host. The dialog shows the current settings and marks edited fields, and its primary
+  action is inactive until a setting changes. A working agent is stopped first with the user's confirmation on that
+  action; a live agent in any other status is stopped first without it, as for Restart. The edited launch is validated
+  exactly as a create validates it before anything is stopped, so an invalid edit leaves the agent running and the
+  dialog open with the reason. A refusal leaves the dialog and its edits visible with the reason. Restart with runs the
+  resume command, so an edited start command of a command launch takes effect the next time it is cloned or replaced.
+  This action is available exactly when Restart is. Its header button remains visible but greyed out otherwise, with a
+  hover tooltip and accessible description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, working directory,
-  title, and agent — the fresh-conversation counterpart to restart's resumed one. The source session is untouched:
+  title, and launch — the fresh-conversation counterpart to restart's resumed one. The source session is untouched:
   cloning starts a brand-new, independent create through the same form and the same confirmation described under
   Creation and identity above, so every field can be edited before submitting and the request can be cancelled like any
-  other create. A structured source carries its stored declarative launch selection into the composer verbatim,
-  including omitted default fields; it is never rediscovered by parsing the compiled invocation. A legacy agent carries
-  over as a profile only while the source's profile is still the one it names (the same identity a session's own profile
-  snapshot already tracks); otherwise the form falls back to the source's raw invocation, exactly as "the client asks
-  instead of guessing" already requires for a vanished remembered default. Cloning does not deduplicate titles — a
-  duplicate is allowed, the same as any other create.
-- **Replace** creates a new session — new id, fresh conversation, same host, working directory, title, and agent (a
-  profile while the source's profile is still the one it names, otherwise the source's raw invocation, exactly as clone
-  resolves it) — and then DELETES the source. Confirmed directly from the row menu, with one inline confirmation and
-  nothing to edit first, since the whole point is the same settings. Contrast restart, which keeps the session's own id
-  and its conversation: restart continues a session, replace starts one over under the same settings. If the create
-  fails, the source is untouched. If the create succeeds and the removal that follows fails, the reply names both
-  sessions; whether the source is still there depends on how the removal failed, and the user checks or removes it by
-  hand. Replace is offered wherever clone is offered.
+  other create. The source's stored launch is carried into the launcher verbatim: an agent launch's choices including
+  omitted default fields, never rediscovered by parsing its composed command, or a command launch's command, YOLO
+  assertion, declared agent type, and resume command. Cloning does not deduplicate titles — a duplicate is allowed, the
+  same as any other create.
+- **Replace** creates a new session — new id, fresh conversation, same host, working directory, title, and launch,
+  copied exactly as stored — and then DELETES the source. For a command launch, "fresh conversation" means only that
+  Farhelm starts the stored command again rather than a resume; a command that itself continues a conversation, such as
+  `claude --continue`, does so. Confirmed directly from the row menu, with one inline confirmation and nothing to edit
+  first, since the whole point is the same settings. Contrast restart, which keeps the session's own id and its
+  conversation: restart continues a session, replace starts one over under the same settings. If the create fails, the
+  source is untouched. If the create succeeds and the removal that follows fails, the reply names both sessions; whether
+  the source is still there depends on how the removal failed, and the user checks or removes it by hand. Replace is
+  offered wherever clone is offered.
 - **Replace with** opens the same editable create form clone opens, pre-filled the same way clone pre-fills it, so every
   field can be edited before launching — the key use is starting an equivalent session on a different harness or effort.
   Launching creates the new session and then deletes the source, with exactly Replace's create-then-delete contract and
@@ -856,11 +884,13 @@ clients. The working directory and launch command remain abbreviated only where 
 always available on the row (a tooltip on the web and desktop clients); an abbreviation is never the only place a value
 is recorded. A row's own actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread
 toggle — reachable there or by clicking the dot itself — that sets the session's seen state directly (see Status). Every
-session row carries one permission mark. An amber slashed shield means its effective structured permission is YOLO, or
-the shared command-line classifier recognizes it as YOLO. A green plain shield means a structured launch in a non-YOLO
-mode. Every other row, including shells and `codex --full-auto`, carries an amber question mark: a profile or custom
-command cannot establish that the session asks for approval. Hover and screen-reader text name the specific structured
-mode (default, approve, smart approve, chat, or YOLO); unknown text explains the profile/custom origin.
+session row carries one permission mark. An amber slashed shield means the session's launch is YOLO by the rule under
+Creation: its effective agent-launch permission is YOLO, or its command was asserted to be YOLO. A green plain shield
+means an agent launch in a non-YOLO mode, or a command asserted not to be YOLO. A session created before launch kinds
+existed that was not an agent launch has no assertion and carries an amber question mark. Hover and screen-reader text
+name the specific agent-launch mode (default, approve, smart approve, chat, or YOLO), or say that the mark is the
+assertion made when the command was launched, by the user or by an agent, and not something Farhelm checked, or that a
+pre-existing session's command was never classified.
 
 Hovering a live status dot, agent mark, or permission mark explains that mark. A clickable dot also names its mark read
 or mark unread action. The hover text uses the same status and permission meaning the row exposes to assistive
@@ -884,7 +914,7 @@ versions. If either build string cannot be parsed as a semantic version, or the 
 age is unknown and the row stays `connected`. The host count, its unpersisted details checkbox, and the secondary add
 action share one header row. Host actions open on demand from the row menu, with the older-host update button also
 available inline; details reveals the version, identity, session count, remedies, diagnostics, and provisioning progress
-under every row. Profiles use the neutral secondary tier for routine row actions and the normal blue tier for popup
+under every row. Templates use the neutral secondary tier for routine row actions and the normal blue tier for popup
 affirmatives, while the host selector stays a native control; session creation remains the blue primary action.
 Destructive confirmations use the danger tier, and explicit menu, tab, and composer controls retain their purpose-built
 styling. Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives helm
@@ -958,7 +988,7 @@ no stamp, and the session's creation time stands in as the displayed age. A sess
 all, never one counted from 1970.
 
 Running/waiting/idle discrimination for raw TUIs is inherently heuristic, and the waiting/idle boundary especially so.
-The bar: best-effort observation of the agent's screen, through one screen reader per agent kind. The generic reader,
+The bar: best-effort observation of the agent's screen, through one screen reader per agent type. The generic reader,
 used by every agent without a dedicated one, knows nothing about the agent: a screen that keeps changing is running, one
 that stopped changing is idle, and it never reports waiting. Claude Code and Codex have dedicated readers that recognize
 what those agents draw — their busy indicators, their input prompt at rest, and the dialogs in which they ask the user
@@ -970,7 +1000,7 @@ detection must never gate or delay interaction with the terminal. Its one effect
 Restart with ask before stopping a live agent (see Lifecycle operations), where a wrong reading costs at most a skipped
 or an extra confirmation. Farhelm-supplied integration must not make vendor configuration a condition of launching an
 agent. Grok is the explicit opt-in exception for conversation capture: users install its three documented hook entries
-themselves, while an unconfigured Grok still launches normally and remains fresh-only. OMP and Grok both use generic
+themselves, while an unconfigured Grok still launches normally and cannot be restarted. OMP and Grok both use generic
 activity only. Their approval prompts show the generic running/idle classification, never waiting — a settled scope
 decision, not a reader waiting to be written.
 
@@ -1022,14 +1052,15 @@ whatever the agent renders is what you see. There is no composer, no message abs
   deselecting).
 - The typical session header is one keyboard-reachable row ordered status, session name, age, directory, command line,
   then Restart, Restart with, Replace, Clone, Replace with, and Delete. All six actions remain in the row and are fully
-  visible from a 650px main pane; narrower panes may clip the trailing actions. Restart with is greyed out when the
-  session has no stored structured launch settings or no conversation to resume; its tooltip and accessible description
-  explain the specific reason. Directory and command line are muted click-to-copy buttons that take the width their
-  values need and ellipsize only when the row runs out of room; a click confirms locally for about 1.5 seconds.
-  Clipboard writes use the native bridge first and `navigator.clipboard` second, with JSON serialization and silent
-  failures. Replace has its own anchored danger confirmation and neutral cancellation. Delete is styled as the danger
-  action and always asks first in the same anchored way, even for a session that has ended, with the same consequence
-  text the row's delete prompt shows.
+  visible from a 650px main pane; narrower panes may clip the trailing actions. Restart and Restart with are greyed out
+  when the session cannot resume its conversation (see Lifecycle operations); their tooltips and accessible descriptions
+  explain the specific reason, such as an agent type without conversation reporting, a command launch that declared no
+  agent type or did not opt into Resume, or a conversation that was never captured. Directory and command line are muted
+  click-to-copy buttons that take the width their values need and ellipsize only when the row runs out of room; a click
+  confirms locally for about 1.5 seconds. Clipboard writes use the native bridge first and `navigator.clipboard` second,
+  with JSON serialization and silent failures. Replace has its own anchored danger confirmation and neutral
+  cancellation. Delete is styled as the danger action and always asks first in the same anchored way, even for a session
+  that has ended, with the same consequence text the row's delete prompt shows.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a
@@ -1128,14 +1159,14 @@ Upload failures must be visible; an attachment must never disappear silently.
 ## Desktop window chrome
 
 The macOS desktop window integrates its native title bar with the app header: native traffic-light controls sit in the
-sidebar's top row beside the version readout, with no separate visible app-title strip. The Profiles control sits beside
-New in the session list header. The session header and terminal tabs continue the app's surface to the top edge. Empty
-header space provides window dragging, and double-clicking it zooms the window (repeating the gesture restores the prior
-frame); a single click without movement never zooms. Controls and terminal text retain their own interactions. Browser
-and Linux window layouts retain their existing appearance and gain no drag or zoom behavior. In narrow macOS windows,
-the app-level row stays fixed above both scrolling panes so horizontal scrolling cannot move application controls
-underneath native window buttons. Startup, authentication errors, and build-mismatch notices also keep their content
-clear of native controls.
+sidebar's top row beside the version readout, with no separate visible app-title strip. The Templates control sits
+beside New in the session list header. The session header and terminal tabs continue the app's surface to the top edge.
+Empty header space provides window dragging, and double-clicking it zooms the window (repeating the gesture restores the
+prior frame); a single click without movement never zooms. Controls and terminal text retain their own interactions.
+Browser and Linux window layouts retain their existing appearance and gain no drag or zoom behavior. In narrow macOS
+windows, the app-level row stays fixed above both scrolling panes so horizontal scrolling cannot move application
+controls underneath native window buttons. Startup, authentication errors, and build-mismatch notices also keep their
+content clear of native controls.
 
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size
@@ -1165,12 +1196,12 @@ running while the supervisor is down and reattach when it returns. Sessions pers
 The environment contract: a session process behaves as if the user had SSHed into the host and typed the command in
 their interactive shell — PATH, rc-file variables, locale included — even though the supervisor starts at boot. That
 SSH-and-type test is the contract when shell sourcing subtleties (login vs. non-login, `.profile` vs. `.bashrc`) would
-otherwise leave room for argument. A bare `claude` in a profile must work exactly as it does from the user's own shell;
-"command not found because a daemon launched it" is a bug, not a caveat. One deliberate exception: the directory holding
-the Farhelm binary that launched the session comes first on the session's `PATH`, so `farhelm` run inside a session
-reaches that exact build; in the Mac app's side-by-side version layout that directory holds the app's forwarder instead,
-so `farhelm` reaches the version of Farhelm now running, which after an update and restart is the newer one. Other
-programs in the same directory take precedence over the user's own `PATH` order as a result. The environment is
+otherwise leave room for argument. A bare `claude` in a command launch must work exactly as it does from the user's own
+shell; "command not found because a daemon launched it" is a bug, not a caveat. One deliberate exception: the directory
+holding the Farhelm binary that launched the session comes first on the session's `PATH`, so `farhelm` run inside a
+session reaches that exact build; in the Mac app's side-by-side version layout that directory holds the app's forwarder
+instead, so `farhelm` reaches the version of Farhelm now running, which after an update and restart is the newer one.
+Other programs in the same directory take precedence over the user's own `PATH` order as a result. The environment is
 evaluated at each launch: edit your rc files and the next launch or restart sees the change; already-running sessions do
 not.
 
@@ -1184,10 +1215,11 @@ surviving terminal still holds it, unknown code otherwise (reporting a code the 
 guessing; inventing one where nothing retains it would be). Interrupted sessions' terminal contents are gone — there is
 no history store (see Terminal experience) — but the conversation itself is recoverable. Opening an interrupted session
 shows a centered neutral card in the empty terminal area explaining that the host restart paused the session and that it
-needs an intentional restart. The card offers two choices: Restart, which uses the normal restart-with-resume offer, or
-Replace, which starts a fresh session under the same settings and keeps its inline destructive confirmation. Nothing
-respawns unattended — an agent (especially one launched with permissive flags) only restarts or replaces when the user
-chooses and confirms. The system must not presume the original OS process survived the reboot.
+needs an intentional restart. The card offers Restart when the session can resume its conversation (see Lifecycle
+operations), and Replace, which starts a fresh session under the same settings and keeps its inline destructive
+confirmation; a session that cannot resume offers only Replace and says why. Nothing respawns unattended — an agent
+(especially one launched with permissive flags) only restarts or replaces when the user chooses and confirms. The system
+must not presume the original OS process survived the reboot.
 
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.
@@ -1197,22 +1229,22 @@ only from the harness's own explicit report, through a hook, plugin, extension, 
 harness needs. Heuristics that cannot be relied upon, such as correlating the vendor's files on disk with a launch, are
 not supported, because a wrong match resumes, and appends to, a conversation that is not the session's own. Checking the
 exact file a report names is verification of that report, not identification. A launch whose harness cannot report, or
-whose report never arrived, has no captured identity and takes the uncaptured-identity fallback below: restart says so,
-and offers a fresh launch when its resume invocation needs the identity. What capture never does is write to the agent's
-own configuration or record directories. A hook passed on the command line for one launch is allowed because it writes
-nothing the vendor owns — no configuration file, no conversation record, no trust state — and cannot outlive the launch
-that carried it. It is not invisible in the absolute: the report it delivers lands in farhelm's own database, and every
-run leaves a line in farhelm's own hook log. Vendor-owned state is the boundary the no-agent-configuration rule from
-Status is protecting, and that rule's own example — hooks written into the agent's configuration — still stands. Grok is
-the documented opt-in exception: the user installs its hook entries, and Farhelm itself never writes, edits, or removes
-them. Every integrated kind identifies conversations only through accepted reports; Farhelm never selects a conversation
-by scanning vendor state. Historical stored identities remain usable under the same per-kind Resume rules, regardless of
-their source. A reporting credential alone does not establish which Codex conversation is in the foreground. Goose
-persists a credential-free named MCP reporter with the conversation and reuses it on resume; Pi loads a private static
-extension from Farhelm's state directory on every launch. A Pi report without a session file withdraws the old resume
-target. Before a Pi resume, Farhelm reads the bounded first record of that exact file without following symlinks and
-requires its session ID to match. A failed check changes the durable offer to fresh and rejects the stale Resume request
-so the user can refresh; it never silently launches fresh under that request.
+whose report never arrived, has no captured identity and cannot be restarted: Restart says why, and Replace starts the
+session over. What capture never does is write to the agent's own configuration or record directories. A hook passed on
+the command line for one launch is allowed because it writes nothing the vendor owns — no configuration file, no
+conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
+absolute: the report it delivers lands in farhelm's own database, and every run leaves a line in farhelm's own hook log.
+Vendor-owned state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own
+example — hooks written into the agent's configuration — still stands. Grok is the documented opt-in exception: the user
+installs its hook entries, and Farhelm itself never writes, edits, or removes them. Every integrated agent type
+identifies conversations only through accepted reports; Farhelm never selects a conversation by scanning vendor state.
+Historical stored identities remain usable under the same per-type Resume rules, regardless of their source. A reporting
+credential alone does not establish which Codex conversation is in the foreground. Goose persists a credential-free
+named MCP reporter with the conversation and reuses it on resume; Pi loads a private static extension from Farhelm's
+state directory on every launch. A Pi report without a session file withdraws the old resume target. Before a Pi resume,
+Farhelm reads the bounded first record of that exact file without following symlinks and requires its session ID to
+match. A failed check withdraws the durable resume offer, which makes Restart unavailable, and rejects the stale Resume
+request so the user can refresh; it never silently launches fresh under that request.
 
 Codex reports must come from the foreground native Codex process under the session's owned pane, not a nested Codex
 process that inherited its credential. Farhelm also verifies the exact reported transcript's root-session metadata;
@@ -1230,10 +1262,10 @@ started underneath the foreground one — a shelled-out sub-agent that inherited
 reporting hook from its own settings — cannot replace or withdraw the foreground's conversation. The rule is positional:
 Farhelm does not recognize Claude's executable and does not read the injected hook out of anyone's command line, because
 both are vendor details that change independently of Farhelm. A plain launch makes the pane process Claude itself and a
-one-level wrapper profile makes Claude its direct child, so both keep reporting; a wrapper chain deeper than that loses
-hook capture, and without an accepted report gets the uncaptured-identity fallback. Native sub-agents never report:
-Claude fires no `SessionStart` for them, and any report naming a sub-agent is refused for every kind. Claude takes no
-versioned ownership proof, so its existing captures stay resumable across the change.
+one-level wrapper command makes Claude its direct child, so both keep reporting; a wrapper chain deeper than that loses
+hook capture, and without an accepted report has no captured identity and cannot be restarted. Native sub-agents never
+report: Claude fires no `SessionStart` for them, and any report naming a sub-agent is refused for every agent type.
+Claude takes no versioned ownership proof, so its existing captures stay resumable across the change.
 
 Grok reports must come from one native `grok` process under the owned pane, launched with `--no-leader` before any real
 end-of-options boundary. The only admitted descendants are the documented reporter command and its narrow shell
@@ -1262,9 +1294,9 @@ delegated task, workpool, or revival child stays silent, while a separately laun
 interactive — is refused by process attribution instead. Sessions launched under the old gateless asset fail closed,
 runnable with no capture, until a relaunch installs the current asset. A parent lineage field never rejects: legitimate
 forks carry one. OMP captures admitted under the proof carry version 1 like Codex, with no historical exception: every
-older OMP row offers fresh-only until its first proven report. Every conversation-identity report carries a closed
-vendor discriminator naming the adapter that produced it — the injected hook command, the Goose helper, or a shipped
-asset — and a report addressed to a session of another kind is refused before any vendor state is consulted. The
+older OMP row offers no Resume until its first proven report. Every conversation-identity report carries a closed vendor
+discriminator naming the adapter that produced it — the injected hook command, the Goose helper, or a shipped asset —
+and a report addressed to a session of another agent type is refused before any vendor state is consulted. The
 discriminator routes; it does not prove. Codex and Grok admission require foreground and record proofs, and their exact
 resume additionally requires versioned proof that the binding was admitted under those proofs, with the historical Codex
 exception described in SPEC_impl.md. Claude admission requires the positional check above but no versioned proof, so its
@@ -1273,54 +1305,42 @@ alone adds no foreground protection. Old senders that predate the discriminator 
 untagged. A refused report changes nothing: no stored identity, no offer, no pending state. Resume is never silently
 turned into fresh, and historical captures are never rewritten to look proven.
 
-OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. A launch
-whose program is `omp` gets Farhelm's private extension when the invocation is an interactive-shaped launch; utility
-subcommands, print/mode/export/alias/help/version/license/list-models occurrences, the reserved-word rejecting forms,
-internal worker selectors, `--trusted-extension` launches (which OMP refuses to combine with an injected `-e`), and a
-genuine end-of-options `--` are left without the extension — runnable exactly as written. A genuine `--` additionally
-refuses the CREATE when the derived OMP resume template would be appended behind it (the appended `--resume` would land
-in prompt position); a `--` consumed as an option value or an explicit resume template creates normally. An OMP report
-carries the same durable locator shape under an `omp:` prefix instead of Pi's `pi:`, and the two are never
-interchangeable: an OMP locator is never accepted for a Pi session or the reverse, and neither passes as a plain
-conversation id for the other kinds. Before an OMP resume, Farhelm reads a bounded prefix of the reported file without
-following symlinks, skips at most one leading shape-checked title slot (a fixed-width 256-byte record OMP rewrites in
-place), and requires the next record to be the session header at `version: 3` carrying the reported id — anything else
-refuses. The refusal fails closed the same way Pi's does: the durable offer becomes fresh and the stale Resume request
-is rejected, never silently launched fresh. A session header with no title slot cannot be told apart from a Pi-shaped
-file by its bytes, so OMP's vendor isolation lives at the locator and report boundary, not in file bytes. Two OMP
-limitations are stated rather than smoothed over. OMP can move an active conversation's file without any event Farhelm
-subscribes to, so an immediate exit after such a move can leave a stale locator until the next subscribed event —
-pre-resume verification is what keeps that offer from resuming an absent file. And a conversation stored somewhere other
-than a session file, or compressed into a `.jsonl.gz` archive, has nothing Farhelm can verify, so its resume offer
-withdraws — fail closed, not a silent fresh start. One OMP difference works in the user's favor: OMP 18.2.4 persists a
-new conversation eagerly, so after `/new` the fresh conversation can be resumable at once instead of waiting for a first
-assistant message.
+OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. An OMP agent
+launch gets Farhelm's private extension, and so does a command launch that declares OMP, where its `{farhelm_args}`
+stands; Farhelm does not inspect the command to decide whether the extension fits, so a command declared as OMP that
+cannot take it is the user's to fix. An OMP report carries the same durable locator shape under an `omp:` prefix instead
+of Pi's `pi:`, and the two are never interchangeable: an OMP locator is never accepted for a Pi session or the reverse,
+and neither passes as a plain conversation id for the other agent types. Before an OMP resume, Farhelm reads a bounded
+prefix of the reported file without following symlinks, skips at most one leading shape-checked title slot (a
+fixed-width 256-byte record OMP rewrites in place), and requires the next record to be the session header at
+`version: 3` carrying the reported id — anything else refuses. The refusal fails closed the same way Pi's does: the
+durable resume offer is withdrawn and the stale Resume request is rejected, never silently launched fresh. A session
+header with no title slot cannot be told apart from a Pi-shaped file by its bytes, so OMP's vendor isolation lives at
+the locator and report boundary, not in file bytes. Two OMP limitations are stated rather than smoothed over. OMP can
+move an active conversation's file without any event Farhelm subscribes to, so an immediate exit after such a move can
+leave a stale locator until the next subscribed event — pre-resume verification is what keeps that offer from resuming
+an absent file. And a conversation stored somewhere other than a session file, or compressed into a `.jsonl.gz` archive,
+has nothing Farhelm can verify, so its resume offer withdraws — fail closed, not a silent fresh start. One OMP
+difference works in the user's favor: OMP 18.2.4 persists a new conversation eagerly, so after `/new` the fresh
+conversation can be resumable at once instead of waiting for a first assistant message.
 
-When an integrated session has no explicit resume invocation, its resume invocation is derived from the original launch
-argv retained for that session: Claude appends `--resume <conversation-id>`, and Codex appends
-`resume <conversation-id>`, Goose uses `session --resume --session-id <conversation-id>`, Pi uses
-`--session <verified-absolute-file>`, OMP uses `--resume <verified-absolute-file>`, and Grok uses
-`--no-leader --resume <verified-conversation-id>`. For Pi and OMP, `{conversation}` in a resume template means that
-verified file path, not Farhelm's internal durable locator; for Codex it means the verified persistent thread ID, not
-the runtime session ID or encoded locator; for Grok it means the verified UUID, not the `grok:` locator or either
-evidence path. The original argv is reused as-is, including permission and configuration arguments, and is preserved as
-argv elements rather than rejoined shell text — except that OMP's own session selectors are stripped from the retained
-argv first, so an old resume or fork target cannot survive between the user and the verified one. Grok and Claude
-instead refuse to derive a template when the retained argv already has a session selector or a real `--` (for Claude:
-`--continue`/`-c`, `--resume`/`-r`, `--session-id`, `--from-pr`, `--teleport` or `--fork-session`, in any argument
-position, so a wrapper declared as Claude whose own arguments include `-c` or `--` is refused too and needs an explicit
-template), and Codex refuses when any argument is spelled `resume` or `fork` (its session-selecting subcommands, which
-Codex accepts only once), even where that word is an option value or the prompt; an explicit template remains available
-for a custom supported shape. This immediate rule assumes every original argument is reusable and that the launch has no
-initial prompt or launch-only option; separating those concerns into common, launch, and resume arguments is deferred.
+Farhelm composes an agent launch's resume command from the same choices as its start command: Claude adds
+`--resume <conversation-id>`, Codex `resume <conversation-id>`, Goose `session --resume --session-id <conversation-id>`,
+Pi `--session <verified-absolute-file>`, OMP `--resume <verified-absolute-file>`, and Grok
+`--no-leader --resume <verified-conversation-id>`. A command launch that opts into Resume supplies its own resume
+command, and Farhelm never derives one from its start command: it fills in `{conversation}`, `{cwd}`, and
+`{farhelm_args}` and runs the rest as written. For Pi and OMP, `{conversation}` means the verified file path, not
+Farhelm's internal durable locator; for Codex it means the verified persistent thread ID, not the runtime session ID or
+encoded locator; for Grok it means the verified UUID, not the `grok:` locator or either evidence path.
 
-Anything farhelm attaches to an agent launch must be invisible from inside the session when it works AND when it fails:
-no output on the agent's terminal, no non-zero exit, no error the agent's own UI can show. A hook that cannot do its job
-gives up silently within a bounded time and leaves its diagnostics in farhelm's own state directory, never in the user's
-session. The bound is on the part the agent waits for — reading the vendor's payload and reporting the result — because
-that is the whole of what can hold the agent up; writing the diagnostic happens afterwards, is best-effort, and is not
-itself bounded. One accepted exception to the invisibility rule is a line the vendor itself prints because of a flag we
-pass (Codex's hook-trust warning), which must be documented.
+Anything farhelm attaches to a launch — an agent launch, or a command launch that declares an agent type — must be
+invisible from inside the session when it works AND when it fails: no output on the agent's terminal, no non-zero exit,
+no error the agent's own UI can show. A hook that cannot do its job gives up silently within a bounded time and leaves
+its diagnostics in farhelm's own state directory, never in the user's session. The bound is on the part the agent waits
+for — reading the vendor's payload and reporting the result — because that is the whole of what can hold the agent up;
+writing the diagnostic happens afterwards, is best-effort, and is not itself bounded. One accepted exception to the
+invisibility rule is a line the vendor itself prints because of a flag we pass (Codex's hook-trust warning), which must
+be documented.
 
 The other exception is farhelm's own, and it is deliberate rather than tolerated: on a launch that gets the hook, the
 hook prints exactly one line for the AGENT to read — that `$farhelm <request>` in the user's message means "use the
@@ -1332,14 +1352,28 @@ The instructions themselves are printed only when that command is run, so a sess
 farhelm pays one line and nothing more. Grok's manually configured hooks omit `--announce`: Grok ignores the relevant
 stdout, so its integration delivers no instructions pointer.
 
-For agents without integration, restart falls back to the profile's resume invocation verbatim, or to a fresh launch
-when the profile defines none. A generic session has no conversation-identity capture, so its fallback command cannot
-contain `{conversation}`; create refuses that configuration with guidance to remove the placeholder or use an integrated
-kind. If an integrated agent's conversation identity was never captured, restart says so and offers a fresh launch when
-its resume invocation requires that identity. A resume invocation referencing `{conversation}` is never run with the
-placeholder unfilled: no captured identity means restart offers a fresh launch and says why, not a garbled command line.
-`{cwd}` is always filled where it stands as a whole argument, on every launch and restart; there is no launch without a
-working directory.
+A resume command is never run with `{conversation}` unfilled: no captured conversation means no Restart, with the reason
+shown, not a garbled command line. `{cwd}` is always filled where it stands as a whole argument, on every launch and
+restart; there is no launch without a working directory.
+
+Sessions created before launch kinds existed keep working after the upgrade. One that was created from structured
+choices becomes an agent launch: its stored commands are Farhelm-composed and never contain a bare `--`, so the upgrade
+places `{farhelm_args}` exactly where the previous release appended Farhelm's arguments, and from then on it behaves
+like any other agent launch. Confirmed 2026-10-03: every other pre-existing session (one created from a profile or a
+typed command) stays a legacy session rather than being converted. A legacy session keeps its stored command, agent
+type, and resume command, and Farhelm's arguments are still added where the previous release added them, but only for a
+legacy session. Restart follows the rule above: it is offered only when the stored resume command can resume a captured
+conversation, so a legacy session that relied on a fresh restart or a resume command without `{conversation}` can no
+longer be restarted. Plain Replace, `farhelm agent clone`, `farhelm spawn --inherit-agent`, and Restart with refuse a
+legacy session with a remedy naming Replace with or a new launch. Clone and Replace with open the launcher on the
+command launch kind with the stored command filled in and nothing else, for the user to finish; an interrupted legacy
+session that cannot be restarted offers Replace with in place of Replace. A legacy session has no YOLO assertion and
+carries the unclassified permission mark.
+
+Profiles are removed outright at the upgrade, built-in and stored alike, with no conversion into templates, and with
+them the remembered default profile and every session's profile snapshot. Confirmed 2026-10-03: downgrading across this
+change is not supported. An older release cannot read the new launch records, and removed profiles are not restored; the
+release notes say so.
 
 ## VCS neutrality
 
@@ -1379,23 +1413,23 @@ or refresh.
 
 The CLI's contract, since agents will script against it: on success it prints the child session id to stdout and exits
 zero, and success means the session exists — a child whose agent then fails to launch still exists, in error or exited
-status. Precondition failures exit nonzero with a message on stderr. `--cwd` and exactly one agent selector are
-required. `--inherit-agent` explicitly reuses the asking session's stored invocation, agent kind, resume template, and
-profile snapshot, and works with no helm attached. `--agent <name>` resolves the exact name through the attached helm's
-catalog; `--profile-id <id>` selects the exact catalog row without treating the id as a name. Both catalog selectors are
-refused with a remedy when no helm is attached. The title is generated when omitted. An optional idempotency key makes
-retries safe: re-running spawn with the same key after a timeout or ambiguous outcome returns the existing child rather
-than creating another. Keys are scoped to the asking session on its host and live as long as the child session does: the
-same key from another session is an unrelated request, never a replay of someone else's child, and a replay never
-returns the asking session itself. Confirmed 2026-09-28, the same scoping applies to the idempotency keys of
-`farhelm agent create` and `farhelm agent clone`. Guaranteed Farhelm-injected environment: the session id
-(`$FARHELM_SESSION_ID`) and the per-session credential; other Farhelm-specific variables are illustrative, not contract.
-(The user's login-shell environment is separately guaranteed; see Durability.)
+status. Precondition failures exit nonzero with a message on stderr. `--cwd` is required, and the launch is either
+`--inherit-agent` or the launch flags shared with `farhelm agent create` below. `--inherit-agent` explicitly reuses the
+asking session's stored launch, and works with no helm attached. The launch flags are resolved by the attached helm,
+which owns templates and composes agent launches, and are refused with a remedy when no helm is attached. The title is
+generated when omitted. An optional idempotency key makes retries safe: re-running spawn with the same key after a
+timeout or ambiguous outcome returns the existing child rather than creating another. Keys are scoped to the asking
+session on its host and live as long as the child session does: the same key from another session is an unrelated
+request, never a replay of someone else's child, and a replay never returns the asking session itself. Confirmed
+2026-09-28, the same scoping applies to the idempotency keys of `farhelm agent create` and `farhelm agent clone`.
+Guaranteed Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other
+Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is separately guaranteed;
+see Durability.)
 
 A session can also ASK, not only create. `farhelm agent <verb>`, run inside a session with the same injected credential
 spawn uses, reaches the helm rather than the session's own supervisor: the supervisor forwards the question to the helm
 currently attached to that session and relays the answer back, because a session has no way to reach the helm's machine
-directly. The verbs are answered with the HELM's view — every host and profile it knows, and every session it knows,
+directly. The verbs are answered with the HELM's view — every host and template it knows, and every session it knows,
 whichever machine they are on — with the asking session and its host marked. That is deliberately wider than spawn's
 own-host-only rule above, which stands unchanged: creating is a local act, asking is not. Every verb goes this way,
 including questions about the session's own host, so there is one answer to what an agent sees. The failure this defines
@@ -1404,14 +1438,14 @@ silent fallback to what the supervisor alone could have answered. The verbs may 
 any session named by id, including the asking session when the caller deliberately supplies its id, with the helm
 applying its ordinary rules to the operation exactly as it would for a client request. Rename also requires the title
 the caller observed; the owning supervisor compares and changes it atomically, so a stale agent cannot overwrite a
-concurrent rename. Restart requires an explicit `--session` target, one mode selected from that session's discovery
-offer (`resume`, `fallback-template`, or `fresh`), and an explicit `--stop-if-running` consent when the target is
-working (an idle, waiting, or unknown target is stopped without it, as in the GUI). The owning supervisor revalidates
-both the offer and the target's status at handling time: a stale mode is refused rather than changed into another mode,
-and Fresh never discards an available resumable conversation. An explicit self restart warns before dispatch that it can
-interrupt the invoking CLI, lose its acknowledgement, and leave resumed task continuation unconfirmed; it never prints
-an unobserved completion as success. There is no `farhelm agent replace`: an agent replacing its own session would be
-killing itself mid-request, which is a design question this version leaves open rather than answers by accident.
+concurrent rename. Restart requires an explicit `--session` target that can resume its conversation (as in the GUI,
+there is no other kind of restart), and an explicit `--stop-if-running` consent when the target is working (an idle,
+waiting, or unknown target is stopped without it, as in the GUI). The owning supervisor revalidates both the resume
+offer and the target's status at handling time, and refuses rather than launching anything else when the conversation
+can no longer be resumed. An explicit self restart warns before dispatch that it can interrupt the invoking CLI, lose
+its acknowledgement, and leave resumed task continuation unconfirmed; it never prints an unobserved completion as
+success. There is no `farhelm agent replace`: an agent replacing its own session would be killing itself mid-request,
+which is a design question this version leaves open rather than answers by accident.
 
 The verbs also CREATE, and this is where reaching the helm buys something no supervisor-local design could offer.
 `farhelm agent create` makes a session on an explicitly named host, and `farhelm agent clone` copies an explicitly named
@@ -1428,18 +1462,32 @@ tracked in TODO.md's Maybe later bucket. Their existence does not authorize addi
 capabilities. Cross-host stop, rename, and restart are separately permitted bounded operations. Restart uses only the
 selected session's stored launch configuration on its owning host; it accepts no replacement command.
 
-`create --profile` resolves an exact NAME in the helm's catalog; duplicate names are refused. `create --profile-id`
-selects an exact ID without falling back to a matching name. A clone follows its explicitly selected source's
-snapshotted profile id on any host while the helm still holds it. No match is a refusal naming the profile. There is
-deliberately no fallback to the source's raw invocation: a command line written for one machine may name a binary that
-is absent, a different build, or one that takes different flags on another. A session created from a raw invocation has
-no profile to follow and clones as that invocation. Create requires exactly one profile name, profile ID, or raw
-invocation; it never chooses the remembered default for an agent.
+`farhelm agent create` and `farhelm spawn` take the launcher's fields as flags. `--template <name>` applies a template
+by its exact name, and may be repeated to apply several in order. `--agent <type>` sets the agent type; `--model`,
+`--effort`, `--permissions`, and `--trust` set an agent launch's choices; `--command` makes it a command launch, which
+needs `--yolo` or `--no-yolo` as its assertion and may add `--agent <type>` as its declared agent type and
+`--resume-command` to opt into Resume. Templates are applied first, in order, and the other flags then act as further
+edits, so `--template my-codex --model gpt-6-luna` is `my-codex` with a different model. The result is validated exactly
+like a GUI launch, with the same refusals naming the field, and the remembered GUI defaults never fill a gap, so the
+same templates can launch differently from the CLI than from a GUI that preselected a remembered permission. A flag
+required by the verb, such as `--cwd` or the target host, may be omitted when an applied template sets that field, and
+an explicit flag wins over a template. `farhelm spawn` targets its own host, so a template that sets a host is refused
+there. A template whose destination is a fresh GitHub checkout is refused on the CLI, which does not create checkouts.
+`--inherit-agent` is exclusive with every launch flag. A command flag repeated or contradicted (`--yolo` with
+`--no-yolo`) is refused rather than resolved by order. The removed selectors `--profile` and `--profile-id`, and
+`farhelm agent restart --mode`, are refused with a message naming what replaced them, and `--agent` given something that
+is not an agent type is refused with the list of agent types. An idempotency key is bound to the launch the first
+accepted request resolved its templates and flags into: a retry with the same key returns that session even if a
+template has been edited since. `farhelm agent clone` copies its explicitly selected source's stored launch onto an
+explicitly named host, verbatim. Clone carries no translation between hosts: a command written for one machine may name
+a binary that is absent, a different build, or one that takes different flags on another. Agents can apply templates but
+not create, edit, or delete them: template writes from agents wait for the permission prompts for actions requested
+through the `farhelm` CLI (TODO.md), because a template can carry a command line that every host the helm manages may
+later run.
 
-Profile names and IDs are ordinary fleet metadata exposed by `farhelm agent profiles`. Discovery also has `--json` forms
-with a versioned envelope, exact IDs, the caller's host identity, and completeness fields. It never exposes raw profile
-command lines, credentials, resume templates, or provider configuration. Duplicate names remain separate rows; an acting
-command refuses an ambiguous name rather than choosing one.
+Templates are ordinary fleet metadata exposed by `farhelm agent templates`: each template's name and the fields it sets,
+with their values except a command line or resume command, which are listed as set without their text. Discovery also
+has `--json` forms with a versioned envelope, exact names, the caller's host identity, and completeness fields.
 
 `farhelm agent instructions` (also spelled `farhelm agent help`) prints the agent-facing account of all of the above:
 the verbs, the `*` marker, that a session's own credential is what authorizes the question, and what to do about "no
@@ -1732,10 +1780,10 @@ line or a message with those bytes replaced is fine; acting on the replaced text
 ### Evidence after resumability is withdrawn
 
 Conversation resume is a core feature while Farhelm can safely identify the session's conversation. Once the current
-restart offer is already `FreshOnly` or `FallbackTemplate`, Farhelm is not required to preserve every remaining capture
-field through a definitive failed restart or other recovery transition. A later retry may therefore have less capture
-evidence when preserving it would add meaningful complexity. This allowance does not permit turning a valid `Resume`
-offer into a fresh launch, or silently substituting another conversation.
+session can no longer resume its conversation, Farhelm is not required to preserve every remaining capture field through
+a definitive failed restart or other recovery transition. A later retry may therefore have less capture evidence when
+preserving it would add meaningful complexity. This allowance does not permit turning a valid `Resume` offer into a
+fresh launch, or silently substituting another conversation.
 
 ### Desktop Quit
 
@@ -1819,22 +1867,22 @@ exposure is accepted pending the guardrails in [TODO.md's Maybe later bucket](TO
 agent/supervisor-originated creation retries share that acceptance; permanent retention of their retry records is not
 required. This does not waive correctness of user-initiated GUI requests or select a pruning implementation.
 
-The same temporary exception covers profile resolution. Any attached host may obtain any catalog profile's resolved
-launch bundle, including its full command line and resume template, because that exception already lets any host ask for
-any profile to be launched on itself, which delivers the same bundle to it. Until the guardrails land, profiles are no
-place for secrets that must stay hidden from an attached host. This acceptance is not a standing grant: it ends with the
-cross-host creation exception, when spawning sessions on other hosts and reading their session and profile data are
-limited to explicitly trusted environments.
+The same temporary exception covers template resolution. Any attached host may obtain any template's full contents,
+including a command line and resume command it carries, because that exception already lets any host ask for any
+template to be applied to a launch on itself, which delivers the same contents to it. Until the guardrails land,
+templates are no place for secrets that must stay hidden from an attached host. This acceptance is not a standing grant:
+it ends with the cross-host creation exception, when spawning sessions on other hosts and reading their session and
+template data are limited to explicitly trusted environments.
 
 Confirmed 2026-09-28, under that same temporary exception: command lines are not secret from agents either. An agent
-runs with the same account authority as its host's supervisor, which can already obtain any profile's bundle, so an
-agent may obtain any profile's resolved command line and resume template (for example from a spawn reply) and any
+runs with the same account authority as its host's supervisor, which can already obtain any template's contents, so an
+agent may obtain any template's command line and resume command (for example by applying it in a spawn) and any
 session's command line (for example by cloning that session onto a host it can read). Until the guardrails land, neither
-profiles nor session command lines are a place for secrets. This ends with the same exception.
+templates nor session command lines are a place for secrets. This ends with the same exception.
 
 Do not add other arbitrary cross-host execution capabilities by analogy with those exceptions. Future agent-driven
 orchestration, such as setting up several sessions on another host, is wanted with an explicitly authorized launch
-policy; trusted profiles are a possible design, not a security property established for the current catalog.
+policy; trusted templates are a possible design, not a security property established for the current catalog.
 
 ### Client hardening
 
@@ -1879,11 +1927,11 @@ correctly, and the best-effort qualifier above applies only to several GUIs at o
 
 ### Remote input, session defaults, and availability
 
-Agents may discover the helm catalog's profile names and IDs. Listing those names and IDs in lookup suggestions is
-explicitly allowed, not a confidentiality defect, and does not require a new discovery interface. Raw command lines are
-not part of that listing, but they are not protected from agents either while the temporary exception in
+Agents may discover the helm catalog's template names and what each sets. Listing those in lookup suggestions is
+explicitly allowed, not a confidentiality defect, and does not require a new discovery interface. Command lines are not
+part of that listing, but they are not protected from agents either while the temporary exception in
 [Local authority and trust between hosts](#local-authority-and-trust-between-hosts) lasts. Discovery also does not make
-current profiles trusted execution guardrails; the separate host-authority rules still apply.
+current templates trusted execution guardrails; the separate host-authority rules still apply.
 
 Agent instructions must identify fleet session metadata as data, never instructions to follow; see
 [Agent-spawned sessions](#agent-spawned-sessions) for the CLI contract. Merely echoing an agent's own input into its own
@@ -1891,17 +1939,11 @@ session terminal does not establish a security defect: the agent already control
 unsafe rendering of remote input by the helm or GUI, secret disclosure, or violations of existing formatting contracts.
 
 Only what the user explicitly selects in the GUI may affect the GUI's future defaults and suggestions: the remembered
-permission mode and workspace-trust choice, the remembered profile, and the recent setups the New dialog offers. Each is
-recorded from the user's own selection in the request that succeeded, never from what a host replies or lists. A
-supervisor's create reply, the settings a plain Replace copies from a listed row, and anything an agent creates do not
-qualify, because none of them is a choice the user made in the GUI. A choice is still recorded only once its create
-succeeds; the host's success decides whether it is recorded, never what.
-
-The helm owns the remembered default for profile-backed session creation. The structured composer still opens without a
-selected harness; this authority rule does not require it to preselect a profile. A remote supervisor's reported
-timestamps, profile references, or other session metadata must not override an explicit user choice or indefinitely
-determine that default for other hosts. The temporary agent-requested create/clone exception does not authorize this
-influence over user-driven session creation.
+permission mode and workspace-trust choice, and the recent setups the New dialog offers. Each is recorded from the
+user's own selection in the request that succeeded, never from what a host replies or lists. A supervisor's create
+reply, the settings a plain Replace copies from a listed row, and anything an agent creates do not qualify, because none
+of them is a choice the user made in the GUI. A choice is still recorded only once its create succeeds; the host's
+success decides whether it is recorded, never what.
 
 Failures or malicious behavior from a remote host must not disrupt unrelated hosts or ordinary helm/GUI controls, apart
 from the explicitly permitted operations above and the exceptions below. Supervisors need sensible recovery from
