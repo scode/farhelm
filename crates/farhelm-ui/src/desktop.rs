@@ -3,7 +3,9 @@
 //!
 //! The native app is not a remote-helm client. It owns one loopback helm for
 //! its lifetime and discovers or starts the local supervisor against the same
-//! state directory. Its two client stacks authenticate with credentials the
+//! state directory. That helm serves the window's API only: the window's
+//! assets come through the native handler, and browsers get no page or token
+//! exchange. Its two client stacks authenticate with credentials the
 //! embedded helm mints in memory and hands over at startup
 //! ([`farhelm_helm::EmbeddedReady`]), not through the token exchange a browser
 //! uses: token rotation and the helm's cap on remembered browser credentials
@@ -40,14 +42,13 @@ mod tmux_preflight;
 mod window_state;
 
 pub(crate) use assets::use_embedded_asset_handler;
-use bundle::{bundled_farhelm, bundled_web_ui, desktop_state_dir};
+use bundle::{bundled_farhelm, desktop_state_dir};
 use state::{APP_STATE_FILE, update_state};
 use tmux_preflight::{
     is_executable_file, macos_tmux_prefixes, resolve_supervisor_tmux, run_tmux_preflight_or_exit,
 };
 use window_state::{WINDOW_STATE_FILE, WindowTracker};
 
-const DEFAULT_DESKTOP_PORT: u16 = 7433;
 const DESKTOP_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The hidden argv-1 flag that prints resolved asset paths instead of
@@ -400,17 +401,11 @@ impl DesktopBootstrap {
         };
         ensure_managed_supervisor_running(&mut supervisor)?;
 
-        // A stable origin makes the embedded web UI discoverable and keeps
-        // its browser credential scoped to one origin across app restarts.
-        // Binding is deliberately exclusive: if another process owns the
-        // chosen port, helm startup fails visibly instead of silently moving
-        // the user to a different URL.
-        let port = std::env::var("FARHELM_DESKTOP_PORT")
-            .ok()
-            .map(|value| value.parse::<u16>().context("parsing FARHELM_DESKTOP_PORT"))
-            .transpose()?
-            .unwrap_or(DEFAULT_DESKTOP_PORT);
-        let ui_dist = bundled_web_ui();
+        // The embedded helm is an internal implementation detail of this
+        // process. Port 0 lets the kernel choose a fresh loopback port for
+        // each launch, so another local process cannot predict or reserve a
+        // stable endpoint before the desktop starts.
+        let port = 0;
         let (ready_tx, ready_rx) = mpsc::channel::<farhelm_helm::EmbeddedReady>();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let helm_state = state_dir.clone();
@@ -424,7 +419,7 @@ impl DesktopBootstrap {
                         farhelm_helm::HelmArgs {
                             port,
                             state_dir: Some(helm_state),
-                            ui_dist,
+                            ui_dist: None,
                             ensure_hosts: None,
                             payload_dir: None,
                             release_base_url: None,
@@ -494,6 +489,10 @@ impl DesktopBootstrap {
         let base = format!("http://{}", ready.addr);
         let native_secret = ready.native_device_secret;
         crate::auth::install_native_device_secret(native_secret.clone());
+        #[cfg(debug_assertions)]
+        if let Some(path) = std::env::var_os("FARHELM_DESKTOP_SMOKE_READY") {
+            write_smoke_ready(&PathBuf::from(path), &base, &native_secret)?;
+        }
         runtime.block_on(await_local_supervisor(
             &base,
             &state_dir,
@@ -578,6 +577,57 @@ impl Drop for DesktopBootstrap {
             let _ = monitor.join();
         }
     }
+}
+
+/// Publish the embedded helm's address and native credential to the local
+/// desktop smoke harness in debug builds only.
+///
+/// The smoke test cannot use the browser token exchange because the embedded
+/// helm deliberately does not expose that route. This file is a test-only
+/// handoff: it is written atomically with mode 0600, never compiled into a
+/// release build, and contains the same in-memory credential the native
+/// client already uses. Production launches have no environment-controlled
+/// path that could make a credential leave the process.
+#[cfg(debug_assertions)]
+fn write_smoke_ready(path: &Path, base: &str, native_device_secret: &str) -> anyhow::Result<()> {
+    #[derive(Serialize)]
+    struct SmokeReady<'a> {
+        base: &'a str,
+        native_device_secret: &'a str,
+    }
+
+    let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+    let bytes = serde_json::to_vec(&SmokeReady {
+        base,
+        native_device_secret,
+    })?;
+    // Create privately from the first instant and refuse any existing path;
+    // chmod after opening would leave a disclosure window or follow a symlink.
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary).with_context(|| {
+        format!(
+            "opening desktop smoke readiness file {}",
+            temporary.display()
+        )
+    })?;
+    let result = (|| -> anyhow::Result<()> {
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path).with_context(|| {
+            format!("publishing desktop smoke readiness file {}", path.display())
+        })?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 /// Record that the webview's JavaScript stack completed an authenticated
