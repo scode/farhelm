@@ -1206,10 +1206,50 @@ pub fn App() -> Element {
     return rsx! { window_chrome::WindowFrame { AppBody {} } };
 }
 
+/// Keep `data-window-active` on the root element (`<html>`) set to `"true"`
+/// while the window or tab has keyboard focus and is visible, and `"false"`
+/// otherwise, so app.css can pause every animation while Farhelm is in the
+/// background.
+///
+/// This exists for CPU and battery, not for looks: SPEC_impl.md ("GUI:
+/// Dioxus", looping animations) requires every looping animation to stop
+/// while the window is inactive, and a Farhelm window visible beside another
+/// app's focused window counts as inactive. The universal
+/// `animation-play-state` rule at the end of app.css is the only reader;
+/// nothing on the Rust side reads the attribute or hears from these
+/// listeners, so the eval channel finishing does not matter.
+///
+/// The state is recomputed from `document.hasFocus()` and
+/// `document.visibilityState` on every window `focus`/`blur` and document
+/// `visibilitychange`, rather than inferred from which event fired, plus once
+/// immediately so the first paint is right. Installation is idempotent per
+/// page (guarded by a window global, like the other page-level listeners in
+/// this crate) because `AppBody` remounts whenever the authenticated tree is
+/// rebuilt, and duplicate listeners would only repeat the same write.
+fn install_window_activity_tracking() {
+    document::eval(
+        "if (!window.__farhelmWindowActivityTracking) { \
+             window.__farhelmWindowActivityTracking = true; \
+             const update = () => { \
+                 document.documentElement.dataset.windowActive = String( \
+                     document.hasFocus() && document.visibilityState !== 'hidden'); \
+             }; \
+             window.addEventListener('focus', update); \
+             window.addEventListener('blur', update); \
+             document.addEventListener('visibilitychange', update); \
+             update(); \
+         }",
+    );
+}
+
 /// The renderer-independent application mounted only after desktop IPC auth
 /// has completed. Browser builds mount it immediately.
 #[component]
 fn AppBody() -> Element {
+    // Here rather than in `App`: the desktop branch of `App` requires the
+    // embedded asset handler to be its first hook, and this is the one
+    // component both builds mount, with every animation underneath it.
+    use_hook(install_window_activity_tracking);
     let mut current = use_signal(|| None::<Session>);
     // A single one-shot bridge lets the keyed session view request the list's
     // existing clone composer without introducing a registry or context.

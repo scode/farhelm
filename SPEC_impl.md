@@ -335,6 +335,35 @@ composer used to carry a palette, corner radii, and a periwinkle selection of it
 list above rules out; a dialog now uses the shared tokens and adds only what being modal needs (a veil, a panel edge one
 step brighter than a control outline, a shadow), on the same one corner scale as everything else.
 
+Nothing on screen may redraw on its own more than 10 times per second. "On its own" means an indicator or decoration
+that moves, fades, spins, or blinks while nothing about the state it shows has changed; drawing new content because new
+data arrived (terminal output, a list update) is not animation, and this rule does not cover it. In this codebase that
+means a CSS animation that repeats indefinitely (`infinite`, or any iteration count that keeps it running with no end in
+sight) uses a stepped timing function, `steps(n)`, `step-start`, or `step-end`, at no more than 10 steps per second
+counted across the whole cycle (the timing function applies to each interval between keyframes, so `steps(4)` over a
+three-keyframe pulse is eight changes per cycle). Interpolating timing functions on such an animation (`linear`, `ease`,
+`ease-in`, `ease-out`, `ease-in-out`, `cubic-bezier(...)`) are forbidden, and so are `requestAnimationFrame` loops and
+JS timers that change what is drawn more often than 10 times per second. That list explains the rule; it is not a
+whitelist, and a technique it does not name that redraws every frame is just as forbidden. One-shot transitions and
+animations started by a user action or a state change, and finished within about a second, are allowed: the 100 ms hover
+tints, or xterm.js's 800 ms scrollbar fade. Every looping animation also stands still while the window is inactive,
+meaning the window or tab lacks keyboard focus or is hidden or minimized, which includes a Farhelm window visible beside
+another app that has focus; one universal `animation-play-state` rule in app.css, keyed on an attribute the UI root
+keeps in step with focus and visibility, covers present and future animations alike. That rule freezes one-shot CSS
+animations as well, so one that may start while the window is inactive has to read correctly at its first keyframe, or
+be written as a CSS transition, which the pause does not touch. Under Reduce Motion (`prefers-reduced-motion: reduce`)
+every looping indicator is static. `js-tests/app-css-animations.test.js` enforces the stepped-timing half against
+app.css.
+
+The reason is CPU and battery, not taste. An interpolated animation produces a new frame on every display refresh for as
+long as it runs, so on macOS the compositor (WindowServer) redraws the window at the display's full rate, up to 120 Hz,
+and the display cannot drop to its low-power idle refresh. A single running-status pulse, `2s ease-in-out infinite` on
+opacity, was observed holding WindowServer at roughly 40-50% CPU on a 120 Hz MacBook, even with the window hidden; that
+is one observation on one machine (2026-10-02), not a constant, but turning Reduce Motion on made the load go away and
+turning it off brought it back. Animating only opacity or transform does not get around this: it keeps the page's own
+layout and paint idle, but the compositor still redraws every frame the value changes, so "compositor-only" does not
+make a looping animation cheap.
+
 `--font-ui` and `--font-mono` name the same vendored face — JetBrains Mono Nerd Font, described below in the xterm.js
 island section — rather than two different ones. The chrome (`--font-ui`) and the terminal (`--font-mono`, the stack
 terminal.js hands xterm.js) used to differ, chrome sitting on the platform's `system-ui` face; unifying them means

@@ -1248,8 +1248,9 @@ samp {
      stared at all day: a fade long enough to notice becomes a tic, and
      a blanket `transition: all` would animate layout properties nobody
      asked to move. Hover tints on rows and buttons are the whole budget
-     — this sheet's ONLY `@keyframes` is the running status dot's pulse (see
-     `.status-dot` and `.host-update-dot`), and controls gain none here. */
+     — the only `@keyframes` in this sheet are the looping status and
+     delete indicators (see `.status-dot`, `.host-update-dot` and
+     `.delete-spinner`), and controls gain none here. */
   transition: background-color 100ms;
 }
 
@@ -2939,17 +2940,31 @@ samp {
   cursor: pointer;
 }
 
-/* The only animation in the app, and it is spent here deliberately: running
-   is the one status that means something is happening RIGHT NOW, and a
-   still dot cannot distinguish "working" from "alive but at rest" without
-   asking the user to compare two greens. Slow (2s) and shallow (down to 45%
-   opacity, never off) so it reads as a heartbeat in peripheral vision
-   rather than as a blink demanding attention — this sits in a sidebar
-   someone stares at all day.
+/* The running pulse, spent here deliberately: running is the one status
+   that means something is happening RIGHT NOW, and a still dot cannot
+   distinguish "working" from "alive but at rest" without asking the user
+   to compare two greens. Slow (2s) and shallow (down to 45% opacity, never
+   off) so it reads as a heartbeat in peripheral vision rather than as a
+   blink demanding attention — this sits in a sidebar someone stares at all
+   day. The host update dot and the delete header dot reuse it.
+
+   Stepped, not interpolated, and that is a battery rule rather than a
+   look: an interpolating timing function (`ease-in-out`, `linear`, ...)
+   produces a new frame on every display refresh for as long as the
+   animation runs, and on macOS that kept the window server redrawing the
+   whole window at 120 Hz with nothing else on screen changing. SPEC_impl.md
+   ("GUI: Dioxus", looping animations) has the rule: at most 10 visual
+   changes per second, and every looping animation pauses while the window
+   is inactive (the `data-window-active` rule at the end of this sheet).
+   `steps(4)` applies per keyframe interval, so the 1 to 0.45 to 1 cycle
+   takes eight steps in 2s (five opacity levels, down and back): four
+   changes per second.
 
    Opacity only: animating size or color would move layout or fight the
-   status palette, and opacity is the one property a compositor can animate
-   without touching either. */
+   status palette. That keeps the page's own layout and paint idle, but it
+   does NOT make a looping animation cheap — the compositor still redraws
+   every frame the value changes, which is why the step count is the knob
+   that matters. */
 @keyframes farhelm-status-pulse {
   0%,
   100% {
@@ -2962,7 +2977,7 @@ samp {
 }
 
 .status-badge.running .status-dot {
-  animation: farhelm-status-pulse 2s ease-in-out infinite;
+  animation: farhelm-status-pulse 2s steps(4) infinite;
 }
 
 /* A stale row, and the stale session's own metadata band, get a STILL dot.
@@ -3314,10 +3329,11 @@ samp {
   min-width: 0;
 }
 
-/* Inline host updates reuse the running status pulse: the progress is active,
-   while the dot stays small enough to leave the step and elapsed text legible. */
+/* Inline host updates reuse the running status pulse, stepped timing and
+   all (see `farhelm-status-pulse`): the progress is active, while the dot
+   stays small enough to leave the step and elapsed text legible. */
 .host-update-dot {
-  animation: farhelm-status-pulse 2s ease-in-out infinite;
+  animation: farhelm-status-pulse 2s steps(4) infinite;
   background: var(--warn);
   border-radius: 50%;
   display: inline-block;
@@ -3354,7 +3370,10 @@ samp {
   white-space: nowrap;
 }
 .delete-spinner {
-  animation: farhelm-delete-spin 0.8s linear infinite;
+  /* Eight 45-degree jumps per 0.8s turn, a classic stepped spinner: ten
+     changes per second, the cap SPEC_impl.md allows a looping animation
+     (see `farhelm-status-pulse` for why it may not rotate smoothly). */
+  animation: farhelm-delete-spin 0.8s steps(8) infinite;
   border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -3366,9 +3385,9 @@ samp {
 }
 /* The header keeps the small pulsing dot beside its words: it sits among
    the header's other controls, and the terminal overlay under it already
-   carries the spinner. */
+   carries the spinner. Same stepped pulse as the running status. */
 .delete-progress-dot {
-  animation: farhelm-status-pulse 2s ease-in-out infinite;
+  animation: farhelm-status-pulse 2s steps(4) infinite;
   background: var(--accent);
   border-radius: 50%;
   display: inline-block;
@@ -5597,4 +5616,32 @@ samp {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* Every animation on the page stands still while the window is inactive:
+   the window or tab lacks keyboard focus, or is hidden or minimized.
+   `AppBody` (src/lib.rs) keeps `data-window-active` on the root element in
+   step with the window's focus and visibility. A dot frozen beside another
+   app's window is the agreed cost; a stepped animation that keeps running
+   in the background still wakes the compositor several times a second for
+   a window nobody is looking at.
+
+   One universal rule rather than a list of selectors, so the next looping
+   indicator cannot forget to pause (SPEC_impl.md, "GUI: Dioxus", looping
+   animations). Nothing else in this sheet sets `animation-play-state`, so
+   `!important` overrides nothing deliberate; it only wins over specificity.
+   It also pauses xterm.js's own cursor blink, which only runs while the
+   terminal has focus anyway. Reduced motion is separate and stronger: those
+   overrides remove the animations outright, focused window or not.
+
+   NOTE: this freezes one-shot animations too. A one-shot CSS animation
+   that starts while the window is inactive sits on its first keyframe
+   until the user comes back, so an entrance that starts invisible would
+   stay invisible. Write such an effect as a `transition`, which
+   `animation-play-state` does not touch, or make its first keyframe read
+   correctly on its own. */
+:root[data-window-active="false"] *,
+:root[data-window-active="false"] *::before,
+:root[data-window-active="false"] *::after {
+  animation-play-state: paused !important;
 }
