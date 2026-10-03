@@ -7,10 +7,10 @@ says, except where this file names a passage the user decided to change.
 
 This plan has no dependency on another plan. Neighbors to read before starting, so your work fits what they landed:
 
-- `plans/triage-confirm-ssh-identity.md`, ordered before this plan, changes the add form (its item 9: a new validation
-  refusal shown in the form) and the probe lifecycle (its item 17: a dropped probe still finishes and may register the
-  host). Expect both on main and carry them into the dialog.
-- `plans/host-update-button.md` is ordered after this plan and edits the same host row. Nothing here waits on it.
+- The earlier `triage-confirm-ssh-identity` plan, now landed, changed the add form (#1452: a new validation refusal
+  shown in the form) and the probe lifecycle (#1460: a dropped probe still finishes and may register the host). Both are
+  on main; carry them into the dialog.
+- `plans/queue/host-update-button.md` runs after this plan and edits the same host row. Nothing here waits on it.
 
 ## The goal
 
@@ -200,7 +200,7 @@ Three PRs, in this order. Line numbers drift; find the code by name.
   `buttons.spec.ts` (tier tests naming `.add-host-form`), `profiles.spec.ts` focus on `.add-host-button`. Add: "yes, and
   don't ask" then a second add starts setup with no dialog question; the failed-add re-run uses the dialog.
 - Changelog fragment `kind: changed`. Remove the TODO entry "A proper dialog for adding a remote host". This is the
-  plan's final PR: mark this plan's line in `plans/INDEX.md` `[executed]`.
+  plan's final PR.
 
 ### What not to build
 
@@ -222,7 +222,9 @@ describes, not in the checkout.
 
 Your first action is to invoke the `agent-resumeable` skill with the log file's absolute path. If the log exists, read
 it and resume where the previous session left off, cross-checking it against reality (the jj graph, bookmarks, open PRs,
-TODO.md and `plans/INDEX.md`) rather than starting over. If it does not exist, this is a fresh start.
+TODO.md and `plans/queue/INDEX.md`) rather than starting over. If it does not exist, this is a fresh start. A plan that
+an earlier executor worked on, or that came back from review, also gets the resume check in `plans/AGENTS.md` (Executing
+one plan, step 7) before any work.
 
 ### Galaxy-brain, no-workhorse
 
@@ -230,7 +232,9 @@ The user requires you to use `$scode-galaxy-brain` to achieve this entire goal. 
 the resume protocol and keep it active for the whole run. The user forbids delegating any unit of your own
 decomposition, read-only or writing: you do all of that work yourself and do not ask routing about it, and this demand
 overrides galaxy-brain's own judgment of what is worth delegating. The spawns this file calls for (the review gate and
-the scope reassessment review) are still routed and launched through galaxy-brain.
+the scope reassessment review) are still routed and launched through galaxy-brain. The sub-agents `plans/AGENTS.md`
+requires of every plan (the resume check, and the cold reads of a blocked question and of the report) are exempt from
+the no-delegation demand and run as that file says, not through galaxy-brain.
 
 ### Resource watchdog
 
@@ -256,9 +260,9 @@ restarts it, and stop it when the plan closes. Do not lengthen the sampling inte
 
 ### PR discipline
 
-- Use the `jjstack` skill. The stack's base is not main but the tip of the plan stack, set up per `plans/AGENTS.md`
-  (Executing, step 4). PRs already in the plan stack, from earlier plans or an earlier blocked run of this one, are the
-  base and are not rewritten.
+- Use the `jjstack` skill. The stack's base is `main@origin`, or this plan's own open PRs when it resumes, set up per
+  `plans/AGENTS.md` (Executing one plan, step 6); never another plan's PRs. Bookmarks are
+  `plan/host-dialogs-and-menu/<nn>-<short-name>`.
 - PR 1, PR 2, PR 3 in that order, one commit, bookmark and draft PR each. Within this run, if a PR needs correcting,
   restructure it rather than stacking a correction on top, and do not add code in one PR that a later PR of this plan
   deletes (PR 1 keeps the inline removal block untouched precisely so PR 2 deletes it once).
@@ -267,7 +271,8 @@ restarts it, and stop it when the plan closes. Do not lengthen the sampling inte
   `python3 releasing/check-changelog.py format`.
 - Run every commit message, PR title and PR description through the `scode-commit-msg-reviewer` skill's cold read. Leave
   a PR description empty when the diff and title say everything.
-- PRs stay drafts. Never mark one ready and never merge; landing the plan stack is the user's job.
+- PRs stay drafts. Never mark one ready and never merge; landing waits until the maintainer has reviewed this plan's
+  report (`plans/AGENTS.md`).
 
 ### Validation
 
@@ -338,13 +343,13 @@ confirmation component was extracted, and every reviewer finding you declined. T
 Resolve routine implementation forks within the agreed scope and log them. Remove planner-invented machinery that turns
 out unnecessary when the decisions still hold. A material scope expansion, a weakened guarantee, or an omitted required
 behavior needs an agreed fallback or the user's decision; a review finding or a log entry is not authorization. Anything
-that needs a decision: record the concrete tradeoff and block per `plans/AGENTS.md` (Executing, step 7). Because the PRs
-form one linear stack, if one PR blocks, do not build the later ones on top of it.
+that needs a decision: record the concrete tradeoff and block per `plans/AGENTS.md` (Executing one plan, step 10).
+Because the PRs form one linear stack, if one PR blocks, do not build the later ones on top of it.
 
 ## Done criterion
 
-The plan is complete when the three draft PRs exist as one linear stack on the plan stack's tip, each satisfies its
-section above and the acceptance criteria, each has passed the review gate, each has removed its TODO.md entry, and PR 3
-has marked this plan's `plans/INDEX.md` line `[executed]`. Open, not merged: merging is the user's job. Then close the
-plan per `plans/AGENTS.md` (Executing, step 8): write its report, write a closing entry in its log, and stop the
-watchdog.
+The plan is complete when the three draft PRs exist as one linear stack, each satisfies its section above and the
+acceptance criteria, each has passed the review gate, and each has removed its TODO.md entry. Open, not merged: merging
+happens only after the maintainer has reviewed this plan's report. If a `## Decisions` section exists, its latest entry
+must also be satisfied. Then close the plan per `plans/AGENTS.md` (Executing one plan, steps 11 and 12): deliver its
+report through the queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.

@@ -47,7 +47,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   on macOS Reduce Motion made it stop. The cause is the running-status pulse (`ease-in-out infinite`), which makes the
   compositor redraw every display frame. Make every looping animation stepped (at most 10 changes a second), pause them
   all while the window is unfocused or hidden, keep Reduce Motion static, and write the rule into the specs. Plan:
-  `plans/stepped-animations.md`.
+  `plans/queue/stepped-animations.md`.
 - **Remove heuristic conversation-identity fallbacks.** Decided 2026-10-01: Farhelm identifies an agent's conversation
   only from the harness's own explicit report (a hook, plugin, extension, or whatever reporting mechanism that harness
   needs), never from heuristics that cannot be relied upon. Remove Claude's record scan (`agent_kind/capture.rs`,
@@ -67,7 +67,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Claude's sender check before it, give the hook 30 s and Claude's, Codex's and Grok's kill timers 60 s, and retry while
   no supervisor process is listening for about 4 s. The earlier idea of replying first and committing later is dropped:
   its premise, that a longer wait shows the user a hook error, was wrong. Review item:
-  `review_feedback_queue/claude-clear-report-dropped-on-claim-timeout.md`. Plan: `plans/identity-report-wait-retry.md`.
+  `review_feedback_queue/claude-clear-report-dropped-on-claim-timeout.md`. Plan:
+  `plans/queue/identity-report-wait-retry.md`.
 
 - **Re-examine and simplify how launches are represented.** The maintainer wants to interrogate how launches are handled
   end to end and reconsider the design with simplification in mind. Today a session can be launched from a structured
@@ -101,17 +102,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   to a `gh:` fresh checkout was refused with an error saying to pick a different session name because the git checkout
   path already exists. Not yet investigated: it may fail like that every time, or something subtler about that session's
   state may have triggered it. Reproduce first, then fix whichever it turns out to be. Plan:
-  `plans/gh-clone-fresh-checkout.md`.
+  `plans/queue/gh-clone-fresh-checkout.md`.
 
 - **Clone of a gh: checkout session reuses the same working copy.** Cloning a session launched on a `gh:` fresh
   checkout, then renaming the clone, still left the clone on the original session's working copy rather than a checkout
   of its own. The maintainer knows the cause and can fix it up by hand, but the clone flow for these sessions needs
-  improving. Details TBD. Plan: `plans/gh-clone-fresh-checkout.md`.
+  improving. Details TBD. Plan: `plans/queue/gh-clone-fresh-checkout.md`.
 
 - **Clone then gh: should pick a fresh session name and checkout directory.** When the user clones a session and enters
   `gh:some/repo` as the clone's target, Farhelm should allocate a new session name and checkout directory for it. Today
   the default experience is an error saying the checkout conflicts with the existing one. Closely related to the entry
-  above on clones reusing the original working copy. Details TBD. Plan: `plans/gh-clone-fresh-checkout.md`.
+  above on clones reusing the original working copy. Details TBD. Plan: `plans/queue/gh-clone-fresh-checkout.md`.
 
 - Make `install.sh`'s output easier to scan. The completion message is a wall of text mixing installation results,
   restart instructions, and setup advice. Improve the layout and visual hierarchy, possibly with color; details TBD.
@@ -164,7 +165,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   step, elapsed time, and token count, listed under `● main`. Note that the spinner said 5 agents while the list showed
   one entry plus 3 more. The supervisor's Claude screen reader is tested against real screens in
   `crates/farhelm-supervisor/tests/fixtures/screens/claude/` (see `docs/agent-screen-fixtures.md`); a fixture of this
-  state belongs there. Plan: `plans/claude-background-wait-status.md`.
+  state belongs there. Plan: `plans/queue/claude-background-wait-status.md`.
 
 - **Audio signal when an agent is waiting on input.** Play a sound when a session's agent gets stuck waiting for the
   user (a question, an approval prompt), so a user looking at something else notices without watching the sidebar.
@@ -213,13 +214,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **A proper dialog for adding a remote host.** Must fix. Adding a remote host still throws a wall of text into the
   sidebar. Instead, adding a host should show a clean, well-designed dialog that explains what will happen, and let the
-  user answer either "yes" or "yes, and don't ask in the future". Plan: `plans/host-dialogs-and-menu.md`.
+  user answer either "yes" or "yes, and don't ask in the future". Plan: `plans/queue/host-dialogs-and-menu.md`.
 
 - **A proper dialog for removing a host.** Removing a host from the sidebar today asks inline, in the host's row: a
   block of text ("forgetting a host leaves its supervisor and sessions running; re-adding the destination finds them
   again", then the quoted host name) above "confirm remove" and "cancel" buttons. Replace it with a clean, modern pop-up
   dialog that explains what removal will do, and add a "don't ask again in the future" option. Same direction as the
-  host-add dialog entry above. Plan: `plans/host-dialogs-and-menu.md`.
+  host-add dialog entry above. Plan: `plans/queue/host-dialogs-and-menu.md`.
 
 - **A way to turn host add and remove confirmations back on.** The host dialogs plan adds "yes, and don't ask in the
   future" to the add-host dialog and "remove, and don't ask again" to the remove-host dialog, both kept as helm
@@ -236,13 +237,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Make the host pop-up menu match the session pop-up menu.** Redesign the host pop-up menu so it looks and feels
   exactly like the session pop-up menu: the same positioning, the same style, the same per-item descriptions, and so on.
-  Plan: `plans/host-dialogs-and-menu.md`.
+  Plan: `plans/queue/host-dialogs-and-menu.md`.
 
 - **An update button on hosts that can be updated.** When a host in the host list can be updated (an old version, or one
   that needs an update), show an actual clickable "update" button there instead of only text. Keep the update option in
   the host's pop-up menu as well. When an update is not just possible but required, the button should look different,
   probably red; the exact treatment is for design time. Hovering over the button should say what clicking it does and
-  whether the update is required or merely possible; wording TBD. Plan: `plans/host-update-button.md`.
+  whether the update is required or merely possible; wording TBD. Plan: `plans/queue/host-update-button.md`.
 
 - **Replace the YOLO session icon.** The sidebar marks a YOLO session with an open padlock, but the other permission
   modes use a closed one, and the difference is hard to see. That makes it easy to read as "this session is locked

@@ -6,13 +6,13 @@ need is here or in the repository files it names. SPEC.md and SPEC_impl.md stay 
 says.
 
 This plan has no dependency on another plan. It touches neither the helm's clipboard endpoint nor its SPEC.md
-best-effort sentence, which `plans/triage-restart-takeover-update.md` item 4 changes; if that plan has landed by the
-time you run, read its result so your comments do not contradict it.
+best-effort sentence, which item 4 of the earlier `triage-restart-takeover-update` plan changed; that plan has landed,
+so read its result on main so your comments do not contradict it.
 
 ## The goal
 
 Carry out the three triage outcomes recorded in root `TRIAGE_OUTCOMES.md` whose Execution field reads
-`` planned in `plans/triage-clipboard-terminal-limit.md` ``, exactly as root `AGENTS.md` section "Execute triage
+`` planned in `plans/queue/triage-clipboard-terminal-limit.md` ``, exactly as root `AGENTS.md` section "Execute triage
 outcomes" prescribes: one reviewable commit, one stable bookmark and one draft PR per outcome, in a single linear stack,
 in ledger order:
 
@@ -27,14 +27,13 @@ the ledger entry wins and the disagreement is a DECISION to log (or a question, 
 
 Acceptance criteria:
 
-- Three draft PRs exist, stacked in the order above on top of the plan stack's tip (see PR discipline).
+- Three draft PRs exist, stacked in the order above (see PR discipline).
 - Each PR does what its ledger entry's Completion criteria say, as refined by the plan-time decisions below.
 - Each PR removes its feedback file and its line in `review_feedback_queue/INDEX.md`.
 - Each PR updates its own `TRIAGE_OUTCOMES.md` Execution field to `complete` with the jj change ID, bookmark and PR URL.
   Record the change ID and bookmark before creating the PR, then add the URL to the same change and push again; no
   separate bookkeeping PR.
 - PRs 1 and 3 have passed the review gate (both reviewers). PR 2 gets no review.
-- PR 3 also changes this plan's line in `plans/INDEX.md` to `[executed]`. Do not delete this plan file.
 - No PR is marked ready, and nothing is merged.
 
 ## Requirement sources
@@ -146,7 +145,6 @@ Line numbers drift; find the code by name.
      multi-megabyte fixtures beyond that.
    - Changelog fragment: the effect is only observable with a hostile or broken supervisor; choose `kind: fixed` or
      `kind: none` with a reason, and log the DECISION.
-   - This PR also marks this plan's `plans/INDEX.md` line `[executed]`.
 
 ## How to run
 
@@ -162,7 +160,8 @@ that section says. Resolve it to an absolute path before you start. Scratch file
 Your first action is to invoke the `agent-resumeable` skill with the log file's absolute path. If the log exists, read
 it and resume where the previous session left off, cross-checking it against reality (the jj graph, bookmarks, open PRs,
 and `TRIAGE_OUTCOMES.md` Execution fields on each PR) rather than starting over. If it does not exist, this is a fresh
-start.
+start. A plan that an earlier executor worked on, or that came back from review, also gets the resume check in
+`plans/AGENTS.md` (Executing one plan, step 7) before any work.
 
 ### Galaxy-brain, no-workhorse
 
@@ -170,7 +169,9 @@ The user requires you to use `$scode-galaxy-brain` to achieve this entire goal. 
 the resume protocol and keep it active for the whole run. The user forbids delegating any unit of your own
 decomposition, read-only or writing: you do all of that work yourself and do not ask routing about it, and this demand
 overrides galaxy-brain's own judgment of what is worth delegating. The spawns this file calls for (the review gate and
-the scope reassessment review) are still routed and launched through galaxy-brain.
+the scope reassessment review) are still routed and launched through galaxy-brain. The sub-agents `plans/AGENTS.md`
+requires of every plan (the resume check, and the cold reads of a blocked question and of the report) are exempt from
+the no-delegation demand and run as that file says, not through galaxy-brain.
 
 ### Resource watchdog
 
@@ -196,9 +197,9 @@ restarts it, and stop it when the plan closes. Do not lengthen the sampling inte
 
 ### PR discipline
 
-- Use the `jjstack` skill. The stack's base is not main but the tip of the plan stack, set up per `plans/AGENTS.md`
-  (Executing, step 4). PRs already in the plan stack, from earlier plans or an earlier blocked run of this one, are the
-  base and are not rewritten.
+- Use the `jjstack` skill. The stack's base is `main@origin`, or this plan's own open PRs when it resumes, set up per
+  `plans/AGENTS.md` (Executing one plan, step 6); never another plan's PRs. Bookmarks are
+  `plan/triage-clipboard-terminal-limit/<nn>-<short-name>`.
 - One outcome per commit, bookmark and draft PR, in the order listed in The goal. Never combine outcomes. Within this
   run, if a PR needs correcting, restructure it rather than stacking a correction on top.
 - Commit messages and PR titles use Conventional Commits. The type reflects the user-visible effect: `fix:` for PRs 1
@@ -206,7 +207,8 @@ restarts it, and stop it when the plan closes. Do not lengthen the sampling inte
   per root `AGENTS.md` (Releases and the changelog); validate with `python3 releasing/check-changelog.py format`.
 - Run every commit message, PR title and PR description through the `scode-commit-msg-reviewer` skill's cold read. Leave
   a PR description empty when the diff and title say everything.
-- PRs stay drafts. Never mark one ready and never merge; landing the plan stack is the user's job.
+- PRs stay drafts. Never mark one ready and never merge; landing waits until the maintainer has reviewed this plan's
+  report (`plans/AGENTS.md`).
 
 ### Validation
 
@@ -277,16 +279,17 @@ for these later.
 Resolve routine implementation forks within the agreed scope and log them. Remove planner-invented machinery that turns
 out unnecessary when the ledger's requirements still hold. A material scope expansion, a weakened guarantee, or an
 omitted required behavior needs an agreed fallback or the user's decision; a review finding or a log entry is not
-authorization. If an item needs such a decision, record the concrete tradeoff and block per `plans/AGENTS.md`
-(Executing, step 7). Because the PRs form one linear stack, later items sit on top of the blocked one: finish the PRs
+authorization. If an item needs such a decision, record the concrete tradeoff and block per `plans/AGENTS.md` (Executing
+one plan, step 10). Because the PRs form one linear stack, later items sit on top of the blocked one: finish the PRs
 before it, record the question, and close the plan as blocked rather than building past it. If current code or specs
 have moved so that a recorded decision no longer applies, that is a question for the user too, per root `AGENTS.md`
 (Execute triage outcomes); never re-triage an item yourself.
 
 ## Done criterion
 
-The plan is complete when all three draft PRs exist as one linear stack on the plan stack's tip, each satisfies its
-ledger entry's Completion criteria as refined by the plan-time decisions, PRs 1 and 3 have passed both reviews, each has
-updated its own `TRIAGE_OUTCOMES.md` Execution field and removed its queue item, and PR 3 has marked this plan's
-`plans/INDEX.md` line `[executed]`. Open, not merged: merging is the user's job. Then close the plan per
-`plans/AGENTS.md` (Executing, step 8): write its report, write a closing entry in its log, and stop the watchdog.
+The plan is complete when all three draft PRs exist as one linear stack, each satisfies its ledger entry's Completion
+criteria as refined by the plan-time decisions, PRs 1 and 3 have passed both reviews, and each has updated its own
+`TRIAGE_OUTCOMES.md` Execution field and removed its queue item. Open, not merged: merging happens only after the
+maintainer has reviewed this plan's report. If a `## Decisions` section exists, its latest entry must also be satisfied.
+Then close the plan per `plans/AGENTS.md` (Executing one plan, steps 11 and 12): deliver its report through the queue
+script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
