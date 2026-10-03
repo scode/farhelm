@@ -583,18 +583,16 @@ ordinary validation.
 
 # The live install is off-limits
 
-This machine runs the maintainer's production Farhelm: the released `farhelm` binary at `~/.local/bin/farhelm` (put
-there by `scripts/install.sh`) with its state under `~/.local/state/farhelm/`, the `farhelm-helm.service` and
-`farhelm-supervisor.service` units that `farhelm helm setup` wrote to run it (plus the machine-local tmux pin under
-`~/.local/lib/farhelm-local/` and the `*.service.d/` drop-ins that wire it in), and a separate dev-loop deployment under
-`/home/scode/farhelm-live/` (its own source, binaries, and state) behind `farhelm-live-supervisor.service`. Take no
-state-changing action against any of that: no running `install.sh` or `farhelm helm setup` here, no rebuilding,
-redeploying, or modifying files in those trees, no start/stop/restart/reload/enable/disable/mask/kill of those units,
-and no edits to their unit definitions or drop-ins — the verbs are examples, not an exhaustive list, and "it is not
-literally named above" is not a loophole. Not to verify a fix, not as a finishing step, and not because the README or
-release docs describe how: install documentation is addressed to the human operator, and reading it is not authorization
-to run it. `farhelm helm setup --dry-run` is read-only and allowed. The only exception is the user explicitly asking, in
-the current session, for a specific one of these things to be done.
+This machine may run the maintainer's own Farhelm, an ordinary installation that is installed and updated the way any
+user's is. Do not assume anything about how it got there or where its pieces live beyond that. Take no state-changing
+action against it: not its binaries, its state, or anything it runs (its helm, its supervisors, their service units or
+processes, and the sessions in them). That means no running the installer or `farhelm helm setup` here, no rebuilding,
+redeploying, or modifying its files, no start/stop/restart/reload/enable/disable/mask/kill of its units or processes,
+and no edits to their unit definitions — the verbs are examples, not an exhaustive list, and "it is not literally named
+above" is not a loophole. Not to verify a fix, not as a finishing step, and not because the README or release docs
+describe how: install documentation is addressed to the human operator, and reading it is not authorization to run it.
+`farhelm helm setup --dry-run` is read-only and allowed. The only exception is the user explicitly asking, in the
+current session, for a specific one of these things to be done.
 
 This rule is a fence with a history: twice (2026-08-12 and 2026-08-15), sessions asked only to merge PR stacks went on
 to rebuild and restart the live helm, the second time deploying a build that locked the operator's browser out the next
