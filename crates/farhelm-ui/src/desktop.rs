@@ -35,6 +35,8 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use farhelm_supervisor::service::{SHUTDOWN_OUTPUT_BUDGET, STATE_DIR_CLAIM_WAIT};
+
 mod assets;
 mod bundle;
 mod state;
@@ -407,6 +409,18 @@ impl DesktopBootstrap {
             }),
         };
         ensure_managed_supervisor_running(&mut supervisor)?;
+        if let Some(child) = &mut supervisor {
+            runtime.block_on(await_managed_supervisor_serving(
+                child,
+                MANAGED_SUPERVISOR_SERVING_WAIT,
+                || async {
+                    Ok(
+                        farhelm_helm::discover_local_supervisor(&farhelm, &state_dir).await?
+                            == farhelm_helm::LocalSupervisorDiscovery::Answering,
+                    )
+                },
+            ))?;
+        }
 
         // The embedded helm is an internal implementation detail of this
         // process. Port 0 lets the kernel choose a fresh loopback port for
@@ -577,13 +591,61 @@ impl Drop for DesktopBootstrap {
             let _ = shutdown.send(());
         }
         if let Some(supervisor) = &mut self.supervisor {
-            let _ = supervisor.kill();
-            let _ = supervisor.wait();
+            stop_managed_supervisor(supervisor, MANAGED_SUPERVISOR_STOP_GRACE);
         }
         if let Some(monitor) = self.helm_monitor.take() {
             let _ = monitor.join();
         }
     }
+}
+
+/// How long the app's own teardown lets its managed supervisor stop in order
+/// before killing it.
+///
+/// Longer than the supervisor's [`SHUTDOWN_OUTPUT_BUDGET`] for closing its
+/// terminal-output clients, so a supervisor doing exactly that is never cut
+/// off; only one still running well past the budget is treated as stuck.
+const MANAGED_SUPERVISOR_STOP_GRACE: Duration =
+    SHUTDOWN_OUTPUT_BUDGET.saturating_add(Duration::from_secs(5));
+
+/// Stop the managed supervisor the way quitting the app does, and kill it
+/// only if it is stuck.
+///
+/// Closing the child's stdin is the stdin tether the supervisor runs under
+/// (`--exit-on-stdin-close`): it starts the same orderly shutdown a quit
+/// does, closing every terminal-output client before exiting. A SIGKILL
+/// skips that, and tmux can abort its whole private server, and every
+/// session in it, when an output client vanishes with output queued. So
+/// the kill comes only after `grace`, for a supervisor that did not finish
+/// on its own.
+///
+/// This is not what a normal quit runs. The event loop never returns
+/// (tao's `run` ends in `process::exit`, and AppKit's Cmd-Q terminates the
+/// process the same way), so [`DesktopBootstrap`]'s `Drop` is skipped and
+/// the tether closes when the process exits. `Drop`, and this, run only
+/// when a panic unwinds out of the event loop. Blocking the exiting app for
+/// up to `grace` there is the price of not destroying the user's sessions
+/// on the way out.
+///
+/// Returns how the child ended, or `None` if even that could not be read.
+fn stop_managed_supervisor(child: &mut Child, grace: Duration) -> Option<std::process::ExitStatus> {
+    drop(child.stdin.take());
+    let deadline = std::time::Instant::now() + grace;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    tracing::warn!(
+        ?grace,
+        "the managed supervisor did not stop after its tether closed; killing it"
+    );
+    let _ = child.kill();
+    child.wait().ok()
 }
 
 /// Publish the embedded helm's address and native credential to the local
@@ -754,6 +816,70 @@ fn ensure_managed_supervisor_running(supervisor: &mut Option<Child>) -> anyhow::
         bail!("the managed supervisor child exited during desktop startup with {status}");
     }
     Ok(())
+}
+
+/// How long startup waits for the supervisor child it just spawned to start
+/// serving, before the embedded helm is started.
+///
+/// The child itself may spend up to [`STATE_DIR_CLAIM_WAIT`] waiting for a
+/// Farhelm that was just quit to release the state directory, and then has
+/// its own startup to do (opening its database, starting tmux). The margin
+/// covers that startup on a slow machine; a child that is still not serving
+/// after it is reported rather than waited for.
+const MANAGED_SUPERVISOR_SERVING_WAIT: Duration =
+    STATE_DIR_CLAIM_WAIT.saturating_add(Duration::from_secs(15));
+
+/// Wait until the supervisor child this app spawned answers, failing early if
+/// the child exits.
+///
+/// Without this, the embedded helm starts dialing at once and backs off
+/// (about 0, 1, 3, 7, 15 and 30 seconds) while a child that is waiting out a
+/// just-quit predecessor is not serving yet. A child that starts serving
+/// between two of those attempts sits unnoticed until the next one, which
+/// can land after the 30 seconds [`await_local_supervisor`] allows, and the
+/// app then refuses to open beside a supervisor that is running fine.
+/// Starting the helm only once the child answers makes the helm's first
+/// attempt the one that connects.
+///
+/// `answers` is the probe. Startup passes the same hello-based discovery it
+/// ran before spawning, rather than a bare connect: a connection dropped
+/// before its hello is logged by the supervisor as an error, which would put
+/// a false alarm in every launch's log. Nothing here touches
+/// `supervisor.lock`; taking that lock to test it is exactly what could make
+/// the starting child find it held.
+async fn await_managed_supervisor_serving<P, F>(
+    child: &mut Child,
+    wait: Duration,
+    mut answers: P,
+) -> anyhow::Result<()>
+where
+    P: FnMut() -> F,
+    F: std::future::Future<Output = anyhow::Result<bool>>,
+{
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        // A probe error is checked against the child before it is
+        // reported: a child that just exited is the real cause, and the
+        // probe's own complaint about it (a hello cut short, or a removed
+        // program that will not spawn) would only hide that.
+        let answered = answers().await;
+        if let Some(status) = child
+            .try_wait()
+            .context("monitoring the managed supervisor child during desktop startup")?
+        {
+            bail!("the managed supervisor child exited during desktop startup with {status}");
+        }
+        if answered? {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "the managed local supervisor did not start serving within {} seconds",
+                wait.as_secs()
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 /// What startup messages call the local supervisor: "managed" only when this
@@ -1579,6 +1705,124 @@ mod tests {
             Err("fixture cancelled")
         );
         assert_eq!(peer.read(&mut [0; 1]).unwrap(), 0);
+    }
+
+    /// Spawn a stand-in for the managed supervisor: `script` under `sh`,
+    /// with a piped stdin like the real tether, and confirm it is running
+    /// before the test acts on it.
+    fn tethered_child(script: &str) -> Child {
+        let mut child = Command::new("sh")
+            .args(["-c", script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("spawn the stand-in supervisor");
+        assert!(
+            child.try_wait().expect("poll the stand-in").is_none(),
+            "fixture: the stand-in must still be running before it is stopped"
+        );
+        child
+    }
+
+    /// The app's teardown must stop its supervisor through the tether, not
+    /// a SIGKILL, because a killed supervisor skips closing its output
+    /// clients in order and can take tmux, and every session, down with it.
+    /// Pinned: a child that exits when its stdin closes is left to exit by
+    /// itself, which shows as a normal zero exit rather than a signal.
+    #[farhelm_testtrace::test]
+    fn stopping_the_managed_supervisor_closes_its_tether_and_lets_it_exit() {
+        use std::os::unix::process::ExitStatusExt as _;
+        let mut child = tethered_child("cat >/dev/null");
+        let status = stop_managed_supervisor(&mut child, Duration::from_secs(60))
+            .expect("the stand-in's exit status");
+        assert_eq!(
+            status.signal(),
+            None,
+            "it must not have been killed: {status}"
+        );
+        assert!(status.success(), "{status}");
+    }
+
+    /// A supervisor stuck past the grace still has to go, or a panicking app
+    /// would hang on its way out. Pinned: a child that ignores the closed
+    /// tether is killed once the grace runs out.
+    #[farhelm_testtrace::test]
+    fn stopping_a_stuck_managed_supervisor_kills_it_after_the_grace() {
+        use std::os::unix::process::ExitStatusExt as _;
+        const SIGKILL: i32 = 9;
+        let mut child = tethered_child("exec sleep 60");
+        let status = stop_managed_supervisor(&mut child, Duration::from_millis(100))
+            .expect("the stand-in's exit status");
+        assert_eq!(status.signal(), Some(SIGKILL), "{status}");
+    }
+
+    /// Startup must hand over to the embedded helm as soon as the child it
+    /// spawned answers, so the helm's first connection attempt is the one
+    /// that succeeds. Pinned: the wait keeps probing while the child does not
+    /// answer and returns on the first answer, with the child still running.
+    #[farhelm_testtrace::test]
+    fn waiting_for_the_managed_supervisor_returns_once_it_answers() {
+        let mut child = tethered_child("cat >/dev/null");
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let probes = std::cell::Cell::new(0);
+        runtime
+            .block_on(await_managed_supervisor_serving(
+                &mut child,
+                Duration::from_secs(60),
+                || {
+                    probes.set(probes.get() + 1);
+                    let answered = probes.get() >= 3;
+                    async move { Ok(answered) }
+                },
+            ))
+            .expect("an answering supervisor ends the wait");
+        assert_eq!(probes.get(), 3, "the wait ends on the first answer");
+        stop_managed_supervisor(&mut child, Duration::from_secs(60));
+    }
+
+    /// A child that dies while startup waits for it must be reported as the
+    /// failure it is, not waited out to the deadline. Pinned: the error names
+    /// the child's exit while nothing ever answers.
+    #[farhelm_testtrace::test]
+    fn waiting_for_the_managed_supervisor_reports_its_exit() {
+        let mut child = Command::new("sh")
+            .args(["-c", "exit 3"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("spawn the stand-in supervisor");
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let error = runtime
+            .block_on(await_managed_supervisor_serving(
+                &mut child,
+                Duration::from_secs(60),
+                || async { Ok(false) },
+            ))
+            .expect_err("an exited child must fail startup");
+        assert!(
+            format!("{error:#}").contains("exited during desktop startup"),
+            "{error:#}"
+        );
+    }
+
+    /// A child that neither serves nor exits must not hold startup forever.
+    /// Pinned: the wait ends with an error that says it never started
+    /// serving.
+    #[farhelm_testtrace::test]
+    fn waiting_for_the_managed_supervisor_gives_up_after_the_wait() {
+        let mut child = tethered_child("cat >/dev/null");
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let error = runtime
+            .block_on(await_managed_supervisor_serving(
+                &mut child,
+                Duration::from_millis(200),
+                || async { Ok(false) },
+            ))
+            .expect_err("a child that never serves must fail startup");
+        assert!(
+            format!("{error:#}").contains("did not start serving"),
+            "{error:#}"
+        );
+        stop_managed_supervisor(&mut child, Duration::from_secs(60));
     }
 
     /// The startup guard marks the embedded helm's shutdown as expected when

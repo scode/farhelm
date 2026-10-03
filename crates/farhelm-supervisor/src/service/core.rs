@@ -983,6 +983,17 @@ pub struct SupervisorSeams {
     /// boundary (see `FaultSeam`'s own note on why the TRAIT itself needs
     /// no such bound).
     pub upload_fs: Arc<dyn crate::files::FaultSeam + Send + Sync>,
+    /// How long construction waits for another process to release the
+    /// state directory (see [`StateDirOwnership::claim_waiting`]).
+    ///
+    /// Zero by default, which keeps the single attempt the in-process
+    /// harnesses that build claimless supervisors on purpose were written
+    /// against; they use the explicit-executable constructors, which take
+    /// this default.
+    /// [`Supervisor::new_for_startup`], the path `farhelm supervisor run`
+    /// takes (and [`Supervisor::new`], which delegates to it), sets
+    /// [`STATE_DIR_CLAIM_WAIT`].
+    pub state_dir_claim_wait: Duration,
 }
 
 /// Where an [`TabOpenFault`] can fail a tab open.
@@ -1046,6 +1057,7 @@ impl Default for SupervisorSeams {
             scopes: Arc::new(crate::scope::ScopeManager::systemd()),
             launch_shell: None,
             upload_fs: Arc::new(crate::files::RealFs),
+            state_dir_claim_wait: Duration::ZERO,
         }
     }
 }
@@ -1262,6 +1274,102 @@ impl StateDirOwnership {
         });
         claims.insert(path, Arc::downgrade(&owned));
         Ok(Some((owned, true)))
+    }
+
+    /// [`Self::claim`], but a lock held by a supervisor that is not serving
+    /// is retried for up to `wait` instead of being given up on at once.
+    ///
+    /// This is what lets Farhelm be reopened right after it was quit. A
+    /// stopping supervisor stops answering on its socket immediately and
+    /// then keeps `supervisor.lock` for up to [`SHUTDOWN_OUTPUT_BUDGET`]
+    /// while it closes its terminal-output clients in order. A successor
+    /// started in that window used to find the lock held, start read-only,
+    /// and have `serve` refuse it, so the desktop app refused to open. The
+    /// wait lives here, in the supervisor that needs the lock, rather than
+    /// in whatever starts it: nothing else ever takes `supervisor.lock` to
+    /// test it, because a probe holding the lock for even a moment is
+    /// itself something a starting supervisor would trip over.
+    ///
+    /// The one other quiet holder is `farhelm uninstall`, which takes the
+    /// lock without serving so that an app started during the removal cannot
+    /// come up. The wait would otherwise outlast a short uninstall and start
+    /// a supervisor from a program that no longer exists, so construction
+    /// re-checks its own program after any waiting claim (see
+    /// [`Supervisor::new_with_seams`]).
+    ///
+    /// A holder that ANSWERS on the socket is not waited for. That is a
+    /// supervisor already serving the directory, which no amount of waiting
+    /// will make go away, and a second instance must still be refused
+    /// promptly: the result is the usual `Ok(None)`, and `serve` refuses
+    /// with its usual message. A holder that never answers and never lets
+    /// go (a predecessor stuck in shutdown, or one still constructing)
+    /// gets an error naming that after `wait`.
+    ///
+    /// A zero `wait` is exactly [`Self::claim`]: one attempt, and a held
+    /// lock is `Ok(None)` whether or not anything answers. In-process
+    /// harnesses rely on that to build claimless supervisors on purpose.
+    async fn claim_waiting(
+        state_dir: &Path,
+        wait: Duration,
+    ) -> anyhow::Result<Option<(Arc<StateDirOwnership>, bool)>> {
+        Self::claim_waiting_observed(state_dir, wait, || {}).await
+    }
+
+    /// [`Self::claim_waiting`], calling `on_busy` each time an attempt
+    /// finds the lock held by a holder that does not answer, so a test can
+    /// release the lock only once the wait has demonstrably met it.
+    async fn claim_waiting_observed(
+        state_dir: &Path,
+        wait: Duration,
+        on_busy: impl Fn(),
+    ) -> anyhow::Result<Option<(Arc<StateDirOwnership>, bool)>> {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            if let Some(claim) = Self::claim(state_dir)? {
+                return Ok(Some(claim));
+            }
+            if wait.is_zero() || Self::holder_answers(state_dir).await {
+                return Ok(None);
+            }
+            on_busy();
+            if tokio::time::Instant::now() >= deadline {
+                anyhow::bail!(
+                    "another process still holds {} without serving it after {wait:?}; \
+                     usually that is a Farhelm that was just quit and is still shutting \
+                     down, so try again in a moment, and stop that supervisor if it stays \
+                     stuck",
+                    state_dir.join("supervisor.lock").display()
+                );
+            }
+            tokio::time::sleep(STATE_DIR_CLAIM_RETRY).await;
+        }
+    }
+
+    /// Whether something accepts connections on `state_dir`'s supervisor
+    /// socket, for [`Self::claim_waiting_observed`].
+    ///
+    /// Accepting is the whole answer: a supervisor that is shutting down has
+    /// already dropped its listener, so a refused or missing socket is the
+    /// only shape worth waiting for. The protocol hello that follows a
+    /// successful connect is there for the incumbent's sake, not this
+    /// caller's. A connection dropped before its hello is logged by the
+    /// serving supervisor as an error, and a duplicate start is an ordinary
+    /// event that should not leave one in a healthy supervisor's log. The
+    /// hello is bounded, and its outcome (including a protocol mismatch with
+    /// an older incumbent) does not change the answer.
+    async fn holder_answers(state_dir: &Path) -> bool {
+        let Ok(stream) = UnixStream::connect(Supervisor::socket_path(state_dir)).await else {
+            return false;
+        };
+        let (read, write) = tokio::io::split(stream);
+        let mut reader = farhelm_proto::io::FrameReader::new(read);
+        let mut writer = farhelm_proto::io::FrameWriter::new(write);
+        let _ = tokio::time::timeout(
+            Duration::from_secs(2),
+            farhelm_proto::io::handshake(&mut reader, &mut writer, "supervisor-startup"),
+        )
+        .await;
+        true
     }
 
     /// Take the right to serve, or report that something already has it.
@@ -4934,6 +5042,7 @@ impl Supervisor {
                 agent_hooks,
                 agent_instructions,
                 boot_id,
+                state_dir_claim_wait: STATE_DIR_CLAIM_WAIT,
                 ..defaults
             },
         )
@@ -5055,11 +5164,26 @@ impl Supervisor {
         // [`StateDirOwnership`] for the two concrete harms — a bricked
         // incumbent and a predecessor's live sessions recorded as ended —
         // and for why an unclaimed supervisor is still constructible
-        // rather than fatal here.
-        let (ownership, lock_newly_acquired) = match StateDirOwnership::claim(&state_dir)? {
-            Some((ownership, newly_acquired)) => (Some(ownership), newly_acquired),
-            None => (None, false),
-        };
+        // rather than fatal here. `farhelm supervisor run` waits here for
+        // a predecessor that is still shutting down (`claim_waiting`).
+        let (ownership, lock_newly_acquired) =
+            match StateDirOwnership::claim_waiting(&state_dir, seams.state_dir_claim_wait).await? {
+                Some((ownership, newly_acquired)) => (Some(ownership), newly_acquired),
+                None => (None, false),
+            };
+        // A claim that may have waited must still be starting a Farhelm
+        // that exists: `farhelm uninstall` holds this lock while it removes
+        // the installation, and a supervisor that waited it out would
+        // otherwise serve from a program that is gone, so every session it
+        // launched would fail. Refusing keeps an app started during the
+        // removal from opening at all, as it did before the wait existed.
+        if !seams.state_dir_claim_wait.is_zero() && !farhelm_exe.exists() {
+            anyhow::bail!(
+                "this Farhelm's program {} no longer exists; it was probably removed (for \
+                 example by `farhelm uninstall`) while this supervisor was starting",
+                farhelm_exe.display()
+            );
+        }
         if ownership.is_none() {
             warn!(
                 state_dir = %state_dir.display(),
@@ -14398,7 +14522,24 @@ fn tab_close_cleanup_result(
 /// avoid. Ordinarily each client needs one acknowledged tmux round trip, so
 /// the budget only matters when tmux itself is wedged; the process still
 /// exits, having done what it could.
-const SHUTDOWN_OUTPUT_BUDGET: Duration = Duration::from_secs(10);
+pub const SHUTDOWN_OUTPUT_BUDGET: Duration = Duration::from_secs(10);
+
+/// How long `farhelm supervisor run` waits for a predecessor that holds the
+/// state directory without serving it (see
+/// [`StateDirOwnership::claim_waiting`]).
+///
+/// Longer than [`SHUTDOWN_OUTPUT_BUDGET`] with room to spare, because the
+/// predecessor this exists for is one spending that budget closing its
+/// output clients, and it still has to exit and release the lock after the
+/// budget runs out. The desktop app waits for the supervisor it spawned to
+/// start serving for longer than this, before it starts its embedded helm,
+/// so that a successful wait normally leaves time for the rest of startup
+/// rather than turning into a refused app.
+pub const STATE_DIR_CLAIM_WAIT: Duration =
+    SHUTDOWN_OUTPUT_BUDGET.saturating_add(Duration::from_secs(10));
+
+/// Pause between a starting supervisor's attempts at a held state directory.
+const STATE_DIR_CLAIM_RETRY: Duration = Duration::from_millis(50);
 
 /// `farhelm supervisor run` in one call: build a supervisor on `state_dir`
 /// and serve its socket until it is told to stop.
@@ -21938,6 +22079,202 @@ exit 0
             *entry.run.outcome.lock().unwrap(),
             LastOutcome::Running,
             "a failed write must not advance the mirror"
+        );
+    }
+
+    /// Hold `state_dir`'s lock file the way a quitting supervisor does, with
+    /// its socket file left behind but nothing answering on it, for the
+    /// `claim_waiting` tests below.
+    ///
+    /// A bare `flock` on a separate open file description, for the reason
+    /// `a_supervisor_without_the_state_dir_claim_reconciles_nothing_durably`
+    /// gives: it conflicts with the claim at the syscall level even inside
+    /// this process, which is exactly the cross-process predecessor these
+    /// tests stand in for. Fails the test if the lock is not actually
+    /// taken, since every test using it depends on that premise.
+    fn hold_state_dir_lock(state_dir: &Path) -> std::fs::File {
+        // A stopping supervisor leaves its socket file behind and refuses
+        // connections on it, so the stand-in does the same: bound, then
+        // dropped. Connecting then fails as refused rather than as missing,
+        // which is the case production meets.
+        drop(
+            std::os::unix::net::UnixListener::bind(Supervisor::socket_path(state_dir))
+                .expect("fixture: binding the stand-in's socket"),
+        );
+        assert!(
+            Supervisor::socket_path(state_dir).exists(),
+            "fixture: the stale socket file must be left behind"
+        );
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(state_dir.join("supervisor.lock"))
+            .expect("lock file");
+        lock.try_lock()
+            .expect("fixture: the stand-in predecessor must hold the lock");
+        lock
+    }
+
+    /// Reopening Farhelm right after quitting it must start, not refuse.
+    ///
+    /// The quit supervisor has stopped answering but still holds the state
+    /// directory while it closes its output clients in order, and a
+    /// successor started in that window used to give up at once. Pinned:
+    /// a waiting claim that meets a held, unanswered lock keeps trying,
+    /// and takes the lock itself (the `true` half of the claim, which the
+    /// startup reap of stale tmux clients depends on) once the predecessor
+    /// lets go. The predecessor releases only from inside `on_busy`, so the
+    /// test proves the claim really met contention instead of racing past
+    /// it, and needs no timing of its own.
+    #[farhelm_testtrace::test]
+    async fn a_waiting_claim_takes_the_state_dir_once_a_quiet_predecessor_lets_go() {
+        let dir = tempfile::tempdir().expect("state dir");
+        let predecessor = std::sync::Mutex::new(Some(hold_state_dir_lock(dir.path())));
+        let busy = std::sync::atomic::AtomicUsize::new(0);
+        let (_, newly_acquired) =
+            StateDirOwnership::claim_waiting_observed(dir.path(), Duration::from_secs(60), || {
+                busy.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                predecessor.lock().unwrap().take();
+            })
+            .await
+            .expect("the claim must not fail")
+            .expect("the successor must own the directory once the predecessor released it");
+        assert!(
+            busy.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "the claim must have met the held lock before taking it"
+        );
+        assert!(newly_acquired, "the successor took the OS lock itself");
+    }
+
+    /// A predecessor that never releases the directory and never answers
+    /// must end the wait with a reason, not hang startup or start a
+    /// read-only supervisor that `serve` then refuses with a message
+    /// blaming a running supervisor that is not there. Pinned: the waiting
+    /// branch was taken (`on_busy` ran), and the error names the lock and
+    /// that a just-quit Farhelm may still be shutting down.
+    #[farhelm_testtrace::test]
+    async fn a_waiting_claim_gives_up_on_a_predecessor_that_never_lets_go() {
+        let dir = tempfile::tempdir().expect("state dir");
+        let _predecessor = hold_state_dir_lock(dir.path());
+        let busy = std::sync::atomic::AtomicUsize::new(0);
+        let error = StateDirOwnership::claim_waiting_observed(
+            dir.path(),
+            Duration::from_millis(200),
+            || {
+                busy.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            },
+        )
+        .await
+        .expect_err("a lock held past the wait must refuse startup");
+        assert!(busy.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+        let message = format!("{error:#}");
+        assert!(message.contains("supervisor.lock"), "{message}");
+        assert!(message.contains("still shutting down"), "{message}");
+    }
+
+    /// A second instance must still be refused promptly. A holder that
+    /// answers on the socket is a supervisor already serving the
+    /// directory, and waiting would only delay the refusal by the whole
+    /// wait. Pinned: the claim reports the directory as someone else's
+    /// (`None`, which `serve` turns into its usual refusal) without ever
+    /// entering the waiting branch; `on_busy` panics if it does.
+    #[farhelm_testtrace::test]
+    async fn a_waiting_claim_does_not_wait_for_a_holder_that_answers() {
+        let dir = tempfile::tempdir().expect("state dir");
+        let _incumbent = hold_state_dir_lock(dir.path());
+        // Bound but never accepted from: a pending connection in the
+        // backlog is what "answers" means here, exactly as for a serving
+        // supervisor that has not got round to accepting yet.
+        std::fs::remove_file(Supervisor::socket_path(dir.path()))
+            .expect("fixture: clearing the stale socket the holder helper leaves");
+        let _listener = std::os::unix::net::UnixListener::bind(Supervisor::socket_path(dir.path()))
+            .expect("fixture: the incumbent's socket must bind");
+        let claim =
+            StateDirOwnership::claim_waiting_observed(dir.path(), Duration::from_secs(60), || {
+                panic!("a holder that answers must not be waited for")
+            })
+            .await
+            .expect("the claim must not fail");
+        assert!(claim.is_none(), "the serving incumbent keeps the directory");
+    }
+
+    /// The zero wait in-process harnesses get by default must stay a single
+    /// attempt: they build claimless supervisors on purpose, against a held
+    /// lock with nothing answering, and would otherwise either sit out a
+    /// wait or fail where they expect a read-only supervisor.
+    #[farhelm_testtrace::test]
+    async fn a_zero_wait_claim_is_a_single_attempt() {
+        let dir = tempfile::tempdir().expect("state dir");
+        let _holder = hold_state_dir_lock(dir.path());
+        let claim = StateDirOwnership::claim_waiting_observed(dir.path(), Duration::ZERO, || {
+            panic!("a zero wait must not enter the waiting branch")
+        })
+        .await
+        .expect("the claim must not fail");
+        assert!(claim.is_none());
+    }
+
+    /// `farhelm supervisor run` must get the wait, and the constructors
+    /// harnesses build claimless supervisors with must not. Dropping the
+    /// startup half silently brings back the refused reopen; growing the
+    /// default would make every harness that builds a claimless supervisor
+    /// on purpose sit out the wait first. Pinned on a supervisor actually
+    /// built through `new_for_startup`, so the wiring itself is what is
+    /// checked.
+    #[farhelm_testtrace::test]
+    async fn only_the_startup_constructor_waits_for_the_state_dir() {
+        assert_eq!(
+            SupervisorSeams::default().state_dir_claim_wait,
+            Duration::ZERO
+        );
+        let state = StateDir::new();
+        let sup = Supervisor::new_for_startup(
+            state.path(),
+            SupervisorStartup {
+                tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
+                agent_hooks: crate::agent_kind::AgentHooks::default(),
+                agent_instructions: crate::agent_kind::AgentInstructions::default(),
+                boot_id_file: None,
+            },
+        )
+        .await
+        .expect("supervisor");
+        assert_eq!(sup.seams.state_dir_claim_wait, STATE_DIR_CLAIM_WAIT);
+        assert!(STATE_DIR_CLAIM_WAIT > SHUTDOWN_OUTPUT_BUDGET);
+    }
+
+    /// An app opened while `farhelm uninstall` removes the installation
+    /// must not come up. Uninstall holds the state directory's lock without
+    /// serving, which is exactly what the startup wait waits out, so a
+    /// supervisor that got the lock after the removal would be running from
+    /// a program that no longer exists. Pinned: construction with the
+    /// startup wait refuses a program path that does not exist, naming it,
+    /// before it opens the database.
+    #[farhelm_testtrace::test]
+    async fn a_waiting_startup_refuses_a_removed_program() {
+        let state = StateDir::new();
+        let gone = state.path().join("removed").join("farhelm");
+        let error = match Supervisor::new_with_seams(
+            state.path(),
+            gone.clone(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                state_dir_claim_wait: Duration::from_secs(1),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        {
+            Ok(_) => panic!("a supervisor must not start from a removed program"),
+            Err(error) => error,
+        };
+        let message = format!("{error:#}");
+        assert!(message.contains("no longer exists"), "{message}");
+        assert!(message.contains(&gone.display().to_string()), "{message}");
+        assert!(
+            !state.path().join("supervisor.db").exists(),
+            "the refusal must come before the database is opened"
         );
     }
 
