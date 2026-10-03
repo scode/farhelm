@@ -20,7 +20,7 @@ use crate::profiles::{
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{
     ApiBase, HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
-    ProfileExistence, Session,
+    ProfileExistence, Session, SessionStatus,
 };
 
 use super::SharedPreferences;
@@ -1016,6 +1016,17 @@ pub(super) struct CreatePrefill {
     /// [`IntentBinding::replace_source`], which carries this value from
     /// submit through to that branch).
     pub(super) replace_source: Option<String>,
+    /// The "replace with" source's status and terminal tab count when the
+    /// launcher opened, `None` for a plain clone.
+    ///
+    /// Only the last fallback: `ListView` hands the form the source's row
+    /// from the live listing whenever the listing has it, then the last state
+    /// a listing showed, and this snapshot only before any listing has shown
+    /// the row (a header "replace with" on a session the sidebar's filter
+    /// hides, say). Either way the launcher's warning and the
+    /// precondition its replace sends come from the same value; see
+    /// `CreateSessionForm`'s `replace_source_state`.
+    pub(super) replace_source_opened: Option<(SessionStatus, usize)>,
 }
 
 /// Build the prefill a clone click seeds the create form with, from the
@@ -1048,7 +1059,43 @@ pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill 
         launch: session.launch.clone(),
         agent,
         replace_source: None,
+        replace_source_opened: None,
     }
+}
+
+/// The id of the launcher's "replace with" warning, which the replace button
+/// references as its description while the warning has text.
+const REPLACE_WARNING_ID: &str = "launch-composer-replace-warning";
+
+/// What a "replace with" launcher warns about its source, and the precondition
+/// its replace sends, from the source state one render shows.
+///
+/// SPEC.md "Replace with": the launcher's button is the confirmation, so it
+/// authorizes only what the launcher said. A source with anything alive gets
+/// Replace's warning and the level that warning covers
+/// (`status::delete_guard`); a source showing nothing alive gets no warning
+/// and `NothingAlive`, so a source restarted behind the page's back is kept
+/// rather than killed unannounced. No state at all is treated as nothing
+/// shown: no warning, the strictest level.
+fn replace_with_warning(
+    state: Option<&(SessionStatus, usize)>,
+) -> (Option<String>, crate::DeleteGuard) {
+    match state {
+        Some((status, tabs)) if !crate::status::shows_nothing_alive(status, *tabs) => (
+            Some(crate::status::replace_with_consequence(status, *tabs)),
+            crate::status::delete_guard(status, *tabs),
+        ),
+        _ => (None, crate::DeleteGuard::NothingAlive),
+    }
+}
+
+/// Mark a clone's prefill as a "replace with" of `session`, the row it was
+/// built from: the source id that routes the submit to the replace endpoint,
+/// plus the status snapshot the launcher falls back to while the live listing
+/// lacks the row (see [`CreatePrefill::replace_source_opened`]).
+pub(super) fn mark_replace_with(prefill: &mut CreatePrefill, session: &Session) {
+    prefill.replace_source = Some(session.id.clone());
+    prefill.replace_source_opened = Some((session.status.clone(), session.tabs.len()));
 }
 
 // ---------------------------------------------------------------------
@@ -1488,6 +1535,19 @@ pub(super) fn CreateSessionForm(
     /// effect (below `chosen_profile`'s declaration) is what turns a new
     /// generation into field values.
     prefill: Option<CreatePrefill>,
+    /// For "replace with", the source session's status and terminal tab
+    /// count as the page currently knows them: its row in the live listing,
+    /// else the last state a listing showed for it, else
+    /// [`CreatePrefill::replace_source_opened`].
+    /// `None` for a create or a plain clone.
+    ///
+    /// SPEC.md "Replace with": the launcher's replace button is the
+    /// confirmation, so while this shows anything alive the launcher draws
+    /// Replace's warning, and the replace it sends carries the precondition
+    /// matching that same value (`status::delete_guard`). Both are derived
+    /// from this one prop in the same render, so the request never authorizes
+    /// more than the text on screen said.
+    replace_source_state: Option<(SessionStatus, usize)>,
     /// Discard this draft without creating a session.
     on_cancel: EventHandler<()>,
     on_created: EventHandler<CreatedSession>,
@@ -2349,6 +2409,14 @@ pub(super) fn CreateSessionForm(
     // earlier. `launch-composer-launch-context` beside it is unchanged
     // either way — the host/folder summary is equally true of both verbs.
     let submit_verb = if is_replace_with { "replace" } else { "launch" };
+    // What pressing "replace" stops, drawn from the same render the submit
+    // handler below is created in: the warning under the button, and the
+    // precondition that handler sends (see `replace_with_warning`).
+    let (replace_warning, replace_guard) = if is_replace_with {
+        replace_with_warning(replace_source_state.as_ref())
+    } else {
+        (None, crate::DeleteGuard::NothingAlive)
+    };
     let current_launch = if creation_surface() == CreationSurface::Structured {
         structured_harness().map(|harness| {
             LaunchIntent::Structured(LaunchSelection {
@@ -3459,7 +3527,10 @@ pub(super) fn CreateSessionForm(
                         // Publish before dispatch. A lost response must leave
                         // the exact payload available to the next explicit retry.
                         github_attempt.set(Some((bound.clone(), attempt.clone())));
-                        match api::submit_fresh_create(&base, bound.replace_source.as_deref(), &attempt.body).await {
+                        // The body is the retained original; the source
+                        // delete's precondition is this press's, matching
+                        // the warning on screen now (see `submit_fresh_create`).
+                        match api::submit_fresh_create(&base, bound.replace_source.as_deref(), replace_guard, &attempt.body).await {
                             Ok((session, notice)) => {
                                 github_attempt.set(None);
                                 delete_notice.publish(notice);
@@ -3493,6 +3564,7 @@ pub(super) fn CreateSessionForm(
                             api::replace_session_with(
                                 &base,
                                 source,
+                                replace_guard,
                                 &bound.cwd,
                                 agent,
                                 &bound.title,
@@ -3626,6 +3698,7 @@ pub(super) fn CreateSessionForm(
                 button {
                     r#type: "submit",
                     class: "btn btn-primary create-session-submit",
+                    aria_describedby: replace_warning.as_ref().map(|_| REPLACE_WARNING_ID),
                     // `blocked` as well as this form's own flag: a create must
                     // not overlap a host mutation (see `ListView`'s operation
                     // gate), and a control that is inert for that window says so
@@ -3722,6 +3795,20 @@ pub(super) fn CreateSessionForm(
                             intent_key.set(None);
                         },
                         "reset choices"
+                    }
+                }
+            }
+            // "Replace with"'s warning sits directly under the replace button
+            // it qualifies, for the same reason as the YOLO question below:
+            // the button is the confirmation, and a warning out of view would
+            // not be read before the press (SPEC.md "Replace with").
+            // Polite live region: the warning can appear or change while the
+            // launcher stays open, and the replace button names it as its
+            // description, since pressing that button is the confirmation.
+            if is_replace_with {
+                div { id: REPLACE_WARNING_ID, class: "launch-composer-replace-warning", aria_live: "polite",
+                    if let Some(warning) = &replace_warning {
+                        "{warning}"
                     }
                 }
             }
@@ -5626,6 +5713,79 @@ mod tests {
         assert_eq!(prefill.cwd, "/work/api");
         assert_eq!(prefill.title, "my session");
         assert_eq!(prefill.replace_source, None);
+        assert_eq!(prefill.replace_source_opened, None);
+    }
+
+    /// Why this matters: "Replace with" opened the launcher straight from the
+    /// menu and its replace killed whatever the source was running, with
+    /// nothing on screen saying so (SPEC.md "Replace with"). Spec: a source
+    /// with anything alive gets Replace's warning and the precondition that
+    /// warning covers (a running agent: unconditional; an ended agent with a
+    /// tab: agent-ended); a source showing nothing alive, or no state at
+    /// all, gets no warning and the nothing-alive precondition, so a restart
+    /// the launcher did not show refuses the delete.
+    #[farhelm_testtrace::test]
+    fn replace_with_warns_and_binds_to_the_source_state_it_shows() {
+        let running = (SessionStatus::Running, 0);
+        let (warning, guard) = replace_with_warning(Some(&running));
+        assert!(
+            warning
+                .as_deref()
+                .is_some_and(|text| text.starts_with("still running")),
+            "{warning:?}"
+        );
+        assert_eq!(guard, crate::DeleteGuard::Unconditional);
+
+        let tabs_only = (SessionStatus::Exited { exit_code: Some(0) }, 1);
+        let (warning, guard) = replace_with_warning(Some(&tabs_only));
+        assert!(
+            warning
+                .as_deref()
+                .is_some_and(|text| text.starts_with("1 terminal tab is still open")),
+            "{warning:?}"
+        );
+        assert_eq!(guard, crate::DeleteGuard::AgentEnded);
+
+        let nothing_alive = (SessionStatus::Exited { exit_code: Some(0) }, 0);
+        assert_eq!(
+            replace_with_warning(Some(&nothing_alive)),
+            (None, crate::DeleteGuard::NothingAlive)
+        );
+        assert_eq!(
+            replace_with_warning(None),
+            (None, crate::DeleteGuard::NothingAlive)
+        );
+    }
+
+    /// Why this matters: the launcher falls back to the state its source had
+    /// when it opened whenever the live listing lacks the row, so that
+    /// snapshot must be taken from the row the user picked. Spec: marking a
+    /// clone's prefill as a replace-with records the row's id, status and
+    /// tab count, and leaves the clone's other fields as `prefill_from` set
+    /// them.
+    #[farhelm_testtrace::test]
+    fn marking_a_replace_with_records_the_source_and_its_state() {
+        let session = Session {
+            status: SessionStatus::Exited { exit_code: Some(1) },
+            tabs: vec![crate::Tab { id: "t1".into() }],
+            ..row_specimen("s1")
+        };
+        let clone = prefill_from(&session, 4);
+        let mut prefill = clone.clone();
+        mark_replace_with(&mut prefill, &session);
+        assert_eq!(prefill.replace_source.as_deref(), Some("s1"));
+        assert_eq!(
+            prefill.replace_source_opened,
+            Some((SessionStatus::Exited { exit_code: Some(1) }, 1))
+        );
+        assert_eq!(
+            CreatePrefill {
+                replace_source: None,
+                replace_source_opened: None,
+                ..prefill
+            },
+            clone
+        );
     }
 
     /// Repo metadata describes the source, not a fresh destination request.

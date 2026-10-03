@@ -646,7 +646,12 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   Unlike clone, it keeps the source's own host — clone is the way to start a session on a different host. Offered
   wherever clone and replace are offered. Clone, replace with, and New are one launcher — same layout, same controls,
   same search, same validation — differing only in what is pre-filled when they open and in what launching does (create;
-  create then delete the source).
+  create then delete the source). Its launch button is the confirmation of that delete: while the source has anything
+  alive, the launcher shows Replace's warning about the source beside it, following the source's state as the client
+  sees it while the launcher stays open, and launching carries the precondition matching what the launcher showed at the
+  click (see the confirmation rule below). A source that has more alive by then, such as one restarted while the
+  launcher was open, is kept: the new session is still created first, with no liveness check before it, and the user
+  gets Replace's both-sessions-exist error.
 - **Delete** removes the session and its stored state, in any state, terminating the agent and tabs if running — with
   confirmation that says so when anything is still alive. Deletion may make partial progress before failing, including
   removing attachment files while retaining the session row for retry. There is no rollback guarantee. Report the

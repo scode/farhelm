@@ -26,10 +26,10 @@ use crate::rows::{
     menu_row_reordered, remove_row_reporting_menu_move, retire_vanished_renames,
     settle_optimistic_renames,
 };
-use crate::{ApiBase, HostId, Session};
+use crate::{ApiBase, HostId, Session, SessionStatus};
 
 use super::create_form::{
-    CreatePrefill, CreateSessionForm, CreateTarget, CreatedSession, prefill_from,
+    CreatePrefill, CreateSessionForm, CreateTarget, CreatedSession, mark_replace_with, prefill_from,
 };
 use super::row::SessionRow;
 use super::shared::{
@@ -2235,6 +2235,33 @@ pub(crate) fn ListView(
         show_create.set(true);
     };
 
+    // The last (status, tab count) a successful listing showed for the open
+    // "replace with" launcher's source, keyed by its id. The launcher falls
+    // back to it while the current listing lacks the row, so a failed refresh
+    // or a filter hiding the source keeps the warning at the newest state the
+    // page has seen rather than reverting it to the one from when the
+    // launcher opened (see the `replace_source_state` prop below). It belongs
+    // to one opening: both "replace with" paths clear it before publishing a
+    // new prefill, or a launcher reopened on the same source while the
+    // listing lacks it would show what an earlier opening saw instead of its
+    // own, newer snapshot.
+    let mut replace_source_seen = use_signal(|| None::<(String, (SessionStatus, usize))>);
+    use_effect(move || {
+        let Some(source) = clone_prefill
+            .read()
+            .as_ref()
+            .and_then(|prefill| prefill.replace_source.clone())
+        else {
+            return;
+        };
+        if let Some(state) = listed_state(&listing.read(), &source) {
+            let seen = Some((source, state));
+            if *replace_source_seen.peek() != seen {
+                replace_source_seen.set(seen);
+            }
+        }
+    });
+
     // The "replace with" menu item's click — `on_clone`'s body verbatim
     // (same guard, same shared `clone_prefill` signal, same
     // generation-minting scheme, same reasons for both) except that the
@@ -2266,7 +2293,10 @@ pub(crate) fn ListView(
             .as_ref()
             .map_or(0, |prefill| prefill.generation + 1);
         let mut prefill = prefill_from(&session, generation);
-        prefill.replace_source = Some(session.id);
+        mark_replace_with(&mut prefill, &session);
+        // A new opening starts from its own snapshot, never from what an
+        // earlier launcher on the same source last saw.
+        replace_source_seen.set(None);
         clone_prefill.set(Some(prefill));
         show_create.set(true);
     };
@@ -2304,7 +2334,8 @@ pub(crate) fn ListView(
         );
         let mut prefill = prefill_from(&session, generation);
         if replace_with {
-            prefill.replace_source = Some(session.id.clone());
+            mark_replace_with(&mut prefill, &session);
+            replace_source_seen.set(None);
         }
         clone_prefill.set(Some(prefill));
         menu_open.set(None);
@@ -3027,6 +3058,25 @@ pub(crate) fn ListView(
                     ops,
                     initial_cwd: ordinary_new_cwd(),
                     prefill: clone_prefill(),
+                    // The "replace with" source as the sidebar currently
+                    // lists it, so the launcher's warning follows a source
+                    // that starts or stops while it is open. While the
+                    // listing lacks the row (a failed read, a filter that
+                    // hides it), the last state a listing showed stands in,
+                    // and before any listing has shown it, the snapshot
+                    // taken when the launcher opened.
+                    replace_source_state: clone_prefill.read().as_ref().and_then(|prefill| {
+                        let source = prefill.replace_source.as_deref()?;
+                        listed_state(&listing.read(), source)
+                            .or_else(|| {
+                                replace_source_seen
+                                    .read()
+                                    .as_ref()
+                                    .filter(|(id, _)| id == source)
+                                    .map(|(_, state)| state.clone())
+                            })
+                            .or_else(|| prefill.replace_source_opened.clone())
+                    }),
                     on_cancel: move |_| {
                         // A cancelled composer must not carry its destination
                         // or clone provenance into the next fresh launch.
@@ -3461,6 +3511,23 @@ fn seen_toggle_report(
                 errors.insert(id, format!("seen: {error}"));
             }
         }
+    }
+}
+
+/// One session's (status, terminal tab count) as a successfully read listing
+/// shows it, or `None` when the listing failed, has not loaded, or lacks the
+/// row. Feeds the "replace with" launcher's view of its source.
+fn listed_state(
+    listing: &Option<Result<SessionListing, String>>,
+    id: &str,
+) -> Option<(SessionStatus, usize)> {
+    match listing {
+        Some(Ok(listing)) => listing
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .map(|session| (session.status.clone(), session.tabs.len())),
+        _ => None,
     }
 }
 

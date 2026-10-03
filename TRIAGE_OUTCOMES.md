@@ -5555,7 +5555,11 @@
   user accepted: the replacement is created first and a source that no longer matches what the launcher showed is kept,
   with the existing both-sessions-exist error; no liveness check before the create. SPEC.md is written to match. The
   fresh-checkout launch fixes the precondition into its retained, replayable payload at launch time.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `xywmtprl`, bookmark `triage-1001e/02-replace-with-binds`, PR
+  https://github.com/scode/farhelm/pull/1443. Deviation, decided during execution: the fresh-checkout launch does not
+  fix the precondition at the first press; every press, retries included, sends the precondition matching the warning
+  shown at that press, because the helm's idempotency for a fresh replacement covers only the source and the create, and
+  a frozen precondition could contradict the warning on screen.
 
 ## claude-scan-claims-foreign-record.md
 
