@@ -305,6 +305,46 @@ fn screen_fixtures_read_as_the_state_they_were_captured_in() {
     );
 }
 
+/// The hand-made Claude background-task screen keeps its idle boundary: when
+/// the waiting announcement is replaced with Claude's finished-turn line,
+/// the same input-box geometry reads anchored idle.
+///
+/// Why it matters: the two lines occupy the same place above the prompt, so
+/// the working match must be specific to an explicit unfinished announcement
+/// rather than any decorative line in that part of the screen.
+#[test]
+fn claude_background_wait_screen_becomes_idle_after_the_turn_finishes() {
+    let fixture = load_fixtures()
+        .into_iter()
+        .find(|fixture| {
+            fixture.harness == "claude"
+                && fixture.scenario == "derived-background-agents"
+                && fixture.expected == "working"
+        })
+        .expect("the derived Claude background-agent screen must exist");
+    let finished = fixture.screen.replace(
+        "✻ Waiting for 5 background agents to finish",
+        "✻ Cogitated for 26s · done 3:41 PM",
+    );
+    assert_ne!(
+        finished, fixture.screen,
+        "fixture premise: waiting line exists"
+    );
+    let text = crate::tmux::retain_pane_tail(&finished, SAMPLE_TAIL_BYTES);
+    let reading = reader_for(AgentKind::Claude).read(
+        SampleCounts {
+            samples: 9,
+            unchanged_streak: 0,
+        },
+        &Screen {
+            text: &text,
+            title: &fixture.title,
+        },
+    );
+    assert_eq!(reading.state, ScreenState::Idle);
+    assert!(reading.anchored);
+}
+
 /// Codex's on-screen `Working (… • esc to interrupt)` widget alone reads
 /// the real working screens as working, without the pane title's spinner.
 ///

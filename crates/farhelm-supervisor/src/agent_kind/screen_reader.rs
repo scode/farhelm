@@ -274,21 +274,27 @@ impl ScreenReader for GenericReader {}
 /// below it. While a turn runs,
 /// a spinner line (`✶ Imagining… (2s · thinking)`, the glyph and verb
 /// rotating) sits just above that box for the whole turn, tool runs
-/// included. Every dialog that needs the user — permission prompts,
+/// included. When the turn has handed work to background agents, Claude
+/// replaces that spinner with a line such as `✻ Waiting for 5 background
+/// agents to finish`; that line is still work in progress. Every dialog
+/// that needs the user — permission prompts,
 /// question forms, the folder-trust prompt — replaces the box and ends in
 /// a key-hint footer containing "Esc to cancel".
 ///
-/// Deliberate choices: background tasks announced at an idle prompt read
-/// idle, because the agent is waiting on the user's next message, not
-/// working on one; and the pane title is not read, because Claude keeps it
-/// at `✳ <topic>` through a whole turn, so it says nothing about work.
+/// Deliberate choices: only Claude's explicit background-work announcement
+/// counts as working because it says Claude's turn is blocked on that work
+/// and will resume when it finishes; a footer hint or a list of background
+/// tasks at an otherwise idle prompt does not, because Claude is waiting on
+/// the user's next message. The pane title is not read, because Claude keeps
+/// it at `✳ <topic>` through a whole turn, so it says nothing about work.
 struct ClaudeReader;
 
 /// How far from the bottom a Claude dialog's key-hint footer may sit.
 /// Dialogs put it on the last line; the slack covers a wrapped footer.
 const CLAUDE_FOOTER_LINES: usize = 2;
 
-/// How far above the input box's top rule the spinner line may sit.
+/// How far above the input box's top rule Claude's working line (spinner or
+/// background-wait announcement) may sit.
 /// Claude puts notices (a connector warning, a tmux hint, a tip) between
 /// the two; six covers every observed arrangement without reaching into
 /// transcript text.
@@ -319,7 +325,7 @@ impl ScreenReader for ClaudeReader {
             return generic_reading(counts);
         };
         let above_box = &lines[box_rule.saturating_sub(CLAUDE_SPINNER_LINES_ABOVE_BOX)..box_rule];
-        if above_box.iter().any(|line| is_claude_spinner_line(line)) {
+        if above_box.iter().any(|line| is_claude_working_line(line)) {
             return Reading::anchored(ScreenState::Working);
         }
         Reading::anchored(ScreenState::Idle)
@@ -354,22 +360,36 @@ fn claude_input_box_rule(lines: &[&str]) -> Option<usize> {
         .map(|index| index - 1)
 }
 
-/// Whether `line` is Claude's working spinner: one non-alphanumeric glyph,
-/// a space, a one-word verb ending in `…`, then ` (` and the elapsed
-/// seconds — `✶ Imagining… (2s · thinking)`.
+/// Whether `line` is Claude's working indicator: either its animated spinner
+/// or the explicit announcement that background work is still running.
 ///
 /// The shape rather than a glyph list, because the glyphs rotate and have
-/// changed between versions; the finished-turn line (`✻ Cogitated for 26s`)
-/// carries no ellipsis and so does not match.
-fn is_claude_spinner_line(line: &str) -> bool {
-    let mut chars = line.trim_start().chars();
+/// changed between versions. The finished-turn line (`✻ Cogitated for 26s`)
+/// carries no ellipsis, and the background announcement must end exactly at
+/// `to finish`, so neither idle screen is mistaken for active work.
+fn is_claude_working_line(line: &str) -> bool {
+    let mut chars = line.trim().chars();
     let Some(glyph) = chars.next() else {
         return false;
     };
     if glyph.is_alphanumeric() || glyph.is_whitespace() || chars.next() != Some(' ') {
         return false;
     }
-    let Some((verb, after)) = chars.as_str().split_once("… (") else {
+    let rest = chars.as_str();
+    if let Some(background) = rest.strip_prefix("Waiting for ") {
+        let Some(background) = background.strip_suffix(" to finish") else {
+            return false;
+        };
+        let mut words = background.split_ascii_whitespace();
+        let Some(count) = words.next() else {
+            return false;
+        };
+        return count.chars().all(|c| c.is_ascii_digit())
+            && words.next() == Some("background")
+            && words.next().is_some()
+            && words.next().is_none();
+    }
+    let Some((verb, after)) = rest.split_once("… (") else {
         return false;
     };
     !verb.is_empty()
@@ -617,21 +637,26 @@ mod tests {
         }
     }
 
-    /// Claude's spinner is recognized by its shape, whatever the glyph, and
-    /// the finished-turn line and ordinary prose are not.
+    /// Claude's working indicators are recognized by their shape, whatever
+    /// the glyph, while background-task listings and finished-turn prose are
+    /// not.
     ///
     /// Why it matters: the glyphs rotate every frame and have changed
-    /// between versions, so a glyph list would go stale; the finished-turn
-    /// line sits in the same place and must read idle.
+    /// between versions, and Claude's background count can differ from its
+    /// visible task list. The finished-turn line sits in the same place and
+    /// must read idle.
     #[test]
-    fn claude_spinner_line_is_recognized_by_shape() {
+    fn claude_working_line_is_recognized_by_shape() {
         for line in [
             "✶ Imagining… (2s · thinking)",
             "· Imagining… (3s · ↓ 262 tokens)",
             "* Tempering… (48s · ↓ 2.9k tokens · thinking with high effort)",
             "  ✢ Slithering… (1m 4s · ↓ 224 tokens)",
+            "✻ Waiting for 5 background agents to finish",
+            "✻ Waiting for 1 background agent to finish",
+            "✻ Waiting for 2 background shells to finish",
         ] {
-            assert!(is_claude_spinner_line(line), "{line:?}");
+            assert!(is_claude_working_line(line), "{line:?}");
         }
         for line in [
             "✻ Cogitated for 26s · done 3:41 PM",
@@ -639,9 +664,15 @@ mod tests {
             "Imagining… (2s)",
             "✶ Two words… (2s)",
             "✶ Imagining… (soon)",
+            "Waiting for 5 background agents to finish",
+            "✻ Waiting for background agents to finish",
+            "✻ Waiting for five background agents to finish",
+            "✻ Waiting for 5 background agents to finish.",
+            "● Waiting for 3 background",
+            "  agents to finish.",
             "",
         ] {
-            assert!(!is_claude_spinner_line(line), "{line:?}");
+            assert!(!is_claude_working_line(line), "{line:?}");
         }
     }
 
