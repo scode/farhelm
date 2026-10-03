@@ -72,7 +72,12 @@
 //!   harnesses to their marks in `icons.rs`. One exception keeps a direct
 //!   comparison: the new-session form's Cursor support notice
 //!   (`list/create_form.rs`), which also recognizes Cursor's built-in
-//!   profiles by id.
+//!   profiles by id. The browser's per-agent facts are keyed on the agent
+//!   KIND rather than the harness, so they also cover raw and profile
+//!   launches: they live in the exhaustive functions of `SessionAgentKind` in
+//!   `farhelm-ui/src/lib.rs`, the browser's tolerant mirror of
+//!   [`farhelm_proto::AgentKind`] (today the copy instruction the terminal's
+//!   "this drag did not copy" notice offers).
 //! - **Pure per-kind decisions in the supervisor.** This module: one
 //!   [`AgentIntegration`] impl per kind (resume template, record parsing,
 //!   hook argv, [`AgentIntegration::inject_hooks`],

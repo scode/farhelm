@@ -669,6 +669,7 @@ mod tests {
             cwd: "/tmp".into(),
             canonical_cwd: None,
             invocation: "agent".into(),
+            agent_kind: crate::SessionAgentKind::Unrecognized,
             launch: None,
             status: SessionStatus::Unknown,
             annotation: None,

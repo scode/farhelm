@@ -1001,9 +1001,13 @@ whatever the agent renders is what you see. There is no composer, no message abs
   way, and is the only path that reaches the clipboard for a selection an app under mouse reporting makes for itself; an
   OSC 52 READ is never answered with clipboard contents. A user-initiated paste intentionally sends the pasted content
   to the selected terminal; it does not authorize a program to query the clipboard. Every completed selection re-copies,
-  even one identical to what is already on the clipboard. Clipboard operations are explicitly best-effort and silent on
-  failure — permission policy, secure-context requirements, and an engine's own clipboard behavior are outside this
-  system's control — a deliberate, named exception to the Errors and diagnostics section's surface-every-error rule
+  even one identical to what is already on the clipboard. When a plain drag goes to a program under mouse reporting and
+  the program copies nothing (no OSC 52 write follows), the terminal shows a brief notice, at most once per page load
+  for each distinct text, that the program handles selection itself: use its own copy command, or hold the forcing
+  modifier while dragging. For a Codex session's agent terminal the notice names Codex's own copy key instead. It is
+  guidance about the program, not a report of a clipboard failure. Clipboard operations are explicitly best-effort and
+  silent on failure — permission policy, secure-context requirements, and an engine's own clipboard behavior are outside
+  this system's control — a deliberate, named exception to the Errors and diagnostics section's surface-every-error rule
   below, not a lapse in it. Farhelm assumes the host's system clipboard works. A broken, hung or slow clipboard is not
   something Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else
   in Farhelm may stall because of it.

@@ -174,6 +174,9 @@ export interface SessionRow {
    * badge-render test compares the rendered row against these. */
   cwd?: string;
   invocation?: string;
+  /** The supervisor's agent kind for the session ("codex", "generic", …);
+   * the drag-copy notice tests in mouse-modes.spec.ts check it. */
+  agent_kind?: string;
   /**
    * The profile this session was created from, absent for a raw-created one.
    *
