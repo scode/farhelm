@@ -11,7 +11,7 @@
 //! The scopes differ, and deliberately. The origin guard and the build
 //! stamp wrap the whole router, because both answer questions that have
 //! nothing to do with which route was asked for. The CORS headers wrap the
-//! five desktop-webview fetch edges, because widening them is widening what
+//! four desktop-webview fetch edges, because widening them is widening what
 //! a cross-origin page may read.
 //!
 //! ## The loopback guard is a real security boundary
@@ -19,7 +19,8 @@
 //! Binding to 127.0.0.1 is not by itself a defense against the user's OWN
 //! browser: a hostile page can rebind DNS to loopback and reach this helm
 //! as if it were same-origin, and WebSocket upgrades are not CORS-gated at
-//! all. `require_loopback_origin` is what actually stands in the way, and
+//! all. `require_loopback_origin` is what actually stands in the way. Its
+//! `mode` selects the embedded helm's custom-scheme exemption, and
 //! `origin_is_allowed` is its decision as a pure function so the whole
 //! matrix can be pinned by unit tests rather than by whichever branches
 //! an integration test happens to reach.
@@ -28,9 +29,9 @@
 //!
 //! The web build is served BY the helm, so nothing it does is
 //! cross-origin. The desktop build's page comes from a custom webview
-//! scheme, so its credential validation, token exchange, uploads,
-//! client-log reports, and clipboard writes are. `desktop_webview_cors`
-//! closes that gap on exactly those five routes, for exactly the origins
+//! scheme, so its credential validation, uploads, client-log reports, and
+//! clipboard writes are. `desktop_webview_cors` closes that gap on exactly
+//! those four webview fetch routes, for exactly the origins
 //! `is_desktop_webview_origin` recognizes.
 //!
 //! ## The build stamp is how a stale tab finds out
@@ -56,10 +57,11 @@ use axum::response::IntoResponse;
 /// browser request that arrived through the wrong origin in the first place.
 pub(crate) async fn require_loopback_origin(
     port: u16,
+    mode: crate::ServingMode,
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    if !origin_is_allowed(req.headers(), port) {
+    if !origin_is_allowed(req.headers(), port, mode) {
         if let Some(location) = legacy_loopback_redirect(req.method(), req.headers(), port) {
             return (
                 axum::http::StatusCode::TEMPORARY_REDIRECT,
@@ -108,7 +110,7 @@ pub(crate) async fn require_loopback_origin(
 /// under an origin another account can serve. SPEC_impl.md records the
 /// rule and the residual it leaves (a squatter can still show a fake token
 /// prompt at `localhost`).
-fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
+fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16, mode: crate::ServingMode) -> bool {
     let is_loopback_authority = |authority: &str| -> bool {
         // Refuse anything containing '/': deriving the authority by
         // splitting on '/' would accept any value that merely ENDS in a
@@ -136,11 +138,13 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
         .is_some_and(is_loopback_authority);
 
     // A missing Origin is fine — curl and other non-browser clients omit
-    // it — but a present one must match. The desktop target is the
+    // it — but a present one must match. Embedded mode is the one
     // exception: its webview serves the app from dioxus's custom scheme,
     // so its WebSocket carries that origin. A web page cannot forge a
-    // custom-scheme Origin, which is why this is safe to allow; `null`
-    // (sandboxed iframes, data: documents) deliberately is not.
+    // custom-scheme Origin, which is why this is safe to allow there;
+    // standalone mode refuses it. Both modes refuse `null` (sandboxed
+    // iframes and data: documents), which has no trusted relationship with
+    // this helm.
     //
     // Host carries no scheme; Origin does, and only `http://` can be this
     // helm's own page: it never serves TLS. The scheme also decides what a
@@ -150,7 +154,7 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
     let origin_ok = headers.get(axum::http::header::ORIGIN).is_none_or(|v| {
         v.to_str().is_ok_and(|o| {
             o.strip_prefix("http://").is_some_and(is_loopback_authority)
-                || is_desktop_webview_origin(o)
+                || (mode == crate::ServingMode::Embedded && is_desktop_webview_origin(o))
         })
     });
 
@@ -166,8 +170,9 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
     // bar and bookmark launches say `none`, reloads and the app's own
     // requests say `same-origin`, non-browser clients send nothing, and
     // the desktop webview's fetches (cross-site by construction, custom
-    // scheme → loopback) carry their allowed custom-scheme Origin and are
-    // gated by that arm instead of this one.
+    // scheme → loopback) carry their custom-scheme Origin, which the arm
+    // above admits only on the embedded helm, and are gated by that arm
+    // instead of this one.
     let fetch_site_ok = headers.get(axum::http::header::ORIGIN).is_some()
         || headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) != Some("cross-site");
 
@@ -212,49 +217,55 @@ fn legacy_loopback_redirect(
 
 /// Whether an `Origin` is one of the desktop build's own webview schemes.
 ///
-/// The single definition of "the desktop app is calling", shared by
-/// [`origin_is_allowed`] (which decides whether the request is answered at
-/// all) and [`desktop_webview_cors`] (which decides whether the ANSWER may be
-/// read). Two lists would be a way for those to disagree, and disagreeing
-/// means either the desktop build breaks or a web page gets CORS access it
-/// was never meant to have.
+/// The single predicate for a desktop framework webview scheme, shared by
+/// [`origin_is_allowed`] and [`desktop_webview_cors`]. The origin guard adds
+/// the embedded-mode check before admitting it; the CORS layer only runs
+/// after that guard. Keeping the scheme predicate in one place prevents the
+/// two layers from disagreeing about which embedded requests the window may
+/// read.
 ///
 /// Safe to allow against the threat this guard exists for: a web page in a
-/// browser cannot forge a custom-scheme `Origin`. It does not identify
-/// Farhelm's own window, though. Every Dioxus desktop app serves its page as
-/// `dioxus://index.html/`, and any app built on wry can use `wry://`, so
-/// content shown by another such app on the machine passes too; SPEC.md "Client to helm" accepts that for this
-/// browser-facing check, because such content still needs a credential, and
-/// rules out relying on `Origin` to establish the native app as a client.
+/// browser cannot forge a custom-scheme `Origin`. The exemption is used only
+/// by the embedded helm, whose page necessarily comes from one of these
+/// schemes; the standalone helm has no such page and rejects them before the
+/// CORS layers run. This does not identify Farhelm's own window: every Dioxus
+/// desktop app serves its page as `dioxus://index.html/`, and any app built on
+/// wry can use `wry://`. Content shown by another such app can therefore pass
+/// the embedded browser-facing check, which still requires a device
+/// credential and never establishes the native app as a client.
 fn is_desktop_webview_origin(origin: &str) -> bool {
     origin.starts_with("dioxus://") || origin.starts_with("wry://")
 }
 
-/// The CORS headers for the desktop webview's five cross-origin fetch edges.
+/// The CORS headers for the desktop webview's four cross-origin fetch edges.
 ///
 /// The web build has no CORS problem: the helm serves the page, so its
 /// uploads are same-origin. The desktop build does. Its page is served by
 /// wry from a custom scheme while the helm answers on
 /// `http://127.0.0.1:<port>`, so every JavaScript `fetch` from it is
-/// cross-origin. Today those fetches are credential validation, the
-/// bootstrap-token exchange, attachment upload, client-log reporting, and
-/// native clipboard writes (`clipboard.rs`).
+/// cross-origin. Today those fetches are credential validation, attachment
+/// upload, client-log reporting, and native clipboard writes (`clipboard.rs`).
 /// The terminal and invalidation WebSockets are governed
 /// by the origin guard and explicit subprotocol credential instead: WebSocket
 /// upgrades are not CORS-gated.
 ///
 /// Deliberately narrow in every direction:
 ///
-/// - Only [`is_desktop_webview_origin`] origins get headers at all — the
-///   same origins the loopback guard already lets through, echoed back
+/// - Only [`is_desktop_webview_origin`] origins get headers at all — in
+///   embedded mode these are the same origins the loopback guard lets
+///   through, echoed back
 ///   rather than answered with `*`, with `Vary: Origin` so nothing caches
 ///   one origin's answer for another.
-/// - Only the credential-validation, token-exchange, attachment,
-///   client-log, and clipboard routes carry it (see `build_router`). The
-///   ordinary REST client is native, so the other routes have no
+/// - The credential-validation, attachment, client-log, and clipboard routes
+///   carry the four useful desktop answers (see `build_router`). The
+///   standalone token-exchange route still carries the layer because this
+///   change gates the origin check and nothing else; its custom-scheme
+///   requests are refused by the outer guard before it can add headers, so it
+///   is an inert fifth layer, not a desktop fetch edge.
+///   The ordinary REST client is native, so the other routes have no
 ///   cross-origin caller and get no cross-origin readability.
 /// - Only the methods and headers those routes need: `GET` for credential
-///   validation, `POST` for exchange/upload/client-log/clipboard (plus the
+///   validation, `POST` for upload/client-log/clipboard (plus the
 ///   `OPTIONS`
 ///   preflight itself), `authorization` for the explicit device secret, and
 ///   `content-type`, which `fetch(url, {body: file})` sets from the blob and
@@ -366,6 +377,18 @@ mod tests {
     use axum::http::HeaderMap;
     const PORT: u16 = 7433;
 
+    /// Pin a matrix case to the standalone helm, whose custom-scheme arm is
+    /// deliberately the stricter baseline for the loopback guard.
+    fn standalone_origin_is_allowed(headers: &HeaderMap, port: u16) -> bool {
+        origin_is_allowed(headers, port, crate::ServingMode::Standalone)
+    }
+
+    /// Pin a matrix case to the embedded helm, the only mode that admits the
+    /// desktop webview's custom-scheme Origin.
+    fn embedded_origin_is_allowed(headers: &HeaderMap, port: u16) -> bool {
+        origin_is_allowed(headers, port, crate::ServingMode::Embedded)
+    }
+
     fn headers(host: Option<&str>, origin: Option<&str>) -> HeaderMap {
         let mut h = HeaderMap::new();
         if let Some(host) = host {
@@ -386,12 +409,12 @@ mod tests {
     #[farhelm_testtrace::test]
     fn loopback_hosts_with_no_or_loopback_origin_are_allowed() {
         // curl and non-browser clients: Host only, no Origin.
-        assert!(origin_is_allowed(
+        assert!(standalone_origin_is_allowed(
             &headers(Some("127.0.0.1:7433"), None),
             PORT
         ));
         // The browser's own same-origin requests carry both.
-        assert!(origin_is_allowed(
+        assert!(standalone_origin_is_allowed(
             &headers(Some("127.0.0.1:7433"), Some("http://127.0.0.1:7433")),
             PORT
         ));
@@ -407,10 +430,13 @@ mod tests {
     #[farhelm_testtrace::test]
     fn loopback_names_other_than_the_ipv4_literal_are_refused() {
         for host in ["localhost:7433", "[::1]:7433"] {
-            assert!(!origin_is_allowed(&headers(Some(host), None), PORT));
+            assert!(!standalone_origin_is_allowed(
+                &headers(Some(host), None),
+                PORT
+            ));
         }
         for origin in ["http://localhost:7433", "http://[::1]:7433"] {
-            assert!(!origin_is_allowed(
+            assert!(!standalone_origin_is_allowed(
                 &headers(Some("127.0.0.1:7433"), Some(origin)),
                 PORT
             ));
@@ -482,22 +508,46 @@ mod tests {
         }
     }
 
-    /// The desktop webview serves the app from a custom scheme a web page
-    /// cannot forge; those origins are allowed. `null` (sandboxed iframe,
-    /// data: document) is deliberately NOT — loosening `None => true`
-    /// into "unparseable/null is fine" would reopen the rebinding hole.
+    /// Custom-scheme origins are admitted only by the embedded helm. A
+    /// standalone helm has no page that needs this cross-origin exemption,
+    /// so accepting another framework app's scheme there would widen its
+    /// browser boundary for no reason. `null` (sandboxed iframe, data:
+    /// document) is refused in both modes.
     #[farhelm_testtrace::test]
-    fn custom_scheme_origins_are_allowed_but_null_is_not() {
+    fn custom_scheme_origins_are_allowed_only_when_embedded() {
         let host = Some("127.0.0.1:7433");
-        assert!(origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
             &headers(host, Some("dioxus://index.html")),
             PORT
         ));
-        assert!(origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
             &headers(host, Some("wry://localhost")),
             PORT
         ));
-        assert!(!origin_is_allowed(&headers(host, Some("null")), PORT));
+        assert!(!standalone_origin_is_allowed(
+            &headers(host, Some("null")),
+            PORT
+        ));
+        assert!(embedded_origin_is_allowed(
+            &headers(host, Some("dioxus://index.html")),
+            PORT
+        ));
+        assert!(embedded_origin_is_allowed(
+            &headers(host, Some("wry://localhost")),
+            PORT
+        ));
+        assert!(!embedded_origin_is_allowed(
+            &headers(host, Some("null")),
+            PORT
+        ));
+        assert!(!embedded_origin_is_allowed(
+            &headers(Some("attacker.example:7433"), Some("dioxus://index.html")),
+            PORT
+        ));
+        assert!(!embedded_origin_is_allowed(
+            &headers(None, Some("wry://localhost")),
+            PORT
+        ));
     }
 
     /// A rebinding attack presents a foreign Host (the attacker's domain
@@ -505,20 +555,20 @@ mod tests {
     /// refuse, as must a missing Host and the wrong loopback port.
     #[farhelm_testtrace::test]
     fn foreign_or_missing_authorities_are_refused() {
-        assert!(!origin_is_allowed(&headers(None, None), PORT));
-        assert!(!origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(&headers(None, None), PORT));
+        assert!(!standalone_origin_is_allowed(
             &headers(Some("attacker.example:7433"), None),
             PORT
         ));
-        assert!(!origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
             &headers(Some("127.0.0.1:9999"), None),
             PORT
         ));
-        assert!(!origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
             &headers(Some("127.0.0.1:7433"), Some("http://evil.example")),
             PORT
         ));
-        assert!(!origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
             &headers(Some("127.0.0.1:7433"), Some("http://127.0.0.1:9999")),
             PORT
         ));
@@ -531,19 +581,34 @@ mod tests {
     /// any other port (fail-closed).
     #[farhelm_testtrace::test]
     fn default_port_80_accepts_portless_loopback_authorities() {
-        assert!(origin_is_allowed(&headers(Some("127.0.0.1"), None), 80));
+        assert!(standalone_origin_is_allowed(
+            &headers(Some("127.0.0.1"), None),
+            80
+        ));
         // The portless names are refused on port 80 like everywhere else.
-        assert!(!origin_is_allowed(&headers(Some("localhost"), None), 80));
-        assert!(origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
+            &headers(Some("localhost"), None),
+            80
+        ));
+        assert!(standalone_origin_is_allowed(
             &headers(Some("127.0.0.1"), Some("http://127.0.0.1")),
             80
         ));
         // Explicit :80 still works (curl sends it).
-        assert!(origin_is_allowed(&headers(Some("127.0.0.1:80"), None), 80));
+        assert!(standalone_origin_is_allowed(
+            &headers(Some("127.0.0.1:80"), None),
+            80
+        ));
         // Foreign authorities are still refused on port 80...
-        assert!(!origin_is_allowed(&headers(Some("evil.example"), None), 80));
+        assert!(!standalone_origin_is_allowed(
+            &headers(Some("evil.example"), None),
+            80
+        ));
         // ...and portless loopback stays refused on non-default ports.
-        assert!(!origin_is_allowed(&headers(Some("127.0.0.1"), None), PORT));
+        assert!(!standalone_origin_is_allowed(
+            &headers(Some("127.0.0.1"), None),
+            PORT
+        ));
     }
 
     /// The helm never serves TLS, so an `https://` Origin is never its own
@@ -553,15 +618,15 @@ mod tests {
     /// with and without an explicit port.
     #[farhelm_testtrace::test]
     fn https_origins_are_refused() {
-        assert!(!origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
             &headers(Some("127.0.0.1"), Some("https://127.0.0.1")),
             80
         ));
-        assert!(!origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
             &headers(Some("127.0.0.1:80"), Some("https://127.0.0.1:80")),
             80
         ));
-        assert!(!origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
             &headers(Some("127.0.0.1:7433"), Some("https://127.0.0.1:7433")),
             PORT
         ));
@@ -573,11 +638,11 @@ mod tests {
     /// that this gate must not depend on that.
     #[farhelm_testtrace::test]
     fn embedded_loopback_suffixes_are_refused() {
-        assert!(!origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
             &headers(Some("evil.example/127.0.0.1:7433"), None),
             PORT
         ));
-        assert!(!origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
             &headers(
                 Some("127.0.0.1:7433"),
                 Some("http://evil.example/127.0.0.1:7433")
@@ -600,29 +665,45 @@ mod tests {
     /// with the UI auto-attaching a session on load, rendering the page for
     /// a hostile navigator is a terminal takeover. Every legitimate shape
     /// stays permitted: `none` (address bar), `same-origin` (reloads, the
-    /// app's own requests), an absent header (non-browser clients), and the
-    /// desktop webview's custom-scheme Origin, whose fetches are cross-site
-    /// by construction and are vouched for by the origin arm instead.
+    /// app's own requests), and an absent header (non-browser clients). The
+    /// embedded desktop webview's custom-scheme Origin is separately vouched
+    /// for by the origin arm, while standalone mode refuses it.
     #[farhelm_testtrace::test]
     fn cross_site_navigations_are_refused_without_a_vouching_origin() {
         let base = || headers(Some("127.0.0.1:7433"), None);
-        assert!(!origin_is_allowed(
+        assert!(!standalone_origin_is_allowed(
             &with_fetch_site(base(), "cross-site"),
             PORT
         ));
-        assert!(origin_is_allowed(&with_fetch_site(base(), "none"), PORT));
-        assert!(origin_is_allowed(
+        assert!(standalone_origin_is_allowed(
+            &with_fetch_site(base(), "none"),
+            PORT
+        ));
+        assert!(standalone_origin_is_allowed(
             &with_fetch_site(base(), "same-origin"),
             PORT
         ));
-        assert!(origin_is_allowed(&base(), PORT));
-        // The desktop webview: cross-site fetch metadata, but an allowed
-        // custom-scheme Origin vouches for it.
-        assert!(origin_is_allowed(
+        assert!(standalone_origin_is_allowed(&base(), PORT));
+        // The standalone helm refuses the custom scheme even when the
+        // fetch-metadata header says cross-site.
+        assert!(!standalone_origin_is_allowed(
             &with_fetch_site(
                 headers(Some("127.0.0.1:7433"), Some("dioxus://index.html")),
                 "cross-site"
             ),
+            PORT
+        ));
+        // The embedded helm admits the same request because its own page
+        // necessarily comes from that custom scheme.
+        assert!(embedded_origin_is_allowed(
+            &with_fetch_site(
+                headers(Some("127.0.0.1:7433"), Some("dioxus://index.html")),
+                "cross-site"
+            ),
+            PORT
+        ));
+        assert!(!embedded_origin_is_allowed(
+            &with_fetch_site(base(), "cross-site"),
             PORT
         ));
     }

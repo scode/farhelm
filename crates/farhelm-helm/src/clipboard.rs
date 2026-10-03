@@ -203,7 +203,7 @@ mod tests {
     /// refusal thanks to the CORS layering order.
     #[farhelm_testtrace::test]
     async fn unauthenticated_post_is_a_structured_401_readable_by_the_desktop_webview() {
-        let harness = rest_harness::idle_helm().await;
+        let harness = rest_harness::idle_helm().await.embedded();
         let mut request = post(serde_json::json!({"text": "hello"}));
         request
             .headers_mut()

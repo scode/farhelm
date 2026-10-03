@@ -67,19 +67,21 @@ launch gets a fresh pair, and the web token never enters the desktop process's J
 via `GET /api/auth/device` before the window opens. The webview's origin is a custom scheme (`dioxus://`, `wry://`), so
 its fetches to the loopback helm are cross-origin; CORS headers remain attached to the desktop routes that need them.
 The standalone helm keeps the browser exchange and UI. Every Dioxus desktop app presents the same `dioxus://index.html`
-origin, and any wry-based app can present `wry://`. SPEC.md accepts other such apps passing this browser-facing check;
-the desktop app's identity rests on its credential, never on its Origin.
+origin, and any wry-based app can present `wry://`; only the embedded helm admits those schemes, because its page needs
+cross-origin access to its loopback API. A standalone helm refuses them. Another such app's content can still pass the
+embedded helm's browser-facing check; that is accepted only because it has no credential, and the desktop app's identity
+rests on its credential, never on its Origin.
 
 Two things sit beside the credential and are worth knowing about because the tradeoff below leans on them. The loopback
 origin guard (`require_loopback_origin`) refuses any request whose `Host` is not this helm's own loopback authority, any
-browser `Origin` that is not that authority or a desktop custom scheme, and any top-level cross-site navigation
-(`Sec-Fetch-Site: cross-site` with no vouching Origin). That authority is the IPv4 literal `127.0.0.1:<port>` only. The
-helm binds only IPv4 loopback, so another local account can bind `[::1]` on the same port even while the helm runs, and
-a browser that resolves `localhost` to `::1` would load that account's page under the origin where the UI keeps its
-device secret. The names `localhost` and `[::1]` are therefore refused (a plain page load under them is redirected to
-`127.0.0.1`), which keeps the secret out of any origin another account can serve. A secret a browser stored under
-`localhost` before that rule stays exposed to such a squatter until the token is rotated. Every response carries
-`X-Frame-Options: DENY` and `frame-ancestors 'none'`.
+browser `Origin` that is not that authority or (for the embedded mode only) a desktop custom scheme, and any top-level
+cross-site navigation (`Sec-Fetch-Site: cross-site` with no vouching Origin). That authority is the IPv4 literal
+`127.0.0.1:<port>` only. The helm binds only IPv4 loopback, so another local account can bind `[::1]` on the same port
+even while the helm runs, and a browser that resolves `localhost` to `::1` would load that account's page under the
+origin where the UI keeps its device secret. The names `localhost` and `[::1]` are therefore refused (a plain page load
+under them is redirected to `127.0.0.1`), which keeps the secret out of any origin another account can serve. A secret a
+browser stored under `localhost` before that rule stays exposed to such a squatter until the token is rotated. Every
+response carries `X-Frame-Options: DENY` and `frame-ancestors 'none'`.
 
 ### The tradeoff that was taken
 

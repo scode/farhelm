@@ -155,7 +155,7 @@ pub mod manager;
 
 /// The layers wrapped around the routes: the loopback-origin guard and the
 /// build stamp, which every response passes through, plus the CORS headers
-/// scoped to the desktop webview's token-exchange and attachment routes.
+/// scoped to the desktop webview's four cross-origin API routes.
 mod middleware;
 
 /// Discovery-first supervisor setup, explicit update, and host-scoped run
@@ -443,7 +443,8 @@ impl HelmArgs {
 /// crate's docs for why the single-client `AppState` this replaced could
 /// not survive multi-host.
 struct AppState {
-    /// One choice controls credential admission, browser routes, and static UI.
+    /// One choice controls credential admission, browser routes, static UI,
+    /// and whether the desktop custom-Origin exemption is active.
     mode: ServingMode,
     manager: Arc<manager::ConnectionManager>,
     store: store::HelmStore,
@@ -485,7 +486,9 @@ struct AppState {
 }
 
 /// The two serving surfaces share their handlers, but the desktop's embedded
-/// helm has a narrower authentication and static-content boundary.
+/// helm has a narrower authentication and static-content boundary. The mode
+/// also controls whether the loopback guard admits the custom webview Origin
+/// that only the embedded window needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ServingMode {
     Standalone,
@@ -806,13 +809,19 @@ fn api_router(state: Arc<AppState>) -> Router {
         .merge(desktop_client_log)
         .merge(desktop_clipboard);
     let app = match mode {
-        ServingMode::Standalone => app.route(
-            "/api/auth/token",
-            axum::routing::post(auth::exchange_token)
-                .layer(axum::extract::DefaultBodyLimit::max(256))
-                .options(middleware::desktop_webview_preflight)
-                .layer(axum::middleware::from_fn(middleware::desktop_webview_cors)),
-        ),
+        ServingMode::Standalone => {
+            // Leave the token route's preflight and CORS layer untouched. The
+            // standalone origin guard refuses every custom-scheme Origin
+            // before they run, so the layer is inert for standalone callers;
+            // retaining it keeps this route otherwise unchanged.
+            app.route(
+                "/api/auth/token",
+                axum::routing::post(auth::exchange_token)
+                    .layer(axum::extract::DefaultBodyLimit::max(256))
+                    .options(middleware::desktop_webview_preflight)
+                    .layer(axum::middleware::from_fn(middleware::desktop_webview_cors)),
+            )
+        }
         ServingMode::Embedded => app,
     };
     app.with_state(state)
@@ -1037,7 +1046,8 @@ fn serve_embedded_bytes(path: &str, bytes: &'static [u8]) -> axum::response::Res
 /// including the origin guard and headers, rather than exercising handlers
 /// in isolation and silently skipping the security boundary.
 fn build_router(state: Arc<AppState>, ui: UiSource, port: u16) -> Router {
-    let ui = match state.mode {
+    let mode = state.mode;
+    let ui = match mode {
         ServingMode::Standalone => ui,
         ServingMode::Embedded => UiSource::None,
     };
@@ -1058,7 +1068,7 @@ fn build_router(state: Arc<AppState>, ui: UiSource, port: u16) -> Router {
 
     app.layer(axum::middleware::from_fn(
         move |req: axum::extract::Request, next: axum::middleware::Next| {
-            middleware::require_loopback_origin(port, req, next)
+            middleware::require_loopback_origin(port, mode, req, next)
         },
     ))
     // OUTSIDE the origin guard, and that placement is the whole point:
@@ -1114,14 +1124,17 @@ mod embedded_ui_tests {
 
     /// The desktop's private helm exposes the API only: a browser pointed at
     /// its loopback address must find neither the standalone SPA nor the
-    /// bootstrap token exchange. A credential proven valid against standalone
-    /// state must be refused even though the same durable row still exists.
+    /// bootstrap token exchange. A standalone custom-scheme request must be
+    /// refused, while the same Origin is admitted by the embedded mode. A
+    /// credential proven valid against standalone state must also be refused
+    /// even though the same durable row still exists.
     #[farhelm_testtrace::test]
     async fn embedded_mode_has_no_browser_ui_or_token_exchange() {
         let harness = rest_harness::idle_helm().await;
         let stored_secret = harness.state.auth.mint_device().await.unwrap();
         let standalone = build_router(Arc::clone(&harness.state), UiSource::None, 7433);
         let accepted = standalone
+            .clone()
             .oneshot(
                 Request::builder()
                     .uri("/api/auth/device")
@@ -1137,6 +1150,31 @@ mod embedded_ui_tests {
             StatusCode::NO_CONTENT,
             "fixture premise: the durable credential authenticates standalone"
         );
+        let custom_origin = standalone
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/auth/device")
+                    .header(header::HOST, "127.0.0.1:7433")
+                    .header(header::ORIGIN, "dioxus://index.html")
+                    .header(header::AUTHORIZATION, format!("Bearer {stored_secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            custom_origin.status(),
+            StatusCode::FORBIDDEN,
+            "standalone helm must refuse the desktop-only custom Origin"
+        );
+        assert!(
+            custom_origin
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none(),
+            "a refused Origin must not receive readable CORS headers"
+        );
         let state = Arc::new(AppState::with_provisioning(
             Arc::clone(&harness.state.manager),
             harness.state.store.clone(),
@@ -1145,6 +1183,24 @@ mod embedded_ui_tests {
         ));
         let device_secret = state.auth.mint_embedded_device().unwrap();
         let router = build_router(state, UiSource::Embedded(&FIXTURE_UI), 7433);
+        let embedded_origin = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/auth/device")
+                    .header(header::HOST, "127.0.0.1:7433")
+                    .header(header::ORIGIN, "dioxus://index.html")
+                    .header(header::AUTHORIZATION, format!("Bearer {device_secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(embedded_origin.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            embedded_origin.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "dioxus://index.html"
+        );
         let stored_request = router
             .clone()
             .oneshot(
