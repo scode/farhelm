@@ -62,8 +62,6 @@ One line per open item. This file must always match the feedback files in this d
 
 - `event-feed-cap-refusal-invisible.md` — the event feed's subscriber-cap refusal is a pre-upgrade 503 that browsers
   cannot observe.
-- `claude-scan-budget-never-settles.md` — Claude record-scan capture can never complete in a large project directory and
-  rescans forever.
 - `env-wrapper-hides-command-not-found.md` — Farhelm's own `env` wrapper turns "command not found" for Goose, Pi and OMP
   into exited (127) instead of error.
 - `host-write-lock-split-on-actor-respawn.md` — the per-host write lock lives on the actor handle, so a respawn lets

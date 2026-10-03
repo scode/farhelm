@@ -5594,7 +5594,8 @@
 - Decision: only true because the Claude record scan still exists; removed with it under the near-term TODO from
   `claude-scan-claims-foreign-record.md` (user, 2026-10-01).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `xxxluwpp`, bookmark `triage-1001e/04-discard-scan-budget`, PR
+  https://github.com/scode/farhelm/pull/1445.
 
 ## claude-capture-warns-forever.md
 
