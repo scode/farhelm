@@ -140,36 +140,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   response, so terminal output and the event feed would have to travel over the webview's IPC channel, and the UI's
   network layer would need a second transport beside HTTP.
 
-- **Claude Code reads as idle while it waits on background agents.** When Claude Code's main turn has ended but
-  background subagents it launched are still running, it is still working, and Farhelm should show the session as active
-  rather than idle. Captured from a real session (Claude Code with background reviewer subagents, model shown as Opus
-  5.5; user, host, and path lines left out). The bottom of the screen read, top to bottom:
-
-  ```
-  ● Agent "correctness-state-lifecycle review" finished · 14m 22s
-
-  ● The state-lifecycle reviewer is done. [... several lines of the main agent's reply, ending:]
-    Once it reports, I'll merge everything and hand the findings to the restater to rewrite for readers who don't know the code.
-
-  ✻ Waiting for 5 background agents to finish
-  ──────────────────────────────────────────────
-  ❯
-  ──────────────────────────────────────────────
-    [user's custom status line]
-    ⏵⏵ bypass permissions on · 1 shell · /tasks to see subagents · ← for agents
-
-    ● main
-    ○ general-purpose (+3)  Reading SPEC.md desktop Quit section          18m 5s · ↓ 489.8k tokens
-  ```
-
-  The signals are the dim spinner line "Waiting for N background agents to finish" just above the empty input box (the
-  leading glyph is Claude Code's animated spinner, captured here as `✻`), the "/tasks to see subagents · ← for agents"
-  hints in the footer, and the agent list under it, where `○ general-purpose (+3)` shows a running subagent's current
-  step, elapsed time, and token count, listed under `● main`. Note that the spinner said 5 agents while the list showed
-  one entry plus 3 more. The supervisor's Claude screen reader is tested against real screens in
-  `crates/farhelm-supervisor/tests/fixtures/screens/claude/` (see `docs/agent-screen-fixtures.md`); a fixture of this
-  state belongs there. Plan: `plans/queue/claude-background-wait-status.md`.
-
 - **Audio signal when an agent is waiting on input.** Play a sound when a session's agent gets stuck waiting for the
   user (a question, an approval prompt), so a user looking at something else notices without watching the sidebar.
   Possibly other events too; which ones, and the sound, volume, and any setting to turn it off, are to be decided when
