@@ -113,7 +113,13 @@ pub(crate) struct ProfilesView {
 ///
 /// A client has no id to know in advance, and letting it propose one would
 /// invite collisions. On update, the URL is the sole resource authority.
+///
+/// Unknown keys are refused. `resume_template` is optional (absent and
+/// `null` both mean none), so without this a misspelled `resume_templat`
+/// was silently ignored and the edit cleared the stored template. Clients
+/// that omit `resume_template` on purpose still work.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ProfileSpec {
     name: String,
     invocation: String,
@@ -592,5 +598,106 @@ mod tests {
             );
         }
         peer.await.unwrap();
+    }
+
+    /// Why: a misspelled key in a profile edit used to be ignored, and since
+    /// `resume_template` is optional the edit then cleared the stored
+    /// template without any error. Spec: an edit or create body with an
+    /// unknown key is refused (422, naming the key) and nothing is stored or
+    /// changed, the existing resume template included; a body that simply
+    /// omits `resume_template` is still accepted.
+    #[farhelm_testtrace::test]
+    async fn a_profile_edit_with_an_unknown_key_is_refused_and_changes_nothing() {
+        let harness = rest_harness::idle_helm().await;
+        let (status, created) = request(
+            &harness,
+            "POST",
+            "/api/profiles",
+            Some(serde_json::json!({
+                "name": "wrapper",
+                "invocation": "wrapper --agent",
+                "agent_kind": "generic",
+                "resume_template": ["wrapper", "--resume"],
+            })),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::CREATED, "{created}");
+        let id = created["id"].as_str().unwrap().to_string();
+        let before = harness.manager.events().revision();
+
+        let (status, value) = request(
+            &harness,
+            "POST",
+            &format!("/api/profiles/{id}"),
+            Some(serde_json::json!({
+                "name": "renamed",
+                "invocation": "wrapper --agent",
+                "agent_kind": "generic",
+                "resume_templat": ["wrapper", "--other"],
+            })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "{value}"
+        );
+        assert!(
+            value.to_string().contains("unknown field `resume_templat`"),
+            "the refusal is the unknown-key one, naming the key: {value}"
+        );
+        assert_eq!(harness.manager.events().revision(), before);
+        let (_, catalog) = request(&harness, "GET", "/api/profiles", None).await;
+        let stored = catalog["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|profile| profile["id"] == id.as_str())
+            .expect("the profile still exists")
+            .clone();
+        assert_eq!(stored["name"], "wrapper");
+        assert_eq!(
+            stored["resume_template"],
+            serde_json::json!(["wrapper", "--resume"])
+        );
+
+        let (status, value) = request(
+            &harness,
+            "POST",
+            &format!("/api/profiles/{id}"),
+            Some(serde_json::json!({
+                "name": "renamed",
+                "invocation": "wrapper --agent",
+                "agent_kind": "generic",
+            })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::OK,
+            "omitting the key stays valid: {value}"
+        );
+
+        // The same body type creates profiles, so a create with a stray key
+        // is refused too, before anything is stored.
+        let before_create = harness.manager.events().revision();
+        let (status, value) = request(
+            &harness,
+            "POST",
+            "/api/profiles",
+            Some(serde_json::json!({
+                "name": "stray",
+                "invocation": "stray",
+                "agent_kind": "generic",
+                "resume_templat": null,
+            })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "{value}"
+        );
+        assert_eq!(harness.manager.events().revision(), before_create);
     }
 }

@@ -6341,7 +6341,8 @@
 - Completion criteria: `#[serde(deny_unknown_fields)]` on `ProfileSpec`, with `resume_template` still optional, and a
   REST test showing a misspelled key is refused and the stored profile is unchanged. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/triage-boundary-checks.md`.
+- Execution: complete: change `ozmyvrzvqmzq`, bookmark `plan/triage-boundary-checks/02-profile-unknown-keys`, PR
+  https://github.com/scode/farhelm/pull/1492.
 
 ## provision-lock-map-grows-per-requested-id.md
 
