@@ -1077,7 +1077,7 @@ mod tests {
             .await
             .unwrap();
         let ProbeResponse::Provisionable {
-            probe_id,
+            probe_id: _probe_id,
             plan,
             confirmation,
         } = response
@@ -1086,39 +1086,29 @@ mod tests {
         };
         assert_eq!(harness.store.list_hosts().await.unwrap(), before);
         assert!(backend.operations.lock().unwrap().is_empty());
-        assert!(confirmation.contains("starts at boot if linger succeeds"));
-        assert!(confirmation.contains("starts at login, not at boot"));
+        assert!(
+            confirmation.contains("start the supervisor at boot when user lingering is enabled")
+        );
+        assert!(confirmation.contains("if lingering is refused, start it at login instead"));
         let ProvisioningAction::WriteUnit { unit, .. } = &plan.actions[3] else {
             panic!("the fourth action must write the unit")
         };
         let farhelm = root.path().join("lib/farhelm");
         let unit_path = root.path().join("units").join(unit);
         let expected = format!(
-            "Farhelm will perform these steps for user@absent:\n\
-             host: ubuntu, x86_64\n\
-             1. create or reuse directories {} (mode 0755), {} (mode 0700), {} (created with mode 0755 if missing; an existing directory keeps its permissions)\n\
-             2. upload Farhelm to temporary file {} and verify its digest\n\
-             3. install Farhelm at {} via temporary file {} and atomic rename\n\
-             4. write user unit {unit} at {} via temporary file {} and atomic rename\n\
-             5. reload the systemd user manager\n\
-             6. enable and start {unit}; the supervisor runs persistently under the systemd user manager\n\
-             7. optionally enable linger: the supervisor starts at boot if linger succeeds; if privilege is refused, continue and report that it starts at login, not at boot\n\
-             8. dial the supervisor and attach it to the already-registered host row\n",
+            "Farhelm will set up user@absent (ubuntu, x86_64):\n\
+             - create or reuse directory {}\n\
+             - create or reuse directory {}\n\
+             - create or reuse directory {}\n\
+             - place Farhelm at {}\n\
+             - write user service {unit} at {}\n\
+             - enable and start {unit}; the supervisor runs persistently under the systemd user manager\n\
+             - start the supervisor at boot when user lingering is enabled; if lingering is refused, start it at login instead\n",
             root.path().join("lib").display(),
             root.path().join("state").display(),
             root.path().join("units").display(),
-            root.path()
-                .join(format!("lib/.farhelm.farhelm-tmp-{probe_id}"))
-                .display(),
             farhelm.display(),
-            root.path()
-                .join(format!("lib/.farhelm.farhelm-tmp-{probe_id}"))
-                .display(),
             unit_path.display(),
-            root.path()
-                .join("units")
-                .join(format!(".{unit}.farhelm-tmp-{probe_id}"))
-                .display(),
         );
         assert_eq!(confirmation, expected);
     }
@@ -4327,7 +4317,11 @@ mod tests {
                 "nonce",
             )
             .unwrap();
-        assert!(named.confirmation().contains("host: centos, aarch64\n"));
+        assert!(
+            named
+                .confirmation()
+                .contains("Farhelm will set up host (centos, aarch64):\n")
+        );
         let unknown = layout(root.path())
             .plan(
                 ProvisioningOperation::Add,
@@ -4341,7 +4335,7 @@ mod tests {
         assert!(
             unknown
                 .confirmation()
-                .contains("host: unknown distribution, aarch64\n")
+                .contains("Farhelm will set up host (unknown distribution, aarch64):\n")
         );
     }
 

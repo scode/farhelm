@@ -67,15 +67,15 @@ use crate::menu_panel::{
     measurement_outcome, remember_menu_item, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
-use crate::ops::OpLock;
+use crate::ops::{OpGuard, OpLock};
 use crate::peer::{DetailPart, PeerLine, display_identity, display_peer};
 use crate::provisioning::{
-    ActionRequest, HostBinding, HostUpdateProgress, PlanConfirmation, ProvisioningMenuState,
-    ProvisioningPanel, ProvisioningTraceShape, UpdateProgressSummary, UpdateStepLine,
+    ActionRequest, HostBinding, HostUpdateProgress, ProvisioningMenuState, ProvisioningPanel,
+    ProvisioningTraceShape, SetupPlanConfirmation, UpdateProgressSummary, UpdateStepLine,
 };
 use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
-mod settings_dialog;
+pub(crate) mod settings_dialog;
 
 use settings_dialog::SettingsField;
 
@@ -951,6 +951,11 @@ pub(crate) fn HostsPanel(
     // An add that committed with an unreadable reply, which has no row to
     // sit on — see the form's `on_added`.
     let mut add_warning = use_signal(|| None::<String>);
+    // A setup submission the helm refused or that failed in transport. The
+    // add dialog has already closed by then (see `on_add_submit`), so the
+    // panel is the only place left to say so; opening the dialog again
+    // clears it, the same way a fresh attempt clears an in-dialog error.
+    let mut add_error = use_signal(|| None::<String>);
 
     // Closes BOTH row-menu signals every time the add form mounts,
     // unmounts, or (via `on_added` setting `adding` back to `false`)
@@ -1241,6 +1246,37 @@ pub(crate) fn HostsPanel(
     // Cosmetic, not the guard — every handler below claims the token for
     // itself (see the `ops` module).
     let busy = ops.busy();
+
+    // The add dialog's setup submission, run in THIS component's scope
+    // rather than the dialog's. A confirmed setup closes the dialog at once
+    // (a modal must never hold the user behind a pending request), and a
+    // task spawned by the dialog would be dropped with it, stranding the
+    // reply. The page token travels in with the submission: the dialog
+    // claimed it synchronously in the confirming handler, and dropping it
+    // when the POST completes is what re-enables the heading's add button
+    // and every other page mutation.
+    let add_submit_base = base.clone();
+    let on_add_submit = move |submission: AddSubmission| {
+        let AddSubmission { probe_id, claim } = submission;
+        settings_dialog::return_focus_to_add_button();
+        adding.set(false);
+        add_error.set(None);
+        add_warning.set(None);
+        let base = add_submit_base.clone();
+        spawn(async move {
+            let result = provision_host(&base, &probe_id).await;
+            drop(claim);
+            match result {
+                Ok(ProvisioningSubmission::Accepted(_)) => {}
+                Ok(ProvisioningSubmission::Unvalidated(warning)) => add_warning.set(Some(warning)),
+                Err(problem) => add_error.set(Some(problem.into_text())),
+            }
+            // Every outcome refreshes: an accepted add registered a row whose
+            // run the row itself follows, and a refused or ambiguous one may
+            // still have committed (the probe id is one-use either way).
+            on_changed.call(());
+        });
+    };
     rsx! {
         section { class: "hosts-panel",
             div { class: "hosts-heading",
@@ -1313,20 +1349,27 @@ pub(crate) fn HostsPanel(
                     // "add"; assistive technology keeps the object that
                     // action adds, matching the form and existing callers.
                     aria_label: "add host",
-                    // This control UNMOUNTS the add form, so it must not act
-                    // while a MUTATION is in flight: dropping the component
-                    // mid-request strands the response with nothing left to
-                    // act on it. Reads are not what the token covers — the
-                    // page reads constantly and none of those care whether
-                    // this form exists. The token is read synchronously in
-                    // the handler for the same reason every other guard here
-                    // is — the attribute is one render behind.
+                    // Opening the add dialog waits out any live MUTATION,
+                    // including the previous add's setup POST, which this
+                    // panel runs after that dialog closed (`on_add_submit`):
+                    // a second add started under it would only reach a
+                    // confirm the token refuses. Reads are not what the token
+                    // covers — the page reads constantly and none of those
+                    // care whether the dialog exists. While the dialog is
+                    // open this button sits behind its modal, so closing is
+                    // the dialog's own cancel. The token is read
+                    // synchronously in the handler for the same reason every
+                    // other guard here is — the attribute is one render
+                    // behind.
                     disabled: busy,
                     onclick: move |_| {
                         if ops.busy_now() {
                             return;
                         }
                         let open = adding();
+                        if !open {
+                            add_error.set(None);
+                        }
                         adding.set(!open);
                     },
                     "add"
@@ -1336,7 +1379,13 @@ pub(crate) fn HostsPanel(
                 AddHostForm {
                     ops,
                     on_refresh: on_changed,
+                    on_submit: on_add_submit,
+                    on_cancel: move |_| {
+                        settings_dialog::return_focus_to_add_button();
+                        adding.set(false);
+                    },
                     on_added: move |unvalidated: Option<String>| {
+                        settings_dialog::return_focus_to_add_button();
                         adding.set(false);
                         // A committed-but-unreadable add has no row id to
                         // hang a warning on — the reply that would have
@@ -1352,6 +1401,12 @@ pub(crate) fn HostsPanel(
                 PeerLine {
                     class: "host-warning add-host-warning",
                     parts: vec![DetailPart::Peer(warning)],
+                }
+            }
+            if let Some(error) = add_error() {
+                PeerLine {
+                    class: "host-error add-host-error",
+                    parts: probe_error_parts(error),
                 }
             }
             // Two different failures, said differently, decided by whether a
@@ -3180,6 +3235,19 @@ struct AddOffer {
     binding: AddBinding,
 }
 
+/// A confirmed setup, handed from the add dialog to the hosts panel.
+///
+/// The dialog closes as soon as the user confirms, so the POST cannot live in
+/// the dialog's scope. `claim` is the page token the dialog took in the same
+/// handler that consumed the offer; it must be held until the POST resolves,
+/// which is why it travels with the probe id instead of being re-claimed by
+/// the receiver (a re-claim could lose to another page mutation after the
+/// offer was already spent).
+struct AddSubmission {
+    probe_id: String,
+    claim: OpGuard,
+}
+
 /// Keep probe and manual diagnostics inside the peer-text boundary.
 fn probe_error_parts(error: String) -> Vec<DetailPart> {
     vec![DetailPart::Peer(error)]
@@ -3216,27 +3284,41 @@ fn destination_detail_parts(destination: &str) -> Vec<DetailPart> {
 /// Discovery claims no page token because its network wait must not freeze
 /// unrelated page work. It can still mutate the registry when a supervisor
 /// answers, so its local re-entry guard and authoritative refresh are part of
-/// the contract. Only this form's explicit confirmation starts its
-/// provisioning run and claims `OpLock` around its POST; remote updates on
-/// existing rows submit automatically from the row's own lifecycle instead.
+/// the contract. Only this form's explicit confirmation (or the remembered
+/// permanent answer) starts its provisioning run and claims `OpLock` around
+/// its POST; remote updates on existing rows submit automatically from the
+/// row's own lifecycle instead.
+///
+/// The dialog never holds the user behind a pending request. Confirming
+/// setup hands the claimed token and the one-use probe id to `on_submit` and
+/// the dialog closes; the panel runs the POST and the new row tracks the run.
+/// Cancel and Escape stay live throughout, including while discovery is out
+/// or another page operation holds the token: closing mid-discovery drops
+/// the probe's reply, as closing the inline form did before this was a
+/// dialog, and the helm's registry change still reaches this page through
+/// the fleet feed if the probe registered a host.
 #[component]
 fn AddHostForm(
     mut ops: OpLock,
     on_added: EventHandler<Option<String>>,
     on_refresh: EventHandler<()>,
+    on_submit: EventHandler<AddSubmission>,
+    on_cancel: EventHandler<()>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let mut preferences = use_context::<crate::list::SharedPreferences>();
     let mut ssh = use_signal(String::new);
     let mut remote_farhelm = use_signal(String::new);
     let mut remote_state_dir = use_signal(String::new);
     let mut error = use_signal(|| None::<String>);
     let mut probing = use_signal(|| false);
     let mut offer = use_signal(|| None::<AddOffer>);
+    let mut auto_submit = use_signal(|| false);
     let page_busy = ops.busy();
     let busy = page_busy || *probing.read();
 
-    let confirm_base = base.clone();
-    let confirm = move |_| {
+    let preference_base = base.clone();
+    let confirm = use_callback(move |_| {
         let Some(planned) = offer.peek().clone() else {
             return;
         };
@@ -3259,22 +3341,41 @@ fn AddHostForm(
         // ambiguity reaches the browser. Never present it for a second use.
         offer.set(None);
         error.set(None);
-        let base = confirm_base.clone();
-        spawn(async move {
-            let result = provision_host(&base, &planned.probe_id).await;
-            drop(claim);
-            match result {
-                Ok(ProvisioningSubmission::Accepted(_)) => on_added.call(None),
-                Ok(ProvisioningSubmission::Unvalidated(warning)) => on_added.call(Some(warning)),
-                Err(problem) => {
-                    error.set(Some(problem.into_text()));
-                    on_refresh.call(());
-                }
-            }
+        on_submit.call(AddSubmission {
+            probe_id: planned.probe_id,
+            claim,
         });
-    };
+    });
+
+    // A permanent answer skips only the setup question. The probe still
+    // produces the one-use authority, and the same binding check protects
+    // against fields changing while that authority is in flight.
+    use_effect(move || {
+        if auto_submit() && offer.peek().is_some() {
+            auto_submit.set(false);
+            confirm.call(());
+        }
+    });
+    use_effect(move || {
+        if offer.read().is_some() && !*auto_submit.peek() {
+            settings_dialog::focus_add_cancel();
+        }
+    });
 
     rsx! {
+        div { class: "host-settings-backdrop", role: "presentation",
+            div {
+                class: "host-settings-dialog host-add-dialog",
+                role: "dialog",
+                aria_modal: "true",
+                aria_label: "add host",
+                tabindex: "-1",
+                onmounted: move |_| settings_dialog::install_add_dialog(),
+                onkeydown: move |evt: KeyboardEvent| {
+                    if evt.key() == Key::Escape && !evt.is_composing() {
+                        on_cancel.call(());
+                    }
+                },
         form {
             class: "add-host-form",
             onsubmit: move |evt| {
@@ -3303,11 +3404,12 @@ fn AddHostForm(
                         Ok(ProbeResponse::Provisionable {
                             probe_id,
                             confirmation,
-                        }) => offer.set(Some(AddOffer {
-                            probe_id,
-                            confirmation,
-                            binding,
-                        })),
+                        }) => {
+                            offer.set(Some(AddOffer { probe_id, confirmation, binding }));
+                            auto_submit.set(
+                                preferences.0.peek().skip_host_setup_confirmation == Some(true),
+                            );
+                        }
                         Ok(ProbeResponse::Manual { reason }) => error.set(Some(reason)),
                         Ok(ProbeResponse::Unvalidated(problem)) => {
                             // A successful probe may have registered an
@@ -3328,17 +3430,20 @@ fn AddHostForm(
             // become part of a command line, and a "corrected" one dials or
             // execs something the user did not type.
             if let Some(planned) = offer.read().clone() {
-                PlanConfirmation {
+                SetupPlanConfirmation {
                     confirmation: planned.confirmation,
                     busy: page_busy,
-                    confirm_label: "confirm setup",
-                    on_confirm: confirm,
-                    on_cancel: move |_| {
-                        if !ops.busy_now() {
-                            offer.set(None);
-                            error.set(None);
+                    on_confirm: move |skip_future| {
+                        if skip_future {
+                            preferences.0.write().skip_host_setup_confirmation = Some(true);
+                            store_preference(
+                                &preference_base,
+                                PreferenceValue::HostSetupConfirmation(true),
+                            );
                         }
+                        confirm.call(());
                     },
+                    on_cancel: move |_| on_cancel.call(()),
                 }
             } else {
                 label {
@@ -3395,6 +3500,17 @@ fn AddHostForm(
                 PeerLine {
                     class: "create-session-error add-host-error",
                     parts: probe_error_parts(err),
+                }
+            }
+        }
+                if offer.read().is_none() {
+                    // Never disabled: see this component's doc.
+                    button {
+                        r#type: "button",
+                        class: "btn btn-neutral add-host-cancel",
+                        onclick: move |_| on_cancel.call(()),
+                        "cancel"
+                    }
                 }
             }
         }

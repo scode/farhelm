@@ -59,11 +59,14 @@ use web_time::Instant;
 use dioxus::prelude::*;
 
 use crate::api::{
-    ProbeResponse, ProvisioningAccepted, ProvisioningOperation, ProvisioningStatus,
-    ProvisioningSubmission, ProvisioningView, SubmissionError, fetch_provisioning,
-    plan_host_update, probe_local_host, probe_ssh_host, provision_host, update_host,
+    PreferenceValue, ProbeResponse, ProvisioningAccepted, ProvisioningOperation,
+    ProvisioningStatus, ProvisioningSubmission, ProvisioningView, SubmissionError,
+    fetch_provisioning, plan_host_update, probe_local_host, probe_ssh_host, provision_host,
+    store_preference, update_host,
 };
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
+use crate::hosts::settings_dialog;
+use crate::list::SharedPreferences;
 use crate::ops::{OpGuard, OpLock, ReadGate};
 use crate::peer::{DetailPart, PeerBlock, PeerLine};
 use crate::reader::{SurfaceReader, Trigger, request_read};
@@ -221,13 +224,12 @@ fn decide_request(
     }
 }
 
-/// Whether this operation on this binding submits without confirmation.
+/// Whether this row-menu operation submits without confirmation.
 ///
-/// Remote UPDATE only. ADD keeps its confirmation in every shape (initial
-/// setup, automatic local setup, rerun), and anything that is not an ssh row
-/// confirms too — this gate must not be widened to the menu's broader
-/// `update_allowed`, which also offers Update on local rows the backend's
-/// `plan_update()` refuses.
+/// Remote UPDATE is always automatic. ADD is handled by the add-host dialog,
+/// which may submit after probing when the shared helm preference records the
+/// user's permanent answer; that preference must not leak into this menu
+/// helper or make a local row's unsupported UPDATE look automatic.
 fn automatic_update(operation: ProvisioningOperation, binding: &HostBinding) -> bool {
     operation == ProvisioningOperation::Update && binding.kind.updates_automatically()
 }
@@ -688,6 +690,50 @@ pub(crate) fn PlanConfirmation(
                     onclick: move |_| on_cancel.call(()),
                     "cancel"
                 }
+            }
+        }
+    }
+}
+
+/// Render the three answers for an initial or rerun host setup offer.
+///
+/// The helm supplies the text; this component owns only the shared button
+/// wording and tiering so the initial add dialog and a failed-add rerun ask
+/// the same question.
+///
+/// `busy` disables only the two answers that would submit. Cancel stays
+/// live: this renders inside a modal, and a modal must never hold the user
+/// behind somebody else's pending request.
+#[component]
+pub(crate) fn SetupPlanConfirmation(
+    confirmation: String,
+    busy: bool,
+    on_confirm: EventHandler<bool>,
+    on_cancel: EventHandler<()>,
+) -> Element {
+    rsx! {
+        PeerBlock { class: "provisioning-plan", text: confirmation }
+        div { class: "provisioning-confirm-actions add-host-confirm-actions",
+            button {
+                r#type: "button",
+                class: "btn btn-primary provisioning-confirm",
+                disabled: busy,
+                onclick: move |_| on_confirm.call(false),
+                "yes"
+            }
+            button {
+                r#type: "button",
+                class: "btn btn-primary btn-outline",
+                disabled: busy,
+                onclick: move |_| on_confirm.call(true),
+                "yes, and don't ask in the future"
+            }
+            button {
+                r#type: "button",
+                class: "btn btn-neutral add-host-cancel",
+                autofocus: true,
+                onclick: move |_| on_cancel.call(()),
+                "cancel"
             }
         }
     }
@@ -1561,6 +1607,7 @@ pub(crate) fn ProvisioningPanel(
     on_changed: EventHandler<()>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let mut preferences = use_context::<SharedPreferences>();
     let host_id = host.id;
     let binding = HostBinding::from(&host);
     let current_binding = use_memo(use_reactive((&binding,), |(binding,)| binding));
@@ -1569,6 +1616,7 @@ pub(crate) fn ProvisioningPanel(
     let progress_surface = use_signal(SurfaceReader::default);
     let mut read_gate = use_signal(ReadGate::default);
     let mut pending = use_signal(|| None::<PendingPlan>);
+    let mut auto_submit_add = use_signal(|| false);
     let mut planning = use_signal(|| false);
     let mut action_error = use_signal(|| None::<String>);
     let mut action_warning = use_signal(|| None::<String>);
@@ -1751,6 +1799,10 @@ pub(crate) fn ProvisioningPanel(
                     if is_local_add {
                         local_auto_retry.set(true);
                     }
+                    auto_submit_add.set(
+                        !is_local_add
+                            && preferences.0.peek().skip_host_setup_confirmation == Some(true),
+                    );
                     pending.set(Some(plan));
                     on_reveal_details.call(());
                 }
@@ -2237,7 +2289,7 @@ pub(crate) fn ProvisioningPanel(
     // exclusion even if this row disappears while the POST is pending.
     let submit_base = base.clone();
     let submit_progress = request_progress.clone();
-    let confirm = move |_| {
+    let confirm = use_callback(move |_| {
         let Some(plan) = pending.peek().clone() else {
             return;
         };
@@ -2282,7 +2334,17 @@ pub(crate) fn ProvisioningPanel(
             },
             plan,
         );
-    };
+    });
+
+    // A remembered setup answer applies to failed remote ADD reruns as well
+    // as a fresh add. Keep the one-use plan and binding checks in the same
+    // submission path; this effect only removes the question from the UI.
+    use_effect(move || {
+        if auto_submit_add() && pending.peek().is_some() {
+            auto_submit_add.set(false);
+            confirm.call(());
+        }
+    });
 
     let snapshot = progress.read().clone();
     let offer = pending.read().clone();
@@ -2409,24 +2471,76 @@ pub(crate) fn ProvisioningPanel(
             }
 
             if let Some(plan) = offer {
-                PlanConfirmation {
-                    confirmation: plan.confirmation,
-                    busy: page_busy,
-                    confirm_label: match plan.operation {
-                        ProvisioningOperation::Add => "confirm setup",
-                        ProvisioningOperation::Update => "confirm update",
-                    },
-                    on_confirm: confirm,
-                    on_cancel: move |_| {
-                        if !ops.busy_now() {
-                            pending.set(None);
-                            action_error.set(None);
-                            action_warning.set(None);
-                            if local_setup {
-                                local_auto_retry.set(true);
+                if plan.operation == ProvisioningOperation::Add {
+                    div { class: "host-settings-backdrop", role: "presentation",
+                        div {
+                            class: "host-settings-dialog host-add-dialog",
+                            role: "dialog",
+                            aria_modal: "true",
+                            aria_label: "host setup",
+                            tabindex: "-1",
+                            onmounted: move |_| {
+                                settings_dialog::install_add_dialog();
+                                settings_dialog::focus_add_cancel();
+                            },
+                            // Cancel and Escape stay live while another
+                            // operation holds the page token: dismissing the
+                            // question starts nothing, and the confirm path
+                            // takes `pending` before it submits, so there is
+                            // no request of this row's to strand.
+                            onkeydown: move |evt: KeyboardEvent| {
+                                if evt.key() == Key::Escape && !evt.is_composing() {
+                                    settings_dialog::return_focus_to_row(host_id);
+                                    pending.set(None);
+                                    action_error.set(None);
+                                    action_warning.set(None);
+                                    if local_setup {
+                                        local_auto_retry.set(true);
+                                    }
+                                }
+                            },
+                            SetupPlanConfirmation {
+                                confirmation: plan.confirmation,
+                                busy: page_busy,
+                                on_confirm: move |skip_future| {
+                                    if skip_future {
+                                        preferences.0.write().skip_host_setup_confirmation = Some(true);
+                                        store_preference(
+                                            &base,
+                                            PreferenceValue::HostSetupConfirmation(true),
+                                        );
+                                    }
+                                    confirm.call(());
+                                },
+                                on_cancel: move |_| {
+                                    settings_dialog::return_focus_to_row(host_id);
+                                    pending.set(None);
+                                    action_error.set(None);
+                                    action_warning.set(None);
+                                    if local_setup {
+                                        local_auto_retry.set(true);
+                                    }
+                                },
                             }
                         }
-                    },
+                    }
+                } else {
+                    PlanConfirmation {
+                        confirmation: plan.confirmation,
+                        busy: page_busy,
+                        confirm_label: "confirm update",
+                        on_confirm: move |_| confirm.call(()),
+                        on_cancel: move |_| {
+                            if !ops.busy_now() {
+                                pending.set(None);
+                                action_error.set(None);
+                                action_warning.set(None);
+                                if local_setup {
+                                    local_auto_retry.set(true);
+                                }
+                            }
+                        },
+                    }
                 }
             } else if is_planning {
                 div {
@@ -2689,9 +2803,9 @@ mod tests {
         );
     }
 
-    /// Only remote UPDATE skips confirmation. ADD keeps it in every shape,
-    /// and so does anything that is not an ssh row — the menu's broader
-    /// offer on local rows must never widen this gate.
+    /// The row-menu path skips only remote UPDATE. ADD's optional permanent
+    /// answer is evaluated by the add-host dialog after its probe, and
+    /// anything that is not an ssh row stays confirmed here.
     #[farhelm_testtrace::test]
     fn only_remote_updates_submit_without_confirmation() {
         let host_id = 7;

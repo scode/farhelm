@@ -1328,6 +1328,7 @@ mod tests {
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
+                 ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE hosts DROP COLUMN yolo_safe;
                  PRAGMA user_version = 26;",
             )

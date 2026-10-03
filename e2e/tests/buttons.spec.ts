@@ -154,9 +154,12 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
     await page.getByRole("button", { name: "add host" }).click();
     await expect(page.locator(".add-host-form")).toBeVisible();
     await expectPrimary(".add-host-submit");
-    // The list never unmounts. Close the add form through its own toggle so
-    // the following row-menu samples start from the resting layout.
-    await page.getByRole("button", { name: "add host" }).click();
+    // The form is a modal now, so the heading's toggle sits behind it and
+    // its own cancel closes it. That cancel is a dialog secondary, which is
+    // the neutral tier like the create form's. Closing it lets the following
+    // row-menu samples start from the resting layout.
+    await expectNeutral(".add-host-cancel");
+    await page.locator(".add-host-cancel").click();
     await expect(page.locator(".add-host-form")).toHaveCount(0);
 
     // --- Ghost exemption (row-menu item) and the destructive item, both

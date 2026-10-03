@@ -2236,6 +2236,9 @@ samp {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-dialog);
 }
+.host-add-dialog {
+  width: min(560px, 100%);
+}
 .host-settings-title {
   color: var(--fg-0);
   font-size: 14px;
@@ -3648,14 +3651,30 @@ samp {
   color: var(--danger);
 }
 
-/* The add-host form reuses the create dialog's box entirely — same inline,
-   non-modal shape, same field styling — so the two registration surfaces do
-   not look like they come from different applications. */
+/* The add-host form lives in the same modal card as host settings. Keeping
+   the fields and the setup offer in one surface means a probe never replaces
+   the dialog with an unexplained block in the sidebar. */
 .add-host-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 10px 0 4px;
+}
+
+.add-host-confirm-actions {
+  flex-wrap: wrap;
+}
+
+.add-host-form .add-host-cancel {
+  align-self: flex-end;
+}
+
+.host-add-dialog > .add-host-cancel {
+  align-self: flex-end;
+}
+
+.add-host-form .provisioning-plan {
+  margin-top: 0;
 }
 
 .add-host-form label {

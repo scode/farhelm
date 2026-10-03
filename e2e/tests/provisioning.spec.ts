@@ -15,8 +15,11 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  hostRowByName,
   openHostMenu,
   openHostsPanel,
+  patchPreferences,
+  readPreferences,
   stubFeed,
   type FeedStub,
 } from "./helpers/fleet";
@@ -359,9 +362,17 @@ test.beforeEach(async () => {
 });
 
 test.afterEach(async ({ request }) => {
+  // A test that failed while `holdLockWithAdd` still held its setup POST
+  // must not let that POST reach the helm later. WebKit forwards a held
+  // request when the context closes, which registered the lock host after
+  // the cleanup below had already run and leaked it into every later spec
+  // sharing this helm. Abort it here, and wait for the abort to land,
+  // before the registry is checked.
+  await Promise.all(heldAddConfirms.splice(0).map((abort) => abort()));
   // Release an action held by a failed assertion so it cannot poison the
   // next serial test or the second browser project.
   await configureBackend();
+  await patchPreferences(request, { skip_host_setup_confirmation: null });
   await removeHostsBeyondBaseline(request);
 });
 
@@ -380,9 +391,41 @@ test("real discovery offers one peer-safe concrete plan and mutates nothing befo
   await expect(plan).toContainText(remote);
   await expect(plan).toContainText("<U+202E>");
   await expect(plan).toContainText("<U+200B>");
-  await expect(page.getByRole("button", { name: "confirm setup" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "yes", exact: true })).toBeVisible();
   expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect"]);
+});
+
+test("a permanent setup answer submits the next setup-needed add after probing", async ({
+  page,
+  request,
+}, testInfo) => {
+  const first = destination(testInfo, "remember-setup-first");
+  const second = destination(testInfo, "remember-setup-second");
+  await configureBackend({
+    targets: {
+      [target(first)]: {},
+      [target(second)]: {},
+    },
+  });
+  await patchPreferences(request, { skip_host_setup_confirmation: null });
+  await page.goto("/");
+  await openHostsPanel(page);
+
+  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".add-host-ssh").fill(first);
+  await page.locator(".add-host-submit").click();
+  await expect(page.locator(".provisioning-plan")).toBeVisible();
+  await page.getByRole("button", { name: "yes, and don't ask in the future", exact: true }).click();
+  await expect(hostRowByName(page, first)).toBeVisible();
+  await expect.poll(async () => (await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
+
+  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".add-host-ssh").fill(second);
+  await page.locator(".add-host-submit").click();
+  await expect(hostRowByName(page, second)).toBeVisible();
+  await expect(page.getByRole("button", { name: "yes", exact: true })).toHaveCount(0);
+  await expect(page.locator(".add-host-form")).toHaveCount(0);
 });
 
 test("manual discovery preserves the concrete peer-safe reason and never provisions", async ({
@@ -480,7 +523,7 @@ test("discovery registers an answering supervisor through the real handler", asy
   await probeRemote(page, remote);
 
   await expect(page.locator(`.host-row:has-text("${remote}")`)).toBeVisible();
-  await expect(page.getByRole("button", { name: "confirm setup" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "yes", exact: true })).toHaveCount(0);
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe"]);
 });
 
@@ -510,6 +553,65 @@ test("blank optional fields and same-task double submit produce one real probe",
   expect((await backendEvents()).filter((event) => event.event === "probe")).toHaveLength(1);
 });
 
+/**
+ * The add dialog must never hold the user behind a pending request, so its
+ * cancel stays live while discovery is out and closing it frees the page.
+ *
+ * Specifies: with the probe held, cancel is enabled and closes the dialog;
+ * the page behind it is reachable again at once; and releasing the probe
+ * afterwards reopens nothing and registers nothing. Closing drops the
+ * dialog's wait for the reply, and the browser may abandon the request with
+ * it, so the release barrier is the route handler finishing, not a response.
+ */
+test("the add dialog's cancel stays live while discovery is pending", async ({
+  page,
+  request,
+}, testInfo) => {
+  const remote = destination(testInfo, "cancel-while-probing");
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let resolveArrived!: () => void;
+  const arrived = new Promise<void>((resolve) => {
+    resolveArrived = resolve;
+  });
+  let resolveHandled!: () => void;
+  const handled = new Promise<void>((resolve) => {
+    resolveHandled = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === "/api/hosts/probe",
+    async (route) => {
+      resolveArrived();
+      await gate;
+      try {
+        await route.continue();
+      } catch {
+        // The page abandoned the request when the dialog closed.
+      } finally {
+        resolveHandled();
+      }
+    },
+  );
+  await page.goto("/");
+  await probeRemote(page, remote);
+  await arrived;
+  await expect(page.locator(".add-host-submit")).toHaveText("probing…");
+
+  const cancel = page.locator(".add-host-cancel");
+  await expect(cancel).toBeEnabled();
+  await cancel.click();
+  await expect(page.locator(".host-add-dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+
+  release();
+  await handled;
+  await expect(page.locator(".host-add-dialog")).toHaveCount(0);
+  await expect(page.locator(".provisioning-plan")).toHaveCount(0);
+  expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
+});
+
 test("accepted ADD registers before execution and releases the page lock while running", async ({
   page,
   request,
@@ -525,7 +627,7 @@ test("accepted ADD registers before execution and releases the page lock while r
   await page.goto("/");
   await openHostsPanel(page);
   await probeRemote(page, remote);
-  await page.getByRole("button", { name: "confirm setup" }).click();
+  await page.getByRole("button", { name: "yes", exact: true }).click();
 
   const registered = await hostFor(request, remote);
   await expect(page.locator(`[data-host-id="${registered.id}"]`)).toBeVisible();
@@ -575,10 +677,12 @@ test("a refused ADD attempt consumes the displayed offer and refreshes committed
   const consumed = await request.post("/api/hosts/provision", { data: { probe_id: planned.probe_id } });
   expect(consumed.status()).toBe(202);
 
-  await page.getByRole("button", { name: "confirm setup" }).click();
+  await page.getByRole("button", { name: "yes", exact: true }).click();
+  // Confirming closed the dialog before the refusal arrived, so the refusal
+  // is reported on the hosts panel rather than inside a dialog that is gone.
   await expect(page.locator(".add-host-error")).toContainText("already been used");
-  await expect(page.locator(".add-host-form .provisioning-plan")).toHaveCount(0);
-  await expect(page.locator(".add-host-ssh")).toBeVisible();
+  await expect(page.locator(".add-host-form")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
   await expect(page.locator(`.host-row:has-text("${remote}")`)).toBeVisible();
 });
 
@@ -596,7 +700,7 @@ test("a malformed accepted ADD closes the form and warns without retrying", asyn
   await page.goto("/");
   await openHostsPanel(page);
   await probeRemote(page, remote);
-  await page.getByRole("button", { name: "confirm setup" }).click();
+  await page.getByRole("button", { name: "yes", exact: true }).click();
 
   await expect(page.locator(".add-host-form")).toHaveCount(0);
   await expect(page.locator(".add-host-warning")).toContainText("accepted");
@@ -942,12 +1046,25 @@ test("a failed local ADD keeps its rerun action in the local setup state", async
 // Authoritative success returns the status spot to its ordinary label.
 
 /**
+ * Aborts for `holdLockWithAdd` gates; `afterEach` fires whatever is left.
+ * Each resolves once a held confirm has been aborted, or at once when its
+ * gate was already released (the handler then continued long ago and the
+ * abort changes nothing) or the confirm never arrived.
+ */
+const heldAddConfirms: Array<() => Promise<void>> = [];
+
+/**
  * Hold the page operation lock through an ADD confirm, without touching details.
  *
  * Discovery stays outside the lock, so the held request is the confirm POST
  * itself: its arrival proves the claim is taken, and releasing it completes
  * the ADD and frees the token. Unlike retry/adopt/edit, confirming an add
  * writes no global disclosure, so checkbox assertions stay meaningful.
+ *
+ * Confirming also closes the add dialog while the POST is still held: the
+ * submission belongs to the hosts panel from then on, so the rest of the
+ * page (other hosts' menus above all) stays reachable instead of sitting
+ * under a modal that waits on the request.
  */
 async function holdLockWithAdd(
   page: Page,
@@ -957,6 +1074,17 @@ async function holdLockWithAdd(
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
+  let abandoned = false;
+  let arrived = false;
+  let settle!: () => void;
+  const settled = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  heldAddConfirms.push(async () => {
+    abandoned = true;
+    release();
+    if (arrived) await settled;
+  });
   let resolveConfirmed!: () => void;
   const confirmed = new Promise<void>((resolve) => {
     resolveConfirmed = resolve;
@@ -965,9 +1093,15 @@ async function holdLockWithAdd(
   await page.route(
     (url) => url.pathname === "/api/hosts/provision",
     async (route) => {
+      arrived = true;
       resolveConfirmed();
       await gate;
-      await route.continue();
+      try {
+        if (abandoned) await route.abort();
+        else await route.continue();
+      } finally {
+        settle();
+      }
     },
   );
   const addHost = page.getByRole("button", { name: "add host" });
@@ -975,8 +1109,9 @@ async function holdLockWithAdd(
   await page.locator(".add-host-ssh").fill(destination);
   await page.locator(".add-host-submit").click();
   await expect(page.locator(".add-host-form .provisioning-plan")).toBeVisible();
-  await page.getByRole("button", { name: "confirm setup" }).click();
+  await page.getByRole("button", { name: "yes", exact: true }).click();
   await confirmed;
+  await expect(page.locator(".host-add-dialog")).toHaveCount(0);
   // The held confirm owns the page token: unrelated adds disable until
   // the release below, which is the UI-side proof the lock is really held.
   await expect(addHost).toBeDisabled();

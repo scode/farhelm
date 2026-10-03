@@ -932,6 +932,8 @@ export interface Preferences {
   remembered_permissions?: string;
   /** Whether host removal skips its confirmation dialog after this client seeds. */
   skip_host_remove_confirmation?: boolean;
+  /** Whether host setup skips its confirmation dialog after this client seeds. */
+  skip_host_setup_confirmation?: boolean;
 }
 
 /** Read the helm's shared preference row (SPEC.md, Session list). */
@@ -960,6 +962,7 @@ export async function patchPreferences(
     remembered_permissions?: string | null;
     remembered_workspace_trust?: boolean | null;
     skip_host_remove_confirmation?: boolean | null;
+    skip_host_setup_confirmation?: boolean | null;
   },
 ): Promise<void> {
   const response = await request.put("/api/preferences", { data: patch });
@@ -982,6 +985,7 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
     compact: null,
     remembered_permissions: null,
     skip_host_remove_confirmation: null,
+    skip_host_setup_confirmation: null,
   });
 }
 
@@ -1232,6 +1236,39 @@ export async function openHostMenu(row: Locator): Promise<void> {
     "waiting for the host actions panel to finish measuring against its own toggle",
     "left: var(--menu-left)",
   );
+}
+
+/**
+ * Escape a literal for use inside a `RegExp`.
+ *
+ * Host names here are ssh DESTINATIONS, which routinely contain regex
+ * metacharacters — a dotted hostname is the common case, and `.` matches
+ * anything. Interpolating one raw builds a pattern that quietly matches more
+ * rows than it names, so `user@a.b` would also select `user@axb`; with a
+ * bracket or a paren in a name it stops being a valid pattern at all and the
+ * test fails for a reason that has nothing to do with what it asserts.
+ */
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Locator for one host's row in the panel, matched against `.host-name`
+ * exactly — the same anchoring `rowByTitle` uses and for the same reason:
+ * a row's full text contains its state detail too, which mentions other
+ * hosts (a duplicate names its twin), so `hasText` on the row would match
+ * rows that merely refer to the wanted host.
+ *
+ * Shared because the provisioning and multi-host specs both need to find a
+ * row by the destination a test just registered, and a looser `:has-text`
+ * match there would also pick up a row whose detail mentions it.
+ */
+export function hostRowByName(page: Page, name: string): Locator {
+  return page.locator(".host-row").filter({
+    has: page.locator(".host-name", {
+      hasText: new RegExp(`^${escapeRegExp(name)}$`),
+    }),
+  });
 }
 
 /**

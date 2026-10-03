@@ -50,6 +50,7 @@ use crate::{Host, HostId};
 
 /// The selector the isolation and the focus scripts find the dialog by.
 const DIALOG_SELECTOR: &str = r#".host-settings-dialog[role="dialog"]"#;
+const ADD_DIALOG_SELECTOR: &str = r#".host-add-dialog[role="dialog"]"#;
 
 /// One setting the dialog can change, as the key its last write's outcome is
 /// filed under. A superset of [`EditField`]: the YOLO checkbox writes through
@@ -109,7 +110,7 @@ pub(super) fn field_outcome(
 /// nothing. The focus waits a frame so it lands after the dialog is gone.
 /// A host that was removed meanwhile has no toggle, and the lookup just
 /// finds nothing.
-pub(super) fn return_focus_to_row(id: HostId) {
+pub(crate) fn return_focus_to_row(id: HostId) {
     let row = serde_json::to_string(&format!(r#"[data-host-id="{id}"] .host-row-menu"#))
         .expect("a string always serializes");
     document::eval(&format!(
@@ -138,9 +139,50 @@ fn install_remove_dialog() {
     install_dialog_with_initial_focus(".host-settings-close");
 }
 
+/// Focus and isolate the add-host dialog, whose first control is the SSH
+/// destination rather than a destructive action.
+pub(crate) fn install_add_dialog() {
+    install_dialog_with_selector(
+        ADD_DIALOG_SELECTOR,
+        ".add-host-ssh",
+        Some(".add-host-cancel"),
+    );
+}
+
+/// Release the add-host modal and return focus to the heading's add button.
+pub(crate) fn return_focus_to_add_button() {
+    let selector = serde_json::to_string(".add-host-button").expect("a string always serializes");
+    document::eval(&format!(
+        "{} requestAnimationFrame(() => document.querySelector({selector})?.focus({{ preventScroll: true }}))",
+        modal_isolation::release_js(ADD_DIALOG_SELECTOR),
+    ));
+}
+
+/// Put the safe cancel action first when probing changes into a setup offer.
+pub(crate) fn focus_add_cancel() {
+    document::eval("document.querySelector('.add-host-cancel')?.focus({ preventScroll: true });");
+}
+
 /// Apply the shared modal setup and choose the first control explicitly.
 fn install_dialog_with_initial_focus(initial_focus: &str) {
-    let dialog = serde_json::to_string(DIALOG_SELECTOR).expect("a string always serializes");
+    install_dialog_with_selector(
+        DIALOG_SELECTOR,
+        initial_focus,
+        Some(".host-cancel-edit, .host-settings-close"),
+    );
+}
+
+/// Install focus isolation for a dialog and name its safe Escape action.
+///
+/// The add-host dialog shares this helper but has a different cancel control;
+/// keeping the selector beside the dialog setup prevents the document-level
+/// Escape fallback from silently swallowing Escape when focus has escaped.
+fn install_dialog_with_selector(
+    dialog_selector: &str,
+    initial_focus: &str,
+    escape_selector: Option<&str>,
+) {
+    let dialog = serde_json::to_string(dialog_selector).expect("a string always serializes");
     let initial_focus = serde_json::to_string(initial_focus).expect("a string always serializes");
     document::eval(&format!(
         r#"(() => {{
@@ -154,14 +196,10 @@ fn install_dialog_with_initial_focus(initial_focus: &str) {
             }}
             (dialog.querySelector({initial_focus}) ?? dialog).focus({{ preventScroll: true }});
         }})(); {}"#,
-        // The first match in document order wins: an open field's cancel
-        // button when there is one, so Escape with focus lost mid-save does
-        // what the dialog's own Escape does (nothing while the save is out,
-        // cancel the edit otherwise); close when no field is open.
-        modal_isolation::install_js(
-            DIALOG_SELECTOR,
-            Some(".host-cancel-edit, .host-settings-close")
-        ),
+        // The caller supplies the dialog's safe cancel action. Settings use
+        // the field-cancel selector before their dialog close control; the
+        // add flow supplies its own cancel button.
+        modal_isolation::install_js(dialog_selector, escape_selector,),
     ));
 }
 

@@ -76,8 +76,11 @@ one supervisor per user per host, and adding a host is discovery-first: the helm
 user's supervisor. If one is already running — say one the user started interactively by hand — the helm uses it as-is;
 it never restarts or replaces a running supervisor. If none exists, the user is asked whether to set one up
 automatically, and on confirmation one action installs the supervisor binary, sets up the per-user systemd layer, and
-registers the host — no separate host-side setup. Passwordless SSH is the prerequisite on the HOST side, plus, on the
-helm's own machine, access to the configured release source (GitHub by default) or a staged payload directory (a
+registers the host — no separate host-side setup. The setup question names the concrete files and systemd unit it will
+write, and that the supervisor runs persistently and starts at boot (or at login when lingering is refused). The user
+may choose to skip this setup question for later additions from the same helm; that choice is shared by every client and
+does not change discovery of an already-running supervisor. Passwordless SSH is the prerequisite on the HOST side, plus,
+on the helm's own machine, access to the configured release source (GitHub by default) or a staged payload directory (a
 developer-facing, best-effort option; see [Supported host setup](#supported-host-setup)). With that in place,
 provisioning and everyday operation just work out of the box — reaching supervisors needs no port forwards, no opened
 firewall ports, and no address configuration beyond the SSH destination. (The web UI's own loopback-plus-forward story
@@ -755,16 +758,16 @@ means the registered local host, and configured remote hosts follow in registry 
 last-known sessions remain useful. Choosing a host sends a server-side query immediately and is not persisted. The list
 can be ordered independently by most recent activity, by creation time, or by title; the order someone picks is
 remembered by the helm as one preference shared by every client, together with the last-selected session and compact-row
-choice, and most recent activity is what a client shows until someone picks otherwise. No client keeps its own copy:
-every client reads the helm's preference once after authenticating and writes it on change, so a browser tab and the
-desktop app open in the same order and on the same session. The same shared preference row carries whether host removal
-confirmation should be skipped after an explicit "don't ask" answer; a client that has already loaded its preferences
-keeps asking until it reloads. Per-client persistence — browser storage, a desktop state file, anything that lets two
-clients remember different answers — is not wanted for these shared preferences (terminal text size, by contrast, is
-deliberately per device; see Terminal experience). A client that asks the helm for no particular order gets creation
-time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not
-nest the list and implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can
-record it, while `farhelm agent create` and `clone` need not record the asking session.
+choice, and most recent activity is what a client shows until someone picks otherwise. The same shared preference row
+carries whether host setup or host removal confirmation should be skipped after an explicit permanent answer; a client
+that has already loaded its preferences keeps asking until it reloads. No client keeps its own copy: every client reads
+the helm's preference once after authenticating and writes it on change, so a browser tab and the desktop app open in
+the same order and on the same session. Per-client persistence — browser storage, a desktop state file, anything that
+lets two clients remember different answers — is not wanted for these shared preferences (terminal text size, by
+contrast, is deliberately per device; see Terminal experience). A client that asks the helm for no particular order gets
+creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
+does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
+`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The option labelled most recent activity sorts connected running and waiting sessions first, then every other session —
 idle, unclassified, ended, and anything on an unreachable host. Inside each group the order is the most recent observed
@@ -1413,8 +1416,8 @@ the agent creates it.
 
 - Every failed operation surfaces a concrete, actionable error in the client. A dialog must never close as though an
   operation succeeded when it failed. Two best-effort exceptions log a failure but stay silent rather than surfacing it:
-  the helm-side preference (list order, last selection, compact layout, and the host-removal confirmation choice),
-  because losing next-launch convenience must not turn a choice that already took effect into a failed current
+  the helm-side preference (list order, last selection, compact layout, and the host setup and removal confirmation
+  choices), because losing next-launch convenience must not turn a choice that already took effect into a failed current
   operation, and a helm that lost the preference falls back to the defaults; and the automatic "mark seen" a session's
   own opening or activity advance triggers (see Status), because a lost automatic mark costs nothing worse than a dot
   that is one open-and-close cycle behind, corrected by the next successful write. The manual "mark unread"/"mark read"

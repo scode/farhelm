@@ -354,7 +354,9 @@ impl ListSort {
 /// carried through to `list::view::decoded_sort`'s fallback instead of
 /// failing the decode of the whole reply.
 ///
-/// The remembered launch choices are never this client's OWN writes — no
+/// The host confirmation choices are client writes, but they remain helm-wide
+/// because the queue sends sparse patches and the seed is read after
+/// authentication. The remembered launch choices are never this client's OWN writes — no
 /// [`PreferenceValue`] variant exists for them. The helm sets them as a side
 /// effect of a successful user structured launch (this client's or another
 /// client's), and this client only mirrors its own launch's result
@@ -375,6 +377,8 @@ pub(crate) struct Preferences {
     pub(crate) remembered_workspace_trust: Option<bool>,
     /// Whether host removal can proceed without opening its confirmation.
     pub(crate) skip_host_remove_confirmation: Option<bool>,
+    /// Whether adding a host can submit setup immediately after probing.
+    pub(crate) skip_host_setup_confirmation: Option<bool>,
 }
 
 /// How long the seed read of the shared preference may take before the
@@ -420,6 +424,7 @@ pub(crate) enum PreferenceField {
     Selected,
     Compact,
     HostRemoveConfirmation,
+    HostSetupConfirmation,
 }
 
 impl PreferenceField {
@@ -430,6 +435,7 @@ impl PreferenceField {
             PreferenceField::Selected => "last_selected",
             PreferenceField::Compact => "compact",
             PreferenceField::HostRemoveConfirmation => "skip_host_remove_confirmation",
+            PreferenceField::HostSetupConfirmation => "skip_host_setup_confirmation",
         }
     }
 }
@@ -446,6 +452,7 @@ pub(crate) enum PreferenceValue {
     Selected(String),
     Compact(bool),
     HostRemoveConfirmation(bool),
+    HostSetupConfirmation(bool),
 }
 
 impl PreferenceValue {
@@ -456,6 +463,7 @@ impl PreferenceValue {
             Self::Selected(_) => PreferenceField::Selected,
             Self::Compact(_) => PreferenceField::Compact,
             Self::HostRemoveConfirmation(_) => PreferenceField::HostRemoveConfirmation,
+            Self::HostSetupConfirmation(_) => PreferenceField::HostSetupConfirmation,
         }
     }
 
@@ -463,7 +471,9 @@ impl PreferenceValue {
     fn wire_value(&self) -> serde_json::Value {
         match self {
             Self::Sort(value) | Self::Selected(value) => serde_json::json!(value),
-            Self::Compact(value) | Self::HostRemoveConfirmation(value) => serde_json::json!(value),
+            Self::Compact(value)
+            | Self::HostRemoveConfirmation(value)
+            | Self::HostSetupConfirmation(value) => serde_json::json!(value),
         }
     }
 
@@ -476,6 +486,7 @@ impl PreferenceValue {
             Self::HostRemoveConfirmation(value) => {
                 seed.skip_host_remove_confirmation = Some(*value)
             }
+            Self::HostSetupConfirmation(value) => seed.skip_host_setup_confirmation = Some(*value),
         }
     }
 }
@@ -524,6 +535,7 @@ struct PreferenceWrites {
     selected: FieldWrite,
     compact: FieldWrite,
     host_remove_confirmation: FieldWrite,
+    host_setup_confirmation: FieldWrite,
 }
 
 impl PreferenceWrites {
@@ -533,6 +545,7 @@ impl PreferenceWrites {
             PreferenceField::Selected => &mut self.selected,
             PreferenceField::Compact => &mut self.compact,
             PreferenceField::HostRemoveConfirmation => &mut self.host_remove_confirmation,
+            PreferenceField::HostSetupConfirmation => &mut self.host_setup_confirmation,
         }
     }
 
@@ -596,6 +609,7 @@ impl PreferenceWrites {
             PreferenceField::Selected => &self.selected,
             PreferenceField::Compact => &self.compact,
             PreferenceField::HostRemoveConfirmation => &self.host_remove_confirmation,
+            PreferenceField::HostSetupConfirmation => &self.host_setup_confirmation,
         };
         if slot.acked {
             return None;
@@ -682,6 +696,7 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
         PreferenceField::Selected,
         PreferenceField::Compact,
         PreferenceField::HostRemoveConfirmation,
+        PreferenceField::HostSetupConfirmation,
     ] {
         let claimed = {
             let mut queue = preference_writes();
@@ -4399,6 +4414,10 @@ mod preference_write_tests {
         assert!(
             queue.record(PreferenceValue::HostRemoveConfirmation(true)),
             "the host-removal choice owns an independent writer"
+        );
+        assert!(
+            queue.record(PreferenceValue::HostSetupConfirmation(true)),
+            "the host-setup choice owns an independent writer"
         );
     }
 
