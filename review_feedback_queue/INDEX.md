@@ -58,8 +58,6 @@ One line per open item. This file must always match the feedback files in this d
 - `attach-reports-generic-timeout.md` — the attach step spins 30 s on skew/identity states and reports only "timed out".
 - `header-actions-skip-listing-read.md` — header replace/restart request no listing read, so under build mismatch the
   sidebar keeps deleted/stale rows.
-- `desktop-copy-fallback-never-runs.md` — the native clipboard writer never rejects, so the header copy fallback never
-  runs and failures show "copied".
 - `dropped-create-skips-bookkeeping.md` — reloading during a create starts the agent but never records launch history or
   the remembered default profile.
 - `agent-create-aborted-on-retire.md` — an agent's create/clone aborted by its host's reconnect still creates the
