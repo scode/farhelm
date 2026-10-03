@@ -6327,7 +6327,8 @@
   refused whole, keeping the previous cache, as oversized and duplicate ids already are. On the UI side, correct the
   encoder's doc and test comment only; the helm check is the boundary. Fix `created_session_from`'s doc. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-boundary-checks.md`.
+- Execution: complete: change `kzxusrvrrlkl`, bookmark `plan/triage-boundary-checks/01-session-id-check`, PR
+  https://github.com/scode/farhelm/pull/1491.
 
 ## profile-body-accepts-unknown-fields.md
 

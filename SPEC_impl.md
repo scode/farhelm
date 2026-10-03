@@ -1227,23 +1227,23 @@ That vocabulary is a rule about a PHASE, not a list of failures, and every hop a
 has been handed to the next hop, the only endings that may speak plainly are the expected success reply and a refusal
 the peer itself authored. Everything else — the link dying, a frame that will not decode, a reply correlated to another
 request, a well-formed reply of the wrong shape, a reply of the RIGHT shape whose payload this side has to refuse (a
-created session id that is empty, past the ingress cap, or carrying control characters), a refusal that could not be
-enqueued — is delivered-outcome-unknown for a mutating verb, because each of them leaves the same question unanswered
-and a peer broken enough to produce one is not thereby proof that nothing happened. The refused-payload case is the one
-where "the peer probably did it" is strongest rather than weakest: the target answered with the very reply that says the
-session was started, and the id that could address it afterwards is precisely what got thrown away. The helm's own
-connection to a target supervisor enforces this by ending rather than by guessing: an agent answer it cannot even refuse
-(its writer queue full) closes the connection instead of dropping the refusal, since the link dying is the terminal
-event a mutation's retained fence is waiting for, and a silent drop on a link that then recovers holds that fence until
-the retention's own last-resort bound expires. A wrong-shape reply is named by its `ControlMsg` VARIANT and nothing
-else, for the same reason the phase rule exists at all: the full rendering of a legal near-frame-limit listing pushed
-the agent's own reply frame past the protocol limit, whereupon the size backstop replaced the whole outcome and the
-mutation vocabulary was lost to a bare `Internal` — and it carried a session's raw invocation and cwd into an
-agent-facing error chain besides. That backstop now preserves an outcome-unknown verdict's kind and remedy when it has
-to drop oversized prose, for the same reason: a size check must not be able to revoke a claim about durable state. The
-phase rule is confined to the AGENT path (`agent_requests::transport_outcome`) rather than folded into `error_kind`, so
-the REST surface keeps mapping the same transport failure to `Internal`: an HTTP caller has its own idempotency story,
-and inventing a status for this would be a contract change no client asked for.
+created session id that breaks the ingress rule: empty, past the cap, carrying control characters, or `.` or `..`), a
+refusal that could not be enqueued — is delivered-outcome-unknown for a mutating verb, because each of them leaves the
+same question unanswered and a peer broken enough to produce one is not thereby proof that nothing happened. The
+refused-payload case is the one where "the peer probably did it" is strongest rather than weakest: the target answered
+with the very reply that says the session was started, and the id that could address it afterwards is precisely what got
+thrown away. The helm's own connection to a target supervisor enforces this by ending rather than by guessing: an agent
+answer it cannot even refuse (its writer queue full) closes the connection instead of dropping the refusal, since the
+link dying is the terminal event a mutation's retained fence is waiting for, and a silent drop on a link that then
+recovers holds that fence until the retention's own last-resort bound expires. A wrong-shape reply is named by its
+`ControlMsg` VARIANT and nothing else, for the same reason the phase rule exists at all: the full rendering of a legal
+near-frame-limit listing pushed the agent's own reply frame past the protocol limit, whereupon the size backstop
+replaced the whole outcome and the mutation vocabulary was lost to a bare `Internal` — and it carried a session's raw
+invocation and cwd into an agent-facing error chain besides. That backstop now preserves an outcome-unknown verdict's
+kind and remedy when it has to drop oversized prose, for the same reason: a size check must not be able to revoke a
+claim about durable state. The phase rule is confined to the AGENT path (`agent_requests::transport_outcome`) rather
+than folded into `error_kind`, so the REST surface keeps mapping the same transport failure to `Internal`: an HTTP
+caller has its own idempotency story, and inventing a status for this would be a contract change no client asked for.
 
 The class that decides the vocabulary is the failed REQUEST's, not the verb's, and clone is where the two come apart: it
 snapshots its source with an ordinary listing before any create is dispatched, so a transport failure there is a
