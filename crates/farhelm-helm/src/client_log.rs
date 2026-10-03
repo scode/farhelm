@@ -463,7 +463,7 @@ mod tests {
         /// fetch failure.
         #[farhelm_testtrace::test]
         async fn unauthenticated_post_is_a_structured_401_readable_by_the_desktop_webview() {
-            let harness = rest_harness::idle_helm().await;
+            let harness = rest_harness::idle_helm().await.embedded();
             let mut request = post(serde_json::json!({"entries": []}));
             request
                 .headers_mut()
@@ -495,7 +495,7 @@ mod tests {
         /// and mirrored from the attachment route's preflight contract.
         #[farhelm_testtrace::test]
         async fn preflight_answers_the_desktop_webview_origin_without_auth() {
-            let harness = rest_harness::idle_helm().await;
+            let harness = rest_harness::idle_helm().await.embedded();
             let request = axum::http::Request::builder()
                 .method("OPTIONS")
                 .uri("/api/client-log")

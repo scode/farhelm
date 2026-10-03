@@ -41,9 +41,9 @@
 //!
 //! ## Why no CORS layer
 //!
-//! The desktop webview's JavaScript reaches exactly five helm routes across
-//! origins (the device validation, the token exchange, attachment uploads,
-//! the console log, and the clipboard), and this is deliberately not a sixth: the desktop
+//! The desktop webview's JavaScript reaches exactly four helm routes across
+//! origins (device validation, attachment uploads, the console log, and the
+//! clipboard), and this is deliberately not a fifth: the desktop
 //! UI's preference read and write go through the same native reqwest
 //! funnel every other REST call does (`farhelm-ui`'s `api::send`), so the
 //! route sits inside the ordinary protected group with nothing special
