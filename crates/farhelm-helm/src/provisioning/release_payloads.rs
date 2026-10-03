@@ -723,7 +723,7 @@ impl ReleasePayloadSource {
         if let Some(length) = response.content_length()
             && length > limit
         {
-            return Err(asset_size_refusal(asset, length, limit, Ok(())));
+            return Err(asset_size_refusal(asset, length, limit));
         }
 
         let part = self.cache_dir.join(format!("{asset}.part"));
@@ -731,37 +731,42 @@ impl ReleasePayloadSource {
             .await
             .with_context(|| format!("creating {}", part.display()))?;
         let mut hasher = Sha256::new();
-        let mut stream = response.bytes_stream();
-        let mut received = 0_u64;
-        while let Some(chunk) = stream.next().await {
-            // The body stream fails with the FINAL request URL attached (a
-            // redirect target, possibly a signed object-store URL) — strip
-            // it exactly as the transport path does.
-            let chunk = chunk.map_err(|error| self.unreachable(transport_error(error)))?;
-            received = received.saturating_add(
-                u64::try_from(chunk.len()).expect("a response chunk length fits in u64"),
-            );
-            if received > limit {
-                drop(file);
-                return Err(asset_size_refusal(
-                    asset,
-                    received,
-                    limit,
-                    remove_if_present(&part),
-                ));
+        // Every way the transfer can fail after the `.part` file exists ends
+        // in the one cleanup below: a dropped connection mid-body, the size
+        // cap, or a write, flush or fsync error. Each used to return on its
+        // own, and all but the size cap left the unverified partial behind.
+        let written: anyhow::Result<()> = async {
+            let mut stream = response.bytes_stream();
+            let mut received = 0_u64;
+            while let Some(chunk) = stream.next().await {
+                // The body stream fails with the FINAL request URL attached
+                // (a redirect target, possibly a signed object-store URL) —
+                // strip it exactly as the transport path does.
+                let chunk = chunk.map_err(|error| self.unreachable(transport_error(error)))?;
+                received = received.saturating_add(
+                    u64::try_from(chunk.len()).expect("a response chunk length fits in u64"),
+                );
+                if received > limit {
+                    return Err(asset_size_refusal(asset, received, limit));
+                }
+                hasher.update(&chunk);
+                tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
+                    .await
+                    .with_context(|| format!("writing {}", part.display()))?;
             }
-            hasher.update(&chunk);
-            tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
+            tokio::io::AsyncWriteExt::flush(&mut file)
                 .await
                 .with_context(|| format!("writing {}", part.display()))?;
+            file.sync_all()
+                .await
+                .with_context(|| format!("writing {}", part.display()))?;
+            Ok(())
         }
-        tokio::io::AsyncWriteExt::flush(&mut file)
-            .await
-            .with_context(|| format!("writing {}", part.display()))?;
-        file.sync_all()
-            .await
-            .with_context(|| format!("writing {}", part.display()))?;
+        .await;
         drop(file);
+        if let Err(error) = written {
+            return Err(with_partial_cleanup(error, remove_if_present(&part)));
+        }
 
         let actual = hex(&hasher.finalize());
         if actual != expected {
@@ -776,8 +781,11 @@ impl ReleasePayloadSource {
             ));
         }
         let downloaded = self.cache_dir.join(asset);
-        std::fs::rename(&part, &downloaded)
-            .with_context(|| format!("installing {}", downloaded.display()))?;
+        if let Err(error) = std::fs::rename(&part, &downloaded) {
+            let error =
+                anyhow::Error::new(error).context(format!("installing {}", downloaded.display()));
+            return Err(with_partial_cleanup(error, remove_if_present(&part)));
+        }
         Ok(downloaded)
     }
 }
@@ -1220,31 +1228,31 @@ fn checksum_refusal(
     expected: &str,
     cleanup: anyhow::Result<()>,
 ) -> anyhow::Error {
-    let refusal =
-        anyhow!("refusing {asset}: SHA-256 {actual} does not match SHA256SUMS ({expected})");
+    with_partial_cleanup(
+        anyhow!("refusing {asset}: SHA-256 {actual} does not match SHA256SUMS ({expected})"),
+        cleanup,
+    )
+}
+
+/// A failed download's error, with the outcome of removing its partial file:
+/// the error alone when the removal worked, or the removal failure carrying
+/// it as context, so neither the original failure nor a partial left behind
+/// goes unreported. Every failure after the `.part` file exists goes through
+/// this, [`checksum_refusal`] included.
+fn with_partial_cleanup(error: anyhow::Error, cleanup: anyhow::Result<()>) -> anyhow::Error {
     match cleanup {
-        Ok(()) => refusal,
-        Err(error) => error.context(format!("{refusal:#}")),
+        Ok(()) => error,
+        Err(cleanup) => cleanup.context(format!("{error:#}")),
     }
 }
 
 /// Refuse an asset once its declared or observed size exceeds the sanity cap.
 ///
-/// A streamed refusal removes the unverified partial file before returning.
-/// Keeping cleanup in the error constructor preserves the primary refusal while
-/// still reporting a filesystem failure if the partial cannot be removed.
-fn asset_size_refusal(
-    asset: &str,
-    reached: u64,
-    limit: u64,
-    cleanup: anyhow::Result<()>,
-) -> anyhow::Error {
-    let refusal =
-        anyhow!("refused: asset {asset} reached {reached} bytes, over the {limit}-byte cap");
-    match cleanup {
-        Ok(()) => refusal,
-        Err(error) => error.context(format!("{refusal:#}")),
-    }
+/// A refusal mid-stream reaches the download's one cleanup path
+/// ([`with_partial_cleanup`]) like any other failure after the `.part` file
+/// exists; a refusal from the declared length happens before it does.
+fn asset_size_refusal(asset: &str, reached: u64, limit: u64) -> anyhow::Error {
+    anyhow!("refused: asset {asset} reached {reached} bytes, over the {limit}-byte cap")
 }
 
 /// Publish both verified control files into `cache_dir`, creating it first.
@@ -2499,6 +2507,92 @@ mod tests {
         assert!(!generation.join(asset).exists());
     }
 
+    /// A loopback HTTP server that answers one request with a 200 announcing
+    /// a 1 MiB body, sends 4 KiB of it, waits for `close` to be notified, and
+    /// then closes the connection: a download that breaks mid-body, after
+    /// the response was accepted and some of it written. Raw TCP rather than
+    /// the axum fixture, because a body stream that errors makes axum drop
+    /// the connection before the headers are sent, which fails the request
+    /// instead of the body. Returns the URL to fetch and the `close` trigger.
+    async fn connection_dropped_mid_body() -> (String, Arc<tokio::sync::Notify>) {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let close = Arc::new(tokio::sync::Notify::new());
+        let closing = Arc::clone(&close);
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = socket.read(&mut buffer).await.unwrap();
+                if read == 0 {
+                    return;
+                }
+                request.extend_from_slice(&buffer[..read]);
+            }
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\n\r\n")
+                .await
+                .unwrap();
+            socket.write_all(&[b'a'; 4096]).await.unwrap();
+            socket.flush().await.unwrap();
+            closing.notified().await;
+            // Dropping the socket closes the connection 1 MiB short.
+        });
+        (format!("http://{address}/asset"), close)
+    }
+
+    /// Why this matters: a release download that broke partway used to leave
+    /// its unverified `<asset>.part` in the helm's payload cache until the
+    /// next restart swept it. Spec: once part of the body has been written to
+    /// `<asset>.part`, a connection that closes short fails the download as a
+    /// body error, and neither the partial file nor a finished asset is left
+    /// in the cache.
+    #[farhelm_testtrace::test]
+    async fn a_download_broken_mid_stream_leaves_no_partial_file() {
+        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
+        let (broken, close) = connection_dropped_mid_body().await;
+        let release =
+            FixtureRelease::start(vec![(asset.as_str(), Override::Redirect(broken))]).await;
+        let cache = tempfile::tempdir().unwrap();
+        let source = release.source(cache.path());
+        let download =
+            tokio::spawn(
+                async move { source.path(PayloadKind::Farhelm, PayloadArch::X86_64).await },
+            );
+
+        // The premise, observed rather than assumed: the partial file exists
+        // and holds some of the body before the connection breaks.
+        let part = generation(cache.path(), &release.base_url).join(format!("{asset}.part"));
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            while !part.metadata().is_ok_and(|metadata| metadata.len() > 0) {
+                // sleep-ok: polling interval while waiting for the download to write its partial file.
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("test premise: the download wrote part of the body to its .part file");
+        close.notify_one();
+
+        let error = tokio::time::timeout(std::time::Duration::from_secs(30), download)
+            .await
+            .expect("a broken connection must end the download")
+            .expect("the download task must not panic")
+            .unwrap_err();
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("error decoding response body"),
+            "the failure must be the body read: {rendered}"
+        );
+        assert!(!part.exists(), "{rendered}");
+        assert!(
+            !generation(cache.path(), &release.base_url)
+                .join(&asset)
+                .exists()
+        );
+    }
+
     /// Spec: an asset served as a redirect is followed, and the FINAL body
     /// is what gets checksum-verified and extracted.
     ///
@@ -3156,6 +3250,33 @@ mod tests {
         assert!(
             rendered.contains("removing /cache/asset.tar.gz.part: permission denied"),
             "the cleanup failure must survive with its path: {rendered}"
+        );
+    }
+
+    /// Why this matters: a download that fails and then cannot remove its
+    /// partial file has two things to report, and losing either hides
+    /// unverified bytes in the helm's state or the reason the download
+    /// failed. Spec: with a clean removal the download's own error is
+    /// returned unchanged; with a failed removal both the error and the
+    /// removal failure, with its path, are in the rendered message.
+    #[farhelm_testtrace::test]
+    fn a_failed_download_reports_a_partial_it_could_not_remove() {
+        let clean = with_partial_cleanup(anyhow!("error decoding response body"), Ok(()));
+        assert_eq!(format!("{clean:#}"), "error decoding response body");
+        let dirty = with_partial_cleanup(
+            anyhow!("error decoding response body"),
+            Err(anyhow!(
+                "removing /cache/asset.tar.gz.part: permission denied"
+            )),
+        );
+        let rendered = format!("{dirty:#}");
+        assert!(
+            rendered.contains("error decoding response body"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("removing /cache/asset.tar.gz.part: permission denied"),
+            "{rendered}"
         );
     }
 

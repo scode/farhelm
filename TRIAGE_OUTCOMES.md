@@ -5765,7 +5765,8 @@
 - Completion criteria: every failed download removes its partial file using the existing cleanup helper; add a test for
   a mid-stream failure. Remove this feedback file and its index entry. Stop and ask before implementing if this needs
   significant new complexity or a refactor.
-- Execution: planned in `plans/triage-confirm-ssh-identity.md`.
+- Execution: complete: change `vkzmokqy`, bookmark `triage-1001e/12-partial-download-cleanup`, PR
+  https://github.com/scode/farhelm/pull/1454.
 
 ## incarnation-counter-restarts-per-process.md
 
