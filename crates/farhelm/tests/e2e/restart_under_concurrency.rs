@@ -5,8 +5,7 @@ use crate::harness::*;
 
 use crate::boot_id_durable_outcome::{listed, wait_for_dead_pane};
 use crate::conversation_identity_capture::{
-    capture_harness, last_marker_value, provoke_record, record_session, settle_past_horizon,
-    snapshot_of,
+    capture_harness, provoke_record, record_session, settle_past_horizon,
 };
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::restart_with_resume::pane_capture;

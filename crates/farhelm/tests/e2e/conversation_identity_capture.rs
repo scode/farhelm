@@ -52,36 +52,6 @@ pub(crate) fn test_capture_bounds() -> CaptureWindowBounds {
     CaptureWindowBounds::new(TEST_CAPTURE_BEFORE, TEST_CAPTURE_AFTER, TEST_CAPTURE_GRACE)
 }
 
-/// Everything a capture test needs beyond the harness itself: the private
-/// agent home the supervisor observes and the fixture writes into, and a
-/// directory of kind-named symlinks to the farhelm binary.
-///
-/// The symlinks are what let these tests exercise DERIVATION rather than
-/// routing around it. A session launched as `farhelm-fixtures fake-agent
-/// ...` has basename `farhelm-fixtures` and correctly classifies as generic, so
-/// running the fixture through `<bin>/claude` is the only way to reach the
-/// integrated path the way a real user does — and it simultaneously pins
-/// PLAN_M3.md item 7's other promise, that the default resume template is
-/// built from the ORIGINAL first token (this absolute path) rather than
-/// from a bare command name. The binary is multi-call by SUBCOMMAND, not
-/// by argv0, so it behaves identically under either name.
-pub(crate) struct CaptureFixtures {
-    home: farhelm_teststate::TestDir,
-    bin: farhelm_teststate::TestDir,
-}
-
-impl CaptureFixtures {
-    /// Private record root observed by the supervisor and fake agents.
-    pub(crate) fn home(&self) -> &std::path::Path {
-        self.home.path()
-    }
-
-    /// Directory containing the kind-named fake-agent entry points.
-    pub(crate) fn bin(&self) -> &std::path::Path {
-        self.bin.path()
-    }
-}
-
 /// A harness whose supervisor observes a private agent home, with the
 /// short capture window above.
 pub(crate) async fn capture_harness() -> (Harness, CaptureFixtures) {
@@ -96,41 +66,19 @@ async fn capture_harness_with_fault(
     capture_harness_with_seams(move |seams| seams.faults.capture_store_fault = fault).await
 }
 
-/// [`capture_harness`] with one more seam adjusted by the caller.
-///
-/// A closure rather than a whole `SupervisorSeams` argument because two of
-/// the seams here are NOT the caller's to choose: `agent_home` has to point
-/// at the fixture tree this function creates (which does not exist yet when
-/// a caller would be building the struct), and `capture_window` is what
-/// makes every test in this file finish in seconds instead of minutes. A
-/// caller that could pass the struct wholesale would silently drop both by
-/// forgetting a field, and the failure would look like "capture stopped
-/// working" rather than "the harness was misconfigured".
-///
-/// Those two are therefore written AFTER `adjust` runs, and that ordering
-/// is the whole guarantee: a closure is free to build a whole fresh
-/// `SupervisorSeams` (or to clear a field by accident), and setting them
-/// first would leave the harness silently pointed at the real agent home
-/// with production-length windows — a configuration in which every test
-/// here would either hang for minutes or observe someone else's records.
+/// [`capture_harness`] with one more seam adjusted by the caller. The shared
+/// fixture builder owns the private agent home and kind-named binaries; this
+/// module adds the short capture window that keeps its scanner tests bounded.
+/// Set the window after `adjust` so replacing the seams cannot restore the
+/// production timeout and invalidate the tests' observation budgets.
 pub(crate) async fn capture_harness_with_seams(
     adjust: impl FnOnce(&mut SupervisorSeams),
 ) -> (Harness, CaptureFixtures) {
-    let home = farhelm_teststate::tempdir().expect("agent home");
-    let bin = farhelm_teststate::tempdir().expect("agent bin");
-    for kind in ["claude", "codex"] {
-        std::os::unix::fs::symlink(fixtures_bin(), bin.path().join(kind))
-            .expect("symlink the farhelm binary under an agent's own name");
-    }
-    let mut seams = SupervisorSeams {
-        scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
-        ..SupervisorSeams::default()
-    };
-    adjust(&mut seams);
-    seams.agent_home = Some(home.path().to_path_buf());
-    seams.capture_window = test_capture_bounds();
-    let h = harness_with_seams(SupervisorTimeouts::default(), seams).await;
-    (h, CaptureFixtures { home, bin })
+    fixture_harness_with_seams(move |seams| {
+        adjust(seams);
+        seams.capture_window = test_capture_bounds();
+    })
+    .await
 }
 
 /// Create a session running the record-writing fake agent for `kind`
@@ -144,8 +92,8 @@ pub(crate) async fn record_session(
 ) -> SessionInfo {
     let invocation = format!(
         "{} fake-agent --script {kind}-record --record-home {}",
-        shell_words::quote(&fixtures.bin.path().join(kind).to_string_lossy()),
-        shell_words::quote(&fixtures.home.path().to_string_lossy())
+        shell_words::quote(&fixtures.bin().join(kind).to_string_lossy()),
+        shell_words::quote(&fixtures.home().to_string_lossy())
     );
     h.client
         .create_session(&cwd.to_string_lossy(), &invocation, None, 80, 24)
@@ -177,51 +125,6 @@ pub(crate) async fn provoke_record(
     wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
     let id = marker_value(&seen, "RECORD-WRITTEN:");
     (chan, rx, seen, id)
-}
-
-/// The value the fixture printed after `marker`, up to the line ending.
-///
-/// The fixture's markers are its own contract with these tests (the same
-/// discipline `FAKE-AGENT READY` established), and reading the id back out
-/// is what lets a test assert the supervisor captured the RIGHT
-/// conversation rather than just any one — the property that separates
-/// this feature working from it appearing to.
-pub(crate) fn marker_value(transcript: &[u8], marker: &str) -> String {
-    let text = String::from_utf8_lossy(transcript);
-    let start = text
-        .find(marker)
-        .unwrap_or_else(|| panic!("no {marker} in transcript:\n{text}"))
-        + marker.len();
-    text[start..]
-        .chars()
-        .take_while(|c| !c.is_whitespace())
-        .collect()
-}
-
-/// The value after the LAST occurrence of `marker`, for transcripts that
-/// span a restart: a reattached client's replay carries the previous run's
-/// markers too, so "the first one" is the wrong run's answer whenever a
-/// terminal was reused.
-pub(crate) fn last_marker_value(transcript: &[u8], marker: &str) -> String {
-    let text = String::from_utf8_lossy(transcript);
-    let start = text
-        .rfind(marker)
-        .unwrap_or_else(|| panic!("no {marker} in transcript:\n{text}"))
-        + marker.len();
-    text[start..]
-        .chars()
-        .take_while(|c| !c.is_whitespace())
-        .collect()
-}
-
-/// This session's durable snapshot, as the supervisor would answer a
-/// restart.
-pub(crate) async fn snapshot_of(h: &Harness, session_id: &str) -> SessionSnapshot {
-    h.sup
-        .session_snapshot(session_id)
-        .await
-        .expect("reading the snapshot")
-        .expect("the session exists")
 }
 
 /// Poll until this session's durable first-input time is recorded, and
@@ -609,7 +512,7 @@ async fn a_rival_record_arriving_late_in_the_window_flips_a_provisional_claim() 
     // Now a second record for the same directory, timestamped inside the
     // same window — the shape another agent running here would produce.
     let canonical = std::fs::canonicalize(work.path()).expect("canonicalize");
-    let project = fixtures.home.path().join(".claude").join("projects").join(
+    let project = fixtures.home().join(".claude").join("projects").join(
         farhelm_supervisor::agent_kind::munge_cwd(&canonical.to_string_lossy()),
     );
     let rival_line = serde_json::json!({
@@ -662,8 +565,7 @@ async fn an_append_re_verifies_the_identity_and_a_fork_never_displaces_it() {
 
     let canonical = std::fs::canonicalize(work.path()).expect("canonicalize");
     let record = fixtures
-        .home
-        .path()
+        .home()
         .join(".claude")
         .join("projects")
         .join(farhelm_supervisor::agent_kind::munge_cwd(
@@ -754,7 +656,7 @@ async fn two_near_simultaneous_sessions_in_one_directory_stay_uncaptured() {
     // directory. A rescan that re-decided from present evidence would now
     // find exactly one candidate and claim it.
     let canonical = std::fs::canonicalize(work.path()).expect("canonicalize");
-    let project = fixtures.home.path().join(".claude").join("projects").join(
+    let project = fixtures.home().join(".claude").join("projects").join(
         farhelm_supervisor::agent_kind::munge_cwd(&canonical.to_string_lossy()),
     );
     for entry in std::fs::read_dir(&project).expect("project dir") {
@@ -828,7 +730,7 @@ async fn a_capture_missed_while_the_supervisor_was_down_lands_on_reload() {
         farhelm_bin().into(),
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            agent_home: Some(fixtures.home.path().to_path_buf()),
+            agent_home: Some(fixtures.home().to_path_buf()),
             capture_window: test_capture_bounds(),
             ..SupervisorSeams::default()
         },
@@ -895,7 +797,7 @@ async fn an_ambiguity_survives_a_restart_even_when_its_evidence_does_not() {
 
     // The rival's record is gone by the time the successor looks.
     let canonical = std::fs::canonicalize(work.path()).expect("canonicalize");
-    let project = fixtures.home.path().join(".claude").join("projects").join(
+    let project = fixtures.home().join(".claude").join("projects").join(
         farhelm_supervisor::agent_kind::munge_cwd(&canonical.to_string_lossy()),
     );
     for entry in std::fs::read_dir(&project).expect("project dir") {
@@ -910,7 +812,7 @@ async fn an_ambiguity_survives_a_restart_even_when_its_evidence_does_not() {
         farhelm_bin().into(),
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            agent_home: Some(fixtures.home.path().to_path_buf()),
+            agent_home: Some(fixtures.home().to_path_buf()),
             capture_window: test_capture_bounds(),
             ..SupervisorSeams::default()
         },
@@ -1125,7 +1027,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
         farhelm_bin().into(),
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            agent_home: Some(fixtures.home.path().to_path_buf()),
+            agent_home: Some(fixtures.home().to_path_buf()),
             capture_window: test_capture_bounds(),
             ..SupervisorSeams::default()
         },
@@ -1212,7 +1114,7 @@ async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered(
     // says generic. The override is what makes it claude.
     let invocation = fixture_cmd(&format!(
         "fake-agent --script claude-record --record-home {}",
-        shell_words::quote(&fixtures.home.path().to_string_lossy())
+        shell_words::quote(&fixtures.home().to_string_lossy())
     ));
     let overridden = h
         .client
@@ -1309,8 +1211,8 @@ async fn a_keyed_replay_after_capture_reports_the_resume_offer() {
     let work = farhelm_teststate::tempdir().expect("workdir");
     let invocation = format!(
         "{} fake-agent --script claude-record --record-home {}",
-        shell_words::quote(&fixtures.bin.path().join("claude").to_string_lossy()),
-        shell_words::quote(&fixtures.home.path().to_string_lossy())
+        shell_words::quote(&fixtures.bin().join("claude").to_string_lossy()),
+        shell_words::quote(&fixtures.home().to_string_lossy())
     );
     let created = h
         .client
@@ -1368,7 +1270,7 @@ async fn a_session_resuming_an_old_conversation_is_not_captured() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let canonical = std::fs::canonicalize(work.path()).expect("canonicalize");
-    let project = fixtures.home.path().join(".claude").join("projects").join(
+    let project = fixtures.home().join(".claude").join("projects").join(
         farhelm_supervisor::agent_kind::munge_cwd(&canonical.to_string_lossy()),
     );
     std::fs::create_dir_all(&project).expect("project dir");
@@ -1387,7 +1289,7 @@ async fn a_session_resuming_an_old_conversation_is_not_captured() {
     // from the supervisor's side.
     let invocation = format!(
         "{} fake-agent --script basic",
-        shell_words::quote(&fixtures.bin.path().join("claude").to_string_lossy())
+        shell_words::quote(&fixtures.bin().join("claude").to_string_lossy())
     );
     let session = h
         .client
