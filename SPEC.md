@@ -239,11 +239,15 @@ users can find both the removal procedure and its safety guarantees.
 
 ### Installation and updates
 
-The standalone installer installs Farhelm for the current user without root. It places `farhelm` in `~/.local/bin` by
-default; `FARHELM_INSTALL_DIR` selects another directory. On supported macOS releases it also installs `farhelm-desktop`
-beside the CLI and assembles `~/Applications/Farhelm.app`, including copies of both executables. The existing app-bundle
-opt-out remains supported. Installation does not create or start services: Linux service setup is a separate, explicit
-`farhelm helm setup` operation, and macOS runs through the desktop app or manually started processes as described in
+The standalone installer temporarily supports only a Mac installing the desktop app, on Apple silicon (including
+Rosetta). This limits only the installer: Linux remains supported for running a helm and session hosts, which the helm
+provisions over SSH itself. Other operating systems are refused before any download or filesystem change.
+
+The installer runs as the current user without root. It always installs `farhelm` and `farhelm-desktop` in
+`~/.local/bin` and assembles `~/Applications/Farhelm.app`, including copies of both executables. There is no custom
+install-directory or app-bundle opt-out. Releases without the app resources (before 0.2.1) are refused before any
+installed file is replaced; staging may create the executable directory, but installs nothing. Installation does not
+create or start services. The desktop app manages its own helm and local supervisor, as described in
 [Topology](#topology).
 
 Re-running the installer updates the installation. Its default is the latest stable release; `FARHELM_VERSION` selects a
@@ -265,15 +269,16 @@ reported, and the install proceeds; no crash or interruption point may lose it.
 
 An installation must have an equally discoverable removal path. The installation instructions document
 `farhelm uninstall` alongside installation, and a successful installer run prints that command. Users of releases
-without uninstall support may need to upgrade once before using it. Supporting those older binaries directly, or
-providing a separately downloaded uninstaller, is not required initially.
+without uninstall support on macOS may need to upgrade once before using it. The current installer cannot supply that
+upgrade on Linux. Supporting those older binaries directly, or providing a separately downloaded uninstaller, is not
+required initially.
 
 ### Uninstall scope and interaction
 
-`farhelm uninstall` removes the selected local standalone installation for the current user. It supports the installer's
-custom installation directory as well as its default. It must identify the installation being removed rather than assume
-that whichever files happen to be in the default directory are the intended targets. Ambiguous ownership or an
-unsupported installation must produce an actionable refusal before changes begin.
+`farhelm uninstall` removes the selected local standalone installation for the current user. It supports the default
+installation directory and custom directories used by earlier installers. It must identify the installation being
+removed rather than assume that whichever files happen to be in the default directory are the intended targets.
+Ambiguous ownership or an unsupported installation must produce an actionable refusal before changes begin.
 
 The command shows the files and services it intends to remove and the data it will retain, then asks for confirmation.
 `--yes` skips that confirmation, not ownership checks. Without an interactive confirmation channel, the command requires
@@ -350,11 +355,12 @@ Reach this with the simplest mechanism that works, and prefer a refusal to machi
 
 ### Acceptance coverage
 
-Automated tests must exercise the actual installer and installed uninstall command through fresh installation and update
-followed by removal. They must verify custom paths, dry-run and confirmation behavior, retained data and unrelated
-files, foreign artifacts and symlinks, the stopping prerequisite, and partial-failure retries. Linux coverage must
-establish the service ownership and removal behavior. Concurrent lifecycle operations are outside this initial
-acceptance scope.
+On macOS, automated tests must exercise the actual installer and installed uninstall command through fresh installation
+and update followed by removal. They must verify paths containing spaces and quotes, dry-run and confirmation behavior,
+retained data and unrelated files, foreign artifacts and symlinks, the stopping prerequisite, and partial-failure
+retries. While the installer refuses Linux, end-to-end acceptance coverage of installer-made Linux installations,
+including service-failure ordering during removal, is absent. This does not remove Linux uninstall behavior or its
+lower-level tests. Concurrent lifecycle operations are outside this initial acceptance scope.
 
 Filesystem-refusal tests must verify the diagnostic's evidence against the fixture that caused the refusal. An assertion
 that output merely says "unsafe" or names an artifact does not establish this contract.
@@ -1899,10 +1905,10 @@ does not authorize incidental changes to unrelated host configuration.
 
 Farhelm is not designed for install directories that other local accounts can write to, whether provisioning's lib,
 state, or binary directory on a host, a shared directory it writes into, or the standalone installer's install directory
-(`~/.local/bin` or `FARHELM_INSTALL_DIR`). Keeping them writable only by the user is the user's responsibility, and
-Farhelm's installation, update, recovery, and uninstall guarantees assume no other account can create or replace entries
-in them. A group-writable or sticky shared directory is outside what the installer's lock, journal, and backup
-safeguards defend against.
+(`~/.local/bin`). Keeping them writable only by the user is the user's responsibility, and Farhelm's installation,
+update, recovery, and uninstall guarantees assume no other account can create or replace entries in them. A
+group-writable or sticky shared directory is outside what the installer's lock, journal, and backup safeguards defend
+against.
 
 On a host provisioned from the hosts panel, the supervisor unit (`farhelm-supervisor.service`) has one owner. A unit
 without `farhelm helm setup`'s managed-by marker belongs to provisioning, and ADD and UPDATE may replace it. A unit that
@@ -1958,8 +1964,8 @@ clear message is enough. Setup and Update may treat the layout they install as t
 settings they manage, such as start at boot and linger, on every run. The rules above about shared directories and
 unrelated host configuration still hold.
 
-The machine running the helm keeps its own supported setup: `install.sh` followed by `farhelm helm setup` on Linux, and
-the desktop app on a Mac.
+A Linux machine running a helm remains supported, but the standalone installer temporarily does not cover that setup. On
+a Mac the installer supplies the desktop app, which manages its own helm and local supervisor.
 
 ### Upgrade compatibility and client scale
 

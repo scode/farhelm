@@ -135,7 +135,7 @@ write_binary() {
 # deterministic content "fake icns: CONTENT_LINE" so bundle assertions can
 # byte-compare it. Pass "no-icns" as the fifth argument to build the OLDER
 # desktop-archive shape (releases that predate the icon), which install.sh
-# must install without a bundle rather than refuse.
+# refuses before replacing any installed file.
 build_archive() {
   local out=$1 package=$2 target=$3 content=$4 icns=${5:-icns}
   local binary=farhelm
@@ -153,22 +153,14 @@ build_archive() {
   rm -rf "$stage"
 }
 
-# build_good_release DIR VERSION
-# The full six-asset inventory (plan §1 / RELEASE_ARCHIVES), all checksums
-# correct: farhelm and farhelm-desktop for every target, both tmux builds,
-# SHA256SUMS. Every farhelm/farhelm-desktop member prints "farhelm VERSION"
-# / "farhelm-desktop VERSION".
+# build_good_release DIR VERSION -- the Mac CLI/app pair, independently hashed.
+# Linux release assets belong to provisioning and are not installer fixtures.
 build_good_release() {
   local dir=$1 version=$2
   mkdir -p "$dir"
-  build_archive "$dir/farhelm-x86_64-unknown-linux-musl.tar.gz" farhelm x86_64-unknown-linux-musl "farhelm $version"
-  build_archive "$dir/farhelm-aarch64-unknown-linux-musl.tar.gz" farhelm aarch64-unknown-linux-musl "farhelm $version"
   build_archive "$dir/farhelm-aarch64-apple-darwin.tar.gz" farhelm aarch64-apple-darwin "farhelm $version"
   build_archive "$dir/farhelm-desktop-aarch64-apple-darwin.tar.gz" farhelm-desktop aarch64-apple-darwin "farhelm-desktop $version"
-  printf '#!/bin/sh\necho "tmux fixture x86_64"\n' >"$dir/tmux-x86_64-unknown-linux-musl"
-  printf '#!/bin/sh\necho "tmux fixture aarch64"\n' >"$dir/tmux-aarch64-unknown-linux-musl"
-  chmod 755 "$dir/tmux-x86_64-unknown-linux-musl" "$dir/tmux-aarch64-unknown-linux-musl"
-  (cd "$dir" && sha256sum -- *.tar.gz tmux-* >SHA256SUMS)
+  (cd "$dir" && sha256sum -- *.tar.gz >SHA256SUMS)
 }
 
 # corrupt_checksum DIR ARCHIVE_NAME
@@ -193,8 +185,7 @@ corrupt_checksum() {
 }
 
 # build_two_member_archive_release DIR VERSION
-# One archive (the x86_64 Linux target only -- that is the platform this
-# harness itself runs as, so no uname shim is needed to reach it) whose
+# One Mac CLI archive whose
 # member list has TWO entries basename-matching "farhelm". Exercises the
 # "more than one candidate member" refusal.
 build_two_member_archive_release() {
@@ -204,9 +195,9 @@ build_two_member_archive_release() {
   stage=$(mktemp -d "$WORKDIR/two-member-stage.XXXXXX")
   write_binary "$stage/a" farhelm "farhelm $version"
   write_binary "$stage/b" farhelm "farhelm $version"
-  tar -czf "$dir/farhelm-x86_64-unknown-linux-musl.tar.gz" -C "$stage" a/farhelm b/farhelm
+  tar -czf "$dir/farhelm-aarch64-apple-darwin.tar.gz" -C "$stage" a/farhelm b/farhelm
   rm -rf "$stage"
-  (cd "$dir" && sha256sum -- farhelm-x86_64-unknown-linux-musl.tar.gz >SHA256SUMS)
+  (cd "$dir" && sha256sum -- farhelm-aarch64-apple-darwin.tar.gz >SHA256SUMS)
 }
 
 # build_nonregular_member_release DIR VERSION
@@ -218,13 +209,13 @@ build_nonregular_member_release() {
   mkdir -p "$dir"
   local stage
   stage=$(mktemp -d "$WORKDIR/nonregular-stage.XXXXXX")
-  mkdir -p "$stage/farhelm-x86_64-unknown-linux-musl"
-  ln -s /nonexistent-target "$stage/farhelm-x86_64-unknown-linux-musl/farhelm"
+  mkdir -p "$stage/farhelm-aarch64-apple-darwin"
+  ln -s /nonexistent-target "$stage/farhelm-aarch64-apple-darwin/farhelm"
   # tar does not dereference a symlink source by default -- the archive
   # member itself is a symlink entry, which is exactly the case under test.
-  tar -czf "$dir/farhelm-x86_64-unknown-linux-musl.tar.gz" -C "$stage" farhelm-x86_64-unknown-linux-musl/farhelm
+  tar -czf "$dir/farhelm-aarch64-apple-darwin.tar.gz" -C "$stage" farhelm-aarch64-apple-darwin/farhelm
   rm -rf "$stage"
-  (cd "$dir" && sha256sum -- farhelm-x86_64-unknown-linux-musl.tar.gz >SHA256SUMS)
+  (cd "$dir" && sha256sum -- farhelm-aarch64-apple-darwin.tar.gz >SHA256SUMS)
 }
 
 # build_zero_rows_release DIR VERSION (F18)
@@ -232,7 +223,7 @@ build_nonregular_member_release() {
 build_zero_rows_release() {
   local dir=$1 version=$2
   mkdir -p "$dir"
-  build_archive "$dir/farhelm-x86_64-unknown-linux-musl.tar.gz" farhelm x86_64-unknown-linux-musl "farhelm $version"
+  build_archive "$dir/farhelm-aarch64-apple-darwin.tar.gz" farhelm aarch64-apple-darwin "farhelm $version"
   : >"$dir/SHA256SUMS"
 }
 
@@ -242,8 +233,8 @@ build_zero_rows_release() {
 build_duplicate_rows_release() {
   local dir=$1 version=$2
   mkdir -p "$dir"
-  build_archive "$dir/farhelm-x86_64-unknown-linux-musl.tar.gz" farhelm x86_64-unknown-linux-musl "farhelm $version"
-  (cd "$dir" && sha256sum -- farhelm-x86_64-unknown-linux-musl.tar.gz >SHA256SUMS)
+  build_archive "$dir/farhelm-aarch64-apple-darwin.tar.gz" farhelm aarch64-apple-darwin "farhelm $version"
+  (cd "$dir" && sha256sum -- farhelm-aarch64-apple-darwin.tar.gz >SHA256SUMS)
   cat "$dir/SHA256SUMS" "$dir/SHA256SUMS" >"$dir/SHA256SUMS.tmp"
   mv "$dir/SHA256SUMS.tmp" "$dir/SHA256SUMS"
 }
@@ -257,10 +248,10 @@ build_zero_members_release() {
   mkdir -p "$dir"
   local stage
   stage=$(mktemp -d "$WORKDIR/zero-members-stage.XXXXXX")
-  write_binary "$stage/farhelm-x86_64-unknown-linux-musl" not-farhelm "farhelm $version"
-  tar -czf "$dir/farhelm-x86_64-unknown-linux-musl.tar.gz" -C "$stage" farhelm-x86_64-unknown-linux-musl/not-farhelm
+  write_binary "$stage/farhelm-aarch64-apple-darwin" not-farhelm "farhelm $version"
+  tar -czf "$dir/farhelm-aarch64-apple-darwin.tar.gz" -C "$stage" farhelm-aarch64-apple-darwin/not-farhelm
   rm -rf "$stage"
-  (cd "$dir" && sha256sum -- farhelm-x86_64-unknown-linux-musl.tar.gz >SHA256SUMS)
+  (cd "$dir" && sha256sum -- farhelm-aarch64-apple-darwin.tar.gz >SHA256SUMS)
 }
 
 # build_wrong_version_release DIR ACTUAL_VERSION (F18)
@@ -285,15 +276,15 @@ build_decoy_bypass_release() {
   mkdir -p "$dir"
   local stage
   stage=$(mktemp -d "$WORKDIR/decoy-stage.XXXXXX")
-  mkdir -p "$stage/farhelm-x86_64-unknown-linux-musl"
+  mkdir -p "$stage/farhelm-aarch64-apple-darwin"
   printf '#!/bin/sh\necho "farhelm %s (decoy, should never run)"\n' "$version" \
-    >"$stage/farhelm-x86_64-unknown-linux-musl/farhelm.extra"
-  chmod 755 "$stage/farhelm-x86_64-unknown-linux-musl/farhelm.extra"
-  ln -s /nonexistent-target "$stage/farhelm-x86_64-unknown-linux-musl/farhelm"
-  tar -czf "$dir/farhelm-x86_64-unknown-linux-musl.tar.gz" -C "$stage" \
-    farhelm-x86_64-unknown-linux-musl/farhelm.extra farhelm-x86_64-unknown-linux-musl/farhelm
+    >"$stage/farhelm-aarch64-apple-darwin/farhelm.extra"
+  chmod 755 "$stage/farhelm-aarch64-apple-darwin/farhelm.extra"
+  ln -s /nonexistent-target "$stage/farhelm-aarch64-apple-darwin/farhelm"
+  tar -czf "$dir/farhelm-aarch64-apple-darwin.tar.gz" -C "$stage" \
+    farhelm-aarch64-apple-darwin/farhelm.extra farhelm-aarch64-apple-darwin/farhelm
   rm -rf "$stage"
-  (cd "$dir" && sha256sum -- farhelm-x86_64-unknown-linux-musl.tar.gz >SHA256SUMS)
+  (cd "$dir" && sha256sum -- farhelm-aarch64-apple-darwin.tar.gz >SHA256SUMS)
 }
 
 # ---------------------------------------------------------------------------
@@ -425,6 +416,17 @@ make_toolchain() {
       ln -sf "$real" "$dir/$tool"
     fi
   done
+  # The installer runs Mac-shaped even on the Linux/BusyBox CI hosts.
+  # Replace the symlink, never write through it to the host's real uname.
+  rm -f "$dir/uname"
+  cat >"$dir/uname" <<'UNAMEEOF'
+#!/bin/sh
+case "$1" in
+  -s) echo Darwin ;;
+  -m) echo arm64 ;;
+esac
+UNAMEEOF
+  chmod 755 "$dir/uname"
 }
 
 # write_fake_tmux DIR VERSION_OUTPUT
@@ -446,7 +448,7 @@ make_toolchain "$TOOLCHAIN_FULL"
 # ---------------------------------------------------------------------------
 # run_install: the one place every scenario invokes the installer. Always
 # `env -i` (this script's own environment never leaks in), always an
-# isolated $HOME and $FARHELM_INSTALL_DIR the caller provides, always
+# isolated $HOME supplied by the caller, always
 # `/bin/sh` naming install.sh by absolute path (so no scenario's stripped-
 # down $PATH needs to contain "sh" itself).
 #
@@ -454,11 +456,11 @@ make_toolchain "$TOOLCHAIN_FULL"
 # to assert against.
 # ---------------------------------------------------------------------------
 run_install() {
-  local path_dir=$1 home=$2 install_dir=$3 base_url=$4 version=$5
-  # Anything after the five fixed arguments is extra VAR=VALUE assignments
+  local path_dir=$1 home=$2 base_url=$3 version=$4
+  # Anything after the four fixed arguments is extra VAR=VALUE assignments
   # spliced into the child environment (still under `env -i`), for the few
-  # scenarios that exercise an opt-out knob like FARHELM_NO_APP_BUNDLE.
-  shift 5
+  # scenarios whose command doubles need explicit fixture inputs.
+  shift 4
   local out_file err_file
   out_file=$(mktemp "$WORKDIR/out.XXXXXX")
   err_file=$(mktemp "$WORKDIR/err.XXXXXX")
@@ -466,7 +468,6 @@ run_install() {
   env -i \
     PATH="$path_dir" \
     HOME="$home" \
-    FARHELM_INSTALL_DIR="$install_dir" \
     FARHELM_INSTALL_TEST_BASE_URL="$base_url" \
     FARHELM_VERSION="$version" \
     "$@" \
@@ -477,17 +478,41 @@ run_install() {
   ERR=$(cat "$err_file")
 }
 
+# seed_legacy_install HOME OLD_DIR -- model ownership records from older installers.
+# The installer no longer accepts a custom directory, but its moved/foreign
+# record rules still protect old installations. Start from verified current
+# bytes, relocate only the fixture's flat files, and rebind both records to
+# the old path. Every subsequent installer invocation uses ~/.local/bin.
+seed_legacy_install() {
+  local home=$1 old=$2
+  run_install "$MAC_TOOLS" "$home" "$BASE/good" 1.2.3
+  check "legacy fixture: baseline install succeeds" [ "$RC" -eq 0 ]
+  mkdir -p "$(dirname "$old")"
+  mv "$home/.local/bin" "$old"
+  python3 - "$home" "$old" <<'PYRECORD'
+import os
+from pathlib import Path
+import sys
+home, old = map(Path, sys.argv[1:])
+for record in [old / ".farhelm-installation", home / "Applications/Farhelm.app/Contents/.farhelm-installation"]:
+    fields = record.read_bytes().split(b"\0")
+    fields[1] = os.fsencode(old.resolve())
+    record.write_bytes(b"\0".join(fields))
+PYRECORD
+  check "legacy fixture: standalone record matches relocated bytes" assert_standalone_record "$old"
+  check "legacy fixture: bundle record names the old installation" assert_bundle_record "$home/Applications/Farhelm.app" "$old"
+}
+
 # run_install_bg: like run_install, but starts install.sh in the background
 # and returns immediately with its pid in BG_PID -- for the one scenario
 # (F29) that needs to send it a signal mid-run rather than wait for it to
 # finish on its own. Point base_url at a /slow/-prefixed fixture (see
 # start_server) so there is a reliable window to act in.
 run_install_bg() {
-  local path_dir=$1 home=$2 install_dir=$3 base_url=$4 version=$5
+  local path_dir=$1 home=$2 base_url=$3 version=$4
   env -i \
     PATH="$path_dir" \
     HOME="$home" \
-    FARHELM_INSTALL_DIR="$install_dir" \
     FARHELM_INSTALL_TEST_BASE_URL="$base_url" \
     FARHELM_VERSION="$version" \
     /bin/sh "$INSTALL_SH" >"$WORKDIR/bg-out" 2>"$WORKDIR/bg-err" &
@@ -495,26 +520,25 @@ run_install_bg() {
 }
 
 # find_snapshot DIR -- a stable, sorted directory listing used for the
-# "nothing outside FARHELM_INSTALL_DIR changed" check. Includes file types
+# "nothing outside the bin directory and bundle changed" check. Includes file types
 # so a file silently becoming a directory (or vice versa) would show up
 # too, not just its name.
 find_snapshot() {
   find "$1" -mindepth 0 -exec sh -c 'printf "%s %s\n" "$(stat -c %F "$1" 2>/dev/null || echo "?")" "$1"' _ {} \; | sort
 }
 
-# assert_standalone_record INSTALL_DIR DESKTOP_EXPECTED
+# assert_standalone_record INSTALL_DIR
 # Compares the complete NUL-delimited record with an independent Python
 # oracle. Python receives the pathname as an argument, so it can retain
 # trailing newlines and use realpath and byte hashing without copying the
 # installer's shell canonicalization.
 assert_standalone_record() {
-  python3 - "$1" "$2" <<'PY'
+  python3 - "$1" <<'PY'
 import hashlib
 import os
 import sys
 
 install_dir = sys.argv[1]
-has_desktop = sys.argv[2] == "yes"
 canonical = os.fsencode(os.path.realpath(install_dir))
 
 def digest(path):
@@ -525,7 +549,7 @@ expected = b"\0".join([
     b"farhelm-standalone",
     canonical,
     digest(os.path.join(install_dir, "farhelm")),
-    digest(os.path.join(install_dir, "farhelm-desktop")) if has_desktop else b"",
+    digest(os.path.join(install_dir, "farhelm-desktop")),
 ]) + b"\0"
 with open(os.path.join(install_dir, ".farhelm-installation"), "rb") as record:
     raise SystemExit(0 if record.read() == expected else 1)
@@ -591,7 +615,7 @@ mkdir -p "$WWW/redirect-real"
 build_good_release "$WWW/redirect-real" 1.2.3
 mkdir -p "$WWW/norelease" # deliberately empty: every request 404s
 build_good_release "$WWW/badchecksum" 1.2.3
-corrupt_checksum "$WWW/badchecksum" farhelm-x86_64-unknown-linux-musl.tar.gz
+corrupt_checksum "$WWW/badchecksum" farhelm-aarch64-apple-darwin.tar.gz
 build_two_member_archive_release "$WWW/twomember" 1.2.3
 build_nonregular_member_release "$WWW/nonregular"
 build_good_release "$WWW/prerelease" 1.2.3-rc.1
@@ -616,6 +640,42 @@ BASE="http://127.0.0.1:$SERVER_PORT"
 echo "fixture server: $BASE"
 
 # ===========================================================================
+# Unsupported platforms must refuse before even a download or mkdir. The
+# fixture HOME does not exist, so its absence proves no installer path ran.
+# ===========================================================================
+LINUX_TOOLS="$WORKDIR/toolchain-linux"
+mkdir -p "$LINUX_TOOLS"
+cp -a "$TOOLCHAIN_FULL"/. "$LINUX_TOOLS/"
+rm -f "$LINUX_TOOLS/uname" "$LINUX_TOOLS/curl"
+cat >"$LINUX_TOOLS/uname" <<'UNAMEEOF'
+#!/bin/sh
+case "$1" in
+  -s) echo Linux ;;
+  -m) echo x86_64 ;;
+esac
+UNAMEEOF
+cat >"$LINUX_TOOLS/curl" <<'CURLEOF'
+#!/bin/sh
+printf 'unexpected download\n' >"$HOME-download"
+exit 1
+CURLEOF
+chmod 755 "$LINUX_TOOLS/uname" "$LINUX_TOOLS/curl"
+HOME_LINUX="$WORKDIR/home-linux-refused"
+run_install "$LINUX_TOOLS" "$HOME_LINUX" "$BASE/good" 1.2.3
+check "Linux refuses with exit 1" [ "$RC" -eq 1 ]
+check "Linux leaves HOME absent" [ ! -e "$HOME_LINUX" ]
+check "Linux never downloads" [ ! -e "$HOME_LINUX-download" ]
+check "Linux has no stdout report" [ -z "$OUT" ]
+LINUX_REFUSAL="$(cat <<'MESSAGE'
+❌ This installer only supports macOS for now.
+   Linux is supported for running a helm and session hosts; only this installer is
+   limited, and that will be fixed. If you want to install on Linux, please open an
+   issue and it will be prioritized: https://github.com/scode/farhelm/issues
+MESSAGE
+)"
+check "Linux refusal matches the approved text" [ "$ERR" = "$LINUX_REFUSAL" ]
+
+# ===========================================================================
 # Scenario: fresh install (also the base case every later scenario's
 # "update" and "rollback" tests build on).
 # ===========================================================================
@@ -624,35 +684,16 @@ echo "== fresh install =="
 HOME1="$WORKDIR/home1"
 INSTALL1="$HOME1/.local/bin"
 mkdir -p "$HOME1"
-run_install "$TOOLCHAIN_FULL" "$HOME1" "$INSTALL1" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME1" "$BASE/good" 1.2.3
 check "fresh install exits 0" [ "$RC" -eq 0 ]
 check "fresh install writes farhelm" [ -x "$INSTALL1/farhelm" ]
 check "fresh install reports its own version" contains "$("$INSTALL1/farhelm" --version)" "farhelm 1.2.3"
 check "fresh install installs mode 0755" [ "$(stat -c %a "$INSTALL1/farhelm")" = "755" ]
-check "fresh install reports Installed" contains "$OUT" "Installed farhelm 1.2.3 to $INSTALL1."
+check "fresh install reports Installed" contains "$OUT" "Installed farhelm 1.2.3 (and farhelm-desktop) to $INSTALL1."
 check "fresh install writes owner-only standalone metadata" [ "$(stat -c %a "$INSTALL1/.farhelm-installation")" = "600" ]
-check "fresh install writes the exact standalone metadata fields" assert_standalone_record "$INSTALL1" no
+check "fresh install writes the exact standalone metadata fields" assert_standalone_record "$INSTALL1"
 check "fresh install has no appended canonical-path newline" assert_stable_path_field "$INSTALL1"
 check "fresh install has no leftover staging/lock/backup dot-files" [ -z "$(find "$INSTALL1" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation')" ]
-
-# Relative destinations are refused outright (see "FARHELM_INSTALL_DIR must
-# be absolute" below), which also retires the earlier check that an
-# inherited CDPATH could not redirect a relative destination's record.
-
-# A Linux destination may already contain a separately installed desktop
-# executable. The standalone record must leave that foreign artifact
-# unclaimed while still recording the CLI this run installed.
-HOME_FOREIGN_DESKTOP="$WORKDIR/home-foreign-desktop"
-INSTALL_FOREIGN_DESKTOP="$HOME_FOREIGN_DESKTOP/.local/bin"
-mkdir -p "$INSTALL_FOREIGN_DESKTOP"
-printf 'foreign desktop\n' >"$INSTALL_FOREIGN_DESKTOP/farhelm-desktop"
-chmod 755 "$INSTALL_FOREIGN_DESKTOP/farhelm-desktop"
-run_install "$TOOLCHAIN_FULL" "$HOME_FOREIGN_DESKTOP" "$INSTALL_FOREIGN_DESKTOP" "$BASE/good" 1.2.3
-check "Linux foreign desktop install succeeds" [ "$RC" -eq 0 ]
-check "Linux foreign desktop remains byte-for-byte untouched" \
-  [ "$(cat "$INSTALL_FOREIGN_DESKTOP/farhelm-desktop")" = "foreign desktop" ]
-check "Linux foreign desktop is absent from ownership metadata" \
-  assert_standalone_record "$INSTALL_FOREIGN_DESKTOP" no
 
 # ===========================================================================
 # Scenario: update (re-run against the same release) -- the ".old" rollback
@@ -660,10 +701,10 @@ check "Linux foreign desktop is absent from ownership metadata" \
 # ===========================================================================
 echo
 echo "== update (re-run) =="
-run_install "$TOOLCHAIN_FULL" "$HOME1" "$INSTALL1" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME1" "$BASE/good" 1.2.3
 check "update exits 0" [ "$RC" -eq 0 ]
 check "update reports Updated" contains "$OUT" "Updated. Restart what is running:"
-check "update mentions systemctl restart line" contains "$OUT" "systemctl --user restart farhelm-supervisor farhelm-helm"
+check "update gives macOS restart advice" contains "$OUT" "quit and reopen Farhelm"
 check "update does not print a rollback message" not_contains "$OUT$ERR" "was restored"
 check "update leaves no leftover staging/lock/backup dot-files" [ -z "$(find "$INSTALL1" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation')" ]
 
@@ -678,7 +719,7 @@ echo "== fresh install through a 302 redirect chain (F1) =="
 HOME_REDIRECT="$WORKDIR/home-redirect"
 INSTALL_REDIRECT="$HOME_REDIRECT/.local/bin"
 mkdir -p "$HOME_REDIRECT"
-run_install "$TOOLCHAIN_FULL" "$HOME_REDIRECT" "$INSTALL_REDIRECT" "$BASE/redirect" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_REDIRECT" "$BASE/redirect" 1.2.3
 check "redirect-chain install exits 0" [ "$RC" -eq 0 ]
 check "redirect-chain install produced a working farhelm" contains "$("$INSTALL_REDIRECT/farhelm" --version 2>/dev/null || true)" "farhelm 1.2.3"
 
@@ -697,28 +738,12 @@ check "redirect-chain install produced a working farhelm" contains "$("$INSTALL_
 # ===========================================================================
 echo
 echo "== macOS-shaped install, then rollback on farhelm-desktop failure =="
-MAC_TOOLS="$WORKDIR/toolchain-mac"
-mkdir -p "$MAC_TOOLS"
-cp -a "$TOOLCHAIN_FULL"/. "$MAC_TOOLS/"
-# uname is a symlink from the cp -a above (to the real /usr/bin/uname); `cat
-# >` on it would follow the symlink and try to overwrite the real system
-# binary in place (and fail with EACCES, since it is root-owned) rather than
-# replacing what $MAC_TOOLS/uname points AT. Remove the symlink first so
-# this writes a fresh regular file instead.
-rm -f "$MAC_TOOLS/uname"
-cat >"$MAC_TOOLS/uname" <<'EOF'
-#!/bin/sh
-case "$1" in
-  -s) echo Darwin ;;
-  -m) echo arm64 ;;
-esac
-EOF
-chmod 755 "$MAC_TOOLS/uname"
+MAC_TOOLS="$TOOLCHAIN_FULL"
 
 HOME_MAC="$WORKDIR/home-mac"
 INSTALL_MAC="$HOME_MAC/.local/bin"
 mkdir -p "$HOME_MAC"
-run_install "$MAC_TOOLS" "$HOME_MAC" "$INSTALL_MAC" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_MAC" "$BASE/good" 1.2.3
 check "macOS-shaped fresh install exits 0" [ "$RC" -eq 0 ]
 check "macOS-shaped fresh install writes farhelm-desktop too" [ -x "$INSTALL_MAC/farhelm-desktop" ]
 check "macOS-shaped fresh install reports the desktop binary" contains "$OUT" "Installed farhelm 1.2.3 (and farhelm-desktop) to $INSTALL_MAC."
@@ -748,7 +773,7 @@ check "bundle: executable carries the executable bit" [ -x "$MAC_APP/Contents/Ma
 check "bundle: CLI sibling carries the executable bit" [ -x "$MAC_APP/Contents/MacOS/farhelm" ]
 check "bundle: icon is the archive's Farhelm.icns byte-for-byte" \
   [ "$(cat "$MAC_APP/Contents/Resources/Farhelm.icns")" = "fake icns: farhelm-desktop 1.2.3" ]
-check "macOS standalone metadata has all installed hashes" assert_standalone_record "$INSTALL_MAC" yes
+check "macOS standalone metadata has all installed hashes" assert_standalone_record "$INSTALL_MAC"
 check "macOS standalone metadata is owner-only" [ "$(stat -c %a "$INSTALL_MAC/.farhelm-installation")" = "600" ]
 check "bundle metadata has the exact content fields" assert_bundle_record "$MAC_APP" "$INSTALL_MAC"
 check "bundle metadata is owner-only" [ "$(stat -c %a "$MAC_APP/Contents/.farhelm-installation")" = "600" ]
@@ -790,7 +815,7 @@ chmod 755 "$MAC_TOOLS_FAILDESKTOP/mv"
 
 # Attempt to update to 1.2.4 (NOT 1.2.3) -- the forced failure must leave
 # BOTH destinations at the 1.2.3 content, never a 1.2.3/1.2.4 mix.
-run_install "$MAC_TOOLS_FAILDESKTOP" "$HOME_MAC" "$INSTALL_MAC" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS_FAILDESKTOP" "$HOME_MAC" "$BASE/good-v2" 1.2.4
 check "forced desktop-replace failure exits 1" [ "$RC" -ne 0 ]
 check "forced desktop-replace failure prints the exact required message" \
   contains "$ERR" "install/update failed while replacing farhelm-desktop; the previous installation (if any) was restored"
@@ -813,7 +838,7 @@ check "forced desktop-replace failure leaves the 1.2.3 bundle untouched" \
 MAC_TOOLS_V2="$WORKDIR/toolchain-mac-v2"
 mkdir -p "$MAC_TOOLS_V2"
 cp -a "$MAC_TOOLS"/. "$MAC_TOOLS_V2/"
-run_install "$MAC_TOOLS_V2" "$HOME_MAC" "$INSTALL_MAC" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS_V2" "$HOME_MAC" "$BASE/good-v2" 1.2.4
 check "a real update to 1.2.4 after the forced failure succeeds" [ "$RC" -eq 0 ]
 check "real update: farhelm now reports 1.2.4" [ "$("$INSTALL_MAC/farhelm" --version)" = "farhelm 1.2.4" ]
 check "real update: farhelm-desktop content changed from the 1.2.3 original" \
@@ -824,30 +849,6 @@ check "real update: bundle executable tracks the new farhelm-desktop" \
   [ "$(cat "$MAC_APP/Contents/MacOS/farhelm-desktop")" = "$(cat "$INSTALL_MAC/farhelm-desktop")" ]
 check "real update: bundle metadata matches the new bundle" assert_bundle_record "$MAC_APP" "$INSTALL_MAC"
 
-# Opting out of bundle assembly on an update keeps the existing bundle and
-# its record independent while the flat executables and standalone record
-# advance to the new release.
-HOME_OLD_OPTOUT="$WORKDIR/home-old-optout"
-INSTALL_OLD_OPTOUT="$HOME_OLD_OPTOUT/.local/bin"
-mkdir -p "$HOME_OLD_OPTOUT"
-run_install "$MAC_TOOLS" "$HOME_OLD_OPTOUT" "$INSTALL_OLD_OPTOUT" "$BASE/good" 1.2.3
-OLD_OPTOUT_APP="$HOME_OLD_OPTOUT/Applications/Farhelm.app"
-cp -a "$OLD_OPTOUT_APP" "$WORKDIR/old-optout-app"
-cp "$OLD_OPTOUT_APP/Contents/.farhelm-installation" "$WORKDIR/old-optout-bundle-record"
-check "opt-out baseline bundle record verifies independently" \
-  assert_bundle_record "$OLD_OPTOUT_APP" "$INSTALL_OLD_OPTOUT"
-run_install "$MAC_TOOLS" "$HOME_OLD_OPTOUT" "$INSTALL_OLD_OPTOUT" "$BASE/good-v2" 1.2.4 \
-  FARHELM_NO_APP_BUNDLE=1
-check "bundle opt-out update succeeds" [ "$RC" -eq 0 ]
-check "bundle opt-out update advances flat ownership metadata" \
-  assert_standalone_record "$INSTALL_OLD_OPTOUT" yes
-check "bundle opt-out update leaves the old bundle unchanged" \
-  diff -r "$WORKDIR/old-optout-app" "$OLD_OPTOUT_APP"
-check "bundle opt-out update leaves the old bundle record unchanged" \
-  cmp -s "$WORKDIR/old-optout-bundle-record" "$OLD_OPTOUT_APP/Contents/.farhelm-installation"
-check "bundle opt-out update leaves the old bundle independently verifiable" \
-  assert_bundle_record "$OLD_OPTOUT_APP" "$INSTALL_OLD_OPTOUT"
-
 # ===========================================================================
 # Scenario: bundle edge shapes, all macOS-shaped. Each gets its own fresh
 # HOME so bundle presence/absence assertions cannot bleed between cases.
@@ -855,29 +856,42 @@ check "bundle opt-out update leaves the old bundle independently verifiable" \
 echo
 echo "== Farhelm.app bundle edge shapes =="
 
-# A release whose desktop archive predates the icon: install succeeds, says
-# why there is no bundle, and creates none.
+# A release whose desktop archive predates the icon cannot satisfy the app
+# contract. Refuse before replacing binaries, and remove ephemeral staging.
 build_good_release "$WWW/good-preicon" 1.2.3
 build_archive "$WWW/good-preicon/farhelm-desktop-aarch64-apple-darwin.tar.gz" \
   farhelm-desktop aarch64-apple-darwin "farhelm-desktop 1.2.3" no-icns
-(cd "$WWW/good-preicon" && sha256sum -- *.tar.gz tmux-* >SHA256SUMS)
+(cd "$WWW/good-preicon" && sha256sum -- *.tar.gz >SHA256SUMS)
 HOME_PREICON="$WORKDIR/home-preicon"
 mkdir -p "$HOME_PREICON"
-run_install "$MAC_TOOLS" "$HOME_PREICON" "$HOME_PREICON/.local/bin" "$BASE/good-preicon" 1.2.3
-check "pre-icon release installs cleanly" [ "$RC" -eq 0 ]
-check "pre-icon release explains the missing bundle" \
-  contains "$OUT" "carries no Farhelm.icns"
+run_install "$MAC_TOOLS" "$HOME_PREICON" "$BASE/good-preicon" 1.2.3
+check "pre-icon release is refused" [ "$RC" -eq 1 ]
+check "pre-icon release names the too-old release" \
+  contains "$ERR" "Farhelm 1.2.3 is too old for this installer: it has no Mac app."
+check "pre-icon release explains the supported versions" \
+  contains "$ERR" "   Pick 0.2.1 or newer, or leave FARHELM_VERSION unset for the latest release."
+check "pre-icon release leaves no staging or lock" \
+  [ -z "$(find "$HOME_PREICON/.local/bin" -mindepth 1 -maxdepth 1 -name '.farhelm*')" ]
+check "pre-icon release installs no binary" [ ! -e "$HOME_PREICON/.local/bin/farhelm" ]
 check "pre-icon release creates no bundle" [ ! -e "$HOME_PREICON/Applications/Farhelm.app" ]
 
-# FARHELM_NO_APP_BUNDLE opts out even when the icon is available.
-HOME_OPTOUT="$WORKDIR/home-optout"
-mkdir -p "$HOME_OPTOUT"
-run_install "$MAC_TOOLS" "$HOME_OPTOUT" "$HOME_OPTOUT/.local/bin" "$BASE/good" 1.2.3 \
-  FARHELM_NO_APP_BUNDLE=1
-check "FARHELM_NO_APP_BUNDLE install exits 0" [ "$RC" -eq 0 ]
-check "FARHELM_NO_APP_BUNDLE reports the opt-out" \
-  contains "$OUT" "Skipped assembling the Farhelm.app bundle (FARHELM_NO_APP_BUNDLE is set)."
-check "FARHELM_NO_APP_BUNDLE creates no bundle" [ ! -e "$HOME_OPTOUT/Applications/Farhelm.app" ]
+# Refusing an old release must also preserve a working installation, not
+# merely leave a fresh home empty. Snapshot every installed file's bytes so
+# an early replacement followed by a refusal cannot look like a safe gate.
+HOME_PREICON_UPDATE="$WORKDIR/home-preicon-update"
+run_install "$MAC_TOOLS" "$HOME_PREICON_UPDATE" "$BASE/good-v2" 1.2.4
+check "pre-icon update premise: current install succeeds" [ "$RC" -eq 0 ]
+check "pre-icon update premise: flat ownership is valid" \
+  assert_standalone_record "$HOME_PREICON_UPDATE/.local/bin"
+check "pre-icon update premise: app ownership is valid" \
+  assert_bundle_record "$HOME_PREICON_UPDATE/Applications/Farhelm.app" "$HOME_PREICON_UPDATE/.local/bin"
+PREICON_BYTES=$(find "$HOME_PREICON_UPDATE" -type f -exec sha256sum {} \; | sort)
+run_install "$MAC_TOOLS" "$HOME_PREICON_UPDATE" "$BASE/good-preicon" 1.2.3
+check "pre-icon update is refused" [ "$RC" -eq 1 ]
+check "pre-icon update preserves every installed file" \
+  [ "$(find "$HOME_PREICON_UPDATE" -type f -exec sha256sum {} \; | sort)" = "$PREICON_BYTES" ]
+check "pre-icon update leaves no staging or lock" \
+  [ -z "$(find "$HOME_PREICON_UPDATE/.local/bin" -name '.farhelm*' ! -name '.farhelm-installation')" ]
 
 # A Farhelm.app that is NOT a farhelm bundle belongs to the user: refuse to
 # replace it, but the binaries must still have been committed (the bundle
@@ -890,7 +904,7 @@ cat >"$HOME_FOREIGN/Applications/Farhelm.app/Contents/Info.plist" <<'EOF'
 	<key>CFBundleIdentifier</key><string>com.example.unrelated</string>
 </dict></plist>
 EOF
-run_install "$MAC_TOOLS" "$HOME_FOREIGN" "$HOME_FOREIGN/.local/bin" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_FOREIGN" "$BASE/good" 1.2.3
 check "foreign Farhelm.app: install exits 1" [ "$RC" -ne 0 ]
 check "foreign Farhelm.app: refusal names the problem" \
   contains "$ERR" "does not look like a farhelm app bundle; refusing to replace it."
@@ -927,7 +941,7 @@ mkdir -p "$HOME_STALE/Applications/Farhelm.app/Contents/MacOS"
 printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>\n\t<key>CFBundleIdentifier</key><string>org.farhelm.desktop-trial</string>\n</dict></plist>\n' \
   >"$HOME_STALE/Applications/Farhelm.app/Contents/Info.plist"
 echo mine >"$HOME_STALE/Applications/Farhelm.app/Contents/MacOS/leftover"
-run_install "$MAC_TOOLS" "$HOME_STALE" "$HOME_STALE/.local/bin" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_STALE" "$BASE/good" 1.2.3
 check "farhelm-mentioning foreign bundle: install exits 1" [ "$RC" -ne 0 ]
 check "farhelm-mentioning foreign bundle: refusal names the problem" \
   contains "$ERR" "does not look like a farhelm app bundle; refusing to replace it."
@@ -940,7 +954,7 @@ HOME_LEGACY="$WORKDIR/home-legacy"
 LEGACY_APP="$HOME_LEGACY/Applications/Farhelm.app"
 write_legacy_bundle "$LEGACY_APP"
 check "legacy bundle premise: it carries no record" [ ! -e "$LEGACY_APP/Contents/.farhelm-installation" ]
-run_install "$MAC_TOOLS" "$HOME_LEGACY" "$HOME_LEGACY/.local/bin" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_LEGACY" "$BASE/good" 1.2.3
 check "legacy installer bundle: install exits 0" [ "$RC" -eq 0 ]
 check "legacy installer bundle: rebuilt at the new version" \
   contains "$(cat "$LEGACY_APP/Contents/Info.plist")" "<string>1.2.3</string>"
@@ -953,7 +967,7 @@ HOME_LEGACYX="$WORKDIR/home-legacy-extra"
 LEGACYX_APP="$HOME_LEGACYX/Applications/Farhelm.app"
 write_legacy_bundle "$LEGACYX_APP"
 echo mine >"$LEGACYX_APP/Contents/MacOS/my-helper"
-run_install "$MAC_TOOLS" "$HOME_LEGACYX" "$HOME_LEGACYX/.local/bin" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_LEGACYX" "$BASE/good" 1.2.3
 check "legacy shape plus a user file: install exits 1" [ "$RC" -ne 0 ]
 check "legacy shape plus a user file: the user's file is untouched" \
   [ "$(cat "$LEGACYX_APP/Contents/MacOS/my-helper")" = "mine" ]
@@ -966,7 +980,7 @@ write_legacy_bundle "$LEGACYC_APP"
 printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n<!-- Original identity:\n\t<key>CFBundleIdentifier</key>\n\t<string>org.scode.farhelm.desktop</string>\n-->\n\t<key>CFBundleIdentifier</key>\n\t<string>com.example.custom-farhelm</string>\n</dict>\n</plist>\n' \
   >"$LEGACYC_APP/Contents/Info.plist"
 LEGACYC_PLIST=$(cat "$LEGACYC_APP/Contents/Info.plist")
-run_install "$MAC_TOOLS" "$HOME_LEGACYC" "$HOME_LEGACYC/.local/bin" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_LEGACYC" "$BASE/good" 1.2.3
 check "legacy layout, commented-out identifier: install exits 1" [ "$RC" -ne 0 ]
 check "legacy layout, commented-out identifier: the bundle is untouched" \
   [ "$(cat "$LEGACYC_APP/Contents/Info.plist")" = "$LEGACYC_PLIST" ]
@@ -979,13 +993,13 @@ check "legacy layout, commented-out identifier: its executables are untouched" \
 HOME_HALF="$WORKDIR/home-half"
 HALF_APP="$HOME_HALF/Applications/Farhelm.app"
 mkdir -p "$HOME_HALF"
-run_install "$MAC_TOOLS" "$HOME_HALF" "$HOME_HALF/.local/bin" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_HALF" "$BASE/good" 1.2.3
 check "half-uninstalled bundle setup: first install exits 0" [ "$RC" -eq 0 ]
 rm -f "$HALF_APP/Contents/Info.plist"
 echo stale >"$HALF_APP/Contents/MacOS/leftover"
 check "half-uninstalled bundle premise: record present" [ -f "$HALF_APP/Contents/.farhelm-installation" ]
 check "half-uninstalled bundle premise: Info.plist gone" [ ! -e "$HALF_APP/Contents/Info.plist" ]
-run_install "$MAC_TOOLS" "$HOME_HALF" "$HOME_HALF/.local/bin" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_HALF" "$BASE/good-v2" 1.2.4
 check "half-uninstalled bundle: update exits 0" [ "$RC" -eq 0 ]
 check "half-uninstalled bundle: rebuilt at the new version" \
   contains "$(cat "$HALF_APP/Contents/Info.plist")" "<string>1.2.4</string>"
@@ -996,10 +1010,10 @@ check "half-uninstalled bundle: no stale file survives the wholesale swap" \
 # bundle this installation's to replace.
 HOME_OTHERDIR="$WORKDIR/home-otherdir"
 mkdir -p "$HOME_OTHERDIR"
-run_install "$MAC_TOOLS" "$HOME_OTHERDIR" "$HOME_OTHERDIR/first/bin" "$BASE/good" 1.2.3
+seed_legacy_install "$HOME_OTHERDIR" "$HOME_OTHERDIR/first/bin"
 check "other-directory record setup: first install exits 0" [ "$RC" -eq 0 ]
 OTHERDIR_PLIST=$(cat "$HOME_OTHERDIR/Applications/Farhelm.app/Contents/Info.plist")
-run_install "$MAC_TOOLS" "$HOME_OTHERDIR" "$HOME_OTHERDIR/second/bin" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_OTHERDIR" "$BASE/good-v2" 1.2.4
 check "other-directory record: install exits 1" [ "$RC" -ne 0 ]
 check "other-directory record: the existing bundle is untouched" \
   [ "$(cat "$HOME_OTHERDIR/Applications/Farhelm.app/Contents/Info.plist")" = "$OTHERDIR_PLIST" ]
@@ -1014,29 +1028,29 @@ check "other-directory record: the refusal names the installation the bundle bel
 # naming a directory that no longer holds a farhelm installation, or that
 # now resolves to this installation's directory, is this installation's.
 
-# Moved by a different FARHELM_INSTALL_DIR, the old directory gone.
+# An old custom installation is gone; a new default-path install adopts its bundle.
 HOME_MOVED="$WORKDIR/home-moved"
 MOVED_APP="$HOME_MOVED/Applications/Farhelm.app"
 mkdir -p "$HOME_MOVED"
-run_install "$MAC_TOOLS" "$HOME_MOVED" "$HOME_MOVED/old/bin" "$BASE/good" 1.2.3
+seed_legacy_install "$HOME_MOVED" "$HOME_MOVED/old/bin"
 check "moved install setup: first install exits 0" [ "$RC" -eq 0 ]
 check "moved install premise: the bundle's record names the old directory" \
   assert_bundle_record "$MOVED_APP" "$HOME_MOVED/old/bin"
 rm -rf "$HOME_MOVED/old"
 check "moved install premise: the old directory is gone" [ ! -e "$HOME_MOVED/old" ]
-run_install "$MAC_TOOLS" "$HOME_MOVED" "$HOME_MOVED/new/bin" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_MOVED" "$BASE/good-v2" 1.2.4
 check "moved install: update exits 0" [ "$RC" -eq 0 ]
 check "moved install: bundle rebuilt at the new version" \
   contains "$(cat "$MOVED_APP/Contents/Info.plist")" "<string>1.2.4</string>"
 check "moved install: the record now names the new directory" \
-  assert_bundle_record "$MOVED_APP" "$HOME_MOVED/new/bin"
+  assert_bundle_record "$MOVED_APP" "$HOME_MOVED/.local/bin"
 
 # The old directory survives but holds no installation any more (its
 # binaries and record went; the directory itself stayed).
 HOME_EMPTIED="$WORKDIR/home-emptied"
 EMPTIED_APP="$HOME_EMPTIED/Applications/Farhelm.app"
 mkdir -p "$HOME_EMPTIED"
-run_install "$MAC_TOOLS" "$HOME_EMPTIED" "$HOME_EMPTIED/old/bin" "$BASE/good" 1.2.3
+seed_legacy_install "$HOME_EMPTIED" "$HOME_EMPTIED/old/bin"
 check "emptied old directory setup: first install exits 0" [ "$RC" -eq 0 ]
 check "emptied old directory premise: the bundle's record names the old directory" \
   assert_bundle_record "$EMPTIED_APP" "$HOME_EMPTIED/old/bin"
@@ -1045,17 +1059,17 @@ rm -f "$HOME_EMPTIED/old/bin/farhelm" "$HOME_EMPTIED/old/bin/farhelm-desktop" \
 check "emptied old directory premise: the directory itself remains" [ -d "$HOME_EMPTIED/old/bin" ]
 check "emptied old directory premise: it holds no installation record or binaries" \
   [ ! -e "$HOME_EMPTIED/old/bin/.farhelm-installation" ] && [ -z "$(ls -A "$HOME_EMPTIED/old/bin")" ]
-run_install "$MAC_TOOLS" "$HOME_EMPTIED" "$HOME_EMPTIED/new/bin" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_EMPTIED" "$BASE/good-v2" 1.2.4
 check "emptied old directory: update exits 0" [ "$RC" -eq 0 ]
 check "emptied old directory: the record now names the new directory" \
-  assert_bundle_record "$EMPTIED_APP" "$HOME_EMPTIED/new/bin"
+  assert_bundle_record "$EMPTIED_APP" "$HOME_EMPTIED/.local/bin"
 
 # ~/.local/bin moved elsewhere and replaced by a symlink to its new home:
 # the record's path now resolves to this installation's directory.
 HOME_LINKED="$WORKDIR/home-linked"
 LINKED_APP="$HOME_LINKED/Applications/Farhelm.app"
 mkdir -p "$HOME_LINKED"
-run_install "$MAC_TOOLS" "$HOME_LINKED" "$HOME_LINKED/.local/bin" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_LINKED" "$BASE/good" 1.2.3
 check "symlinked install setup: first install exits 0" [ "$RC" -eq 0 ]
 check "symlinked install premise: the bundle's record names the original directory" \
   assert_bundle_record "$LINKED_APP" "$HOME_LINKED/.local/bin"
@@ -1065,7 +1079,7 @@ check "symlinked install premise: the old path is now a symlink" [ -L "$HOME_LIN
 check "symlinked install premise: it resolves to the moved installation" \
   [ "$(realpath "$HOME_LINKED/.local/bin")" = "$(realpath "$HOME_LINKED/.local/bin-real")" ] \
   && [ -f "$HOME_LINKED/.local/bin-real/.farhelm-installation" ]
-run_install "$MAC_TOOLS" "$HOME_LINKED" "$HOME_LINKED/.local/bin" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_LINKED" "$BASE/good-v2" 1.2.4
 check "symlinked install: update exits 0" [ "$RC" -eq 0 ]
 check "symlinked install: bundle rebuilt at the new version" \
   contains "$(cat "$LINKED_APP/Contents/Info.plist")" "<string>1.2.4</string>"
@@ -1080,7 +1094,7 @@ HOME_NLMOVE="$WORKDIR/home-nl-move"
 NLMOVE_APP="$HOME_NLMOVE/Applications/Farhelm.app"
 printf -v NLMOVE_OLD '%s/old\nbin\n' "$HOME_NLMOVE"
 mkdir -p "$HOME_NLMOVE"
-run_install "$MAC_TOOLS" "$HOME_NLMOVE" "$NLMOVE_OLD" "$BASE/good" 1.2.3
+seed_legacy_install "$HOME_NLMOVE" "$NLMOVE_OLD"
 check "newline-named moved install setup: first install exits 0" [ "$RC" -eq 0 ]
 check "newline-named moved install premise: the record names the newline-named directory" \
   assert_bundle_record "$NLMOVE_APP" "$NLMOVE_OLD"
@@ -1092,7 +1106,7 @@ check "newline-named moved install premise: the record names the newline-named d
 NLMOVE_PLIST=$(cat "$NLMOVE_APP/Contents/Info.plist")
 check "newline-named install premise: the truncated readings name no directory" \
   [ ! -e "${NLMOVE_OLD%$'\n'}" ] && [ ! -e "$HOME_NLMOVE/old" ]
-run_install "$MAC_TOOLS" "$HOME_NLMOVE" "$HOME_NLMOVE/new/bin" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_NLMOVE" "$BASE/good-v2" 1.2.4
 check "newline-named install still in place: install exits 1" [ "$RC" -ne 0 ]
 check "newline-named install still in place: the bundle is untouched" \
   [ "$(cat "$NLMOVE_APP/Contents/Info.plist")" = "$NLMOVE_PLIST" ]
@@ -1100,10 +1114,10 @@ check "newline-named install still in place: the refusal names the exact directo
   contains "$ERR" "belongs to the farhelm installation in $NLMOVE_OLD, which is still installed"
 rm -rf "$NLMOVE_OLD"
 check "newline-named moved install premise: the old directory is gone" [ ! -e "$NLMOVE_OLD" ]
-run_install "$MAC_TOOLS" "$HOME_NLMOVE" "$HOME_NLMOVE/new/bin" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_NLMOVE" "$BASE/good-v2" 1.2.4
 check "newline-named moved install: update exits 0" [ "$RC" -eq 0 ]
 check "newline-named moved install: the record now names the new directory" \
-  assert_bundle_record "$NLMOVE_APP" "$HOME_NLMOVE/new/bin"
+  assert_bundle_record "$NLMOVE_APP" "$HOME_NLMOVE/.local/bin"
 
 # An installation that is intact but cannot be looked into (its directory's
 # parent unsearchable) is not an installation that disappeared. Why: `test
@@ -1113,7 +1127,7 @@ if [ "$(id -u)" -ne 0 ]; then
   HOME_LOCKED="$WORKDIR/home-locked"
   LOCKED_APP="$HOME_LOCKED/Applications/Farhelm.app"
   mkdir -p "$HOME_LOCKED"
-  run_install "$MAC_TOOLS" "$HOME_LOCKED" "$HOME_LOCKED/first/bin" "$BASE/good" 1.2.3
+  seed_legacy_install "$HOME_LOCKED" "$HOME_LOCKED/first/bin"
   check "unsearchable installation setup: first install exits 0" [ "$RC" -eq 0 ]
   check "unsearchable installation premise: the record names the first directory" \
     assert_bundle_record "$LOCKED_APP" "$HOME_LOCKED/first/bin"
@@ -1121,7 +1135,7 @@ if [ "$(id -u)" -ne 0 ]; then
   chmod 000 "$HOME_LOCKED/first"
   check "unsearchable installation premise: its record cannot be looked up" \
     [ ! -e "$HOME_LOCKED/first/bin/.farhelm-installation" ]
-  run_install "$MAC_TOOLS" "$HOME_LOCKED" "$HOME_LOCKED/second/bin" "$BASE/good-v2" 1.2.4
+  run_install "$MAC_TOOLS" "$HOME_LOCKED" "$BASE/good-v2" 1.2.4
   chmod 755 "$HOME_LOCKED/first"
   check "unsearchable installation premise: the first installation is intact" \
     [ -f "$HOME_LOCKED/first/bin/.farhelm-installation" ]
@@ -1144,7 +1158,7 @@ mkdir -p "$MIXREC_APP/Contents"
 echo mine >"$MIXREC_APP/Contents/my-file"
 check "mixed-framing record premise: it holds exactly six NULs" \
   [ "$(tr -cd '\000' <"$MIXREC_APP/Contents/.farhelm-installation" | tr '\000' x)" = xxxxxx ]
-run_install "$MAC_TOOLS" "$HOME_MIXREC" "$HOME_MIXREC/.local/bin" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_MIXREC" "$BASE/good" 1.2.3
 check "mixed-framing record: install exits 1" [ "$RC" -ne 0 ]
 check "mixed-framing record: the refusal is the foreign-bundle one" \
   contains "$ERR" "does not look like a farhelm app bundle; refusing to replace it."
@@ -1162,7 +1176,7 @@ mkdir -p "$FAKEREC_APP/Contents"
 printf 'farhelm-app\n/nonexistent/old/bin\na\nb\nc\nd\n' >"$FAKEREC_APP/Contents/.farhelm-installation"
 echo mine >"$FAKEREC_APP/Contents/my-file"
 check "newline-framed record premise: it names a directory that does not exist" [ ! -e /nonexistent/old/bin ]
-run_install "$MAC_TOOLS" "$HOME_FAKEREC" "$HOME_FAKEREC/.local/bin" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_FAKEREC" "$BASE/good" 1.2.3
 check "newline-framed record: install exits 1" [ "$RC" -ne 0 ]
 check "newline-framed record: the refusal is the foreign-bundle one" \
   contains "$ERR" "does not look like a farhelm app bundle; refusing to replace it."
@@ -1179,7 +1193,7 @@ check "newline-framed record: the bundle's own file is untouched" \
 HOME_BUNDLELOCK="$WORKDIR/home-bundlelock"
 INSTALL_BUNDLELOCK="$HOME_BUNDLELOCK/.local/bin"
 mkdir -p "$HOME_BUNDLELOCK"
-run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$BASE/good" 1.2.3
 check "bundle lock setup: first install exits 0" [ "$RC" -eq 0 ]
 MAC_TOOLS_CPWATCH="$WORKDIR/toolchain-mac-cpwatch"
 mkdir -p "$MAC_TOOLS_CPWATCH"
@@ -1199,7 +1213,7 @@ exec /bin/cp "$@"
 CPEOF
 chmod 755 "$MAC_TOOLS_CPWATCH/cp"
 CPWATCH_LOG_FILE="$WORKDIR/cpwatch.log"
-run_install "$MAC_TOOLS_CPWATCH" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good-v2" 1.2.4 \
+run_install "$MAC_TOOLS_CPWATCH" "$HOME_BUNDLELOCK" "$BASE/good-v2" 1.2.4 \
   CPWATCH_LOCK="$INSTALL_BUNDLELOCK/.farhelm-install.lock" \
   CPWATCH_LOG="$CPWATCH_LOG_FILE"
 check "bundle lock: update exits 0" [ "$RC" -eq 0 ]
@@ -1222,7 +1236,7 @@ mkdir "$HOME_BUNDLELOCK/Applications/.farhelm-app.lock"
 mkdir "$HOME_BUNDLELOCK/Applications/.farhelm-app-replaced.1"
 echo keep >"$HOME_BUNDLELOCK/Applications/.farhelm-app-replaced.1/sentinel"
 BUNDLELOCK_PLIST=$(cat "$HOME_BUNDLELOCK/Applications/Farhelm.app/Contents/Info.plist")
-run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$BASE/good" 1.2.3
 check "bundle lock: a held bundle lock fails the bundle step" [ "$RC" -ne 0 ]
 check "bundle lock: the refusal names the bundle lock" \
   contains "$ERR" "$HOME_BUNDLELOCK/Applications/.farhelm-app.lock"
@@ -1232,7 +1246,7 @@ check "bundle lock: the held lock is left in place" [ -d "$HOME_BUNDLELOCK/Appli
 check "bundle lock: the bundle is untouched while another run holds the lock" \
   [ "$(cat "$HOME_BUNDLELOCK/Applications/Farhelm.app/Contents/Info.plist")" = "$BUNDLELOCK_PLIST" ]
 rmdir "$HOME_BUNDLELOCK/Applications/.farhelm-app.lock"
-run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$BASE/good" 1.2.3
 check "bundle lock: with the lock free the bundle is rebuilt" [ "$RC" -eq 0 ]
 check "bundle lock: an unrelated hidden entry is untouched" \
   [ "$(cat "$HOME_BUNDLELOCK/Applications/.farhelm-app-replaced.1/sentinel")" = keep ]
@@ -1273,7 +1287,7 @@ chmod 755 "$MAC_TOOLS_SWAPFAIL/mv"
 SWAP_APP="$HOME_BUNDLELOCK/Applications/Farhelm.app"
 SWAP_PLIST=$(cat "$SWAP_APP/Contents/Info.plist")
 SWAP_RECORD=$(od -An -tx1 "$SWAP_APP/Contents/.farhelm-installation")
-run_install "$MAC_TOOLS_SWAPFAIL" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS_SWAPFAIL" "$HOME_BUNDLELOCK" "$BASE/good-v2" 1.2.4
 check "bundle swap failure: the install exits 1" [ "$RC" -ne 0 ]
 check "bundle swap failure: the old bundle is back in place" \
   [ "$(cat "$SWAP_APP/Contents/Info.plist")" = "$SWAP_PLIST" ]
@@ -1283,13 +1297,13 @@ check "bundle swap failure: the bundle lock is released" \
   [ ! -e "$HOME_BUNDLELOCK/Applications/.farhelm-app.lock" ]
 check "bundle swap failure: no private build directory is left" \
   [ -z "$(find "$HOME_BUNDLELOCK/Applications" -mindepth 1 -maxdepth 1 -name '.farhelm-app-build.*')" ]
-run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_BUNDLELOCK" "$BASE/good-v2" 1.2.4
 check "bundle swap failure: an ordinary re-run rebuilds the bundle" [ "$RC" -eq 0 ]
 check "bundle swap failure: the rebuilt bundle carries the new version" \
   contains "$(cat "$SWAP_APP/Contents/Info.plist")" "<string>1.2.4</string>"
 
 SWAP_PLIST=$(cat "$SWAP_APP/Contents/Info.plist")
-run_install "$MAC_TOOLS_SWAPFAIL" "$HOME_BUNDLELOCK" "$INSTALL_BUNDLELOCK" "$BASE/good" 1.2.3 \
+run_install "$MAC_TOOLS_SWAPFAIL" "$HOME_BUNDLELOCK" "$BASE/good" 1.2.3 \
   RESTORE_FAILS=1
 check "bundle restore failure: the install exits 1" [ "$RC" -ne 0 ]
 check "bundle restore failure: the message names where the old bundle is" \
@@ -1309,13 +1323,12 @@ check "bundle restore failure: the bundle lock is released" \
 # the copy when it is this installation's own record, and leaves any other
 # installation's copy alone.
 HOME_RECEIPT="$WORKDIR/home-receipt"
-INSTALL_RECEIPT="$HOME_RECEIPT/.local/bin"
 mkdir -p "$HOME_RECEIPT"
-run_install "$MAC_TOOLS" "$HOME_RECEIPT" "$INSTALL_RECEIPT" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_RECEIPT" "$BASE/good" 1.2.3
 check "leftover receipt setup: first install exits 0" [ "$RC" -eq 0 ]
 RECEIPT_COPY="$HOME_RECEIPT/Applications/.Farhelm.app.uninstall-receipt"
 cp "$HOME_RECEIPT/Applications/Farhelm.app/Contents/.farhelm-installation" "$RECEIPT_COPY"
-run_install "$MAC_TOOLS" "$HOME_RECEIPT" "$INSTALL_RECEIPT" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_RECEIPT" "$BASE/good-v2" 1.2.4
 check "leftover receipt: the reinstall exits 0" [ "$RC" -eq 0 ]
 check "leftover receipt: this installation's stale copy is removed" [ ! -e "$RECEIPT_COPY" ]
 
@@ -1329,7 +1342,7 @@ check "leftover receipt: this installation's stale copy is removed" [ ! -e "$REC
 # bundle, and the receipt is removed.
 HOME_MOVEDRECEIPT="$WORKDIR/home-movedreceipt"
 mkdir -p "$HOME_MOVEDRECEIPT"
-run_install "$MAC_TOOLS" "$HOME_MOVEDRECEIPT" "$HOME_MOVEDRECEIPT/old/bin" "$BASE/good" 1.2.3
+seed_legacy_install "$HOME_MOVEDRECEIPT" "$HOME_MOVEDRECEIPT/old/bin"
 check "moved receipt setup: first install exits 0" [ "$RC" -eq 0 ]
 MOVEDRECEIPT_APP="$HOME_MOVEDRECEIPT/Applications/Farhelm.app"
 MOVEDRECEIPT_COPY="$HOME_MOVEDRECEIPT/Applications/.Farhelm.app.uninstall-receipt"
@@ -1338,17 +1351,17 @@ rm -rf "$MOVEDRECEIPT_APP" "$HOME_MOVEDRECEIPT/old"
 check "moved receipt premise: the receipt names the old directory" \
   contains "$(tr '\000' '\n' <"$MOVEDRECEIPT_COPY")" "$HOME_MOVEDRECEIPT/old/bin"
 check "moved receipt premise: the old directory is gone" [ ! -e "$HOME_MOVEDRECEIPT/old" ]
-run_install "$MAC_TOOLS" "$HOME_MOVEDRECEIPT" "$HOME_MOVEDRECEIPT/new/bin" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_MOVEDRECEIPT" "$BASE/good-v2" 1.2.4
 check "moved receipt: the install from the new directory exits 0" [ "$RC" -eq 0 ]
 check "moved receipt: the bundle is built for the new directory" \
-  assert_bundle_record "$MOVEDRECEIPT_APP" "$HOME_MOVEDRECEIPT/new/bin"
+  assert_bundle_record "$MOVEDRECEIPT_APP" "$HOME_MOVEDRECEIPT/.local/bin"
 check "moved receipt: the leftover receipt is removed" [ ! -e "$MOVEDRECEIPT_COPY" ]
 
 # The other move shape: the recorded path is still there, now a symlink to
 # where the installation lives.
 HOME_LINKEDRECEIPT="$WORKDIR/home-linkedreceipt"
 mkdir -p "$HOME_LINKEDRECEIPT"
-run_install "$MAC_TOOLS" "$HOME_LINKEDRECEIPT" "$HOME_LINKEDRECEIPT/.local/bin" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_LINKEDRECEIPT" "$BASE/good" 1.2.3
 check "linked receipt setup: first install exits 0" [ "$RC" -eq 0 ]
 LINKEDRECEIPT_APP="$HOME_LINKEDRECEIPT/Applications/Farhelm.app"
 LINKEDRECEIPT_COPY="$HOME_LINKEDRECEIPT/Applications/.Farhelm.app.uninstall-receipt"
@@ -1357,7 +1370,7 @@ rm -rf "$LINKEDRECEIPT_APP"
 mv "$HOME_LINKEDRECEIPT/.local/bin" "$HOME_LINKEDRECEIPT/.local/bin-real"
 ln -s bin-real "$HOME_LINKEDRECEIPT/.local/bin"
 check "linked receipt premise: the recorded path is now a symlink" [ -L "$HOME_LINKEDRECEIPT/.local/bin" ]
-run_install "$MAC_TOOLS" "$HOME_LINKEDRECEIPT" "$HOME_LINKEDRECEIPT/.local/bin" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_LINKEDRECEIPT" "$BASE/good-v2" 1.2.4
 check "linked receipt: the reinstall exits 0" [ "$RC" -eq 0 ]
 check "linked receipt: the leftover receipt is removed" [ ! -e "$LINKEDRECEIPT_COPY" ]
 check "linked receipt: the bundle is rebuilt" [ -d "$LINKEDRECEIPT_APP" ]
@@ -1369,7 +1382,7 @@ check "linked receipt: the bundle is rebuilt" [ -d "$LINKEDRECEIPT_APP" ]
 # step, leave A's receipt byte for byte, and create no bundle to disagree with.
 HOME_FOREIGNRECEIPT="$WORKDIR/home-foreignreceipt"
 mkdir -p "$HOME_FOREIGNRECEIPT"
-run_install "$MAC_TOOLS" "$HOME_FOREIGNRECEIPT" "$HOME_FOREIGNRECEIPT/a/bin" "$BASE/good" 1.2.3
+seed_legacy_install "$HOME_FOREIGNRECEIPT" "$HOME_FOREIGNRECEIPT/a/bin"
 check "foreign receipt setup: installation A exits 0" [ "$RC" -eq 0 ]
 FOREIGN_APP="$HOME_FOREIGNRECEIPT/Applications/Farhelm.app"
 FOREIGN_COPY="$HOME_FOREIGNRECEIPT/Applications/.Farhelm.app.uninstall-receipt"
@@ -1380,12 +1393,12 @@ rm -rf "$FOREIGN_APP"
 check "foreign receipt premise: installation A is still installed" \
   [ -f "$HOME_FOREIGNRECEIPT/a/bin/.farhelm-installation" ]
 FOREIGN_BYTES=$(od -An -tx1 "$FOREIGN_COPY")
-run_install "$MAC_TOOLS" "$HOME_FOREIGNRECEIPT" "$HOME_FOREIGNRECEIPT/b/bin" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_FOREIGNRECEIPT" "$BASE/good-v2" 1.2.4
 check "foreign receipt: installation B refuses the bundle step" [ "$RC" -ne 0 ]
 check "foreign receipt: the refusal names the receipt and how to clear it" \
   contains "$ERR" "$FOREIGN_COPY was left by an interrupted farhelm uninstall and is not this installation's record"
 check "foreign receipt: B's binaries are still installed" \
-  [ "$("$HOME_FOREIGNRECEIPT/b/bin/farhelm" --version)" = "farhelm 1.2.4" ]
+  [ "$("$HOME_FOREIGNRECEIPT/.local/bin/farhelm" --version)" = "farhelm 1.2.4" ]
 check "foreign receipt: A's receipt is unchanged" [ "$(od -An -tx1 "$FOREIGN_COPY")" = "$FOREIGN_BYTES" ]
 check "foreign receipt: no bundle was created beside it" [ ! -e "$FOREIGN_APP" ]
 
@@ -1400,7 +1413,7 @@ echo "== F3: rollback when the FIRST replacement (farhelm) fails =="
 HOMEFIRSTFAIL="$WORKDIR/homefirstfail"
 INSTALLFIRSTFAIL="$HOMEFIRSTFAIL/.local/bin"
 mkdir -p "$HOMEFIRSTFAIL"
-run_install "$TOOLCHAIN_FULL" "$HOMEFIRSTFAIL" "$INSTALLFIRSTFAIL" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMEFIRSTFAIL" "$BASE/good" 1.2.3
 check "F3 setup: initial install exits 0" [ "$RC" -eq 0 ]
 OLD_FIRSTFAIL_CONTENT=$(cat "$INSTALLFIRSTFAIL/farhelm")
 
@@ -1431,7 +1444,7 @@ exec /bin/mv "$@"
 MVEOF
 chmod 755 "$TOOLS_FAILFIRST/mv"
 
-run_install "$TOOLS_FAILFIRST" "$HOMEFIRSTFAIL" "$INSTALLFIRSTFAIL" "$BASE/good" 1.2.3
+run_install "$TOOLS_FAILFIRST" "$HOMEFIRSTFAIL" "$BASE/good" 1.2.3
 check "F3: forced first-replacement failure exits 1" [ "$RC" -ne 0 ]
 check "F3: forced first-replacement failure prints the exact required message" \
   contains "$ERR" "install/update failed while replacing farhelm; the previous farhelm (if any) was restored"
@@ -1451,7 +1464,7 @@ HOMEDIRDEST="$WORKDIR/homedirdest"
 INSTALLDIRDEST="$HOMEDIRDEST/.local/bin"
 mkdir -p "$INSTALLDIRDEST/farhelm" # farhelm is a DIRECTORY here, not a file
 echo "sentinel" >"$INSTALLDIRDEST/farhelm/keepme"
-run_install "$TOOLCHAIN_FULL" "$HOMEDIRDEST" "$INSTALLDIRDEST" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMEDIRDEST" "$BASE/good" 1.2.3
 check "F4: directory-collision install exits 1" [ "$RC" -ne 0 ]
 check "F4: directory-collision install names the problem" contains "$ERR" "is not a regular file"
 check "F4: directory-collision install leaves the directory's contents untouched" \
@@ -1466,13 +1479,13 @@ echo "== installer ownership metadata refusal and repair =="
 HOMEMETA="$WORKDIR/home-meta"
 INSTALLMETA="$HOMEMETA/.local/bin"
 mkdir -p "$HOMEMETA"
-run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$INSTALLMETA" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$BASE/good" 1.2.3
 check "metadata refusal setup succeeds" [ "$RC" -eq 0 ]
 META_OUTSIDE="$WORKDIR/metadata-outside"
 printf 'outside sentinel\n' >"$META_OUTSIDE"
 rm "$INSTALLMETA/.farhelm-installation"
 ln -s "$META_OUTSIDE" "$INSTALLMETA/.farhelm-installation"
-run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$INSTALLMETA" "$BASE/good-v2" 1.2.4
+run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$BASE/good-v2" 1.2.4
 check "metadata symlink refusal exits 1" [ "$RC" -ne 0 ]
 check "metadata symlink refusal names the metadata target" contains "$ERR" "ownership metadata"
 check "metadata symlink refusal leaves the link in place" [ -L "$INSTALLMETA/.farhelm-installation" ]
@@ -1480,13 +1493,13 @@ check "metadata symlink refusal does not touch the link target" [ "$(cat "$META_
 check "metadata symlink refusal leaves committed binaries usable" [ "$("$INSTALLMETA/farhelm" --version)" = "farhelm 1.2.4" ]
 rm "$INSTALLMETA/.farhelm-installation"
 ln -s "$WORKDIR/missing-metadata-target" "$INSTALLMETA/.farhelm-installation"
-run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$INSTALLMETA" "$BASE/good-v2" 1.2.4
+run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$BASE/good-v2" 1.2.4
 check "dangling metadata symlink refusal exits 1" [ "$RC" -ne 0 ]
 check "dangling metadata symlink remains in place" [ -L "$INSTALLMETA/.farhelm-installation" ]
 rm "$INSTALLMETA/.farhelm-installation"
 
 mkdir "$INSTALLMETA/.farhelm-installation"
-run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$INSTALLMETA" "$BASE/good-v2" 1.2.4
+run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$BASE/good-v2" 1.2.4
 check "metadata directory refusal exits 1" [ "$RC" -ne 0 ]
 check "metadata directory refusal leaves the directory in place" [ -d "$INSTALLMETA/.farhelm-installation" ]
 rm -rf "$INSTALLMETA/.farhelm-installation"
@@ -1495,7 +1508,7 @@ TOOLS_FAILMETA="$WORKDIR/toolchain-failmeta"
 HOMEFAILMETA="$WORKDIR/home-failmeta"
 INSTALLFAILMETA="$HOMEFAILMETA/.local/bin"
 mkdir -p "$HOMEFAILMETA"
-run_install "$TOOLCHAIN_FULL" "$HOMEFAILMETA" "$INSTALLFAILMETA" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMEFAILMETA" "$BASE/good" 1.2.3
 check "metadata publication failure setup succeeds" [ "$RC" -eq 0 ]
 cp "$INSTALLFAILMETA/.farhelm-installation" "$WORKDIR/old-metadata-record"
 mkdir -p "$TOOLS_FAILMETA"
@@ -1513,7 +1526,7 @@ esac
 exec /bin/mv "$@"
 MVEOF
 chmod 755 "$TOOLS_FAILMETA/mv"
-run_install "$TOOLS_FAILMETA" "$HOMEFAILMETA" "$INSTALLFAILMETA" "$BASE/good-v2" 1.2.4
+run_install "$TOOLS_FAILMETA" "$HOMEFAILMETA" "$BASE/good-v2" 1.2.4
 check "forced metadata publication failure exits 1" [ "$RC" -ne 0 ]
 check "forced metadata publication failure explains the committed binaries" \
   contains "$ERR" "binaries in $INSTALLFAILMETA are installed and usable"
@@ -1523,10 +1536,10 @@ check "forced metadata publication failure leaves the prior record intact" \
   cmp -s "$WORKDIR/old-metadata-record" "$INSTALLFAILMETA/.farhelm-installation"
 check "forced metadata publication failure leaves no rollback debris" \
   [ -z "$(find "$INSTALLFAILMETA" -maxdepth 1 -name '.farhelm-install.*' -o -name '.farhelm-install.lock' -o -name '.farhelm.old')" ]
-run_install "$TOOLCHAIN_FULL" "$HOMEFAILMETA" "$INSTALLFAILMETA" "$BASE/good-v2" 1.2.4
+run_install "$TOOLCHAIN_FULL" "$HOMEFAILMETA" "$BASE/good-v2" 1.2.4
 check "metadata publication repair succeeds" [ "$RC" -eq 0 ]
 check "metadata publication repair writes current ownership fields" \
-  assert_standalone_record "$INSTALLFAILMETA" no
+  assert_standalone_record "$INSTALLFAILMETA"
 check "metadata publication repair changes the CLI digest" \
   assert_records_differ "$WORKDIR/old-metadata-record" "$INSTALLFAILMETA/.farhelm-installation"
 
@@ -1546,7 +1559,7 @@ echo "== F31: recovers from a stale lock + journal (simulated crash) =="
 HOMECRASH="$WORKDIR/homecrash"
 INSTALLCRASH="$HOMECRASH/.local/bin"
 mkdir -p "$INSTALLCRASH"
-run_install "$TOOLCHAIN_FULL" "$HOMECRASH" "$INSTALLCRASH" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMECRASH" "$BASE/good" 1.2.3
 check "F31 setup: initial install exits 0" [ "$RC" -eq 0 ]
 OLD_CRASH_CONTENT=$(cat "$INSTALLCRASH/farhelm")
 
@@ -1561,7 +1574,7 @@ echo 999999 >"$INSTALLCRASH/.farhelm-install.lock/pid" # a pid nothing on this m
 # aside to its .old backup".
 printf 'PARK cli\n' >"$INSTALLCRASH/.farhelm-install.lock/journal"
 
-run_install "$TOOLCHAIN_FULL" "$HOMECRASH" "$INSTALLCRASH" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMECRASH" "$BASE/good" 1.2.3
 check "F31: recovery run exits 1 (it repairs and asks for a retry, not a silent continue)" \
   [ "$RC" -ne 0 ]
 check "F31: recovery run reports what it did" contains "$ERR" "recovered from an interrupted install/update"
@@ -1571,7 +1584,7 @@ check "F31: recovery removes the stale lock" [ ! -e "$INSTALLCRASH/.farhelm-inst
 check "F31: recovery removes the durable backup once restored" [ ! -e "$INSTALLCRASH/.farhelm.old" ]
 check "F31: recovery removes the journal" [ ! -e "$INSTALLCRASH/.farhelm-install.lock/journal" ]
 
-run_install "$TOOLCHAIN_FULL" "$HOMECRASH" "$INSTALLCRASH" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMECRASH" "$BASE/good" 1.2.3
 check "F31: an ordinary run after recovery succeeds" [ "$RC" -eq 0 ]
 
 # ===========================================================================
@@ -1587,7 +1600,7 @@ echo "== stale-lock recovery refuses while another run holds the recovery claim 
 HOMECLAIM="$WORKDIR/homeclaim"
 INSTALLCLAIM="$HOMECLAIM/.local/bin"
 mkdir -p "$INSTALLCLAIM"
-run_install "$TOOLCHAIN_FULL" "$HOMECLAIM" "$INSTALLCLAIM" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMECLAIM" "$BASE/good" 1.2.3
 check "claim setup: initial install exits 0" [ "$RC" -eq 0 ]
 OLD_CLAIM_CONTENT=$(cat "$INSTALLCLAIM/farhelm")
 cp "$INSTALLCLAIM/farhelm" "$INSTALLCLAIM/.farhelm.old"
@@ -1600,7 +1613,7 @@ echo 999999 >"$INSTALLCLAIM/.farhelm-install.lock/pid"
 printf 'PARK cli\n' >"$INSTALLCLAIM/.farhelm-install.lock/journal"
 mkdir "$INSTALLCLAIM/.farhelm-install.lock.recovering"
 
-run_install "$TOOLCHAIN_FULL" "$HOMECLAIM" "$INSTALLCLAIM" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMECLAIM" "$BASE/good" 1.2.3
 check "claim: a run finding the recovery claim held refuses" [ "$RC" -ne 0 ]
 check "claim: the refusal says another run is recovering" \
   contains "$ERR" "is recovering from an interrupted run"
@@ -1611,37 +1624,11 @@ check "claim: the refused run leaves the journal alone" \
   [ -e "$INSTALLCLAIM/.farhelm-install.lock/journal" ]
 
 rmdir "$INSTALLCLAIM/.farhelm-install.lock.recovering"
-run_install "$TOOLCHAIN_FULL" "$HOMECLAIM" "$INSTALLCLAIM" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMECLAIM" "$BASE/good" 1.2.3
 check "claim: once the claim is free, recovery restores the previous farhelm" \
   [ "$(cat "$INSTALLCLAIM/farhelm")" = "$OLD_CLAIM_CONTENT" ]
 check "claim: recovery releases its claim" [ ! -e "$INSTALLCLAIM/.farhelm-install.lock.recovering" ]
 check "claim: recovery removes the stale lock" [ ! -e "$INSTALLCLAIM/.farhelm-install.lock" ]
-
-# ===========================================================================
-# Scenario: FARHELM_INSTALL_DIR must be absolute. A relative value installs
-# under the directory the installer happens to run in, and a quoted `~/bin`
-# reaches the installer unexpanded, creating a directory literally named `~`
-# (which a later `rm -rf ~` would turn into deleting the home directory). Both
-# are refused before anything is created. The installer runs from a scratch
-# directory here so a regression cannot write into the checkout.
-# ===========================================================================
-echo
-echo "== FARHELM_INSTALL_DIR must be absolute =="
-HOMEREL="$WORKDIR/homerel"
-CWDREL="$WORKDIR/cwdrel"
-mkdir -p "$HOMEREL" "$CWDREL"
-cd "$CWDREL"
-# shellcheck disable=SC2088 # the unexpanded ~ is the input under test.
-run_install "$TOOLCHAIN_FULL" "$HOMEREL" '~/bin' "$BASE/good" 1.2.3
-check "relative dir: a quoted ~ is refused" [ "$RC" -ne 0 ]
-check "relative dir: the refusal names the unexpanded ~ and suggests \$HOME" \
-  contains "$ERR" "starts with a literal ~ that the shell did not expand"
-run_install "$TOOLCHAIN_FULL" "$HOMEREL" 'bin' "$BASE/good" 1.2.3
-check "relative dir: a relative path is refused" [ "$RC" -ne 0 ]
-check "relative dir: the refusal says it must be absolute" contains "$ERR" "is not an absolute path"
-cd "$OLDPWD"
-check "relative dir: nothing was created in the current directory" \
-  [ -z "$(find "$CWDREL" -mindepth 1)" ]
 
 # ===========================================================================
 # Scenario: a stale lock that names the installer's OWN pid. In containers
@@ -1656,7 +1643,7 @@ echo "== stale lock naming the installer's own pid =="
 HOMEOWNPID="$WORKDIR/homeownpid"
 INSTALLOWNPID="$HOMEOWNPID/.local/bin"
 mkdir -p "$INSTALLOWNPID"
-run_install "$TOOLCHAIN_FULL" "$HOMEOWNPID" "$INSTALLOWNPID" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMEOWNPID" "$BASE/good" 1.2.3
 check "own-pid setup: initial install exits 0" [ "$RC" -eq 0 ]
 mkdir "$INSTALLOWNPID/.farhelm-install.lock"
 chmod 0700 "$INSTALLOWNPID/.farhelm-install.lock"
@@ -1671,7 +1658,7 @@ exec /bin/sh "$OWNPID_REAL_INSTALL"
 WRAPPER
 REAL_INSTALL_SH=$INSTALL_SH
 INSTALL_SH=$OWNPID_WRAPPER
-run_install "$TOOLCHAIN_FULL" "$HOMEOWNPID" "$INSTALLOWNPID" "$BASE/good" 1.2.3 \
+run_install "$TOOLCHAIN_FULL" "$HOMEOWNPID" "$BASE/good" 1.2.3 \
   OWNPID_LOCK_PID="$INSTALLOWNPID/.farhelm-install.lock/pid" \
   OWNPID_REAL_INSTALL="$REAL_INSTALL_SH"
 INSTALL_SH=$REAL_INSTALL_SH
@@ -1711,7 +1698,7 @@ chmod 755 "$ROSETTA_TOOLS/sysctl"
 
 HOMEROSETTA="$WORKDIR/homerosetta"
 mkdir -p "$HOMEROSETTA"
-run_install "$ROSETTA_TOOLS" "$HOMEROSETTA" "$HOMEROSETTA/.local/bin" "$BASE/good" 1.2.3
+run_install "$ROSETTA_TOOLS" "$HOMEROSETTA" "$BASE/good" 1.2.3
 check "F12: Rosetta-shaped Darwin/x86_64 with arm64 hardware installs" [ "$RC" -eq 0 ]
 check "F12: Rosetta-shaped install fetches the aarch64-apple-darwin assets (farhelm-desktop too)" \
   [ -x "$HOMEROSETTA/.local/bin/farhelm-desktop" ]
@@ -1722,38 +1709,9 @@ cp -a "$ROSETTA_TOOLS"/. "$INTEL_TOOLS/"
 rm -f "$INTEL_TOOLS/sysctl"
 HOMEINTEL="$WORKDIR/homeintel"
 mkdir -p "$HOMEINTEL"
-run_install "$INTEL_TOOLS" "$HOMEINTEL" "$HOMEINTEL/.local/bin" "$BASE/good" 1.2.3
+run_install "$INTEL_TOOLS" "$HOMEINTEL" "$BASE/good" 1.2.3
 check "F12: a genuine Intel Mac (no arm64 hardware sysctl) is still rejected" [ "$RC" -ne 0 ]
 check "F12: genuine Intel Mac rejection names the platform" contains "$ERR" "no release build for Darwin x86_64"
-
-# ===========================================================================
-# Scenario: Linux aarch64 platform mapping (F17) -- the only one of the
-# three shipped targets none of the scenarios above ever selects (they are
-# all either the harness's own x86_64 Linux host or macOS-shaped via a
-# uname shim).
-# ===========================================================================
-echo
-echo "== F17: Linux aarch64 platform mapping =="
-AARCH64_TOOLS="$WORKDIR/toolchain-aarch64"
-mkdir -p "$AARCH64_TOOLS"
-cp -a "$TOOLCHAIN_FULL"/. "$AARCH64_TOOLS/"
-rm -f "$AARCH64_TOOLS/uname"
-cat >"$AARCH64_TOOLS/uname" <<'EOF'
-#!/bin/sh
-case "$1" in
-  -s) echo Linux ;;
-  -m) echo aarch64 ;;
-esac
-EOF
-chmod 755 "$AARCH64_TOOLS/uname"
-
-HOMEAARCH64="$WORKDIR/homeaarch64"
-mkdir -p "$HOMEAARCH64"
-run_install "$AARCH64_TOOLS" "$HOMEAARCH64" "$HOMEAARCH64/.local/bin" "$BASE/good" 1.2.3
-check "F17: Linux aarch64 install exits 0" [ "$RC" -eq 0 ]
-check "F17: Linux aarch64 install produces a working farhelm" \
-  contains "$("$HOMEAARCH64/.local/bin/farhelm" --version 2>/dev/null || true)" "farhelm 1.2.3"
-check "F17: Linux aarch64 does not also install farhelm-desktop" [ ! -e "$HOMEAARCH64/.local/bin/farhelm-desktop" ]
 
 # ===========================================================================
 # Scenario: 404 (no SHA256SUMS at all).
@@ -1762,7 +1720,7 @@ echo
 echo "== 404 (no SHA256SUMS) =="
 HOME404="$WORKDIR/home404"
 mkdir -p "$HOME404"
-run_install "$TOOLCHAIN_FULL" "$HOME404" "$HOME404/.local/bin" "$BASE/norelease" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME404" "$BASE/norelease" 1.2.3
 check "404 exits 1" [ "$RC" -ne 0 ]
 check "404 names the version and the HTTP code" contains "$ERR" "no SHA256SUMS for v1.2.3"
 check "404 message mentions HTTP 404" contains "$ERR" "(HTTP 404)"
@@ -1776,7 +1734,7 @@ echo
 echo "== checksum mismatch =="
 HOMEBADSUM="$WORKDIR/homebadsum"
 mkdir -p "$HOMEBADSUM"
-run_install "$TOOLCHAIN_FULL" "$HOMEBADSUM" "$HOMEBADSUM/.local/bin" "$BASE/badchecksum" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMEBADSUM" "$BASE/badchecksum" 1.2.3
 check "checksum mismatch exits 1" [ "$RC" -ne 0 ]
 check "checksum mismatch names the failure" contains "$ERR" "checksum mismatch"
 
@@ -1787,7 +1745,7 @@ echo
 echo "== malformed archive: two members named farhelm =="
 HOMETWO="$WORKDIR/hometwo"
 mkdir -p "$HOMETWO"
-run_install "$TOOLCHAIN_FULL" "$HOMETWO" "$HOMETWO/.local/bin" "$BASE/twomember" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMETWO" "$BASE/twomember" 1.2.3
 check "two-member archive exits 1" [ "$RC" -ne 0 ]
 check "two-member archive names the count" contains "$ERR" "expected exactly 1"
 
@@ -1798,7 +1756,7 @@ echo
 echo "== malformed archive: non-regular member =="
 HOMENONREG="$WORKDIR/homenonreg"
 mkdir -p "$HOMENONREG"
-run_install "$TOOLCHAIN_FULL" "$HOMENONREG" "$HOMENONREG/.local/bin" "$BASE/nonregular" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMENONREG" "$BASE/nonregular" 1.2.3
 check "non-regular member exits 1" [ "$RC" -ne 0 ]
 check "non-regular member names the problem" contains "$ERR" "is not a regular file"
 
@@ -1823,7 +1781,7 @@ printf '#!/bin/sh\ncase "$1" in\n  tvzf) exit 2 ;;\nesac\nexec %s "$@"\n' "$REAL
 chmod 755 "$TVFAIL_TOOLS/tar"
 HOMETVFAIL="$WORKDIR/hometvfail"
 mkdir -p "$HOMETVFAIL"
-run_install "$TVFAIL_TOOLS" "$HOMETVFAIL" "$HOMETVFAIL/.local/bin" "$BASE/good" 1.2.3
+run_install "$TVFAIL_TOOLS" "$HOMETVFAIL" "$BASE/good" 1.2.3
 check "tv-listing failure exits 1" [ "$RC" -ne 0 ]
 check "tv-listing failure is explained, not silent" contains "$ERR" "could not list"
 
@@ -1838,7 +1796,7 @@ echo "== version normalization =="
 for spec in "1.2.3-rc.1" "v1.2.3-rc.1"; do
   HOMEV="$WORKDIR/homev-${spec//./-}"
   mkdir -p "$HOMEV"
-  run_install "$TOOLCHAIN_FULL" "$HOMEV" "$HOMEV/.local/bin" "$BASE/prerelease" "$spec"
+  run_install "$TOOLCHAIN_FULL" "$HOMEV" "$BASE/prerelease" "$spec"
   check "FARHELM_VERSION=$spec exits 0" [ "$RC" -eq 0 ]
   check "FARHELM_VERSION=$spec normalizes to farhelm 1.2.3-rc.1" \
     contains "$("$HOMEV/.local/bin/farhelm" --version 2>/dev/null || true)" "farhelm 1.2.3-rc.1"
@@ -1846,7 +1804,7 @@ done
 for spec in "1.2.3-dev.1" "v1.2.3-dev.1"; do
   HOMEV="$WORKDIR/homev-${spec//./-}"
   mkdir -p "$HOMEV"
-  run_install "$TOOLCHAIN_FULL" "$HOMEV" "$HOMEV/.local/bin" "$BASE/prerelease-dev" "$spec"
+  run_install "$TOOLCHAIN_FULL" "$HOMEV" "$BASE/prerelease-dev" "$spec"
   check "FARHELM_VERSION=$spec exits 0" [ "$RC" -eq 0 ]
   check "FARHELM_VERSION=$spec normalizes to farhelm 1.2.3-dev.1" \
     contains "$("$HOMEV/.local/bin/farhelm" --version 2>/dev/null || true)" "farhelm 1.2.3-dev.1"
@@ -1860,25 +1818,25 @@ done
 for spec in "0.0.0-unreleased" "v0.0.0-unreleased"; do
   HOMEV="$WORKDIR/homev-${spec//./-}"
   mkdir -p "$HOMEV"
-  run_install "$TOOLCHAIN_FULL" "$HOMEV" "$HOMEV/.local/bin" "$BASE/unreleased" "$spec"
+  run_install "$TOOLCHAIN_FULL" "$HOMEV" "$BASE/unreleased" "$spec"
   check "FARHELM_VERSION=$spec installs from the test base URL" [ "$RC" -eq 0 ]
   check "FARHELM_VERSION=$spec installs farhelm 0.0.0-unreleased" \
     contains "$("$HOMEV/.local/bin/farhelm" --version 2>/dev/null || true)" "farhelm 0.0.0-unreleased"
 done
 HOMEUNREL="$WORKDIR/homeunreleased-nobase"
 mkdir -p "$HOMEUNREL"
-run_install "$TOOLCHAIN_FULL" "$HOMEUNREL" "$HOMEUNREL/.local/bin" "" "0.0.0-unreleased"
+run_install "$TOOLCHAIN_FULL" "$HOMEUNREL" "" "0.0.0-unreleased"
 check "FARHELM_VERSION=0.0.0-unreleased without the test base URL exits 1" [ "$RC" -ne 0 ]
 check "FARHELM_VERSION=0.0.0-unreleased without the test base URL is a version error" \
   contains "$ERR" "is not X.Y.Z"
 
 HOMEPLAIN="$WORKDIR/homeplain"
 mkdir -p "$HOMEPLAIN"
-run_install "$TOOLCHAIN_FULL" "$HOMEPLAIN" "$HOMEPLAIN/.local/bin" "$BASE/good" "1.2.3"
+run_install "$TOOLCHAIN_FULL" "$HOMEPLAIN" "$BASE/good" "1.2.3"
 check "bare X.Y.Z (no leading v) installs" [ "$RC" -eq 0 ]
 HOMEVPLAIN="$WORKDIR/homevplain"
 mkdir -p "$HOMEVPLAIN"
-run_install "$TOOLCHAIN_FULL" "$HOMEVPLAIN" "$HOMEVPLAIN/.local/bin" "$BASE/good" "v1.2.3"
+run_install "$TOOLCHAIN_FULL" "$HOMEVPLAIN" "$BASE/good" "v1.2.3"
 check "vX.Y.Z installs" [ "$RC" -eq 0 ]
 
 # ===========================================================================
@@ -1902,7 +1860,7 @@ for v in "${INVALID_VERSIONS[@]}"; do
   i=$((i + 1))
   HOMEINV="$WORKDIR/homeinv$i"
   mkdir -p "$HOMEINV"
-  run_install "$TOOLCHAIN_FULL" "$HOMEINV" "$HOMEINV/.local/bin" "$BASE/good" "$v"
+  run_install "$TOOLCHAIN_FULL" "$HOMEINV" "$BASE/good" "$v"
   check "invalid FARHELM_VERSION #$i exits 1" [ "$RC" -ne 0 ]
   check "invalid FARHELM_VERSION #$i names the problem" contains "$ERR" "is not X.Y.Z"
   check "invalid FARHELM_VERSION #$i created no staging directory" \
@@ -1925,7 +1883,7 @@ for missing in curl tar; do
   HOMEM="$WORKDIR/homemissing-$missing"
   mkdir -p "$HOMEM"
   before=$(server_request_count)
-  run_install "$TOOLS_MISSING" "$HOMEM" "$HOMEM/.local/bin" "$BASE/good" 1.2.3
+  run_install "$TOOLS_MISSING" "$HOMEM" "$BASE/good" 1.2.3
   after=$(server_request_count)
   check "missing $missing exits 1" [ "$RC" -ne 0 ]
   check "missing $missing is named in the message" contains "$ERR" "$missing"
@@ -1942,7 +1900,7 @@ mkdir -p "$HOMENOSUM"
 # creation, not merely that it fails eventually -- if checksum-tool
 # detection ever moved after a download, this is what would catch it.
 before_nosum=$(server_request_count)
-run_install "$TOOLS_NO_CHECKSUM" "$HOMENOSUM" "$HOMENOSUM/.local/bin" "$BASE/good" 1.2.3
+run_install "$TOOLS_NO_CHECKSUM" "$HOMENOSUM" "$BASE/good" 1.2.3
 after_nosum=$(server_request_count)
 check "no checksum tool at all exits 1" [ "$RC" -ne 0 ]
 check "no checksum tool names the requirement" contains "$ERR" "sha256sum-or-shasum-or-openssl"
@@ -1962,7 +1920,7 @@ for only in sha256sum shasum openssl; do
   make_toolchain "$TOOLS_ONLY" "${omit[@]}"
   HOMEONLY="$WORKDIR/homeonly-$only"
   mkdir -p "$HOMEONLY"
-  run_install "$TOOLS_ONLY" "$HOMEONLY" "$HOMEONLY/.local/bin" "$BASE/good" 1.2.3
+  run_install "$TOOLS_ONLY" "$HOMEONLY" "$BASE/good" 1.2.3
   check "checksum fallback via only $only succeeds" [ "$RC" -eq 0 ]
   check "checksum fallback via only $only produces a working farhelm" \
     contains "$("$HOMEONLY/.local/bin/farhelm" --version 2>/dev/null || true)" "farhelm 1.2.3"
@@ -1970,68 +1928,51 @@ done
 
 # ===========================================================================
 # Scenario: closing-message contract -- PATH warning, restart reminder, the
-# four standing bullets, and the tmux hint across five tmux fixtures.
+# uninstall guidance, and the tmux hint across the floor boundary fixtures.
 # ===========================================================================
 echo
 echo "== closing-message contract =="
 
 HOMEPATHOUT="$WORKDIR/homepathout"
 mkdir -p "$HOMEPATHOUT"
-run_install "$TOOLCHAIN_FULL" "$HOMEPATHOUT" "$HOMEPATHOUT/.local/bin" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMEPATHOUT" "$BASE/good" 1.2.3
 check "PATH warning appears when install dir is not on PATH" contains "$OUT" "is not on your PATH."
 check "PATH warning includes a pasteable export line" contains "$OUT" "export PATH="
 
 HOMEPATHIN="$WORKDIR/homepathin"
 INSTALLPATHIN="$HOMEPATHIN/.local/bin"
 mkdir -p "$INSTALLPATHIN"
-run_install "$INSTALLPATHIN:$TOOLCHAIN_FULL" "$HOMEPATHIN" "$INSTALLPATHIN" "$BASE/good" 1.2.3
+run_install "$INSTALLPATHIN:$TOOLCHAIN_FULL" "$HOMEPATHIN" "$BASE/good" 1.2.3
 check "PATH warning is absent when install dir already on PATH" not_contains "$OUT" "is not on your PATH."
 
-# The four always-present bullets (D8), on the fresh install captured above.
-check "closing message: install summary" contains "$OUT" "Installed farhelm 1.2.3 to"
-check "closing message: helm setup guidance" contains "$OUT" "run 'farhelm helm setup'"
-check "closing message: do-not-run guidance" contains "$OUT" "Do NOT run it if this machine runs the desktop app"
-check "closing message: SSH provisioning mention" contains "$OUT" "that helm installs the supervisor here over"
-
-# F20: every settled semantic clause, line by line, across all four
-# fresh/update x Linux/macOS combinations -- not just short substrings.
+# The install summary is present even when no advisory is needed.
+check "closing message: install summary" contains "$OUT" "Installed farhelm 1.2.3 (and farhelm-desktop) to"
+# F20: every settled semantic clause, line by line, across both
+# fresh/update Mac cases -- not just short substrings.
 # Each invocation below puts the install directory ON PATH (no PATH-
 # warning noise; that is covered separately above) and uses an at-floor
 # tmux fixture (no tmux-hint noise; that is covered separately below), so
 # every assertion here is squarely about the STANDING closing message.
 assert_closing_message_contract() {
-  local label=$1 has_desktop=$2 is_update=$3 version=$4
+  local label=$1 is_update=$2 version=$3
   local tools="$WORKDIR/toolchain-f20-$label"
   mkdir -p "$tools"
   cp -a "$TOOLCHAIN_FULL"/. "$tools/"
   write_fake_tmux "$tools" "tmux $TMUX_FLOOR"
-  if [ "$has_desktop" = yes ]; then
-    rm -f "$tools/uname"
-    cat >"$tools/uname" <<'UNAMEEOF'
-#!/bin/sh
-case "$1" in
-  -s) echo Darwin ;;
-  -m) echo arm64 ;;
-esac
-UNAMEEOF
-    chmod 755 "$tools/uname"
-  fi
   local home="$WORKDIR/home-f20-$label"
   local install="$home/.local/bin"
   mkdir -p "$install"
   if [ "$is_update" = yes ]; then
     printf '#!/bin/sh\necho "farhelm 0.0.1-old"\n' >"$install/farhelm"
     chmod 755 "$install/farhelm"
-    if [ "$has_desktop" = yes ]; then
-      printf '#!/bin/sh\necho "farhelm-desktop 0.0.1-old"\n' >"$install/farhelm-desktop"
-      chmod 755 "$install/farhelm-desktop"
-    fi
+    printf '#!/bin/sh\necho "farhelm-desktop 0.0.1-old"\n' >"$install/farhelm-desktop"
+    chmod 755 "$install/farhelm-desktop"
   fi
-  run_install "$install:$tools" "$home" "$install" "$BASE/good" "$version"
+  run_install "$install:$tools" "$home" "$BASE/good" "$version"
   check "F20 ($label): install exits 0" [ "$RC" -eq 0 ]
 
-  # The install summary line, exactly (single or dual binary; Updated on
-  # an update, Installed on a fresh install).
+  # Both executables belong to every successful install. The summary
+  # distinguishes a fresh install from replacement of existing files.
   if [ "$is_update" = yes ]; then
     summary_verb="Updated"
     summary_prep="in"
@@ -2039,46 +1980,18 @@ UNAMEEOF
     summary_verb="Installed"
     summary_prep="to"
   fi
-  if [ "$has_desktop" = yes ]; then
-    check "F20 ($label): install summary names both binaries" \
-      contains "$OUT" "$summary_verb farhelm $version (and farhelm-desktop) $summary_prep $install."
-  else
-    check "F20 ($label): install summary names farhelm only" \
-      contains "$OUT" "$summary_verb farhelm $version $summary_prep $install."
-    check "F20 ($label): install summary does not also claim farhelm-desktop" \
-      not_contains "$OUT" "(and farhelm-desktop)"
-  fi
+  check "F20 ($label): install summary names both binaries" \
+    contains "$OUT" "$summary_verb farhelm $version (and farhelm-desktop) $summary_prep $install."
 
-  # The helm-setup paragraph, every line.
   check "F20 ($label): uninstall command is discoverable" \
     contains "$OUT" "run 'farhelm uninstall' (keeps user data)"
   check "F20 ($label): uninstall preview is discoverable" \
     contains "$OUT" "farhelm uninstall --dry-run"
-  check "F20 ($label): helm-setup paragraph line 1" \
-    contains "$OUT" "If this machine should run your helm (the web UI on 127.0.0.1:7433) and host"
-  check "F20 ($label): helm-setup paragraph line 2" \
-    contains "$OUT" "agent sessions itself, run 'farhelm helm setup' — it writes and starts the helm"
-  check "F20 ($label): helm-setup paragraph line 3" contains "$OUT" "and supervisor user units."
-
-  # The do-not-run paragraph, every line.
-  check "F20 ($label): do-not-run paragraph line 1" \
-    contains "$OUT" "Do NOT run it if this machine runs the desktop app (farhelm-desktop starts its"
-  check "F20 ($label): do-not-run paragraph line 2" \
-    contains "$OUT" "own helm and local supervisor), or if it is a Linux session host you will add"
-  check "F20 ($label): do-not-run paragraph line 3" \
-    contains "$OUT" "from another helm's hosts panel (that helm installs the supervisor here over"
-  check "F20 ($label): do-not-run paragraph line 4" \
-    contains "$OUT" "SSH), or if you only want a browser tab against a helm elsewhere (nothing to"
-  check "F20 ($label): do-not-run paragraph line 5" contains "$OUT" "set up)."
 
   # The restart-reminder block: present (every line) on an update, wholly
-  # absent on a fresh install -- including its macOS-specific lines even
-  # on a fresh LINUX install, and vice versa, since the whole block is one
-  # unconditional unit covering both platforms.
+  # absent on a fresh install.
   if [ "$is_update" = yes ]; then
     check "F20 ($label): restart-reminder heading" contains "$OUT" "Updated. Restart what is running:"
-    check "F20 ($label): restart-reminder Linux line" \
-      contains "$OUT" "Linux: systemctl --user restart farhelm-supervisor farhelm-helm"
     check "F20 ($label): restart-reminder macOS line 1" \
       contains "$OUT" "macOS: quit and reopen Farhelm (the desktop app owns the embedded helm and"
     check "F20 ($label): restart-reminder macOS line 2" \
@@ -2095,22 +2008,14 @@ UNAMEEOF
       not_contains "$OUT" "Updated. Restart what is running:"
   fi
 
-  # The bundle note is part of the standing macOS closing message now, and
-  # must never leak into a Linux run.
-  if [ "$has_desktop" = yes ]; then
-    check "F20 ($label): bundle note present" \
-      contains "$OUT" "Assembled $home/Applications/Farhelm.app (Spotlight, Dock, and Cmd-Tab identity)."
-  else
-    check "F20 ($label): no bundle note on Linux" not_contains "$OUT" "Farhelm.app"
-  fi
+  check "F20 ($label): bundle note present" \
+    contains "$OUT" "Assembled $home/Applications/Farhelm.app (Spotlight, Dock, and Cmd-Tab identity)."
 
   check "F20 ($label): no PATH warning (install dir is on PATH)" not_contains "$OUT" "is not on your PATH"
   check "F20 ($label): no tmux hint (at-floor fixture)" not_contains "$OUT" "or newer is required"
 }
-assert_closing_message_contract "fresh-linux" no no 1.2.3
-assert_closing_message_contract "fresh-macos" yes no 1.2.3
-assert_closing_message_contract "update-linux" no yes 1.2.3
-assert_closing_message_contract "update-macos" yes yes 1.2.3
+assert_closing_message_contract "fresh-macos" no 1.2.3
+assert_closing_message_contract "update-macos" yes 1.2.3
 
 # tmux hint: absent, malformed, the floor-derived boundary cases below, and
 # exactly-at and above the floor.
@@ -2124,7 +2029,7 @@ run_tmux_case() {
   fi
   local home="$WORKDIR/home-tmux-$label"
   mkdir -p "$home"
-  run_install "$tools" "$home" "$home/.local/bin" "$BASE/good" 1.2.3
+  run_install "$tools" "$home" "$BASE/good" 1.2.3
   if [ "$expect_hint" = yes ]; then
     check "tmux hint ($label): present" contains "$OUT" "$TMUX_FLOOR_HINT"
     check "tmux hint ($label): reports '$expect_have'" contains "$OUT" "this machine has $expect_have."
@@ -2162,12 +2067,11 @@ run_tmux_case "at-floor" "tmux $TMUX_FLOOR" no ""
 run_tmux_case "above-floor" "tmux $TMUX_FLOOR_MAJOR.$((TMUX_FLOOR_MINOR + 1))" no ""
 
 # ===========================================================================
-# Scenario: no side effects outside FARHELM_INSTALL_DIR (F27) -- systemctl/
-# launchctl are never invoked, and nothing under $HOME changes except
-# FARHELM_INSTALL_DIR itself.
+# Scenario: no side effects outside the bin directory and bundle (F27).
+# Neither systemctl nor launchctl may run.
 # ===========================================================================
 echo
-echo "== no service side effects, nothing outside FARHELM_INSTALL_DIR changes =="
+echo "== no side effects outside the installation and bundle =="
 SENTINEL_TOOLS="$WORKDIR/toolchain-sentinel"
 mkdir -p "$SENTINEL_TOOLS"
 cp -a "$TOOLCHAIN_FULL"/. "$SENTINEL_TOOLS/"
@@ -2185,26 +2089,24 @@ HOMESIDE="$WORKDIR/homeside"
 INSTALLSIDE="$HOMESIDE/.local/bin"
 mkdir -p "$HOMESIDE"
 # Seed a few ordinary files elsewhere under $HOME to prove they survive, and
-# pre-create $HOMESIDE/.local itself (install.sh's `mkdir -p` would create
-# it anyway as INSTALLSIDE's parent) so the before/after snapshot diff below
-# is not tripped up by that expected, install-dir-adjacent directory coming
-# into existence -- only its "bin" child is meant to be excluded from "must
-# not change" by the $INSTALLSIDE filter.
-mkdir -p "$HOMESIDE/.local" "$HOMESIDE/.config" "$HOMESIDE/Documents"
+# pre-create the two installation parents so the snapshot compares only
+# unrelated entries. The flat bin directory and Farhelm.app are the only
+# subtrees excluded from that comparison.
+mkdir -p "$HOMESIDE/.local" "$HOMESIDE/Applications" "$HOMESIDE/.config" "$HOMESIDE/Documents"
 echo "untouched" >"$HOMESIDE/.bashrc"
 echo "untouched" >"$HOMESIDE/Documents/notes.txt"
 
 BEFORE_SNAPSHOT=$(find_snapshot "$HOMESIDE")
-run_install "$SENTINEL_TOOLS" "$HOMESIDE" "$INSTALLSIDE" "$BASE/good" 1.2.3
+run_install "$SENTINEL_TOOLS" "$HOMESIDE" "$BASE/good" 1.2.3
 check "sentinel-guarded install exits 0" [ "$RC" -eq 0 ]
 check "systemctl/launchctl were never invoked" [ ! -s "$SENTINEL_LOG" ]
 check ".bashrc is untouched" [ "$(cat "$HOMESIDE/.bashrc")" = "untouched" ]
 check "Documents/notes.txt is untouched" [ "$(cat "$HOMESIDE/Documents/notes.txt")" = "untouched" ]
 
 AFTER_SNAPSHOT=$(find_snapshot "$HOMESIDE")
-DIFF_OUTSIDE_INSTALL=$(diff <(printf '%s\n' "$BEFORE_SNAPSHOT" | grep -Fv "$INSTALLSIDE") \
-  <(printf '%s\n' "$AFTER_SNAPSHOT" | grep -Fv "$INSTALLSIDE") || true)
-check "nothing outside FARHELM_INSTALL_DIR changed under \$HOME" [ -z "$DIFF_OUTSIDE_INSTALL" ]
+DIFF_OUTSIDE_INSTALL=$(diff <(printf '%s\n' "$BEFORE_SNAPSHOT" | grep -Fv -e "$INSTALLSIDE" -e "$HOMESIDE/Applications/Farhelm.app") \
+  <(printf '%s\n' "$AFTER_SNAPSHOT" | grep -Fv -e "$INSTALLSIDE" -e "$HOMESIDE/Applications/Farhelm.app") || true)
+check "nothing outside the installation and bundle changed under \$HOME" [ -z "$DIFF_OUTSIDE_INSTALL" ]
 
 # ===========================================================================
 # Scenario: SIGTERM mid-run cleans up (F29) -- proves the INT/TERM/HUP
@@ -2219,7 +2121,7 @@ echo "== F29: SIGTERM mid-run cleans up (signal traps, not just EXIT) =="
 HOMETERM="$WORKDIR/hometerm"
 INSTALLTERM="$HOMETERM/.local/bin"
 mkdir -p "$HOMETERM"
-run_install_bg "$TOOLCHAIN_FULL" "$HOMETERM" "$INSTALLTERM" "$BASE/slow" 1.2.3
+run_install_bg "$TOOLCHAIN_FULL" "$HOMETERM" "$BASE/slow" 1.2.3
 sleep 0.5
 if kill -0 "$BG_PID" 2>/dev/null; then
   kill -TERM "$BG_PID"
@@ -2247,7 +2149,7 @@ check_integrity_gate() {
   chmod 755 "$install/farhelm"
   local sentinel
   sentinel=$(cat "$install/farhelm")
-  run_install "$TOOLCHAIN_FULL" "$home" "$install" "$BASE/$fixture" "$version"
+  run_install "$TOOLCHAIN_FULL" "$home" "$BASE/$fixture" "$version"
   check "F18 ($label): exits 1" [ "$RC" -ne 0 ]
   check "F18 ($label): names the problem" contains "$ERR" "$expect_err"
   check "F18 ($label): sentinel farhelm preserved byte-for-byte" [ "$(cat "$install/farhelm")" = "$sentinel" ]
@@ -2262,8 +2164,7 @@ check_integrity_gate "decoybypass" decoybypass 1.2.3 "is not a regular file"
 
 # ===========================================================================
 # Scenario: macOS destination collision on farhelm-desktop specifically
-# (F24) -- the Round 1 collision test only ever exercised the Linux
-# farhelm path; a regression that validates only that path could still let
+# (F24) -- checking only the CLI destination could still let
 # `mv` place a staged desktop executable inside a user-owned
 # farhelm-desktop DIRECTORY while reporting success.
 # ===========================================================================
@@ -2276,7 +2177,7 @@ printf '#!/bin/sh\necho "farhelm 1.2.3"\n' >"$INSTALLMACDIRDEST/farhelm"
 chmod 755 "$INSTALLMACDIRDEST/farhelm"
 mkdir -p "$INSTALLMACDIRDEST/farhelm-desktop"
 echo "sentinel" >"$INSTALLMACDIRDEST/farhelm-desktop/keepme"
-run_install "$MAC_TOOLS" "$HOMEMACDIRDEST" "$INSTALLMACDIRDEST" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOMEMACDIRDEST" "$BASE/good" 1.2.3
 check "F24: macOS desktop-directory collision exits 1" [ "$RC" -ne 0 ]
 check "F24: macOS desktop-directory collision names the problem" contains "$ERR" "is not a regular file"
 check "F24: farhelm-desktop/keepme is untouched" [ "$(cat "$INSTALLMACDIRDEST/farhelm-desktop/keepme")" = "sentinel" ]
@@ -2295,7 +2196,7 @@ mkdir -p "$INSTALL503"
 printf '#!/bin/sh\necho "SENTINEL-503"\n' >"$INSTALL503/farhelm"
 chmod 755 "$INSTALL503/farhelm"
 SENTINEL_503=$(cat "$INSTALL503/farhelm")
-run_install "$TOOLCHAIN_FULL" "$HOME503" "$INSTALL503" "$BASE/sums503" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME503" "$BASE/sums503" 1.2.3
 check "F25: 503 exits 1" [ "$RC" -ne 0 ]
 check "F25: 503 uses the generic diagnostic naming the code and URL" \
   contains "$ERR" "download failed (HTTP 503): $BASE/sums503/SHA256SUMS"
@@ -2304,13 +2205,10 @@ check "F25: 503 leaves no staging/lock/journal residue" \
   [ -z "$(find "$INSTALL503" -maxdepth 1 -name '.farhelm*' 2>/dev/null || true)" ]
 
 # ===========================================================================
-# Scenario: FARHELM_INSTALL_DIR omitted entirely (F26) -- proves the
-# documented default ($HOME/.local/bin) is what the PRODUCTION expression
-# evaluates to, not just what every other scenario's run_install happens
-# to pass.
+# Scenario: fixed installation layout (F26), including the always-built app.
 # ===========================================================================
 echo
-echo "== F26: default install directory (FARHELM_INSTALL_DIR unset) =="
+echo "== F26: fixed install directory and app =="
 HOMEDEFAULT="$WORKDIR/homedefault"
 mkdir -p "$HOMEDEFAULT"
 DEFAULT_OUT=$(mktemp "$WORKDIR/out.XXXXXX")
@@ -2323,7 +2221,7 @@ set -e
 check "F26: default install dir exits 0" [ "$DEFAULT_RC" -eq 0 ]
 check "F26: farhelm lands at \$HOME/.local/bin/farhelm" [ -x "$HOMEDEFAULT/.local/bin/farhelm" ]
 check "F26: nothing else under \$HOME was created" \
-  [ "$(find "$HOMEDEFAULT" -type f 2>/dev/null | wc -l)" -eq 2 ]
+  [ "$(find "$HOMEDEFAULT" -type f 2>/dev/null | wc -l)" -eq 8 ]
 
 # ===========================================================================
 # Scenario: the real production download URL, with no FARHELM_RELEASE_
@@ -2413,7 +2311,7 @@ HOMEF27="$WORKDIR/homef27"
 INSTALLF27="$HOMEF27/.local/bin"
 mkdir -p "$INSTALLF27"
 set +e
-env -i PATH="$TOOLS_F27" HOME="$HOMEF27" FARHELM_INSTALL_DIR="$INSTALLF27" FARHELM_VERSION="$F27_VERSION" \
+env -i PATH="$TOOLS_F27" HOME="$HOMEF27" FARHELM_VERSION="$F27_VERSION" \
   /bin/sh "$INSTALL_SH" >"$WORKDIR/f27-out" 2>"$WORKDIR/f27-err"
 F27_RC=$?
 set -e
@@ -2426,7 +2324,7 @@ check "F27: installed farhelm reports the requested version" \
 # prefix of install.sh, at every 4 KiB boundary across the whole file and
 # then one byte at a time across the last 64 bytes, must fail closed: a
 # non-zero exit, zero curl invocations, and zero files created in the
-# install directory. This is what actually exercises the `{ ... }`
+# fixture home. This is what actually exercises the `{ ... }`
 # wrapper's fail-closed property end to end, rather than trusting it by
 # inspection.
 # ===========================================================================
@@ -2453,18 +2351,17 @@ f22_check_prefix() {
   local prefix_file="$WORKDIR/f22-prefix.sh"
   head -c "$off" "$INSTALL_SH" >"$prefix_file"
   local home="$WORKDIR/f22-home"
-  local install="$WORKDIR/f22-install"
-  rm -rf "$home" "$install"
-  mkdir -p "$home" "$install"
+  rm -rf "$home"
+  mkdir -p "$home"
   : >"$CURL_CALL_LOG"
   set +e
-  env -i PATH="$CURL_RECORDER" HOME="$home" FARHELM_INSTALL_DIR="$install" FARHELM_VERSION=1.2.3 \
+  env -i PATH="$CURL_RECORDER" HOME="$home" FARHELM_VERSION=1.2.3 \
     /bin/sh "$prefix_file" >/dev/null 2>/dev/null
   local rc=$?
   set -e
   F22_CHECKED=$((F22_CHECKED + 1))
   local created
-  created=$(find "$install" -mindepth 1 2>/dev/null | wc -l)
+  created=$(find "$home" -mindepth 1 2>/dev/null | wc -l)
   if [ "$rc" -eq 0 ] || [ -s "$CURL_CALL_LOG" ] || [ "$created" -ne 0 ]; then
     F22_FAILURES=$((F22_FAILURES + 1))
     printf 'NOT OK - F22: prefix at byte %s did not fail closed (rc=%s, curl_called=%s, files_created=%s)\n' \
@@ -2545,7 +2442,7 @@ chmod +x "$TOOLS_F23A/mv"
 HOMEF23="$WORKDIR/homef23"
 INSTALLF23="$HOMEF23/.local/bin"
 mkdir -p "$INSTALLF23"
-run_install_bg "$TOOLS_F23A" "$HOMEF23" "$INSTALLF23" "$BASE/good" 1.2.3
+run_install_bg "$TOOLS_F23A" "$HOMEF23" "$BASE/good" 1.2.3
 F23_PID_A=$BG_PID
 
 f23_tries=200
@@ -2561,7 +2458,7 @@ check "F23: installer A reached its first move (lock fully published)" [ -e "$SY
 check "F23: installer A is still running (paused mid-replacement, not finished)" kill -0 "$F23_PID_A"
 
 BEFORE_F23_SNAPSHOT=$(find_snapshot "$INSTALLF23")
-run_install "$TOOLCHAIN_FULL" "$HOMEF23" "$INSTALLF23" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMEF23" "$BASE/good" 1.2.3
 check "F23: installer B refuses while A holds the lock" [ "$RC" -ne 0 ]
 check "F23: installer B's refusal names another running install" contains "$ERR" "already running"
 AFTER_F23_B_SNAPSHOT=$(find_snapshot "$INSTALLF23")
@@ -2587,7 +2484,7 @@ HOMELOCKFILE="$WORKDIR/homelockfile"
 INSTALLLOCKFILE="$HOMELOCKFILE/.local/bin"
 mkdir -p "$INSTALLLOCKFILE"
 echo "not a lock" >"$INSTALLLOCKFILE/.farhelm-install.lock"
-run_install "$TOOLCHAIN_FULL" "$HOMELOCKFILE" "$INSTALLLOCKFILE" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMELOCKFILE" "$BASE/good" 1.2.3
 check "F6: a regular file at the lock path is refused" [ "$RC" -ne 0 ]
 check "F6: refusal names it as not a farhelm lock" contains "$ERR" "not a farhelm install lock"
 check "F6: the regular file is untouched" [ "$(cat "$INSTALLLOCKFILE/.farhelm-install.lock")" = "not a lock" ]
@@ -2596,7 +2493,7 @@ HOMELOCKDIR="$WORKDIR/homelockdir"
 INSTALLLOCKDIR="$HOMELOCKDIR/.local/bin"
 mkdir -p "$INSTALLLOCKDIR/.farhelm-install.lock"
 echo "unrelated data" >"$INSTALLLOCKDIR/.farhelm-install.lock/somefile"
-run_install "$TOOLCHAIN_FULL" "$HOMELOCKDIR" "$INSTALLLOCKDIR" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMELOCKDIR" "$BASE/good" 1.2.3
 check "F6: a nonempty unrelated directory at the lock path is refused" [ "$RC" -ne 0 ]
 check "F6: refusal names it as not a farhelm lock (directory case)" contains "$ERR" "not a farhelm install lock"
 check "F6: the unrelated directory's contents are untouched" \
@@ -2611,7 +2508,7 @@ INSTALLLOCKMODE="$HOMELOCKMODE/.local/bin"
 mkdir -p "$INSTALLLOCKMODE"
 mkdir "$INSTALLLOCKMODE/.farhelm-install.lock"
 chmod 0770 "$INSTALLLOCKMODE/.farhelm-install.lock"
-run_install "$TOOLCHAIN_FULL" "$HOMELOCKMODE" "$INSTALLLOCKMODE" "$BASE/good" 1.2.3 QUOTING_STYLE=shell-always
+run_install "$TOOLCHAIN_FULL" "$HOMELOCKMODE" "$BASE/good" 1.2.3 QUOTING_STYLE=shell-always
 check "F6: a group-writable shaped lock is refused" [ "$RC" -ne 0 ]
 check "F6: a writable lock refusal keeps the existing message" \
   contains "$ERR" "not a farhelm install lock"
@@ -2620,7 +2517,7 @@ check "F6: the group-writable lock is left untouched" \
 
 chmod 0700 "$INSTALLLOCKMODE/.farhelm-install.lock"
 printf '999999\n' >"$INSTALLLOCKMODE/.farhelm-install.lock/pid"
-run_install "$TOOLCHAIN_FULL" "$HOMELOCKMODE" "$INSTALLLOCKMODE" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMELOCKMODE" "$BASE/good" 1.2.3
 check "F6: an owner-only stale lock follows recovery" [ "$RC" -eq 0 ]
 check "F6: an owner-only stale lock is removed after recovery" \
   [ ! -e "$INSTALLLOCKMODE/.farhelm-install.lock" ]
@@ -2637,7 +2534,7 @@ INSTALLBACKUPDEBRIS="$HOMEBACKUPDEBRIS/.local/bin"
 mkdir -p "$INSTALLBACKUPDEBRIS"
 printf 'committed old bytes\n' >"$INSTALLBACKUPDEBRIS/.farhelm.old"
 printf 'foreign bytes\n' >"$INSTALLBACKUPDEBRIS/.not-a-farhelm-backup"
-run_install "$TOOLCHAIN_FULL" "$HOMEBACKUPDEBRIS" "$INSTALLBACKUPDEBRIS" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMEBACKUPDEBRIS" "$BASE/good" 1.2.3
 check "F7: journal-free backup debris is removed by a successful run" [ "$RC" -eq 0 ]
 check "F7: journal-free backup debris is gone" [ ! -e "$INSTALLBACKUPDEBRIS/.farhelm.old" ]
 check "F7: debris cleanup emits one notice" contains "$ERR" "removed committed backup debris"
@@ -2653,7 +2550,7 @@ printf '999999\n' >"$INSTALLBACKUPJOURNAL/.farhelm-install.lock/pid"
 printf 'PARK cli\n' >"$INSTALLBACKUPJOURNAL/.farhelm-install.lock/journal"
 printf '#!/bin/sh\necho "farhelm 1.2.3-backup"\n' >"$INSTALLBACKUPJOURNAL/.farhelm.old"
 chmod 755 "$INSTALLBACKUPJOURNAL/.farhelm.old"
-run_install "$TOOLCHAIN_FULL" "$HOMEBACKUPJOURNAL" "$INSTALLBACKUPJOURNAL" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMEBACKUPJOURNAL" "$BASE/good" 1.2.3
 check "F7: journaled backup keeps recovery refusal behavior" [ "$RC" -ne 0 ]
 check "F7: journaled backup is recovered into farhelm" \
   [ "$("$INSTALLBACKUPJOURNAL/farhelm" --version)" = "farhelm 1.2.3-backup" ]
@@ -2661,7 +2558,7 @@ check "F7: journaled recovery leaves no backup" [ ! -e "$INSTALLBACKUPJOURNAL/.f
 
 HOMEINVALIDBASE="$WORKDIR/homeinvalidbase"
 INSTALLINVALIDBASE="$HOMEINVALIDBASE/.local/bin"
-run_install "$TOOLCHAIN_FULL" "$HOMEINVALIDBASE" "$INSTALLINVALIDBASE" \
+run_install "$TOOLCHAIN_FULL" "$HOMEINVALIDBASE" \
   "http://user:pass@127.0.0.1:$SERVER_PORT/good" 1.2.3
 check "F7: override userinfo is refused" [ "$RC" -eq 1 ]
 check "F7: userinfo refusal names FARHELM_INSTALL_TEST_BASE_URL" \
@@ -2669,7 +2566,7 @@ check "F7: userinfo refusal names FARHELM_INSTALL_TEST_BASE_URL" \
 check "F7: userinfo refusal creates no install state" \
   [ ! -e "$INSTALLINVALIDBASE" ]
 
-run_install "$TOOLCHAIN_FULL" "$HOMEINVALIDBASE" "$INSTALLINVALIDBASE" \
+run_install "$TOOLCHAIN_FULL" "$HOMEINVALIDBASE" \
   "$BASE/good?query=refused" 1.2.3
 check "F7: override query is refused" [ "$RC" -eq 1 ]
 check "F7: query refusal names FARHELM_INSTALL_TEST_BASE_URL" \
@@ -2696,7 +2593,7 @@ chmod 0700 "$INSTALLRECOVERYBAD/.farhelm-install.lock"
 echo 999999 >"$INSTALLRECOVERYBAD/.farhelm-install.lock/pid"
 printf 'PARK cli\n' >"$INSTALLRECOVERYBAD/.farhelm-install.lock/journal"
 
-run_install "$TOOLCHAIN_FULL" "$HOMERECOVERYBAD" "$INSTALLRECOVERYBAD" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMERECOVERYBAD" "$BASE/good" 1.2.3
 check "F8: recovery into a corrupted destination exits 1" [ "$RC" -ne 0 ]
 check "F8: recovery failure message names manual intervention" contains "$ERR" "LEFT IN PLACE"
 check "F8: the lock is left in place" [ -e "$INSTALLRECOVERYBAD/.farhelm-install.lock" ]
@@ -2716,7 +2613,7 @@ INSTALLUMASK="$HOMEUMASK/.local/bin"
 mkdir -p "$HOMEUMASK"
 set +e
 # shellcheck disable=SC2016 # the single quotes are deliberate: "$1" must reach the INNER sh, not expand in this one
-env -i PATH="$TOOLCHAIN_FULL" HOME="$HOMEUMASK" FARHELM_INSTALL_DIR="$INSTALLUMASK" \
+env -i PATH="$TOOLCHAIN_FULL" HOME="$HOMEUMASK" \
   FARHELM_INSTALL_TEST_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
   /bin/sh -c 'umask 000; exec /bin/sh "$1"' _ "$INSTALL_SH" >"$WORKDIR/f9-out" 2>"$WORKDIR/f9-err"
 F9_RC=$?
@@ -2728,21 +2625,10 @@ check "F9: the newly-created install directory is not group/world-writable" \
 check "F9: the newly-created HOME .local directory is not group/world-writable" \
   [ "$(stat -c %a "$HOMEUMASK/.local")" = "755" ]
 
-HOMEUMASKMAC="$WORKDIR/homeumaskmac"
-INSTALLUMASKMAC="$HOMEUMASKMAC/.local/bin"
-mkdir -p "$HOMEUMASKMAC"
-set +e
-# shellcheck disable=SC2016 # the single quotes are deliberate: "$1" must reach the INNER sh, not expand in this one
-env -i PATH="$MAC_TOOLS" HOME="$HOMEUMASKMAC" FARHELM_INSTALL_DIR="$INSTALLUMASKMAC" \
-  FARHELM_INSTALL_TEST_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
-  /bin/sh -c 'umask 000; exec /bin/sh "$1"' _ "$INSTALL_SH" >"$WORKDIR/f9-mac-out" 2>"$WORKDIR/f9-mac-err"
-F9_MAC_RC=$?
-set -e
-check "F9: macOS-shaped umask-000 install exits 0" [ "$F9_MAC_RC" -eq 0 ]
-check "F9: macOS-shaped Applications directory is not group/world-writable" \
-  [ "$(stat -c %a "$HOMEUMASKMAC/Applications")" = "755" ]
-check "F9: macOS-shaped bundle Contents directory is not group/world-writable" \
-  [ "$(stat -c %a "$HOMEUMASKMAC/Applications/Farhelm.app/Contents")" = "755" ]
+check "F9: Applications directory is not group/world-writable" \
+  [ "$(stat -c %a "$HOMEUMASK/Applications")" = "755" ]
+check "F9: bundle Contents directory is not group/world-writable" \
+  [ "$(stat -c %a "$HOMEUMASK/Applications/Farhelm.app/Contents")" = "755" ]
 
 # ===========================================================================
 # Scenario: multiline tmux output is rejected as a whole, not scanned line
@@ -2762,12 +2648,12 @@ run_tmux_case "two-valid-lines" "$(printf 'tmux %s\ntmux 3.8' "$TMUX_FLOOR")" ye
 # ===========================================================================
 echo
 echo "== F15: colon-containing install directory =="
-HOMECOLON="$WORKDIR/homecolon"
-INSTALLCOLON="$HOMECOLON/.local/bin:extra"
+HOMECOLON="$WORKDIR/home:colon"
+INSTALLCOLON="$HOMECOLON/.local/bin"
 mkdir -p "$INSTALLCOLON"
 DECEPTIVE_PATH="$TOOLCHAIN_FULL:$HOMECOLON/.local/bin:extra:/usr/bin"
 set +e
-env -i PATH="$DECEPTIVE_PATH" HOME="$HOMECOLON" FARHELM_INSTALL_DIR="$INSTALLCOLON" \
+env -i PATH="$DECEPTIVE_PATH" HOME="$HOMECOLON" \
   FARHELM_INSTALL_TEST_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
   /bin/sh "$INSTALL_SH" >"$WORKDIR/f15-out" 2>"$WORKDIR/f15-err"
 F15_RC=$?
@@ -2801,7 +2687,7 @@ REAL_AWK=$(command -v awk)
 r3_seed_macos_pair() {
   local label=$1 home=$2 install=$3
   mkdir -p "$home"
-  run_install "$MAC_TOOLS" "$home" "$install" "$BASE/good" 1.2.3
+  run_install "$MAC_TOOLS" "$home" "$BASE/good" 1.2.3
   check "$label: setup installs the 1.2.3 macOS pair" [ "$RC" -eq 0 ]
   R3_OLD_FARHELM=$(cat "$install/farhelm")
   R3_OLD_DESKTOP=$(cat "$install/farhelm-desktop")
@@ -2853,7 +2739,7 @@ exec "$REAL_AWK" "\$@"
 EOF
 chmod 755 "$TOOLS_R3F1/mktemp" "$TOOLS_R3F1/awk"
 
-run_install "$TOOLS_R3F1" "$HOME_R3F1" "$INSTALL_R3F1" "$BASE/good-v2" 1.2.4
+run_install "$TOOLS_R3F1" "$HOME_R3F1" "$BASE/good-v2" 1.2.4
 check "R3 F1: the forced update failure exits 1" [ "$RC" -ne 0 ]
 check "R3 F1: farhelm is restored to the OLD (1.2.3) bytes" \
   [ "$(cat "$INSTALL_R3F1/farhelm")" = "$R3_OLD_FARHELM" ]
@@ -2864,7 +2750,7 @@ check "R3 F1: farhelm-desktop still exists, at the OLD (1.2.3) bytes" \
 check "R3 F1: no leftover lock, journal, or backup" \
   [ -z "$(find "$INSTALL_R3F1" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation' 2>/dev/null || true)" ]
 
-run_install "$MAC_TOOLS" "$HOME_R3F1" "$INSTALL_R3F1" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_R3F1" "$BASE/good-v2" 1.2.4
 check "R3 F1: a following run installs 1.2.4 cleanly" [ "$RC" -eq 0 ]
 check "R3 F1: the following run's farhelm reports 1.2.4" \
   [ "$("$INSTALL_R3F1/farhelm" --version)" = "farhelm 1.2.4" ]
@@ -2921,7 +2807,7 @@ exec /bin/mv "$@"
 MVEOF
 chmod 755 "$TOOLS_R3F2A/mv"
 
-run_install "$TOOLS_R3F2A" "$HOME_R3F2A" "$INSTALL_R3F2A" "$BASE/good-v2" 1.2.4
+run_install "$TOOLS_R3F2A" "$HOME_R3F2A" "$BASE/good-v2" 1.2.4
 check "R3 F2a: the run exits 1" [ "$RC" -ne 0 ]
 check "R3 F2a: the explicit rollback reports it could not finish" \
   contains "$ERR" "automatic rollback could not fully complete"
@@ -2945,7 +2831,7 @@ check "R3 F2a: the journal is owner-only" \
 
 # The stranded state is not a dead end: with the sabotaged `mv` gone, the
 # stale lock's own recovery path finishes the job.
-run_install "$MAC_TOOLS" "$HOME_R3F2A" "$INSTALL_R3F2A" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_R3F2A" "$BASE/good-v2" 1.2.4
 check "R3 F2a: a following run recovers rather than installing" [ "$RC" -ne 0 ]
 check "R3 F2a: the following run reports the recovery" \
   contains "$ERR" "recovered from an interrupted install/update"
@@ -3016,7 +2902,7 @@ chmod 755 "$TOOLS_R3F2B/mv"
 # child that died on an uncatchable signal, which is expected here and
 # would otherwise read as a harness error. run_install captures the
 # installer's own streams into files, so nothing under test is hidden.
-run_install "$TOOLS_R3F2B" "$HOME_R3F2B" "$INSTALL_R3F2B" "$BASE/good-v2" 1.2.4 2>/dev/null
+run_install "$TOOLS_R3F2B" "$HOME_R3F2B" "$BASE/good-v2" 1.2.4 2>/dev/null
 check "R3 F2b: the killed run exits non-zero" [ "$RC" -ne 0 ]
 check "R3 F2b: the killed run left its lock behind (no trap ran)" \
   [ -d "$INSTALL_R3F2B/.farhelm-install.lock" ]
@@ -3025,7 +2911,7 @@ check "R3 F2b: the killed run left its journal behind" \
 check "R3 F2b: farhelm-desktop was restored before the kill" \
   [ "$(cat "$INSTALL_R3F2B/farhelm-desktop")" = "$R3_OLD_DESKTOP" ]
 
-run_install "$MAC_TOOLS" "$HOME_R3F2B" "$INSTALL_R3F2B" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_R3F2B" "$BASE/good-v2" 1.2.4
 check "R3 F2b: the second run recovers rather than installing" [ "$RC" -ne 0 ]
 check "R3 F2b: the second run reports the recovery" \
   contains "$ERR" "recovered from an interrupted install/update"
@@ -3042,8 +2928,8 @@ check "R3 F2b: recovery clears the lock and journal" \
 # Scenario: an install directory whose NAME carries the journal's own
 # delimiters (R3 F3).
 #
-# FARHELM_INSTALL_DIR is documented as taking any pathname, and a pathname
-# may legally contain a pipe or a newline. A journal that spelled moves as
+# A home directory may legally contain a pipe or a newline, so its
+# ~/.local/bin installation inherits those characters. A journal that spelled moves as
 # "TYPE|SRC|DEST" could not represent either: the pipe shifts fragments into
 # the wrong fields and the newline manufactures extra apparent records, so
 # rollback would quietly no-op and report success. Records naming binaries
@@ -3056,11 +2942,11 @@ check "R3 F2b: recovery clears the lock and journal" \
 # ===========================================================================
 echo
 echo "== R3 F3: an install directory containing '|' and a newline =="
-HOME_R3F3="$WORKDIR/home-r3f3"
-printf -v INSTALL_R3F3 '%s/.local/bin|pipe\nnewline\n' "$HOME_R3F3"
+printf -v HOME_R3F3 '%s/home-r3f3|pipe\nnewline\n' "$WORKDIR"
+INSTALL_R3F3="$HOME_R3F3/.local/bin"
 r3_seed_macos_pair "R3 F3" "$HOME_R3F3" "$INSTALL_R3F3"
 
-run_install "$MAC_TOOLS_FAILDESKTOP" "$HOME_R3F3" "$INSTALL_R3F3" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS_FAILDESKTOP" "$HOME_R3F3" "$BASE/good-v2" 1.2.4
 check "R3 F3: the forced update failure exits 1" [ "$RC" -ne 0 ]
 check "R3 F3: farhelm is restored byte-for-byte" \
   [ "$(cat "$INSTALL_R3F3/farhelm")" = "$R3_OLD_FARHELM" ]
@@ -3069,11 +2955,11 @@ check "R3 F3: farhelm-desktop is restored byte-for-byte" \
 check "R3 F3: no leftover lock, journal, or backup" \
   [ -z "$(find "$INSTALL_R3F3" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation' 2>/dev/null || true)" ]
 
-run_install "$MAC_TOOLS" "$HOME_R3F3" "$INSTALL_R3F3" "$BASE/good-v2" 1.2.4
+run_install "$MAC_TOOLS" "$HOME_R3F3" "$BASE/good-v2" 1.2.4
 check "R3 F3: a following run installs 1.2.4 cleanly" [ "$RC" -eq 0 ]
 check "R3 F3: the following run's farhelm reports 1.2.4" \
   [ "$("$INSTALL_R3F3/farhelm" --version)" = "farhelm 1.2.4" ]
-check "R3 F3: standalone metadata preserves the awkward canonical path" assert_standalone_record "$INSTALL_R3F3" yes
+check "R3 F3: standalone metadata preserves the awkward canonical path" assert_standalone_record "$INSTALL_R3F3"
 # The closing report is only reached by a run that gets that far, hence the
 # assertion here rather than on the deliberately-failed run above.
 check "R3 F3: the newline-named directory gets the by-hand PATH guidance" \
@@ -3099,7 +2985,7 @@ echo "outside sentinel" >"$R3_OUTSIDE"
 HOME_R3F4BAD="$WORKDIR/home-r3f4bad"
 INSTALL_R3F4BAD="$HOME_R3F4BAD/.local/bin"
 mkdir -p "$HOME_R3F4BAD"
-run_install "$TOOLCHAIN_FULL" "$HOME_R3F4BAD" "$INSTALL_R3F4BAD" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_R3F4BAD" "$BASE/good" 1.2.3
 check "R3 F4 (bad record): setup install exits 0" [ "$RC" -eq 0 ]
 R3F4_FARHELM=$(cat "$INSTALL_R3F4BAD/farhelm")
 printf '#!/bin/sh\necho "farhelm 0.0.1-parked"\n' >"$INSTALL_R3F4BAD/.farhelm.old"
@@ -3115,7 +3001,7 @@ echo 999999 >"$INSTALL_R3F4BAD/.farhelm-install.lock/pid"
   printf 'INSTALL|%s|%s\n' "$R3_OUTSIDE" "$INSTALL_R3F4BAD/farhelm"
 } >"$INSTALL_R3F4BAD/.farhelm-install.lock/journal"
 
-run_install "$TOOLCHAIN_FULL" "$HOME_R3F4BAD" "$INSTALL_R3F4BAD" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_R3F4BAD" "$BASE/good" 1.2.3
 check "R3 F4 (bad record): the run exits 1" [ "$RC" -ne 0 ]
 check "R3 F4 (bad record): the refusal names the unrecognized record" \
   contains "$ERR" "does not recognise"
@@ -3136,7 +3022,7 @@ mkdir -p "$INSTALL_R3F4LOCK/.farhelm-install.lock"
 echo 999999 >"$INSTALL_R3F4LOCK/.farhelm-install.lock/pid"
 printf 'PARK cli\n' >"$INSTALL_R3F4LOCK/.farhelm-install.lock/journal"
 echo "unrelated data" >"$INSTALL_R3F4LOCK/.farhelm-install.lock/stray"
-run_install "$TOOLCHAIN_FULL" "$HOME_R3F4LOCK" "$INSTALL_R3F4LOCK" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_R3F4LOCK" "$BASE/good" 1.2.3
 check "R3 F4 (extra lock entry): the run exits 1" [ "$RC" -ne 0 ]
 check "R3 F4 (extra lock entry): refused as not a farhelm lock" \
   contains "$ERR" "not a farhelm install lock"
@@ -3147,7 +3033,7 @@ HOME_R3F4SYM="$WORKDIR/home-r3f4sym"
 INSTALL_R3F4SYM="$HOME_R3F4SYM/.local/bin"
 mkdir -p "$INSTALL_R3F4SYM"
 ln -s "$R3_OUTSIDE" "$INSTALL_R3F4SYM/.farhelm-install.journal"
-run_install "$TOOLCHAIN_FULL" "$HOME_R3F4SYM" "$INSTALL_R3F4SYM" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_R3F4SYM" "$BASE/good" 1.2.3
 check "R3 F4 (retired journal path): the install still succeeds" [ "$RC" -eq 0 ]
 check "R3 F4 (retired journal path): the planted symlink is neither followed nor removed" \
   [ -L "$INSTALL_R3F4SYM/.farhelm-install.journal" ]
@@ -3160,7 +3046,7 @@ check "R3 F4 (retired journal path): its target is byte-for-byte untouched" \
 #
 # Why this matters: the installer used to move any regular file named
 # farhelm aside and then delete it, so a user's own wrapper script in a
-# custom FARHELM_INSTALL_DIR vanished while the run reported an update.
+# installation directory vanished while the run reported an update.
 # Spec: a destination whose SHA-256 matches the executable-directory record
 # is replaced with no leftover; anything else (a foreign file, a Farhelm
 # from before the record existed, a recorded binary edited since) is kept
@@ -3171,12 +3057,12 @@ echo "== K1-K4: unrecorded existing farhelm is kept =="
 kept_files() { find "$1" -maxdepth 1 -name 'farhelm.replaced-*' | sort; }
 
 HOME_K1="$WORKDIR/home-k1"
-INSTALL_K1="$HOME_K1/bin"
+INSTALL_K1="$HOME_K1/.local/bin"
 mkdir -p "$INSTALL_K1"
 printf '#!/bin/sh\necho my own wrapper\n' >"$INSTALL_K1/farhelm"
 K1_OWN=$(cat "$INSTALL_K1/farhelm")
 check "K1 premise: no ownership record before the install" [ ! -e "$INSTALL_K1/.farhelm-installation" ]
-run_install "$TOOLCHAIN_FULL" "$HOME_K1" "$INSTALL_K1" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_K1" "$BASE/good" 1.2.3
 check "K1 (foreign file): the install exits 0" [ "$RC" -eq 0 ]
 K1_KEPT=$(kept_files "$INSTALL_K1")
 check "K1 (foreign file): exactly one kept copy exists" [ "$(printf '%s\n' "$K1_KEPT" | grep -c .)" -eq 1 ]
@@ -3185,38 +3071,38 @@ check "K1 (foreign file): farhelm itself was replaced" [ "$(cat "$INSTALL_K1/far
 check "K1 (foreign file): the closing message names the kept copy" contains "$OUT" "was kept as $K1_KEPT"
 
 HOME_K2="$WORKDIR/home-k2"
-INSTALL_K2="$HOME_K2/bin"
+INSTALL_K2="$HOME_K2/.local/bin"
 mkdir -p "$HOME_K2"
-run_install "$TOOLCHAIN_FULL" "$HOME_K2" "$INSTALL_K2" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_K2" "$BASE/good" 1.2.3
 check "K2 setup: the first install exits 0" [ "$RC" -eq 0 ]
-check "K2 premise: the record vouches for the installed farhelm" assert_standalone_record "$INSTALL_K2" no
-run_install "$TOOLCHAIN_FULL" "$HOME_K2" "$INSTALL_K2" "$BASE/good" 1.2.3
+check "K2 premise: the record vouches for the installed farhelm" assert_standalone_record "$INSTALL_K2"
+run_install "$TOOLCHAIN_FULL" "$HOME_K2" "$BASE/good" 1.2.3
 check "K2 (recorded update): the update exits 0" [ "$RC" -eq 0 ]
 check "K2 (recorded update): no kept copy is left behind" [ -z "$(kept_files "$INSTALL_K2")" ]
 check "K2 (recorded update): the closing message mentions no kept copy" not_contains "$OUT" "was kept as"
 
 HOME_K3="$WORKDIR/home-k3"
-INSTALL_K3="$HOME_K3/bin"
+INSTALL_K3="$HOME_K3/.local/bin"
 mkdir -p "$HOME_K3"
-run_install "$TOOLCHAIN_FULL" "$HOME_K3" "$INSTALL_K3" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_K3" "$BASE/good" 1.2.3
 check "K3 setup: the first install exits 0" [ "$RC" -eq 0 ]
 K3_PREVIOUS=$(cat "$INSTALL_K3/farhelm")
 # A Farhelm installed before #673 has no record at all.
 rm -f "$INSTALL_K3/.farhelm-installation"
-run_install "$TOOLCHAIN_FULL" "$HOME_K3" "$INSTALL_K3" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_K3" "$BASE/good" 1.2.3
 check "K3 (pre-record install): the update exits 0" [ "$RC" -eq 0 ]
 K3_KEPT=$(kept_files "$INSTALL_K3")
 check "K3 (pre-record install): the previous farhelm is kept" [ "$(cat "$K3_KEPT")" = "$K3_PREVIOUS" ]
-check "K3 (pre-record install): the new record is written" assert_standalone_record "$INSTALL_K3" no
+check "K3 (pre-record install): the new record is written" assert_standalone_record "$INSTALL_K3"
 
 HOME_K4="$WORKDIR/home-k4"
-INSTALL_K4="$HOME_K4/bin"
+INSTALL_K4="$HOME_K4/.local/bin"
 mkdir -p "$HOME_K4"
-run_install "$TOOLCHAIN_FULL" "$HOME_K4" "$INSTALL_K4" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_K4" "$BASE/good" 1.2.3
 check "K4 setup: the first install exits 0" [ "$RC" -eq 0 ]
 printf '#!/bin/sh\necho edited since\n' >"$INSTALL_K4/farhelm"
 K4_EDITED=$(cat "$INSTALL_K4/farhelm")
-run_install "$TOOLCHAIN_FULL" "$HOME_K4" "$INSTALL_K4" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_K4" "$BASE/good" 1.2.3
 check "K4 (digest mismatch): the update exits 0" [ "$RC" -eq 0 ]
 check "K4 (digest mismatch): the edited file is kept" [ "$(cat "$(kept_files "$INSTALL_K4")")" = "$K4_EDITED" ]
 
@@ -3225,12 +3111,12 @@ check "K4 (digest mismatch): the edited file is kept" [ "$(cat "$(kept_files "$I
 # premise only holds for an ordinary user.
 if [ "$(id -u)" -ne 0 ]; then
   HOME_K5="$WORKDIR/home-k5"
-  INSTALL_K5="$HOME_K5/bin"
+  INSTALL_K5="$HOME_K5/.local/bin"
   mkdir -p "$INSTALL_K5"
   printf 'unreadable\n' >"$INSTALL_K5/farhelm"
   chmod 000 "$INSTALL_K5/farhelm"
   check "K5 premise: the existing farhelm cannot be read" [ ! -r "$INSTALL_K5/farhelm" ]
-  run_install "$TOOLCHAIN_FULL" "$HOME_K5" "$INSTALL_K5" "$BASE/good" 1.2.3
+  run_install "$TOOLCHAIN_FULL" "$HOME_K5" "$BASE/good" 1.2.3
   check "K5 (unreadable file): the install exits 0" [ "$RC" -eq 0 ]
   K5_KEPT=$(kept_files "$INSTALL_K5")
   check "K5 (unreadable file): a kept copy exists" [ -n "$K5_KEPT" ]
@@ -3256,7 +3142,7 @@ echo "== M1-M2: installer download source =="
 
 HOME_M1="$WORKDIR/home-m1"
 INSTALL_M1="$HOME_M1/.local/bin"
-run_install "$TOOLCHAIN_FULL" "$HOME_M1" "$INSTALL_M1" "http://mirror.example.invalid/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_M1" "http://mirror.example.invalid/good" 1.2.3
 check "M1 (non-loopback http test URL): refused with exit 1" [ "$RC" -eq 1 ]
 check "M1 (non-loopback http test URL): the refusal names the variable" \
   contains "$ERR" "FARHELM_INSTALL_TEST_BASE_URL must be an https URL"
@@ -3282,8 +3168,7 @@ exit 22
 CURLEOF
 chmod 755 "$TOOLS_M2/curl"
 HOME_M2="$WORKDIR/home-m2"
-INSTALL_M2="$HOME_M2/.local/bin"
-run_install "$TOOLS_M2" "$HOME_M2" "$INSTALL_M2" "" 1.2.3 FARHELM_RELEASE_BASE_URL="$BASE/good"
+run_install "$TOOLS_M2" "$HOME_M2" "" 1.2.3 FARHELM_RELEASE_BASE_URL="$BASE/good"
 check "M2 premise: the curl double was asked for at least one URL" [ -s "$M2_LOG" ]
 check "M2 (helm mirror variable set): no request goes to that mirror" not_contains "$(cat "$M2_LOG")" "$BASE"
 check "M2 (helm mirror variable set): the download goes to GitHub over HTTPS" \
@@ -3294,10 +3179,9 @@ check "M2 (helm mirror variable set): the installer does not mention it" not_con
 # to this machine: the redirect names remote.invalid, which cannot resolve,
 # so the install only succeeds if every connection was pinned to loopback.
 HOME_M3="$WORKDIR/home-m3"
-INSTALL_M3="$HOME_M3/.local/bin"
 mkdir -p "$HOME_M3"
 M3_BEFORE=$(grep -c 'redirect-real' "$SERVER_LOG" || true)
-run_install "$TOOLCHAIN_FULL" "$HOME_M3" "$INSTALL_M3" "$BASE/redirect-remote" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_M3" "$BASE/redirect-remote" 1.2.3
 check "M3 (loopback URL redirecting to another host): install exits 0" [ "$RC" -eq 0 ]
 check "M3 (loopback URL redirecting to another host): the redirected requests reached this machine" \
   [ "$(grep -c 'redirect-real' "$SERVER_LOG")" -gt "$M3_BEFORE" ]
@@ -3318,7 +3202,7 @@ mkdir -p "$HOME_P1"
 P1_OLD_UMASK=$(umask)
 umask 002
 check "P1 premise: the installer runs under umask 002" [ "$(umask)" = 0002 ]
-run_install "$MAC_TOOLS" "$HOME_P1" "$HOME_P1/.local/bin" "$BASE/good" 1.2.3
+run_install "$MAC_TOOLS" "$HOME_P1" "$BASE/good" 1.2.3
 umask "$P1_OLD_UMASK"
 check "P1: macOS-shaped install exits 0" [ "$RC" -eq 0 ]
 check "P1: Info.plist is 0644 despite the umask" \

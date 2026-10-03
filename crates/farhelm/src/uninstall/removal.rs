@@ -233,9 +233,9 @@ mod tests {
     ///
     /// Why it matters: bundles from installers that predate receipts, and
     /// self-built or signed apps, used to refuse the entire uninstall, and the
-    /// advised reinstall does nothing under `FARHELM_NO_APP_BUNDLE` and
-    /// otherwise replaces the user's own app, so nothing documented got the
-    /// user out. Deleting an app Farhelm cannot prove it made stays excluded.
+    /// advised reinstall could replace a recognized legacy app or refuse a
+    /// foreign one. Neither supplied a removal path that preserved it. Deleting
+    /// an app Farhelm cannot prove it made stays excluded.
     /// Specified: with the receipt removed and signed-app entries the
     /// installer never writes added, inspection succeeds with the app retained,
     /// removal deletes the flat CLI, every file of the app survives, and the

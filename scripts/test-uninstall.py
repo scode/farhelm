@@ -2,9 +2,9 @@
 """Exercise the standalone installer and its installed uninstall command.
 
 The release server serves a real compiled CLI and a small desktop packaging
-fixture. All mutations belong to fresh temporary homes; Linux children see a
-fixture systemctl so this suite cannot reach the operator's user manager.
-Native macOS uses its actual installer platform and filesystem behavior.
+fixture. All mutations belong to fresh temporary homes. This suite runs only
+on macOS because the installer refuses other platforms. A uname shim cannot
+substitute for native coverage: a Linux CLI rejects desktop ownership records.
 """
 
 import argparse
@@ -54,6 +54,7 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+@unittest.skipUnless(sys.platform == "darwin", "installed uninstall acceptance requires macOS")
 class InstalledUninstall(unittest.TestCase):
     """Each case owns a complete install and observes it through child CLIs."""
 
@@ -74,13 +75,9 @@ class InstalledUninstall(unittest.TestCase):
         if not version.startswith("farhelm "):
             raise AssertionError(f"unexpected compiled CLI version: {version!r}")
         cls.version = version.removeprefix("farhelm ")
-        arch = platform.machine()
-        if sys.platform == "darwin":
-            if arch != "arm64":
-                raise RuntimeError("installer supports native arm64 macOS only")
-            cls.target = "aarch64-apple-darwin"
-        else:
-            cls.target = {"x86_64": "x86_64", "aarch64": "aarch64"}[arch] + "-unknown-linux-musl"
+        if platform.machine() != "arm64":
+            raise RuntimeError("installer supports native arm64 macOS only")
+        cls.target = "aarch64-apple-darwin"
         for name, release_version in (("current", cls.version), ("old", "0.0.1")):
             release = root / name
             stage = root / (name + "-stage")
@@ -95,15 +92,14 @@ class InstalledUninstall(unittest.TestCase):
             cli.chmod(0o755)
             with tarfile.open(release / (cli_dir.name + ".tar.gz"), "w:gz") as archive:
                 archive.add(cli_dir, arcname=cli_dir.name)
-            if sys.platform == "darwin":
-                desktop_dir = stage / ("farhelm-desktop-" + cls.target)
-                desktop_dir.mkdir()
-                desktop = desktop_dir / "farhelm-desktop"
-                desktop.write_text(f"#!/bin/sh\nprintf 'desktop fixture {release_version}\\n'\n")
-                desktop.chmod(0o755)
-                (desktop_dir / "Farhelm.icns").write_bytes(b"packaging fixture icon")
-                with tarfile.open(release / (desktop_dir.name + ".tar.gz"), "w:gz") as archive:
-                    archive.add(desktop_dir, arcname=desktop_dir.name)
+            desktop_dir = stage / ("farhelm-desktop-" + cls.target)
+            desktop_dir.mkdir()
+            desktop = desktop_dir / "farhelm-desktop"
+            desktop.write_text(f"#!/bin/sh\nprintf 'desktop fixture {release_version}\\n'\n")
+            desktop.chmod(0o755)
+            (desktop_dir / "Farhelm.icns").write_bytes(b"packaging fixture icon")
+            with tarfile.open(release / (desktop_dir.name + ".tar.gz"), "w:gz") as archive:
+                archive.add(desktop_dir, arcname=desktop_dir.name)
             checksums = [f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n"
                          for p in sorted(release.glob("*.tar.gz"))]
             (release / "SHA256SUMS").write_text("".join(checksums))
@@ -128,20 +124,13 @@ class InstalledUninstall(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(prefix="farhelm-uninstall-")
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name).resolve()
-        self.home = self.root / "home"
+        self.home = self.root / "home 'with quotes'"
         self.home.mkdir(mode=0o700)
-        self.tools = self.root / "tools"
-        self.tools.mkdir()
-        systemctl = self.tools / "systemctl"
-        systemctl.write_text("#!/bin/sh\nprintf 'fixture has no user manager\\n' >&2\nexit 1\n")
-        systemctl.chmod(0o755)
         self.env = {
             "HOME": str(self.home),
-            "PATH": str(self.tools) + os.pathsep + os.defpath,
+            "PATH": os.defpath,
             "XDG_CONFIG_HOME": str(self.home / ".config"),
             "XDG_STATE_HOME": str(self.home / ".local/state"),
-            "XDG_RUNTIME_DIR": str(self.root / "runtime"),
-            "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(self.root / "absent-bus"),
             "LC_ALL": "C",
         }
         self.install_dir = self.home / ".local/bin"
@@ -174,15 +163,10 @@ class InstalledUninstall(unittest.TestCase):
             if slave is not None:
                 os.close(slave)
 
-    def install(self, *, old=False, custom=False, no_bundle=False):
+    def install(self, *, old=False):
         """Run the actual shell installer and independently verify its CLI bytes."""
         env = dict(self.env, FARHELM_INSTALL_TEST_BASE_URL=self.url + ("/old" if old else "/current"),
                    FARHELM_VERSION="0.0.1" if old else self.version)
-        if custom:
-            self.install_dir = self.home / "custom path 'with quotes'" / "bin"
-            env["FARHELM_INSTALL_DIR"] = str(self.install_dir)
-        if no_bundle:
-            env["FARHELM_NO_APP_BUNDLE"] = "1"
         result = self.run_child(["/bin/sh", str(self.installer)], env=env)
         self.assert_success(result)
         cli = self.install_dir / "farhelm"
@@ -255,11 +239,11 @@ class InstalledUninstall(unittest.TestCase):
         self.assert_success(self.run_child([str(cli), "uninstall", "--yes"]))
         self.assert_removed()
 
-    def test_upgrade_custom_install_then_remove(self):
+    def test_upgrade_then_remove(self):
         """One upgrade supplies uninstall even when the old CLI never supported it."""
-        cli = self.install(old=True, custom=True)
+        cli = self.install(old=True)
         self.assertIn(b"0.0.1", self.run_child([str(cli), "--version"]).stdout)
-        cli = self.install(custom=True)
+        cli = self.install()
         link = self.home / "cli-link"
         link.symlink_to(cli)
         self.assert_success(self.run_child([str(link), "uninstall", "--yes"]))
@@ -299,69 +283,6 @@ class InstalledUninstall(unittest.TestCase):
         self.assertIn(b"regular file", result.stdout + result.stderr)
         self.assertEqual(snapshot(self.home), before)
 
-    @unittest.skipUnless(sys.platform == "linux", "Linux service fixture")
-    def test_partial_service_failure_keeps_cli_for_retry(self):
-        """A manager failure after one deletion must stop before removing the CLI.
-
-        This drives the composition through the installed command; helper tests
-        alone cannot prove that a service error prevents subsequent file removal.
-        """
-        cli = self.install()
-        units = self.home / ".config/systemd/user"
-        units.mkdir(parents=True)
-        supervisor = units / "farhelm-supervisor.service"
-        helm = units / "farhelm-helm.service"
-        for service in [supervisor, helm]:
-            service.write_text(f"# managed-by: farhelm helm setup\n[Service]\nExecStart={cli} --version\n")
-        target = self.home / "custom-drop-ins"
-        target.mkdir()
-        sentinel = target / "custom.conf"
-        sentinel.write_bytes(b"[Service]\nEnvironment=KEEP=yes\n")
-        dropin = units / "farhelm-supervisor.service.d"
-        dropin.symlink_to(target, target_is_directory=True)
-        failure = self.home / "fail-disable"
-        failure.touch()
-        manager = self.tools / "systemctl"
-        manager.write_text(
-            "#!/bin/sh\n"
-            "case \"$2\" in\n"
-            "show-environment) printf 'HOME=%s\\nXDG_CONFIG_HOME=%s\\n' \"$HOME\" \"$XDG_CONFIG_HOME\";;\n"
-            "disable) if [ \"$4\" = farhelm-helm.service ] && [ -f \"$HOME/fail-disable\" ]; then\n"
-            "  printf 'fixture refuses helm disable\\n' >&2; exit 1; fi;;\n"
-            "daemon-reload) :;;\n"
-            "*) printf 'unexpected fixture command\\n' >&2; exit 2;;\n"
-            "esac\n")
-        self.assertTrue(cli.is_file())
-        self.assertTrue(supervisor.is_file())
-        self.assertTrue(helm.is_file())
-        result = self.run_child([str(cli), "uninstall", "--yes"])
-        diagnostic = result.stdout + result.stderr
-        self.assertNotEqual(result.returncode, 0, diagnostic)
-        self.assertIn(b"Stop local sessions", result.stdout)
-        self.assertIn(b"fixture refuses helm disable", diagnostic)
-        self.assertIn(b"rerun uninstall", diagnostic)
-        self.assertIn(b"removed " + str(supervisor).encode(), diagnostic)
-        self.assertIn(str(dropin).encode(), diagnostic)
-        self.assertFalse(supervisor.exists())
-        self.assertTrue(helm.is_file())
-        self.assertTrue(cli.is_file())
-        self.assertTrue((self.install_dir / ".farhelm-installation").is_file())
-        failure.unlink()
-        self.assert_success(self.run_child([str(cli), "uninstall", "--yes"]))
-        self.assert_removed()
-        self.assertFalse(helm.exists())
-        self.assertTrue(dropin.is_symlink())
-        self.assertEqual(sentinel.read_bytes(), b"[Service]\nEnvironment=KEEP=yes\n")
-
-    @unittest.skipUnless(sys.platform == "darwin", "native macOS bundle case")
-    def test_opt_out(self):
-        """An absent opt-out bundle does not prevent flat executable removal."""
-        cli = self.install(no_bundle=True)
-        self.assertFalse(self.bundle.exists())
-        self.assert_success(self.run_child([str(cli), "uninstall", "--yes"]))
-        self.assert_removed()
-
-    @unittest.skipUnless(sys.platform == "darwin", "native macOS bundle case")
     def test_missing_flat_desktop(self):
         """An already-removed flat payload must not prevent retrying bundle cleanup."""
         cli = self.install()
@@ -372,7 +293,6 @@ class InstalledUninstall(unittest.TestCase):
         self.assert_success(self.run_child([str(cli), "uninstall", "--yes"]))
         self.assert_removed()
 
-    @unittest.skipUnless(sys.platform == "darwin", "native macOS bundle case")
     def test_bundle_cli_directs_to_flat_retry_command(self):
         """An app-local invocation must not remove the binary needed for retry."""
         cli = self.install()
@@ -385,7 +305,6 @@ class InstalledUninstall(unittest.TestCase):
         self.assertIn(str(cli).encode(), result.stdout + result.stderr)
         self.assertEqual(snapshot(self.home), before)
 
-    @unittest.skipUnless(sys.platform == "darwin", "native macOS bundle case")
     def test_foreign_bundle_entry_refuses(self):
         """Unexpected bundle contents survive a refusal before any file removal."""
         cli = self.install()

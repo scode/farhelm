@@ -20,7 +20,7 @@
   # off right after the literal bytes `main` is itself already a complete,
   # executable command, and the shell runs it immediately.
   #
-  # The one supported way to install farhelm: detects your platform,
+  # The macOS desktop installer: checks the platform,
   # downloads the matching release from GitHub, verifies it, and puts the
   # binaries in place. The README's "Install" chapter is the same text as
   # this script's behavior and is the place to look for the user-facing
@@ -63,12 +63,12 @@
   # `PARK desktop`, `INSTALL cli`, `INSTALL desktop`, and `UNDONE <n>`;
   # every path rollback touches is derived at recovery time from
   # $INSTALL_DIR plus the two fixed binary names. That keeps a legal but
-  # awkward FARHELM_INSTALL_DIR (one containing the field separator, or a
+  # awkward home-directory path (one containing the field separator, or a
   # newline, both of which a pathname may legally contain) from splitting
   # into extra fields or extra apparent records, and it bounds what a
   # journal can ever ask for: at most `farhelm`, `farhelm-desktop`, their
   # `.old` backups, and nothing else, inside the install directory the
-  # caller selected. Anything outside the vocabulary makes rollback refuse
+  # caller owns. Anything outside the vocabulary makes rollback refuse
   # rather than guess.
   #
   # Rollback is REPLAY-SAFE. Undo steps are not idempotent as a pair — an
@@ -279,10 +279,7 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     pir_canonical=${pir_canonical%__FARHELM_CANONICAL_PATH_END__}
     pir_canonical=${pir_canonical%"$NEWLINE"}
     pir_cli_sha=$(sha256_of "$INSTALL_DIR/farhelm") || return 1
-    pir_desktop_sha=
-    if [ "$HAS_DESKTOP" -eq 1 ]; then
-      pir_desktop_sha=$(sha256_of "$INSTALL_DIR/farhelm-desktop") || return 1
-    fi
+    pir_desktop_sha=$(sha256_of "$INSTALL_DIR/farhelm-desktop") || return 1
 
     (umask 077; printf '%s\000%s\000%s\000%s\000' \
       farhelm-standalone "$pir_canonical" "$pir_cli_sha" "$pir_desktop_sha" >"$pir_stage") || return 1
@@ -557,7 +554,7 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # that installation, and is not this one's to replace.
   #
   # Without this, moving the install directory (a different
-  # FARHELM_INSTALL_DIR, `~/.local/bin` moved and replaced by a symlink, a
+  # legacy custom install directory, `~/.local/bin` replaced by a symlink, a
   # renamed home directory) left every later install refusing its own
   # bundle, and the app stuck on the old version.
   bundle_record_moved_here() {
@@ -1126,22 +1123,31 @@ EOF
   }
 
   main() {
-    # 1. Platform.
-    #
-    # Only the three targets a release actually ships (D4) are recognized;
-    # everything else — Windows, real Intel Macs, 32-bit anything — is out
-    # of scope rather than guessed at. Apple-silicon Macs running under
-    # Rosetta report `x86_64` from `uname -m` even though the hardware (and
-    # therefore this script) can run the native arm64 build directly, so
-    # that combination gets one extra check instead of being rejected
-    # outright.
+    # 1. Environment and platform. The fixed install directory comes from HOME.
+    if [ -z "${HOME:-}" ]; then
+      printf 'HOME is not set; refusing to install\n' >&2
+      exit 1
+    fi
+    case "$HOME" in
+      /*) ;;
+      *) printf 'HOME must be an absolute path; refusing to install\n' >&2; exit 1 ;;
+    esac
+    # Only the installer is macOS-only. The helm provisions Linux hosts
+    # itself; refusing here must happen before downloads or filesystem writes.
     os=$(uname -s)
+    if [ "$os" != Darwin ]; then
+      printf '%s\n' \
+        '❌ This installer only supports macOS for now.' \
+        '   Linux is supported for running a helm and session hosts; only this installer is' \
+        '   limited, and that will be fixed. If you want to install on Linux, please open an' \
+        '   issue and it will be prioritized: https://github.com/scode/farhelm/issues' >&2
+      exit 1
+    fi
+    # Rosetta reports x86_64 on Apple silicon, which can run the native build.
     machine=$(uname -m)
-    case "$os $machine" in
-      "Linux x86_64") TARGET=x86_64-unknown-linux-musl ;;
-      "Linux aarch64") TARGET=aarch64-unknown-linux-musl ;;
-      "Darwin arm64") TARGET=aarch64-apple-darwin ;;
-      "Darwin x86_64")
+    case "$machine" in
+      arm64) TARGET=aarch64-apple-darwin ;;
+      x86_64)
         if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = "1" ]; then
           TARGET=aarch64-apple-darwin
         else
@@ -1154,13 +1160,6 @@ EOF
         exit 1
         ;;
     esac
-    # Whether this platform's row(s) in $ASSET_TABLE include farhelm-desktop
-    # — a property of TARGET alone, decided here once and used for every
-    # later decision that depends on it, instead of re-deriving it from
-    # filesystem state (staged files, or what happens to already exist at
-    # the destination) after the fact.
-    HAS_DESKTOP=0
-    [ "$TARGET" = "aarch64-apple-darwin" ] && HAS_DESKTOP=1
 
     # FARHELM_INSTALL_TEST_BASE_URL exists only so this script's own test
     # suites can point it at a fixture server instead of GitHub. It
@@ -1300,25 +1299,7 @@ EOF
     BASE_URL=${FARHELM_INSTALL_TEST_BASE_URL:-$DOWNLOAD_PREFIX/$VERSION_TAG}
     BASE_URL=${BASE_URL%/}
 
-    INSTALL_DIR=${FARHELM_INSTALL_DIR:-$HOME/.local/bin}
-    # Only an absolute path. A relative one installs under whatever
-    # directory `curl | sh` happened to run in, and a quoted `~/bin` is not
-    # expanded by the shell, so it creates a directory literally named `~`
-    # there, which a later `rm -rf ~` meant to tidy it would turn into
-    # deleting the home directory. The success message would repeat the
-    # relative spelling and look like confirmation.
-    case "$INSTALL_DIR" in
-      /*) ;;
-      '~'*)
-        # shellcheck disable=SC2016 # $HOME is advice to the reader, not expanded here.
-        printf 'FARHELM_INSTALL_DIR=%s starts with a literal ~ that the shell did not expand (it was quoted); use $HOME instead, for example FARHELM_INSTALL_DIR="$HOME/bin"\n' "$INSTALL_DIR" >&2
-        exit 1
-        ;;
-      *)
-        printf 'FARHELM_INSTALL_DIR=%s is not an absolute path; it must start with / (a relative path would install under the current directory)\n' "$INSTALL_DIR" >&2
-        exit 1
-        ;;
-    esac
+    INSTALL_DIR="$HOME/.local/bin"
     # Mask group/world write bits on any directory COMPONENT this specific
     # call creates (umask 000 would otherwise leave a brand-new directory
     # mode 0777, which would undermine the installed binaries' own
@@ -1395,17 +1376,16 @@ EOF
       exit 1
     fi
 
-    # 5. Download, verify, and unpack exactly the archives this platform
-    # needs — one row for Linux, two (farhelm and farhelm-desktop) for
-    # macOS. Reading $ASSET_TABLE through a heredoc rather than a pipe is
+    # 5. Download, verify, and unpack the CLI and desktop archives. The
+    # table keeps Linux rows for release-asset parity, not installation.
+    # Reading $ASSET_TABLE through a heredoc rather than a pipe is
     # deliberate: a `command | while read` loop runs the loop body in a
     # subshell under POSIX sh, and every variable this loop sets needs to
     # outlive it.
     #
     # ICNS_STATE is one of those outliving variables: `staged` once the
-    # desktop archive yielded a Farhelm.icns, `absent` otherwise (Linux
-    # runs, and macOS installs of releases that predate the icon). The
-    # bundle step after the commit reads it.
+    # desktop archive yielded a Farhelm.icns, `absent` for old releases.
+    # Refuse those before taking the install lock or replacing any file.
     ICNS_STATE=absent
     while IFS='|' read -r row_target row_archive row_binary; do
       [ "$row_target" = "$TARGET" ] || continue
@@ -1439,9 +1419,8 @@ EOF
 
       # The desktop archive also carries the app icon the bundle step below
       # builds Farhelm.app around. Releases published before the icon
-      # existed do not have it, and this script installs pinned old
-      # versions too — so ABSENCE is a skip the closing report explains,
-      # not an error, while a PRESENT icon gets the same extraction
+      # existed do not have it; the pre-commit gate below refuses them.
+      # A present icon gets the same extraction
       # discipline as a binary. More than one match is the one shape that
       # is never legitimate.
       if [ "$row_binary" = "farhelm-desktop" ]; then
@@ -1481,6 +1460,14 @@ EOF
       exit 1
     fi
 
+    # Old archives cannot supply the app this installer promises. Staging
+    # may have created the bin directory, but no installed file has changed.
+    if [ "$ICNS_STATE" != staged ]; then
+      printf '❌ Farhelm %s is too old for this installer: it has no Mac app.\n' "$VERSION_NUM" >&2
+      printf '%s\n' '   Pick 0.2.1 or newer, or leave FARHELM_VERSION unset for the latest release.' >&2
+      exit 1
+    fi
+
     # 6. Replace. Both binaries this run needs are fully staged and
     # verified above; nothing past this point downloads anything.
     # Everything from here is local filesystem work, guarded by a lock so
@@ -1491,8 +1478,7 @@ EOF
     # complete new pair in place, never a partial mix.
     acquire_lock
 
-    binaries="farhelm"
-    [ "$HAS_DESKTOP" -eq 1 ] && binaries="farhelm farhelm-desktop"
+    binaries="farhelm farhelm-desktop"
 
     # A journal-free interruption after commit can strand backups between
     # journal removal and cleanup. At this point the lock is ours and no
@@ -1640,119 +1626,109 @@ EOF
     # edited in place (in-place modification of an existing .app is what
     # trips macOS's App Management privacy prompt). A failure here exits 1,
     # but the messages say what is still true: the binaries in
-    # FARHELM_INSTALL_DIR are committed and usable.
+    # ~/.local/bin are committed and usable.
     #
     # The executable KEEPS the name farhelm-desktop inside the bundle: the
     # default APFS is case-insensitive, so an executable named "Farhelm"
     # would be the same directory entry as the required CLI sibling
     # "farhelm" and the second copy would clobber the first. The pretty
-    # name comes from CFBundleName. Set FARHELM_NO_APP_BUNDLE=1 to skip
-    # bundle assembly entirely and get the pre-bundle behavior.
-    BUNDLE_NOTE=""
-    if [ "$HAS_DESKTOP" -eq 1 ]; then
-      if [ -n "${FARHELM_NO_APP_BUNDLE:-}" ]; then
-        BUNDLE_NOTE="Skipped assembling the Farhelm.app bundle (FARHELM_NO_APP_BUNDLE is set)."
-      elif [ "$ICNS_STATE" != staged ]; then
-        BUNDLE_NOTE="Skipped assembling the Farhelm.app bundle — this release's desktop archive carries no Farhelm.icns (releases before the bundle existed)."
-      elif [ -z "${HOME:-}" ]; then
-        BUNDLE_NOTE="Skipped assembling the Farhelm.app bundle (HOME is not set)."
-      else
-        app_parent="$HOME/Applications"
-        app_path="$app_parent/Farhelm.app"
+    # name comes from CFBundleName. Every successful install builds the app.
+    app_parent="$HOME/Applications"
+    app_path="$app_parent/Farhelm.app"
 
-        bundle_fail() {
-          printf 'assembling %s failed at: %s\n' "$app_path" "$1" >&2
-          printf 'The binaries in %s are installed and usable; re-run the installer to retry the bundle.\n' "$INSTALL_DIR" >&2
-          exit 1
-        }
+    bundle_fail() {
+      printf 'assembling %s failed at: %s\n' "$app_path" "$1" >&2
+      printf 'The binaries in %s are installed and usable; re-run the installer to retry the bundle.\n' "$INSTALL_DIR" >&2
+      exit 1
+    }
 
-        # The bundle has its own lock, next to it. The install lock only
-        # keeps runs for the same install directory apart, but every install
-        # directory shares this one bundle name: two installs of different
-        # directories could each find the name free and both move a bundle
-        # onto it, and `mv` onto an existing directory nests the second
-        # inside the first. Contention refuses, as does a lock an interrupted
-        # run left behind, which nothing can tell from a live one; the
-        # binaries are already installed either way. The ownership check
-        # below runs under this lock so no other run can change the bundle
-        # between that check and the swap.
-        (umask 022; mkdir -p "$app_parent") || bundle_fail "creating $app_parent"
-        BUNDLE_LOCK="$app_parent/.farhelm-app.lock"
-        if ! (umask 077; mkdir "$BUNDLE_LOCK") 2>/dev/null; then
-          printf 'another farhelm install is assembling %s right now, or one was interrupted while doing so; wait a moment and re-run -- if this persists, remove %s by hand\n' "$app_path" "$BUNDLE_LOCK" >&2
-          printf 'The binaries in %s are installed and usable.\n' "$INSTALL_DIR" >&2
-          exit 1
+    # The bundle has its own lock, next to it. The install lock only
+    # keeps runs for the same install directory apart. Older installers
+    # could target other directories while sharing this bundle name; they
+    # still need to contend on the bundle lock, since `mv` onto an existing
+    # directory nests the second bundle inside the first. Contention
+    # refuses, as does a lock an interrupted
+    # run left behind, which nothing can tell from a live one; the
+    # binaries are already installed either way. The ownership check
+    # below runs under this lock so no other run can change the bundle
+    # between that check and the swap.
+    (umask 022; mkdir -p "$app_parent") || bundle_fail "creating $app_parent"
+    BUNDLE_LOCK="$app_parent/.farhelm-app.lock"
+    if ! (umask 077; mkdir "$BUNDLE_LOCK") 2>/dev/null; then
+      printf 'another farhelm install is assembling %s right now, or one was interrupted while doing so; wait a moment and re-run -- if this persists, remove %s by hand\n' "$app_path" "$BUNDLE_LOCK" >&2
+      printf 'The binaries in %s are installed and usable.\n' "$INSTALL_DIR" >&2
+      exit 1
+    fi
+    BUNDLE_LOCK_HELD=1
+
+    # An uninstall interrupted at the very end of removing the bundle
+    # leaves its retry copy of the bundle record beside it, and uninstall
+    # refuses whenever that copy and the bundle's own record disagree.
+    # This installation's own copy is removed once the new bundle is in
+    # place (below). Another installation's copy is that installation's
+    # only way to finish its uninstall, and building a bundle next to it
+    # would leave both installations unable to uninstall, so this run
+    # refuses the bundle step instead and says how to clear it.
+    pending_receipt="$app_parent/.Farhelm.app.uninstall-receipt"
+    # A receipt naming a directory that has since moved here (or no
+    # longer holds an installation) is this installation's own, by the
+    # same rule the bundle's record gets below; refusing it would point
+    # the user at "that installation", which is this one.
+    if { [ -e "$pending_receipt" ] || [ -L "$pending_receipt" ]; } &&
+      ! record_file_is_ours "$pending_receipt" "$pir_canonical" &&
+      ! record_file_moved_here "$pending_receipt" "$pir_canonical"; then
+      printf '%s was left by an interrupted farhelm uninstall and is not this installation'"'"'s record, and building %s now would leave that uninstall unable to finish; run that installation'"'"'s farhelm uninstall again to finish it (or delete %s if that installation is gone), then re-run this installer\n' "$pending_receipt" "$app_path" "$pending_receipt" >&2
+      printf 'The binaries in %s are installed and usable.\n' "$INSTALL_DIR" >&2
+      exit 1
+    fi
+
+    # Replace only a bundle this installer can show it built: one that
+    # carries this installation's bundle record, or the recordless shape
+    # it built before records existed. Anything else at this name,
+    # including a bundle the user built or customised whose Info.plist
+    # merely mentions Farhelm, belongs to the user and is refused, not
+    # moved aside: a renamed .app in ~/Applications would still show up
+    # as an app, and "rename yours and re-run" is the clearer message.
+    # SPEC.md's installation rule (a file is not destroyed because its
+    # name matches) is the reason.
+    # A bundle whose record names another directory is also this
+    # installation's when that directory has moved here or no longer
+    # holds an installation (bundle_record_moved_here). When the named
+    # directory still holds one, the refusal names it, so the user can
+    # tell which installation the bundle belongs to.
+    if [ -e "$app_path" ]; then
+      if ! bundle_record_is_ours "$app_path" "$pir_canonical" \
+        && ! bundle_record_moved_here "$app_path" "$pir_canonical" \
+        && ! is_legacy_installer_bundle "$app_path"; then
+        if other_install_dir=$(bundle_record_dir "$app_path"); then
+          other_install_dir=${other_install_dir%/}
+          printf '%s belongs to the farhelm installation in %s, which is still installed; refusing to replace it.\n' "$app_path" "$other_install_dir" >&2
+          printf 'The binaries in %s are installed and usable; uninstall the other installation, or remove or rename that bundle, and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
+        else
+          printf '%s exists and does not look like a farhelm app bundle; refusing to replace it.\n' "$app_path" >&2
+          printf 'The binaries in %s are installed and usable; remove or rename that bundle and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
         fi
-        BUNDLE_LOCK_HELD=1
+        exit 1
+      fi
+    fi
 
-        # An uninstall interrupted at the very end of removing the bundle
-        # leaves its retry copy of the bundle record beside it, and uninstall
-        # refuses whenever that copy and the bundle's own record disagree.
-        # This installation's own copy is removed once the new bundle is in
-        # place (below). Another installation's copy is that installation's
-        # only way to finish its uninstall, and building a bundle next to it
-        # would leave both installations unable to uninstall, so this run
-        # refuses the bundle step instead and says how to clear it.
-        pending_receipt="$app_parent/.Farhelm.app.uninstall-receipt"
-        # A receipt naming a directory that has since moved here (or no
-        # longer holds an installation) is this installation's own, by the
-        # same rule the bundle's record gets below; refusing it would point
-        # the user at "that installation", which is this one.
-        if { [ -e "$pending_receipt" ] || [ -L "$pending_receipt" ]; } &&
-          ! record_file_is_ours "$pending_receipt" "$pir_canonical" &&
-          ! record_file_moved_here "$pending_receipt" "$pir_canonical"; then
-          printf '%s was left by an interrupted farhelm uninstall and is not this installation'"'"'s record, and building %s now would leave that uninstall unable to finish; run that installation'"'"'s farhelm uninstall again to finish it (or delete %s if that installation is gone), then re-run this installer\n' "$pending_receipt" "$app_path" "$pending_receipt" >&2
-          printf 'The binaries in %s are installed and usable.\n' "$INSTALL_DIR" >&2
-          exit 1
-        fi
+    # Built in a private directory beside the bundle, so the final move
+    # is a rename on the same filesystem (the install directory may be on
+    # another one, where `mv` would copy the tree into the public name
+    # and an interruption could leave half a bundle there). The previous
+    # bundle is moved into the same directory before the swap, so the
+    # public name only ever holds the old bundle, nothing, or the new
+    # one, and everything deleted afterwards is this run's own.
+    BUNDLE_WORK=$(mktemp -d "$app_parent/.farhelm-app-build.XXXXXX") || bundle_fail "creating a private build directory in $app_parent"
+    bundle_stage="$BUNDLE_WORK/Farhelm.app"
+    (umask 022; mkdir -p "$bundle_stage/Contents/MacOS" "$bundle_stage/Contents/Resources") || bundle_fail "creating the staging layout"
+    cp "$INSTALL_DIR/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm-desktop" || bundle_fail "copying farhelm-desktop"
+    cp "$INSTALL_DIR/farhelm" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "copying farhelm"
+    chmod 0755 "$bundle_stage/Contents/MacOS/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "setting binary modes"
+    cp "$STAGING_DIR/Farhelm.icns" "$bundle_stage/Contents/Resources/Farhelm.icns" || bundle_fail "copying the icon"
+    chmod 0644 "$bundle_stage/Contents/Resources/Farhelm.icns" || bundle_fail "setting the icon mode"
 
-        # Replace only a bundle this installer can show it built: one that
-        # carries this installation's bundle record, or the recordless shape
-        # it built before records existed. Anything else at this name,
-        # including a bundle the user built or customised whose Info.plist
-        # merely mentions Farhelm, belongs to the user and is refused, not
-        # moved aside: a renamed .app in ~/Applications would still show up
-        # as an app, and "rename yours and re-run" is the clearer message.
-        # SPEC.md's installation rule (a file is not destroyed because its
-        # name matches) is the reason.
-        # A bundle whose record names another directory is also this
-        # installation's when that directory has moved here or no longer
-        # holds an installation (bundle_record_moved_here). When the named
-        # directory still holds one, the refusal names it, so the user can
-        # tell which installation the bundle belongs to.
-        if [ -e "$app_path" ]; then
-          if ! bundle_record_is_ours "$app_path" "$pir_canonical" \
-            && ! bundle_record_moved_here "$app_path" "$pir_canonical" \
-            && ! is_legacy_installer_bundle "$app_path"; then
-            if other_install_dir=$(bundle_record_dir "$app_path"); then
-              other_install_dir=${other_install_dir%/}
-              printf '%s belongs to the farhelm installation in %s, which is still installed; refusing to replace it.\n' "$app_path" "$other_install_dir" >&2
-              printf 'The binaries in %s are installed and usable; uninstall the other installation, or remove or rename that bundle, and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
-            else
-              printf '%s exists and does not look like a farhelm app bundle; refusing to replace it.\n' "$app_path" >&2
-              printf 'The binaries in %s are installed and usable; remove or rename that bundle and re-run to get Farhelm.app.\n' "$INSTALL_DIR" >&2
-            fi
-            exit 1
-          fi
-        fi
-
-        # Built in a private directory beside the bundle, so the final move
-        # is a rename on the same filesystem (the install directory may be on
-        # another one, where `mv` would copy the tree into the public name
-        # and an interruption could leave half a bundle there). The previous
-        # bundle is moved into the same directory before the swap, so the
-        # public name only ever holds the old bundle, nothing, or the new
-        # one, and everything deleted afterwards is this run's own.
-        BUNDLE_WORK=$(mktemp -d "$app_parent/.farhelm-app-build.XXXXXX") || bundle_fail "creating a private build directory in $app_parent"
-        bundle_stage="$BUNDLE_WORK/Farhelm.app"
-        (umask 022; mkdir -p "$bundle_stage/Contents/MacOS" "$bundle_stage/Contents/Resources") || bundle_fail "creating the staging layout"
-        cp "$INSTALL_DIR/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm-desktop" || bundle_fail "copying farhelm-desktop"
-        cp "$INSTALL_DIR/farhelm" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "copying farhelm"
-        chmod 0755 "$bundle_stage/Contents/MacOS/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "setting binary modes"
-        cp "$STAGING_DIR/Farhelm.icns" "$bundle_stage/Contents/Resources/Farhelm.icns" || bundle_fail "copying the icon"
-        chmod 0644 "$bundle_stage/Contents/Resources/Farhelm.icns" || bundle_fail "setting the icon mode"
-
-        cat >"$bundle_stage/Contents/Info.plist" <<PLIST_EOF || bundle_fail "writing Info.plist"
+    cat >"$bundle_stage/Contents/Info.plist" <<PLIST_EOF || bundle_fail "writing Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -1784,53 +1760,50 @@ EOF
 </dict>
 </plist>
 PLIST_EOF
-        # Info.plist is launch configuration: its LSEnvironment key can set
-        # DYLD_INSERT_LIBRARIES or FARHELM_* for the app, so whoever can write
-        # it can run code as the user the next time Farhelm is opened. The
-        # heredoc above creates it with the caller's umask (group-writable
-        # under a common umask of 002, and every account on a Mac is in the
-        # staff group), so it gets an explicit owner-only-writable mode like
-        # every other file in the bundle, before it is hashed into the record.
-        chmod 0644 "$bundle_stage/Contents/Info.plist" || bundle_fail "setting the Info.plist mode"
+    # Info.plist is launch configuration: its LSEnvironment key can set
+    # DYLD_INSERT_LIBRARIES or FARHELM_* for the app, so whoever can write
+    # it can run code as the user the next time Farhelm is opened. The
+    # heredoc above creates it with the caller's umask (group-writable
+    # under a common umask of 002, and every account on a Mac is in the
+    # staff group), so it gets an explicit owner-only-writable mode like
+    # every other file in the bundle, before it is hashed into the record.
+    chmod 0644 "$bundle_stage/Contents/Info.plist" || bundle_fail "setting the Info.plist mode"
 
-        bundle_cli_sha=$(sha256_of "$bundle_stage/Contents/MacOS/farhelm") || bundle_fail "hashing the staged CLI"
-        bundle_desktop_sha=$(sha256_of "$bundle_stage/Contents/MacOS/farhelm-desktop") || bundle_fail "hashing the staged desktop executable"
-        bundle_plist_sha=$(sha256_of "$bundle_stage/Contents/Info.plist") || bundle_fail "hashing Info.plist"
-        bundle_icns_sha=$(sha256_of "$bundle_stage/Contents/Resources/Farhelm.icns") || bundle_fail "hashing Farhelm.icns"
-        write_bundle_record "$bundle_stage" "$pir_canonical" "$bundle_cli_sha" "$bundle_desktop_sha" \
-          "$bundle_plist_sha" "$bundle_icns_sha" || bundle_fail "writing installer ownership metadata"
+    bundle_cli_sha=$(sha256_of "$bundle_stage/Contents/MacOS/farhelm") || bundle_fail "hashing the staged CLI"
+    bundle_desktop_sha=$(sha256_of "$bundle_stage/Contents/MacOS/farhelm-desktop") || bundle_fail "hashing the staged desktop executable"
+    bundle_plist_sha=$(sha256_of "$bundle_stage/Contents/Info.plist") || bundle_fail "hashing Info.plist"
+    bundle_icns_sha=$(sha256_of "$bundle_stage/Contents/Resources/Farhelm.icns") || bundle_fail "hashing Farhelm.icns"
+    write_bundle_record "$bundle_stage" "$pir_canonical" "$bundle_cli_sha" "$bundle_desktop_sha" \
+      "$bundle_plist_sha" "$bundle_icns_sha" || bundle_fail "writing installer ownership metadata"
 
-        # Swap by renaming, not by deleting in place: interrupting `rm -rf`
-        # on the live name used to leave a half-deleted bundle no later run
-        # or uninstall would accept. If the move in fails, cleanup puts the
-        # previous bundle back.
-        if [ -e "$app_path" ]; then
-          mv "$app_path" "$BUNDLE_WORK/previous" || bundle_fail "moving the previous bundle aside (grant your terminal App Management in System Settings > Privacy & Security if this said 'Operation not permitted')"
-        fi
-        mv "$bundle_stage" "$app_path" || bundle_fail "moving the staged bundle into place"
-        rm -rf "$BUNDLE_WORK" || printf 'note: could not delete %s, which held the previous bundle; it is safe to delete\n' "$BUNDLE_WORK" >&2
-        BUNDLE_WORK=""
-        # This installation's own leftover receipt (see the check under the
-        # bundle lock above) now describes a bundle that no longer exists,
-        # and would disagree with the new one (a different version's
-        # Info.plist digest, say), so it goes.
-        if record_file_is_ours "$pending_receipt" "$pir_canonical" \
-          || record_file_moved_here "$pending_receipt" "$pir_canonical"; then
-          rm -f "$pending_receipt" || printf 'note: could not delete %s, left by an interrupted uninstall; delete it by hand if a later uninstall refuses\n' "$pending_receipt" >&2
-        fi
-
-        # Registration is best-effort tidiness: Launch Services discovers
-        # ~/Applications on its own, this just shortens the wait. The
-        # binary does not exist on the Linux CI host the installer tests
-        # run on, hence the -x guard.
-        LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-        if [ -x "$LSREGISTER" ]; then
-          "$LSREGISTER" -f "$app_path" >/dev/null 2>&1 || true
-        fi
-        BUNDLE_NOTE="Assembled $app_path (Spotlight, Dock, and Cmd-Tab identity)."
-        release_bundle_lock
-      fi
+    # Swap by renaming, not by deleting in place: interrupting `rm -rf`
+    # on the live name used to leave a half-deleted bundle no later run
+    # or uninstall would accept. If the move in fails, cleanup puts the
+    # previous bundle back.
+    if [ -e "$app_path" ]; then
+      mv "$app_path" "$BUNDLE_WORK/previous" || bundle_fail "moving the previous bundle aside (grant your terminal App Management in System Settings > Privacy & Security if this said 'Operation not permitted')"
     fi
+    mv "$bundle_stage" "$app_path" || bundle_fail "moving the staged bundle into place"
+    rm -rf "$BUNDLE_WORK" || printf 'note: could not delete %s, which held the previous bundle; it is safe to delete\n' "$BUNDLE_WORK" >&2
+    BUNDLE_WORK=""
+    # This installation's own leftover receipt (see the check under the
+    # bundle lock above) now describes a bundle that no longer exists,
+    # and would disagree with the new one (a different version's
+    # Info.plist digest, say), so it goes.
+    if record_file_is_ours "$pending_receipt" "$pir_canonical" \
+      || record_file_moved_here "$pending_receipt" "$pir_canonical"; then
+      rm -f "$pending_receipt" || printf 'note: could not delete %s, left by an interrupted uninstall; delete it by hand if a later uninstall refuses\n' "$pending_receipt" >&2
+    fi
+
+    # Registration is best-effort tidiness: Launch Services discovers
+    # ~/Applications on its own, this just shortens the wait. The
+    # binary does not exist on the Linux CI host the installer tests
+    # run on, hence the -x guard.
+    LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+    if [ -x "$LSREGISTER" ]; then
+      "$LSREGISTER" -f "$app_path" >/dev/null 2>&1 || true
+    fi
+    release_bundle_lock
 
     # Stop claiming the lock BEFORE releasing it. Once the slot is free,
     # another installer can take it and write its own journal there; if this
@@ -1848,29 +1821,18 @@ PLIST_EOF
     # apply prints nothing.
     echo ""
     if [ "$replaced_something" -eq 1 ]; then
-      if [ "$HAS_DESKTOP" -eq 1 ]; then
-        printf 'Updated farhelm %s (and farhelm-desktop) in %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
-      else
-        printf 'Updated farhelm %s in %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
-      fi
+      printf 'Updated farhelm %s (and farhelm-desktop) in %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
     else
-      if [ "$HAS_DESKTOP" -eq 1 ]; then
-        printf 'Installed farhelm %s (and farhelm-desktop) to %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
-      else
-        printf 'Installed farhelm %s to %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
-      fi
+      printf 'Installed farhelm %s (and farhelm-desktop) to %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
     fi
     if [ -n "$KEPT_NOTES" ]; then
       printf '%s' "$KEPT_NOTES"
     fi
-    if [ -n "$BUNDLE_NOTE" ]; then
-      printf '%s\n' "$BUNDLE_NOTE"
-    fi
+    printf 'Assembled %s (Spotlight, Dock, and Cmd-Tab identity).\n' "$app_path"
 
     if [ "$replaced_something" -eq 1 ]; then
       echo ""
       echo "Updated. Restart what is running:"
-      echo "  Linux: systemctl --user restart farhelm-supervisor farhelm-helm"
       echo "  macOS: quit and reopen Farhelm (the desktop app owns the embedded helm and"
       echo "  any supervisor it started as child processes; a supervisor you started by"
       echo "  hand with 'farhelm supervisor run' is reused as-is — restart it yourself)."
@@ -1913,16 +1875,6 @@ PLIST_EOF
     echo "To remove this installation, run 'farhelm uninstall' (keeps user data)."
     echo "Preview removal with 'farhelm uninstall --dry-run'."
     echo ""
-    echo "If this machine should run your helm (the web UI on 127.0.0.1:7433) and host"
-    echo "agent sessions itself, run 'farhelm helm setup' — it writes and starts the helm"
-    echo "and supervisor user units."
-    echo ""
-    echo "Do NOT run it if this machine runs the desktop app (farhelm-desktop starts its"
-    echo "own helm and local supervisor), or if it is a Linux session host you will add"
-    echo "from another helm's hosts panel (that helm installs the supervisor here over"
-    echo "SSH), or if you only want a browser tab against a helm elsewhere (nothing to"
-    echo "set up)."
-
     # tmux hint: parsed as "tmux <major>.<minor><letter?>" (tmux's own
     # release spelling, e.g. "3.7c"); anything that does not match that
     # shape, or no tmux at all, counts as "none". The WHOLE output must be
@@ -1968,7 +1920,7 @@ PLIST_EOF
     fi
     if [ "$meets_floor" -ne 1 ]; then
       echo ""
-      printf 'tmux 3.7c or newer is required wherever sessions run; this machine has %s. Linuxbrew/Homebrew: brew install tmux.\n' "$tmux_have"
+      printf 'tmux 3.7c or newer is required wherever sessions run; this machine has %s. Homebrew: brew install tmux.\n' "$tmux_have"
     fi
   }
 
