@@ -2,23 +2,24 @@
 #
 # Wait, without involving a model, until plans/ on the remote main branch changes.
 #
-# This is the idle half of "drain the plans and keep monitoring" (plans/AGENTS.md). A monitoring agent used to wake
-# every hour (a background sleep) and spend a full model round discovering that nothing had changed; each such wake-up
-# re-reads the agent's whole conversation uncached. This script does the cheap part instead: it polls the git tree
-# hash of plans/ on the remote branch and exits only when that hash differs from the baseline the agent last drained
-# against, so the agent's background-task completion is the wake-up.
+# This is the idle half of "drain the plans and keep monitoring" and of "monitor for complete plans"
+# (plans/AGENTS.md). A monitoring agent used to wake every hour (a background sleep) and spend a full model round
+# discovering that nothing had changed; each such wake-up re-reads the agent's whole conversation uncached. This script
+# does the cheap part instead: it polls the git tree hash of plans/ on the remote branch and exits only when that hash
+# differs from the baseline the agent last drained against, so the agent's background-task completion is the wake-up.
 #
 # Why plans/ alone is enough: everything that can give an idle executor new work arrives as a change under plans/ on
 # main, because the plans queue script (scripts/plans-queue.py) records every state change as a commit there. A new
 # plan adds a line to plans/queue/INDEX.md; a plan answered, sent back for a follow-up, or given back returns to
-# [pending]; a dependency becomes satisfied when its line is removed after landing. "Check for plans" interrupts the
-# agent directly. Merging or closing plan PRs makes nothing eligible by itself.
+# [pending]; a dependency becomes satisfied when its line is removed after landing; a finished plan becomes
+# [complete] for the monitor to land. Merging or closing plan PRs makes nothing eligible by itself.
 #
 # Not every change under plans/ is worth a wake-up, though. With several executors, claims are the most frequent
-# commits there and never give an idle executor work. With --wake-check, a changed tree hash is only a hint: the
-# watcher then asks the queue script whether the difference from the baseline commit is anything but claims, and keeps
-# waiting if not. The tree hash stays the cheap first filter, so the check runs when the tree changes, not on every
-# poll.
+# commits there and never give an idle executor work, and the monitor that lands finished plans cares only about plans
+# becoming complete. With --wake-check, a changed tree hash is only a hint: the watcher then asks the queue script
+# whether the difference from the baseline commit is something the agent's role acts on (--wake-for, executor by
+# default), and keeps waiting if not. The tree hash stays the cheap first filter, so the check runs when the tree
+# changes, not on every poll.
 #
 # The script only reads, through the GitHub API; it never touches a local repository, so it works the same from a
 # colocated checkout or a jj workspace and cannot disturb either while it runs. It sticks to bash 3.2 features, the
@@ -27,7 +28,7 @@
 # Usage:
 #   scripts/plans-watch.sh --repo OWNER/NAME (--baseline <tree-hash|none> | --baseline-from <commit-id>)
 #                          [--branch main] [--interval SECONDS] [--max-wait SECONDS] [--max-failures N]
-#                          [--request-timeout SECONDS] [--wake-check PATH]
+#                          [--request-timeout SECONDS] [--wake-check PATH [--wake-for executor|lander]]
 #
 # The baseline is the tree hash of plans/ in the main commit the agent's last round selected from, or `none` if that
 # commit has no plans/ directory. --baseline-from <commit-id> asks GitHub for it, through the same request the polls
@@ -36,8 +37,9 @@
 # watcher's start would otherwise become the baseline and never wake anyone.
 #
 # --wake-check PATH needs --baseline-from, since it compares against that commit. The watcher runs
-# `PATH --repo OWNER/NAME wake-check --baseline <commit-id> --ref <branch>` (scripts/plans-queue.py has exactly that
-# interface), which must print `wake` or `ignore`. It runs under the same timeout and failure accounting as a request:
+# `PATH --repo OWNER/NAME wake-check --baseline <commit-id> --ref <branch> --for <role>` (scripts/plans-queue.py has
+# exactly that interface), which must print `wake` or `ignore`. The role comes from --wake-for: `executor` for a
+# draining executor, `lander` for the monitor. It runs under the same timeout and failure accounting as a request:
 # a check that fails or prints anything else is a failed poll, never a change.
 #
 # Exit status and the one line printed to stdout (nothing goes to stderr, so a harness that captures only stdout, or
@@ -59,6 +61,7 @@ repo=""
 baseline=""
 baseline_from=""
 wake_check=""
+wake_for=executor
 branch="main"
 interval=300
 max_wait=6600
@@ -91,11 +94,12 @@ is_object_id() {
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--repo | --baseline | --baseline-from | --branch | --interval | --max-wait | --max-failures | --request-timeout | \
-		--wake-check)
+		--wake-check | --wake-for)
 		[ $# -ge 2 ] || usage "$1 needs a value"
 		case "$1" in
 		--repo) repo=$2 ;;
 		--wake-check) wake_check=$2 ;;
+		--wake-for) wake_for=$2 ;;
 		--baseline) baseline=$2 ;;
 		--baseline-from) baseline_from=$2 ;;
 		--branch) branch=$2 ;;
@@ -135,6 +139,10 @@ case "$branch" in '' | -* | *[![:alnum:]._-]*) usage "--branch must be a branch 
 [ "$interval" -ge 1 ] || usage "--interval must be at least 1"
 [ "$max_failures" -ge 1 ] || usage "--max-failures must be at least 1"
 [ "$request_timeout" -ge 1 ] || usage "--request-timeout must be at least 1"
+case "$wake_for" in executor | lander) ;; *) usage "--wake-for must be executor or lander, got '$wake_for'" ;; esac
+# Without a check there is nothing to pass the role to, and a monitor whose invocation lost --wake-check would wake on
+# every change under plans/ without a word.
+[ "$wake_for" = executor ] || [ -n "$wake_check" ] || usage "--wake-for needs --wake-check"
 if [ -n "$wake_check" ]; then
 	[ -n "$baseline_from" ] || usage "--wake-check needs --baseline-from: it compares against that commit"
 	if ! [ -f "$wake_check" ] || ! [ -x "$wake_check" ]; then
@@ -219,7 +227,8 @@ plans_tree() {
 # else, like a failed or hung check, is a failure with its reason in $tmp/err.
 verdict() {
 	local out
-	bounded "$wake_check" --repo "$repo" wake-check --baseline "$baseline_from" --ref "$branch" || return 1
+	bounded "$wake_check" --repo "$repo" wake-check --baseline "$baseline_from" --ref "$branch" --for "$wake_for" ||
+		return 1
 	out=$(cat "$tmp/out")
 	case "$out" in
 	wake | ignore)
