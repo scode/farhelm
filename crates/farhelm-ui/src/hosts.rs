@@ -3371,12 +3371,14 @@ fn HostDestinationForm(
     }
 }
 
-/// The form inputs that one displayed ADD confirmation was planned from.
+/// The form input that one displayed ADD confirmation was planned from.
+///
+/// Only the ssh destination: the dialog no longer asks for a remote binary or
+/// state directory, so its probe sends neither and discovery or setup supplies
+/// both (the helm's API and stored rows still carry them).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AddBinding {
     destination: String,
-    remote_farhelm: String,
-    remote_state_dir: String,
 }
 
 /// One-use ADD authority paired with the inputs the helm inspected.
@@ -3426,12 +3428,14 @@ fn destination_detail_parts(destination: &str) -> Vec<DetailPart> {
 /// The add-host form: discover first, then either keep the answering
 /// supervisor or offer the exact setup plan retained by the helm.
 ///
-/// The two optional fields are exposed rather than hidden behind a default
-/// because discovery needs them to find an existing custom installation, and
-/// a retained setup plan uses them as its installation coordinates. They are
-/// therefore part of both sides of discovery-first ADD whenever farhelm is
-/// not on the remote's `PATH` or its supervisor serves a non-default state
-/// directory — the case the e2e harness itself is built on.
+/// The form asks only for the ssh destination. It used to offer a remote
+/// farhelm path and a remote state directory as optional fields, but nobody
+/// adding a host knew what to put in them: the probe finds a supervisor where
+/// setup installs it, and setup records the binary and state directory it
+/// installed. The helm's probe and add API still accept both paths (the
+/// browser harness and `--ensure-hosts` rely on them), and a row's set-up
+/// action still sends the paths stored on that row; only this dialog stopped
+/// asking.
 ///
 /// Discovery claims no page token because its network wait must not freeze
 /// unrelated page work. It can still mutate the registry when a supervisor
@@ -3460,8 +3464,6 @@ fn AddHostForm(
     let base = use_context::<ApiBase>().0;
     let mut preferences = use_context::<crate::list::SharedPreferences>();
     let mut ssh = use_signal(String::new);
-    let mut remote_farhelm = use_signal(String::new);
-    let mut remote_state_dir = use_signal(String::new);
     let mut error = use_signal(|| None::<String>);
     let mut probing = use_signal(|| false);
     let mut offer = use_signal(|| None::<AddOffer>);
@@ -3476,13 +3478,11 @@ fn AddHostForm(
         };
         let current = AddBinding {
             destination: ssh.peek().clone(),
-            remote_farhelm: remote_farhelm.peek().clone(),
-            remote_state_dir: remote_state_dir.peek().clone(),
         };
         if planned.binding != current {
             offer.set(None);
             error.set(Some(
-                "the host fields changed after discovery; probe again".to_string(),
+                "the ssh destination changed after discovery; probe again".to_string(),
             ));
             return;
         }
@@ -3501,7 +3501,7 @@ fn AddHostForm(
 
     // A permanent answer skips only the setup question. The probe still
     // produces the one-use authority, and the same binding check protects
-    // against fields changing while that authority is in flight.
+    // against the destination changing while that authority is in flight.
     use_effect(move || {
         if auto_submit() && offer.peek().is_some() {
             auto_submit.set(false);
@@ -3542,16 +3542,12 @@ fn AddHostForm(
                 error.set(None);
                 probing.set(true);
                 let base = base.clone();
-                let binding = AddBinding {
-                    destination: ssh(),
-                    remote_farhelm: remote_farhelm(),
-                    remote_state_dir: remote_state_dir(),
-                };
+                let binding = AddBinding { destination: ssh() };
                 let destination = binding.destination.clone();
-                let farhelm = binding.remote_farhelm.clone();
-                let state_dir = binding.remote_state_dir.clone();
                 spawn(async move {
-                    match probe_ssh_host(&base, &destination, &farhelm, &state_dir).await {
+                    // No remote binary or state directory: blank paths go out
+                    // as null, and the helm's probe looks where setup installs.
+                    match probe_ssh_host(&base, &destination, "", "").await {
                         Ok(ProbeResponse::Discovered) => on_added.call(None),
                         Ok(ProbeResponse::Provisionable {
                             probe_id,
@@ -3577,10 +3573,6 @@ fn AddHostForm(
                     probing.set(false);
                 });
             },
-            // Same total opt-out of browser text mangling the create form's
-            // command fields carry, for the same reason: all three of these
-            // become part of a command line, and a "corrected" one dials or
-            // execs something the user did not type.
             if let Some(planned) = offer.read().clone() {
                 SetupPlanConfirmation {
                     confirmation: planned.confirmation,
@@ -3600,6 +3592,10 @@ fn AddHostForm(
             } else {
                 label {
                     "ssh destination"
+                    // Same total opt-out of browser text mangling the create
+                    // form's command fields carry, for the same reason: the
+                    // destination becomes part of an ssh command line, and a
+                    // "corrected" one dials a host the user did not type.
                     input {
                         r#type: "text",
                         class: "add-host-ssh",
@@ -3611,34 +3607,6 @@ fn AddHostForm(
                         value: "{ssh}",
                         disabled: busy,
                         oninput: move |evt| ssh.set(evt.value()),
-                    }
-                }
-                label {
-                    "remote farhelm (optional)"
-                    input {
-                        r#type: "text",
-                        class: "add-host-farhelm",
-                        autocomplete: "off",
-                        autocorrect: "off",
-                        autocapitalize: "none",
-                        spellcheck: "false",
-                        value: "{remote_farhelm}",
-                        disabled: busy,
-                        oninput: move |evt| remote_farhelm.set(evt.value()),
-                    }
-                }
-                label {
-                    "remote state dir (optional)"
-                    input {
-                        r#type: "text",
-                        class: "add-host-state-dir",
-                        autocomplete: "off",
-                        autocorrect: "off",
-                        autocapitalize: "none",
-                        spellcheck: "false",
-                        value: "{remote_state_dir}",
-                        disabled: busy,
-                        oninput: move |evt| remote_state_dir.set(evt.value()),
                     }
                 }
                 button {

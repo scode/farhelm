@@ -2997,14 +2997,16 @@ pub(crate) async fn decode_hosts(resp: reqwest::Response) -> Result<Vec<Host>, S
         .map_err(|e| e.to_string())
 }
 
-/// One optional install field as it goes on the wire: absent when the user
-/// left it blank, and otherwise exactly what they typed.
+/// One optional install path as it goes on the wire: absent when blank, and
+/// otherwise sent verbatim.
 ///
-/// The trim decides PRESENCE only. It is tempting to trim the value too —
-/// a stray trailing space in a path field looks like a typo — but these are
-/// paths on a machine this UI cannot see, a path may legally contain leading
-/// or trailing spaces, and an entry silently dialing a path the user did not
-/// type fails in a way nothing on screen explains.
+/// Two callers feed it: the add dialog, which asks for no paths and passes
+/// blanks, and a host row's set-up action, which passes the paths stored on
+/// that row. The trim decides PRESENCE only. It is tempting to trim the value
+/// too, since a stray trailing space looks like a typo, but these are paths on
+/// a machine this UI cannot see, a path may legally contain leading or
+/// trailing spaces, and an entry silently dialing a path nobody chose fails in
+/// a way nothing on screen explains.
 fn install_field(value: &str) -> Option<String> {
     (!value.trim().is_empty()).then(|| value.to_string())
 }
@@ -3065,11 +3067,11 @@ async fn commit_of<T: serde::de::DeserializeOwned>(
 
 /// Discover an ssh destination before either registering or offering setup.
 ///
-/// The optional install coordinates follow the old add form's byte-for-byte
-/// rule: blank means absent, while every non-blank path is sent exactly as
-/// typed. Discovery itself decides whether the supervisor is registered
-/// as-is, a concrete plan is retained for confirmation, or the target stays
-/// manual-only.
+/// The optional install paths follow [`install_field`]'s rule: blank means
+/// absent, and any other path is sent verbatim. The add dialog passes blanks;
+/// a host row's set-up action passes the row's stored paths. Discovery itself
+/// decides whether the supervisor is registered as-is, a concrete plan is
+/// retained for confirmation, or the target stays manual-only.
 pub(crate) async fn probe_ssh_host(
     base: &str,
     ssh: &str,

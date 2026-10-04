@@ -38,13 +38,7 @@ test("add dialog", async ({ page, request }) => {
     "How you would ssh to it: user@host, or a host alias from your ssh config.",
     { side: "left", dy: -40 },
   );
-  // Stacked down the left margin, one per row of the form, so the boxes do
-  // not overlap each other.
-  await director.callout(
-    dialog.locator(".add-host-farhelm"),
-    "Leave both of these empty unless Farhelm should live somewhere else on the host.",
-    { side: "left", dy: 60 },
-  );
+  // Stacked down the left margin so the boxes do not overlap each other.
   await director.callout(dialog.locator(".add-host-submit"), "Checks the host first. Nothing changes on it yet.", {
     side: "left",
     dy: 110,

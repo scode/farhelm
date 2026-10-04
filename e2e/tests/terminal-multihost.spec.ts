@@ -1991,9 +1991,12 @@ test.describe("multi-host", () => {
   // destination with no supervisor behind it could only ever prove the
   // unreachable path, which `unreachable-host-goes-stale` already covers
   // against a real one. So the entry is dropped through the API first —
-  // setup, not the thing under test — and re-registered through the form,
-  // which is also what exercises the two optional install fields the
-  // harness's isolated state directory makes mandatory.
+  // setup, not the thing under test — and re-registered through the form.
+  // The form sends only the destination. The harness's remote runs from an
+  // isolated binary and state directory, and the helm's injected discovered
+  // probe (`configureDiscoveredProbe` in this file's `beforeAll`) answers with
+  // exactly those, so registration records them from discovery rather than
+  // from anything the user typed.
   test("add-host-discovers: a form-registered ssh host progresses to connected", async ({
     page,
     request,
@@ -2018,8 +2021,6 @@ test.describe("multi-host", () => {
       await page.locator(".add-host-button").click();
       const form = page.locator(".add-host-form");
       await form.locator(".add-host-ssh").fill(info.remote_ssh);
-      await form.locator(".add-host-farhelm").fill(info.farhelm);
-      await form.locator(".add-host-state-dir").fill(info.remote_state);
       await form.locator(".add-host-submit").click();
 
       // The row appears at once — registration does not wait for a
@@ -2029,9 +2030,10 @@ test.describe("multi-host", () => {
       await expect(row).toHaveAttribute("data-host-phase", "connected", {
         timeout: 60_000,
       });
-      // The install fields reached the row, not just the form: without them
-      // this entry would dial a farhelm and a state directory that are not
-      // the harness's, and would never have connected at all.
+      // The discovered coordinates reached the row: the form sent no paths,
+      // so these came from the probe's answer. Without them this entry would
+      // dial a farhelm and a state directory that are not the harness's, and
+      // would never have connected at all.
       const readded = await apiRemoteHost(request);
       expect(readded.remote_farhelm).toBe(info.farhelm);
       expect(readded.remote_state_dir).toBe(info.remote_state);
@@ -2782,8 +2784,6 @@ test.describe("multi-host", () => {
       await page.locator(".add-host-button").click();
       const form = page.locator(".add-host-form");
       await form.locator(".add-host-ssh").fill(info.remote_ssh);
-      await form.locator(".add-host-farhelm").fill(info.farhelm);
-      await form.locator(".add-host-state-dir").fill(info.remote_state);
       await form.locator(".add-host-submit").click();
 
       await expect(hostRowByName(page, info.remote_ssh)).toHaveAttribute(
@@ -3457,11 +3457,12 @@ test.describe("multi-host", () => {
     }
   });
 
-  // The two optional install fields left blank must reach the helm as
-  // ABSENT, never as empty strings: the helm takes `""` literally, and a
-  // host registered to dial a binary named nothing never connects for a
-  // reason no status can explain.
-  test("add-host-blank-optional-fields: blanks are omitted rather than sent empty", async ({
+  // The add dialog asks for no remote binary or state directory, and both
+  // must reach the helm as ABSENT, never as empty strings: the dialog hands
+  // the probe blank paths, the helm takes `""` literally, and a host
+  // registered to dial a binary named nothing never connects for a reason no
+  // status can explain.
+  test("add-host-sends-no-install-paths: the dialog's probe omits both paths rather than sending them empty", async ({
     page,
     request,
   }) => {
@@ -3490,8 +3491,8 @@ test.describe("multi-host", () => {
       expect(body.remote_farhelm ?? null).toBeNull();
       expect(body.remote_state_dir ?? null).toBeNull();
       // The row records what discovery actually dialed. The plain `farhelm`
-      // value comes from the injected supervisor observation, not an empty
-      // form field silently converted into a path.
+      // value comes from the injected supervisor observation, not a blank
+      // path silently converted into one.
       const row = (await apiHosts(request)).find(
         (host: any) => host.destination === destination,
       );
