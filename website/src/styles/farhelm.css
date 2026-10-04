@@ -332,6 +332,27 @@ header.header {
   text-align: center;
 }
 
+/* The previous/next links under each page. Starlight draws them as large
+   cards (1.5rem titles, 1rem padding), which dwarfed the text above them once
+   the prose was brought down to the sidebar's size; these sit at about half
+   that, with the title at the prose's size. */
+.pagination-links a {
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  font-size: var(--sl-text-xs);
+  line-height: 1.3;
+}
+
+.pagination-links .link-title {
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+
+.pagination-links svg {
+  width: 1rem;
+  height: 1rem;
+}
+
 .right-sidebar {
   border-inline-start-color: var(--farhelm-line);
 }
