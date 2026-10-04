@@ -3,37 +3,9 @@
 //! `#[path]` keeps this as `sessions::tests`, preserving private-item access without widening
 //! production visibility.
 
-use super::{resolve_owner, resolve_session_profiles_from_store, store};
+use super::{resolve_owner, store};
 use crate::rest_harness::{self, WsTestClient, silent_supervisor};
 use std::time::Duration;
-
-/// Raw session rows do not read or decode the profile catalog.
-///
-/// The fixture breaks the catalog at the schema level (the store skips a
-/// merely undecodable row, so a planted bad row would no longer fail the
-/// read). Every catalog read now errors; successful resolution therefore
-/// proves the raw-only early return happens before any store access.
-#[farhelm_testtrace::test]
-async fn raw_only_profile_resolution_ignores_a_broken_catalog() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db = dir.path().join("helm.db");
-    let store = store::HelmStore::open(&db).await.expect("open store");
-    store
-        .break_profile_catalog_for_test()
-        .await
-        .expect("break the profile catalog");
-    assert!(
-        store.profiles().await.is_err(),
-        "the fixture must fail a real catalog read"
-    );
-
-    let mut sessions = vec![rest_harness::session("raw", 1)];
-    sessions[0].source_profile = None;
-    resolve_session_profiles_from_store(&store, &mut sessions)
-        .await
-        .expect("raw rows do not need the catalog");
-    assert_eq!(sessions[0].source_profile, None);
-}
 
 /// The composer reads its release-owned catalog and its successful-create
 /// suggestions through HTTP, rather than deriving either from a session list
@@ -163,23 +135,15 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
         let ControlMsg::CreateSession {
             req_id,
             parent: None,
-            profile_name: None,
             cwd,
             invocation,
-            // Bound rather than swept into the `..` below: which MODE
-            // the helm forwards is exactly what the assertions here are
-            // about, and a `..` would let a future change start sending
-            // a profile selection alongside the invocation — the
-            // ambiguous request the supervisor refuses — with this test
-            // still green.
-            source_profile,
             title,
             cols,
             rows,
             agent_kind,
             resume_template,
             // Not under test here (the assertions below only check
-            // cwd/invocation/profile/title/cols/rows/agent_kind/
+            // cwd/invocation/title/cols/rows/agent_kind/
             // resume_template); PLAN_M3.md's `intent_key` is exercised
             // by `create_session_forwards_the_bodys_extras_to_the_supervisor`
             // instead.
@@ -195,13 +159,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
         // non-optional fields during deserialization.)
         assert_eq!((cols, rows), (80, 24), "serde defaults must be 80x24");
         assert_eq!(cwd, "~/project");
-        // The raw mode has no source snapshot. Profile-backed creates are
-        // resolved by the helm and carry both an invocation and snapshot.
         assert_eq!(invocation, Some("some-agent".to_string()));
-        assert_eq!(
-            source_profile, None,
-            "the raw mode must not claim catalog provenance"
-        );
         assert_eq!(title, None);
         assert_eq!(agent_kind, None);
         assert_eq!(resume_template, None);
@@ -232,7 +190,6 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
-                    source_profile: None,
                     github_repo: None,
                     working_copy: None,
                 },
@@ -339,7 +296,6 @@ async fn a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed() {
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
                         tabs: Vec::new(),
-                        source_profile: None,
                         github_repo: None,
                         working_copy: None,
                     },
@@ -560,7 +516,6 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
                         tabs: Vec::new(),
-                        source_profile: None,
                         github_repo: None,
                         working_copy: None,
                     },
@@ -721,7 +676,6 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
                         tabs: Vec::new(),
-                        source_profile: None,
                         github_repo: None,
                         working_copy: None,
                     },
@@ -924,7 +878,6 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
         let ControlMsg::CreateSession {
             req_id,
             parent: None,
-            profile_name: None,
             intent_key,
             agent_kind,
             resume_template,
@@ -964,7 +917,6 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
-                    source_profile: None,
                     github_repo: None,
                     working_copy: None,
                 },
@@ -2175,102 +2127,6 @@ async fn a_replace_forwards_its_source_delete_precondition() {
     }
 }
 
-/// Spec: a plain Replace of a session the host lists as created from a
-/// catalog profile does not make that profile the helm-wide remembered
-/// default.
-///
-/// Why: the profile id comes from the owning host's listing, and profile ids
-/// are discoverable to agents, so a compromised host could list a session
-/// under any catalog profile (a "yolo" one, say) and have the next New
-/// dialog suggest it on every host once the user pressed Replace. Only a
-/// profile the user picked in the GUI may become the default.
-#[farhelm_testtrace::test]
-async fn a_plain_replace_does_not_remember_the_listed_rows_profile() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, Frame};
-
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let mut source = rest_harness::session("profiled-src", 1_700_000_000);
-    // Filled in once the catalog row exists below; the scripted list is read
-    // only after the harness starts.
-    source.invocation = "claude".to_string();
-    let (harness, local) = spliced_replace_harness(client_side, Vec::new()).await;
-    // YOLO launch on the fixture's ask-first host; the guard
-    // is not what this test is about (see `yolo_guard`'s own tests).
-    allow_yolo_here(&harness.store).await;
-    let crate::store::ProfileCreation::Created(profile) = harness
-        .store
-        .create_profile(
-            "yolo-profile".into(),
-            "claude --dangerously-skip-permissions".into(),
-            farhelm_proto::AgentKind::Claude,
-            None,
-        )
-        .await
-        .unwrap()
-    else {
-        panic!("fixture catalog must have capacity");
-    };
-    source.source_profile = Some(farhelm_proto::SourceProfile {
-        id: profile.id.clone(),
-        name: profile.name.clone(),
-        existence: farhelm_proto::ProfileExistence::Unresolved,
-    });
-    let fleet = harness.fleet.clone();
-    fleet.edit(local, |script| script.sessions.push(source.clone()));
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::CreateSession { req_id, .. } = request else {
-            panic!("expected CreateSession, got {request:?}");
-        };
-        let mut created = rest_harness::session("profiled-new", 1_700_000_500);
-        created.source_profile = source.source_profile.clone();
-        fleet.edit(local, |script| script.sessions.push(created.clone()));
-        writer
-            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
-                req_id,
-                session: created,
-            }))
-            .await
-            .unwrap();
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, .. } = request else {
-            panic!("expected DeleteSession, got {request:?}");
-        };
-        fleet.edit(local, |script| {
-            script.sessions.retain(|s| s.id != "profiled-src")
-        });
-        writer
-            .write_control(&ControlMsg::SessionDeleted {
-                req_id,
-                notice: None,
-            })
-            .await
-            .unwrap();
-    });
-
-    harness.refresh_to_completion(local).await;
-    let (status, body) = post_text(
-        &harness,
-        "/api/sessions/profiled-src/replace",
-        serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
-    peer.await.unwrap();
-    assert_eq!(
-        harness.store.remembered_profile().await.unwrap(),
-        None,
-        "a plain Replace must not make the listed row's profile the default"
-    );
-}
-
 /// The simplest replace: a live, raw-invocation source. SPEC.md's contract
 /// is a NEW id carrying the source's cwd, title, and invocation, with the
 /// old id gone from the list at once — this pins that promise against the
@@ -2298,16 +2154,14 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
             .unwrap();
 
         // The create half: cwd, title, and invocation copied verbatim from
-        // the source; no profile, no overrides, no idempotency key (the
+        // the source; no overrides, no idempotency key (the
         // request body below sends none).
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
             req_id,
             parent: None,
-            profile_name: None,
             cwd,
             invocation,
-            source_profile,
             title,
             intent_key,
             agent_kind,
@@ -2319,7 +2173,6 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         };
         assert_eq!(cwd, "/sess-1");
         assert_eq!(invocation, Some("agent".to_string()));
-        assert_eq!(source_profile, None);
         assert_eq!(title, Some("sess-1".to_string()));
         assert_eq!(intent_key, None);
         assert_eq!(agent_kind, None);
@@ -2342,7 +2195,6 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -2445,7 +2297,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
 ///
 /// The collision is real, not merely hostile-peer input: a same-host
 /// replace with no field overrides reconstructs the EXACT fingerprint the
-/// source's own creation used (same cwd, title, raw invocation or profile,
+/// source's own creation used (same cwd, title, raw invocation,
 /// default dimensions, no parent), so a caller that reuses the source's own
 /// creation key hits a legitimate reservation REPLAY at the target, which
 /// answers with the source row rather than a new one. Accepting that reply
@@ -2494,7 +2346,6 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
-                    source_profile: None,
                     github_repo: None,
                     working_copy: None,
                 },
@@ -2525,136 +2376,6 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
         row_ids(&value),
         vec!["sess-1"],
         "a rejected replay must leave the source exactly as it was — no delete was ever sent"
-    );
-
-    peer.await.unwrap();
-}
-
-/// A profile-backed source's replacement follows the SAME profile — the
-/// happy path `mode_from_source` shares with `clone_for_agent`, exercised
-/// here through the REST route instead of the agent relay.
-#[farhelm_testtrace::test]
-async fn replace_of_a_profile_backed_session_follows_its_profile() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, Frame, ProfileSnapshot, SessionInfo, SourceProfile};
-
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let source = farhelm_proto::SessionInfo {
-        source_profile: Some(farhelm_proto::SourceProfile {
-            id: "builtin-claude".to_string(),
-            name: "claude".to_string(),
-            existence: farhelm_proto::ProfileExistence::Unresolved,
-        }),
-        ..rest_harness::session("sess-1", 1_700_000_000)
-    };
-    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
-    let fleet = harness.fleet.clone();
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::CreateSession {
-            req_id,
-            invocation,
-            source_profile,
-            agent_kind,
-            resume_template,
-            ..
-        } = request
-        else {
-            panic!("expected CreateSession, got {request:?}");
-        };
-        // This release-owned definition exists without fixture setup, so the
-        // replacement path exercises the same catalog resolution a browser
-        // uses when it selects a built-in by id.
-        assert_eq!(invocation, Some("claude".to_string()));
-        assert_eq!(
-            source_profile,
-            Some(ProfileSnapshot {
-                id: "builtin-claude".to_string(),
-                name: "claude".to_string(),
-            })
-        );
-        assert_eq!(agent_kind, Some(farhelm_proto::AgentKind::Claude));
-        assert_eq!(resume_template, None);
-        let created = SessionInfo {
-            agent_kind: farhelm_proto::AgentKind::Generic,
-            parent: None,
-            id: "sess-2".into(),
-            title: "sess-1".into(),
-            created_at: 1_700_000_500,
-            last_activity_at: 1_700_000_500,
-            last_work_started_at: 0,
-            creation_seq: None,
-            cwd: "/sess-1".into(),
-            canonical_cwd: None,
-            invocation: "claude".into(),
-            resume_template: None,
-            launch: None,
-            status: farhelm_proto::SessionStatus::Unknown,
-            annotation: None,
-            restart_offer: farhelm_proto::RestartOffer::default(),
-            tabs: Vec::new(),
-            // The exact `existence` the supervisor sends here does
-            // not matter: `do_create_session` recomputes it against
-            // the live catalog before this reaches the caller (see
-            // `resolve_session_profiles`), so `Unresolved` is the
-            // ordinary placeholder every other fixture in this file
-            // uses.
-            source_profile: Some(SourceProfile {
-                id: "builtin-claude".to_string(),
-                name: "claude".to_string(),
-                existence: farhelm_proto::ProfileExistence::Unresolved,
-            }),
-            github_repo: None,
-            working_copy: None,
-        };
-        // See `spliced_replace_harness`'s doc: fixture updated before reply.
-        fleet.edit(local, |script| script.sessions.push(created.clone()));
-        writer
-            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
-                req_id,
-                session: created,
-            }))
-            .await
-            .unwrap();
-
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession {
-            req_id, session_id, ..
-        } = request
-        else {
-            panic!("expected DeleteSession, got {request:?}");
-        };
-        assert_eq!(session_id, "sess-1");
-        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
-        writer
-            .write_control(&ControlMsg::SessionDeleted {
-                req_id,
-                notice: None,
-            })
-            .await
-            .unwrap();
-    });
-
-    harness.await_refreshed(local).await;
-    let (status, body) = post_text(
-        &harness,
-        "/api/sessions/sess-1/replace",
-        serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
-    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
-    assert_eq!(session.id, "sess-2");
-    assert_eq!(
-        session.source_profile.as_ref().map(|p| p.id.as_str()),
-        Some("builtin-claude")
     );
 
     peer.await.unwrap();
@@ -2773,117 +2494,6 @@ async fn replace_of_a_structured_session_preserves_its_resume_template() {
     peer.await.unwrap();
 }
 
-/// A source whose snapshotted profile has been DELETED still replaces,
-/// falling back to its raw invocation — the deliberate DIVERGENCE from
-/// `clone_for_agent`'s own
-/// `profile_clone_with_a_dangling_snapshot_never_contacts_the_target`: the
-/// agent-CLI clone refuses this exact shape because a raw invocation
-/// written for one machine may not run on another, while replace never
-/// changes machine, so the refusal clone needs has nothing to guard against
-/// here. Pinned so this divergence is not "fixed" into a refusal later.
-#[farhelm_testtrace::test]
-async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invocation() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
-
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let source = farhelm_proto::SessionInfo {
-        invocation: "sh -c 'echo hi'".to_string(),
-        source_profile: Some(farhelm_proto::SourceProfile {
-            id: "deleted-profile".to_string(),
-            name: "Former agent".to_string(),
-            existence: farhelm_proto::ProfileExistence::Unresolved,
-        }),
-        ..rest_harness::session("sess-1", 1_700_000_000)
-    };
-    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
-    let fleet = harness.fleet.clone();
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::CreateSession {
-            req_id,
-            invocation,
-            source_profile,
-            ..
-        } = request
-        else {
-            panic!("expected CreateSession, got {request:?}");
-        };
-        assert_eq!(invocation, Some("sh -c 'echo hi'".to_string()));
-        assert_eq!(
-            source_profile, None,
-            "a raw fallback carries no profile provenance"
-        );
-        let created = SessionInfo {
-            agent_kind: farhelm_proto::AgentKind::Generic,
-            parent: None,
-            id: "sess-2".into(),
-            title: "sess-1".into(),
-            created_at: 1_700_000_500,
-            last_activity_at: 1_700_000_500,
-            last_work_started_at: 0,
-            creation_seq: None,
-            cwd: "/sess-1".into(),
-            canonical_cwd: None,
-            invocation: "sh -c 'echo hi'".into(),
-            resume_template: None,
-            launch: None,
-            status: farhelm_proto::SessionStatus::Unknown,
-            annotation: None,
-            restart_offer: farhelm_proto::RestartOffer::default(),
-            tabs: Vec::new(),
-            source_profile: None,
-            github_repo: None,
-            working_copy: None,
-        };
-        // See `spliced_replace_harness`'s doc: fixture updated before reply.
-        fleet.edit(local, |script| script.sessions.push(created.clone()));
-        writer
-            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
-                req_id,
-                session: created,
-            }))
-            .await
-            .unwrap();
-
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession {
-            req_id, session_id, ..
-        } = request
-        else {
-            panic!("expected DeleteSession, got {request:?}");
-        };
-        assert_eq!(session_id, "sess-1");
-        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
-        writer
-            .write_control(&ControlMsg::SessionDeleted {
-                req_id,
-                notice: None,
-            })
-            .await
-            .unwrap();
-    });
-
-    harness.await_refreshed(local).await;
-    let (status, body) = post_text(
-        &harness,
-        "/api/sessions/sess-1/replace",
-        serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
-    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
-    assert_eq!(session.invocation, "sh -c 'echo hi'");
-
-    peer.await.unwrap();
-}
 /// If the create fails, the source is untouched: the handler returns before
 /// ever sending a delete, and the row stays listed exactly as it was — the
 /// "nothing was lost" half of `do_replace_session`'s asymmetric failure
@@ -2980,7 +2590,6 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -3116,7 +2725,6 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -3268,7 +2876,6 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -3426,16 +3033,14 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
             .unwrap();
 
         // The create half must carry the OVERRIDE's cwd, invocation, and
-        // title — never the source's own — with no profile and no
-        // idempotency key (the request body below sends none).
+        // title — never the source's own — with no idempotency key (the
+        // request body below sends none).
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
             req_id,
             parent: None,
-            profile_name: None,
             cwd,
             invocation,
-            source_profile,
             title,
             intent_key,
             ..
@@ -3445,7 +3050,6 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         };
         assert_eq!(cwd, "/replaced-with");
         assert_eq!(invocation, Some("new-agent --flag".to_string()));
-        assert_eq!(source_profile, None);
         assert_eq!(title, Some("replaced-with-title".to_string()));
         assert_eq!(intent_key, None);
         let created = SessionInfo {
@@ -3466,7 +3070,6 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -3680,7 +3283,6 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -3781,7 +3383,7 @@ async fn a_replace_with_mismatched_intent_key_is_refused_as_a_bad_request() {
 }
 
 /// A "replace with" body with a create-shape problem — here naming BOTH
-/// `invocation` and `profile_id` — is a 400 with the SAME precedence an
+/// `invocation` and `launch` — is a 400 with the SAME precedence an
 /// ordinary create gives it: before routing, before any supervisor round
 /// trip, and therefore even for a session id this fleet has never heard
 /// of. `ReplaceReq::with`'s doc promises the override is resolved "exactly
@@ -3805,7 +3407,11 @@ async fn a_replace_with_body_shape_problem_is_refused_before_routing() {
         &harness,
         "/api/sessions/does-not-exist/replace",
         serde_json::json!({
-            "with": { "cwd": "/x", "invocation": "agent", "profile_id": "some-profile" }
+            "with": {
+                "cwd": "/x",
+                "invocation": "agent",
+                "launch": { "harness": "codex", "model": null, "effort": null, "permissions": null }
+            }
         }),
     )
     .await;
@@ -3907,7 +3513,6 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
-                    source_profile: None,
                     github_repo: None,
                     working_copy: None,
                 },
@@ -4421,7 +4026,6 @@ async fn restart_session_passes_consent_through_and_returns_the_session() {
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::Resume,
                     tabs: Vec::new(),
-                    source_profile: None,
                     github_repo: None,
                     working_copy: None,
                 },
@@ -4676,7 +4280,6 @@ async fn rename_session_forwards_the_title_verbatim() {
             annotation: None,
             restart_offer: RestartOffer::Resume,
             tabs: vec![TabInfo { id: "tab-1".into() }],
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -4854,7 +4457,6 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
                         tabs: Vec::new(),
-                        source_profile: None,
                         github_repo: None,
                         working_copy: None,
                     },
@@ -5229,9 +4831,9 @@ async fn close_tab_error_reply_maps_to_404_with_the_supervisors_message() {
 /// the precondition header (`farhelm_proto::http::PRECONDITION_HEADER`), forwarded nowhere; the same
 /// body naming the current connection is created normally.
 ///
-/// Profile ids are helm-wide, but the action still names one installation.
-/// The client checks before it sends so a retarget or adoption cannot launch
-/// the resolved bundle on a successor host the user did not choose.
+/// The action names one installation. The client checks before it sends so
+/// a retarget or adoption cannot launch the bundle on a successor host the
+/// user did not choose.
 ///
 /// "Reaches no supervisor" is asserted by ORDER rather than by a timeout:
 /// the peer asserts on the FIRST create it is sent, and a forwarded stale
@@ -5251,23 +4853,16 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
-            req_id,
-            source_profile,
-            invocation,
-            ..
+            req_id, invocation, ..
         } = request
         else {
             panic!("expected CreateSession, got {request:?}");
         };
         assert_eq!(
-            source_profile,
-            Some(farhelm_proto::ProfileSnapshot {
-                id: "builtin-claude".to_string(),
-                name: "claude".to_string(),
-            }),
-            "the only create that may reach a supervisor carries the resolved profile"
+            invocation.as_deref(),
+            Some("claude"),
+            "the only create that may reach a supervisor is the current-connection one"
         );
-        assert_eq!(invocation.as_deref(), Some("claude"));
         writer
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
@@ -5289,7 +4884,6 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
-                    source_profile: None,
                     github_repo: None,
                     working_copy: None,
                 },
@@ -5311,7 +4905,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
         "/api/sessions",
         serde_json::json!({
             "cwd": "/work",
-            "profile_id": "builtin-claude",
+            "invocation": "claude",
             "expected_incarnation": current - 1,
         }),
     )
@@ -5330,7 +4924,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
         "/api/sessions",
         serde_json::json!({
             "cwd": "/work",
-            "profile_id": "builtin-claude",
+            "invocation": "claude",
             "expected_incarnation": current,
         }),
     )
@@ -5397,95 +4991,6 @@ async fn a_browse_prepared_against_a_replaced_connection_reaches_no_supervisor()
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     peer.await
         .expect("only the current request reaches the peer");
-}
-
-/// A stale claim fails the session-cache seed, and the remembered default
-/// still lands — with its invalidation published.
-///
-/// This is the central consistency split the bare-id default introduced,
-/// and nothing else pins it: [`record_session`]'s cache seed is
-/// CLAIM-CHECKED (a write prepared on a replaced connection must not file a
-/// session under whatever answers on the host now), while the remembered
-/// default is a registry-row preference that survives exactly that
-/// replacement. Reintroducing a claim check around the default — or letting
-/// a refused cache seed short-circuit the bookkeeping — would pass every
-/// other test in this file and fail here.
-#[farhelm_testtrace::test]
-async fn a_stale_claim_blocks_the_cache_seed_but_not_the_remembered_default() {
-    use farhelm_proto::SessionInfo;
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
-
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-        // Hold the connection open; nothing is forwarded in this test.
-        while let Ok(Some(_)) = reader.read_frame().await {}
-    });
-
-    let harness = rest_harness::spliced_helm(client_side).await;
-    let local = rest_harness::local_id(&harness.store).await;
-    let current = harness
-        .manager
-        .status(local)
-        .expect("the local host has an actor")
-        .incarnation;
-    // A claim from the connection BEFORE this one — the shape a reply's
-    // bookkeeping sees when the host reconnected mid-create.
-    let stale = crate::manager::SessionClaim {
-        host: local,
-        incarnation: current.wrapping_sub(1),
-        identity: None,
-    };
-    let session = SessionInfo {
-        agent_kind: farhelm_proto::AgentKind::Generic,
-        parent: None,
-        id: "sess-stale".into(),
-        title: "sess-stale".into(),
-        created_at: 1_700_000_700,
-        last_activity_at: 1_700_000_700,
-        last_work_started_at: 0,
-        creation_seq: Some(5),
-        cwd: "/work".into(),
-        canonical_cwd: None,
-        invocation: "claude".into(),
-        resume_template: None,
-        launch: None,
-        status: farhelm_proto::SessionStatus::Unknown,
-        annotation: None,
-        restart_offer: farhelm_proto::RestartOffer::default(),
-        tabs: Vec::new(),
-        source_profile: None,
-        github_repo: None,
-        working_copy: None,
-    };
-
-    assert!(
-        harness
-            .manager
-            .remember_session(&stale, &session)
-            .await
-            .is_err(),
-        "a cache seed prepared against a replaced connection must be refused"
-    );
-
-    let before = harness.manager.events().revision();
-    super::remember_default_profile(&harness.state, local, "p-favorite", &session).await;
-    assert_eq!(
-        harness.store.remembered_profile().await.unwrap().as_deref(),
-        Some("p-favorite"),
-        "the default is a registry-row write and must land regardless of the claim"
-    );
-    assert!(
-        harness.manager.events().revision() > before,
-        "and its change is published so open create dialogs learn of it"
-    );
-    drop(harness);
-    let _ = peer.await;
 }
 
 /// Issue one request against `app` and return its status and JSON body.
@@ -7425,239 +6930,6 @@ async fn an_identity_less_duplicate_of_a_cached_id_is_listed_once() {
     assert_eq!(shared["host"], local, "the cached (first) claim holds");
 }
 
-/// Every session mutation reads the catalog before it asks the supervisor.
-///
-/// A broken catalog must not turn a completed create, restart, or rename
-/// into an error reply. This test keeps routing healthy while making
-/// only the profile catalog read fail (at the schema level, since the store
-/// skips a merely undecodable row), then proves all three handlers refuse
-/// without sending a mutation frame. The profile-backed create also pins
-/// that its otherwise necessary bundle lookup shares this preflight read.
-#[farhelm_testtrace::test]
-async fn catalog_failure_precedes_every_session_mutation() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
-
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-        let leaked = tokio::time::timeout(Duration::from_secs(2), reader.read_frame()).await;
-        assert!(
-            !matches!(leaked, Ok(Ok(Some(_)))),
-            "catalog failure must happen before any supervisor mutation, but one arrived: \
-             {leaked:?}"
-        );
-    });
-
-    let harness = rest_harness::spliced_helm_listing(
-        client_side,
-        vec![rest_harness::session("profile-order", 500)],
-    )
-    .await;
-    harness
-        .store
-        .break_profile_catalog_for_test()
-        .await
-        .expect("break the profile catalog");
-    assert!(
-        harness.store.profiles().await.is_err(),
-        "the fixture must make the mutation preflight fail"
-    );
-
-    for (path, body) in [
-        (
-            "/api/sessions",
-            serde_json::json!({
-                "cwd": "/tmp",
-                "profile_id": "builtin-claude",
-            }),
-        ),
-        ("/api/sessions/profile-order/restart", serde_json::json!({})),
-        (
-            "/api/sessions/profile-order/rename",
-            serde_json::json!({ "title": "not-applied" }),
-        ),
-    ] {
-        let (status, response) = post_text(&harness, path, body).await;
-        assert_eq!(
-            status,
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            "{path} must fail on the catalog preflight: {response}"
-        );
-    }
-    peer.await.unwrap();
-}
-
-/// Create, detail, restart, and rename never expose `Unresolved`.
-///
-/// The supervisor deliberately reports only immutable profile provenance;
-/// the helm owns the current existence verdict. This test returns the
-/// supervisor-only marker from every live reply shape and checks the public
-/// JSON after a catalog rename and deletion, covering all three public
-/// verdicts without relying on a periodic refresh to rewrite the rows first.
-#[farhelm_testtrace::test]
-async fn every_live_session_reply_resolves_profile_existence_before_json() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, ProfileExistence, SessionInfo, SourceProfile};
-
-    /// Build the supervisor's provenance-only view of the profiled session.
-    ///
-    /// Reconstructing it for every mutation ensures no earlier helm verdict
-    /// can accidentally make a later assertion pass through cached state.
-    fn unresolved_profiled_session(id: &str) -> SessionInfo {
-        SessionInfo {
-            source_profile: Some(SourceProfile {
-                id: id.to_string(),
-                name: "claude".to_string(),
-                existence: ProfileExistence::Unresolved,
-            }),
-            ..rest_harness::session("profile-live", 500)
-        }
-    }
-
-    let builder = rest_harness::FleetBuilder::new().await;
-    let crate::store::ProfileCreation::Created(mut profile) = builder
-        .store()
-        .create_profile(
-            "claude".to_string(),
-            "claude".to_string(),
-            farhelm_proto::AgentKind::Claude,
-            None,
-        )
-        .await
-        .unwrap()
-    else {
-        panic!("fresh catalog has capacity")
-    };
-    let original = unresolved_profiled_session(&profile.id);
-    let peer_profile_id = profile.id.clone();
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-        loop {
-            let Ok(Some(frame)) = reader.read_frame().await else {
-                return;
-            };
-            match parse_control(&frame) {
-                Ok(ControlMsg::CreateSession {
-                    req_id,
-                    source_profile,
-                    ..
-                }) => {
-                    let snapshot = source_profile.expect("profile create carries a snapshot");
-                    writer
-                        .write_control(&ControlMsg::SessionCreated {
-                            req_id,
-                            session: SessionInfo {
-                                source_profile: Some(SourceProfile {
-                                    id: snapshot.id,
-                                    name: snapshot.name,
-                                    existence: ProfileExistence::Unresolved,
-                                }),
-                                ..rest_harness::session("profile-created", 600)
-                            },
-                        })
-                        .await
-                        .unwrap();
-                }
-                Ok(ControlMsg::RestartSession { req_id, .. }) => writer
-                    .write_control(&ControlMsg::SessionRestarted {
-                        req_id,
-                        session: unresolved_profiled_session(&peer_profile_id),
-                    })
-                    .await
-                    .unwrap(),
-                Ok(ControlMsg::RenameSession { req_id, .. }) => writer
-                    .write_control(&ControlMsg::SessionRenamed {
-                        req_id,
-                        session: unresolved_profiled_session(&peer_profile_id),
-                    })
-                    .await
-                    .unwrap(),
-                other => panic!("unexpected supervisor request: {other:?}"),
-            }
-        }
-    });
-
-    let harness = builder
-        .local(rest_harness::HostScript {
-            identity: Some("local-identity".to_string()),
-            sessions: vec![original],
-            peer: Some(client_side),
-            ..rest_harness::HostScript::default()
-        })
-        .await
-        .start()
-        .await;
-    harness
-        .await_refreshed(rest_harness::local_id(&harness.store).await)
-        .await;
-
-    let (status, created) = post_text(
-        &harness,
-        "/api/sessions",
-        serde_json::json!({ "cwd": "/tmp", "profile_id": "builtin-codex" }),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{created}");
-    let created: serde_json::Value = serde_json::from_str(&created).unwrap();
-    assert_eq!(created["source_profile"]["existence"], "present");
-    assert_eq!(
-        harness.store.remembered_profile().await.unwrap().as_deref(),
-        Some("builtin-codex"),
-        "a profile selected through the REST create surface becomes the user's default"
-    );
-
-    let profile_id = profile.id.clone();
-    profile.name = "claude-renamed".to_string();
-    harness
-        .store
-        .update_profile(profile)
-        .await
-        .unwrap()
-        .expect("profile still exists");
-
-    let (status, detail) = get_json(&harness, "/api/sessions/profile-live").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(detail["source_profile"]["existence"], "renamed");
-
-    for path in [
-        "/api/sessions/profile-live/restart",
-        "/api/sessions/profile-live/rename",
-    ] {
-        let body = if path.ends_with("restart") {
-            serde_json::json!({})
-        } else {
-            serde_json::json!({ "title": "renamed session" })
-        };
-        let (status, response) = post_text(&harness, path, body).await;
-        assert_eq!(status, axum::http::StatusCode::OK, "{response}");
-        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(response["source_profile"]["existence"], "renamed");
-    }
-
-    assert!(harness.store.delete_profile(&profile_id).await.unwrap());
-    let (status, renamed) = post_text(
-        &harness,
-        "/api/sessions/profile-live/rename",
-        serde_json::json!({ "title": "renamed after deletion" }),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{renamed}");
-    let renamed: serde_json::Value = serde_json::from_str(&renamed).unwrap();
-    assert_eq!(renamed["source_profile"]["existence"], "deleted");
-    peer.abort();
-}
-
 /// A mutation reply that says `Unknown` must not erase a status the
 /// helm already knew.
 ///
@@ -7887,25 +7159,10 @@ async fn a_restart_that_cannot_improve_the_status_wakes_the_refresh() {
 /// notice". Refusing here would leave the UI nothing to draw behind
 /// that notice, so the read is served from the cache and marked
 /// `stale`, while every mutating route on the same session still refuses
-/// (pinned above). The source profile is deleted after the cache write so
-/// this also pins that detail replies re-read the helm catalog instead of
-/// leaking the cache's older existence verdict.
+/// (pinned above).
 #[farhelm_testtrace::test]
 async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
     let builder = rest_harness::FleetBuilder::new().await;
-    let crate::store::ProfileCreation::Created(profile) = builder
-        .store()
-        .create_profile(
-            "claude".to_string(),
-            "claude".to_string(),
-            farhelm_proto::AgentKind::Claude,
-            None,
-        )
-        .await
-        .unwrap()
-    else {
-        panic!("fresh catalog has capacity")
-    };
     let (builder, host) = builder
         .ssh(
             "user@breaks",
@@ -7915,11 +7172,6 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
                     title: "the work in progress".to_string(),
                     cwd: "/home/user/project".to_string(),
                     canonical_cwd: None,
-                    source_profile: Some(farhelm_proto::SourceProfile {
-                        id: profile.id.clone(),
-                        name: "claude".to_string(),
-                        existence: farhelm_proto::ProfileExistence::Unresolved,
-                    }),
                     ..rest_harness::session("owned", 100)
                 }],
                 ..rest_harness::HostScript::default()
@@ -7928,13 +7180,6 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
         .await;
     let harness = builder.start().await;
     harness.await_refreshed(host).await;
-    assert!(
-        harness
-            .store
-            .delete_profile(&profile.id)
-            .await
-            .expect("delete the cached session's profile")
-    );
     harness.fleet.take_down(host);
     harness
         .await_state(host, |state| state.phase() == "unreachable-reprobing")
@@ -7945,7 +7190,6 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
     assert_eq!(value["title"], "the work in progress");
     assert_eq!(value["cwd"], "/home/user/project");
     assert_eq!(value["host"], host);
-    assert_eq!(value["source_profile"]["existence"], "deleted");
     assert_eq!(
         value["stale"], true,
         "the metadata is last-known knowledge and must say so"
@@ -7977,38 +7221,13 @@ fn filterable(
     cwd: &str,
     title: &str,
     status: farhelm_proto::SessionStatus,
-    source_profile: Option<farhelm_proto::SourceProfile>,
 ) -> farhelm_proto::SessionInfo {
     farhelm_proto::SessionInfo {
         cwd: cwd.to_string(),
         canonical_cwd: None,
         title: title.to_string(),
         status,
-        source_profile,
         ..rest_harness::session(id, created_at)
-    }
-}
-
-/// The profile reference a session created from a profile carries.
-///
-/// `existence` is a PARAMETER rather than a fixed `Present`, and the
-/// reason is the property these fixtures exist to pin: a session's
-/// snapshot (`id` and `name`) is durable and never rewritten, while the
-/// helm derives existence from its catalog before serving a row. So a
-/// cached row can legitimately carry `Deleted` beside a name no catalog
-/// holds any more — which is exactly the row the profile filter must
-/// still match, by that name. Fixing this field at `Present` would make
-/// every fixture describe the easy case and leave the interesting one
-/// unrepresentable.
-fn source(
-    id: &str,
-    name: &str,
-    existence: farhelm_proto::ProfileExistence,
-) -> farhelm_proto::SourceProfile {
-    farhelm_proto::SourceProfile {
-        id: id.to_string(),
-        name: name.to_string(),
-        existence,
     }
 }
 
@@ -8016,13 +7235,8 @@ fn source(
 /// dimension at once, so that each single-dimension assertion below
 /// distinguishes ONE property rather than accidentally selecting on
 /// several.
-///
-/// One session was created from a profile that has since been DELETED,
-/// which is the case SPEC.md's snapshot rule makes load-bearing: it
-/// still filters, under the name it snapshotted, because nothing
-/// rewrote its row when the profile went away.
 async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::HostId) {
-    use farhelm_proto::{ProfileExistence, SessionStatus};
+    use farhelm_proto::SessionStatus;
 
     let (builder, alpha) = rest_harness::FleetBuilder::new()
         .await
@@ -8037,7 +7251,6 @@ async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
                         "/home/me/src/farhelm",
                         "Refactor the drain",
                         SessionStatus::Running,
-                        Some(source("p-claude", "Claude Code", ProfileExistence::Present)),
                     )
                 },
                 filterable(
@@ -8046,7 +7259,6 @@ async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
                     "/home/me/notes",
                     "Read the SPEC",
                     SessionStatus::Idle,
-                    None,
                 ),
             ],
             ..rest_harness::HostScript::default()
@@ -8063,7 +7275,6 @@ async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
                         "/srv/alpha/work",
                         "Nightly sweep",
                         SessionStatus::Waiting,
-                        Some(source("p-gone", "Codex", ProfileExistence::Deleted)),
                     ),
                     farhelm_proto::SessionInfo {
                         parent: Some("root-session".to_string()),
@@ -8073,7 +7284,6 @@ async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
                             "/srv/alpha/other",
                             "Drain the queue",
                             SessionStatus::Exited { exit_code: Some(0) },
-                            Some(source("p-claude", "Claude Code", ProfileExistence::Present)),
                         )
                     },
                 ],
@@ -8089,14 +7299,14 @@ async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
     (harness, local, alpha)
 }
 
-/// Every dimension SPEC.md names — host, parent, directory, profile,
-/// status, title — narrows the list by itself, with the semantics
+/// Every dimension SPEC.md names — host, parent, directory, status,
+/// title — narrows the list by itself, with the semantics
 /// `store::SessionFilter` documents.
 ///
 /// One test rather than five because the fixture is the expensive part
 /// and the assertions are one line each; what matters is that each
 /// parameter selects a DIFFERENT subset, which is only visible with all
-/// six side by side.
+/// five side by side.
 #[farhelm_testtrace::test]
 async fn every_filter_dimension_narrows_the_list_on_its_own() {
     let (harness, local, alpha) = filterable_fleet().await;
@@ -8119,11 +7329,6 @@ async fn every_filter_dimension_narrows_the_list_on_its_own() {
     let (_, value) = get_json(&harness, "/api/sessions?status=exited").await;
     assert_eq!(row_ids(&value), vec!["alpha-exited"]);
 
-    // By profile ID: exact, opaque, and rename-proof. Both hosts'
-    // sessions from that profile come back, in the merged order.
-    let (_, value) = get_json(&harness, "/api/sessions?profile=p-claude").await;
-    assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
-
     // Substring again, and case-insensitive again.
     let (_, value) = get_json(&harness, "/api/sessions?title=drain").await;
     assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
@@ -8136,44 +7341,6 @@ async fn every_filter_dimension_narrows_the_list_on_its_own() {
     // than merely excluding the other one.
     let (_, value) = get_json(&harness, &format!("/api/sessions?host={local}")).await;
     assert_eq!(row_ids(&value), vec!["local-running", "local-idle"]);
-}
-
-/// SPEC.md's snapshot rule, as the LIST sees it: a session created from
-/// a profile that has since been deleted still filters — under the name
-/// it snapshotted, because that is the only handle anyone still has.
-///
-/// The alternative implementations all fail here in different ways:
-/// matching only by id loses the session as soon as a user picks the
-/// name they remember, and rewriting historical rows on a profile
-/// delete (the shape PLAN_M6_75.md item 3 rejects) would have erased
-/// the name this filter matches.
-#[farhelm_testtrace::test]
-async fn a_deleted_profiles_sessions_still_filter_under_their_snapshotted_name() {
-    let (harness, _local, _alpha) = filterable_fleet().await;
-
-    let (status, value) = get_json(&harness, "/api/sessions?profile=Codex").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(
-        row_ids(&value),
-        vec!["alpha-waiting"],
-        "a deleted profile's sessions stay findable by the name they snapshotted"
-    );
-    assert_eq!(value["matching"], 1);
-
-    // The id half of the same rule, for the same session: the id
-    // outlives the profile too, so a client holding one still resolves.
-    let (_, value) = get_json(&harness, "/api/sessions?profile=p-gone").await;
-    assert_eq!(row_ids(&value), vec!["alpha-waiting"]);
-
-    // A raw-created session matches NO profile filter — it was never
-    // shaped by one, and "sessions from profile X" must not quietly
-    // include sessions from no profile at all.
-    let (_, value) = get_json(&harness, "/api/sessions?profile=").await;
-    assert_eq!(
-        row_ids(&value).len(),
-        4,
-        "an empty profile parameter is a cleared search box, not a filter matching nothing"
-    );
 }
 
 /// Filters AND together, and the combination narrows further than
@@ -8249,7 +7416,6 @@ async fn only_an_empty_filter_value_clears_it_and_whitespace_is_content() {
             "/srv/my project",
             "fix  the  spacing",
             SessionStatus::Running,
-            None,
         ),
         filterable(
             "plain",
@@ -8257,7 +7423,6 @@ async fn only_an_empty_filter_value_clears_it_and_whitespace_is_content() {
             "/srv/plain",
             "ordinary",
             SessionStatus::Running,
-            None,
         ),
     ])
     .await;
@@ -8307,7 +7472,6 @@ async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
                     "/opt/work",
                     "Live one",
                     SessionStatus::Running,
-                    None,
                 ),
                 filterable(
                     "memory-idle",
@@ -8315,7 +7479,6 @@ async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
                     "/opt/other",
                     "Quiet one",
                     SessionStatus::Idle,
-                    None,
                 ),
             ],
             ..rest_harness::HostScript::default()
@@ -8844,170 +8007,137 @@ async fn create_with_valid_github_repo_without_a_root_names_the_set_root_command
     peer.await.unwrap();
 }
 
-/// A recorded fresh request must reach lookup before stale settings or a
-/// deleted launch profile can refuse it. Unknown keys still face current
+/// A recorded fresh request must reach lookup before stale settings can
+/// refuse it. Unknown keys still face current
 /// preconditions; a different installation must not receive even the lookup.
 /// The scripted peer observes the actual frame sequence and stays open until
 /// both REST calls finish, so an accidental create cannot hide behind EOF.
 #[farhelm_testtrace::test]
 async fn fresh_rest_reconciliation_precedes_mutable_resolution_and_binds_installation() {
+    use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, ProfileExistence, SourceProfile};
 
-    for by_name in [false, true] {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        for expected_key in ["recorded-key", "unknown-key", "unknown-stale-config"] {
+            let frame = reader.read_frame().await.unwrap().expect("lookup frame");
+            let ControlMsg::ReconcileGithubCheckout {
+                req_id,
+                intent_key,
+                client_identity,
+                refuse_unknown,
+                ..
+            } = parse_control(&frame).unwrap()
+            else {
+                panic!("expected lookup, never create");
+            };
+            assert_eq!(intent_key, expected_key);
+            assert!(
+                !refuse_unknown,
+                "the initial lookup must not spend an unknown key"
+            );
+            let identity: serde_json::Value = serde_json::from_str(&client_identity).unwrap();
+            assert_eq!(identity[0], "github_create_request_v1");
+            assert!(client_identity.contains("recorded-agent"));
+            assert!(client_identity.contains("local-identity"));
+            let session = if expected_key == "recorded-key" {
+                Some(rest_harness::session("recorded-session", 12))
+            } else {
+                None
+            };
+            writer
+                .write_control(&ControlMsg::GithubCheckoutReconciled { req_id, session })
                 .await
                 .unwrap();
-            for expected_key in ["recorded-key", "unknown-key", "unknown-stale-config"] {
-                let frame = reader.read_frame().await.unwrap().expect("lookup frame");
+            if expected_key != "recorded-key" {
+                let frame = reader
+                    .read_frame()
+                    .await
+                    .unwrap()
+                    .expect("durable refusal request");
                 let ControlMsg::ReconcileGithubCheckout {
                     req_id,
                     intent_key,
-                    client_identity,
-                    refuse_unknown,
+                    client_identity: refused_identity,
+                    refuse_unknown: true,
                     ..
                 } = parse_control(&frame).unwrap()
                 else {
-                    panic!("expected lookup, never create");
+                    panic!("a local keyed refusal must be settled, never dispatched as create");
                 };
                 assert_eq!(intent_key, expected_key);
-                assert!(
-                    !refuse_unknown,
-                    "the initial lookup must not spend an unknown key"
-                );
-                let identity: serde_json::Value = serde_json::from_str(&client_identity).unwrap();
-                assert_eq!(
-                    identity[0],
-                    if by_name {
-                        "github_named_profile_v1"
-                    } else {
-                        "github_create_request_v1"
-                    }
-                );
-                assert!(client_identity.contains("removed-profile"));
-                assert!(client_identity.contains("local-identity"));
-                let session = if expected_key == "recorded-key" {
-                    let mut session = rest_harness::session("recorded-session", 12);
-                    session.source_profile = Some(SourceProfile {
-                        id: "removed-profile".into(),
-                        name: "original profile".into(),
-                        existence: ProfileExistence::Unresolved,
-                    });
-                    Some(session)
-                } else {
-                    None
-                };
+                assert_eq!(refused_identity, client_identity);
                 writer
-                    .write_control(&ControlMsg::GithubCheckoutReconciled { req_id, session })
+                    .write_control(&ControlMsg::Error {
+                        req_id,
+                        kind: farhelm_proto::ErrorKind::CheckoutConflict,
+                        message: "fixture durable refusal".into(),
+                    })
                     .await
                     .unwrap();
-                if expected_key != "recorded-key" {
-                    let frame = reader
-                        .read_frame()
-                        .await
-                        .unwrap()
-                        .expect("durable refusal request");
-                    let ControlMsg::ReconcileGithubCheckout {
-                        req_id,
-                        intent_key,
-                        client_identity: refused_identity,
-                        refuse_unknown: true,
-                        ..
-                    } = parse_control(&frame).unwrap()
-                    else {
-                        panic!("a local keyed refusal must be settled, never dispatched as create");
-                    };
-                    assert_eq!(intent_key, expected_key);
-                    assert_eq!(refused_identity, client_identity);
-                    writer
-                        .write_control(&ControlMsg::Error {
-                            req_id,
-                            kind: farhelm_proto::ErrorKind::CheckoutConflict,
-                            message: "fixture durable refusal".into(),
-                        })
-                        .await
-                        .unwrap();
-                }
             }
-            tokio::select! {
-                biased;
-                frame = reader.read_frame() => panic!("unexpected frame after lookup: {frame:?}"),
-                result = &mut finished_rx => result.unwrap(),
-            }
-        });
-        let harness = rest_harness::spliced_helm(client_side).await;
-        let (claim, _) = super::create_target(&harness.state, None).unwrap();
-        assert!(
-            !harness
-                .store
-                .profiles()
-                .await
-                .unwrap()
-                .iter()
-                .any(|p| p.id == "removed-profile")
-        );
-        harness
-            .store
-            .set_checkout_root(None, "/current-root")
-            .await
-            .unwrap();
-        let current = harness.store.resolve_checkout_config(None).await.unwrap();
-        let mut body = serde_json::json!({
-            "cwd": "", "profile_id": "removed-profile", "intent_key": "recorded-key",
-            "expected_incarnation": claim.incarnation + 100,
-            "github_checkout": { "repo": "acme/bar", "title": null, "preview": {
-                "canonical_root": "/old-root", "basename": "bar-1", "cwd": "/old-root/bar-1",
-                "config_revision": current.config_revision - 1,
-                "host": claim.host.to_string(), "incarnation": claim.incarnation + 100,
-                "installation_identity": "local-identity"
-            }}
-        });
-        if by_name {
-            body.as_object_mut().unwrap().remove("profile_id");
-            body["profile_name"] = serde_json::json!("removed-profile");
         }
-        let (status, text) = post_text(&harness, "/api/sessions", body.clone()).await;
-        assert_eq!(status, axum::http::StatusCode::OK, "{text}");
-        let returned: farhelm_proto::SessionInfo = serde_json::from_str(&text).unwrap();
-        assert_eq!(returned.id, "recorded-session");
-        assert_eq!(
-            returned.source_profile.unwrap().existence,
-            ProfileExistence::Deleted
-        );
+        tokio::select! {
+            biased;
+            frame = reader.read_frame() => panic!("unexpected frame after lookup: {frame:?}"),
+            result = &mut finished_rx => result.unwrap(),
+        }
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let (claim, _) = super::create_target(&harness.state, None).unwrap();
+    harness
+        .store
+        .set_checkout_root(None, "/current-root")
+        .await
+        .unwrap();
+    let current = harness.store.resolve_checkout_config(None).await.unwrap();
+    let mut body = serde_json::json!({
+        "cwd": "", "invocation": "recorded-agent", "intent_key": "recorded-key",
+        "expected_incarnation": claim.incarnation + 100,
+        "github_checkout": { "repo": "acme/bar", "title": null, "preview": {
+            "canonical_root": "/old-root", "basename": "bar-1", "cwd": "/old-root/bar-1",
+            "config_revision": current.config_revision - 1,
+            "host": claim.host.to_string(), "incarnation": claim.incarnation + 100,
+            "installation_identity": "local-identity"
+        }}
+    });
+    let (status, text) = post_text(&harness, "/api/sessions", body.clone()).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+    let returned: farhelm_proto::SessionInfo = serde_json::from_str(&text).unwrap();
+    assert_eq!(returned.id, "recorded-session");
 
-        body["intent_key"] = serde_json::json!("unknown-key");
-        let (status, precondition_headers, text) =
-            post_text_headers(&harness, "/api/sessions", body.clone()).await;
-        assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
-        assert!(is_stale_precondition(&precondition_headers), "{text}");
+    body["intent_key"] = serde_json::json!("unknown-key");
+    let (status, precondition_headers, text) =
+        post_text_headers(&harness, "/api/sessions", body.clone()).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+    assert!(is_stale_precondition(&precondition_headers), "{text}");
 
-        body["intent_key"] = serde_json::json!("unknown-stale-config");
-        body["expected_incarnation"] = serde_json::json!(claim.incarnation);
-        body["github_checkout"]["preview"]["incarnation"] = serde_json::json!(claim.incarnation);
-        let (status, headers, text) =
-            post_text_headers(&harness, "/api/sessions", body.clone()).await;
-        assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
-        assert_eq!(headers["x-farhelm-create-outcome"], "definitely-unaccepted");
-        assert!(text.contains("checkout settings changed"), "{text}");
+    body["intent_key"] = serde_json::json!("unknown-stale-config");
+    body["expected_incarnation"] = serde_json::json!(claim.incarnation);
+    body["github_checkout"]["preview"]["incarnation"] = serde_json::json!(claim.incarnation);
+    let (status, headers, text) = post_text_headers(&harness, "/api/sessions", body.clone()).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+    assert_eq!(headers["x-farhelm-create-outcome"], "definitely-unaccepted");
+    assert!(text.contains("checkout settings changed"), "{text}");
 
-        body["github_checkout"]["preview"]["installation_identity"] =
-            serde_json::json!("different-installation");
-        let (status, text) = post_text(&harness, "/api/sessions", body).await;
-        assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
-        assert!(text.contains("different host installation"), "{text}");
-        finished_tx.send(()).unwrap();
-        peer.await.unwrap();
-    }
+    body["github_checkout"]["preview"]["installation_identity"] =
+        serde_json::json!("different-installation");
+    let (status, text) = post_text(&harness, "/api/sessions", body).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+    assert!(text.contains("different host installation"), "{text}");
+    finished_tx.send(()).unwrap();
+    peer.await.unwrap();
 }
 
 /// Local resolution failures need a second, atomic supervisor decision. This
-/// covers late profile-ID lookup as well as stale settings, and proves that
+/// covers late launch compilation as well as stale settings, and proves that
 /// unknown/transport/ordinary failure replies cannot acquire the durable-proof
 /// marker. A source-id winner is vetoed before history/default side effects.
 #[farhelm_testtrace::test]
@@ -9016,7 +8146,7 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
     use farhelm_proto::{ControlMsg, ErrorKind};
 
     for replacing in [false, true] {
-        for cause in ["settings", "profile-id"] {
+        for cause in ["settings", "launch"] {
             for disposition in [
                 "refused",
                 "unknown",
@@ -9115,17 +8245,6 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                     .set_checkout_root(None, "/configured-root")
                     .await
                     .unwrap();
-                harness
-                    .store
-                    .remember_profile_default("builtin-codex")
-                    .await
-                    .unwrap();
-                let profiles = harness.store.profiles().await.unwrap();
-                assert!(
-                    !profiles
-                        .iter()
-                        .any(|profile| profile.id == "removed-profile")
-                );
                 let config = harness.store.resolve_checkout_config(None).await.unwrap();
                 let (claim, _) = super::create_target(&harness.state, None).unwrap();
                 assert!(
@@ -9137,7 +8256,7 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                         .is_empty()
                 );
                 let mut request = serde_json::json!({
-                    "cwd": "", "profile_id": if cause == "profile-id" { "removed-profile" } else { "builtin-claude" },
+                    "cwd": "",
                     "github_checkout": {"repo": "acme/bar", "preview": {
                         "canonical_root": "/configured-root", "basename": "bar-1", "cwd": "/configured-root/bar-1",
                         "config_revision": config.config_revision - i64::from(cause == "settings"),
@@ -9145,6 +8264,16 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                         "installation_identity": "local-identity"
                     }}
                 });
+                // A Grok launch naming a model is refused only when the
+                // selection compiles, which is the late local step this
+                // cause needs; the settings cause uses a valid raw command.
+                if cause == "launch" {
+                    request["launch"] = serde_json::json!({
+                        "harness": "grok", "model": "grok-x", "effort": null, "permissions": null
+                    });
+                } else {
+                    request["invocation"] = serde_json::json!("claude");
+                }
                 let (route, body) = if replacing {
                     (
                         "/api/sessions/sess-1/replace",
@@ -9159,7 +8288,7 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                     "refused" | "source-veto" => axum::http::StatusCode::CONFLICT,
                     "unavailable" => axum::http::StatusCode::SERVICE_UNAVAILABLE,
                     "stored-failure" => axum::http::StatusCode::BAD_REQUEST,
-                    "unknown" if cause == "profile-id" => axum::http::StatusCode::NOT_FOUND,
+                    "unknown" if cause == "launch" => axum::http::StatusCode::BAD_REQUEST,
                     _ => axum::http::StatusCode::CONFLICT,
                 };
                 assert_eq!(
@@ -9179,7 +8308,7 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                         text.contains(if cause == "settings" {
                             "checkout settings changed"
                         } else {
-                            "profile not found"
+                            "Grok does not currently expose a verified model choice"
                         }),
                         "{text}"
                     );
@@ -9192,10 +8321,6 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                         .unwrap()
                         .is_empty()
                 );
-                assert_eq!(
-                    harness.store.remembered_profile().await.unwrap().as_deref(),
-                    Some("builtin-codex")
-                );
                 finished_tx.send(()).unwrap();
                 peer.await.unwrap();
             }
@@ -9205,13 +8330,13 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
 
 /// Two identical submissions can both observe an unknown key before one wins.
 /// The first reaches CreateSession under the original settings; a latch then
-/// changes configuration and deletes its named profile before the second
-/// resolves locally. Atomic refusal must return the accepted winner, including
-/// on replacement, without another create or a false non-acceptance marker.
+/// changes configuration before the second resolves locally. Atomic refusal
+/// must return the accepted winner, including on replacement, without
+/// another create or a false non-acceptance marker.
 #[farhelm_testtrace::test]
 async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, ErrorKind, ProfileExistence, SourceProfile};
+    use farhelm_proto::{ControlMsg, ErrorKind};
 
     for replacing in [false, true] {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
@@ -9247,7 +8372,6 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
             let ControlMsg::CreateSession {
                 req_id: create_id,
                 github_checkout: Some(checkout),
-                source_profile: Some(profile),
                 ..
             } = message
             else {
@@ -9258,11 +8382,6 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
             let mut winner = rest_harness::session("concurrent-winner", 13);
             winner.cwd = checkout.preview.cwd;
             winner.canonical_cwd = Some(winner.cwd.clone());
-            winner.source_profile = Some(SourceProfile {
-                id: profile.id,
-                name: profile.name,
-                existence: ProfileExistence::Unresolved,
-            });
             create_seen_tx.send(()).unwrap();
             let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
             let ControlMsg::ReconcileGithubCheckout {
@@ -9345,34 +8464,10 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
             .set_checkout_root(None, "/original-root")
             .await
             .unwrap();
-        let crate::store::ProfileCreation::Created(profile) = harness
-            .store
-            .create_profile(
-                "race-profile".into(),
-                "agent".into(),
-                farhelm_proto::AgentKind::Generic,
-                None,
-            )
-            .await
-            .unwrap()
-        else {
-            panic!("fixture needs a uniquely named profile")
-        };
-        assert_eq!(
-            harness
-                .store
-                .profiles()
-                .await
-                .unwrap()
-                .iter()
-                .filter(|p| p.name == "race-profile")
-                .count(),
-            1
-        );
         let config = harness.store.resolve_checkout_config(None).await.unwrap();
         let (claim, _) = super::create_target(&harness.state, None).unwrap();
         let mut request = serde_json::json!({
-            "cwd": "", "profile_name": "race-profile",
+            "cwd": "", "invocation": "agent",
             "github_checkout": {"repo": "acme/bar", "preview": {
                 "canonical_root": "/original-root", "basename": "bar-1", "cwd": "/original-root/bar-1",
                 "config_revision": config.config_revision, "host": claim.host.to_string(),
@@ -9398,7 +8493,6 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                 .set_checkout_root(None, "/changed-root")
                 .await
                 .unwrap();
-            assert!(harness.store.delete_profile(&profile.id).await.unwrap());
             assert!(
                 harness
                     .store
@@ -9430,17 +8524,6 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                 assert!(text.contains("both sessions still exist"), "{text}");
             }
         }
-        if !replacing {
-            let returned: farhelm_proto::SessionInfo = serde_json::from_str(&second.2).unwrap();
-            assert_eq!(
-                returned.source_profile.unwrap().existence,
-                ProfileExistence::Deleted
-            );
-        }
-        assert_eq!(
-            harness.store.remembered_profile().await.unwrap().as_deref(),
-            Some(profile.id.as_str())
-        );
         assert_eq!(
             harness
                 .store
@@ -9489,8 +8572,6 @@ async fn fresh_create_and_replace_refuse_a_contradictory_cwd() {
         let (claim, _) = super::create_target(&harness.state, None).unwrap();
         for (selector, value) in [
             ("invocation", serde_json::json!("agent")),
-            ("profile_id", serde_json::json!("builtin-claude")),
-            ("profile_name", serde_json::json!("claude")),
             ("launch", serde_json::json!({"harness": "codex"})),
         ] {
             let mut request = serde_json::json!({
@@ -9525,261 +8606,6 @@ async fn fresh_create_and_replace_refuse_a_contradictory_cwd() {
         finished_tx.send(()).unwrap();
         peer.await.unwrap();
     }
-}
-
-/// A peer can forge profile provenance even on a matching-key reply. Named
-/// replays must not let that metadata choose the helm-wide default; an
-/// explicit client-selected id remains authoritative. Exercise both entry
-/// points because replacement has its own reconciliation acceptance path.
-#[farhelm_testtrace::test]
-async fn fresh_reconciliation_does_not_trust_remote_profile_defaults() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, ErrorKind, ProfileExistence, SourceProfile};
-
-    for replacing in [false, true] {
-        for by_name in [true, false] {
-            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-            let (harness, local) =
-                spliced_replace_harness(client_side, vec![rest_harness::session("sess-1", 12)])
-                    .await;
-            let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
-            let peer = tokio::spawn(async move {
-                let (r, w) = tokio::io::split(peer_side);
-                let mut reader = FrameReader::new(r);
-                let mut writer = FrameWriter::new(w);
-                handshake(&mut reader, &mut writer, "supervisor")
-                    .await
-                    .unwrap();
-                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-                let ControlMsg::ReconcileGithubCheckout { req_id, .. } = message else {
-                    panic!("expected reconciliation: {message:?}");
-                };
-                let mut session = rest_harness::session("reconciled", 13);
-                session.source_profile = Some(SourceProfile {
-                    id: "builtin-codex".into(),
-                    name: "codex".into(),
-                    existence: ProfileExistence::Unresolved,
-                });
-                writer
-                    .write_control(&ControlMsg::GithubCheckoutReconciled {
-                        req_id,
-                        session: Some(session),
-                    })
-                    .await
-                    .unwrap();
-                if replacing {
-                    let message =
-                        parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-                    let ControlMsg::DeleteSession {
-                        req_id, session_id, ..
-                    } = message
-                    else {
-                        panic!("expected source deletion: {message:?}");
-                    };
-                    assert_eq!(session_id, "sess-1");
-                    // A definite delete refusal leaves both sessions visible
-                    // without changing which create has been accepted.
-                    writer
-                        .write_control(&ControlMsg::Error {
-                            req_id,
-                            kind: ErrorKind::Conflict,
-                            message: "retain source".into(),
-                        })
-                        .await
-                        .unwrap();
-                }
-                tokio::select! {
-                    biased;
-                    frame = reader.read_frame() => panic!("unexpected frame: {frame:?}"),
-                    result = &mut finished_rx => result.unwrap(),
-                }
-            });
-            harness.await_refreshed(local).await;
-            let profiles = harness.store.profiles().await.unwrap();
-            for id in ["builtin-claude", "builtin-codex", "builtin-codex-yolo"] {
-                assert!(profiles.iter().any(|profile| profile.id == id));
-            }
-            harness
-                .store
-                .remember_profile_default("builtin-codex-yolo")
-                .await
-                .unwrap();
-            assert_eq!(
-                harness.store.remembered_profile().await.unwrap().as_deref(),
-                Some("builtin-codex-yolo")
-            );
-            let (claim, _) = super::create_target(&harness.state, None).unwrap();
-            let mut request = serde_json::json!({
-                "cwd": "", "github_checkout": {"repo": "acme/bar", "preview": {
-                    "canonical_root": "/old-root", "basename": "bar-1", "cwd": "/old-root/bar-1",
-                    "config_revision": 0, "host": claim.host.to_string(),
-                    "incarnation": claim.incarnation, "installation_identity": "local-identity"
-                }}
-            });
-            if by_name {
-                request["profile_name"] = serde_json::json!("claude");
-            } else {
-                request["profile_id"] = serde_json::json!("builtin-claude");
-            }
-            let (route, body) = if replacing {
-                (
-                    "/api/sessions/sess-1/replace",
-                    serde_json::json!({"intent_key": "recorded", "with": request}),
-                )
-            } else {
-                request["intent_key"] = serde_json::json!("recorded");
-                ("/api/sessions", request)
-            };
-            let (status, text) = post_text(&harness, route, body).await;
-            assert_eq!(
-                status,
-                if replacing {
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR
-                } else {
-                    axum::http::StatusCode::OK
-                },
-                "{text}"
-            );
-            assert!(text.contains("reconciled"), "{text}");
-            assert_eq!(
-                harness.store.remembered_profile().await.unwrap().as_deref(),
-                Some(if by_name {
-                    "builtin-codex-yolo"
-                } else {
-                    "builtin-claude"
-                }),
-                "remote profile metadata must not select the default"
-            );
-            finished_tx.send(()).unwrap();
-            peer.await.unwrap();
-        }
-    }
-}
-
-/// Name selection must resolve exactly once before fresh allocation, and
-/// malformed or ambiguous selectors must never reach the supervisor. The
-/// single observed frame is the positive control after all local refusals.
-#[farhelm_testtrace::test]
-async fn named_profile_fresh_create_resolves_exactly_and_refuses_ambiguous_selectors() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, ProfileExistence, SourceProfile};
-
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-        let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::CreateSession {
-            req_id,
-            invocation,
-            source_profile: Some(profile),
-            github_checkout: Some(checkout),
-            cwd,
-            ..
-        } = message
-        else {
-            panic!("expected the one valid named fresh create: {message:?}");
-        };
-        assert_eq!(profile.id, "builtin-claude");
-        assert!(
-            cwd.is_empty(),
-            "preview cwd is not an ordinary supervisor destination"
-        );
-        assert_eq!(profile.name, "claude");
-        assert_eq!(invocation.as_deref(), Some("claude"));
-        assert_eq!(checkout.root, "/named-root");
-        assert!(checkout.client_identity.contains("github_named_profile_v1"));
-        let mut session = rest_harness::session("named-fresh", 100);
-        session.cwd = "/named-root/bar-1".into();
-        session.canonical_cwd = Some(session.cwd.clone());
-        session.source_profile = Some(SourceProfile {
-            id: profile.id,
-            name: profile.name,
-            existence: ProfileExistence::Unresolved,
-        });
-        writer
-            .write_control(&ControlMsg::SessionCreated { req_id, session })
-            .await
-            .unwrap();
-    });
-    let harness = rest_harness::spliced_helm(client_side).await;
-    let profiles = harness.store.profiles().await.unwrap();
-    assert_eq!(profiles.iter().filter(|p| p.name == "claude").count(), 1);
-    let base = serde_json::json!({ "cwd": "/tmp", "profile_name": "claude" });
-    for (field, value) in [
-        ("invocation", serde_json::json!("agent")),
-        ("profile_id", serde_json::json!("builtin-claude")),
-        ("launch", serde_json::json!({"harness": "codex"})),
-        ("agent_kind", serde_json::json!("generic")),
-        ("resume_template", serde_json::json!(["agent"])),
-    ] {
-        let mut body = base.clone();
-        body[field] = value;
-        let (status, text) = post_text(&harness, "/api/sessions", body).await;
-        assert_eq!(
-            status,
-            axum::http::StatusCode::BAD_REQUEST,
-            "{field}: {text}"
-        );
-    }
-    let (status, text) = post_text(
-        &harness,
-        "/api/sessions",
-        serde_json::json!({"cwd": "/tmp", "profile_name": "CLAUDE"}),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{text}");
-    let crate::store::ProfileCreation::Created(duplicate) = harness
-        .store
-        .create_profile(
-            "claude".into(),
-            "other-command".into(),
-            farhelm_proto::AgentKind::Generic,
-            None,
-        )
-        .await
-        .unwrap()
-    else {
-        panic!("fixture catalog must have capacity");
-    };
-    assert_eq!(
-        harness
-            .store
-            .profiles()
-            .await
-            .unwrap()
-            .iter()
-            .filter(|p| p.name == "claude")
-            .count(),
-        2
-    );
-    let (status, text) = post_text(&harness, "/api/sessions", base).await;
-    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{text}");
-    assert!(harness.store.delete_profile(&duplicate.id).await.unwrap());
-    harness
-        .store
-        .set_checkout_root(None, "/named-root")
-        .await
-        .unwrap();
-    let settings = harness.store.resolve_checkout_config(None).await.unwrap();
-    let (claim, _) = super::create_target(&harness.state, None).unwrap();
-    let body = serde_json::json!({
-        "cwd": "/named-root/bar-1", "profile_name": "claude", "expected_incarnation": claim.incarnation,
-        "github_checkout": {"repo": "acme/bar", "title": null, "preview": {
-            "canonical_root": "/named-root", "basename": "bar-1", "cwd": "/named-root/bar-1",
-            "config_revision": settings.config_revision, "host": claim.host.to_string(),
-            "incarnation": claim.incarnation, "installation_identity": claim.identity,
-        }},
-    });
-    let (status, text) = post_text(&harness, "/api/sessions", body).await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
-    let session: farhelm_proto::SessionInfo = serde_json::from_str(&text).unwrap();
-    assert_eq!(session.source_profile.unwrap().id, "builtin-claude");
-    peer.await.unwrap();
 }
 
 /// Fresh replacement forwards the accepted payload once, then reconciles the
@@ -10503,5 +9329,29 @@ fn repository_discovery_failure_names_a_busy_host_and_nothing_else() {
     assert_eq!(
         super::repository_discovery_failure(&anyhow::anyhow!("connection lost")),
         git_hint
+    );
+}
+
+/// Spec: the fresh-create request identity of a typed-command create is
+/// exactly the string earlier releases produced for the same body, with
+/// `null` in the fourth slot where the removed `profile_id` selector sat.
+///
+/// Why: the identity is the key's binding across a lost reply, and the
+/// supervisor compares it by string equality. Removing profiles kept the
+/// slot so a fresh-checkout create retried across the upgrade still matches
+/// its own reservation (SPEC_impl.md, "Launch-kinds reservations"); a later
+/// edit that dropped or moved the slot would compile and pass every other
+/// test while quietly turning such retries into conflicts.
+#[farhelm_testtrace::test]
+fn a_typed_command_keeps_its_pre_removal_request_identity() {
+    let req: super::CreateReq = serde_json::from_value(serde_json::json!({
+        "cwd": "/w",
+        "invocation": "agent",
+        "title": "t",
+    }))
+    .expect("a typed-command create body decodes");
+    assert_eq!(
+        super::fresh_create_request_identity(&req),
+        r#"["github_create_request_v1","/w","agent",null,null,"t",null,null,null,null,null]"#
     );
 }

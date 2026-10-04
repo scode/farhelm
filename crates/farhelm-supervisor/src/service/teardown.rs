@@ -1245,7 +1245,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: true,
-                    source_profile: None,
                 },
                 None,
             )
@@ -2145,7 +2144,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 4,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -2208,7 +2206,6 @@ mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: true,
-                    source_profile: None,
                 },
                 None,
             )
@@ -3665,7 +3662,6 @@ mod tests {
                 invocation: "agent".into(),
                 agent_kind: None,
                 resume_template: None,
-                source_profile: None,
                 launch: None,
             },
             title: None,

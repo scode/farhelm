@@ -52,10 +52,8 @@
 //! - **What a launch can choose.** Exhaustive `LaunchHarness` methods in
 //!   `farhelm-proto/src/launch.rs` (`agent_kind`, `offers_model`,
 //!   `offers_effort`, `offers_permission`, `offers_workspace_trust`,
-//!   `offers_only_yolo`). The built-in launch profiles (Claude, Codex, Muse,
-//!   Cursor and their YOLO variants, with their resume templates) are
-//!   `builtin_profiles` in `farhelm-helm/src/store.rs`. The helm's release
-//!   catalog and argv compiler stay in
+//!   `offers_only_yolo`). The helm's release catalog and argv compiler stay
+//!   in
 //!   `farhelm-helm/src/launches.rs`: exhaustive matches for the program
 //!   name and the model, effort, and YOLO flags, plus harness-specific
 //!   branches (Goose's environment and subcommand, Grok's `--no-leader`,
@@ -67,10 +65,9 @@
 //!   `LaunchHarness::ALL` at compile time, help text); `list/row.rs` maps
 //!   harnesses to their marks in `icons.rs`. One exception keeps a direct
 //!   comparison: the new-session form's Cursor support notice
-//!   (`list/create_form.rs`), which also recognizes Cursor's built-in
-//!   profiles by id. The browser's per-agent facts are keyed on the agent
-//!   KIND rather than the harness, so they also cover raw and profile
-//!   launches: they live in the exhaustive functions of `SessionAgentKind` in
+//!   (`list/create_form.rs`). The browser's per-agent facts are keyed on the
+//!   agent KIND rather than the harness, so they also cover raw launches:
+//!   they live in the exhaustive functions of `SessionAgentKind` in
 //!   `farhelm-ui/src/lib.rs`, the browser's tolerant mirror of
 //!   [`farhelm_proto::AgentKind`] (today the copy instruction the terminal's
 //!   "this drag did not copy" notice offers).
@@ -190,9 +187,9 @@ pub const CONVERSATION_PLACEHOLDER: &str = "{conversation}";
 ///
 /// Exists for wrapper launchers shaped like `wrapper run <dir> <agent...>`,
 /// which need the directory as an ARGUMENT rather than as an ambient
-/// value. Without it, one profile could only ever launch into a single
+/// value. Without it, one command line could only ever launch into a single
 /// hardcoded directory. `{cwd}` keeps that argument aligned with the launch's
-/// actual working directory, including when one profile serves many projects.
+/// actual working directory, including when one command serves many projects.
 ///
 /// Same rules as [`CONVERSATION_PLACEHOLDER`], for the same reasons: EXACT
 /// whole-element equality (`--dir={cwd}` is literal text, not a match),
@@ -1067,8 +1064,8 @@ fn claude_has_ambiguous_resume_shape(args: &[String]) -> bool {
 /// argument spelled exactly `resume` or `fork` is refused, not only the
 /// subcommand: a prompt that is that single word, or an option value such as
 /// `-p fork` (a config profile named `fork`), refuses a derived template even
-/// though it would have resumed. An explicit resume template (a profile's
-/// resume command) remains the escape hatch.
+/// though it would have resumed. An explicit resume template remains the
+/// escape hatch.
 fn codex_has_session_selector(args: &[String]) -> bool {
     args.iter()
         .any(|argument| matches!(argument.as_str(), "resume" | "fork"))
@@ -1954,8 +1951,7 @@ pub enum SnapshotError {
     #[error(
         "a Codex invocation that already contains \"resume\" or \"fork\" cannot be resumed by \
          Farhelm: Codex accepts only one session selector, so the resume command Farhelm would \
-         add could never start; launch it without that argument, or from a profile that sets \
-         its own resume command"
+         add could never start; launch it without that argument"
     )]
     CodexAmbiguousResumeSelector,
     /// A derived Claude template cannot append `--resume <id>` to a launch
@@ -1969,8 +1965,7 @@ pub enum SnapshotError {
         "a Claude invocation that already contains --continue, -c, --resume, -r, --session-id, \
          --from-pr, --teleport, --fork-session or a bare \"--\" cannot be resumed by Farhelm: \
          the --resume flag Farhelm would add could open a different conversation or be read as \
-         prompt text; launch it without that argument, or from a profile that sets its own \
-         resume command"
+         prompt text; launch it without that argument"
     )]
     ClaudeAmbiguousResumeSelector,
 }
@@ -2488,16 +2483,14 @@ pub fn template_has_placeholder(template: Option<&[String]>) -> bool {
 /// accepted, built, or read back.
 ///
 /// `subject` names the thing being checked in the returned message ("agent
-/// invocation", "profile invocation", "resume template", ...); the `Err` is
+/// invocation", "resume template", ...); the `Err` is
 /// the user-facing text verbatim, so callers wrap it in whichever
 /// `ErrorKind` their boundary uses rather than reformatting it.
 ///
 /// It lives here, beside [`CONVERSATION_PLACEHOLDER`], because the rule is
-/// about what an argv IS rather than about which request produced one. It
-/// used to exist only in the profile-write validator, which meant a raw
-/// create, a pending-retry takeover, and a restart each accepted vectors
-/// that profile CRUD refused — the same unexecutable command line, reached
-/// by a different door.
+/// about what an argv IS rather than about which request produced one: a
+/// raw create, a pending-retry takeover, and a restart must all refuse the
+/// same unexecutable command line, whichever door it came through.
 ///
 /// The three refusals, and why each:
 ///
@@ -3342,7 +3335,7 @@ mod tests {
         assert_eq!(fill_cwd(argv.clone(), "/tmp"), argv);
     }
 
-    /// A template with no `{cwd}` at all is the common case (every profile
+    /// A template with no `{cwd}` at all is the common case (every launch
     /// that does not use a wrapper), and it has to be a true no-op: no
     /// spurious element added, no existing element rewritten. Paired with
     /// `has_cwd_placeholder` returning `false`, since that predicate is

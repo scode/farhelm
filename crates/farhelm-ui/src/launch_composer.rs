@@ -228,7 +228,7 @@ pub(crate) enum ComposerSearchResult {
     /// Select one currently offered host without touching the agent draft.
     Host(ComposerHost),
     Harness(LaunchHarness),
-    /// Switch the shared composer to its profile-or-raw-command controls.
+    /// Switch the shared composer to its raw-command controls.
     Command,
     Model {
         id: String,

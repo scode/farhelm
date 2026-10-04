@@ -33,8 +33,6 @@
 import { expect, test } from "./helpers/evidence";
 import { Page, APIRequestContext, Locator, Route } from "@playwright/test";
 import {
-  cleanupProfile,
-  createProfile,
   createResumableSession,
   createSession,
   hostRowByName,
@@ -701,9 +699,8 @@ test.describe("multi-host", () => {
     await expect(local.locator(".host-kind-icon + .visually-hidden")).toHaveText("local");
     await expect(local.locator(".host-status .status-dot")).toBeVisible();
     await expect(local.locator(".host-status-label")).toHaveCount(0);
-    // Profiles lives beside New in the session list header. The local row menu contains Retry and
-    // whichever provisioning command its current setup state permits, but
-    // never destination management.
+    // The local row menu contains Retry and whichever provisioning command
+    // its current setup state permits, but never destination management.
     await openHostMenu(local);
     await expect(local.locator(".host-remove")).toHaveCount(0);
     // Settings is offered on the local row too: whether YOLO launches are
@@ -2176,10 +2173,10 @@ test.describe("multi-host", () => {
   // Clone across hosts, end to end (`create_form.rs`'s `pending_choice`):
   // cloning a row that lives on the SECOND host, while the create
   // dialog's ordinary default points at the FIRST, must still land the
-  // create on the row's own host with the row's own profile — not on
-  // wherever the dialog would otherwise have defaulted. The profile comes
-  // from the helm-wide catalog, so changing hosts must preserve it.
-  test("clone-cross-host: a remote row's clone carries its own host and profile across the handoff", async ({
+  // create on the row's own host with the row's own command — not on
+  // wherever the dialog would otherwise have defaulted. Moving the host
+  // selector must not lose the command the clone seeded.
+  test("clone-cross-host: a remote row's clone carries its own host and command across the handoff", async ({
     page,
     request,
   }) => {
@@ -2187,15 +2184,12 @@ test.describe("multi-host", () => {
     const info = stackInfo();
     const remote = await apiRemoteHost(request);
 
-    const profile = await createProfile(request, {
-      name: `clone-remote-profile-${Date.now()}`,
-    });
     const title = `clone-remote-source-${Date.now()}`;
     const source = await createSession(request, {
       title,
       cwd: "/tmp",
       host: remote.id,
-      profile_id: profile.id,
+      invocation: FAKE_AGENT_INVOCATION,
     });
     // Opened FIRST so the dialog's ordinary default (SPEC.md's "the open
     // session's host") names the LOCAL machine — the opposite of where
@@ -2229,7 +2223,7 @@ test.describe("multi-host", () => {
       await expect(form.locator(".create-session-host")).toHaveValue(String(remote.id), {
         timeout: 20_000,
       });
-      await expect(form.locator(".create-session-profile")).toHaveValue(profile.id, {
+      await expect(form.getByLabel("agent command")).toHaveValue(FAKE_AGENT_INVOCATION, {
         timeout: 20_000,
       });
 
@@ -2241,12 +2235,12 @@ test.describe("multi-host", () => {
         ),
         form.locator(".create-session-submit").click(),
       ]);
-      // The wire body itself, not just what the picker showed — the two
-      // could disagree if the reseed effect wrote the picker's display
+      // The wire body itself, not just what the field showed — the two
+      // could disagree if the reseed effect wrote the field's display
       // without also writing what submit actually reads.
       const sent = response.request().postDataJSON();
       expect(sent.host).toBe(remote.id);
-      expect(sent.profile_id).toBe(profile.id);
+      expect(sent.invocation).toBe(FAKE_AGENT_INVOCATION);
 
       const body = await response.json();
       cloneId = body.id as string;
@@ -2259,34 +2253,28 @@ test.describe("multi-host", () => {
       if (cloneId) await cleanupSession(request, cloneId);
       await cleanupSession(request, anchor.id);
       await cleanupSession(request, source.id);
-      await cleanupProfile(request, profile.id);
     }
   });
 
-  // Clone host reconciliation can remain Waiting while the helm-wide catalog
-  // has already made every agent option usable. The hosts GET is deliberately
-  // held below so the explicit pick is made inside that state, then released:
-  // the later host Bind may select the source installation, but it must never
-  // reclaim ownership of an agent choice the user already made.
-  test("clone-cross-host-explicit-pick: an agent chosen while hosts are pending survives bind", async ({
+  // Clone host reconciliation can remain Waiting while the cloned command is
+  // already editable. The hosts GET is deliberately held below so the edit is
+  // made inside that state, then released: the later host Bind may select the
+  // source installation, but it must never rewrite a command the user has
+  // already edited.
+  test("clone-cross-host-explicit-edit: a command edited while hosts are pending survives bind", async ({
     page,
     request,
   }) => {
     requireFleet();
     const remote = await apiRemoteHost(request);
 
-    const clonedProfile = await createProfile(request, {
-      name: `clone-remote-cloned-${Date.now()}`,
-    });
-    const explicitProfile = await createProfile(request, {
-      name: `clone-remote-explicit-${Date.now()}`,
-    });
+    const explicitCommand = "sh -c 'sleep 300'";
     const title = `clone-remote-explicit-source-${Date.now()}`;
     const source = await createSession(request, {
       title,
       cwd: "/tmp",
       host: remote.id,
-      profile_id: clonedProfile.id,
+      invocation: FAKE_AGENT_INVOCATION,
     });
     // Opened first for the same reason `clone-cross-host` opens one: with
     // no anchor the dialog's ordinary default might already name the
@@ -2325,18 +2313,18 @@ test.describe("multi-host", () => {
       const form = page.locator(".create-session-form");
       await expect(form).toBeVisible();
       await expect(form.locator(".create-session-host")).toHaveValue("");
-      await expect(form.locator(`.create-session-profile option[value="${explicitProfile.id}"]`))
-        .toHaveCount(1, { timeout: 20_000 });
-      await form.locator(".create-session-profile").selectOption(explicitProfile.id);
+      const command = form.getByLabel("agent command");
+      await expect(command).toHaveValue(FAKE_AGENT_INVOCATION, { timeout: 20_000 });
+      await command.fill(explicitCommand);
 
       releaseHosts!();
 
       // The host still followed the clone across the handoff — only the
-      // agent was overridden.
+      // command was overridden.
       await expect(form.locator(".create-session-host")).toHaveValue(String(remote.id), {
         timeout: 20_000,
       });
-      await expect(form.locator(".create-session-profile")).toHaveValue(explicitProfile.id);
+      await expect(command).toHaveValue(explicitCommand);
 
       const newCwd = stackScratchDir("clone-remote-explicit-e2e-");
       await form.getByLabel("folder", { exact: true }).fill(newCwd);
@@ -2349,9 +2337,9 @@ test.describe("multi-host", () => {
       const sent = response.request().postDataJSON();
       expect(sent.host).toBe(remote.id);
       expect(
-        sent.profile_id,
-        "the explicit pick must reach the wire, not the clone's own profile the handoff had queued",
-      ).toBe(explicitProfile.id);
+        sent.invocation,
+        "the explicit edit must reach the wire, not the clone's own command",
+      ).toBe(explicitCommand);
 
       const body = await response.json();
       cloneId = body.id as string;
@@ -2362,8 +2350,6 @@ test.describe("multi-host", () => {
       if (cloneId) await cleanupSession(request, cloneId);
       await cleanupSession(request, anchor.id);
       await cleanupSession(request, source.id);
-      await cleanupProfile(request, clonedProfile.id);
-      await cleanupProfile(request, explicitProfile.id);
     }
   });
 
@@ -3666,10 +3652,6 @@ test.describe("multi-host", () => {
       const form = page.locator(".create-session-form");
       await form.getByRole("button", { name: "other / command" }).click();
       await form.locator(".create-session-host").selectOption(String(down));
-      // Command mode explicitly, as `fillCreateForm` does and for the same
-      // reason. A host change now preserves any profile choice, so this reset
-      // states that the test is intentionally exercising a typed command.
-      await form.locator(".create-session-profile").selectOption("");
       await form.getByLabel("folder", { exact: true }).fill("/tmp");
       await form.getByLabel("agent command").fill(FAKE_AGENT_INVOCATION);
       await form.getByLabel("name (optional)").fill(title);
@@ -3888,10 +3870,10 @@ test.describe("multi-host", () => {
         )
         .toContain("identity-after-the-move");
 
-      // The picker must remain in command mode without dispatching another
+      // The form must remain in command mode without dispatching another
       // change event. Re-selecting it here would rotate the key itself and let
       // broken retarget invalidation pass this test.
-      await expect(form.locator(".create-session-profile")).toHaveValue("");
+      await expect(form).toHaveAttribute("data-composer-mode", "command");
 
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-error")).toBeVisible();

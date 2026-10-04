@@ -23,15 +23,11 @@ dioxus.workspace = true
 # net and process support, which does not build for wasm32. Native builds get
 # `io` back anyway through farhelm-helm; nothing in this crate uses it.
 farhelm-proto = { path = "../farhelm-proto", default-features = false }
-# Races renderer bridge calls against one deadline on both wasm and desktop.
-# The JavaScript commit still guards its own side effect because dropping the
-# Rust future cannot cancel script that the renderer has already started.
-futures-util.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # Parses a launch command's argv the same way the supervisor does
-# (`farhelm-supervisor`'s own profile-invocation validation), so the row's
+# (`farhelm-supervisor`'s own invocation validation), so the row's
 # compact invocation badge (`list::row::compact_invocation`) derives its
 # program basename and marker candidates from real shell-word splitting
 # instead of a partial hand-rolled parser. Pure Rust with no OS glue, so it
@@ -39,7 +35,8 @@ serde_json.workspace = true
 shell-words.workspace = true
 # `Instant` with the standard monotonic contract on both native and wasm.
 # The wasm standard library does not implement `std::time::Instant`, while
-# popup focus deadlines must use one Rust-owned clock on both renderers.
+# the list's hold and request timing must use one Rust-owned clock on both
+# renderers.
 web-time = "1.1.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

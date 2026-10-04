@@ -130,7 +130,6 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
     // state rather than a post-interaction snapshot.
     await expectPrimary(".new-session-button");
     await expectNeutral(".add-host-button");
-    await expectNeutral(".profiles-toggle");
 
     // --- Composer exemption: Launch is deliberately brighter
     // than the generic sidebar primary, per the maintainer's composer mockup.
@@ -221,9 +220,7 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
 });
 
 /**
- * Sidebar heading buttons keep their requested hierarchy and density. The
- * profile control is checked beside New because its move is a layout contract,
- * not only a paint change.
+ * Sidebar heading buttons keep their requested hierarchy and density.
  * The permanent native host select is deliberately outside this button-paint
  * contract; explicit dimensions guard the compact heading size independently.
  */
@@ -233,46 +230,16 @@ test("sidebar heading buttons share secondary paint and compact sizing", async (
   await expect(page.getByRole("button", { name: "new session" })).toHaveText("new");
   await expect(page.getByRole("button", { name: "add host" })).toHaveText("add");
 
-  const heading = page.locator(".session-heading");
-  const newButton = heading.locator(".new-session-button");
-  const profiles = heading.locator(".profiles-toggle");
-  await expect(profiles).toHaveClass(/btn-neutral/);
-  expect(
-    await newButton.evaluate((node) => node.nextElementSibling?.matches(".profiles-toggle") ?? false),
-    "profiles must be the immediate sibling after New in the session list header",
-  ).toBe(true);
-  const buttonGeometry = await Promise.all(
-    [newButton, profiles].map((button) =>
-      button.evaluate((node) => {
-        const style = getComputedStyle(node);
-        return {
-          height: node.getBoundingClientRect().height,
-          paddingTop: style.paddingTop,
-          paddingRight: style.paddingRight,
-          fontSize: style.fontSize,
-          borderRadius: style.borderRadius,
-        };
-      }),
-    ),
-  );
-  expect(buttonGeometry[1], "profiles must match New's rendered shape and size").toEqual(buttonGeometry[0]);
-
-  const secondary = [".profiles-toggle", ".add-host-button"];
-  const styles = await Promise.all(
-    secondary.map((selector) =>
-      page.locator(selector).evaluate((node) => {
-        const style = getComputedStyle(node);
-        return [style.backgroundColor, style.borderTopColor, style.color];
-      }),
-    ),
-  );
-  expect(styles[1]).toEqual(styles[0]);
+  await expect(page.locator(".add-host-button")).toHaveClass(/btn-neutral/);
+  const secondaryBackground = await page
+    .locator(".add-host-button")
+    .evaluate((node) => getComputedStyle(node).backgroundColor);
   const primaryBackground = await page
     .locator(".new-session-button")
     .evaluate((node) => getComputedStyle(node).backgroundColor);
-  expect(primaryBackground).not.toBe(styles[0][0]);
+  expect(primaryBackground).not.toBe(secondaryBackground);
 
-  for (const selector of [".new-session-button", ".profiles-toggle", ".add-host-button"]) {
+  for (const selector of [".new-session-button", ".add-host-button"]) {
     await expect(page.locator(selector)).toHaveCSS("font-size", "12px");
     await expect(page.locator(selector)).toHaveCSS("padding-top", "2px");
     await expect(page.locator(selector)).toHaveCSS("padding-right", "8px");

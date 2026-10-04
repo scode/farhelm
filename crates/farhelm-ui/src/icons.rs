@@ -49,7 +49,7 @@
 use dioxus::prelude::*;
 
 /// The harness identity a sidebar badge can establish without trusting a
-/// profile name. `Terminal` is deliberately the fallback: it says that the
+/// display label. `Terminal` is deliberately the fallback: it says that the
 /// stored command exists without pretending Farhelm knows what runs it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HarnessGlyph {

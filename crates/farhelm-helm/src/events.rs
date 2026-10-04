@@ -5,11 +5,11 @@
 //! carries REVISION NUMBERS ONLY — never a session, never a host, never a
 //! diff — and a client that receives one re-reads whatever its current
 //! surface needs through the readers it already has (the session list, the
-//! detail fetch, the hosts read, the profiles read). Three things fall out
+//! detail fetch, the hosts read, the preferences read). Three things fall out
 //! of that choice, and they are the whole reason it is shaped this way:
 //!
 //! - **One payload shape for every kind of change.** A create, a rename, a
-//!   status flip, a host going down and a profile edit are indistinguishable
+//!   status flip, a host going down and a preference write are indistinguishable
 //!   here, so there is exactly one thing to get right on the wire instead of
 //!   one per mutation.
 //! - **A lagged subscriber collapses to one re-read.** The revision is a

@@ -5,7 +5,7 @@
 //! are tested together. Child-only environment changes keep the test runner
 //! safe for parallel execution.
 
-use farhelm_proto::{ControlMsg, RestartOffer, SessionInfo, SessionStatus, SourceProfile, TabInfo};
+use farhelm_proto::{ControlMsg, RestartOffer, SessionInfo, SessionStatus, TabInfo};
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::process::{Command, Output};
@@ -89,11 +89,6 @@ fn child_session(cwd: String) -> SessionInfo {
         annotation: None,
         restart_offer: RestartOffer::NoConversationReporting,
         tabs: Vec::<TabInfo>::new(),
-        source_profile: Some(SourceProfile {
-            id: "profile-1".to_string(),
-            name: "Agent One".to_string(),
-            existence: farhelm_proto::ProfileExistence::Present,
-        }),
         github_repo: None,
         working_copy: None,
     }
@@ -210,7 +205,7 @@ fn cwd_is_required_by_the_cli_surface() {
     assert!(String::from_utf8(output.stderr).unwrap().contains("--cwd"));
 }
 
-/// Spawn requires an explicit agent choice before it can contact the
+/// Spawn requires explicit `--inherit-agent` before it can contact the
 /// supervisor.
 ///
 /// The inheritance flag is a consequential choice rather than the absence
@@ -218,7 +213,7 @@ fn cwd_is_required_by_the_cli_surface() {
 /// emitting the omitted-selector wire shape that older builds treated as an
 /// implicit parent snapshot.
 #[farhelm_testtrace::test]
-fn an_agent_selector_is_required_by_the_cli_surface() {
+fn explicit_inheritance_is_required_by_the_cli_surface() {
     let output = spawn_command()
         .args(["--cwd", "/tmp"])
         .output()
@@ -227,12 +222,36 @@ fn an_agent_selector_is_required_by_the_cli_surface() {
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("--agent"),
-        "the refusal names a selector: {stderr}"
-    );
-    assert!(
         stderr.contains("--inherit-agent"),
         "the refusal names explicit inheritance: {stderr}"
+    );
+}
+
+/// `farhelm spawn --agent <name>`, removed with agent profiles, is refused
+/// before the supervisor is contacted, with a message naming
+/// `--inherit-agent`.
+///
+/// Agents in sessions started before profiles were removed may still pass
+/// a profile name here; the refusal has to tell them what a spawn can do
+/// instead. The variables point at a socket nobody listens on, so a
+/// regression that sent the request would fail on the connection rather
+/// than with this message.
+#[farhelm_testtrace::test]
+fn the_removed_agent_selector_is_refused_naming_inheritance() {
+    let temp = farhelm_teststate::tempdir().expect("tempdir");
+    let output = spawn_command()
+        .args(["--cwd", "/tmp", "--agent", "claude", "--inherit-agent"])
+        .env("FARHELM_SESSION_ID", "parent-123")
+        .env("FARHELM_SESSION_TOKEN", "secret")
+        .env("FARHELM_SUPERVISOR_SOCK", temp.path().join("absent.sock"))
+        .output()
+        .expect("run spawn");
+    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("agent profiles were removed") && stderr.contains("--inherit-agent"),
+        "the refusal says why and names inheritance: {stderr}"
     );
 }
 
@@ -256,14 +275,11 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
             parent,
             cwd,
             invocation,
-            profile_name,
-            profile_id,
             inherit_agent,
             title,
             intent_key,
             agent_kind,
             resume_template,
-            source_profile,
             ..
         } = request
         else {
@@ -272,12 +288,9 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
         assert_eq!(parent.as_deref(), Some("parent-123"));
         assert_eq!(cwd, expected_cwd);
         assert_eq!(invocation, None);
-        assert_eq!(profile_name.as_deref(), Some("Agent One"));
-        assert_eq!(profile_id, None);
-        assert!(!inherit_agent);
+        assert!(inherit_agent);
         assert_eq!(agent_kind, None);
         assert_eq!(resume_template, None);
-        assert_eq!(source_profile, None);
         assert_eq!(title.as_deref(), Some("scripted child"));
         assert_eq!(intent_key.as_deref(), Some("retry-7"));
         ControlMsg::SessionCreated {
@@ -295,8 +308,7 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
         .args([
             "--cwd",
             "alias/missing-child",
-            "--agent",
-            "Agent One",
+            "--inherit-agent",
             "--parent",
             "parent-123",
             "--title",

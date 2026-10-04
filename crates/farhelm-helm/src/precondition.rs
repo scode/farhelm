@@ -1,21 +1,17 @@
 //! The one precondition a session create may carry: which CONNECTION the
 //! caller prepared it against.
 //!
-//! ## Why this survived the profile-default simplification
+//! ## Why only the create carries it
 //!
-//! This module once held two checks for every host-scoped mutation: which
-//! install (`expected_incarnation`) and which definition (`expected_definition`
-//! on profile edits). Both were removed from the profile routes along with
-//! the install-bound remembered default — profile edits are last-write-wins
-//! now (SPEC.md, Concepts / Agent profile), and a default is only a suggestion
-//! in a dropdown. The session CREATE kept its guard on purpose, because a
-//! create is an ACTION and the failure it closes is a silent success on the
-//! wrong machine:
+//! This module once held checks for other host-scoped mutations too; they
+//! went with the routes they guarded. The session CREATE kept its guard on
+//! purpose, because a create is an ACTION and the failure it closes is a
+//! silent success on the wrong machine:
 //!
 //! A create names its host by REGISTRY ID, and a registry id outlives the
 //! install it points at — a retarget or an adoption in another tab replaces
-//! what answers on the id without the id changing. The selected profile is
-//! helm-wide now, but the action can still succeed on the WRONG installation.
+//! what answers on the id without the id changing, so the action can succeed
+//! on the WRONG installation.
 //! The client checks before it sends; the window it cannot close is between
 //! its own check and the helm's routing, so the check travels WITH the
 //! request. The still-open TODO entry on the HostId-reuse create-default
@@ -56,9 +52,9 @@ use crate::manager::SessionClaim;
 #[error(
     "host {host} is not the connection this request was prepared against (it named connection \
      {expected}, and this host is now on connection {current}): a retarget, an adoption, or a \
-     reconnection has replaced what answers on that host, and profile ids from the previous \
-     install can resolve here to something else entirely — so nothing was changed. Re-read the \
-     host and try again"
+     reconnection has replaced what answers on that host, and a launch prepared for the \
+     previous install may mean something else entirely here — so nothing was changed. Re-read \
+     the host and try again"
 )]
 pub(crate) struct IncarnationStale {
     host: crate::store::HostId,

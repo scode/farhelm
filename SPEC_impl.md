@@ -205,37 +205,36 @@ live dot's mark-read action. Noncompact ended details and qualifier words occupy
 title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without ellipsis,
 clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded ages such
 as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: declared structured launch metadata is
-authoritative, while a legacy row receives only shell-word executable recognition plus the shared YOLO classifier; a
-profile name is not proof of either. C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode
-uses its attributed inline mark, and an unknown command uses the neutral terminal glyph. A legacy row with no name
-leaves that fact absent. `list::shared::session_locality` decides among three answers rather than two — `Local` when the
-session's host id matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why),
-`Remote` when both ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a
-hosts read that has not landed). A confirmed local glyph uses the semantic red caution color, including selected, stale,
-and compact rows, to keep local execution conspicuous. The row draws the LOCAL glyph only for a confirmed `Local`
-verdict — an `Unknown` row draws no glyph at all, never the local one, because a glyph is a positive claim
-`session_locality` has no evidence to back. The 2026-08-23 rule's weaker promise survives underneath: unknown locality
-still never SUPPRESSES an available host label, it only ever leaves the row free to show one it already has, and the
-glyph rule adds a second promise on top rather than replacing the first. Legacy rows without a host name at all
-necessarily show none regardless — locality answers whether a name would be shown, not whether one exists to show. The
-agent track is rendered as glyphs: structured launch metadata decides the harness when present. The sidebar's YOLO mark
-and the helm's YOLO confirmation must agree on every launch by calling the same `farhelm_proto::yolo` functions:
-`selection_is_yolo` for structured launches and `invocation_is_yolo` for command lines and profile invocations. No other
-code re-derives that answer. Raw launches the guard would ask about are marked YOLO, including uninterpretable `env`
-prefixes naming a known agent. The classifier recognizes documented vendor flags and option-spelled modes, including
-Codex's `-a never` with `-s danger-full-access`, while preserving the rule that Codex's sandboxed `--full-auto` is not
-YOLO. Unknown command lines remain unknown rather than being inferred as safe. An omitted Pi, OpenCode, OMP or Goose
-permission is rendered as YOLO for compatibility with older snapshots. The full invocation and a profile's snapshotted
-name remain in its accessible text and tooltip. The working directory is tilde-folded against the `/home/<user>` and
-`/Users/<user>` shapes, since no home directory is on the wire to fold against properly. Every one of those
-abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the full
-truth stays one hover away.
+authoritative, while a legacy row receives only shell-word executable recognition plus the shared YOLO classifier.
+C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode uses its attributed inline mark, and
+an unknown command uses the neutral terminal glyph. A legacy row with no name leaves that fact absent.
+`list::shared::session_locality` decides among three answers rather than two — `Local` when the session's host id
+matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why), `Remote` when both
+ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a hosts read that has
+not landed). A confirmed local glyph uses the semantic red caution color, including selected, stale, and compact rows,
+to keep local execution conspicuous. The row draws the LOCAL glyph only for a confirmed `Local` verdict — an `Unknown`
+row draws no glyph at all, never the local one, because a glyph is a positive claim `session_locality` has no evidence
+to back. The 2026-08-23 rule's weaker promise survives underneath: unknown locality still never SUPPRESSES an available
+host label, it only ever leaves the row free to show one it already has, and the glyph rule adds a second promise on top
+rather than replacing the first. Legacy rows without a host name at all necessarily show none regardless — locality
+answers whether a name would be shown, not whether one exists to show. The agent track is rendered as glyphs: structured
+launch metadata decides the harness when present. The sidebar's YOLO mark and the helm's YOLO confirmation must agree on
+every launch by calling the same `farhelm_proto::yolo` functions: `selection_is_yolo` for structured launches and
+`invocation_is_yolo` for command lines. No other code re-derives that answer. Raw launches the guard would ask about are
+marked YOLO, including uninterpretable `env` prefixes naming a known agent. The classifier recognizes documented vendor
+flags and option-spelled modes, including Codex's `-a never` with `-s danger-full-access`, while preserving the rule
+that Codex's sandboxed `--full-auto` is not YOLO. Unknown command lines remain unknown rather than being inferred as
+safe. An omitted Pi, OpenCode, OMP or Goose permission is rendered as YOLO for compatibility with older snapshots. The
+full invocation remains in its accessible text and tooltip. The working directory is tilde-folded against the
+`/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold against properly. Every one of
+those abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the
+full truth stays one hover away.
 
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
 Permission marks use three hand-drawn stroke silhouettes in the 12-unit viewBox: a slashed shield (`data-glyph="yolo"`)
 and a question mark (`unknown`) use `--warn`; a plain shield (`shielded`) uses `--ok`. The badge's permission is
 non-optional. Structured non-YOLO modes share the plain shield but retain their own mode-specific descriptions; a raw
-command or profile never gets that shield merely because YOLO was not recognized. Both slots remain fixed-width.
+command never gets that shield merely because YOLO was not recognized. Both slots remain fixed-width.
 
 The agent and permission SVGs sit in separate `title` targets, so hovering the permission mark explains its mode instead
 of returning only the combined agent summary. The combined summary remains on the agent track for provenance and the
@@ -258,16 +257,16 @@ and applies the proto's own fallback rule, `last_activity_at` when positive and 
 `farhelm_proto::effective_activity` rather than keeping a copy. The UI depends on farhelm-proto with its tokio-based
 frame I/O feature turned off, so it builds for wasm, and shares the leaf wire types the helm forwards verbatim (session
 status, restart offer, tab, launch selection). It keeps its own decoders for what the helm shapes for HTTP (session
-rows, hosts, profiles and the reply envelopes), because those tolerate words a newer helm may send to a browser tab
-still running older code; shared golden files under `crates/farhelm-helm/http-contract/`, serialized by the helm's tests
-and decoded by the UI's, keep the two sides from drifting. That rule governs the displayed age and the seen/unseen
-comparison only — the helm orders an activity-sorted list by reported status first and the work-start key inside each
-group, so the age column is deliberately not a rank column: a row above another can show an older age, and that is the
-contract rather than a contradiction. A zero means "this helm predates the field" and renders no age at all rather than
-an age counted from 1970. The viewer's end of the subtraction can go missing too — a platform clock that will not
-answer, or one sitting at or before the epoch — and that is carried as an absent value rather than as a zero, because
-subtracting a good host stamp from a zero "now" would clamp every session in the fleet to `now` and paint a dormant
-fleet as a busy one.
+rows, hosts and the reply envelopes), because those tolerate words a newer helm may send to a browser tab still running
+older code; shared golden files under `crates/farhelm-helm/http-contract/`, serialized by the helm's tests and decoded
+by the UI's, keep the two sides from drifting. That rule governs the displayed age and the seen/unseen comparison only —
+the helm orders an activity-sorted list by reported status first and the work-start key inside each group, so the age
+column is deliberately not a rank column: a row above another can show an older age, and that is the contract rather
+than a contradiction. A zero means "this helm predates the field" and renders no age at all rather than an age counted
+from 1970. The viewer's end of the subtraction can go missing too — a platform clock that will not answer, or one
+sitting at or before the epoch — and that is carried as an absent value rather than as a zero, because subtracting a
+good host stamp from a zero "now" would clamp every session in the fleet to `now` and paint a dormant fleet as a busy
+one.
 
 Ages advance on a dedicated 30-second tick — one page-wide signal, written by a component mounted beside the
 invalidation feed and read by the list and the open session's header. The listing's fallback poll was the obvious thing
@@ -323,15 +322,14 @@ inline update action is another deliberate outlined treatment: amber (`--warn`) 
 confirmation. Being outlined, it preserves the sidebar's one-filled-control rule. Pressed disclosures use
 `--accent-fill-hover` so an open trigger is distinct from a resting primary. The normal-primary entry is scoped per
 SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and each
-dialog or popup that floats over it may supply its own affirmative primary. The sidebar's secondary actions and
-profile-row edit/delete controls use the neutral tier; menu items, tabs, composer selections, relays, and other explicit
-exemptions retain their ghost or purpose-built styling. Destructive menu items remain red text, while their confirmation
-buttons use the danger tier. SPEC.md requires the sidebar to mark the selected session's row readably at a glance, so
-anything else joining that list has to be a place where the accent means "this is where you are" — the same thing every
-entry but the delete wait says — because an accent spread across ordinary decoration would leave nothing to make the
-selection readable. Both constraints have a contrast floor under them: the quiet foreground tokens are set so that
-metadata stays at WCAG AA against the brightest surface it lands on, which is what caps how light the selected row's
-fill may go.
+dialog or popup that floats over it may supply its own affirmative primary. The sidebar's secondary actions use the
+neutral tier; menu items, tabs, composer selections, relays, and other explicit exemptions retain their ghost or
+purpose-built styling. Destructive menu items remain red text, while their confirmation buttons use the danger tier.
+SPEC.md requires the sidebar to mark the selected session's row readably at a glance, so anything else joining that list
+has to be a place where the accent means "this is where you are" — the same thing every entry but the delete wait says —
+because an accent spread across ordinary decoration would leave nothing to make the selection readable. Both constraints
+have a contrast floor under them: the quiet foreground tokens are set so that metadata stays at WCAG AA against the
+brightest surface it lands on, which is what caps how light the selected row's fill may go.
 
 Selection is one construct wherever it appears — the sidebar's selected row, the selected tab, and the launch composer's
 chosen harness, segment, folder, and list option: the accent-tinted `--accent-fill`, an accent bar along one edge, and
@@ -428,30 +426,6 @@ when the selected tab exits and the view falls back to the agent), does not take
 during a request the primary action stays focusable (unavailable through `aria-disabled`) while the other controls are
 disabled, because a focused control that is natively disabled or unmounted drops focus to `body`.
 
-The session-list profiles popup has one explicit focus request at a time. Opening lands on `new profile`; opening an
-editor lands on its name field; closing a form returns to its row's edit control or to `new profile`; opening a delete
-prompt lands on cancel; and completing a save or delete chooses the surviving row control described by the catalog
-transition. Escape and layout invalidation close the popup and restore its toggle. Focus-out instead preserves the
-outside destination the user chose. Document/body focus after an internal control replacement is transit, not an outside
-destination, even when the bounded replacement-focus request cannot place focus. The confirmation stays mounted and
-reachable; a recorded trusted outside pointer or Tab choice still dismisses it. A page operation may defer either
-dismissal while it keeps the popup mounted, but it never consumes the obligation: the popup closes once the operation is
-idle if focus or layout still requires it. A catalog refresh patches unchanged keyed profile rows in place, so it does
-not replay focus after locally absorbed mutations. A terminal whose retained output becomes visible while the popup is
-mounted does not take focus. Closing the popup does not hand focus to that terminal; the user can click it when they
-want to type there.
-
-A trusted outside pointer or Tab destination supersedes pending opening and completion focus. The popup DOM node records
-that choice synchronously, so even a focus commit already sent across the renderer bridge must yield before moving
-focus. The Rust request worker observes the same obligation; internal form transitions still express newer in-popup
-intent. Unknown classification and unowned body-focus transit supply no dismissal evidence and leave the obligation
-pending. Escape also reaches the current popup while failed placement leaves focus on body; it does not move focus from
-an unrelated outside control. A subsequent outside focus event or window focus return reconsiders it with a new
-observation revision once its current observation has finished, preserving the original intent's identity and
-provenance. Notifications during that observation coalesce into one queued recheck if it returns Unknown; old classifier
-completions cannot clear a newer obligation. There is no outer timer retry chain; each reconsideration retains the
-existing bounded classification and pending-focus settlement.
-
 Hosts use one permanently mounted list beside the session list, not a compact summary plus a second management panel.
 Its one-row header gives the known host count, an unpersisted global details checkbox, and the secondary add control.
 Every row always shows its name, phase dot, and a muted actions toggle that appears on hover, keyboard focus, or a
@@ -503,18 +477,17 @@ the row and a small pointer toward it. It stays beside the session list instead 
 action toggles. One side placement is clamped to the viewport, including when there is too little room to keep the
 sidebar fully uncovered or to keep the panel top aligned with a row near the bottom. The toggle holds a pressed accent
 state, its row holds a tint, and the panel is a raised surface with a shadow. The action list starts with the session
-title and a muted summary of its stored launch selection or legacy profile snapshot, followed by the concise state. The
-summary uses the same launch-choice wording as the session launcher; a legacy session without a profile uses its agent
-label. A structured session also keeps any source-profile snapshot in that line, and an unclassified session omits the
-state word. There is no profile footer. The pointer is hidden when horizontal clamping makes the panel overlap the
-sidebar, where it could no longer indicate the opening row. Commands have small decorative line icons and form groups
-separated by non-focusable rules: rename and mark read/unread; clone, replace with, and replace; stop; delete. Only
-groups with available commands contribute rules. Clone, replace with, replace, stop, and delete each have a visible
-muted description exposed as an accessible description, so the accessible command name remains the action word. Hover
-and focus fill each command inside the panel with rounded inset corners. **One at a time:** at most one row's menu is
-open, and it closes on any layout change that could have moved the row it was measured against (a sidebar scroll or
-resize, the host list's shape changing, the create form opening, the row reordering under a refresh), because the
-panel's coordinates are a one-time snapshot. **Keyboard:** it is a real `role="menu"` and behaves like one — opening it
+title and a muted summary of its stored launch selection, followed by the concise state. The summary uses the same
+launch-choice wording as the session launcher; a legacy session uses its command's program name, and an unclassified
+session omits the state word. The pointer is hidden when horizontal clamping makes the panel overlap the sidebar, where
+it could no longer indicate the opening row. Commands have small decorative line icons and form groups separated by
+non-focusable rules: rename and mark read/unread; clone, replace with, and replace; stop; delete. Only groups with
+available commands contribute rules. Clone, replace with, replace, stop, and delete each have a visible muted
+description exposed as an accessible description, so the accessible command name remains the action word. Hover and
+focus fill each command inside the panel with rounded inset corners. **One at a time:** at most one row's menu is open,
+and it closes on any layout change that could have moved the row it was measured against (a sidebar scroll or resize,
+the host list's shape changing, the create form opening, the row reordering under a refresh), because the panel's
+coordinates are a one-time snapshot. **Keyboard:** it is a real `role="menu"` and behaves like one — opening it
 (pointer, Enter, Space, ArrowDown) lands focus on the first command and ArrowUp opens onto the last; arrows step and
 wrap, Home/End jump; the whole menu is a single tab stop via roving `tabindex`, so Tab leaves rather than walking the
 commands; Escape closes; and every close that took the menu away from a focused item hands focus back to the toggle
@@ -548,15 +521,9 @@ whenever the two disagree; comparing generations rather than mere presence is wh
 row reseed a second time, since an unrelated rerender of that effect (a host reconnect, a catalog refresh) must not
 overwrite an edit in progress. A structured source seeds the shared composer from its stored declarative selection,
 resolving omitted permissions through `LaunchHarness::effective_permission` rather than parsing the compiled invocation.
-A legacy source selects `other / command` in that same composer and seeds the raw invocation there, including when
-profile mode is selected and displays the selected profile's invocation. Destination, folder browser, optional name,
-search, and submission remain shared; only the structured model, effort, and permission controls are replaced by the
-profile picker and raw command field. For legacy sources, the profile choice is used only when the row's own profile
-snapshot is `Present` — the catalog still holds that id under the SAME name — which is deliberately STRICTER than an
-ordinary create's remembered-default rule (an id that merely still exists, under a new name, is not evidence that
-cloning it again is what today's catalog would still offer); every other answer falls back to the raw command. Trusting
-the id at all is still a snapshot decision, not a live one: submitting a profile-backed clone resolves that id against
-whatever definition the catalog holds at that moment, exactly like any other profile-backed create.
+A legacy source selects `other / command` in that same composer and seeds the raw invocation there. Destination, folder
+browser, optional name, search, and submission remain shared; only the structured model, effort, and permission controls
+are replaced by the raw command field.
 
 Search is the composer's one initial and post-selection focus target in both modes. Its command-mode result set is built
 without the retained structured harness or model, so it can expose globally owned models but cannot offer an effort that
@@ -593,19 +560,16 @@ stays open. A row that names no host at all (a session from a helm too old to re
 rather than retried. An explicit host interaction takes the host decision away from automatic reconciliation for the
 rest of that clone generation.
 
-Agent seeding is separate from host selection. Structured sources retain their stored launch selection. For legacy
-sources, the form reads the source choice against the one helm-owned catalog, which applies to every host: a `Present`
-profile is selected once the live catalog confirms its id, while every other source state falls back to the source
-session's raw invocation. A delayed or unconfirmable host does not suppress that choice, and later host binding or
-withdrawal does not change it. An explicit agent or command interaction is authoritative for the rest of the clone
-generation, so neither a late catalog read nor a late host read can overwrite it.
+Launch seeding is separate from host selection. Structured sources retain their stored launch selection, and legacy
+sources their raw invocation, both seeded once per clone generation. A delayed or unconfirmable host does not suppress
+that seed, and later host binding or withdrawal does not change it, so a late host read cannot overwrite an edit.
 
 A clone's working directory, invocation and title are peer-relayed text (SPEC.md's clone rule copies them off another
 session, and a remote supervisor under `--ssh` is the one this client does not control) going into editable controls, so
-they get the profile editor's escaped-display / raw-seed / edited-flag treatment (`profiles::submitted_field`) rather
-than being written in raw: shown escaped while untouched, so a directional override or an invisible character cannot
-make the field say something different from the bytes a submit would send, and an untouched submit still sends those
-ORIGINAL bytes rather than the escaped spelling on screen.
+they get an escaped-display / raw-seed / edited-flag treatment (`create_form::submitted_field`) rather than being
+written in raw: shown escaped while untouched, so a directional override or an invisible character cannot make the field
+say something different from the bytes a submit would send, and an untouched submit still sends those ORIGINAL bytes
+rather than the escaped spelling on screen.
 
 The title is the exception once a fresh checkout is the destination: an untouched copied title is submitted empty and
 not displayed (SPEC.md, Fresh GitHub checkouts). The composer applies that rule wherever it reads the title for a launch
@@ -1053,11 +1017,11 @@ that deletes a `<state>/snapshots/` directory an older build wrote (`sweep_legac
 not strand captured frames on disk. Exec failure versus ran-and-died cannot be told apart by exit code alone (a missing
 command yields 127 and a non-executable file 126 — both indistinguishable from a program exiting with that code), so
 classification does not rely on exit codes: the shell execs `farhelm internal launch`, a shim that always exists, which
-resolves and execs the profile invocation and, on exec failure, writes a sentinel with the errno detail to a per-launch
-status file (named by session and launch generation, so a sentinel left by a failed earlier launch can never describe a
-later relaunch) before exiting. The supervisor classifies **error** on that sentinel; the one sentinel-less error path
-is a cgroup-scoped launch whose `systemd-run` wrapper died before the shim ever ran, recognized only by its full
-evidence shape (dead pane, launch spec still unconsumed, no sentinel) so it can never claim an agent that actually
+resolves and execs the session's invocation and, on exec failure, writes a sentinel with the errno detail to a
+per-launch status file (named by session and launch generation, so a sentinel left by a failed earlier launch can never
+describe a later relaunch) before exiting. The supervisor classifies **error** on that sentinel; the one sentinel-less
+error path is a cgroup-scoped launch whose `systemd-run` wrapper died before the shim ever ran, recognized only by its
+full evidence shape (dead pane, launch spec still unconsumed, no sentinel) so it can never claim an agent that actually
 started. NOTE: a sentinel written by the shell after a failed `exec` was audited and rejected — interactive bash
 survives a failed exec, but zsh terminates on it in every mode, so shell-side code after `exec` never runs for zsh
 users; the shim works identically under any `$SHELL`.
@@ -1167,17 +1131,10 @@ The helm's trust in an attached supervisor is scoped by effect, not by connectio
 that affect only its own host: which of its sessions sent an upcall, that one of its sessions exited, what its panes
 show. A lie about those damages only that host, where the supervisor already has full authority. Anything whose effect
 reaches beyond its own host (another host's sessions, another supervisor, the helm's machine, or the helm's own state
-such as the profile catalog, settings, and credentials) is allowed only where the spec grants it, and a request's
-arrival on a supervisor connection adds nothing to that grant. The grants are the agent verbs any agent may use
-(cross-host stop, rename, and restart, plus the temporary create and clone exception in SPEC.md's "Local authority and
-trust between hosts"). A supervisor cannot, for example, ask the helm to delete a profile.
-
-`AgentVerb::ResolveProfile` is the verb this rule most needs spelled out for. It reads helm-owned data, the full
-resolved launch bundle of any profile, so answering it for any attached supervisor is not justified by the supervisor's
-identity. It is justified only by the temporary cross-host creation exception, which already lets any host have any
-profile launched on itself and so receive the same bundle; the helm logs every answer with the origin host, the
-supervisor-claimed asking session, and the profile id. When that exception is replaced by explicitly trusted
-environments, `ResolveProfile` from an untrusted host must end with it.
+such as settings and credentials) is allowed only where the spec grants it, and a request's arrival on a supervisor
+connection adds nothing to that grant. The grants are the agent verbs any agent may use (cross-host stop, rename, and
+restart, plus the temporary create and clone exception in SPEC.md's "Local authority and trust between hosts"). A
+supervisor cannot, for example, ask the helm to change a host's settings.
 
 ### Errors crossing levels of abstraction
 
@@ -1323,31 +1280,31 @@ provide containment from that host. Accepting a forwarded session claim does not
 or authorize effects outside the named fleet operations and temporary execution exceptions in SPEC.md's
 maintainer-confirmed decisions. Provisioning a supervisor does not establish trust in its responses. What the helm does
 check is that the connection is still the CURRENT one for that host row, since registry rows outlive the machines behind
-them. Version 14 replaced session-list pagination with a bounded whole-list reply, and version 15 carries helm-resolved
-launch bundles and upward profile resolution. The historical paragraph below describes why 13 was current at the time;
-later released additions took the wire to 26. Version 16 introduced the durable optional structured launch snapshot
-carried with a create and `SessionInfo`. The snapshot is declarative provenance beside the resolved invocation, never a
-browser-owned compiler input; old sessions remain absent rather than being reconstructed from a command. Version 17 adds
-`BrowseDirectory` and `DirectoryListing`: the helm routes one authenticated, connection-incarnation-guarded request to
-the chosen supervisor, which expands `~` from its own recorded home, canonicalizes the requested directory, and returns
-only a sorted bounded immediate child-directory listing plus parent and truncation state. Neither the helm nor the
-client reads the target filesystem. Version 18 adds accepted-create `canonical_cwd`, the identity fact that binds folder
-history to the destination the target supervisor actually accepted. Version 19 adds OpenCode to the structured-harness
-enum. Version 26 retires session archival and its wire fields and messages. A supervisor must retain that snapshot
-alongside the resolved invocation, so an older peer that cannot decode the new enum value refuses the connection rather
-than silently losing the selection. The following 13 paragraph is historical context, not the current protocol version;
-the frozen changelog stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop` and the two creating verbs
-`AgentVerb::Create`/`Clone` (answered by `AgentReply::Created`), all added additively within the version rather than as
-version bumps of their own — which was possible ONLY because 13 itself had not yet shipped when they landed, still being
-developed on this branch with no released build speaking it yet. That is a one-time allowance for a version still in
-flight, not a standing license to keep adding to 13 after it ships; once a protocol version has shipped, a wire-shape
-addition needs a version of its own, same as any other. The same allowance covers the one thing in 13 that is not an
-addition at all: `AgentSession::host` became `Option<String>`, so a reply carrying a row the helm just mutated or
-created can say "there is a session here but no host name I can vouch for" instead of encoding that as an empty string
-indistinguishable from a real value. A decoder built against 13 EARLIER IN ITS OWN DEVELOPMENT rejects `host: null`
-outright — the running additive rule does not stretch to cover it under any reading — so it is allowed here only because
-nothing released speaks 13 yet. It must not be carried forward the same way once 13 ships: the identical edit made
-afterwards needs a version of its own.
+them. Version 14 replaced session-list pagination with a bounded whole-list reply, and version 15 carried helm-resolved
+launch bundles and upward profile resolution, which protocol 38 removed with profiles. The historical paragraph below
+describes why 13 was current at the time; later released additions took the wire to 26. Version 16 introduced the
+durable optional structured launch snapshot carried with a create and `SessionInfo`. The snapshot is declarative
+provenance beside the resolved invocation, never a browser-owned compiler input; old sessions remain absent rather than
+being reconstructed from a command. Version 17 adds `BrowseDirectory` and `DirectoryListing`: the helm routes one
+authenticated, connection-incarnation-guarded request to the chosen supervisor, which expands `~` from its own recorded
+home, canonicalizes the requested directory, and returns only a sorted bounded immediate child-directory listing plus
+parent and truncation state. Neither the helm nor the client reads the target filesystem. Version 18 adds
+accepted-create `canonical_cwd`, the identity fact that binds folder history to the destination the target supervisor
+actually accepted. Version 19 adds OpenCode to the structured-harness enum. Version 26 retires session archival and its
+wire fields and messages. A supervisor must retain that snapshot alongside the resolved invocation, so an older peer
+that cannot decode the new enum value refuses the connection rather than silently losing the selection. The following 13
+paragraph is historical context, not the current protocol version; the frozen changelog stops at 11. Version 13 also
+carries `AgentVerb::Rename`/`Stop` and the two creating verbs `AgentVerb::Create`/`Clone` (answered by
+`AgentReply::Created`), all added additively within the version rather than as version bumps of their own — which was
+possible ONLY because 13 itself had not yet shipped when they landed, still being developed on this branch with no
+released build speaking it yet. That is a one-time allowance for a version still in flight, not a standing license to
+keep adding to 13 after it ships; once a protocol version has shipped, a wire-shape addition needs a version of its own,
+same as any other. The same allowance covers the one thing in 13 that is not an addition at all: `AgentSession::host`
+became `Option<String>`, so a reply carrying a row the helm just mutated or created can say "there is a session here but
+no host name I can vouch for" instead of encoding that as an empty string indistinguishable from a real value. A decoder
+built against 13 EARLIER IN ITS OWN DEVELOPMENT rejects `host: null` outright — the running additive rule does not
+stretch to cover it under any reading — so it is allowed here only because nothing released speaks 13 yet. It must not
+be carried forward the same way once 13 ships: the identical edit made afterwards needs a version of its own.
 
 Version 25 adds `AgentVerb::Restart`, `AgentReply::Restarted`, and the non-secret `AgentSession::restart_offer`
 discovery field. The new tagged request and reply require an exact-version handshake refusal for older peers. Each verb
@@ -1382,11 +1339,8 @@ machine nobody chose. A registered name carrying a control character can never b
 refuses one in `--host`; the not-found refusal says so by count, because the fix is a rename and an agent has no rename
 verb for hosts.
 
-The helm resolves an agent's profile name exactly against its one catalog before the target call. Zero or multiple
-matches are `InvalidRequest` refusals that name candidates; one match becomes the invocation, agent kind, resume
-template, and immutable profile snapshot carried to the supervisor. A clone follows its source's snapshotted profile id
-through the same helm catalog on any host. A missing id is refused before a target call, with no fallback to the old
-name or source invocation.
+An agent's create names its command line with `--invocation`, which the helm forwards to the target supervisor as a raw
+create. A clone copies its source's launch: a structured source's frozen bundle, or another source's raw invocation.
 
 `Clone` resolves the explicitly named source's live owner, drains that owner's pinned connection, and rechecks the owner
 before dispatching to the destination. It does not use the helm's cache: a clone built from a cached row could copy a
@@ -1396,9 +1350,8 @@ fence on `agent_request_locks` that the lifecycle verbs take, since a create tha
 is being invalidated would otherwise leave a session running that nobody was told about.
 
 A KEYED RETRY IS BOUND TO THE RESOLVED BUNDLE SENT TO THE SUPERVISOR. The fingerprint covers the invocation, agent kind,
-resume template, and profile snapshot, so editing a profile between two attempts under one key makes the second request
-different and produces a conflict rather than replaying the first outcome under changed settings. The same applies when
-a clone's source metadata changes between attempts.
+and resume template, so a clone whose source metadata changes between two attempts under one key makes the second
+request different and produces a conflict rather than replaying the first outcome under changed settings.
 
 The relay's own doorway bound treats the host name SEPARATELY from the create payload (`AGENT_HOST_NAME_CAP`, the same
 number every session id is held to). It is routing metadata the helm consumes and no supervisor ever sees, so charging
@@ -1421,12 +1374,11 @@ their existing retry exposure. The current implementation remains described here
 made. Session-lifetime scoping is not merely unimplemented here — it is not expressible, since the target supervisor may
 never have heard of the asking session. Both kinds of key are stored scoped to the asking session (spawn's by the
 supervisor, as `spawn-<asking session>-<SHA-256 of the key>`; create's and clone's by the helm relay), so a key only
-ever replays for the session that used it. Spawn requires an explicit selector: `--inherit-agent` copies the asking
-session's exact stored launch bundle on its own supervisor and therefore works offline, while `--agent` and
-`--profile-id` send `ResolveProfile` through the existing upward relay and are refused with the `--inherit-agent` remedy
-when no helm is attached. Agent create likewise requires an explicit profile name, profile ID, or raw invocation.
+ever replays for the session that used it. Spawn requires explicit `--inherit-agent`, which copies the asking session's
+exact stored launch bundle on its own supervisor and therefore works offline; the supervisor refuses a
+session-authenticated create without it, naming the flag. Agent create likewise requires an explicit command line.
 
-One divergence is worth stating rather than discovering later. A RAW clone — one whose source came from no profile —
+One divergence is worth stating rather than discovering later. A RAW clone — one whose source has no structured launch —
 copies the invocation and nothing else, so the target re-derives the integrated kind from the invocation's first token
 and takes that kind's default resume template. A source created with an explicit `agent_kind` (including the explicit
 "no integration" the tri-state can express) or a custom `resume_template` therefore clones into a session whose
@@ -1447,11 +1399,11 @@ be indistinguishable from "that session is past the cut". The byte allowance exi
 size: session creation admits tens of kilobytes of caller-supplied text per row, and a fleet of legally fat records
 would otherwise produce an answer no frame could carry — discarded whole, reaching the agent as `Internal` rather than
 as the partial listing the verb promises. The per-session `agent` field is a non-secret label drawn from a closed
-vocabulary — the source profile's snapshotted name, or the word for the integrated agent kind the supervisor recorded
-for the session (carried on `SessionInfo`), or `custom` when there is none — and never text derived from the invocation.
-Users put credentials in command lines, this listing is readable with any one attached session's credential, and its
-reader is a model that will quote what it read, so nothing from the command line may cross this wire at all. Even the
-program's basename is not safe: a leading `NAME=secret` assignment is the first word.
+vocabulary — the word for the integrated agent kind the supervisor recorded for the session (carried on `SessionInfo`),
+or `custom` when there is none — and never text derived from the invocation. Users put credentials in command lines,
+this listing is readable with any one attached session's credential, and its reader is a model that will quote what it
+read, so nothing from the command line may cross this wire at all. Even the program's basename is not safe: a leading
+`NAME=secret` assignment is the first word.
 
 The session list is served WHOLE on this wire (protocol 14). `ListSessions` carries nothing but its request id, and
 `SessionList` answers with every session the supervisor has, cut at `LIST_SESSIONS_CAP` (a few hundred rows, one
@@ -1488,11 +1440,10 @@ versioned fresh fingerprint variant and the ordinary serialized create-field cap
 
 Schema 18 stores the checkout registry, memberships, origin provenance and preparation snapshot alongside session and
 intent state. Directory admission serializes allocation, membership insertion and last-reference teardown. Intent locks
-precede directory admission; profile catalog round trips precede admission so a restricted parent's lifecycle claim
-cannot be held while waiting on the helm. Discovery uses its own subprocess budget rather than directory admission.
-Fresh allocation records its plan before mkdir, then records filesystem identity before exposing preparation. A
-post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle.
-Borrowers join every applicable canonical managed ancestor; they never inherit the origin's preparation duty.
+precede directory admission. Discovery uses its own subprocess budget rather than directory admission. Fresh allocation
+records its plan before mkdir, then records filesystem identity before exposing preparation. A post-allocation failure
+atomically retains an error session and membership instead of losing the only deletion handle. Borrowers join every
+applicable canonical managed ancestor; they never inherit the origin's preparation duty.
 
 If identity capture never committed, an existing candidate path remains ambiguous: explicit Delete retires the plan
 without adopting or moving that object and names the preserved path in its diagnostic.
@@ -1525,12 +1476,10 @@ evidence, but cannot authorize another directory move.
 ### Runtime state
 
 - State in SQLite (rusqlite) at `~/.local/state/farhelm/supervisor.db`: sessions and their metadata (SPEC.md's
-  supervisor-authoritative list), each session's profile snapshot taken at creation, spawn idempotency keys, captured
-  conversation identities, host identity, and the boot id last seen. The helm owns the mutable profile catalog, so the
-  supervisor records the snapshot but sends `ProfileExistence::Unresolved` on its wire replies. Comparing the stored
-  boot id against the current one (`/proc/sys/kernel/random/boot_id`; `kern.bootsessionuuid` on macOS — a per-boot UUID,
-  chosen over `kern.boottime` because the kernel rewrites boottime on clock steps and a boot id must never change
-  mid-boot) is how "interrupted" is classified per SPEC.md.
+  supervisor-authoritative list), spawn idempotency keys, captured conversation identities, host identity, and the boot
+  id last seen. Comparing the stored boot id against the current one (`/proc/sys/kernel/random/boot_id`;
+  `kern.bootsessionuuid` on macOS — a per-boot UUID, chosen over `kern.boottime` because the kernel rewrites boottime on
+  clock steps and a boot id must never change mid-boot) is how "interrupted" is classified per SPEC.md.
 - Host identity: generated once at first run, stored in the db.
 - The interrupted-session surface is a centered neutral card in the empty terminal area: it explains that a host restart
   paused the session and keeps the terminal absent until the user intentionally chooses Restart or confirms Replace.
@@ -1540,7 +1489,7 @@ evidence, but cannot authorize another directory move.
   the card with the endpoint's actionable wording. An open Replace confirmation keeps its trigger visibly pressed.
 - Sessions launch through the user's shell as an interactive login shell inside the PTY —
   `$SHELL -l -i -c 'exec farhelm internal launch ...'` as the window's command, with the shim doing the final exec of
-  the profile invocation (see exited-session semantics) — evaluated per launch. The `-i` is load-bearing, by different
+  the session's invocation (see exited-session semantics) — evaluated per launch. The `-i` is load-bearing, by different
   mechanisms per shell (audited): zsh sources `.zshrc` directly when interactive; bash login shells never source
   `.bashrc` themselves under any flags — only the profile chain — and `-i` matters because it puts `i` in `$-`, so the
   stock Debian/Ubuntu `.bashrc` interactivity guard doesn't bail out when the profile chains it. Either way the sourced
@@ -2073,7 +2022,7 @@ stays with the installation identity.
 the exact destination, without writing it. Responses include the configuration revision and installation/incarnation
 claim, never the hook. Naming scans refuse incomplete results after 100,000 entries. Create verifies this binding and
 uses atomic mkdir as the collision authority. Known intent keys reconcile their original snapshot before current
-configuration or profile resolution; replacement identities additionally bind the source session and preserve its veto.
+configuration or launch compilation; replacement identities additionally bind the source session and preserve its veto.
 The composer reads its checkout folder field from that accepted preview, or from the original binding while reconciling
 an ambiguous create. It leaves the field read-only until an explicit existing-folder action changes the destination
 draft; the old editable `cwd` seed is never presented as a fresh-checkout path. Preview failures leave the path empty
@@ -2099,10 +2048,10 @@ manual repository selection. Browser requests debounce for 150 ms and discard st
 ### Composer history
 
 Composer history is one 100-record, per-host-installation unique-create window. Each accepted supervisor session id
-enters it once, whether the request was structured, raw, or profile-backed. Structured suggestions are projections of
-the surviving admission rows, so 100 later raw creates evict an earlier structured setup and remove its frequency
-weight. Folder suggestions are separately bounded at 100 canonical destinations because they answer a different
-question: folders remain useful after several sessions in the same place have left the create window.
+enters it once, whether the request was structured or raw. Structured suggestions are projections of the surviving
+admission rows, so 100 later raw creates evict an earlier structured setup and remove its frequency weight. Folder
+suggestions are separately bounded at 100 canonical destinations because they answer a different question: folders
+remain useful after several sessions in the same place have left the create window.
 
 The admission order is durable. A record with `creation_seq` sorts by its sequence until a sequence-less record enters
 the partition. That accepted legacy record switches the whole retained partition and its cutoff to the protocol fallback
@@ -2146,14 +2095,14 @@ Schema 30 adds nullable `remembered_workspace_trust` to the preference row. The 
 create transaction as structured launch history, only for an explicit Codex, Muse, or Pi choice from a user-originated
 create. Both are written from the selection the user submitted (`CreateAcceptance::explicit_selection`), never from the
 supervisor's reply, per SPEC.md's rule that only explicit GUI selections shape GUI defaults and suggestions; a create
-without one (an agent's, a plain Replace, a raw or profile create) writes neither. Codex true and false compile to a
-whole-argv config marker. The supervisor fills it at the shared spawn seam, after any GitHub checkout has fixed the
-final cwd, with one `projects.<cwd>.trust_level` override set to `trusted` or `untrusted`. The cwd is quoted as a TOML
-key and resolved on the target host; omitted trust adds no Codex override. Muse true adds `--trust-workspace`; Muse
-false adds no trust flag and cannot undo trust from `--yolo` or vendor settings. Pi true adds `--approve` and Pi false
-adds `--no-approve`, independent of Pi's YOLO tool mode. Unsupported harnesses reject an explicit trust value. The
-composer clears that value on a switch to an unsupported harness and restores it from the preference row on a fresh open
-or reset. Older selection JSON decodes without a trust choice.
+without one (an agent's, a plain Replace, a raw create) writes neither. Codex true and false compile to a whole-argv
+config marker. The supervisor fills it at the shared spawn seam, after any GitHub checkout has fixed the final cwd, with
+one `projects.<cwd>.trust_level` override set to `trusted` or `untrusted`. The cwd is quoted as a TOML key and resolved
+on the target host; omitted trust adds no Codex override. Muse true adds `--trust-workspace`; Muse false adds no trust
+flag and cannot undo trust from `--yolo` or vendor settings. Pi true adds `--approve` and Pi false adds `--no-approve`,
+independent of Pi's YOLO tool mode. Unsupported harnesses reject an explicit trust value. The composer clears that value
+on a switch to an unsupported harness and restores it from the preference row on a fresh open or reset. Older selection
+JSON decodes without a trust choice.
 
 Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
 sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order
@@ -2174,50 +2123,37 @@ before changing the draft; submission checks it before and after key minting. Ne
 beside its installation snapshot from AppBody, independently of the filtered sidebar projection.
 
 - State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities, and optional
-  aliases), last-known session cache (survives helm restarts per SPEC.md), the helm-wide profile catalog and its one
-  remembered default, recoverable web token, hashed browser device sessions, and the one client preference (list order,
-  last-selected session, compact rows, and host setup/removal confirmation choices) every client shares.
-- The `profiles` table is bounded on both axes — 128 stored profiles per helm, 8 KiB of caller-supplied text per profile
-  — so the unpaginated catalog reply stays predictably bounded. The helm combines those stored rows with eight
-  release-owned Claude Code, Codex, Muse, and Cursor built-ins in its read and resolution paths; built-ins are never
-  seeded, persisted, or mutable. The response carries an authoritative `builtin` boolean, defaulting false for stored
-  rows and old responses, so the UI need not derive source policy from an opaque ID. Existing stored starters remain
-  ordinary editable rows. A profile names its kind explicitly (`generic` means no integration), and an absent resume
-  template selects that kind's default. The helm resolves every profile-backed create into an invocation, kind,
-  template, and immutable id/name snapshot before the supervisor call. When the template is absent for Claude or Codex,
-  the supervisor derives it by retaining the parsed original invocation argv and appending that kind's resume arguments;
-  the argv is captured before per-launch Farhelm hook injection. This deliberately assumes original arguments are
-  reusable and has no parser for initial prompts or launch-only options. It also resolves every supervisor
-  `SourceProfile` marked `Unresolved` against one catalog read per reply before browser JSON or session-cache storage;
-  missing ids become `Deleted`, and ids whose current names differ from the snapshot become `Renamed`. Profile writes
-  are last-write-wins and carry no definition fingerprint. Muse's two definitions explicitly select `generic` with no
-  resume template. They use the ordinary terminal launch path and generic activity classifier, without per-agent hooks
-  or conversation-identity capture. OpenCode is a structured harness only: its release catalog holds verified Zen model
-  IDs, accepts an omitted model for OpenCode's configured default, passes explicit bare custom Zen names as
-  `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag. Its empty effort vocabulary, generic activity
+  aliases), last-known session cache (survives helm restarts per SPEC.md), recoverable web token, hashed browser device
+  sessions, and the one client preference (list order, last-selected session, compact rows, and host setup/removal
+  confirmation choices) every client shares.
+- Helm schema 36 drops the `profiles` catalog and its remembered default with no conversion (SPEC.md, the launch-kinds
+  upgrade paragraph). Cached session rows may still carry the removed `source_profile` member; serde ignores it, so they
+  keep listing without a rewrite. When a raw create's resume template is absent for Claude or Codex, the supervisor
+  derives it by retaining the parsed original invocation argv and appending that kind's resume arguments; the argv is
+  captured before per-launch Farhelm hook injection. This deliberately assumes original arguments are reusable and has
+  no parser for initial prompts or launch-only options. OpenCode is a structured harness only: its release catalog holds
+  verified Zen model IDs, accepts an omitted model for OpenCode's configured default, passes explicit bare custom Zen
+  names as `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag. Its empty effort vocabulary, generic activity
   classifier, and absent resume template deliberately avoid claiming a provider-specific effort or conversation
   lifecycle contract. Cursor likewise maps its structured harness to the existing Generic kind, with no resume template
-  or capture machinery. Its two release-owned profiles invoke `cursor-agent` and `cursor-agent --force`, and the
-  structured harness launches `cursor-agent` too: the YOLO classifier ignores the generic name `agent`, so a built-in
-  launched as `agent --force` would escape the YOLO confirmation guard. Models use `--model`, with no separate effort
-  flag. The UI preserves its harness in launch intent while explicitly disclosing the lack of tracking and Resume.
-  Protocol 27 adds the Cursor harness variant, not a new runtime integration kind. Protocol 29 adds Grok as both a
-  structured harness and a durable agent kind. Its compiler emits `grok --no-leader`, maps YOLO to `--always-approve`,
-  refuses model and effort choices, and stores `grok --no-leader [--always-approve] --resume {conversation}` as argv
-  elements. The dedicated kind preserves the ownership policy across helm and supervisor storage. It uses the generic
-  activity classifier while the manually configured reporter supplies ownership-proven conversation capture. OMP is also
-  a structured harness only at launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model
-  and provider flags for the harness default, and compiles an explicit model as `omp --provider openrouter --model <id>`
-  (provider intent explicit; a literal custom id stays one argv element and is stored verbatim — provider qualification
-  is not a promise of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and
-  `:suffix` interpretations on the id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`).
-  `--thinking <effort>` carries the seven-level list (`off` through `max`; OMP's `auto` is not offered), and
-  `--approval-mode yolo|always-ask` carries the YOLO/Approve choices. An omitted permission normalizes to YOLO, as for
-  Pi, OpenCode and Goose; explicit Approve remains Approve. SmartApprove and Chat are refused for OMP; the row glyph is
-  the Greek capital omega, chosen so it cannot read as Pi's "P" at sidebar size. Resolving `SourceProfile` snapshots
-  while draining remote sessions discovers catalog state only: those observations never select the helm-wide remembered
-  default. A successful profile-backed create through the user's REST surface alone writes that default; agent-relay
-  creates and clones do not, so an agent's work cannot change the profile the user's next dialog suggests.
+  or capture machinery. The structured harness launches `cursor-agent`: the YOLO classifier ignores the generic name
+  `agent`, so a launch spelled `agent --force` would escape the YOLO confirmation guard. Models use `--model`, with no
+  separate effort flag. The UI preserves its harness in launch intent while explicitly disclosing the lack of tracking
+  and Resume. Protocol 27 adds the Cursor harness variant, not a new runtime integration kind. Protocol 29 adds Grok as
+  both a structured harness and a durable agent kind. Its compiler emits `grok --no-leader`, maps YOLO to
+  `--always-approve`, refuses model and effort choices, and stores
+  `grok --no-leader [--always-approve] --resume {conversation}` as argv elements. The dedicated kind preserves the
+  ownership policy across helm and supervisor storage. It uses the generic activity classifier while the manually
+  configured reporter supplies ownership-proven conversation capture. OMP is also a structured harness only at launch
+  time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model and provider flags for the harness
+  default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent explicit; a
+  literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise of literal
+  upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix` interpretations on the
+  id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`). `--thinking <effort>` carries the
+  seven-level list (`off` through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask` carries the
+  YOLO/Approve choices. An omitted permission normalizes to YOLO, as for Pi, OpenCode and Goose; explicit Approve
+  remains Approve. SmartApprove and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen so it
+  cannot read as Pi's "P" at sidebar size.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter
@@ -2496,22 +2432,19 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   for the same reason — the cache is for the stale list, never a source for a fresh mutation), derives a `CreateMode`
   from that row through a function (`sessions::mode_from_source`) shared with `clone_for_agent`, then calls
   `do_create_session` followed by a delete, reusing the ONE `(claim, client)` pair the owner lookup produced for both
-  calls rather than re-routing before the delete. The shared derivation takes a fallback policy as an argument because
-  the two callers disagree about what a dangling snapshotted profile should do: the agent-CLI clone refuses it (a raw
-  invocation may name a binary absent on another machine), while replace falls back to the source's raw invocation,
-  because replace never changes machine — the refusal clone needs has no failure mode to guard against here. The create
-  half carries the same idempotency-replay veto `clone_for_agent` gives its own create: a same-host replace with no
-  overrides can reconstruct the source's own creation fingerprint, so a caller reusing the source's key would otherwise
-  receive the source row BACK as the "replacement" — this route refuses that reply with `Conflict` before any
-  bookkeeping runs, rather than deleting the session it was just handed back. Create runs before delete so a failed
-  create leaves the source untouched. A delete that fails AFTER a successful create is reported one of two ways
-  depending on whether the failure is a DEFINITE answer: an explicit supervisor refusal, or a delete that never reached
-  the wire at all, means the source was not removed, and the reply names both ids and says both sessions still exist; a
-  delete that reached the wire and then lost its answer (the connection dying after the frame was sent, or any other
-  post-send ending this client cannot interpret) is NOT definite — the supervisor may have completed it — so the reply
-  instead says the replacement exists and that the source's fate is unknown and must be checked before deleting it again
-  or retrying. Neither shape ever rolls the create back (killing an agent the caller just asked for) or claims success
-  (hiding a session, or an uncertainty, the caller needs to see).
+  calls rather than re-routing before the delete. The create half carries the same idempotency-replay veto
+  `clone_for_agent` gives its own create: a same-host replace with no overrides can reconstruct the source's own
+  creation fingerprint, so a caller reusing the source's key would otherwise receive the source row BACK as the
+  "replacement" — this route refuses that reply with `Conflict` before any bookkeeping runs, rather than deleting the
+  session it was just handed back. Create runs before delete so a failed create leaves the source untouched. A delete
+  that fails AFTER a successful create is reported one of two ways depending on whether the failure is a DEFINITE
+  answer: an explicit supervisor refusal, or a delete that never reached the wire at all, means the source was not
+  removed, and the reply names both ids and says both sessions still exist; a delete that reached the wire and then lost
+  its answer (the connection dying after the frame was sent, or any other post-send ending this client cannot interpret)
+  is NOT definite — the supervisor may have completed it — so the reply instead says the replacement exists and that the
+  source's fate is unknown and must be checked before deleting it again or retrying. Neither shape ever rolls the create
+  back (killing an agent the caller just asked for) or claims success (hiding a session, or an uncertainty, the caller
+  needs to see).
 - "Replace with" (SPEC.md's bullet of that name) reuses the same endpoint through `ReplaceReq`'s optional `with` field —
   a whole `CreateReq`, the same type an ordinary create's body decodes into — rather than a second route or a second
   override type: present, its cwd/title/dimensions/mode selector are resolved exactly as an ordinary create's own body
@@ -2542,10 +2475,10 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   startup file that overwrote user edits every boot would make the two fight. Validation is all-or-nothing — a malformed
   file, an unusable destination, or a destination listed twice fails startup with the entry named and nothing written,
   since a helm that came up with three of five guaranteed hosts looks healthy and is not.
-- axum serving: REST for CRUD (sessions, profiles, hosts), a WebSocket event stream for live session-list updates, and a
-  WebSocket per attached terminal. A standalone helm also serves the static UI bundle; the desktop's embedded helm uses
-  the same API routes with no static fallback, no token-exchange route, and a fresh kernel-selected loopback port.
-  Loopback bind enforced — refuses non-loopback per SPEC.md.
+- axum serving: REST for CRUD (sessions, hosts), a WebSocket event stream for live session-list updates, and a WebSocket
+  per attached terminal. A standalone helm also serves the static UI bundle; the desktop's embedded helm uses the same
+  API routes with no static fallback, no token-exchange route, and a fresh kernel-selected loopback port. Loopback bind
+  enforced — refuses non-loopback per SPEC.md.
 - Web token: random 128-bit value minted on the helm's first run and stored recoverably in helm.db so `token show` can
   print it. Browser auth exchanges it once for a random 128-bit device secret returned in the response body; the browser
   keeps that secret in origin-scoped localStorage, whose origin includes the loopback port, and sends it explicitly as a
@@ -2784,25 +2717,28 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - `farhelm helm token show|rotate` — web-token bootstrap and rotation.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.
-- `farhelm spawn --cwd <dir> (--agent <name> | --profile-id <id> | --inherit-agent) [--title ...] [--parent ...]
-  [--idempotency-key ...]`
-  — the in-session spawn CLI from SPEC.md. Agents are taught it, so it is part of what newer binaries keep accepting
-  (see "What running sessions hold across versions"), as are the `farhelm agent` verbs below.
-- `farhelm agent hosts|sessions|profiles [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected
-  credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a
-  refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a
-  model quoting its own shell output. The JSON form uses schema version 3, includes exact IDs, caller identity, and
+- `farhelm spawn --cwd <dir> --inherit-agent [--title ...] [--parent ...] [--idempotency-key ...]` — the in-session
+  spawn CLI from SPEC.md. Agents are taught it, so it is part of what newer binaries keep accepting (see "What running
+  sessions hold across versions"), as are the `farhelm agent` verbs below. The `--agent <name>` and `--profile-id <id>`
+  selectors were removed with profiles; both are still parsed, hidden, only so they can be refused with a message saying
+  so and naming `--inherit-agent` or `farhelm agent create --invocation`.
+- `farhelm agent hosts|sessions [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected credential
+  spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a refusal on
+  stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a model
+  quoting its own shell output. The JSON form uses schema version 4, includes exact IDs, caller identity, and
   completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration.
   Version 3 is the restart-only-resumes change: `restart_offer` lost `fresh_only` and `fallback_template`, while
-  `resume` kept its spelling and meaning. A session row's non-secret `OFFER` cell is `resume` when restart can resume
-  the session's conversation, otherwise the reason it cannot (`not-captured`, `no-reporting`; `not_captured` and
-  `no_conversation_reporting` in JSON); it does not disclose the template, captured conversation locator, or a live-stop
-  recommendation. Every dynamic table cell is escaped to one printable line and every non-final column is capped at 48
-  characters: these values are fleet-wide user text printed straight to a terminal, so a raw newline forges a row, an
-  ESC drives the terminal, and one long title would otherwise be padded onto every other row. A cut listing prints its
-  rows on stdout and one warning on stderr, so a script capturing stdout still gets nothing but the table. It has no
-  timeout of its own: the supervisor bounds the relay and is the only party that can distinguish its two failures (see
-  the transport section's version-20 paragraph).
+  `resume` kept its spelling and meaning. Version 4 is the profile removal: a session's `agent` is always its agent
+  type's word or `custom`, never a profile name, and the profiles listing is gone. `farhelm agent profiles` is still
+  parsed, hidden, only so it can be refused with a message saying profiles were removed. A session row's non-secret
+  `OFFER` cell is `resume` when restart can resume the session's conversation, otherwise the reason it cannot
+  (`not-captured`, `no-reporting`; `not_captured` and `no_conversation_reporting` in JSON); it does not disclose the
+  template, captured conversation locator, or a live-stop recommendation. Every dynamic table cell is escaped to one
+  printable line and every non-final column is capped at 48 characters: these values are fleet-wide user text printed
+  straight to a terminal, so a raw newline forges a row, an ESC drives the terminal, and one long title would otherwise
+  be padded onto every other row. A cut listing prints its rows on stdout and one warning on stderr, so a script
+  capturing stdout still gets nothing but the table. It has no timeout of its own: the supervisor bounds the relay and
+  is the only party that can distinguish its two failures (see the transport section's version-20 paragraph).
 - `farhelm agent rename --session <id> --expected-title=<old> -- <new>`, `farhelm agent stop --session <id>`, and
   `farhelm agent restart --session <id> [--stop-if-running]` — the in-session ACTING CLI, on the same relay and
   credential. Every target is explicit, including a deliberate self-action. Rename compares the observed title and
@@ -2815,11 +2751,10 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   restart resumes and to drop the flag. An explicit self-stop or self-restart may terminate the CLI before its line is
   printed because it belongs to the process tree being ended. Self restart prints its interruption/outcome-unknown
   warning before dispatch and treats a lost reply as unknown rather than success.
-- `farhelm agent create --host <name> --cwd <dir> (--profile <name> | --profile-id <id> | --invocation <cmd>) [--title ...]
-  [--idempotency-key ...]`
-  and `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...]
-  [--idempotency-key ...]` —
-  the in-session CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs
+- `farhelm agent create --host <name> --cwd <dir> --invocation <cmd> [--title ...] [--idempotency-key ...]` and
+  `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...]
+  [--idempotency-key ...]` — the
+  in-session CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs
   follow: stdout is the new session's id and nothing else, matching `farhelm spawn`'s contract, with one confirmation
   line on stderr (`created <id> "<title>" on <host> in <cwd>`, escaped the way the listing tables escape their cells).
   The id is the one agent output meant to be captured as a SINGLE VALUE — an agent takes it and hands it back as
@@ -2834,13 +2769,12 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   `--host` takes a NAME from `farhelm agent hosts`, printed there WHOLE: the NAME column is exempt from the truncation
   every other non-final column takes, because that column is a selector rather than a description and a name cut at 48
   characters is a host an agent can see and can never target. Duplicate names remain separate rows and are refused as
-  ambiguous targets. `--cwd` and `--host` are required on `create`; `--source-session` and `--host` are required on
-  clone. The three create selectors are mutually exclusive and exactly one is required, refused by clap before anything
-  is sent (the helm refuses malformed wire shapes too). Profile IDs use exact ID lookup without name fallback. Every
-  value-taking option on both verbs carries `allow_hyphen_values`, because every one of these values is judged
-  downstream — by the registry, by the helm's catalog, by the target filesystem — and every one of them may legally
-  begin with `-`; refusing such a value locally would be this CLI declining to carry a name the far end would have
-  explained.
+  ambiguous targets. `--cwd`, `--host` and `--invocation` are required on `create`; `--source-session` and `--host` are
+  required on clone. The removed `--profile` and `--profile-id` selectors are still parsed, hidden, only so they can be
+  refused naming `--invocation`. Every value-taking option on both verbs carries `allow_hyphen_values`, because every
+  one of these values is judged downstream — by the registry, by the target filesystem — and every one of them may
+  legally begin with `-`; refusing such a value locally would be this CLI declining to carry a name the far end would
+  have explained.
 - `farhelm agent instructions`, and its alias `farhelm agent help` — print the agent-facing manual described above ("The
   instructions pointer") locally, generated by walking this same `AgentCmd` definition. Neither spelling touches the
   supervisor, the helm, or the session credential: both must work for an agent that has just been handed the pointer
@@ -3340,9 +3274,14 @@ launched before the spawn credential existed must be restarted before an agent i
 `farhelm agent` (the refusal says so), `farhelm agent restart --mode` is refused because every restart now resumes
 (SPEC.md, Agent-spawned sessions; the refusal says to drop the flag), the `restart_offer` values `fresh_only` and
 `fallback_template` are gone from `farhelm agent sessions` (its JSON envelope moved to schema version 3; `resume` is
-unchanged), and OMP admission accepts only the current binary's reporter asset. The last one keeps biting: any change to
-the OMP asset's bytes or name makes every OMP session started before it lose conversation tracking until relaunched, so
-such a change is exactly the kind of retirement this section asks to be surfaced.
+unchanged), agent profiles are removed with no conversion (SPEC.md's launch-kinds upgrade paragraph;
+`farhelm agent profiles`, `farhelm agent create --profile` and `--profile-id`, and `farhelm spawn --agent <name>` and
+`--profile-id` are refused with a message naming what to use instead, a session's `agent` in `farhelm agent sessions` no
+longer carries a profile name and the JSON envelope moved to schema version 4, and a profile-backed create's idempotency
+key from before the removal is refused rather than replayed, see "Launch-kinds reservations"), and OMP admission accepts
+only the current binary's reporter asset. The last one keeps biting: any change to the OMP asset's bytes or name makes
+every OMP session started before it lose conversation tracking until relaunched, so such a change is exactly the kind of
+retirement this section asks to be surfaced.
 
 ### Restart only resumes
 
@@ -3363,6 +3302,27 @@ host's last listing, so helm.db schema 35 rewrites cached `fresh_only` to `not_c
 `no_conversation_reporting`; without it the cache reader would skip those rows and a down host's sessions would drop out
 of the list. Tests of restart mechanics that once restarted a plain command fresh now bind a conversation through the
 supervisor's `record_conversation_for_test` seam, which exists only under `cfg(test)` and the `test-seams` feature.
+
+### Launch-kinds reservations
+
+Removing profiles (protocol 38, supervisor schema 25, helm schema 36) changes what a create request can be, and the
+create-idempotency reservations already on disk were written for the old shapes. They are kept as they are, with no
+compatibility added for them. A key is matched by plain string equality between the stored fingerprint and the
+fingerprint of the retry, so a retry that crosses the upgrade with an old key whose shape changed is refused as key
+reuse (`Conflict`) and never runs a second launch, while one whose shape did not (a raw create into an existing
+directory, whose fingerprint is a frozen tuple) still replays; deleting the rows instead would let one intended create
+start two sessions, which SPEC.md forbids. The frozen fingerprint encoder for a helm-resolved profile bundle
+(`"resolved_profile"`, added in protocol 15) was deleted with profiles: nothing produces that shape any more, and its
+stored rows need no encoder to stay unmatchable.
+
+A fresh-checkout reservation stores a serialized create mode so recovery can relaunch the accepted request after a lost
+reply. Every one stored before the upgrade carries the removed `source_profile` member, null or not. It still decodes,
+because the decoder ignores the removed member, so recovery from such a row still works; it never re-encodes to its
+stored string, so a retry of it under the same key is refused as key reuse rather than matched. The helm's fresh-create
+retry looks the key up first and reuses the stored string, so a lost reply from before the upgrade is still recovered
+rather than refused. A stored mode that fails to decode under the current types is refused explicitly ("no compatible
+fresh-checkout recovery snapshot") rather than treated as an unknown key, which would otherwise allocate a second
+checkout.
 
 ### Restart-with backend wire and persistence
 

@@ -32,22 +32,15 @@ use tokio::sync::watch;
 ///
 ///   The frequent publishers meet it by comparing, not by assuming a
 ///   mutation changed something: the cache writes compare stored rows
-///   inside their own transaction, the actor's publication compares the
-///   value it is about to publish, and the remembered-default write compares
-///   the stored id. A caller that cannot tell must not bump.
-///
-///   Profile edits are a deliberate exception: an edit to an existing
-///   profile bumps even when it resubmits exactly what is stored
-///   (`crate::profiles`'s module docs say so). The rule exists to stop a
-///   timer waking the fleet on no-ops; a user-initiated edit is not on a
-///   timer, so an occasional redundant edit costs every client one re-read.
+///   inside their own transaction, and the actor's publication compares the
+///   value it is about to publish. A caller that cannot tell must not bump.
 ///
 /// Owned by the [`crate::manager::ConnectionManager`] because that is where
 /// the chokepoints are — actor state transitions, cache writes, registry
 /// reconciliation — and reachable from the REST edge through
 /// [`crate::manager::ConnectionManager::events`]
-/// for the publishers that live there (among them profile mutations and
-/// remembered-default writes).
+/// for the publishers that live there (among them host edits and
+/// launch-history writes).
 pub struct FleetEvents {
     /// Starts at zero and only ever increases. Wrapping is not a case: at
     /// one bump per nanosecond a `u64` lasts ~584 years.

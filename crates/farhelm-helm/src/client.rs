@@ -12,8 +12,8 @@ use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
 use farhelm_proto::{
-    AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, ProfileSnapshot, SessionInfo, TabInfo,
-    TerminalSelector, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES,
+    AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, TabInfo, TerminalSelector,
+    UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -790,12 +790,9 @@ pub struct CreateExtras {
     /// kind's template must contain a `{conversation}` element; the
     /// supervisor refuses the create otherwise.
     pub resume_template: Option<Vec<String>>,
-    /// The helm-resolved profile identity. This travels with the invocation
-    /// so the supervisor can persist provenance without owning a catalog.
-    pub source_profile: Option<ProfileSnapshot>,
     /// Explicit launch-composer choices compiled into the resolved invocation.
     ///
-    /// Legacy raw/profile callers leave this absent. The supervisor persists
+    /// Raw callers leave this absent. The supervisor persists
     /// it beside the immutable resolved bundle rather than recovering it from
     /// the command later.
     pub launch: Option<farhelm_proto::LaunchSelection>,
@@ -2657,10 +2654,9 @@ impl SupervisorClient {
     /// [`SupervisorClient::create_session`] carrying a fully resolved launch
     /// bundle as well as PLAN_M3.md item 6's idempotency key.
     ///
-    /// Raw creates leave the profile snapshot absent and may let the
-    /// supervisor infer the agent kind. Profile-backed creates use this same
-    /// entry point after the helm has resolved the catalog row, because the
-    /// supervisor deliberately has no catalog of its own.
+    /// Raw creates may let the supervisor infer the agent kind; structured
+    /// creates send the bundle the helm compiled, because the supervisor
+    /// deliberately has no launch catalog of its own.
     pub async fn create_session_with_extras(
         &self,
         cwd: &str,
@@ -2677,8 +2673,6 @@ impl SupervisorClient {
                 ControlMsg::CreateSession {
                     req_id,
                     parent: None,
-                    profile_name: None,
-                    profile_id: None,
                     inherit_agent: false,
                     cwd: cwd.to_string(),
                     invocation: Some(invocation.to_string()),
@@ -2691,7 +2685,6 @@ impl SupervisorClient {
                     confirm_yolo: false,
                     agent_kind: extras.agent_kind,
                     resume_template: extras.resume_template,
-                    source_profile: extras.source_profile,
                     launch: extras.launch,
                     // The resolved payload is helm-supplied (configuration
                     // plus hook); the supervisor re-verdicts it under
@@ -3999,7 +3992,6 @@ mod tests {
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         }
@@ -4914,7 +4906,7 @@ mod tests {
     /// and would invite the retry that starts the second session.
     ///
     /// All three create wrappers send `ControlMsg::CreateSession` and share
-    /// this arm, so the raw-invocation one stands in for the profile ones.
+    /// this arm, so the raw-invocation one stands in for the others.
     #[farhelm_testtrace::test]
     async fn a_create_reply_of_the_wrong_variant_is_reported_as_sent() {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
@@ -7929,8 +7921,6 @@ mod tests {
                 farhelm_proto::AgentVerb::Create {
                     host: Some("this machine".to_string()),
                     cwd: "/w".to_string(),
-                    profile_name: None,
-                    profile_id: None,
                     invocation: Some("sh".to_string()),
                     title: None,
                     intent_key: None,

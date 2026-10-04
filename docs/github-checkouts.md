@@ -1,8 +1,8 @@
 # Fresh GitHub checkouts
 
 Type `gh:owner/repo` in the launch composer's search field and select the repository to launch an agent in a new clone
-on the selected host. Choose the agent independently: structured harnesses, profiles and raw commands all work. Ordinary
-folder launches still work without any checkout configuration.
+on the selected host. Choose the agent independently: structured harnesses and raw commands both work. Ordinary folder
+launches still work without any checkout configuration.
 
 ## Configure the destination
 

@@ -28,9 +28,9 @@ pub(crate) fn foreground_claude_emitter(
 /// somewhere — cannot replace the foreground's conversation. Such a child
 /// always sits at least two links below the pane, because the foreground's
 /// Bash tool runs it through a shell that does not `exec` it. A plain
-/// profile makes the pane process Claude itself (the login shell, any
+/// launch makes the pane process Claude itself (the login shell, any
 /// `systemd-run --scope`, and the launch shim all `exec`), and a supported
-/// one-level wrapper profile makes Claude the pane's direct child, so both
+/// one-level wrapper launch makes Claude the pane's direct child, so both
 /// keep reporting. Native sub-agents never reach this: they fire no
 /// `SessionStart`, and the doorway refuses any report carrying `agent_id`.
 ///

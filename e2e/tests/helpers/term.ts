@@ -132,9 +132,9 @@ export async function attachSession(page: Page, id: string): Promise<void> {
  * This is the list view's plain toggled `<div>`, not a modal. `title` is
  * required because every caller needs a known title, including the explicit
  * empty-title case. Filling and submitting stay separate because callers need
- * to inspect the form while a request is pending or after it fails. Selecting
- * the explicit legacy command path makes the helper independent of a deleted
- * profile that a shared stack might otherwise retain as its last-used choice.
+ * to inspect the form while a request is pending or after it fails. Only the
+ * "other / command" path accepts an arbitrary command, so the helper selects
+ * it before the command field becomes the request's source of intent.
  */
 export async function fillCreateForm(
   page: Page,
@@ -144,12 +144,6 @@ export async function fillCreateForm(
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
   await form.getByRole("button", { name: "other / command" }).click();
-  // The agent picker is told, explicitly, that this create means the command
-  // below. It is not a formality: only the legacy surface accepts an
-  // arbitrary command, and it must say so before the command field becomes
-  // the request's source of intent. This also makes the helper independent of
-  // whatever profile-backed create a shared stack last recorded.
-  await form.locator(".create-session-profile").selectOption("");
   await form.getByLabel("folder", { exact: true }).fill(cwd);
   await form.getByLabel("agent command").fill(invocation);
   // The name field sits on the top action row now, visible without opening

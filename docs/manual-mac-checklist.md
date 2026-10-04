@@ -10,8 +10,8 @@ The initial implementation deliberately leaves these observations for the mainta
 
 - Confirm there is no separate gray app-title strip. Native traffic lights sit within the sidebar header without
   covering the version, and the session header and terminal tabs reach the window's top edge.
-- Drag the empty space beside the version. Confirm the window moves, while the Profiles button beside New in the session
-  list header opens its popup and selecting header or terminal text does not move the window.
+- Drag the empty space beside the version. Confirm the window moves, while the New button in the session list header
+  opens the launcher and selecting header or terminal text does not move the window.
 - Resize through ordinary and narrow widths, scroll the sidebar, and horizontally scroll a narrow window. Check that the
   traffic lights do not cover active controls, the version remains available, and the sticky header stays usable.
 - Enter and leave fullscreen using the native green button, reveal the fullscreen toolbar, and repeat resizing and
@@ -31,10 +31,9 @@ Double-click maximize/restore on the same spacer:
 - Exercise the awkward sequences: two slow separate clicks (no zoom), a triple click (zoom on press 2, restore on press
   3, no drag on either repeat), rapid repeated pairs, and a double-click with small accidental movement between the
   presses.
-- Probe the spacer's edges: press just beside the version; click the Profiles button beside New (or header text) and
-  then the spacer quickly, and the reverse — a cross-target pair must not zoom or move the window. With the Profiles
-  popup open, double-click the spacer and confirm the popup neither zooms the window nor breaks. Select header or
-  terminal text, use session actions, and switch and create terminal tabs: none of those may move or zoom the window.
+- Probe the spacer's edges: press just beside the version; click the settings gear (or header text) and then the spacer
+  quickly, and the reverse — a cross-target pair must not zoom or move the window. Select header or terminal text, use
+  session actions, and switch and create terminal tabs: none of those may move or zoom the window.
 - Repeat the zoom/restore cycle at narrow widths (including the fixed top-band layout), after scrolling the sidebar and
   horizontally scrolling a narrow window, and on a display with different scaling if one is available. Confirm
   traffic-light placement, resize edges, corners, and shadow are unchanged.

@@ -89,11 +89,8 @@ async function createSession(
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  // An arbitrary command belongs to the legacy path. Choosing it first keeps
-  // this helper independent of a profile-backed create the shared stack may
-  // have recorded before this test started.
+  // An arbitrary command belongs to the command path.
   await form.getByRole("button", { name: "other / command" }).click();
-  await form.locator(".create-session-profile").selectOption("");
   await form.getByLabel("folder", { exact: true }).fill(cwd);
   await form.getByLabel("agent command").fill(invocation);
   // Name is visible on the top action row now; find it by label rather

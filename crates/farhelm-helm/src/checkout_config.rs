@@ -760,7 +760,6 @@ mod tests {
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         }
@@ -1321,6 +1320,9 @@ mod tests {
         let conn = store.conn();
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock();
+            // Schema 36 dropped the profile tables a v26 file still holds.
+            conn.execute_batch(crate::store::PROFILE_TABLES_V15)
+                .unwrap();
             conn.execute_batch(
                 "DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;

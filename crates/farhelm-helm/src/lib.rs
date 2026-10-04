@@ -58,10 +58,7 @@
 //!   because a client that filtered a list the cap had cut would hide
 //!   matches beyond the cut while reporting a count that included them.
 //!   Both counts are taken from the same in-memory view the rows come
-//!   from, in the same request. [`profiles`] is the other half of that
-//!   surface: the helm-owned profile catalog is served only at
-//!   `/api/profiles`. The helm also remembers one raw default id for the
-//!   catalog.
+//!   from, in the same request.
 //!
 //! M1's argv session flags (`--ssh`, `--cwd`, `--agent`, `--title`,
 //! `--remote-farhelm`, `--remote-state-dir`) are gone in this same PR: the
@@ -169,14 +166,11 @@ pub use provisioning::{LocalSupervisorDiscovery, discover_local_supervisor};
 
 /// The optional precondition a session create may carry — which connection
 /// it was prepared against — so a create written for one install cannot
-/// launch on another. Kept on purpose when the profile routes lost theirs;
-/// the module docs say why.
+/// launch on another. The module docs say why.
 mod precondition;
 /// `/api/preferences` — the one client preference (list order, last
 /// selection) the helm remembers for every client at once.
 mod preferences;
-/// Helm-owned agent profile CRUD.
-mod profiles;
 
 /// The rules both session caches share: the reply merge, creation order,
 /// cap eviction, and the session id bound.
@@ -700,15 +694,6 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/hosts/{id}/retry",
             axum::routing::post(hosts::retry_host),
-        )
-        .route(
-            "/api/profiles",
-            get(profiles::list_catalog_profiles).post(profiles::create_catalog_profile),
-        )
-        .route(
-            "/api/profiles/{profile_id}",
-            axum::routing::post(profiles::update_catalog_profile)
-                .delete(profiles::delete_catalog_profile),
         )
         // The shared client preference (SPEC.md, Session list). An ordinary
         // protected route with no CORS wrapper — see `preferences.rs` for
@@ -2340,6 +2325,10 @@ mod tests {
         // refused helm upgraded it.
         drop(crate::store::HelmStore::open(&path).await.unwrap());
         let conn = rusqlite::Connection::open(&path).unwrap();
+        // Schema 36 drops the profile tables, so a file claiming version 29
+        // has to hold them.
+        conn.execute_batch(crate::store::PROFILE_TABLES_V15)
+            .unwrap();
         conn.execute_batch(
             "ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
             ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;

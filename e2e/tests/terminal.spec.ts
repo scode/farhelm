@@ -3861,8 +3861,8 @@ test("compact rows retain distinct ended and harness glyphs within two character
     { id: "error", invocation: "opencode --auto", harness: "opencode", permission: "yolo", description: "YOLO permission bypass", status: { state: "error", detail: "cannot launch" }, annotation: null },
     { id: "default", invocation: "codex", harness: "codex", permission: "shielded", description: "default permission mode", launch: { harness: "codex", model: null, effort: null, permissions: null }, status: { state: "idle" }, annotation: null },
     { id: "approve", invocation: "omp --approval-mode always-ask", harness: "omp", permission: "shielded", description: "approve permission mode", launch: { harness: "omp", model: null, effort: null, permissions: "approve" }, status: { state: "idle" }, annotation: null },
-    { id: "full-auto", invocation: "codex --full-auto", harness: "codex", permission: "unknown", description: "unknown permission mode — profile or custom command", status: { state: "idle" }, annotation: null },
-    { id: "unknown", invocation: "sleep 300", harness: "terminal", permission: "unknown", description: "unknown permission mode — profile or custom command", status: { state: "idle" }, annotation: null },
+    { id: "full-auto", invocation: "codex --full-auto", harness: "codex", permission: "unknown", description: "unknown permission mode — custom command", status: { state: "idle" }, annotation: null },
+    { id: "unknown", invocation: "sleep 300", harness: "terminal", permission: "unknown", description: "unknown permission mode — custom command", status: { state: "idle" }, annotation: null },
   ];
   await patchPreferences(request, { compact: true });
   await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {

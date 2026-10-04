@@ -99,7 +99,6 @@ pub(crate) fn session(id: &str, created_at: i64) -> SessionInfo {
         annotation: None,
         restart_offer: RestartOffer::default(),
         tabs: Vec::new(),
-        source_profile: None,
         github_repo: None,
         working_copy: None,
     }
@@ -1056,13 +1055,6 @@ pub(crate) struct FleetBuilder {
 }
 
 impl FleetBuilder {
-    /// Configure durable fixtures before any connection actor starts.
-    /// Profile-backed session scripts need the real stored ID at construction
-    /// time; creating that row here keeps their initial refresh deterministic.
-    pub(crate) fn store(&self) -> &HelmStore {
-        &self.store
-    }
-
     /// A fresh helm.db with only its reserved local row, and a local host
     /// scripted UNREACHABLE.
     ///

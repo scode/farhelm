@@ -4,7 +4,7 @@
 // with the source's cwd, title, and invocation, selects it, and removes the
 // source — all in one round trip through `POST /api/sessions/{id}/replace`
 // (SPEC.md's "replace"). The helm-level composition (create-then-delete, the
-// two failure modes, the profile-fallback divergence from clone) is covered
+// two failure modes) is covered
 // by `sessions_tests.rs`'s own `POST /api/sessions/{id}/replace` suite; this
 // file's job is only what a real browser click chain actually does: the
 // prompt, the selection swap, and that the replacement's terminal starts

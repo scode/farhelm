@@ -14,16 +14,7 @@ import { type APIRequestContext, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import {
-  cleanupProfile,
-  cleanupSession,
-  createProfile,
-  createSession,
-  listProfiles,
-  listSessions,
-  type ProfileRow,
-  type SessionRow,
-} from "./helpers/fleet";
+import { cleanupSession, createSession, listSessions, type SessionRow } from "./helpers/fleet";
 import {
   CLAUDE_CODE_MARKERS,
   submitPrompt,
@@ -82,9 +73,6 @@ test("a fake agent spawns children that appear without refreshing the observer",
   // Setup is inside the cleanup boundary; each optional records only the
   // resource this test actually acquired before a partial failure.
   let root: string | undefined;
-  let olderProfile: ProfileRow | undefined;
-  let olderSession: SessionRow | undefined;
-  let profile: ProfileRow | undefined;
   let parent: SessionRow | undefined;
   let unparented: SessionRow | undefined;
   let parented: SessionRow | undefined;
@@ -97,23 +85,10 @@ test("a fake agent spawns children that appear without refreshing the observer",
     const parentedDir = path.join(root, "parented-child");
     fs.mkdirSync(unparentedDir);
     fs.mkdirSync(parentedDir);
-    olderProfile = await createProfile(request, {
-      name: `Older spawn fixture ${stamp}`,
-      invocation: SPAWN_AGENT,
-    });
-    olderSession = await createSession(request, {
-      title: `older-spawn-source-${stamp}`,
-      cwd: root,
-      profile_id: olderProfile.id,
-    });
-    profile = await createProfile(request, {
-      name: `Spawn fixture ${stamp}`,
-      invocation: SPAWN_AGENT,
-    });
     parent = await createSession(request, {
       title: `spawn-parent-${stamp}`,
       cwd: root,
-      profile_id: profile.id,
+      invocation: SPAWN_AGENT,
     });
     driver = await context.newPage();
 
@@ -130,9 +105,9 @@ test("a fake agent spawns children that appear without refreshing the observer",
     await waitForReplyMarker(driver, "SPAWNED:");
     unparented = await childByTitle(request, path.basename(unparentedDir));
     expect(
-      unparented.source_profile?.id,
-      "explicit inheritance must preserve the parent's profile-backed bundle",
-    ).toBe(profile.id);
+      unparented.invocation,
+      "explicit inheritance must preserve the parent's own command",
+    ).toBe(SPAWN_AGENT);
     await expect(row(page, unparented.id)).toBeVisible({ timeout: 20_000 });
     expect(page.url(), "the observer must not navigate to discover the child").toBe(observerUrl);
 
@@ -154,9 +129,6 @@ test("a fake agent spawns children that appear without refreshing the observer",
     if (parented) await cleanupSession(request, parented.id);
     if (unparented) await cleanupSession(request, unparented.id);
     if (parent) await cleanupSession(request, parent.id);
-    if (olderSession) await cleanupSession(request, olderSession.id);
-    if (profile) await cleanupProfile(request, profile.id);
-    if (olderProfile) await cleanupProfile(request, olderProfile.id);
     if (root) fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -195,14 +167,10 @@ test("a real Claude creates a jj workspace and spawns into it without refreshing
   try {
     scratch = stackScratchDir(`farhelm-real-spawn-${stamp}-`);
     workspace = path.join(scratch, "spawned-workspace");
-    const claude = (await listProfiles(request)).profiles.find(
-      (profile) => profile.name === "claude",
-    );
-    if (!claude) throw new Error("the helm has no exact `claude` starter profile");
     parent = await createSession(request, {
       title: `real-spawn-parent-${stamp}`,
       cwd: repository,
-      profile_id: claude.id,
+      invocation: "claude",
     });
     driver = await context.newPage();
 

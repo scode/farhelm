@@ -319,16 +319,31 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 35;
+const SCHEMA_VERSION: i64 = 36;
 
-/// The helm-owned profile catalog uses the same durable row shape as the
-/// former supervisor catalog so profiles remain portable across this move.
-const PROFILES_SCHEMA: &str = "CREATE TABLE profiles (
+/// The two profile tables exactly as schema 15 created them and schema 36
+/// dropped them: the helm-owned catalog and the remembered default.
+///
+/// Profiles no longer exist (SPEC.md, the launch-kinds upgrade paragraph),
+/// so nothing reads these tables. The definition stays because the ladder
+/// still has to build them for an old database on its way to 36, and the
+/// migration tests plant them when they hand-build a database between those
+/// two versions; one copy keeps both in step with what shipped.
+pub(crate) const PROFILE_TABLES_V15: &str = "CREATE TABLE profiles (
                  id              TEXT PRIMARY KEY,
                  name            TEXT NOT NULL,
                  invocation      TEXT NOT NULL,
                  agent_kind      TEXT NOT NULL,
                  resume_template TEXT
+             ) STRICT;
+             CREATE TABLE remembered_profile (
+                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                 profile_id TEXT NOT NULL,
+                 source_host_id INTEGER,
+                 source_created_at INTEGER,
+                 source_session_id TEXT,
+                 source_creation_seq INTEGER,
+                 CHECK ((source_created_at IS NULL) = (source_session_id IS NULL))
              ) STRICT;";
 
 /// The per-session "last seen" stamp (schema version 17): the activity
@@ -399,113 +414,6 @@ const CHECKOUT_CONFIG_SCHEMA: &str = "\
                  root       TEXT,
                  post_clone TEXT
              ) STRICT;";
-
-/// The prefix reserved for release-owned definitions.
-///
-/// Stored profiles use UUIDs, but this guard also protects direct store
-/// callers: an accidental persistence path must not create a row that could
-/// shadow a definition supplied by a later release.
-const BUILTIN_PROFILE_PREFIX: &str = "builtin-";
-
-/// Return the fixed profiles that every release exposes beside persisted rows.
-///
-/// These definitions deliberately live outside SQLite. That lets a release
-/// correct a built-in command without treating a user's catalog as generated
-/// state, while stored historical starters remain ordinary editable rows.
-pub(crate) fn builtin_profiles() -> Vec<farhelm_proto::Profile> {
-    vec![
-        // Cursor intentionally uses Generic: these starters do not promise
-        // conversation capture or synthesize a Resume command.
-        farhelm_proto::Profile {
-            id: "builtin-cursor".to_string(),
-            builtin: true,
-            name: "cursor".to_string(),
-            invocation: "cursor-agent".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Generic,
-            resume_template: None,
-        },
-        farhelm_proto::Profile {
-            id: "builtin-cursor-yolo".to_string(),
-            builtin: true,
-            name: "cursor-yolo".to_string(),
-            invocation: "cursor-agent --force".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Generic,
-            resume_template: None,
-        },
-        farhelm_proto::Profile {
-            id: "builtin-claude".to_string(),
-            builtin: true,
-            name: "claude".to_string(),
-            invocation: "claude".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Claude,
-            resume_template: None,
-        },
-        farhelm_proto::Profile {
-            id: "builtin-claude-yolo".to_string(),
-            builtin: true,
-            name: "claude-yolo".to_string(),
-            invocation: "claude --dangerously-skip-permissions".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Claude,
-            resume_template: Some(vec![
-                "claude".to_string(),
-                "--dangerously-skip-permissions".to_string(),
-                "--resume".to_string(),
-                "{conversation}".to_string(),
-            ]),
-        },
-        farhelm_proto::Profile {
-            id: "builtin-codex".to_string(),
-            builtin: true,
-            name: "codex".to_string(),
-            invocation: "codex".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Codex,
-            resume_template: None,
-        },
-        farhelm_proto::Profile {
-            id: "builtin-codex-yolo".to_string(),
-            builtin: true,
-            name: "codex-yolo".to_string(),
-            invocation: "codex --yolo".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Codex,
-            resume_template: Some(vec![
-                "codex".to_string(),
-                "--yolo".to_string(),
-                "resume".to_string(),
-                "{conversation}".to_string(),
-            ]),
-        },
-        // Muse launches through the generic path until its per-session
-        // identity, hooks, and waiting-state signals have an integration.
-        farhelm_proto::Profile {
-            id: "builtin-muse".to_string(),
-            builtin: true,
-            name: "muse".to_string(),
-            invocation: "muse".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Generic,
-            resume_template: None,
-        },
-        farhelm_proto::Profile {
-            id: "builtin-muse-yolo".to_string(),
-            builtin: true,
-            name: "muse-yolo".to_string(),
-            invocation: "muse --yolo".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Generic,
-            resume_template: None,
-        },
-    ]
-}
-
-/// Resolve one release-owned profile by its opaque id.
-pub(crate) fn builtin_profile(id: &str) -> Option<farhelm_proto::Profile> {
-    builtin_profiles()
-        .into_iter()
-        .find(|profile| profile.id == id)
-}
-
-/// Whether an id belongs to the namespace reserved for built-ins.
-fn is_builtin_profile_id(id: &str) -> bool {
-    id.starts_with(BUILTIN_PROFILE_PREFIX)
-}
 
 /// Surrogate primary key of a `hosts` row.
 ///
@@ -754,95 +662,6 @@ pub struct CacheReplacement {
     pub changed: bool,
 }
 
-/// The five SQLite columns needed to reconstruct and revalidate one profile.
-type ProfileColumns = (String, String, String, String, Option<String>);
-
-/// What a helm-owned profile insertion did: either it stored a newly minted
-/// profile or the bounded catalog refused the insertion without a write.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProfileCreation {
-    Created(farhelm_proto::Profile),
-    CatalogFull,
-}
-
-/// Encode the shared agent-kind vocabulary used by the strict SQLite table.
-fn agent_kind_column(kind: farhelm_proto::AgentKind) -> &'static str {
-    match kind {
-        farhelm_proto::AgentKind::Claude => "claude",
-        farhelm_proto::AgentKind::Codex => "codex",
-        farhelm_proto::AgentKind::Goose => "goose",
-        farhelm_proto::AgentKind::Pi => "pi",
-        farhelm_proto::AgentKind::Omp => "omp",
-        farhelm_proto::AgentKind::Grok => "grok",
-        farhelm_proto::AgentKind::Generic => "generic",
-    }
-}
-
-/// Decode and reject unknown agent-kind values instead of silently changing
-/// which integration a stored profile selects.
-fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind> {
-    match text {
-        "claude" => Ok(farhelm_proto::AgentKind::Claude),
-        "codex" => Ok(farhelm_proto::AgentKind::Codex),
-        "goose" => Ok(farhelm_proto::AgentKind::Goose),
-        "pi" => Ok(farhelm_proto::AgentKind::Pi),
-        "omp" => Ok(farhelm_proto::AgentKind::Omp),
-        "grok" => Ok(farhelm_proto::AgentKind::Grok),
-        "generic" => Ok(farhelm_proto::AgentKind::Generic),
-        other => anyhow::bail!("row has unrecognized agent kind {other:?}"),
-    }
-}
-
-/// Serialize the optional argv template in the same representation as the
-/// supervisor catalog.
-fn resume_template_column(template: Option<&[String]>) -> Option<String> {
-    template.map(|value| serde_json::to_string(value).expect("strings serialize"))
-}
-
-/// Decode a stored optional argv template before shared validation runs.
-fn resume_template_from_column(text: Option<String>) -> anyhow::Result<Option<Vec<String>>> {
-    text.map(|value| serde_json::from_str(&value).context("decoding a stored resume template"))
-        .transpose()
-}
-
-/// Read the profile columns in the fixed order used by catalog queries.
-fn read_profile_columns(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProfileColumns> {
-    Ok((
-        row.get(0)?,
-        row.get(1)?,
-        row.get(2)?,
-        row.get(3)?,
-        row.get(4)?,
-    ))
-}
-
-/// Reconstruct a profile and revalidate it so hand-edited or old rows cannot
-/// bypass the catalog's current field contract.
-fn decode_profile_row(columns: ProfileColumns) -> anyhow::Result<farhelm_proto::Profile> {
-    let (id, name, invocation, kind, template) = columns;
-    if is_builtin_profile_id(&id) {
-        anyhow::bail!("stored profile {id} uses the reserved built-in namespace");
-    }
-    let agent_kind = agent_kind_from_column(&kind).with_context(|| format!("profile {id}"))?;
-    let resume_template =
-        resume_template_from_column(template).with_context(|| format!("profile {id}"))?;
-    farhelm_proto::validate_profile_fields(
-        &name,
-        &invocation,
-        agent_kind,
-        resume_template.as_deref(),
-    )
-    .map_err(|message| anyhow::anyhow!("profile {id}: {message}"))?;
-    Ok(farhelm_proto::Profile {
-        id,
-        builtin: false,
-        name,
-        invocation,
-        agent_kind,
-        resume_template,
-    })
-}
-
 /// The predicates a merged-view read is narrowed by — SPEC.md's filtering
 /// and search dimensions, including spawned-session parentage, as one value.
 ///
@@ -863,44 +682,23 @@ fn decode_profile_row(columns: ProfileColumns) -> anyhow::Result<farhelm_proto::
 /// dimensions belong to which half. The split below follows the
 /// shape of the data rather than the wording:
 ///
-/// - **host, parent, status, profile — EXACT.** Each is an identifier or a
-///   value chosen from a finite set
-///   the client already has in hand (the hosts list, the status vocabulary,
-///   the helm's profile catalog), so a substring match would only ever
+/// - **host, parent, status — EXACT.** Each is an identifier or a value
+///   chosen from a finite set the client already has in hand (the hosts
+///   list, the status vocabulary), so a substring match would only ever
 ///   create surprises: `error` matching nothing else today but matching a
-///   future `error_recovered`, or a profile named `claude` also selecting
-///   `claude-review`.
+///   future `error_recovered`.
 /// - **directory, title — case-insensitive SUBSTRING.** These are free text
 ///   the user types into a search box, and neither has a canonical prefix a
 ///   user reliably remembers: a session in `/home/me/src/farhelm` is found
 ///   by typing `farhelm`, and one titled "Refactor the drain" by typing
 ///   `drain`. Case folding is Rust's `to_lowercase` (Unicode-aware, not
 ///   ASCII-only) on both needle and haystack.
-/// - **profile matches the SNAPSHOT, by id OR by name.** A session carries
-///   the profile id and the name AS SNAPSHOTTED at creation
-///   (`SourceProfile`), and nothing rewrites those when the profile is
-///   edited or deleted. Matching the id is what makes a picker's selection
-///   exact and rename-proof; matching the snapshotted name is what keeps a
-///   DELETED profile's sessions filterable at all, since after the delete
-///   the name is the only handle anyone still has. Both are accepted in one
-///   parameter because a client has one search box and the two never
-///   collide in practice (an id is supervisor-minted opaque text).
-///
-/// A session with no `source_profile` — a raw-invocation create — never
-/// matches a profile filter. That is the honest reading of "sessions from
-/// profile X" and not merely a convenience: such a session was never shaped
-/// by any profile.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionFilter {
     host: Option<HostId>,
     parent: Option<String>,
     directory: Option<Folded>,
     title: Option<Folded>,
-    /// The raw needle AND its folded form: the id half of the match is a
-    /// byte comparison against opaque text, the name half is case-folded,
-    /// and precomputing the fold here keeps the per-row cost to a
-    /// comparison rather than an allocation.
-    profile: Option<Folded>,
     /// The `state` tag of [`SessionStatus`], as [`status_key`] spells it.
     /// `&'static str` rather than an enum of this module's own: the
     /// vocabulary is the protocol's, and a second copy of it here would be
@@ -908,17 +706,17 @@ pub struct SessionFilter {
     status: Option<&'static str>,
 }
 
-/// A search needle kept beside its case-folded form.
+/// A search needle, case-folded once when the filter is built so that the
+/// per-row cost is a fold of the haystack and a substring search, not two
+/// allocations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Folded {
-    raw: String,
     folded: String,
 }
 
 impl Folded {
     fn new(raw: &str) -> Folded {
         Folded {
-            raw: raw.to_string(),
             folded: raw.to_lowercase(),
         }
     }
@@ -1211,13 +1009,6 @@ impl SessionFilter {
         self
     }
 
-    /// Narrow to sessions created from the profile named by `value` —
-    /// either its id or its snapshotted name (see this type's docs).
-    pub fn profile(mut self, value: &str) -> SessionFilter {
-        self.profile = Some(Folded::new(value));
-        self
-    }
-
     /// Narrow to one status, by the tag [`status_key`] spells.
     pub fn status(mut self, status: &'static str) -> SessionFilter {
         self.status = Some(status);
@@ -1276,14 +1067,6 @@ impl SessionFilter {
             && !title.contained_in(&info.title)
         {
             return false;
-        }
-        if let Some(profile) = &self.profile {
-            let Some(source) = &info.source_profile else {
-                return false;
-            };
-            if source.id != profile.raw && source.name.to_lowercase() != profile.folded {
-                return false;
-            }
         }
         true
     }
@@ -1917,6 +1700,10 @@ pub struct HelmStore {
 ///   `fallback_template`, which protocol 37 removed with fresh and fallback
 ///   restarts, become `not_captured` and `no_conversation_reporting`, so a
 ///   down host's cached sessions keep decoding and keep being listed.
+/// - 36: profiles are removed (SPEC.md, the launch-kinds upgrade paragraph):
+///   the `profiles` catalog and the `remembered_profile` default go with no
+///   conversion, and cached sessions lose their `source_profile` snapshot,
+///   which `SessionInfo` no longer carries and the decoder ignores.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2079,25 +1866,6 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- wanted at any layer.
              CREATE UNIQUE INDEX session_cache_one_owner
                  ON session_cache (session_id);
-             -- The helm-wide last profile a session was created from.
-             -- (schema version 5 originally stored this per host.) The
-             -- profile id is deliberately not a foreign key: a deleted
-             -- profile remains visible as a dangling default so clients can
-             -- ask instead of silently selecting another profile.
-             -- The source_* columns are
-             -- provenance for ORDERING only -- which observation of a
-             -- profile-backed create is newer -- so a delayed drain cannot
-             -- roll the default backward past a newer create.
-             {PROFILES_SCHEMA}
-             CREATE TABLE remembered_profile (
-                 singleton     INTEGER PRIMARY KEY CHECK (singleton = 1),
-                 profile_id    TEXT NOT NULL,
-                 source_host_id INTEGER,
-                 source_created_at INTEGER,
-                 source_session_id TEXT,
-                 source_creation_seq INTEGER,
-                 CHECK ((source_created_at IS NULL) = (source_session_id IS NULL))
-             ) STRICT;
              -- One recoverable web token. The fixed primary key makes the
              -- single-row rule a schema invariant rather than a convention
              -- shared by whichever commands happen to write it.
@@ -2221,7 +1989,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 35;",
+              PRAGMA user_version = 36;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2614,16 +2382,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         // this migration never writes generated catalog rows.
         tx.execute_batch(&format!(
             "DROP TABLE remembered_profiles;
-             {PROFILES_SCHEMA}
-             CREATE TABLE remembered_profile (
-                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-                 profile_id TEXT NOT NULL,
-                 source_host_id INTEGER,
-                 source_created_at INTEGER,
-                 source_session_id TEXT,
-                 source_creation_seq INTEGER,
-                 CHECK ((source_created_at IS NULL) = (source_session_id IS NULL))
-             ) STRICT;
+             {PROFILE_TABLES_V15}
              PRAGMA user_version = 15;"
         ))
         .context("migrating helm.db to schema version 15")?;
@@ -3078,6 +2837,18 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 35")?;
         version = 35;
+    }
+    if version == 35 {
+        // Profiles are gone with no conversion. Cached `SessionInfo` rows may
+        // still carry a `source_profile` member; serde ignores the unknown
+        // field on decode, so they keep listing without a rewrite.
+        tx.execute_batch(
+            "DROP TABLE profiles;
+             DROP TABLE remembered_profile;
+             PRAGMA user_version = 36;",
+        )
+        .context("migrating helm.db to schema version 36")?;
+        version = 36;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -4426,10 +4197,7 @@ impl HelmStore {
     /// Everything else the helm knows about the row. The learned identity and
     /// the session cache are facts about an install, and the next handshake
     /// against the new endpoint decides what happens to them (a mismatch
-    /// freezes, and adoption is what purges). The helm-wide remembered
-    /// profile survives too. It is a singleton, not state owned by this
-    /// registry row, so changing one host's destination has no profile
-    /// preference to migrate or clear.
+    /// freezes, and adoption is what purges).
     pub async fn update_ssh_destination(
         &self,
         host: HostId,
@@ -4805,9 +4573,6 @@ impl HelmStore {
     /// row marked before its first contact and then retargeted, are left
     /// alone for now (the maintainer's triage decision, 2026-10-01).
     ///
-    /// The remembered default profile is NOT purged. Adoption replaces one
-    /// host's installation identity, while the preference is a helm-wide
-    /// singleton with no ownership relationship to that host or its cache.
     /// The predecessor's create-history partitions ARE purged with its
     /// cache: their identity key prevents accidental display on the
     /// successor, but retaining every retired identity would make repeated
@@ -5413,7 +5178,7 @@ impl HelmStore {
     ///
     /// `explicit_selection` is the launch the user explicitly selected in
     /// the GUI for this create, or `None` (an agent-originated create, a
-    /// plain Replace, a raw or profile create). It alone decides the
+    /// plain Replace, a raw create). It alone decides the
     /// `launch_history` row and, from the same selection, the helm-wide
     /// `preferences.remembered_permissions` memory and, for an explicit
     /// Codex, Muse, or Pi trust choice, `remembered_workspace_trust`.
@@ -6398,338 +6163,6 @@ impl HelmStore {
             )
             .await
     }
-
-    /// Return the usable portion of the helm-owned catalog in stable id order.
-    ///
-    /// Listing does not repair or reseed rows: user edits and deletions are
-    /// durable choices. Malformed persisted data is reported by the decoder
-    /// and warning log instead of silently normalized into a different
-    /// profile, but one bad row must not make the rest of the catalog
-    /// unavailable to host refresh or session creation.
-    pub async fn profiles(&self) -> anyhow::Result<Vec<farhelm_proto::Profile>> {
-        let stored: Vec<farhelm_proto::Profile> = self.conn.call("profile list task panicked", move |conn: &mut Connection| -> anyhow::Result<_> {
-            let mut statement = conn
-                .prepare("SELECT id, name, invocation, agent_kind, resume_template FROM profiles ORDER BY id")
-                .context("preparing profile list query")?;
-            let rows = statement
-                .query_map([], read_profile_columns)
-                .context("querying profiles")?;
-            let mut profiles = Vec::new();
-            for row in rows {
-                let columns = row.context("reading profile row")?;
-                let id = columns.0.clone();
-                match decode_profile_row(columns) {
-                    Ok(profile) => profiles.push(profile),
-                    Err(error) => tracing::warn!(%id, %error, "skipping undecodable stored profile"),
-                }
-            }
-            Ok(profiles)
-        })
-.await
-        ?;
-        let mut profiles = builtin_profiles();
-        profiles.extend(stored);
-        profiles.sort_by(|left, right| left.id.cmp(&right.id));
-        Ok(profiles)
-    }
-
-    /// Read one helm-owned profile, returning `None` for an unknown id so
-    /// update and delete routes can distinguish absence from storage failure.
-    pub async fn profile(&self, id: &str) -> anyhow::Result<Option<farhelm_proto::Profile>> {
-        if let Some(profile) = builtin_profile(id) {
-            return Ok(Some(profile));
-        }
-        let id = id.to_string();
-        self.conn.call("profile read task panicked", move |conn: &mut Connection| -> anyhow::Result<_> {
-            let row = conn
-                .query_row(
-                    "SELECT id, name, invocation, agent_kind, resume_template FROM profiles WHERE id = ?1",
-                    rusqlite::params![id],
-                    read_profile_columns,
-                )
-                .optional()
-                .context("reading one profile")?;
-            row.map(decode_profile_row).transpose()
-        })
-.await
-    }
-
-    /// Insert a validated profile while enforcing the catalog bound in the
-    /// same transaction as the insert, avoiding a check-then-insert race.
-    pub async fn create_profile(
-        &self,
-        name: String,
-        invocation: String,
-        agent_kind: farhelm_proto::AgentKind,
-        resume_template: Option<Vec<String>>,
-    ) -> anyhow::Result<ProfileCreation> {
-        farhelm_proto::validate_profile_fields(
-            &name,
-            &invocation,
-            agent_kind,
-            resume_template.as_deref(),
-        )
-        .map_err(|message| anyhow::anyhow!("refusing to store this profile: {message}"))?;
-        self.conn.call("profile create task panicked", move |conn: &mut Connection| -> anyhow::Result<_> {
-            let tx = conn.transaction().context("beginning profile create transaction")?;
-            let count: i64 = tx
-                .query_row("SELECT COUNT(*) FROM profiles", [], |row| row.get(0))
-                .context("counting profiles")?;
-            if count as usize >= farhelm_proto::MAX_PROFILES {
-                return Ok(ProfileCreation::CatalogFull);
-            }
-            let profile = farhelm_proto::Profile {
-                id: uuid::Uuid::new_v4().to_string(),
-                builtin: false,
-                name,
-                invocation,
-                agent_kind,
-                resume_template,
-            };
-            tx.execute(
-                "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![
-                    profile.id,
-                    profile.name,
-                    profile.invocation,
-                    agent_kind_column(profile.agent_kind),
-                    resume_template_column(profile.resume_template.as_deref()),
-                ],
-            )
-            .context("inserting profile row")?;
-            tx.commit().context("committing profile create")?;
-            Ok(ProfileCreation::Created(profile))
-        })
-.await
-    }
-
-    /// Replace a complete profile definition, preserving its immutable id so
-    /// existing session snapshots continue to refer to the same definition.
-    pub async fn update_profile(
-        &self,
-        profile: farhelm_proto::Profile,
-    ) -> anyhow::Result<Option<farhelm_proto::Profile>> {
-        if is_builtin_profile_id(&profile.id) {
-            anyhow::bail!("built-in profiles are read-only");
-        }
-        farhelm_proto::validate_profile_fields(
-            &profile.name,
-            &profile.invocation,
-            profile.agent_kind,
-            profile.resume_template.as_deref(),
-        )
-        .map_err(|message| anyhow::anyhow!("refusing to store this profile: {message}"))?;
-        self.conn.call("profile update task panicked", move |conn: &mut Connection| -> anyhow::Result<_> {
-            let changed = conn.execute(
-                "UPDATE profiles SET name = ?2, invocation = ?3, agent_kind = ?4, resume_template = ?5 WHERE id = ?1",
-                rusqlite::params![
-                    profile.id,
-                    profile.name,
-                    profile.invocation,
-                    agent_kind_column(profile.agent_kind),
-                    resume_template_column(profile.resume_template.as_deref()),
-                ],
-            ).context("updating profile row")?;
-            Ok((changed > 0).then_some(profile))
-        })
-.await
-    }
-
-    /// Make every profile catalog read fail without touching anything else.
-    ///
-    /// Mutation-order tests need a catalog read to fail without damaging the
-    /// session cache or connection registry they use for routing. A single
-    /// undecodable row no longer does that — `profiles` logs and skips it so
-    /// one damaged row cannot take the whole catalog down — so this seam
-    /// breaks the catalog at the schema level instead: with the table renamed
-    /// away, the list query cannot even be prepared, which is the shape a
-    /// truncated or mismigrated database presents. Nothing else in the store
-    /// joins the profiles table, so routing stays real.
-    #[cfg(test)]
-    pub(crate) async fn break_profile_catalog_for_test(&self) -> anyhow::Result<()> {
-        self.conn
-            .call(
-                "broken catalog fixture task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<()> {
-                    conn.execute(
-                        "ALTER TABLE profiles RENAME TO profiles_broken_for_test",
-                        [],
-                    )
-                    .context("renaming the profiles table away")?;
-                    Ok(())
-                },
-            )
-            .await
-    }
-
-    /// Delete one profile and report whether its id existed; the raw
-    /// remembered default is intentionally left untouched when it dangles.
-    pub async fn delete_profile(&self, id: &str) -> anyhow::Result<bool> {
-        if is_builtin_profile_id(id) {
-            anyhow::bail!("built-in profiles are read-only");
-        }
-        let id = id.to_string();
-        self.conn
-            .call(
-                "profile delete task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<_> {
-                    Ok(
-                        conn.execute("DELETE FROM profiles WHERE id = ?1", rusqlite::params![id])?
-                            > 0,
-                    )
-                },
-            )
-            .await
-    }
-
-    /// Read the raw remembered id, including an id whose profile was deleted.
-    pub async fn remembered_profile(&self) -> anyhow::Result<Option<String>> {
-        self.conn
-            .call(
-                "remembered profile task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<Option<String>> {
-                    conn.query_row(
-                        "SELECT profile_id FROM remembered_profile WHERE singleton = 1",
-                        [],
-                        |r| r.get(0),
-                    )
-                    .optional()
-                    .context("reading the remembered default profile")
-                },
-            )
-            .await
-    }
-
-    /// Remember `profile_id` without a session provenance marker.
-    ///
-    /// Kept for administrative and test callers that do not have the
-    /// creating session in hand. Production user-create handling records
-    /// diagnostic provenance through
-    /// [`Self::remember_profile_default_from_host_session`].
-    pub async fn remember_profile_default(&self, profile_id: &str) -> anyhow::Result<bool> {
-        self.remember_profile_default_with_source(profile_id, None, None, None, None)
-            .await
-    }
-
-    /// Remember a successful profile-backed create whose host owns its sequence.
-    ///
-    /// The source fields are diagnostic provenance for the user's successful
-    /// choice. They never order writes: every successful user create has
-    /// unconditional authority over the remembered default.
-    pub async fn remember_profile_default_from_host_session(
-        &self,
-        profile_id: &str,
-        source_host: HostId,
-        source_creation_seq: Option<u64>,
-        source_created_at: i64,
-        source_session_id: &str,
-    ) -> anyhow::Result<bool> {
-        self.remember_profile_default_with_source(
-            profile_id,
-            Some(source_host),
-            source_creation_seq,
-            Some(source_created_at),
-            Some(source_session_id),
-        )
-        .await
-    }
-
-    /// Remember a successful profile-backed create without a known host.
-    ///
-    /// This remains for administrative and test callers. Production session
-    /// creation uses [`Self::remember_profile_default_from_host_session`] to
-    /// retain the host that created the chosen session as diagnostic context.
-    pub async fn remember_profile_default_from_session(
-        &self,
-        profile_id: &str,
-        source_creation_seq: Option<u64>,
-        source_created_at: i64,
-        source_session_id: &str,
-    ) -> anyhow::Result<bool> {
-        self.remember_profile_default_with_source(
-            profile_id,
-            None,
-            source_creation_seq,
-            Some(source_created_at),
-            Some(source_session_id),
-        )
-        .await
-    }
-
-    /// Write `profile_id` as the helm-wide last-used profile, replacing
-    /// whatever was there.
-    ///
-    /// Written by a successful user-originated profile-backed create.
-    /// Diagnostic callers may use the public wrappers above, but remote
-    /// observations and agent-relay creates do not reach this writer.
-    /// Returns whether the visible profile id changed, so the invalidation
-    /// feed does not wake every client each time a user creates from the same
-    /// profile twice in a row. The source columns still refresh on that
-    /// repeated choice, so they describe the most recent successful user
-    /// create even when the visible id did not change.
-    ///
-    /// The value is intentionally not tied to a host or installation. A
-    /// create whose reply lands after a host retarget records the id all the
-    /// same; the client can still replace the suggestion before creating.
-    async fn remember_profile_default_with_source(
-        &self,
-        profile_id: &str,
-        source_host: Option<HostId>,
-        source_creation_seq: Option<u64>,
-        source_created_at: Option<i64>,
-        source_session_id: Option<&str>,
-    ) -> anyhow::Result<bool> {
-        let profile_id = profile_id.to_string();
-        let source_session_id = source_session_id.map(str::to_string);
-        self.conn
-            .call(
-                "remember profile default task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<bool> {
-                    let stored_source_creation_seq = source_creation_seq
-                        .map(i64::try_from)
-                        .transpose()
-                        .context("creation sequence exceeds SQLite's integer range")?;
-                    let tx = conn
-                        .transaction()
-                        .context("beginning remembered-default transaction")?;
-                    // The profile id alone controls client invalidation. Provenance
-                    // is diagnostic, so a later user choice always replaces it even
-                    // when its supervisor timestamp is older than an earlier one.
-                    let previous_profile: Option<String> = tx
-                        .query_row(
-                            "SELECT profile_id FROM remembered_profile WHERE singleton = 1",
-                            [],
-                            |row| row.get(0),
-                        )
-                        .optional()
-                        .context("checking the remembered default row")?;
-                    let changed = previous_profile.as_deref() != Some(profile_id.as_str());
-                    tx.execute(
-                        "INSERT INTO remembered_profile (\
-                     singleton, profile_id, source_host_id, source_creation_seq, \
-                     source_created_at, source_session_id\
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-                 ON CONFLICT (singleton) DO UPDATE SET profile_id = excluded.profile_id, \
-                     source_host_id = excluded.source_host_id, \
-                     source_creation_seq = excluded.source_creation_seq, \
-                     source_created_at = excluded.source_created_at, \
-                     source_session_id = excluded.source_session_id",
-                        rusqlite::params![
-                            1,
-                            profile_id,
-                            source_host,
-                            stored_source_creation_seq,
-                            source_created_at,
-                            source_session_id
-                        ],
-                    )
-                    .context("remembering the default profile")?;
-                    tx.commit().context("committing the remembered default")?;
-                    Ok(changed)
-                },
-            )
-            .await
-    }
 }
 
 #[cfg(test)]
@@ -6891,34 +6324,8 @@ mod tests {
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
-        }
-    }
-
-    /// A cached session whose immutable source snapshot names `profile`.
-    fn profiled_session(id: &str, created_at: i64, profile: &str) -> SessionInfo {
-        SessionInfo {
-            source_profile: Some(farhelm_proto::SourceProfile {
-                id: profile.to_string(),
-                name: format!("Profile {profile}"),
-                existence: farhelm_proto::ProfileExistence::Present,
-            }),
-            ..session(id, created_at)
-        }
-    }
-
-    /// A profile-backed fixture with a supervisor-assigned creation sequence.
-    fn sequenced_profiled_session(
-        id: &str,
-        created_at: i64,
-        creation_seq: u64,
-        profile: &str,
-    ) -> SessionInfo {
-        SessionInfo {
-            creation_seq: Some(creation_seq),
-            ..profiled_session(id, created_at, profile)
         }
     }
 
@@ -7199,6 +6606,10 @@ mod tests {
             let conn = store.conn.lock();
             // Restore the historical cache column as well: the upgrade must
             // cross its removal after adding repository intent to history.
+            // Schema 36 drops the profile tables, so a file claiming a
+            // version between 15 and 35 has to hold them.
+            conn.execute_batch(PROFILE_TABLES_V15)
+                .expect("plant the profile tables schema 15 created");
             conn.execute_batch(
                 "ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
@@ -7296,8 +6707,8 @@ mod tests {
     }
 
     /// Spec: only an explicit selection is recorded. A create recorded
-    /// without one (an agent's create, a plain Replace, a raw or profile
-    /// create) adds no recent-setups row and moves no remembered default,
+    /// without one (an agent's create, a plain Replace, a raw create) adds no
+    /// recent-setups row and moves no remembered default,
     /// even when the supervisor's reply carries a launch; a create with one
     /// records exactly that selection, whatever the reply says.
     ///
@@ -9490,6 +8901,10 @@ mod tests {
         let non_object = r#"["retained-array"]"#;
         {
             let conn = store.conn.lock();
+            // Schema 36 drops the profile tables, so a file claiming a
+            // version between 15 and 35 has to hold them.
+            conn.execute_batch(PROFILE_TABLES_V15)
+                .expect("plant the profile tables schema 15 created");
             conn.execute_batch(
                 "ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
@@ -9883,10 +9298,6 @@ mod tests {
         assert_eq!(listed[0].title, "before the upgrade");
         assert_eq!(listed[0].cwd, "/work");
         assert_eq!(listed[0].created_at, 100);
-        assert_eq!(
-            listed[0].source_profile, None,
-            "a row written before the field existed reads as raw-created"
-        );
 
         let rows = store.cached_rows(&[host]).await.expect("cached rows");
         assert_eq!(rows.len(), 1);
@@ -9945,6 +9356,10 @@ mod tests {
                 )
                 .expect("plant a cached session");
             }
+            // Schema 36 drops the profile tables, so a file claiming a
+            // version between 15 and 35 has to hold them.
+            conn.execute_batch(PROFILE_TABLES_V15)
+                .expect("plant the profile tables schema 15 created");
             conn.execute_batch("PRAGMA user_version = 34;")
                 .expect("mark the file schema 34");
         }
@@ -9973,6 +9388,73 @@ mod tests {
             ],
             "every cached session must still decode, with the removed offers mapped"
         );
+    }
+
+    /// Schema 36 drops the profile catalog and the remembered default, and a
+    /// session cached with a profile snapshot keeps listing.
+    ///
+    /// Why: profiles are removed with no conversion (SPEC.md, the launch-kinds
+    /// upgrade paragraph), so the tables have to go rather than linger as
+    /// state nothing reads. The cached row matters for the same reason the
+    /// schema 35 rewrite does: the cache reader skips a row it cannot decode,
+    /// and a down host's profile-created sessions must not vanish from the
+    /// list at the upgrade. Specified: after migrating a schema-35 file
+    /// holding a stored profile, a remembered default, and a cached session
+    /// whose JSON still carries `source_profile`, neither table exists and
+    /// the session decodes with everything else intact.
+    #[farhelm_testtrace::test]
+    async fn migrating_from_v35_drops_profiles_and_keeps_profiled_cached_sessions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        drop(
+            HelmStore::open(&db_path)
+                .await
+                .expect("create current schema"),
+        );
+        // The reserved local row `open` mints; ids start at 1.
+        let host: HostId = 1;
+        {
+            let conn = Connection::open(&db_path).expect("reopen raw");
+            conn.execute_batch(PROFILE_TABLES_V15)
+                .expect("plant the profile tables schema 15 created");
+            conn.execute_batch(
+                "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template)
+                     VALUES ('p-1', 'Reviewer', 'claude --model opus', 'claude', NULL);
+                 INSERT INTO remembered_profile (singleton, profile_id) VALUES (1, 'p-1');",
+            )
+            .expect("plant a stored profile and the remembered default");
+            // Hand-written in the shape a schema-35 helm stored, rather than
+            // serialized from today's types, which can no longer produce it.
+            let row = r#"{"id":"profiled","title":"from a profile","created_at":100,"cwd":"/w","invocation":"claude --model opus","status":{"state":"running"},"annotation":null,"restart_offer":"resume","tabs":[],"source_profile":{"id":"p-1","name":"Reviewer","existence":"present"}}"#;
+            conn.execute(
+                "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                 VALUES (?1, 'profiled', 100, ?2)",
+                rusqlite::params![host, row],
+            )
+            .expect("plant a cached profile-created session");
+            conn.execute_batch("PRAGMA user_version = 35;")
+                .expect("mark the file schema 35");
+        }
+
+        let store = HelmStore::open(&db_path).await.expect("migrate and open");
+        let cached = store.cached_sessions(host).await.expect("stale list");
+        assert_eq!(cached.len(), 1, "the profile-created session still lists");
+        assert_eq!(cached[0].id, "profiled");
+        assert_eq!(cached[0].title, "from a profile");
+        assert_eq!(cached[0].invocation, "claude --model opus");
+        drop(store);
+
+        let conn = Connection::open(&db_path).expect("reopen raw");
+        for table in ["profiles", "remembered_profile"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("query the schema");
+            assert_eq!(count, 0, "schema 36 drops {table}");
+        }
     }
 
     /// A migrated database and a freshly created one must end up with
@@ -10026,6 +9508,10 @@ mod tests {
         // leaving the current registry row as the migration must find it.
         {
             let conn = Connection::open(&path).expect("reopen raw schema-22 fixture");
+            // Schema 36 drops the profile tables, so a file claiming a
+            // version between 15 and 35 has to hold them.
+            conn.execute_batch(PROFILE_TABLES_V15)
+                .expect("plant the profile tables schema 15 created");
             conn.execute_batch(
                 "DROP TABLE launch_history;
                  DROP TABLE folder_history;
@@ -10188,6 +9674,10 @@ mod tests {
             let store = HelmStore::open(&path).await.expect("create current schema");
             drop(store);
             let conn = Connection::open(&path).expect("reopen raw");
+            // Schema 36 drops the profile tables, so a file claiming a
+            // version between 15 and 35 has to hold them.
+            conn.execute_batch(PROFILE_TABLES_V15)
+                .expect("plant the profile tables schema 15 created");
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN compact;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
@@ -10240,6 +9730,10 @@ mod tests {
             let store = HelmStore::open(&path).await.expect("create current schema");
             drop(store);
             let conn = Connection::open(&path).expect("reopen raw");
+            // Schema 36 drops the profile tables, so a file claiming a
+            // version between 15 and 35 has to hold them.
+            conn.execute_batch(PROFILE_TABLES_V15)
+                .expect("plant the profile tables schema 15 created");
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                 ALTER TABLE hosts DROP COLUMN yolo_without_asking;
@@ -10295,6 +9789,10 @@ mod tests {
                 .expect("write the version-32 choice");
             drop(store);
             let conn = Connection::open(&path).expect("reopen raw");
+            // Schema 36 drops the profile tables, so a file claiming a
+            // version between 15 and 35 has to hold them.
+            conn.execute_batch(PROFILE_TABLES_V15)
+                .expect("plant the profile tables schema 15 created");
             conn.execute_batch(
                 "ALTER TABLE hosts RENAME COLUMN yolo_without_asking TO yolo_safe;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
@@ -10357,6 +9855,10 @@ mod tests {
         drop(store);
         {
             let conn = Connection::open(&path).unwrap();
+            // Schema 36 drops the profile tables, so a file claiming a
+            // version between 15 and 35 has to hold them.
+            conn.execute_batch(PROFILE_TABLES_V15)
+                .expect("plant the profile tables schema 15 created");
             conn.execute_batch(
                 "ALTER TABLE hosts RENAME COLUMN yolo_without_asking TO yolo_safe;
                  PRAGMA user_version = 33;",
@@ -10397,254 +9899,6 @@ mod tests {
         );
     }
 
-    /// A version-5 database (a bare per-host default and nothing else) reaches the
-    /// current schema with NO remembered default and its host registry intact.
-    ///
-    /// Schema 15 changed what the default IS — one helm-wide id instead of one per
-    /// host — and the settled call was to drop the per-host rows rather than pick a
-    /// winner among them. This pins that a real v5 file (built by downgrading a
-    /// current one, so the row sits in the schema the old release actually shipped)
-    /// migrates cleanly to the empty singleton, and that forgetting the preference
-    /// never costs the registry.
-    #[farhelm_testtrace::test]
-    async fn a_version_5_bare_default_is_dropped_by_schema_15() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("helm.db");
-        let host = {
-            let store = HelmStore::open(&path).await.expect("create");
-            let host = store.add_ssh_host("user@host", None, None).await.unwrap();
-            store
-                .remember_profile_default("starter-claude")
-                .await
-                .unwrap();
-            host
-        };
-
-        // Back to the shape version 5 shipped: no identity column, and a row
-        // recorded under it. The current cache already lacks the historical
-        // archive and ordering columns, so the ladder can add and remove them
-        // without a fixture-only duplicate-column failure. `session_seen` (version 17)
-        // goes the same way as every other post-version-5 table: it must
-        // not exist yet, or the version-17 migration's plain `CREATE TABLE`
-        // fails against one that is already there.
-        {
-            let conn = Connection::open(&path).expect("reopen raw");
-            conn.execute_batch(
-                "DROP TABLE device_sessions;
-                 DROP TABLE web_token;
-                 DROP TABLE profiles;
-                 DROP TABLE remembered_profile;
-                 DROP TABLE preferences;
-                 DROP TABLE session_seen;
-                 ALTER TABLE hosts DROP COLUMN cache_truncated;
-                 ALTER TABLE hosts DROP COLUMN alias;
-                 ALTER TABLE hosts DROP COLUMN yolo_without_asking;
-                 CREATE TABLE remembered_profiles (
-                     host_id    INTEGER PRIMARY KEY
-                                REFERENCES hosts (id) ON DELETE CASCADE,
-                     profile_id TEXT NOT NULL
-                 ) STRICT;
-                 -- Post-version-5 tables of every later rung go too (see
-                 -- session_seen above), including the checkout-config
-                 -- tables the replayed 26→27 step creates.
-                 DROP TABLE checkout_config_host;
-                 DROP TABLE checkout_config;
-                 PRAGMA user_version = 5;",
-            )
-            .expect("downgrade the table");
-            conn.execute(
-                "INSERT INTO remembered_profiles (host_id, profile_id) VALUES (?1, 'starter-claude')",
-                rusqlite::params![host],
-            )
-            .expect("plant a version-5 remembered default");
-        }
-
-        let migrated = HelmStore::open(&path).await.expect("migrate");
-        assert_eq!(
-            migrated.remembered_profile().await.unwrap().as_deref(),
-            None,
-            "schema 15 starts the replacement singleton empty"
-        );
-        // The host itself survives — this is a forgotten preference, not a
-        // lost registry.
-        assert!(
-            migrated
-                .list_hosts()
-                .await
-                .unwrap()
-                .iter()
-                .any(|row| row.id == host)
-        );
-    }
-
-    /// A legacy remembered row is discarded when schema 15 replaces the
-    /// per-host table with the empty helm-wide singleton.
-    ///
-    /// This fixture plants a fully populated legacy row and verifies that the
-    /// v14 -> v15 step drops it while retaining the host registry.
-    #[farhelm_testtrace::test]
-    async fn a_version_11_remembered_rows_are_dropped_by_schema_15() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("helm.db");
-        let host = {
-            let store = HelmStore::open(&path).await.unwrap();
-            store.add_ssh_host("v11@host", None, None).await.unwrap()
-        };
-        {
-            // Down to the version-11 shape everywhere a later rung looks:
-            // the identity column version 12 removes, the two ordering
-            // columns version 13 drops (they must EXIST for the drop to
-            // succeed), and the absence of what versions 13, 14, 16, and 17
-            // add (`hosts.cache_truncated`, the `preferences` table,
-            // `hosts.alias`, and `session_seen`).
-            let conn = Connection::open(&path).expect("reopen raw");
-            conn.execute_batch(
-                "DROP TABLE profiles;
-                 DROP TABLE remembered_profile;
-                 CREATE TABLE remembered_profiles (
-                     host_id       INTEGER PRIMARY KEY
-                                   REFERENCES hosts (id) ON DELETE CASCADE,
-                     profile_id    TEXT NOT NULL,
-                     host_identity TEXT,
-                     source_created_at INTEGER,
-                     source_session_id TEXT,
-                     source_creation_seq INTEGER,
-                     CHECK ((source_created_at IS NULL) = (source_session_id IS NULL))
-                 ) STRICT;
-                 ALTER TABLE session_cache ADD COLUMN activity_at INTEGER;
-                 ALTER TABLE session_cache ADD COLUMN title_sort TEXT;
-                 ALTER TABLE hosts DROP COLUMN cache_truncated;
-                 DROP TABLE session_seen;
-                 ALTER TABLE hosts DROP COLUMN alias;
-                 ALTER TABLE hosts DROP COLUMN yolo_without_asking;
-                 -- IF EXISTS: the preferences table only exists one stack
-                 -- level up; this fixture runs at both.
-                 DROP TABLE IF EXISTS preferences;
-                 DROP TABLE IF EXISTS checkout_config_host;
-                 DROP TABLE IF EXISTS checkout_config;
-                 ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
-                 PRAGMA user_version = 11;",
-            )
-            .expect("downgrade the table");
-            conn.execute(
-                "INSERT INTO remembered_profiles (host_id, profile_id, host_identity, \
-                 source_created_at, source_session_id, source_creation_seq) \
-                 VALUES (?1, 'p-keep', 'install-x', 700, 'sess-700', 7)",
-                rusqlite::params![host],
-            )
-            .expect("plant a version-11 row with full provenance");
-        }
-
-        let migrated = HelmStore::open(&path).await.expect("migrate");
-        assert_eq!(migrated.remembered_profile().await.unwrap(), None);
-        assert!(
-            migrated
-                .list_hosts()
-                .await
-                .unwrap()
-                .iter()
-                .any(|row| row.id == host),
-            "schema 15 drops only the legacy preference, not its host registry row"
-        );
-        drop(migrated);
-        let conn = Connection::open(&path).expect("reopen raw");
-        assert_eq!(
-            conn.query_row("SELECT COUNT(*) FROM remembered_profile", [], |row| row
-                .get::<_, i64>(0),)
-                .unwrap(),
-            0,
-            "schema 15 intentionally starts the singleton without a legacy row"
-        );
-    }
-
-    /// A legacy version-7 preference is discarded when schema 15 replaces
-    /// the per-host table with the empty helm-wide singleton.
-    ///
-    /// The legacy host-scoped value has no comparable meaning in the new
-    /// singleton, so migration discards it. A later user-originated
-    /// profile-backed create establishes the empty preference; drains continue
-    /// to discover sessions without selecting one as the default.
-    #[farhelm_testtrace::test]
-    async fn version_7_remembered_default_is_dropped_by_schema_15() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("helm.db");
-        let host = {
-            let store = HelmStore::open(&path).await.unwrap();
-            host_with_identity(&store, "v7@host", "v7-identity").await
-        };
-        {
-            let conn = Connection::open(&path).unwrap();
-            // The current cache already lacks the archive and ordering
-            // columns that the replayed ladder adds and later removes.
-            conn.execute_batch(
-                "DROP TABLE profiles;
-                 DROP TABLE remembered_profile;
-                 DROP TABLE preferences;
-                 DROP TABLE session_seen;
-                 ALTER TABLE hosts DROP COLUMN cache_truncated;
-                 ALTER TABLE hosts DROP COLUMN alias;
-                 ALTER TABLE hosts DROP COLUMN yolo_without_asking;
-                 CREATE TABLE remembered_profiles (
-                     host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
-                     profile_id TEXT NOT NULL,
-                     host_identity TEXT
-                 ) STRICT;
-                 -- The checkout-config tables are post-version-7 the same
-                 -- way: the replayed 26→27 step creates them from nothing.
-                 DROP TABLE checkout_config_host;
-                 DROP TABLE checkout_config;
-                 PRAGMA user_version = 7;",
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO remembered_profiles (host_id, profile_id, host_identity)
-                 VALUES (?1, 'legacy-profile', 'v7-identity')",
-                rusqlite::params![host],
-            )
-            .unwrap();
-        }
-
-        let store = HelmStore::open(&path).await.unwrap();
-        assert_eq!(store.remembered_profile().await.unwrap(), None);
-        store
-            .replace_host_sessions(
-                host,
-                "v7-identity",
-                vec![sequenced_profiled_session(
-                    "older-surviving-source",
-                    100,
-                    1,
-                    "older-surviving-profile",
-                )],
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            None,
-            "a migrated database still requires a user create to select a default"
-        );
-
-        assert!(
-            store
-                .remember_profile_default_from_host_session(
-                    "established-profile",
-                    host,
-                    Some(2),
-                    200,
-                    "new-create",
-                )
-                .await
-                .unwrap(),
-            "a user create after migration establishes the default"
-        );
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("established-profile")
-        );
-    }
-
     /// The version-17 migration itself (SPEC.md, Status): opening a
     /// version-16 database creates `session_seen` empty and
     /// leaves everything else — the host registry here — untouched, rather
@@ -10667,6 +9921,10 @@ mod tests {
         };
         {
             let conn = Connection::open(&path).expect("reopen raw");
+            // Schema 36 drops the profile tables, so a file claiming a
+            // version between 15 and 35 has to hold them.
+            conn.execute_batch(PROFILE_TABLES_V15)
+                .expect("plant the profile tables schema 15 created");
             conn.execute_batch(
                 "DROP TABLE session_seen;
                  ALTER TABLE preferences DROP COLUMN compact;
@@ -12141,6 +11399,10 @@ mod tests {
         };
         {
             let conn = Connection::open(&path).expect("reopen raw");
+            // Schema 36 drops the profile tables, so a file claiming a
+            // version between 15 and 35 has to hold them.
+            conn.execute_batch(PROFILE_TABLES_V15)
+                .expect("plant the profile tables schema 15 created");
             conn.execute_batch(
                 "DROP TABLE session_seen;
                  ALTER TABLE preferences DROP COLUMN compact;
@@ -14228,136 +13490,6 @@ mod tests {
         );
     }
 
-    /// The remembered default is one value for the whole helm: replaceable,
-    /// durable across a reopen, and not tied to any host.
-    ///
-    /// Durability is the point of storing it in helm.db at all rather than in memory:
-    /// SPEC.md's create dialog defaults to the last-used profile, and a default that
-    /// evaporated on every helm restart would send the user back to picking one by
-    /// hand exactly when they had just established a habit. Host removal is
-    /// included to prove registry lifecycle cannot erase unrelated singleton
-    /// state; it does not claim profile ids are portable across host catalogs.
-    #[farhelm_testtrace::test]
-    async fn a_remembered_default_is_helm_wide_replaceable_and_durable() {
-        let (dir, store) = fresh_store().await;
-        let ssh = store.add_ssh_host("user@host", None, None).await.unwrap();
-
-        assert_eq!(store.remembered_profile().await.unwrap(), None);
-        // `None` throughout: neither of these hosts has ever reported an
-        // identity, which is itself the value the write must match.
-        assert!(
-            store.remember_profile_default("p-1").await.unwrap(),
-            "the first remembered default is a change"
-        );
-        assert!(
-            !store.remember_profile_default("p-1").await.unwrap(),
-            "creating from the same profile twice changes nothing observable"
-        );
-        assert!(store.remember_profile_default("p-2").await.unwrap());
-        assert_eq!(
-            store.remembered_profile().await.unwrap(),
-            Some("p-2".to_string()),
-            "the latest choice replaces the previous one rather than accumulating"
-        );
-        // Durable across a genuine reopen of the same file.
-        drop(store);
-        let reopened = HelmStore::open(&dir.path().join("helm.db"))
-            .await
-            .expect("reopen");
-        assert_eq!(
-            reopened.remembered_profile().await.unwrap(),
-            Some("p-2".to_string())
-        );
-
-        // Removing a host does not affect the helm-wide preference.
-        reopened.remember_profile_default("p-3").await.unwrap();
-        reopened.remove_ssh_host(ssh).await.unwrap();
-        assert_eq!(
-            reopened.remembered_profile().await.unwrap(),
-            Some("p-3".to_string())
-        );
-    }
-
-    /// Host lifecycle changes leave the helm-wide remembered default alone.
-    ///
-    /// Learning an identity, adopting a successor installation, and
-    /// retargeting one registry row can change that host and its cache, but
-    /// none owns the singleton. This pins non-interference without claiming
-    /// the remembered id already names the same definition on every host.
-    #[farhelm_testtrace::test]
-    async fn host_lifecycle_changes_do_not_touch_the_helm_wide_default() {
-        let (_dir, store) = fresh_store().await;
-        let host = store
-            .add_ssh_host("user@learner", None, None)
-            .await
-            .unwrap();
-        assert!(
-            store
-                .remember_profile_default("starter-claude")
-                .await
-                .unwrap()
-        );
-
-        // The host's first successful hello teaches the registry an identity.
-        store
-            .record_first_contact(host, &dialed_as(&store, host).await, "identity-1")
-            .await
-            .unwrap();
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("starter-claude"),
-            "learning an identity is not a reason to forget a preference"
-        );
-
-        // The install behind the row is replaced and the user adopts it.
-        store
-            .adopt_identity(
-                host,
-                &dialed_as(&store, host).await,
-                "identity-1",
-                "identity-2",
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("starter-claude"),
-            "an adoption purges the session cache, not the remembered default"
-        );
-
-        // And the row is pointed somewhere else entirely.
-        store
-            .update_ssh_destination(host, "user@elsewhere")
-            .await
-            .unwrap();
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("starter-claude"),
-            "a retarget leaves the remembered default alone"
-        );
-
-        // Writing the same id again is still no change, so the invalidation
-        // feed is not woken for a user creating from one profile repeatedly.
-        assert!(
-            !store
-                .remember_profile_default("starter-claude")
-                .await
-                .unwrap()
-        );
-    }
-
-    /// The helm-wide remembered default accepts a raw id even without a
-    /// matching host or catalog row.
-    #[farhelm_testtrace::test]
-    async fn remembering_a_default_is_independent_of_host_registry_rows() {
-        let (_dir, store) = fresh_store().await;
-        assert!(store.remember_profile_default("p-1").await.unwrap());
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("p-1")
-        );
-    }
-
     /// A cached row that cannot be shown is DROPPED from the read — not
     /// carried as a placeholder, not counted — and the drop is logged.
     ///
@@ -14520,11 +13652,10 @@ mod tests {
     /// The REST tests cover the query string and the two totals; this covers
     /// the predicate itself, including the three rules a reader is most
     /// likely to get wrong when touching it: substring versus exact per
-    /// dimension, the profile filter's id-OR-snapshotted-name reading, and
-    /// the fact that dimensions AND together.
+    /// dimension, and the fact that dimensions AND together.
     #[farhelm_testtrace::test]
     fn the_session_filter_matches_by_the_documented_rules() {
-        use farhelm_proto::{ProfileExistence, SessionStatus, SourceProfile};
+        use farhelm_proto::SessionStatus;
 
         let info = SessionInfo {
             parent: Some("parent-7".to_string()),
@@ -14532,14 +13663,6 @@ mod tests {
             canonical_cwd: None,
             title: "Refactor the Drain".to_string(),
             status: SessionStatus::Waiting,
-            source_profile: Some(SourceProfile {
-                id: "p-7".to_string(),
-                name: "Claude Code".to_string(),
-                // Deliberately deleted: existence is DERIVED at reply time
-                // and says nothing about whether a filter matches, because
-                // the snapshot is what the session actually carries.
-                existence: ProfileExistence::Deleted,
-            }),
             ..session("s-1", 100)
         };
 
@@ -14568,24 +13691,6 @@ mod tests {
         );
         assert!(!SessionFilter::default().parent("parent").matches(1, &info));
 
-        // Profile: by id (exact, opaque) or by snapshotted name
-        // (case-insensitive), and never by prefix.
-        assert!(SessionFilter::default().profile("p-7").matches(1, &info));
-        assert!(
-            SessionFilter::default()
-                .profile("claude code")
-                .matches(1, &info)
-        );
-        assert!(!SessionFilter::default().profile("claude").matches(1, &info));
-        assert!(!SessionFilter::default().profile("p-").matches(1, &info));
-
-        // A raw-created session matches no profile filter at all.
-        let raw = SessionInfo {
-            source_profile: None,
-            ..info.clone()
-        };
-        assert!(!SessionFilter::default().profile("p-7").matches(1, &raw));
-
         // Dimensions AND: adding one can only ever narrow.
         assert!(
             !SessionFilter::default()
@@ -14596,69 +13701,6 @@ mod tests {
         assert!(SessionFilter::default().is_empty());
         assert!(!SessionFilter::default().title("x").is_empty());
         assert!(!SessionFilter::default().parent("parent-7").is_empty());
-    }
-
-    /// Drains discover remote profile-backed sessions without selecting the
-    /// profile the user's next create dialog will suggest.
-    ///
-    /// A remote session can carry a much newer timestamp than the user's
-    /// last choice. This test keeps both observations in the real store so a
-    /// future drain writer cannot again pin the default and reject the user's
-    /// subsequent, older-timestamp create.
-    #[farhelm_testtrace::test]
-    async fn drains_leave_the_default_to_unconditional_user_creates() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "profiles@host", "profile-identity").await;
-        assert!(
-            store
-                .remember_profile_default_from_host_session(
-                    "profile-user-before-drain",
-                    host,
-                    Some(10),
-                    500,
-                    "user-before-drain",
-                )
-                .await
-                .unwrap()
-        );
-
-        store
-            .replace_host_sessions(
-                host,
-                "profile-identity",
-                vec![sequenced_profiled_session(
-                    "remote-newer-session",
-                    900,
-                    99,
-                    "profile-from-drain",
-                )],
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-user-before-drain"),
-            "a remote observation must not select the user's default"
-        );
-
-        assert!(
-            store
-                .remember_profile_default_from_host_session(
-                    "profile-user-after-drain",
-                    host,
-                    Some(1),
-                    100,
-                    "user-after-drain",
-                )
-                .await
-                .unwrap(),
-            "a user create must win despite its older diagnostic timestamp"
-        );
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-user-after-drain")
-        );
     }
 
     /// Every status the wire can carry has a filter word, and nothing else
@@ -14778,372 +13820,6 @@ mod tests {
         assert_eq!(
             ids(&store.cached_rows(&[host]).await.unwrap()),
             vec!["b".to_string()]
-        );
-    }
-
-    /// Fresh catalogs expose release-owned definitions without persisting
-    /// them, while legacy starter rows survive reopening as editable storage.
-    ///
-    /// Count-only coverage would allow a typo in an invocation, integration,
-    /// or resume template to ship. Reopening after mutations also pins that
-    /// schema setup is initialization, not a startup repair that resurrects
-    /// or overwrites a starter the user changed.
-    #[farhelm_testtrace::test]
-    async fn builtins_do_not_seed_and_legacy_starters_remain_editable() {
-        let (dir, store) = fresh_store().await;
-        let starters = vec![
-            farhelm_proto::Profile {
-                id: "starter-claude".to_string(),
-                builtin: false,
-                name: "claude".to_string(),
-                invocation: "claude".to_string(),
-                agent_kind: farhelm_proto::AgentKind::Claude,
-                resume_template: None,
-            },
-            farhelm_proto::Profile {
-                id: "starter-claude-yolo".to_string(),
-                builtin: false,
-                name: "claude-yolo".to_string(),
-                invocation: "claude --dangerously-skip-permissions".to_string(),
-                agent_kind: farhelm_proto::AgentKind::Claude,
-                resume_template: Some(vec![
-                    "claude".to_string(),
-                    "--dangerously-skip-permissions".to_string(),
-                    "--resume".to_string(),
-                    "{conversation}".to_string(),
-                ]),
-            },
-            farhelm_proto::Profile {
-                id: "starter-codex".to_string(),
-                builtin: false,
-                name: "codex".to_string(),
-                invocation: "codex".to_string(),
-                agent_kind: farhelm_proto::AgentKind::Codex,
-                resume_template: None,
-            },
-            farhelm_proto::Profile {
-                id: "starter-codex-yolo".to_string(),
-                builtin: false,
-                name: "codex-yolo".to_string(),
-                invocation: "codex --yolo".to_string(),
-                agent_kind: farhelm_proto::AgentKind::Codex,
-                resume_template: Some(vec![
-                    "codex".to_string(),
-                    "--yolo".to_string(),
-                    "resume".to_string(),
-                    "{conversation}".to_string(),
-                ]),
-            },
-        ];
-        let mut expected_builtins = starters
-            .iter()
-            .cloned()
-            .map(|profile| farhelm_proto::Profile {
-                id: profile.id.replacen("starter-", "builtin-", 1),
-                builtin: true,
-                ..profile
-            })
-            .collect::<Vec<_>>();
-        for (id, name, invocation) in [
-            ("builtin-muse", "muse", "muse"),
-            ("builtin-muse-yolo", "muse-yolo", "muse --yolo"),
-            ("builtin-cursor", "cursor", "cursor-agent"),
-            ("builtin-cursor-yolo", "cursor-yolo", "cursor-agent --force"),
-        ] {
-            expected_builtins.push(farhelm_proto::Profile {
-                id: id.to_string(),
-                builtin: true,
-                name: name.to_string(),
-                invocation: invocation.to_string(),
-                agent_kind: farhelm_proto::AgentKind::Generic,
-                resume_template: None,
-            });
-        }
-        expected_builtins.sort_by(|left, right| left.id.cmp(&right.id));
-        assert_eq!(store.profiles().await.unwrap(), expected_builtins);
-        {
-            let conn = store.conn.lock();
-            for profile in &starters {
-                conn.execute(
-                    "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    rusqlite::params![
-                        profile.id,
-                        profile.name,
-                        profile.invocation,
-                        agent_kind_column(profile.agent_kind),
-                        resume_template_column(profile.resume_template.as_deref()),
-                    ],
-                )
-                .unwrap();
-            }
-        }
-
-        let edited = farhelm_proto::Profile {
-            id: "starter-claude".to_string(),
-            builtin: false,
-            name: "claude-local".to_string(),
-            invocation: "claude --model local".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Claude,
-            resume_template: None,
-        };
-        assert_eq!(
-            store.update_profile(edited.clone()).await.unwrap(),
-            Some(edited.clone())
-        );
-        assert!(store.delete_profile("starter-codex").await.unwrap());
-
-        drop(store);
-        let reopened = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
-        let mut expected = expected_builtins;
-        expected.extend(starters);
-        expected.retain(|profile| profile.id != "starter-codex");
-        expected.retain(|profile| profile.id != "starter-claude");
-        expected.push(edited);
-        expected.sort_by(|left, right| left.id.cmp(&right.id));
-        assert_eq!(reopened.profiles().await.unwrap(), expected);
-    }
-
-    /// Single-profile reads fail loudly, while catalog reads retain usable
-    /// rows when one persisted profile is malformed.
-    ///
-    /// Store methods validate ordinary writes, so these fixtures bypass that
-    /// boundary as a damaged or hand-edited database would. Silently skipping
-    /// or normalizing one would turn corruption into a plausible catalog with
-    /// a different meaning, so the catalog path logs and omits it instead.
-    #[farhelm_testtrace::test]
-    async fn malformed_profile_rows_fail_single_and_catalog_reads() {
-        let cases = [
-            (
-                "corrupt-kind",
-                "profile",
-                "agent",
-                "unknown",
-                None,
-                "unrecognized agent kind",
-            ),
-            (
-                "corrupt-template",
-                "profile",
-                "agent",
-                "generic",
-                Some("not json"),
-                "decoding a stored resume template",
-            ),
-            (
-                "corrupt-invocation",
-                "profile",
-                "",
-                "generic",
-                None,
-                "profile invocation is empty",
-            ),
-        ];
-
-        for (id, name, invocation, kind, template, reason) in cases {
-            let (_dir, store) = fresh_store().await;
-            {
-                let conn = store.conn.lock();
-                conn.execute(
-                    "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    rusqlite::params![id, name, invocation, kind, template],
-                )
-                .unwrap();
-                conn.execute(
-                    "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    rusqlite::params![
-                        "valid-profile",
-                        "valid",
-                        "agent",
-                        "generic",
-                        Option::<String>::None,
-                    ],
-                )
-                .unwrap();
-            }
-
-            let error = store.profile(id).await.expect_err("single read must fail");
-            let rendered = format!("{error:#}");
-            assert!(rendered.contains(id), "error must name {id}: {rendered}");
-            assert!(
-                rendered.contains(reason),
-                "error for {id} must explain {reason:?}: {rendered}"
-            );
-            let profiles = store
-                .profiles()
-                .await
-                .expect("catalog read skips malformed row");
-            assert_eq!(profiles.len(), builtin_profiles().len() + 1);
-            assert!(profiles.iter().any(|profile| profile.id == "valid-profile"));
-        }
-    }
-
-    /// New closed agent kinds round-trip through the profile column vocabulary,
-    /// while unknown spellings remain errors rather than implicit downgrades.
-    ///
-    /// The strict decode is the storage half of each protocol bump that adds a
-    /// kind. Silently coercing `omp`, `grok`, or a nearby typo would change
-    /// which integration a stored profile selects without any write happening.
-    #[farhelm_testtrace::test]
-    fn new_agent_kinds_round_trip_and_unknown_spellings_stay_refused() {
-        for (kind, spelling) in [
-            (farhelm_proto::AgentKind::Omp, "omp"),
-            (farhelm_proto::AgentKind::Grok, "grok"),
-        ] {
-            assert_eq!(agent_kind_column(kind), spelling);
-            assert_eq!(
-                agent_kind_from_column(spelling).expect("the exact kind spelling decodes"),
-                kind
-            );
-        }
-        // Pi's spelling is unchanged by the OMP addition: the two kinds are
-        // distinct at this boundary, never aliases.
-        assert_eq!(
-            agent_kind_from_column("pi").expect("pi still decodes"),
-            farhelm_proto::AgentKind::Pi
-        );
-        for unknown in ["ompish", "grokish", "GROK", "", "generic "] {
-            assert!(
-                agent_kind_from_column(unknown).is_err(),
-                "{unknown:?} must stay outside the strict vocabulary"
-            );
-        }
-    }
-
-    /// The helm catalog owns durable CRUD, rejects invalid replacements
-    /// without a write, and enforces the exact shared catalog bound.
-    #[farhelm_testtrace::test]
-    async fn helm_profile_catalog_crud_is_bounded_and_validated() {
-        let (_dir, store) = fresh_store().await;
-        let mut expected = builtin_profiles();
-        expected.sort_by(|left, right| left.id.cmp(&right.id));
-        assert_eq!(store.profiles().await.unwrap(), expected);
-        let builtin = builtin_profile("builtin-claude").unwrap();
-        assert!(store.update_profile(builtin).await.is_err());
-        assert!(store.delete_profile("builtin-claude").await.is_err());
-
-        let created = match store
-            .create_profile(
-                "wrapper".to_string(),
-                "wrapper --agent".to_string(),
-                farhelm_proto::AgentKind::Generic,
-                None,
-            )
-            .await
-            .unwrap()
-        {
-            ProfileCreation::Created(profile) => profile,
-            ProfileCreation::CatalogFull => panic!("the starter catalog has room"),
-        };
-        assert_eq!(
-            store.profile(&created.id).await.unwrap(),
-            Some(created.clone())
-        );
-
-        let updated = farhelm_proto::Profile {
-            id: created.id.clone(),
-            builtin: false,
-            name: "renamed".to_string(),
-            invocation: "wrapper --renamed".to_string(),
-            agent_kind: farhelm_proto::AgentKind::Codex,
-            resume_template: Some(vec!["wrapper".to_string(), "{conversation}".to_string()]),
-        };
-        assert_eq!(
-            store.update_profile(updated.clone()).await.unwrap(),
-            Some(updated.clone())
-        );
-        assert_eq!(
-            store.profile(&updated.id).await.unwrap(),
-            Some(updated.clone())
-        );
-        assert_eq!(
-            store
-                .profiles()
-                .await
-                .unwrap()
-                .iter()
-                .find(|profile| profile.id == updated.id),
-            Some(&updated)
-        );
-        let invalid = farhelm_proto::Profile {
-            name: " ".to_string(),
-            ..updated.clone()
-        };
-        assert!(store.update_profile(invalid).await.is_err());
-        assert_eq!(
-            store.profile(&updated.id).await.unwrap(),
-            Some(updated.clone())
-        );
-        assert_eq!(
-            store
-                .profiles()
-                .await
-                .unwrap()
-                .iter()
-                .find(|profile| profile.id == updated.id),
-            Some(&updated)
-        );
-        assert!(store.delete_profile(&updated.id).await.unwrap());
-        assert_eq!(store.profile(&updated.id).await.unwrap(), None);
-        assert!(!store.delete_profile(&updated.id).await.unwrap());
-        assert!(
-            store
-                .create_profile(
-                    " ".to_string(),
-                    "wrapper".to_string(),
-                    farhelm_proto::AgentKind::Generic,
-                    None,
-                )
-                .await
-                .is_err()
-        );
-
-        for index in 0..farhelm_proto::MAX_PROFILES {
-            assert!(matches!(
-                store
-                    .create_profile(
-                        format!("profile-{index}"),
-                        "agent".to_string(),
-                        farhelm_proto::AgentKind::Generic,
-                        None,
-                    )
-                    .await
-                    .unwrap(),
-                ProfileCreation::Created(_)
-            ));
-        }
-        assert_eq!(
-            store.profiles().await.unwrap().len(),
-            farhelm_proto::MAX_PROFILES + builtin_profiles().len()
-        );
-        assert_eq!(
-            store
-                .create_profile(
-                    "past-bound".to_string(),
-                    "agent".to_string(),
-                    farhelm_proto::AgentKind::Generic,
-                    None,
-                )
-                .await
-                .unwrap(),
-            ProfileCreation::CatalogFull
-        );
-        assert_eq!(
-            store.profiles().await.unwrap().len(),
-            farhelm_proto::MAX_PROFILES + builtin_profiles().len(),
-            "release-owned rows remain available beside a full stored catalog"
-        );
-        let after_refusal = store.profiles().await.unwrap();
-        assert_eq!(
-            after_refusal.len(),
-            farhelm_proto::MAX_PROFILES + builtin_profiles().len()
-        );
-        assert!(
-            after_refusal
-                .iter()
-                .all(|profile| profile.name != "past-bound")
         );
     }
 }

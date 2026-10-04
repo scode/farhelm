@@ -71,9 +71,7 @@ use crate::agent_kind::screen_reader::ScreenState;
 use crate::store::{LastOutcome, SessionStore, Transition};
 use crate::tmux::PaneState;
 use anyhow::Context;
-use farhelm_proto::{
-    ProfileExistence, RestartOffer, SessionInfo, SessionStatus, SourceProfile, TabInfo,
-};
+use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus, TabInfo};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -380,13 +378,12 @@ pub(super) fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
 }
 
 /// One entry as a reply must describe it: the stored metadata plus the
-/// four fields that are NEVER stored as answers and are therefore
+/// three fields that are NEVER stored as answers and are therefore
 /// recomputed on every reply — live-probed `status` (with its annotation),
-/// rediscovered `tabs`, a freshly derived `restart_offer`, and an unresolved
-/// source-profile marker for the helm to replace against its catalog.
+/// rediscovered `tabs`, and a freshly derived `restart_offer`.
 ///
 /// `last_activity_at` is refreshed here too, and is deliberately not one
-/// of those four: it IS stored, and this is a plain read of the entry's
+/// of those three: it IS stored, and this is a plain read of the entry's
 /// live cell rather than a recomputation. It needs refreshing for a
 /// mechanical reason only — the entry is immutable behind its `Arc`, so
 /// the ticker advances a cell beside `info` rather than `info` itself.
@@ -432,14 +429,6 @@ pub(crate) fn entry_info(
         .session
         .last_work_started_at
         .load(std::sync::atomic::Ordering::Relaxed);
-    // The entry carries the SNAPSHOT (id and name as recorded at creation);
-    // the existence beside it is deliberately unresolved. The supervisor
-    // has no catalog that could answer it; the helm replaces this marker
-    // before the row reaches its cache or a browser.
-    info.source_profile = info.source_profile.map(|snapshotted| SourceProfile {
-        existence: ProfileExistence::Unresolved,
-        ..snapshotted
-    });
     // Tabs are not stored anywhere at all (`SessionInfo::tabs`), so this
     // rediscovery IS the tab list. A terminal-less entry has no tmux
     // session and therefore no tabs, which the empty default states

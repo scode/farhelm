@@ -57,8 +57,8 @@ use crate::agent_kind::IntegrationSnapshot;
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
 use crate::store::DedupScope;
 use crate::store::{
-    Claimed, IntentClaim, LastOutcome, ProfileSnapshot, Reservation, ReservationOutcome,
-    RetryClaim, SessionStore, Settlement, StoredSession, Transition, now_unix,
+    Claimed, IntentClaim, LastOutcome, Reservation, ReservationOutcome, RetryClaim, SessionStore,
+    Settlement, StoredSession, Transition, now_unix,
 };
 use crate::tmux::{
     AGENT_WINDOW_OPTION, PaneProbe, PaneState, TAB_SCOPED_WINDOW_OPTION, TAB_WINDOW_OPTION,
@@ -66,8 +66,8 @@ use crate::tmux::{
 };
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, ProfileExistence, RestartOffer,
-    SessionInfo, SessionStatus, SourceProfile, TabInfo,
+    AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, RestartOffer, SessionInfo, SessionStatus,
+    TabInfo,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -1535,20 +1535,12 @@ fn classify_unallocated_checkout_conflict(
 /// `None` means "auto-generate", which is a different request from an
 /// explicit title that happens to equal the derived one), and — as of
 /// PLAN_M7.md item 2 — `parent`. The bundle includes the invocation,
-/// `agent_kind`, resume template, and optional source-profile snapshot.
+/// `agent_kind`, and resume template.
 /// `cols`/`rows` are excluded by
 /// design: they shape the ATTACHMENT, not the session, so the same intent
 /// retried from a differently-sized client is still the same intent — a
 /// point the plan makes explicitly, and the reason this function takes no
 /// dimensions at all rather than taking and ignoring them.
-///
-/// ## Resolved profiles are encoded explicitly
-///
-/// The helm resolves a selected profile before the supervisor fingerprints
-/// it. A profile edit between retries therefore changes the bundle and is
-/// refused as a changed request under the same key. The profile snapshot is
-/// included too, because changing only a profile's name still changes what
-/// the resulting session records and shows.
 ///
 /// ## The RAW encoding is frozen, byte for byte
 ///
@@ -1570,9 +1562,12 @@ fn classify_unallocated_checkout_conflict(
 /// are identical rather than merely equivalent.
 ///
 /// Version 11's parented creates received a discriminated tuple rather than
-/// extending the frozen raw encoding. Version 15 follows the same rule for a
-/// resolved profile bundle. The supervisor no longer fingerprints profile ids
-/// or names as selectors because it never receives unresolved selectors.
+/// extending the frozen raw encoding. Version 15 followed the same rule for
+/// a resolved profile bundle (`"resolved_profile"`); that encoder went with
+/// profiles in protocol 38. A reservation stored under it can no longer be
+/// matched by any request this build fingerprints, so a retry crossing the
+/// upgrade with its old key is refused as key reuse rather than duplicated
+/// (SPEC_impl.md, "Launch-kinds reservations").
 ///
 /// ## Representation
 ///
@@ -1622,8 +1617,8 @@ pub(crate) fn create_fingerprint(
     // DIFFERENT resolution is a different request, refused as key reuse.
     if let Some(checkout) = checkout {
         // Retain a typed launch snapshot, not a nested legacy fingerprint:
-        // reconciliation must recover the accepted mode without resolving
-        // today's profile or compiling today's structured selection again.
+        // reconciliation must recover the accepted mode without compiling
+        // today's structured selection again.
         return serde_json::to_string(&FreshCreateFingerprint::GithubCheckout {
             parent: parent.map(str::to_owned),
             requested_cwd: cwd.to_owned(),
@@ -1638,10 +1633,7 @@ pub(crate) fn create_fingerprint(
     // documents that rather than inviting a caller to handle an error that
     // cannot occur.
     //
-    // Raw creates keep their historical encoding. Profile-backed creates
-    // need a distinct shape that binds the resolved bundle, including the
-    // immutable source identity, so an edit between retries is visible as
-    // a changed request.
+    // Raw creates keep their historical encoding.
     match (parent, mode) {
         // FROZEN — see this function's own docs. Five elements, in this
         // order, exactly as every pre-M6.75 supervisor wrote them.
@@ -1651,7 +1643,6 @@ pub(crate) fn create_fingerprint(
                 invocation,
                 agent_kind,
                 resume_template,
-                source_profile: None,
                 ..
             },
         ) => serde_json::to_string(&(
@@ -1670,7 +1661,6 @@ pub(crate) fn create_fingerprint(
                 invocation,
                 agent_kind,
                 resume_template,
-                source_profile: None,
                 ..
             },
         ) => serde_json::to_string(&(
@@ -1682,28 +1672,8 @@ pub(crate) fn create_fingerprint(
             agent_kind.map(crate::store::agent_kind_column),
             resume_template.as_deref(),
         )),
-        (
-            parent,
-            CreateMode::Raw {
-                invocation,
-                agent_kind,
-                resume_template,
-                source_profile: Some(source_profile),
-                ..
-            },
-        ) => serde_json::to_string(&(
-            "resolved_profile",
-            parent,
-            cwd,
-            invocation,
-            title,
-            agent_kind.map(crate::store::agent_kind_column),
-            resume_template.as_deref(),
-            source_profile.id.as_str(),
-            source_profile.name.as_str(),
-        )),
         // Structured input is already a resolved bundle. Its discriminant
-        // keeps the frozen raw/profile encodings byte-for-byte stable while
+        // keeps the frozen raw encodings byte-for-byte stable while
         // binding both the user selection and the exact command it became.
         (
             parent,
@@ -2064,8 +2034,7 @@ fn new_session_identity() -> SessionIdentity {
 /// What an existing reservation means for the request that found it.
 ///
 /// Both variants are boxed, which is the only shape that stays balanced:
-/// `SessionInfo` is a wire record that keeps growing (`source_profile` at
-/// `PROTOCOL_VERSION` 10 was the addition that tipped it), so an inline
+/// `SessionInfo` is a wire record that keeps growing, so an inline
 /// `Answer` makes every `Resolution` as large as the biggest reply this
 /// protocol has ever carried. One allocation on a path that is already
 /// doing durable writes and process launches is not a cost worth
@@ -2166,10 +2135,10 @@ struct LaunchRequest {
     /// under the launch.
     launch_cwd: String,
     /// The command line this session will run and record, whoever supplied
-    /// it: the caller's own, or the one the resolved profile carried.
-    /// OWNED rather than borrowed from `CreateInputs` for exactly that
-    /// reason — a profile-backed create's invocation belongs to a catalog
-    /// row read during validation, which outlives nothing.
+    /// it: the caller's own, or the one an inherited bundle carried. OWNED
+    /// rather than borrowed from `CreateInputs` for exactly that reason — an
+    /// inherited invocation belongs to a parent row read during validation,
+    /// which outlives nothing.
     invocation: String,
     argv: Vec<String>,
     title: String,
@@ -2194,14 +2163,6 @@ struct LaunchRequest {
     /// `launch_reserved` records the accepted directory
     /// (`SessionStore::accept_working_directory`).
     canonical_cwd: Option<String>,
-    /// The profile this create resolved, as the session will remember it
-    /// forever (PLAN_M6_75.md item 4), or `None` for a raw create.
-    ///
-    /// Resolved during validation beside the integration snapshot, and for
-    /// the same reason: the resolution can FAIL (the unknown-profile
-    /// precondition), and every refusal from validation is one a keyed
-    /// create records and replays verbatim.
-    source_profile: Option<ProfileSnapshot>,
     /// The user-selected structured launch, if this was compiled by the
     /// helm. It is carried as data, never inferred from `invocation`.
     launch: Option<farhelm_proto::LaunchSelection>,
@@ -2235,27 +2196,22 @@ pub(crate) struct CreateInputs<'a> {
 /// The resolved launch bundle a `CreateSession` carries after its wire
 /// shape has been validated.
 ///
-/// Profile selectors are resolved by the helm before this value is built.
-/// An explicitly inherited spawn is resolved from the authenticated parent session
-/// before fingerprinting. The supervisor therefore needs only one variant:
-/// every launch is an invocation plus its optional integration and profile
-/// provenance.
+/// An explicitly inherited spawn is resolved from the authenticated parent
+/// session before fingerprinting, so every launch is an invocation plus its
+/// optional integration, or a structured launch.
 ///
 /// Lives here rather than in `handlers` because the create path is what
 /// consumes it: [`create_fingerprint`] encodes it, and
 /// [`Supervisor::validate_create`] validates it.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) enum CreateMode {
-    /// A complete launch bundle, raw when `source_profile` is absent and
-    /// profile-backed when it is present.
+    /// A complete raw launch bundle.
     Raw {
         invocation: String,
         /// `None` means "derive the kind from the invocation's basename",
-        /// which is a guess a raw caller may want. A profile is never a
-        /// guess (see `farhelm_proto::Profile::agent_kind`).
+        /// which is a guess a raw caller may want.
         agent_kind: Option<AgentKind>,
         resume_template: Option<Vec<String>>,
-        source_profile: Option<ProfileSnapshot>,
         launch: Option<farhelm_proto::LaunchSelection>,
     },
     /// A helm-compiled structured launch. The selection is retained beside
@@ -2274,7 +2230,7 @@ pub(crate) enum CreateMode {
 }
 
 /// Durable launch inputs for fresh-checkout reconciliation, independent of
-/// the helm's current settings and profile catalog. Permanent reservations
+/// the helm's current settings. Permanent reservations
 /// retain this encoding even after the session disappears; live session rows
 /// therefore need not be the source of truth for a retry.
 ///
@@ -4082,11 +4038,6 @@ pub struct Supervisor {
     /// see [`super::hints`]. Marking it takes no lock, so it sits outside
     /// the lock-ordering rules entirely.
     pub(crate) change_hints: Arc<super::hints::ChangeHints>,
-    /// Test-only direct routing for a synthetic helm link; production
-    /// routing remains attachment-based so a profile lookup asks the helm
-    /// that actually owns the parent session.
-    #[cfg(test)]
-    pub(crate) test_helm_links: Mutex<HashMap<String, Arc<super::agent_relay::HelmLink>>>,
     /// Per-terminal barriers for provisional opens and unfinished shutdowns.
     ///
     /// Teardown publishes a `Reaping` entry while it still holds
@@ -4697,13 +4648,6 @@ impl Supervisor {
         })
     }
 
-    /// Hold an intent key so handler tests can park a create after its
-    /// lifecycle claim and inspect that claim at the create boundary.
-    #[cfg(test)]
-    pub(crate) async fn claim_intent_for_test(&self, key: &str) -> KeyedGuard {
-        self.intent_locks.claim(key).await
-    }
-
     /// Read immediate child directories on this supervisor's filesystem.
     ///
     /// This is deliberately a nonrecursive browse operation. It expands `~`
@@ -5255,8 +5199,6 @@ impl Supervisor {
             attachments: Mutex::new(HashMap::new()),
             helm_links: Mutex::new(Vec::new()),
             change_hints: Arc::new(super::hints::ChangeHints::default()),
-            #[cfg(test)]
-            test_helm_links: Mutex::new(HashMap::new()),
             output_reaps: Arc::new(std::sync::Mutex::new(HashMap::new())),
             sinks: Arc::new(std::sync::Mutex::new(Default::default())),
             uploads: Mutex::new(HashMap::new()),
@@ -6006,17 +5948,7 @@ impl Supervisor {
                         // is the honest "none known" value every reload
                         // reports.
                         tabs: Vec::new(),
-                        // The stored snapshot, with a PLACEHOLDER existence
-                        // — like `status` and `restart_offer` above, and
-                        // for the same reason: existence is a statement
-                        // about the catalog at REPLY time, and `entry_info`
-                        // re-derives it on every reply that carries this
-                        // entry. Nothing reads the value parked here.
-                        source_profile: row.source_profile.map(|profile| SourceProfile {
-                            id: profile.id,
-                            name: profile.name,
-                            existence: ProfileExistence::Present,
-                        }),
+
                         // Reply-time registry projection supplies these;
                         // cached entries cannot track later memberships.
                         github_repo: None,
@@ -6652,15 +6584,12 @@ impl Supervisor {
     ///
     /// A pending retry rebuilds its launch from the row the crashed attempt
     /// committed ([`Supervisor::validate_retry`]) rather than from the
-    /// request that arrived, and the reason is PLAN_M6_75.md item 4's
-    /// catalog: the request names a profile, and a profile is MUTABLE. An
-    /// unchanged retry that re-read the catalog would launch whatever the
-    /// profile says NOW — so editing a profile between the crash and the
-    /// retry would silently change what an already-accepted intent runs,
-    /// and deleting it would turn that intent into a `NotFound` for a
-    /// create the supervisor had already accepted and half-performed. The
-    /// stored row is what the first attempt actually resolved, and a retry
-    /// under the same reservation is the same create.
+    /// request that arrived: a request can name something MUTABLE (an
+    /// inherited parent's bundle, a structured selection compiled against
+    /// today's catalog), and an unchanged retry that re-resolved it would
+    /// silently change what an already-accepted intent runs. The stored row
+    /// is what the first attempt actually resolved, and a retry under the
+    /// same reservation is the same create.
     #[cfg(test)]
     pub(crate) async fn create_session(
         &self,
@@ -6677,9 +6606,9 @@ impl Supervisor {
     ///
     /// The restricted credential is checked after waiting for its lifecycle
     /// claim; an earlier network-edge check cannot authorize a request whose
-    /// parent was deleted or whose credential changed during that wait. Profile
-    /// catalog round trips belong before this method, inherited bundle reads
-    /// after it. Credentials are neither retained in the guards nor logged.
+    /// parent was deleted or whose credential changed during that wait.
+    /// Inherited bundle reads belong after this method. Credentials are
+    /// neither retained in the guards nor logged.
     pub(crate) async fn admit_create(
         &self,
         intent_key: Option<&str>,
@@ -7054,7 +6983,6 @@ impl Supervisor {
                     invocation: invocation.to_string(),
                     agent_kind: None,
                     resume_template: None,
-                    source_profile: None,
                     launch: None,
                 },
                 title,
@@ -7089,19 +7017,17 @@ impl Supervisor {
     /// The parsed argv and any resume-template override are additionally
     /// held to the shared executable-argv rule
     /// (`agent_kind::ensure_executable_argv`,
-    /// `agent_kind::ensure_resume_template`), which is the same rule profile
-    /// writes enforce. A raw create is otherwise the door through which a
+    /// `agent_kind::ensure_resume_template`). A raw create is otherwise the
+    /// door through which a
     /// command line that names no program — `''` splits into a one-element
     /// argv holding the empty string — reaches tmux. An additional check
     /// refuses a `{cwd}` placeholder as the program
-    /// (`agent_kind::ensure_no_cwd_program`): a raw create is the one path
-    /// that reaches tmux without a profile in front of it, so it needs the
-    /// identical refusal the profile editor applies.
+    /// (`agent_kind::ensure_no_cwd_program`): a raw create's argv is caller
+    /// data that reaches tmux, so the shape of the argv is checked here
+    /// rather than at whichever door it came through.
     ///
-    /// Profile resolution is complete before this method runs. That keeps
-    /// the supervisor independent of the helm catalog while preserving one
-    /// validation and snapshot path for raw, profile-backed, and derived
-    /// spawn bundles.
+    /// One validation and snapshot path serves raw creates and derived
+    /// spawn bundles alike.
     async fn validate_create(&self, inputs: CreateInputs<'_>) -> anyhow::Result<LaunchRequest> {
         let CreateInputs {
             cwd,
@@ -7112,20 +7038,13 @@ impl Supervisor {
             rows,
             github_checkout,
         } = inputs;
-        let (invocation, agent_kind, resume_template, source_profile, launch) = match mode {
+        let (invocation, agent_kind, resume_template, launch) = match mode {
             CreateMode::Raw {
                 invocation,
                 agent_kind,
                 resume_template,
-                source_profile,
                 launch,
-            } => (
-                invocation,
-                agent_kind,
-                resume_template,
-                source_profile,
-                launch,
-            ),
+            } => (invocation, agent_kind, resume_template, launch),
             CreateMode::Structured {
                 invocation,
                 agent_kind,
@@ -7135,7 +7054,6 @@ impl Supervisor {
                 invocation,
                 Some(agent_kind),
                 resume_template,
-                None,
                 Some(selection),
             ),
         };
@@ -7195,20 +7113,15 @@ impl Supervisor {
         // `shell_words` splits into a one-element argv holding the empty
         // string — a command line that exists and names nothing — and it
         // says nothing about a NUL byte, which truncates an argument
-        // silently rather than failing. Profile writes have refused both
-        // for a while; this is the same rule reaching the raw path.
+        // silently rather than failing.
         crate::agent_kind::ensure_executable_argv("agent invocation", &argv)
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
-        // A raw create is the boundary that reaches tmux without ever
-        // passing through a profile, so it needs the same `{cwd}`-as-PROGRAM
-        // refusal the profile editor applies (`store::validate_profile_fields`)
-        // — the rule is about the shape of the argv, not about which door it
-        // came through.
+        // A `{cwd}` placeholder as the PROGRAM is refused here — the rule is
+        // about the shape of the argv, not about which door it came through.
         crate::agent_kind::ensure_no_cwd_program("agent invocation", &argv)
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
-        // The resume-template OVERRIDE is caller data on exactly the same
-        // footing as a profile's template, and it becomes this session's
-        // immutable snapshot — so it is held to the same rule here rather
+        // The resume-template OVERRIDE is caller data, and it becomes this
+        // session's immutable snapshot — so it is held to the same rule here rather
         // than at the restart that would otherwise discover it.
         if let Some(template) = resume_template.as_deref() {
             crate::agent_kind::ensure_resume_template(template)
@@ -7346,7 +7259,6 @@ impl Supervisor {
             rows,
             snapshot,
             canonical_cwd,
-            source_profile,
             launch,
         })
     }
@@ -7639,14 +7551,13 @@ impl Supervisor {
     /// A retry under an existing reservation is the SAME create: its
     /// identities are already assigned, and by this point the supervisor has
     /// established that the first attempt left no launch behind. What it
-    /// must therefore run is what the first attempt resolved — and for a
-    /// profile-backed create, that is no longer derivable from the request,
-    /// because the catalog it names is mutable. Re-resolving would let an
-    /// edit between the two attempts change what an unchanged intent
-    /// launches, and a delete turn an accepted create into a `NotFound`.
-    /// The row is the record of that resolution, so the row is what this
-    /// reads: invocation, integration snapshot, canonical cwd, title, and
-    /// the source-profile identity all come back exactly as committed.
+    /// must therefore run is what the first attempt resolved — and for an
+    /// inherited bundle, that is no longer derivable from the request,
+    /// because the parent it names can change. Re-resolving would let a
+    /// change between the two attempts alter what an unchanged intent
+    /// launches. The row is the record of that resolution, so the row is
+    /// what this reads: invocation, integration snapshot, canonical cwd, and
+    /// title all come back exactly as committed.
     ///
     /// Two things are still checked against the world rather than taken from
     /// the row, and both are about to be used:
@@ -7846,7 +7757,6 @@ impl Supervisor {
                 // attempt never recorded.
                 canonical_cwd: row.canonical_cwd.clone(),
                 cwd: row.cwd,
-                source_profile: row.source_profile,
                 launch: row.launch,
             })
         }
@@ -8249,16 +8159,6 @@ impl Supervisor {
                     kind: row.agent_kind,
                     resume_template: row.resume_template,
                 };
-                // A placeholder existence, replaced below by
-                // `with_derived_source_profile`. Derived NOW rather than
-                // replayed, because a replay can land long after the
-                // original create and the profile it named may have been
-                // renamed or deleted since.
-                let source_profile = row.source_profile.map(|snapshotted| SourceProfile {
-                    id: snapshotted.id,
-                    name: snapshotted.name,
-                    existence: ProfileExistence::Present,
-                });
                 let info = SessionInfo {
                     parent: row.parent,
                     restart_offer: snapshot.restart_offer(
@@ -8286,12 +8186,11 @@ impl Supervisor {
                     // Vocabulary only for now — see PLAN_M4.md step 4 for
                     // where tabs get real rediscovery.
                     tabs: Vec::new(),
-                    source_profile,
                     // Filled from the registry at the reply boundary below.
                     github_repo: None,
                     working_copy: None,
                 };
-                self.with_derived_source_profile(info).await
+                self.with_checkout_metadata(info).await
             }
             None => Err(RequestError::new(
                 ErrorKind::Conflict,
@@ -8543,7 +8442,6 @@ impl Supervisor {
             rows,
             snapshot,
             canonical_cwd,
-            source_profile,
             launch,
             destination,
         } = request;
@@ -8698,10 +8596,7 @@ impl Supervisor {
             // first insert: a relaunch under the same reservation is the
             // same create, so the session it finally produces must carry
             // the same initial kind and template it would have had if
-            // the first attempt had not crashed. The source-profile
-            // snapshot rides along for the same reason — and it is the same
-            // profile either way, since the fingerprint binds the profile
-            // identity to the intent key.
+            // the first attempt had not crashed.
             let row = StoredSession {
                 conversation_source: None,
                 capture_ownership_version: 0,
@@ -8735,7 +8630,6 @@ impl Supervisor {
                 // overwrites this value before reinsertion.
                 generation: 0,
                 launch_scoped: scoped,
-                source_profile: source_profile.clone(),
             };
             // The takeover and the map removal that mirrors it run under
             // this session's LIFECYCLE CLAIM, which is what closes the
@@ -8879,11 +8773,6 @@ impl Supervisor {
                 captured_conversation: None,
                 generation: 0,
                 launch_scoped: scoped,
-                // Written once, with the row, and never rewritten:
-                // SPEC.md's snapshot rule is that a later edit or
-                // delete of the profile leaves this session's record
-                // of what it came from exactly as it is.
-                source_profile: source_profile.clone(),
             };
             let claimed = self
                 .store
@@ -9231,17 +9120,7 @@ impl Supervisor {
             // A brand-new session has no tabs; real tab creation lands in
             // PLAN_M4.md step 4.
             tabs: Vec::new(),
-            // The profile this create resolved, snapshotted once and never
-            // rewritten (PLAN_M6_75.md item 4). The existence beside it is
-            // a PLACEHOLDER here — like `status` above — because this value
-            // is what the published ENTRY carries, and an entry's existence
-            // is re-derived by every reply built from it. The reply this
-            // function returns derives its own below.
-            source_profile: source_profile.map(|profile| SourceProfile {
-                id: profile.id,
-                name: profile.name,
-                existence: ProfileExistence::Present,
-            }),
+
             // Filled at reply time, including memberships acquired later.
             github_repo: None,
             working_copy: None,
@@ -9750,12 +9629,8 @@ impl Supervisor {
         );
         // Marked at publication, not by the create handler: see `hints`.
         self.hint_sessions_changed();
-        // Derived HERE rather than reused from the pre-launch lookup, and
-        // the gap is real: a launch is a tmux round trip plus two durable
-        // writes, and a profile renamed or deleted while it ran would make
-        // a `Present` copied from that lookup a stale answer on a reply
-        // whose contract (`farhelm_proto::SourceProfile`) is that existence
-        // describes the catalog AT REPLY TIME.
+        // Checkout metadata is projected HERE, after publication, so the
+        // reply describes the registry as it stands now.
         //
         // The failure carries the session ID, and that is the load-bearing
         // part rather than politeness. This runs AFTER the session is
@@ -9767,29 +9642,14 @@ impl Supervisor {
         // reservation to reconcile it either, so the id is the only handle
         // that exists.
         let session_id = info.id.clone();
-        self.with_derived_source_profile(info).await.with_context(|| {
+        self.with_checkout_metadata(info).await.with_context(|| {
             format!(
-                "session {session_id} WAS created and is running; only describing which profile \
-                 it came from failed, so this reply is withheld — attach to or delete that \
+                "session {session_id} WAS created and is running; only describing its checkout \
+                 failed, so this reply is withheld — attach to or delete that \
                  session rather than creating another",
                 session_id = truncate_for_error(&session_id)
             )
         })
-    }
-
-    /// Resolve reply-time checkout associations and mark profile existence
-    /// for the helm to resolve against its catalog. Registry failures fail
-    /// the reply rather than falsely describing an owned path as unmanaged;
-    /// mutation callers add context that the operation itself already landed.
-    async fn with_derived_source_profile(
-        &self,
-        mut info: SessionInfo,
-    ) -> anyhow::Result<SessionInfo> {
-        info.source_profile = info.source_profile.map(|snapshotted| SourceProfile {
-            existence: ProfileExistence::Unresolved,
-            ..snapshotted
-        });
-        self.with_checkout_metadata(info).await
     }
 
     /// Single-session counterpart of the listing's batched registry snapshot.
@@ -11307,14 +11167,13 @@ impl Supervisor {
         RelaunchFailure::definitive(error)
     }
 
-    /// Finish a successful relaunch's reply by deriving its source-profile
-    /// existence against the catalog as it stands now (PLAN_M6_75.md item
-    /// 4).
+    /// Finish a successful relaunch's reply by projecting its checkout
+    /// metadata as the registry stands now.
     ///
     /// Separate from [`Supervisor::publish_relaunched`] because publication
     /// must not be able to fail: the new entry is already on the map and the
     /// agent is already running by the time this reads anything. So a failed
-    /// catalog read is reported as a PUBLISHED relaunch failure whose
+    /// metadata read is reported as a PUBLISHED relaunch failure whose
     /// message says the restart itself succeeded — the same shape, and the
     /// same reasoning, as the confirm-write failure above it: the caller is
     /// told what it must not assume, and the next list describes the session
@@ -11323,7 +11182,7 @@ impl Supervisor {
     /// [`RelaunchDisposition::Published`] rather than `ambiguous`, and the
     /// difference is not bookkeeping. An ambiguous failure runs the generic
     /// recovery, which republishes the entry built from the PRE-restart one
-    /// — so a catalog read failing here used to overwrite the new terminal
+    /// — so a metadata read failing here would overwrite the new terminal
     /// with the terminal the restart had just replaced, and report a
     /// `Launching` outcome over an agent that was confirmed running. On a
     /// fresh-terminal restart that loses the live terminal entirely, which
@@ -11331,11 +11190,11 @@ impl Supervisor {
     /// to do with the restart.
     async fn restart_reply(&self, info: SessionInfo) -> Result<SessionInfo, RelaunchFailure> {
         let session_id = info.id.clone();
-        self.with_derived_source_profile(info).await.map_err(|e| {
+        self.with_checkout_metadata(info).await.map_err(|e| {
             RelaunchFailure::published(e.context(format!(
                 "the restart of session {session_id} SUCCEEDED and its new generation is \
-                 published and running; only describing which profile it was created from \
-                 failed, so this reply is withheld — the next list reports the restarted \
+                 published and running; only describing its checkout failed, so this reply \
+                 is withheld — the next list reports the restarted \
                  session normally, and restarting again would kill the agent this one started",
                 session_id = truncate_for_error(&session_id)
             )))
@@ -11442,17 +11301,7 @@ impl Supervisor {
             // preflight list, while replacement in a surviving session
             // supplies a post-replacement discovery.
             tabs,
-            // A restart is a new launch generation of the SAME session, so
-            // what it was created from is carried forward from the entry
-            // being replaced — never dropped, and never re-resolved. Losing
-            // it here would have been invisible until the next reload put
-            // it back, and in the meantime a profile-created session would
-            // have looked raw-created to every client (PLAN_M6_75.md item
-            // 4's snapshot rule, which a restart has no standing to
-            // rewrite). The existence rides along as the same placeholder
-            // every entry carries; the reply built from this derives its
-            // own.
-            source_profile: entry.info.source_profile.clone(),
+
             github_repo: None,
             working_copy: None,
         };
@@ -13636,11 +13485,7 @@ impl Supervisor {
             status: SessionStatus::Unknown,
             annotation: None,
             tabs: Vec::new(),
-            source_profile: row.source_profile.clone().map(|profile| SourceProfile {
-                id: profile.id,
-                name: profile.name,
-                existence: ProfileExistence::Present,
-            }),
+
             restart_offer: snapshot.restart_offer(
                 row.captured_conversation.as_deref(),
                 row.capture_ownership_version,
@@ -15278,7 +15123,6 @@ pub(crate) mod tests {
                             "farhelm-test-resume".to_string(),
                             crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
                         ]),
-                        source_profile: None,
                         launch: None,
                     },
                     title: None,
@@ -15492,7 +15336,6 @@ pub(crate) mod tests {
                     captured_conversation: Some(TEST_CONVERSATION.to_string()),
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -15595,7 +15438,6 @@ pub(crate) mod tests {
                     captured_conversation: Some(TEST_CONVERSATION.to_string()),
                     generation: 0,
                     launch_scoped: true,
-                    source_profile: None,
                 },
                 None,
             )
@@ -16754,7 +16596,6 @@ pub(crate) mod tests {
                 annotation: None,
                 restart_offer: RestartOffer::default(),
                 tabs: Vec::new(),
-                source_profile: None,
                 github_repo: None,
                 working_copy: None,
             },
@@ -16817,7 +16658,6 @@ pub(crate) mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -18158,7 +17998,6 @@ pub(crate) mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -18255,7 +18094,6 @@ pub(crate) mod tests {
                         captured_conversation: None,
                         generation: 0,
                         launch_scoped: false,
-                        source_profile: None,
                     },
                     None,
                 )
@@ -18406,7 +18244,6 @@ pub(crate) mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -18560,7 +18397,6 @@ pub(crate) mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: true,
-                    source_profile: None,
                 },
                 None,
             )
@@ -18692,7 +18528,6 @@ pub(crate) mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -18756,7 +18591,6 @@ pub(crate) mod tests {
                     captured_conversation: captured.map(str::to_string),
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -18800,7 +18634,6 @@ pub(crate) mod tests {
                     captured_conversation: Some(captured.to_string()),
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -18855,7 +18688,6 @@ pub(crate) mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -19002,7 +18834,6 @@ pub(crate) mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -19523,7 +19354,6 @@ pub(crate) mod tests {
                         captured_conversation: Some(format!("conv-{id}")),
                         generation: 0,
                         launch_scoped: false,
-                        source_profile: None,
                     },
                     None,
                 )
@@ -19619,7 +19449,6 @@ pub(crate) mod tests {
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -20225,7 +20054,6 @@ exit 0
                         captured_conversation: None,
                         generation: 0,
                         launch_scoped: false,
-                        source_profile: None,
                         conversation_source: None,
                         capture_ownership_version: 0,
                         omp_reporter_asset: marker.map(str::to_string),
@@ -21468,7 +21296,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -21690,7 +21517,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -21783,7 +21609,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -21859,7 +21684,6 @@ exit 0
                         captured_conversation: None,
                         generation: 0,
                         launch_scoped: false,
-                        source_profile: None,
                     },
                     None,
                 )
@@ -21958,7 +21782,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -22050,7 +21873,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -22335,7 +22157,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 None,
             )
@@ -22724,12 +22545,9 @@ exit 0
             ControlMsg::CreateSession {
                 req_id: 1,
                 parent: None,
-                profile_name: None,
-                profile_id: None,
                 inherit_agent: false,
                 cwd: "/".to_string(),
                 invocation: Some("agent".to_string()),
-                source_profile: None,
                 launch: None,
                 title: None,
                 cols: 80,
@@ -22788,8 +22606,8 @@ exit 0
     /// teeth, and the reason they are here rather than only in a handler
     /// test: the fingerprint is the ONLY thing standing between a retried
     /// intent key and a create that launches something other than what the
-    /// first attempt did. A retry that flips raw-to-profile, or names a
-    /// different profile, must land on a different fingerprint and be
+    /// first attempt did. A retry that flips raw-to-structured, or names a
+    /// different selection, must land on a different fingerprint and be
     /// refused as a key reuse.
     #[farhelm_testtrace::test]
     fn the_create_fingerprint_covers_every_session_shaping_field() {
@@ -22834,32 +22652,12 @@ exit 0
             (
                 create_fingerprint(
                     None,
-                    None,
-                    "/work",
-                    &CreateMode::Raw {
-                        invocation: "agent --flag".to_string(),
-                        agent_kind: None,
-                        resume_template: None,
-                        source_profile: Some(ProfileSnapshot {
-                            id: "prof-1".to_string(),
-                            name: "Profile One".to_string(),
-                        }),
-                        launch: None,
-                    },
-                    Some("t"),
-                ),
-                "the source profile",
-            ),
-            (
-                create_fingerprint(
-                    None,
                     Some("parent-1"),
                     "/work",
                     &CreateMode::Raw {
                         invocation: "agent --flag".to_string(),
                         agent_kind: None,
                         resume_template: None,
-                        source_profile: None,
                         launch: None,
                     },
                     Some("t"),
@@ -22892,18 +22690,6 @@ exit 0
             raw_fingerprint("/work", "a", None, None, Some(&["x"])),
             raw_fingerprint("/work", "a", None, None, Some(&["y"])),
         );
-        // Two profile-mode creates that differ only in WHICH profile are
-        // two different requests: same key, different profile, refused —
-        // never a replay of whichever one happened to run first.
-        assert_ne!(
-            profile_fingerprint("/work", "prof-1", "Profile", "claude", None),
-            profile_fingerprint("/work", "prof-2", "Profile", "claude", None),
-        );
-        assert_ne!(
-            profile_fingerprint("/work", "prof-1", "Profile", "claude", None),
-            profile_fingerprint("/work", "prof-1", "Profile", "claude --new", None),
-            "editing a resolved profile between retries must conflict under the same key"
-        );
         assert_ne!(
             create_fingerprint(
                 None,
@@ -22913,7 +22699,6 @@ exit 0
                     invocation: "agent".to_string(),
                     agent_kind: None,
                     resume_template: None,
-                    source_profile: None,
                     launch: None,
                 },
                 None,
@@ -22926,7 +22711,6 @@ exit 0
                     invocation: "agent".to_string(),
                     agent_kind: None,
                     resume_template: None,
-                    source_profile: None,
                     launch: None,
                 },
                 None,
@@ -22942,10 +22726,6 @@ exit 0
                     invocation: "claude".to_string(),
                     agent_kind: Some(AgentKind::Claude),
                     resume_template: None,
-                    source_profile: Some(ProfileSnapshot {
-                        id: "prof-1".to_string(),
-                        name: "Profile".to_string(),
-                    }),
                     launch: None,
                 },
                 None,
@@ -22958,15 +22738,11 @@ exit 0
                     invocation: "claude".to_string(),
                     agent_kind: Some(AgentKind::Claude),
                     resume_template: None,
-                    source_profile: Some(ProfileSnapshot {
-                        id: "prof-1".to_string(),
-                        name: "Profile".to_string(),
-                    }),
                     launch: None,
                 },
                 None,
             ),
-            "a resolved profile create's parent must change its fingerprint"
+            "a parented create's parent must change its fingerprint"
         );
     }
 
@@ -23082,36 +22858,6 @@ exit 0
                 agent_kind,
                 resume_template: resume_template
                     .map(|template| template.iter().map(ToString::to_string).collect()),
-                source_profile: None,
-                launch: None,
-            },
-            title,
-        )
-    }
-
-    /// Fingerprint a resolved profile bundle for the encoding tests.
-    ///
-    /// Keeping every resolved field explicit makes it easy for a test to pin
-    /// that an edit under the same profile id still changes the request.
-    fn profile_fingerprint(
-        cwd: &str,
-        profile_id: &str,
-        profile_name: &str,
-        invocation: &str,
-        title: Option<&str>,
-    ) -> String {
-        create_fingerprint(
-            None,
-            None,
-            cwd,
-            &CreateMode::Raw {
-                invocation: invocation.to_string(),
-                agent_kind: Some(AgentKind::Claude),
-                resume_template: None,
-                source_profile: Some(ProfileSnapshot {
-                    id: profile_id.to_string(),
-                    name: profile_name.to_string(),
-                }),
                 launch: None,
             },
             title,
@@ -23136,7 +22882,8 @@ exit 0
     /// permanent tombstone, so an encoding change turns every key a
     /// supervisor has ever seen into a `Conflict` on its next identical
     /// retry — permanently, for that key. Version 10 therefore gave the
-    /// PROFILE mode a separate encoding rather than extending this one.
+    /// profile mode (removed in protocol 38) a separate encoding rather than
+    /// extending this one.
     #[farhelm_testtrace::test]
     fn the_persisted_fingerprint_encoding_is_pinned() {
         assert_eq!(
@@ -23153,12 +22900,6 @@ exit 0
             raw_fingerprint("/work", "agent", None, None, None),
             r#"["/work","agent",null,null,null]"#
         );
-        // Resolved bundles have their own discriminant and include profile
-        // provenance as well as every launch-shaping field.
-        assert_eq!(
-            profile_fingerprint("/work", "prof-7", "Claude", "claude", Some("title")),
-            r#"["resolved_profile",null,"/work","claude","title","claude",null,"prof-7","Claude"]"#
-        );
         assert_eq!(
             create_fingerprint(
                 None,
@@ -23168,7 +22909,6 @@ exit 0
                     invocation: "agent".to_string(),
                     agent_kind: None,
                     resume_template: None,
-                    source_profile: None,
                     launch: None,
                 },
                 None,
@@ -23346,10 +23086,18 @@ exit 0
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap()
                 .into_iter()
+                // Columns a later schema drops on purpose: the retired
+                // archive and scan bookkeeping, and (schema 25) the profile
+                // snapshot that went with profiles.
                 .filter(|column| {
                     !matches!(
                         column.as_str(),
-                        "archived" | "captured_record" | "capture_ambiguous" | "first_input_at"
+                        "archived"
+                            | "captured_record"
+                            | "capture_ambiguous"
+                            | "first_input_at"
+                            | "source_profile_id"
+                            | "source_profile_name"
                     )
                 })
                 .collect::<Vec<_>>()
@@ -23365,8 +23113,8 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                24,
-                "the v17 fixture migrates through scan-column removal too"
+                25,
+                "the v17 fixture migrates through scan-column and profile-snapshot removal too"
             );
             assert_eq!(
                 conn.query_row(
@@ -23629,7 +23377,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "v9-key".to_string(),
@@ -23757,7 +23504,6 @@ exit 0
                         invocation: "/opt/bin/claude --dangerously-skip-permissions".to_string(),
                         agent_kind: None,
                         resume_template: None,
-                        source_profile: None,
                         launch: None,
                     },
                     title: Some("t".to_string()),
@@ -23807,7 +23553,6 @@ exit 0
                         invocation: "claude".to_string(),
                         agent_kind: None,
                         resume_template: Some(vec!["claude".to_string(), "--continue".to_string()]),
-                        source_profile: None,
                         launch: None,
                     },
                     title: None,
@@ -23826,15 +23571,13 @@ exit 0
         );
     }
 
-    /// A raw create is the one path that reaches tmux with no profile in
-    /// front of it — its invocation comes straight from the HTTP API's
+    /// A raw create's invocation comes straight from the HTTP API's
     /// `CreateSession` (or a test), never from `farhelm spawn`, which only
-    /// selects or derives a profile and never carries a raw invocation. So
-    /// `{cwd}` as the invocation's PROGRAM has to be refused here too, in
-    /// the identical wording the profile editor gives
-    /// (`agent_kind::ensure_no_cwd_program`) — otherwise a wrapper-shaped
-    /// invocation given directly to the raw-create path would slip past
-    /// the one boundary a profile write goes through.
+    /// inherits a bundle and never carries a raw invocation. So `{cwd}` as
+    /// the invocation's PROGRAM has to be refused here, in the shared
+    /// wording (`agent_kind::ensure_no_cwd_program`) — otherwise a
+    /// wrapper-shaped invocation given directly to the raw-create path would
+    /// reach tmux.
     #[farhelm_testtrace::test]
     async fn a_raw_create_refuses_a_cwd_placeholder_as_the_program() {
         let state = StateDir::new();
@@ -23852,7 +23595,6 @@ exit 0
                     invocation: format!("{} claude", crate::agent_kind::CWD_PLACEHOLDER),
                     agent_kind: None,
                     resume_template: None,
-                    source_profile: None,
                     launch: None,
                 },
                 title: None,
@@ -23908,7 +23650,6 @@ exit 0
                     ),
                     agent_kind: Some(AgentKind::Claude),
                     resume_template: None,
-                    source_profile: None,
                     launch: None,
                 },
                 title: None,
@@ -23954,7 +23695,6 @@ exit 0
                     invocation: format!("wrapper {} claude", crate::agent_kind::CWD_PLACEHOLDER),
                     agent_kind: None,
                     resume_template: None,
-                    source_profile: None,
                     launch: None,
                 },
                 title: None,
@@ -24022,7 +23762,6 @@ exit 0
                             invocation: invocation.to_string(),
                             agent_kind: None,
                             resume_template: None,
-                            source_profile: None,
                             launch: None,
                         },
                         title: None,
@@ -24106,12 +23845,9 @@ exit 0
         let request = |req_id: u64, agent_kind: Option<AgentKind>| ControlMsg::CreateSession {
             req_id,
             parent: None,
-            profile_name: None,
-            profile_id: None,
             inherit_agent: false,
             cwd: "/".to_string(),
             invocation: Some("agent".to_string()),
-            source_profile: None,
             launch: None,
             title: None,
             cols: 80,
@@ -24538,7 +24274,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -24624,7 +24359,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -24720,12 +24454,9 @@ exit 0
                 ControlMsg::CreateSession {
                     req_id,
                     parent: None,
-                    profile_name: None,
-                    profile_id: None,
                     inherit_agent: false,
                     cwd: "/".to_string(),
                     invocation: Some("agent".to_string()),
-                    source_profile: None,
                     launch: None,
                     title: Some(title.clone()),
                     cols: 80,
@@ -24773,12 +24504,9 @@ exit 0
             ControlMsg::CreateSession {
                 req_id: 6,
                 parent: None,
-                profile_name: None,
-                profile_id: None,
                 inherit_agent: false,
                 cwd: "/".to_string(),
                 invocation: Some("agent".to_string()),
-                source_profile: None,
                 launch: None,
                 title: Some("🚀 デモ project — a normal title".to_string()),
                 cols: 80,
@@ -24837,12 +24565,9 @@ exit 0
             ControlMsg::CreateSession {
                 req_id: 1,
                 parent: None,
-                profile_name: None,
-                profile_id: None,
                 inherit_agent: false,
                 cwd: evil.to_str().expect("tempdir paths are UTF-8").to_string(),
                 invocation: Some("agent".to_string()),
-                source_profile: None,
                 launch: None,
                 title: None,
                 cols: 80,
@@ -24917,12 +24642,9 @@ exit 0
         let request = |req_id: u64, title: &str| ControlMsg::CreateSession {
             req_id,
             parent: None,
-            profile_name: None,
-            profile_id: None,
             inherit_agent: false,
             cwd: "/".to_string(),
             invocation: Some("agent".to_string()),
-            source_profile: None,
             launch: None,
             title: Some(title.to_string()),
             cols: 80,
@@ -25157,7 +24879,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -25252,7 +24973,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -25569,7 +25289,6 @@ exit 0
                             "--resume".to_string(),
                             crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
                         ]),
-                        source_profile: None,
                         launch: None,
                     },
                     title: None,
@@ -25696,7 +25415,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -25839,7 +25557,6 @@ exit 0
             captured_conversation: None,
             generation: 7,
             launch_scoped: false,
-            source_profile: None,
         };
         sup.store
             .insert_session(
@@ -25884,7 +25601,6 @@ exit 0
                         resume_template: None,
                     },
                     canonical_cwd: Some(cwd.clone()),
-                    source_profile: None,
                     launch: None,
                 },
                 &Reserved::Retry(Box::new(reservation)),
@@ -25944,15 +25660,13 @@ exit 0
         );
     }
 
-    /// An unexecutable argv is refused on EVERY path that can produce one,
-    /// not only at a profile write.
+    /// An unexecutable argv is refused on EVERY path that can produce one.
     ///
     /// `''` is the case that motivates this: it parses to a one-element argv
     /// holding the empty string, so an `argv.is_empty()` test — which is
     /// what the raw create and the pending retry each had — sees a perfectly
-    /// good command line that names nothing. Profile CRUD has refused it for
-    /// a while, so the same command line was accepted or refused depending
-    /// on which door it came through.
+    /// good command line that names nothing, so the same command line was
+    /// accepted or refused depending on which door it came through.
     ///
     /// All three doors, because each reads its argv from a different place:
     /// the request (raw create), the crashed attempt's row (retry), and the
@@ -26007,7 +25721,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -26175,7 +25888,6 @@ exit 0
                     invocation: "claude".to_string(),
                     agent_kind: None,
                     resume_template: None,
-                    source_profile: None,
                     launch: None,
                 },
                 title: None,
@@ -26304,7 +26016,6 @@ exit 0
                     captured_conversation: None,
                     generation: 0,
                     launch_scoped: false,
-                    source_profile: None,
                 },
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
@@ -27887,7 +27598,6 @@ exit 0
                             invocation: "agent".into(),
                             agent_kind: None,
                             resume_template: None,
-                            source_profile: None,
                             launch: None,
                         },
                         title: title.map(str::to_owned),
@@ -28087,7 +27797,6 @@ exit 0
                         invocation: "same-command".into(),
                         agent_kind: Some(AgentKind::Codex),
                         resume_template: None,
-                        source_profile: None,
                         launch: Some(selection),
                     }
                 }
@@ -28145,21 +27854,25 @@ exit 0
         }
     }
 
-    /// A deleted profile must not erase the accepted launch bundle from a
-    /// permanent reservation. Recovery needs its provenance and resume args,
-    /// including parent/title inputs, even when no live session remains.
+    /// A fresh-checkout reservation retains its accepted raw bundle, including
+    /// parent and title inputs, and refuses other encoding versions. A
+    /// reservation stored before profiles were removed, whose mode still
+    /// carries the `source_profile` member (null or a snapshot), decodes into
+    /// this build's bundle but never re-encodes to the stored string.
+    ///
+    /// Why: the member is gone from `CreateMode`, so serde drops it on
+    /// decode. Recovery must still work from such a row, and a retry of it
+    /// must be refused as key reuse rather than matched, because matching
+    /// would launch under a different stored request than the one accepted
+    /// (SPEC_impl.md, "Launch-kinds reservations").
     #[farhelm_testtrace::test]
-    fn fresh_fingerprint_recovers_profile_snapshot_and_rejects_other_versions() {
+    fn fresh_fingerprint_recovers_the_raw_bundle_and_rejects_other_versions() {
         let root = tempfile::tempdir().unwrap();
         let checkout = checkout_fixture(root.path());
         let mode = CreateMode::Raw {
             invocation: "accepted-command".into(),
             agent_kind: Some(AgentKind::Codex),
             resume_template: Some(vec!["accepted-resume".into(), "{session_id}".into()]),
-            source_profile: Some(ProfileSnapshot {
-                id: "old-profile-id".into(),
-                name: "old-profile-name".into(),
-            }),
             launch: None,
         };
         let encoded = create_fingerprint(
@@ -28187,11 +27900,10 @@ exit 0
             invocation,
             agent_kind,
             resume_template,
-            source_profile,
             launch,
         } = recovered
         else {
-            panic!("profile-backed launch must retain raw mode");
+            panic!("a raw launch must retain raw mode");
         };
         assert_eq!(invocation, "accepted-command");
         assert_eq!(agent_kind, Some(AgentKind::Codex));
@@ -28199,14 +27911,38 @@ exit 0
             resume_template,
             Some(vec!["accepted-resume".into(), "{session_id}".into()])
         );
-        assert_eq!(
-            source_profile,
-            Some(ProfileSnapshot {
-                id: "old-profile-id".into(),
-                name: "old-profile-name".into()
-            })
-        );
         assert!(launch.is_none());
+
+        // Pre-upgrade rows: the same reservation as an older build stored
+        // it, with the `source_profile` member every raw mode carried —
+        // null for a typed command, a snapshot for a profile-backed create.
+        for snapshot in [
+            serde_json::Value::Null,
+            serde_json::json!({"id": "old-profile-id", "name": "old-profile-name"}),
+        ] {
+            let mut stored: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            stored["mode"]["Raw"]["source_profile"] = snapshot.clone();
+            let stored = serde_json::to_string(&stored).unwrap();
+            let FreshCreateFingerprint::GithubCheckout {
+                mode: recovered_old,
+                ..
+            } = serde_json::from_str(&stored).expect("a pre-upgrade reservation still decodes")
+            else {
+                panic!("a launch fingerprint must retain its resolved snapshot");
+            };
+            assert_ne!(
+                create_fingerprint(
+                    Some(&checkout),
+                    Some("parent-id"),
+                    "requested-cwd",
+                    &recovered_old,
+                    Some("accepted-title"),
+                ),
+                stored,
+                "a retry under a pre-upgrade key ({snapshot}) must never match its stored request"
+            );
+        }
+
         let mut unknown: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         unknown["kind"] = serde_json::json!("github_checkout_future");
         assert!(serde_json::from_value::<FreshCreateFingerprint>(unknown).is_err());
@@ -28310,7 +28046,6 @@ exit 0
                 invocation: "agent".to_string(),
                 agent_kind: None,
                 resume_template: None,
-                source_profile: None,
                 launch: None,
             },
             None,
@@ -28743,7 +28478,6 @@ exit 0
                 invocation: "agent".to_string(),
                 agent_kind: None,
                 resume_template: None,
-                source_profile: None,
                 launch: None,
             },
             None,
@@ -28767,7 +28501,6 @@ exit 0
                     invocation: "agent".to_string(),
                     agent_kind: None,
                     resume_template: None,
-                    source_profile: None,
                     launch: None,
                 },
                 title: None,
@@ -30619,7 +30352,6 @@ exit 0
                             "--resume".to_string(),
                             crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
                         ]),
-                        source_profile: None,
                         launch: None,
                     },
                     title: None,
@@ -30981,7 +30713,6 @@ exit 0
                             invocation: "agent".into(),
                             agent_kind: None,
                             resume_template: None,
-                            source_profile: None,
                             launch: None,
                         },
                         title: None,

@@ -35,18 +35,14 @@ pub(crate) struct YoloNeedsConfirmation {
     pub(crate) host_name: String,
 }
 
-/// Whether a create in `mode` is a YOLO launch. A profile is classified by
-/// the invocation of the catalog row the create resolved, the same snapshot
-/// it dispatches; `do_create_session` resolves a bare profile id before
-/// asking, so that arm only exists for exhaustiveness.
+/// Whether a create in `mode` is a YOLO launch: a raw command by the shared
+/// command-line classifier, a structured launch by its own selection.
 pub(crate) fn create_is_yolo(mode: &CreateMode) -> bool {
     match mode {
         CreateMode::Raw(invocation) => invocation_is_yolo(invocation),
         CreateMode::Structured(compiled) => {
             farhelm_proto::yolo::selection_is_yolo(&compiled.selection)
         }
-        CreateMode::Profile(_) => unreachable!("do_create_session resolves profile ids first"),
-        CreateMode::ResolvedProfile { profile, .. } => invocation_is_yolo(&profile.invocation),
     }
 }
 
@@ -136,35 +132,5 @@ mod tests {
         );
         assert!(check(&harness.state, missing, false, false).await.is_ok());
         assert!(check(&harness.state, missing, true, true).await.is_ok());
-    }
-
-    /// Spec: every built-in profile named `…-yolo` is classified YOLO by the
-    /// YOLO confirmation guard, and every other built-in is not.
-    ///
-    /// Why: built-in profiles are plain command lines, so the guard sees them
-    /// only through the shared classifier's tables. When the classifier
-    /// stopped reading the generic name `agent`, the built-in `cursor-yolo`
-    /// profile (then `agent --force`) would have started on a host that asks before YOLO launches
-    /// without asking had its launch not moved to `cursor-agent` in the same
-    /// change. An edit to either the built-in table or the classifier tables
-    /// can break that coupling silently; this catches it.
-    #[test]
-    fn builtin_yolo_profiles_are_guarded_and_the_rest_are_not() {
-        let builtins = crate::store::builtin_profiles();
-        assert!(
-            builtins
-                .iter()
-                .any(|profile| profile.name.ends_with("-yolo")),
-            "premise: some built-in YOLO profile exists"
-        );
-        for profile in builtins {
-            assert_eq!(
-                invocation_is_yolo(&profile.invocation),
-                profile.name.ends_with("-yolo"),
-                "built-in profile {} ({})",
-                profile.name,
-                profile.invocation
-            );
-        }
     }
 }

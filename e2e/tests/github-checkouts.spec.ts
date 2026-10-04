@@ -8,7 +8,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { cleanupProfile, cleanupSession, createProfile, createSession, FAKE_AGENT, localHostId, openRowMenu } from "./helpers/fleet";
+import { cleanupSession, createSession, FAKE_AGENT, localHostId, openRowMenu } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 import { attachSession, waitForTermText } from "./helpers/term";
 
@@ -286,38 +286,30 @@ test("structured checkout previews, launches, and reuses a recent as a fresh clo
   }
 });
 
-/** Command mode and profile mode retain their selector when gh is selected.
- * The same real clone/hook/live-terminal oracles cover both legacy branches. */
-for (const mode of ["raw", "profile"] as const) {
-  test(`${mode} agent choice survives a real fresh checkout`, async ({ page, request }) => {
-    const fixture = await checkoutFixture(`browser-${mode}`);
-    const ids: string[] = [];
-    let profileId: string | undefined;
-    try {
-      const host = await localHostId(request);
-      if (mode === "profile") profileId = (await createProfile(request, { name: `checkout-${mode}` })).id;
-      const form = await openComposer(page, host);
-      await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
-      await form.locator(".create-session-profile").selectOption(profileId ?? "");
-      if (mode === "raw") await form.getByLabel("agent command").fill(FAKE_AGENT);
-      await selectRepo(form, fixture.repo);
-      await expect(form).toHaveAttribute("data-composer-mode", "command");
-      const cwd = path.join(fixture.root, `${fixture.repoName}-1`);
-      await expect(form.locator(".launch-composer-checkout-preview")).toContainText(cwd);
-      expect(await fs.readdir(fixture.root)).toEqual([]);
-      const created = await launch(page, form, ids);
-      if (profileId) expect(created.body.profile_id).toBe(profileId);
-      else expect(created.body.invocation).toBe(FAKE_AGENT);
-      const persisted = await assertCheckout(page, request, fixture, created.session.id, cwd, false);
-      expect(persisted.invocation).toBe(FAKE_AGENT);
-      if (profileId) expect(persisted.source_profile.id).toBe(profileId);
-    } finally {
-      for (const id of ids.reverse()) await cleanupSession(request, id);
-      if (profileId) await cleanupProfile(request, profileId);
-      await fixture.close();
-    }
-  });
-}
+/** Command mode retains its command when gh is selected, under the same real
+ * clone/hook/live-terminal oracles the structured launches use. */
+test("a typed command survives a real fresh checkout", async ({ page, request }) => {
+  const fixture = await checkoutFixture("browser-raw");
+  const ids: string[] = [];
+  try {
+    const host = await localHostId(request);
+    const form = await openComposer(page, host);
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+    await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await selectRepo(form, fixture.repo);
+    await expect(form).toHaveAttribute("data-composer-mode", "command");
+    const cwd = path.join(fixture.root, `${fixture.repoName}-1`);
+    await expect(form.locator(".launch-composer-checkout-preview")).toContainText(cwd);
+    expect(await fs.readdir(fixture.root)).toEqual([]);
+    const created = await launch(page, form, ids);
+    expect(created.body.invocation).toBe(FAKE_AGENT);
+    const persisted = await assertCheckout(page, request, fixture, created.session.id, cwd, false);
+    expect(persisted.invocation).toBe(FAKE_AGENT);
+  } finally {
+    for (const id of ids.reverse()) await cleanupSession(request, id);
+    await fixture.close();
+  }
+});
 
 /** An unlabeled folder result explicitly leaves fresh mode and preserves
  * the agent selection. Ordinary launches must not run the configured hook
@@ -334,7 +326,6 @@ test("an unlabeled folder result replaces fresh intent without cloning", async (
     expect((await history.json()).folders.some((folder: any) => folder.display_cwd === fixture.root)).toBe(true);
     const form = await openComposer(page, host);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
-    await form.locator(".create-session-profile").selectOption("");
     await form.getByLabel("agent command").fill(FAKE_AGENT);
     await selectRepo(form, fixture.repo);
     await expect(form.locator(".launch-composer-checkout-preview")).toContainText(`${fixture.repoName}-1`);
@@ -369,7 +360,6 @@ test("borrowers retain the checkout until the final stopped session is deleted",
     const host = await localHostId(request);
     const form = await openComposer(page, host);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
-    await form.locator(".create-session-profile").selectOption("");
     await form.getByLabel("agent command").fill(FAKE_AGENT);
     await selectRepo(form, fixture.repo);
     const { session: origin } = await launch(page, form, ids);
@@ -466,7 +456,6 @@ test("replacement preserves borrowers and archives only the released checkout", 
     const host = await localHostId(request);
     const form = await openComposer(page, host);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
-    await form.locator(".create-session-profile").selectOption("");
     await form.getByLabel("agent command").fill(FAKE_AGENT);
     await selectRepo(form, fixture.repo);
     const { session: origin } = await launch(page, form, ids);

@@ -276,8 +276,6 @@ test("New selects other command explicitly and preserves the raw invocation", as
   await expect(form.locator(".create-session-host"), "destination controls stay mounted in command mode").toBeVisible();
   await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
   await expect(form.getByLabel("name (optional)")).toBeVisible();
-  const profile = form.locator(".create-session-profile");
-  await profile.selectOption("");
   const command = form.getByLabel("agent command");
   await command.fill(FAKE_AGENT);
 

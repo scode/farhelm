@@ -24,16 +24,6 @@
 //! because two consumers need one read: the panel, and the create dialog's
 //! host selector.
 //!
-//! ## Profiles reach the list in two places (PLAN_M6_75.md item 8)
-//!
-//! The create dialog gains an agent picker over the helm-wide catalog,
-//! and a row created from a profile names the profile it SNAPSHOTTED. Both
-//! rules — what a fresh dialog preselects, and how a snapshot reads once the
-//! catalog has moved on — live in `profiles` rather than being re-derived by
-//! the list. `create_form` owns the picker state and submit handlers, `row`
-//! owns snapshot presentation, and `view` composes both with the list-level
-//! state, as it does for the rename overlay and the count banner.
-//!
 //! ## The list is the WHOLE list
 //!
 //! `api::fetch_sessions` makes one request for the whole list and this view

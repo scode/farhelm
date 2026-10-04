@@ -4264,26 +4264,21 @@
          * So focus is only taken from somewhere that is not a deliberate
          * choice. Editable controls and another island's terminal keep focus
          * because pulling keystrokes out from under active typing is the theft
-         * this guard exists to prevent. A mounted profiles popup is a
-         * structural veto, including while its active control is being
-         * replaced through `body`. The reveal gets no retry after dismissal;
-         * the user can click the terminal when they want to type there.
+         * this guard exists to prevent.
          *
-         * A mounted restart-with dialog is the same kind of veto, and it
-         * matters more there: the dialog is modal, focus usually sits on
+         * A mounted restart-with dialog is a structural veto: the dialog is
+         * modal, focus usually sits on
          * one of its buttons (which the button rule below would otherwise
          * surrender), and a refused restart remounts this very terminal
          * behind the still-open dialog. Without the veto, that reattach
          * would focus the pty under the scrim, and the next keystroke
-         * aimed at the dialog would go to the agent instead. As with the
-         * popup, closing the dialog does not replay the vetoed reveal: a
-         * cancel hands focus back to the header action that opened it.
+         * aimed at the dialog would go to the agent instead. Closing the
+         * dialog does not replay the vetoed reveal: a cancel hands focus back
+         * to the header action that opened it.
          * `sync()` focuses an already-revealed island when the selection
          * changes, which is the other way a terminal can take focus, and
          * it carries the same dialog veto. Both vetoes cover every open modal
-         * dialog (OPEN_MODAL_SELECTOR), not only restart-with (the profiles
-         * popover, which is not a modal dialog, is vetoed here at reveal
-         * only): the rename
+         * dialog (OPEN_MODAL_SELECTOR), not only restart-with: the rename
          * dialog and the session launcher have no `inert` isolation, so for
          * them the vetoes are the only guard; for restart-with they are the
          * second layer behind its `inert` marking (restart_with.rs,
@@ -4297,7 +4292,6 @@
          */
         function takesFocus() {
           if (!focusOnReveal || focusedEl !== spec.el) return false;
-          if (document.querySelector(".profiles-popover")) return false;
           if (document.querySelector(OPEN_MODAL_SELECTOR)) return false;
           const active = document.activeElement;
           if (!active || active === document.body) return true;

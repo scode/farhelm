@@ -40,10 +40,8 @@ import { type APIRequestContext, type Locator, type Page } from "@playwright/tes
 import fs from "node:fs";
 import path from "node:path";
 import {
-  cleanupProfile,
   cleanupSession,
   countReads,
-  createProfile,
   createResumableSession,
   createSession,
   FAKE_AGENT,
@@ -295,7 +293,6 @@ test("macOS header controls stay clear of native buttons while the shell scrolls
   const version = bar.locator(".app-version");
   const drag = bar.locator(".window-drag-region");
   const header = page.locator(".titlebar");
-  await expect(bar.locator(".profiles-toggle")).toHaveCount(0);
   await expect(version).not.toHaveText("");
   await expect(header).toBeVisible();
   await expect(drag).toBeHidden();
@@ -389,7 +386,6 @@ test("macOS header leaves the build mismatch notice readable", async ({ page }) 
   const notice = page.locator(".build-skew");
   const bar = page.locator(".app-bar");
   await expect(notice).toContainText("9.9.9-header-layout");
-  await expect(bar.locator(".profiles-toggle")).toHaveCount(0);
   await page.locator(".window-root").evaluate((element) => element.classList.add("macos-root"));
   await page.locator(".app-shell").evaluate((element) => element.classList.add("macos-window"));
   for (const width of [900, 400]) {
@@ -1235,60 +1231,6 @@ test("the host/directory line aligns under the title as one continuous string", 
     ).toBe(1);
   } finally {
     await cleanupSession(request, session.id);
-  }
-});
-
-/**
- * A long PROFILE-backed invocation badge clips inside its first-line column,
- * while the cwd on the second line remains usable.
- *
- * The 300-char raw invocation above no longer exercises the badge's own
- * overflow handling: the 2026-08 UI refresh compacts any RAW command line to
- * one short word (the program's basename, plus at most a short marker —
- * `list::row::compact_invocation`), so a long raw invocation can no longer
- * widen the badge. A profile-backed session answers differently — the
- * badge shows the profile's own snapshotted NAME
- * (`source_profile_label`/`display_peer` in row.rs), which carries no such
- * compaction and can legitimately run long — so this is the fixture that
- * still proves the badge clips rather than pushing the row wide.
- */
-test("a long profile-backed invocation badge clips inside the row", async ({ page, request }) => {
-  const local = await localHostId(request);
-  const name = `contained-profile-${"p".repeat(280)}`;
-  const profile = await createProfile(request, { name });
-  const session = await createSession(request, {
-    title: `contained-profile-session-${Date.now()}`,
-    cwd: "/tmp",
-    profile_id: profile.id,
-    host: local,
-  });
-  try {
-    await page.goto("/");
-    const target = row(page, session.id);
-    await expect(target).toBeVisible({ timeout: 20_000 });
-
-    const sideBox = (await page.locator(".app-sidebar").boundingBox())!;
-    const badge = target.locator(".session-agent");
-    const cwd = target.locator(".session-cwd");
-    const badgeBox = (await badge.boundingBox())!;
-    const cwdBox = (await cwd.boundingBox())!;
-
-    // The badge never forces the row wide...
-    expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(sideBox.x + sideBox.width + 1);
-    // Its full profile provenance stays discoverable in the glyph track's
-    // tooltip, while the one-character visual mark cannot consume the cwd.
-    await expect(badge).toHaveAttribute("title", new RegExp(`profile: ${name}`));
-    // The directory remains usable on its separate host/cwd line; an
-    // unbounded badge cannot squeeze it because the two fields no longer
-    // share a flex row.
-    expect(
-      cwdBox.width,
-      "the directory must keep a usable share of the shared line, not be squeezed to nothing " +
-        "by an unbounded badge",
-    ).toBeGreaterThan(20);
-  } finally {
-    await cleanupSession(request, session.id);
-    await cleanupProfile(request, profile.id);
   }
 });
 
@@ -3591,23 +3533,6 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   }
 });
 
-/** Closing the session list header popup discards its local editor draft, so reopening
- * starts at the shared catalog rather than resurrecting an abandoned form. */
-test("closing the profiles popup discards its open editor", async ({ page }) => {
-  await page.goto("/");
-  const toggle = page.locator(".profiles-toggle");
-  await toggle.click();
-  await expect(page.locator(".profiles-popover")).toBeVisible({ timeout: 20_000 });
-  await page.locator(".profiles-popover .new-profile-button").click();
-  await expect(page.locator(".profiles-popover .profile-form")).toBeVisible();
-
-  await toggle.click();
-  await expect(page.locator(".profiles-popover")).toHaveCount(0);
-  await toggle.click();
-  await expect(page.locator(".profiles-popover")).toBeVisible();
-  await expect(page.locator(".profiles-popover .profile-form")).toHaveCount(0);
-});
-
 /**
  * F10/TEST-CROSS-MENU: host menus and session menus keep separate
  * open-menu signals, and each toggle's own callback explicitly clears the
@@ -4667,10 +4592,9 @@ test("opening the create-session form closes an open row menu", async ({ page, r
 
     // Moving the opener into the count heading must leave the draft after
     // it in keyboard order. Otherwise forward Tab skips the newly opened
-    // form entirely, even though pointer creation still works. The heading
-    // holds two actions, New then profiles, so the draft follows the LAST of
-    // them: forward Tab from profiles enters the form.
-    await page.locator(".profiles-toggle").focus();
+    // form entirely, even though pointer creation still works: forward Tab
+    // from New enters the form.
+    await page.locator(".new-session-button").focus();
     await page.keyboard.press("Tab");
     await expect(page.locator(".create-session-form :focus")).toHaveCount(1);
 
@@ -6024,7 +5948,6 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     const form = page.locator(".create-session-form");
     await form.getByLabel("folder", { exact: true }).fill(cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
-    await form.locator(".create-session-profile").selectOption("");
     await form.getByLabel("agent command").fill(FAKE_AGENT);
     await expect(form).toHaveAttribute("data-composer-mode", "command");
     const recent = form.locator(".launch-composer-recent-slots").getByRole("button").first();
@@ -6059,7 +5982,6 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
       launch: { harness: "codex", model: "enter-model", effort: "high", permissions: "yolo" },
     });
     expect(posts[0]).not.toHaveProperty("invocation");
-    expect(posts[0]).not.toHaveProperty("profile_id");
   } finally {
     await setLocalYoloWithoutAsking(request, false);
     for (const id of created) await cleanupSession(request, id);
@@ -6244,7 +6166,7 @@ test("composer search recents keep complete 44px two-line rows", async ({ page, 
 });
 
 /**
- * A restored complete setup is not a sticky profile: changing its harness
+ * A restored complete setup is not a sticky choice: changing its harness
  * clears only the incompatible custom model, says why, and keeps compatible
  * effort and permission choices. Pointer and search activation share this
  * assertion because either route could otherwise bypass reconciliation.

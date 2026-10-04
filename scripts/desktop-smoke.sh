@@ -1255,21 +1255,9 @@ for _ in $(seq 1 15); do
   fi
 done
 [ -n "$FORM_OPEN" ] || fail "create form never opened (webview unresponsive to clicks?)"
-# The agent selector preselects a PROFILE, under which the typed command
-# below would be inert ("the selected profile supplies it") and the create
-# would launch that profile's agent instead of bash. "custom command" is
-# the selector's FIRST option by construction (see the create form's rsx),
-# so Home+Return in the opened popup reaches it without depending on how
-# many starter profiles exist.
-DISPLAY=$DISP xdotool mousemove 170 248 click 1 sleep 0.5 key Home sleep 0.3 key Return
-sleep 1
 # ctrl+a first: the working-directory field is prefilled with "~" (the
 # create form's default), and xdotool types at the caret rather than
 # replacing — without the select-all this would submit "~$X/work".
-#
-# The command/title/create ys are midpoints tolerant of the ~14px upward
-# shift the selector change causes (its explanatory label collapses from
-# two lines to one): each lands inside the target field in both layouts.
 DISPLAY=$DISP xdotool mousemove 170 302 click 1 sleep 0.3 key ctrl+a type --delay 120 "$X/work"
 DISPLAY=$DISP xdotool mousemove 170 358 click 1 sleep 0.3 type --delay 120 "bash"
 DISPLAY=$DISP xdotool mousemove 170 407 click 1 sleep 0.3 type --delay 120 "smoke"

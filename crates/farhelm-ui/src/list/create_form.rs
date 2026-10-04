@@ -5,7 +5,7 @@
 
 use dioxus::prelude::*;
 
-use crate::api::{self, CreateAgent, ProfileCatalog, create_session, mint_intent_key};
+use crate::api::{self, CreateAgent, create_session, mint_intent_key};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::github_checkout::{
     DestinationDraft, GithubAttempt, GithubCheckoutRequest, GithubRepo, PreviewAuthority,
@@ -14,13 +14,10 @@ use crate::github_checkout::{
 use crate::launch_controls::LaunchControls;
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
-use crate::profiles::{
-    AgentChoice, CatalogLookup, CatalogSurface, UNRESOLVED_VALUE, resolve_agent, submitted_field,
-};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{
-    ApiBase, HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
-    ProfileExistence, Session, SessionStatus,
+    ApiBase, HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, Session,
+    SessionStatus,
 };
 
 use super::SharedPreferences;
@@ -43,10 +40,9 @@ const REMEMBERED_DESTINATION_CHANGED: &str = "the remembered folder belongs to a
 
 /// The host installation a create intent is bound to.
 ///
-/// Profile ids are helm-wide now, but the idempotency key and clone target are
-/// still installation-specific: a registry row can be retargeted or adopted
-/// while retaining its numeric id. This value keeps that safety boundary out
-/// of the catalog model it no longer belongs to.
+/// The idempotency key and clone target are installation-specific: a
+/// registry row can be retargeted or adopted while retaining its numeric id.
+/// This value carries that safety boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreateTarget {
     pub(crate) host: HostId,
@@ -68,7 +64,7 @@ impl CreateTarget {
 /// submission is the user's choice. Anything that remembers "what the user
 /// picked" (the permission and workspace-trust mirror in `list::view`) must
 /// read `submitted_launch` (SPEC.md: only explicit GUI selections shape GUI
-/// defaults). `None` for command and profile creates.
+/// defaults). `None` for command creates.
 pub(crate) struct CreatedSession {
     pub(crate) session: Session,
     pub(crate) submitted_launch: Option<LaunchSelection>,
@@ -76,24 +72,21 @@ pub(crate) struct CreatedSession {
 
 /// What one create would actually LAUNCH.
 ///
-/// The two creation modes are mutually exclusive on the wire (PLAN_M6_75.md
-/// item 3) and they are mutually exclusive here for a second reason: they are
-/// part of the intent an idempotency key stands for. Keeping the typed
-/// command inside the `Command` arm rather than beside a nullable profile is
-/// what makes "a profile-backed create does not care what is in the command
-/// box" structural — a form field the user cannot reach in that mode can no
-/// longer change what the key is bound to.
+/// The two creation modes are mutually exclusive on the wire and they are
+/// mutually exclusive here for a second reason: they are part of the intent
+/// an idempotency key stands for. Keeping the typed command inside the
+/// `Command` arm is what makes "a structured create does not care what is in
+/// the command box" structural — a form field the user cannot reach in that
+/// mode can no longer change what the key is bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum LaunchIntent {
     /// The invocation as typed into the form.
     Command(String),
-    /// A profile from the helm catalog, by id.
-    Profile(String),
     /// Declarative structured intent compiled only by the helm.
     Structured(LaunchSelection),
 }
 
-/// The active creation surface. Legacy profiles/commands and structured
+/// The active creation surface. Typed commands and structured
 /// harnesses are separate modes because values from one cannot safely become
 /// hidden inputs to the other's idempotency key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -471,9 +464,8 @@ struct IntentBinding {
     /// identity. Existing requests leave this absent and keep their old body.
     github_checkout: Option<GithubCheckoutRequest>,
     /// What this create launches — see [`LaunchIntent`]. Switching between
-    /// the two modes is a different intended create, and so is switching
-    /// profiles, which is why the mode lives inside the binding rather than
-    /// beside it.
+    /// the two modes is a different intended create, which is why the mode
+    /// lives inside the binding rather than beside it.
     agent: LaunchIntent,
     title: String,
     /// `Some(source id)` when this binding is a "replace with", carried
@@ -890,63 +882,12 @@ fn scroll_composer_search_result(index: usize) {
     ));
 }
 
-/// Which of the two creation modes a "clone" click's snapshot TRUSTS —
-/// deliberately not carrying its own payload; see [`CreatePrefill::invocation`]
-/// for where that lives and why.
-///
-/// The choice between the two variants is [`prefill_from`]'s to make: a
-/// clone trusts the row's profile id ONLY when its own `source_profile` says
-/// `Present` — the catalog, as of the row's own snapshot, still holds that
-/// id under the SAME name. Every other answer — no profile at all, a name
-/// the catalog has since changed, an id it no longer holds at all, or an
-/// existence word this build does not recognize — falls back to the raw
-/// invocation instead.
-///
-/// This is DELIBERATELY STRICTER than `profiles::resolve_agent`'s own rule
-/// for an ordinary create, not a restatement of it: `resolve_agent` accepts
-/// a previously chosen profile id whenever the catalog still holds it AT
-/// ALL, name changes included, because that choice was made by a human
-/// looking at today's picker a moment ago. A clone's row can be arbitrarily
-/// old, so "the id still exists" is not enough evidence that cloning it
-/// again is what a look at today's catalog would still choose — a rename is
-/// exactly the kind of change SPEC.md's own snapshot rule says a session
-/// must not be silently re-bound across, and a clone re-selecting the same
-/// id under new user-visible clothing would be doing precisely that.
-///
-/// Trusting the id at all, even under `Present`, is still a SNAPSHOT
-/// decision, not a live one: once a profile-backed clone is applied and the
-/// user submits, the request names the id and nothing else, and the
-/// helm resolves it against whatever definition the catalog holds AT SUBMIT
-/// TIME — an edit landing between the clone click and the submit
-/// changes what the cloned session launches, exactly as it would for any
-/// other profile-backed create, and a deletion in that window is refused by
-/// either the refreshed picker or the helm rather than falling back.
-///
-/// Not [`LaunchIntent`] reused, even though the two-mode split is
-/// identical: `LaunchIntent::Command(String)` pairs its variant with the
-/// launch string, but a clone's raw invocation has to reach the form's
-/// command field in EITHER mode (see `CreatePrefill::invocation`) — parking
-/// it inside a `Command` payload here would duplicate that string when the
-/// mode already is command, and leave a `Profile`-backed clone with nowhere
-/// on `LaunchIntent` to carry it at all. A bare marker beside one shared
-/// field says the same thing without either problem.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum PrefillAgent {
-    /// Launch the row's own profile again, by id, on the row's own host.
-    Profile { id: String },
-    /// No profile this clone may trust — launch the raw invocation
-    /// (`CreatePrefill::invocation`) verbatim instead.
-    Command,
-}
-
 /// What one "clone" click seeds a fresh create form with: everything about
 /// the clicked row that a NEW session can reuse.
 ///
 /// Built once, by [`prefill_from`], from the row's `Session` at the moment
-/// of the click — a snapshot, not a live binding, which is what SPEC.md's
-/// profile-snapshot rule already requires of `Session::source_profile`
-/// itself: a profile edited or deleted after the click must not reach back
-/// into an open, already-prefilled form.
+/// of the click — a snapshot, not a live binding: a row that changes after
+/// the click must not reach back into an open, already-prefilled form.
 ///
 /// `title` and `cwd` travel verbatim, duplicate title included. SPEC.md's
 /// creation rule has nothing to say about uniqueness, an identical title is
@@ -982,26 +923,19 @@ pub(super) struct CreatePrefill {
     pub(super) host_identity: Option<Option<String>>,
     pub(super) cwd: String,
     pub(super) title: String,
-    /// The row's raw launch command, ALWAYS carried regardless of which
-    /// mode [`agent`](Self::agent) trusts.
-    ///
-    /// This is the seed for custom-command mode. While a profile is selected,
-    /// the disabled field displays that profile's current invocation instead;
-    /// retaining the raw value here keeps switching to custom mode faithful to
-    /// the cloned row without making the profile-mode display look executable.
+    /// The row's raw launch command: the seed for custom-command mode.
     pub(super) invocation: String,
     /// Declarative provenance for a structured source session.
     ///
     /// This remains absent for legacy rows. Clone must preserve that absence
     /// rather than reverse-engineering a harness from an arbitrary command.
     pub(super) launch: Option<LaunchSelection>,
-    pub(super) agent: PrefillAgent,
     /// `Some(source id)` for a "replace with" prefill, `None` for a plain
     /// clone — the one field that distinguishes the two, everything else
     /// about how a prefill seeds the form being identical between them
     /// (SPEC.md's "clone, replace with, and New are one launcher"). Every
     /// existing prefill rule above applies exactly the same way whether or
-    /// not this is set: profile-vs-invocation trust, host identity, the
+    /// not this is set: host identity, the
     /// remembered-permissions seed losing to a prefill, `prefill_applied`
     /// generations. What DOES change downstream, all of it in
     /// `CreateSessionForm`'s submit path rather than in reseeding: the
@@ -1030,8 +964,7 @@ pub(super) struct CreatePrefill {
 ///
 /// Kept as a pure mapping — apart from `CreateSessionForm` and from whatever
 /// mints `generation` (`list::view::ListView`, once per clone click) — so
-/// the Present/Renamed/Deleted/Unrecognized/None decision (see
-/// [`PrefillAgent`]) is checkable without mounting a component.
+/// what a clone carries is checkable without mounting a component.
 ///
 /// Always leaves [`CreatePrefill::replace_source`] `None`: this function
 /// builds a CLONE's prefill specifically, and `list::view::ListView`'s own
@@ -1039,12 +972,6 @@ pub(super) struct CreatePrefill {
 /// this returns, since only the caller knows which row is being
 /// replaced-with rather than merely cloned.
 pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill {
-    let agent = match &session.source_profile {
-        Some(source) if source.existence == ProfileExistence::Present => PrefillAgent::Profile {
-            id: source.id.clone(),
-        },
-        _ => PrefillAgent::Command,
-    };
     CreatePrefill {
         generation,
         host: session.host,
@@ -1053,7 +980,6 @@ pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill 
         title: session.title.clone(),
         invocation: session.invocation.clone(),
         launch: session.launch.clone(),
-        agent,
         replace_source: None,
         replace_source_opened: None,
     }
@@ -1095,15 +1021,14 @@ pub(super) fn mark_replace_with(prefill: &mut CreatePrefill, session: &Session) 
 }
 
 // ---------------------------------------------------------------------
-// A clone's host and agent choices, reconciled on independent lifecycles
+// A clone's host choice, reconciled against the registry
 // ---------------------------------------------------------------------
 
 /// What has become of the current clone generation's host binding.
 ///
-/// Host identity remains installation-specific even though the agent catalog
-/// is helm-wide. Keeping this state about the host alone prevents a delayed
-/// registry answer or later retarget from owning an agent choice that remains
-/// valid on every host.
+/// Host identity is installation-specific. Keeping this state about the host
+/// alone prevents a delayed registry answer or later retarget from owning the
+/// cloned launch, which is valid on every host.
 ///
 /// Four states rather than a bool, because three different questions later
 /// code needs answered would otherwise collapse into one flag that cannot
@@ -1173,8 +1098,8 @@ enum CloneHostAction {
 /// This keeps item2-review2.md's F1 (retry once the registry loads), F3
 /// (withdraw the instant a bound installation stops matching), and F4 (a
 /// hostless clone never invents a host) deterministic and checkable without
-/// mounting a component or an effect. Agent seeding is deliberately absent;
-/// [`resolve_clone_agent`] owns its independent helm-catalog lifecycle.
+/// mounting a component or an effect. The cloned launch is seeded once by the
+/// reseed effect and is deliberately absent here.
 ///
 /// `chosen_host_is_bound_host` is only consulted in the `Bound` state: it
 /// is how the caller reports that `chosen_host` has moved away from this
@@ -1257,50 +1182,20 @@ fn resolve_clone_host(
     }
 }
 
-/// Whether a clone may still seed its agent choice automatically.
+/// What a submit should SEND for one of the form's peer-relayed text fields.
 ///
-/// Unlike host reconciliation, this is one-shot. The helm-wide catalog can
-/// confirm a profile without knowing anything about the source host, and no
-/// later host event may withdraw or replace the result. An explicit picker or
-/// command interaction permanently takes authority for this clone generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CloneAgentState {
-    /// The source choice has not yet been applied, normally because its
-    /// profile still needs confirmation from the first catalog answer.
-    Waiting,
-    /// The source choice was applied once and must not be replayed.
-    Seeded,
-    /// A person chose the agent and automatic seeding must stand down.
-    UserTookOver,
-}
-
-/// Resolve one pass of clone-agent seeding against the helm catalog.
-///
-/// Raw commands need no catalog evidence and seed immediately. A profile id
-/// waits for a catalog, uses the profile only while that catalog still holds
-/// it, and otherwise falls back to the source session's raw command. Terminal
-/// states return no action so unrelated renders cannot overwrite the choice.
-fn resolve_clone_agent(
-    state: CloneAgentState,
-    prefill: &PrefillAgent,
-    catalog: Option<&ProfileCatalog>,
-) -> (CloneAgentState, Option<AgentChoice>) {
-    if state != CloneAgentState::Waiting {
-        return (state, None);
-    }
-    match prefill {
-        PrefillAgent::Command => (CloneAgentState::Seeded, Some(AgentChoice::Command)),
-        PrefillAgent::Profile { id } => {
-            let Some(catalog) = catalog else {
-                return (CloneAgentState::Waiting, None);
-            };
-            let choice = if catalog.profiles.iter().any(|profile| profile.id == *id) {
-                AgentChoice::Profile(id.clone())
-            } else {
-                AgentChoice::Command
-            };
-            (CloneAgentState::Seeded, Some(choice))
-        }
+/// A field nobody typed in sends the RAW seed — what it displays is the
+/// escaped rendering of exactly that, so sending the rendering would rewrite a
+/// value the user never touched. A field they DID type in sends what they
+/// typed, whatever it looks like: someone who replaces a live right-to-left
+/// override with its visible spelling means the visible spelling, and no
+/// comparison against the seed can tell that apart from not having edited at
+/// all (which is why this takes an `edited` flag rather than comparing).
+/// [`reseed_cloned_field`] is the seeding half (item2-review2.md F5).
+pub(crate) fn submitted_field(text: &str, edited: bool, seed: Option<&str>) -> String {
+    match seed {
+        Some(seed) if !edited => seed.to_string(),
+        _ => text.to_string(),
     }
 }
 
@@ -1309,8 +1204,7 @@ fn resolve_clone_agent(
 /// (`peer::display_peer`), with the exact raw bytes and a cleared edited
 /// flag recorded alongside so an untouched submit reads back the ORIGINAL
 /// bytes rather than the escaped spelling (item2-review2.md F5;
-/// `profiles::submitted_field` is the read-back half, and
-/// `profiles::ProfileDraft::of` is this exact model's other caller).
+/// [`submitted_field`] is the read-back half).
 fn reseed_cloned_field(
     display: &mut Signal<String>,
     raw_seed: &mut Signal<Option<String>>,
@@ -1371,8 +1265,8 @@ fn submitted_title(text: &str, edited: bool, seed: Option<&str>, fresh_checkout:
 /// explicit legacy fallback.
 ///
 /// A new dialog opens on the structured surface with no harness selected.
-/// Profiles and arbitrary commands remain available through the legacy
-/// surface, but cannot contribute hidden values to a structured request.
+/// Arbitrary commands remain available through the legacy surface, but
+/// cannot contribute hidden values to a structured request.
 ///
 /// `submitting` is owned by the CALLER (`ListView`), not this component:
 /// `ListView`'s own "new session" toggle button needs to see it too, so it
@@ -1475,23 +1369,13 @@ fn submitted_title(text: &str, edited: bool, seed: Option<&str>, fresh_checkout:
 /// surfaces the helm's words in the same error line and leaves the form
 /// exactly as filled, host selection included.
 ///
-/// ## The agent picker (PLAN_M6_75.md item 8)
+/// ## The command path
 ///
-/// The dialog offers the helm's whole catalog on every host. Ordinary New
-/// starts without a structured harness; choosing Other activates a raw-command
-/// draft, never the helm's remembered profile. Clone and Replace instead seed
-/// their source's profile or exact command. Changing the host leaves an explicit
-/// choice intact. The command field is
-/// disabled while a profile is selected, because the
-///   two creation modes are mutually exclusive on the wire and a body naming
-///   both is refused. Disabling it is also what keeps the intent binding
-///   honest: a field the user cannot reach cannot change what the key stands
-///   for.
-///
-/// The raw command path stays on the dialog rather than being replaced. It is
-/// what runs anything no profile describes, and the e2e harness's own creates
-/// go through it — a dialog that only offered profiles would make an ad-hoc
-/// command a trip to `curl`.
+/// Ordinary New starts without a structured harness; choosing Other activates
+/// a raw-command draft. Clone and Replace instead seed their source's
+/// structured choices or exact command. Changing the host leaves the draft
+/// intact. The command path is what runs anything the composer does not
+/// describe, and the e2e harness's own creates go through it.
 ///
 /// ## Clone prefill
 ///
@@ -1504,12 +1388,9 @@ fn submitted_title(text: &str, edited: bool, seed: Option<&str>, fresh_checkout:
 /// field — the two verbs differ only past submit (see `IntentBinding::
 /// replace_source`), which is the whole point of routing both through one
 /// prefill mechanism instead of a second one. The reseed effect replaces the
-/// whole agent draft for each source generation, including the dormant command
-/// choice ordinary New starts with. Profile
-/// confirmation is independent of host reconciliation: the one helm catalog
-/// applies everywhere, so a delayed or unconfirmable host cannot suppress a
-/// valid source profile, and a later host answer cannot overwrite a person's
-/// explicit agent choice.
+/// whole agent draft for each source generation. The launch is independent of
+/// host reconciliation, so a delayed or unconfirmable host cannot suppress
+/// it, and a later host answer cannot overwrite a person's edits.
 ///
 /// The host is not accepted at face value. A `HostId` is a registry row
 /// that survives a retarget or an adopt while the machine behind it
@@ -1521,8 +1402,8 @@ fn submitted_title(text: &str, edited: bool, seed: Option<&str>, fresh_checkout:
 /// A row whose install
 /// cannot be confirmed — hostless entirely, or mismatched once the
 /// registry has had a chance to answer — is left unselected: the selector
-/// falls through to its ordinary default, while the agent is still seeded
-/// from the helm catalog; `clone_host_note` (below) tells the user why the
+/// falls through to its ordinary default, while the launch is still seeded
+/// from the source; `clone_host_note` (below) tells the user why the
 /// host changed, reusing
 /// the same host-note slot `choice_vanished` already renders through.
 /// Unconfirmed is not the same as unchecked, though: a clone opened before
@@ -1537,7 +1418,7 @@ fn submitted_title(text: &str, edited: bool, seed: Option<&str>, fresh_checkout:
 /// this reconciliation entirely, permanently, for the rest of the
 /// generation (`CloneHostState::UserTookOver`). The derived target may catch
 /// up one render after `chosen_host`, but it gates host identity and
-/// idempotency only; it does not scope the catalog or clear the agent choice.
+/// idempotency only; it does not clear the launch draft.
 #[component]
 pub(super) fn CreateSessionForm(
     hosts: Vec<HostOption>,
@@ -1558,11 +1439,9 @@ pub(super) fn CreateSessionForm(
     /// `ListView`'s signal rather than this form's so the same effective-host
     /// derivation also binds the idempotency key and connection claim.
     mut chosen_host: Signal<Option<HostId>>,
-    /// The installation currently selected for the create. This is separate
-    /// from the helm-wide catalog and exists only for host safety checks.
+    /// The installation currently selected for the create, for host safety
+    /// checks.
     create_target: Signal<Option<CreateTarget>>,
-    /// The helm-wide profile catalog shared with the profiles popup.
-    catalog: CatalogSurface,
     /// The page's live-operation token. Claimed at submit, released when the
     /// request completes — the exclusion against every host mutation, and
     /// against a second submit of this form (see `ops`).
@@ -1573,7 +1452,7 @@ pub(super) fn CreateSessionForm(
     /// A "clone" click's seed, or `None` for the ordinary blank-form open.
     /// `ListView` owns the signal this reads and bumps `generation` on
     /// every clone (see `CreatePrefill`); this component's own reseed
-    /// effect (below `chosen_profile`'s declaration) is what turns a new
+    /// effect is what turns a new
     /// generation into field values.
     prefill: Option<CreatePrefill>,
     /// For "replace with", the source session's status and terminal tab
@@ -1702,18 +1581,16 @@ pub(super) fn CreateSessionForm(
     let mut model_show_all = use_signal(|| false);
     let mut model_draft_error = use_signal(|| None::<String>);
     // What each of the three text fields above was SEEDED from, raw, and
-    // whether the user has typed in it since — `profiles::ProfileDraft`'s
-    // escaped-display / raw-seed / edited-flag model, reused rather than
-    // re-invented (item2-review2.md F5): a clone's directory, invocation and
-    // title are peer-relayed text going into an editable control for
-    // exactly the reason a profile's name and invocation are, and an
-    // untouched field must submit the ORIGINAL bytes rather than the
-    // escaped spelling `cwd`/`invocation`/`title` display while the clone is
-    // on screen (see the reseed effect below for where the escaping is
-    // applied, and `profiles::submitted_field` for the read-back half these
-    // are fed into at submit time). `None` seeds mean "never clone-seeded",
-    // which is the ordinary blank-create case: there the field's own text
-    // already IS the value to submit, since nothing relayed it from a peer.
+    // whether the user has typed in it since (item2-review2.md F5): a
+    // clone's directory, invocation and title are peer-relayed text going
+    // into an editable control, and an untouched field must submit the
+    // ORIGINAL bytes rather than the escaped spelling `cwd`/`invocation`/
+    // `title` display while the clone is on screen (see the reseed effect
+    // below for where the escaping is applied, and [`submitted_field`] for
+    // the read-back half these are fed into at submit time). `None` seeds
+    // mean "never clone-seeded", which is the ordinary blank-create case:
+    // there the field's own text already IS the value to submit, since
+    // nothing relayed it from a peer.
     let cwd_initial_raw_seed = initial_cwd.clone();
     let mut cwd_raw_seed = use_signal(move || cwd_initial_raw_seed);
     let mut cwd_edited = use_signal(|| false);
@@ -1742,11 +1619,6 @@ pub(super) fn CreateSessionForm(
     let mut yolo_confirmed_key = use_signal(|| None::<String>);
     let mut yolo_stop_asking_key = use_signal(|| None::<String>);
     let mut yolo_error = use_signal(|| None::<String>);
-    // Ordinary New must never inherit the last-used profile merely because
-    // its catalog arrives. This dormant command draft becomes active only
-    // when Other is selected; structured mode still requires a harness choice.
-    // Clone reseeding clears it before resolving that source's own agent.
-    let mut chosen_profile = use_signal(|| Some(AgentChoice::Command));
     // Whether an explicit choice has been overtaken by reality. Derived per
     // render rather than written back into `chosen_host`, so it cannot
     // outlive the condition that produced it — and so a host that comes back
@@ -1760,10 +1632,6 @@ pub(super) fn CreateSessionForm(
     // generation arrives, and otherwise updated only by the reseed effect
     // below (`resolve_clone_host`) and by an explicit host pick.
     let mut clone_host_state = use_signal(|| CloneHostState::Unconfirmable);
-    // Whether this clone generation may still apply its source agent. Kept
-    // separate from the host state because one helm catalog applies to every
-    // host and explicit agent interaction must remain authoritative.
-    let mut clone_agent_state = use_signal(|| CloneAgentState::Seeded);
     // Why this clone's own host is not (or is no longer) in play, when there
     // is something worth telling the user about it — read
     // straight off `clone_host_state` every render, never cached, so a
@@ -1950,14 +1818,8 @@ pub(super) fn CreateSessionForm(
     let mut intent_key = use_signal(|| None::<(String, IntentBinding)>);
     let busy = ops.busy();
 
-    // Mounting this component is the create surface's closed-to-open
-    // transition. An explicit request is allowed through a latched build skew
-    // and coalesces with any read the page-owned surface already has in flight.
-    use_effect(move || catalog.request(Trigger::Explicit));
-
     // A host installation change rotates the idempotency key and any
-    // host-specific refusal, but the explicit profile choice survives because
-    // every host consumes the same helm catalog.
+    // host-specific refusal; the launch draft survives it.
     let mut bound_target = use_signal(|| None::<CreateTarget>);
     // Which prefill GENERATION (`CreatePrefill`) this form has already
     // applied. Compared by generation rather than by mere presence in the
@@ -1969,18 +1831,16 @@ pub(super) fn CreateSessionForm(
     // Cloned rather than borrowed into the effect below: `hosts` is this
     // component's own prop (not a `Signal`, so it cannot be `Copy`-captured
     // the way the surrounding signals are), and the render body further
-    // down needs its own, unmoved copy for the selector and the agent
-    // picker.
+    // down needs its own, unmoved copy for the selector.
     let hosts_for_reseed = hosts.clone();
     use_effect(use_reactive(
         (&prefill.as_ref().map(|prefill| prefill.generation),),
         move |_| {
             let hosts = &hosts_for_reseed;
             let target = create_target();
-            let read = catalog.catalog.read();
             let previous = bound_target.peek().clone();
 
-            // Applied BEFORE the host and agent resolutions below, and in the
+            // Applied BEFORE the host resolution below, and in the
             // SAME effect invocation rather than a separate one: a clone
             // aimed at a different host is itself what moves
             // `chosen_host`, and these fields must seed exactly once
@@ -2017,9 +1877,9 @@ pub(super) fn CreateSessionForm(
                     &prefill.title,
                 );
                 // Every clone generation establishes the WHOLE form state,
-                // the dormant command field included — see `CreatePrefill::
-                // invocation`'s own doc for why a profile-backed clone
-                // still needs this written.
+                // the dormant command field included, so switching a
+                // structured clone to the command path starts from the
+                // source's own command.
                 reseed_cloned_field(
                     &mut invocation,
                     &mut invocation_raw_seed,
@@ -2086,22 +1946,20 @@ pub(super) fn CreateSessionForm(
                 composer_reset_reason.set(None);
 
                 // item2-review2.md F2: every new generation starts its OWN
-                // host and agent decisions from a clean slate, cleared BEFORE any
+                // host decision from a clean slate, cleared BEFORE any
                 // attempt to resolve it — otherwise a clone whose own host
                 // cannot be confirmed (rejected below, or hostless) could
                 // silently inherit whatever a PREVIOUS generation (or an
-                // earlier manual pick) had left in these three signals.
+                // earlier manual pick) had left in these two signals.
                 chosen_host.set(None);
-                chosen_profile.set(None);
-                clone_agent_state.set(CloneAgentState::Waiting);
                 clone_host_state.set(match prefill.host {
                     None => CloneHostState::Unconfirmable, // F4: nothing to resolve safely
                     Some(_) => CloneHostState::Waiting,
                 });
             }
 
-            // Resolve (or re-resolve) THIS generation's own host binding and
-            // one-shot agent seed. Deliberately NOT gated on the generation transition
+            // Resolve (or re-resolve) THIS generation's own host binding.
+            // Deliberately NOT gated on the generation transition
             // above — it runs on every pass this effect fires, reading
             // whatever `clone_host_state` currently holds, which is what
             // makes both F1's retry (once the registry answers a clone that
@@ -2129,21 +1987,9 @@ pub(super) fn CreateSessionForm(
                         chosen_host.set(None);
                     }
                 }
-
-                let offered = match read.answer() {
-                    CatalogLookup::Known { catalog, .. } => Some(catalog),
-                    CatalogLookup::Pending | CatalogLookup::Failed(_) => None,
-                };
-                let (next_agent_state, choice) =
-                    resolve_clone_agent(*clone_agent_state.peek(), &prefill.agent, offered);
-                clone_agent_state.set(next_agent_state);
-                if let Some(choice) = choice {
-                    chosen_profile.set(Some(choice));
-                }
             }
             // An unconfirmable clone host leaves the selector at its ordinary
-            // default. Agent seeding above is deliberately unaffected: the
-            // source profile belongs to the helm, not to that installation.
+            // default. The launch seeded above is deliberately unaffected.
 
             if previous != target {
                 bound_target.set(target.clone());
@@ -2157,94 +2003,21 @@ pub(super) fn CreateSessionForm(
         },
     ));
 
-    // What the picker may offer: the shared helm catalog once its read lands.
-    let catalog_read = catalog.catalog.read();
-    let held = catalog_read.answer();
-    let offered = match &held {
-        CatalogLookup::Known { catalog, .. } => Some(*catalog),
-        _ => None,
-    };
-    let agent = resolve_agent(chosen_profile.read().as_ref(), offered);
-    let by_profile = matches!(agent.choice, Some(AgentChoice::Profile(_)));
     // Only the active creation surface determines the notice; the other
-    // surface retains a draft that may describe a different harness.
-    let cursor_launch = match creation_surface() {
-        CreationSurface::Structured => structured_harness() == Some(LaunchHarness::Cursor),
-        CreationSurface::Legacy => matches!(
-            &agent.choice,
-            Some(AgentChoice::Profile(id)) if matches!(id.as_str(), "builtin-cursor" | "builtin-cursor-yolo")
-        ),
-    };
-    // Owned, because the picker's options compare against it inside a loop
-    // that also borrows the catalog guard this selection was derived from.
-    // The placeholder's value stands in for "nothing is selected", which is a
-    // state this dialog can genuinely be in — see `profiles::resolve_agent`.
-    let chosen_agent = agent
-        .choice
-        .as_ref()
-        .map(|choice| choice.value().to_string())
-        .unwrap_or_else(|| UNRESOLVED_VALUE.to_string());
-    // Profile mode is display-only: resolve the selected definition from the
-    // current catalog, while custom mode keeps rendering the signal that
-    // carries the clone seed and any user edits.
-    let displayed_invocation = match (&agent.choice, offered) {
-        (Some(AgentChoice::Profile(id)), Some(catalog)) => catalog
-            .profiles
-            .iter()
-            .find(|profile| profile.id == *id)
-            .map(|profile| display_peer(&profile.invocation))
-            .unwrap_or_default(),
-        _ => invocation.read().clone(),
-    };
+    // surface retains a draft that may describe a different harness. A typed
+    // command is never classified as Cursor here.
+    let cursor_launch = creation_surface() == CreationSurface::Structured
+        && structured_harness() == Some(LaunchHarness::Cursor);
+    let displayed_invocation = invocation.read().clone();
 
-    // What a submit would launch, resolved SYNCHRONOUSLY inside the handler
-    // from the live signals and the catalog as it stands at that instant —
-    // never from a value the last render happened to compute.
-    //
-    // The distinction is one JavaScript turn wide and it decides what runs: a
-    // change to the picker followed by a submit in the same turn reaches the
-    // handler before any re-render, so a captured render-time value would send
-    // the PREVIOUS selection under a freshly minted key — a key that faithfully
-    // describes an intent nobody had. What is frozen is this resolution's
-    // result, held across the minting await (see the submit path).
-    let resolve_now = move || {
-        let read = catalog.catalog.peek();
-        let offered = match read.answer() {
-            CatalogLookup::Known { catalog, .. } => Some(catalog),
-            _ => None,
-        };
-        resolve_agent(chosen_profile.peek().as_ref(), offered).choice
-    };
-
-    // The render publishes the current authority before any old completion
-    // may be applied. Effects only start requests; they never decide whether
-    // an old reply still belongs to the visible draft.
-    // A removed profile must not strand an already dispatched fresh request.
-    // Only an exact retained selection gets this reconciliation fallback;
-    // ordinary creates still require the current catalog's resolution.
-    let resolve_fresh_or_current = move || {
-        resolve_now().or_else(|| {
-            let destination = destination_draft.peek();
-            let repo = destination.repo()?;
-            let held = github_attempt.peek();
-            let (binding, _) = held.as_ref()?;
-            let LaunchIntent::Profile(id) = &binding.agent else {
-                return None;
-            };
-            (binding.github_checkout.as_ref()?.repo == repo.identifier()
-                && chosen_profile.peek().as_ref() == Some(&AgentChoice::Profile(id.clone())))
-            .then(|| AgentChoice::Profile(id.clone()))
-        })
-    };
     let preview_agent_now = move || {
         format!(
-            "{:?}:{:?}:{:?}:{:?}:{:?}:{:?}:{}",
+            "{:?}:{:?}:{:?}:{:?}:{:?}:{}",
             creation_surface(),
             structured_harness(),
             structured_model(),
             structured_effort(),
             structured_permissions(),
-            resolve_fresh_or_current(),
             submitted_field(
                 &invocation(),
                 invocation_edited(),
@@ -2435,7 +2208,7 @@ pub(super) fn CreateSessionForm(
     // The harness is named only on the structured surface. Switching to
     // "other / command" deliberately keeps the structured draft (so a trip
     // through Other and back loses nothing), but a legacy launch runs the
-    // chosen profile or command, never that harness — so the button must not
+    // typed command, never that harness — so the button must not
     // promise "Codex" while the click would launch something else.
     let launch_harness = if *creation_surface.read() == CreationSurface::Structured {
         structured_harness()
@@ -2475,14 +2248,11 @@ pub(super) fn CreateSessionForm(
             })
         })
     } else {
-        resolve_fresh_or_current().map(|choice| match choice {
-            AgentChoice::Command => LaunchIntent::Command(submitted_field(
-                &invocation(),
-                invocation_edited(),
-                invocation_raw_seed.peek().as_deref(),
-            )),
-            AgentChoice::Profile(id) => LaunchIntent::Profile(id),
-        })
+        Some(LaunchIntent::Command(submitted_field(
+            &invocation(),
+            invocation_edited(),
+            invocation_raw_seed.peek().as_deref(),
+        )))
     };
     let retry_binding = current_launch.and_then(|launch| {
         let draft = IntentBinding::of(
@@ -3157,19 +2927,10 @@ pub(super) fn CreateSessionForm(
                     yolo_refusal.set(None);
                 }
                 yolo_error.set(None);
-                // No agent, no create. "Nothing is selected" is a real state
-                // rather than a gap to be filled — a profile that was chosen
-                // and has since been deleted, or a clone whose own agent was
-                // never resolved, leaves the dialog waiting for an answer,
-                // and the command field it would otherwise fall back to still
-                // holds whatever was typed into it earlier. Launching that
-                // would run something nobody picked while the note beside it
-                // said nothing was selected. Frozen HERE, from what was just
-                // resolved, and not touched again: the minting await below
-                // can span a deletion, and re-resolving across it would let
-                // the request's MODE differ from the one the button was
-                // pressed on. A profile that goes away in that window is
-                // refused by the supervisor, by name.
+                // Frozen HERE, from the live signals, and not touched again:
+                // the minting await below can span further edits, and
+                // re-reading across it would let the request's MODE differ
+                // from the one the button was pressed on.
                 let launch = if *creation_surface.peek() == CreationSurface::Structured {
                     let Some(harness) = *structured_harness.peek() else {
                         error.set(Some("choose a structured harness before launching".to_string()));
@@ -3191,23 +2952,14 @@ pub(super) fn CreateSessionForm(
                     );
                     LaunchIntent::Structured(selection)
                 } else {
-                    let Some(choice) = resolve_fresh_or_current() else {
-                        error.set(Some("no agent is selected for this create — choose a profile or custom command in other / command mode".to_string()));
-                        ops.release();
-                        return;
-                    };
-                    match choice {
                     // The RAW bytes while untouched, not the escaped display
-                    // the field shows — `profiles::submitted_field` is the
-                    // same read-back rule the profile editor uses for its
-                    // own peer-relayed fields (item2-review2.md F5).
-                    AgentChoice::Command => LaunchIntent::Command(submitted_field(
+                    // the field shows — see [`submitted_field`]
+                    // (item2-review2.md F5).
+                    LaunchIntent::Command(submitted_field(
                         &invocation.peek(),
                         *invocation_edited.peek(),
                         invocation_raw_seed.peek().as_deref(),
-                    )),
-                        AgentChoice::Profile(id) => LaunchIntent::Profile(id),
-                    }
+                    ))
                 };
                 // The HOST is derived here too, from the live signal — never
                 // from what the last render computed. The same one-turn window
@@ -3333,7 +3085,7 @@ pub(super) fn CreateSessionForm(
                     destination_draft.peek().repo().cloned(),
                     *creation_surface.peek(), *structured_harness.peek(),
                     structured_model.peek().clone(), *structured_effort.peek(),
-                    *structured_permissions.peek(), chosen_profile.peek().clone(),
+                    *structured_permissions.peek(),
                     submitted_field(&invocation.peek(), *invocation_edited.peek(), invocation_raw_seed.peek().as_deref()),
                     submitted_title(&title.peek(), *title_edited.peek(), title_raw_seed.peek().as_deref(), destination_draft.peek().repo().is_some()),
                     *chosen_host.peek(),
@@ -3474,9 +3226,9 @@ pub(super) fn CreateSessionForm(
                         // ordinary path; different exactly when a queued edit
                         // landed during the mint.
                         //
-                        // Profile/default changes are intentionally frozen at
-                        // the press: a catalog refresh is not a new user
-                        // choice. Structured controls are different. Every
+                        // A catalog refresh is not a new user choice, so it
+                        // is frozen at the press. Structured controls are
+                        // different. Every
                         // visible harness/model/effort/permission click is a
                         // deliberate edit, and it may have been queued ahead
                         // of the render that disables controls. Re-read that
@@ -3573,7 +3325,6 @@ pub(super) fn CreateSessionForm(
                     }
                     let agent = match &bound.agent {
                         LaunchIntent::Command(invocation) => CreateAgent::Command(invocation),
-                        LaunchIntent::Profile(id) => CreateAgent::Profile(id),
                         LaunchIntent::Structured(selection) => CreateAgent::Structured(selection),
                     };
                     // The one branch point between the two verbs this form
@@ -3669,18 +3420,6 @@ pub(super) fn CreateSessionForm(
                     }};
                     match create_result {
                         Ok(session) => {
-                            // A profile-backed create changes the helm's
-                            // remembered default, which the profiles popup
-                            // marks. Drop the old paired answer before this
-                            // form closes so the next reader stays pending
-                            // until an authoritative read lands;
-                            // writing the submitted id locally would pretend
-                            // the helm's best-effort preference write is known
-                            // to have succeeded.
-                            if matches!(&bound.agent, LaunchIntent::Profile(_)) {
-                                catalog.invalidate();
-                                catalog.request(Trigger::Explicit);
-                            }
                             // Released before navigating: `on_created`
                             // unmounts this component, and a token released
                             // afterwards would be released by a task nobody
@@ -3688,7 +3427,7 @@ pub(super) fn CreateSessionForm(
                             ops.release();
                             let submitted_launch = match &bound.agent {
                                 LaunchIntent::Structured(selection) => Some(selection.clone()),
-                                LaunchIntent::Command(_) | LaunchIntent::Profile(_) => None,
+                                LaunchIntent::Command(_) => None,
                             };
                             on_created.call(CreatedSession {
                                 session: enrich_created_session(
@@ -3725,7 +3464,7 @@ pub(super) fn CreateSessionForm(
                                             reason: crate::yolo_confirm::YoloReason::of_launch(
                                                 match &bound.agent {
                                                     LaunchIntent::Structured(selection) => Some(selection),
-                                                    LaunchIntent::Command(_) | LaunchIntent::Profile(_) => None,
+                                                    LaunchIntent::Command(_) => None,
                                                 },
                                             ),
                                         },
@@ -3778,10 +3517,11 @@ pub(super) fn CreateSessionForm(
                     // gate), and a control that is inert for that window says so
                     // rather than silently dropping the click.
                     //
-                    // Inert with no agent selected for a different reason: there
-                    // is nothing to launch, and the handler refuses in words
-                    // anyway (a `disabled` attribute is one render behind, so it
-                    // is the visible half of that rule rather than the guard).
+                    // Inert with no structured harness selected for a different
+                    // reason: there is nothing to launch, and the handler
+                    // refuses in words anyway (a `disabled` attribute is one
+                    // render behind, so it is the visible half of that rule
+                    // rather than the guard).
                     disabled: busy
                         || !selected_host_available
                         || !fresh_destination_ready
@@ -3789,8 +3529,7 @@ pub(super) fn CreateSessionForm(
                         || !remembered_destination_valid
                         || (retry_binding.is_none() && *creation_surface.read() == CreationSurface::Structured
                             && (structured_harness.read().is_none()
-                                || structured_choice_error.is_some()))
-                        || (retry_binding.is_none() && *creation_surface.read() == CreationSurface::Legacy && agent.choice.is_none()),
+                                || structured_choice_error.is_some())),
                     "{submit_verb}"
                     " "
                     span { class: "launch-composer-launch-context",
@@ -4729,11 +4468,8 @@ pub(super) fn CreateSessionForm(
                                             offered_history, create_target, fetched_history,
                                         );
                                         creation_surface.set(CreationSurface::Legacy);
-                                        // Changing launch mode is not a profile
-                                        // selection. Keep the command-mode draft
-                                        // intact so a valid prefill or deliberate
-                                        // profile choice remains available here.
-                                        clone_agent_state.set(CloneAgentState::UserTookOver);
+                                        // Keep the command-mode draft intact so a
+                                        // clone's seeded command remains here.
                                         intent_key.set(None);
                                         focus_composer_surface();
                                     },
@@ -4925,150 +4661,26 @@ pub(super) fn CreateSessionForm(
                             p { "Cursor session tracking and Resume are not supported." }
                         }
                         if *creation_surface.read() == CreationSurface::Legacy {
-            // The agent, offered from the helm catalog. It never defaults to
-            // the profile last used on this helm (SPEC.md's creation rule;
-            // `profiles::resolve_agent`): New starts on the command path and a
-            // clone on its source's own agent. The empty option is the raw
-            // command path below rather than "no agent" — a create always
-            // launches something, and this select is which of the two
-            // mutually exclusive modes it uses.
+            // The raw command path: what the session runs, typed as one
+            // command line.
             label {
-                "agent"
-                select {
-                    class: "create-session-agent",
-                    class: "create-session-profile",
-                    // Inert for the whole round trip, exactly like the host
-                    // selector and for the same reason: the idempotency key
-                    // is bound to what is launched, so a selection that moved
-                    // between minting and sending would publish a key
-                    // belonging to a different create.
-                    disabled: busy,
-                    value: "{chosen_agent}",
-                    onchange: move |evt| {
-                        if !draft_transition_allowed(ops) {
-                            return;
-                        }
-                        chosen_profile.set(AgentChoice::from_value(&evt.value()));
-                        clone_agent_state.set(CloneAgentState::UserTookOver);
-                        // A different agent is a different intended create,
-                        // exactly as a different directory is.
-                        intent_key.set(None);
-                    },
-                    // The placeholder exists only while nothing is selected,
-                    // and it is what a blocked dialog SHOWS: a `size=1` select
-                    // always has one option selected, so "no answer yet" needs
-                    // an option of its own rather than borrowing the command
-                    // path's — borrowing it is exactly how a vanished profile
-                    // used to turn into a silent command launch.
-                    if agent.choice.is_none() {
-                        option {
-                            value: UNRESOLVED_VALUE,
-                            selected: true,
-                            "— choose an agent —"
-                        }
-                    }
-                    // Which option is CHOSEN is stated on the options
-                    // themselves, not only through the select's `value`
-                    // above, and that is a correctness fix rather than
-                    // belt-and-braces. A select's `value` is applied as a DOM
-                    // PROPERTY, which a browser silently ignores when no
-                    // option matches it yet — and this picker's options
-                    // arrive later than its value by construction, since the
-                    // catalog is read after the dialog opens. The property
-                    // set is then never retried (the framework only re-emits
-                    // an attribute whose value CHANGED), so the picker would
-                    // sit on "custom command" forever while this component
-                    // believed a profile was selected: the invisible
-                    // mismatch — a control showing one thing while the submit
-                    // sends another — that the host selector's own note calls
-                    // the failure worth preventing. An option's `selected` is
-                    // applied when the option itself is created, so it cannot
-                    // race its own list.
-                    option {
-                        value: "",
-                        // Selected only when the command path is what a
-                        // submit would actually use — never merely because
-                        // nothing else is, which is what the placeholder
-                        // above is for.
-                        selected: agent.choice == Some(AgentChoice::Command),
-                        "custom command (below)"
-                    }
-                    for profile in offered.map(|catalog| catalog.profiles.as_slice()).unwrap_or_default() {
-                        option {
-                            key: "{profile.id}",
-                            value: "{profile.id}",
-                            selected: chosen_agent == profile.id,
-                            // Escaped like every other rendering of
-                            // peer-supplied text: an option label is exactly
-                            // where a directional override could make one
-                            // profile read as another, and what is chosen
-                            // here decides what runs.
-                            "{display_peer(&profile.name)}"
-                            if profile.builtin {
-                                " (Built-in)"
-                            }
-                        }
-                    }
-                }
-            }
-            // SPEC.md's ask-don't-guess fallback, said out loud. It appears
-            // only while nothing usable is selected, and the thing it rules
-            // out is the silent substitution: the command field, or some other
-            // profile, quietly standing in for an answer nobody gave.
-            if let Some(note) = agent.note {
-                div { class: "create-session-profile-note", "{note.text()}" }
-            }
-            // A catalog that could not be READ is a third state, and it must
-            // not look like an empty catalog. Offering only the command path
-            // with nothing said would leave a user wondering where their
-            // profiles went, so the helm's failure is printed as written.
-            if let CatalogLookup::Failed(error) = &held {
-                PeerLine {
-                    class: "create-session-profile-error".to_string(),
-                    parts: vec![
-                        DetailPart::text("this helm's profiles could not be read: "),
-                        DetailPart::peer(*error),
-                    ],
-                }
-            }
-            if let CatalogLookup::Known { refresh_error: Some(error), .. } = &held {
-                PeerLine {
-                    class: "create-session-profile-refresh-error".to_string(),
-                    parts: vec![
-                        DetailPart::text(
-                            "showing the last catalog this client read; the refresh failed: ",
-                        ),
-                        DetailPart::peer(*error),
-                    ],
-                }
-            }
-            // The raw field shares the choices column with the profile picker.
-            // A selected profile shows its exact invocation but keeps the field
-            // inert; custom command mode edits and submits the raw draft.
-            label {
-                if by_profile {
-                    "agent command (the selected profile's own; choose \"custom command\" above to edit)"
-                } else {
-                    "agent command"
-                }
+                "agent command"
                 input {
                     r#type: "text",
-                    required: !by_profile && retry_binding.is_none(),
+                    required: retry_binding.is_none(),
                     autocomplete: "off",
                     autocorrect: "off",
                     autocapitalize: "none",
                     spellcheck: "false",
                     dir: "ltr",
                     value: "{displayed_invocation}",
-                    disabled: busy || by_profile,
+                    disabled: busy,
                     oninput: move |evt| {
                         if !draft_transition_allowed(ops) {
                             return;
                         }
                         invocation.set(evt.value());
                         invocation_edited.set(true);
-                        chosen_profile.set(Some(AgentChoice::Command));
-                        clone_agent_state.set(CloneAgentState::UserTookOver);
                         intent_key.set(None);
                     },
                 }
@@ -5255,7 +4867,6 @@ mod tests {
     use super::super::row::row_specimen;
     use super::super::shared::tests::{open, option};
     use super::*;
-    use crate::{Profile, SourceProfile};
 
     /// A lost fresh-create reply remains reconcilable after reconnect and a
     /// changed preview, but cannot be replayed for another installation, agent,
@@ -5266,7 +4877,7 @@ mod tests {
             Some(1),
             &[option(1, "target", true)],
             "/old/bar-1".into(),
-            LaunchIntent::Profile("profile-a".into()),
+            LaunchIntent::Command("agent-a".into()),
             "work".into(),
             Some("source-a".into()),
         )
@@ -5321,10 +4932,10 @@ mod tests {
     /// nothing and launches a second real agent.
     ///
     /// The CREATION MODE joins that list at M6.75, and it is the sharpest
-    /// case of the same rule: the same command line run from a profile and
-    /// typed by hand are two different intended creates, and the supervisor
-    /// folds the mode into its own idempotency fingerprint precisely so a
-    /// retry cannot flip between them.
+    /// case of the same rule: a structured launch and a typed command line
+    /// are two different intended creates, and the supervisor folds the
+    /// mode into its own idempotency fingerprint precisely so a retry cannot
+    /// flip between them.
     #[farhelm_testtrace::test]
     fn an_intent_binding_changes_with_the_host_incarnation_and_with_the_fields() {
         let hosts = vec![option(1, "this machine", true)];
@@ -5367,13 +4978,6 @@ mod tests {
             },
             IntentBinding {
                 agent: LaunchIntent::Command("other-agent".to_string()),
-                ..base.clone()
-            },
-            // A profile-backed create of the "same" thing is a DIFFERENT
-            // intent: what runs is the profile's definition, which nothing on
-            // this side can compare against a typed command.
-            IntentBinding {
-                agent: LaunchIntent::Profile("p-1".to_string()),
                 ..base.clone()
             },
             IntentBinding {
@@ -5677,78 +5281,21 @@ mod tests {
         );
     }
 
-    /// A profile snapshot builds a source in whatever existence the test
-    /// wants to pretend the catalog currently reports.
-    fn source(existence: ProfileExistence) -> SourceProfile {
-        SourceProfile {
-            id: "profile-1".to_string(),
-            name: "shipped profile".to_string(),
-            existence,
-        }
-    }
-
-    /// A clone trusts the row's own profile choice ONLY while the catalog
-    /// still recognizes it under its snapshotted id AND name — every other
-    /// existence answer, and no profile at all, falls back to the raw
-    /// invocation the row actually ran.
-    ///
-    /// This is the one decision `PrefillAgent` exists to encode, and it is
-    /// STRICTER than `profiles::resolve_agent`'s own rule for an ordinary
-    /// create (see `PrefillAgent`'s own doc for why a `Renamed` id is not
-    /// trusted here even though `resolve_agent` would accept it): a clone
-    /// can be arbitrarily old, so an id merely still existing is not enough
-    /// evidence that recreating it is what the current catalog would still
-    /// offer under that name.
+    /// The raw invocation is carried on every prefill, a structured one
+    /// included, which has no use for it until the user switches the mounted
+    /// form to "other / command": leaving it unset there would let a stale,
+    /// unrelated command surface then.
     #[farhelm_testtrace::test]
-    fn prefill_from_clones_the_profile_only_when_it_is_present() {
-        let present = Session {
-            source_profile: Some(source(ProfileExistence::Present)),
-            ..row_specimen("s1")
-        };
-        assert_eq!(
-            prefill_from(&present, 1).agent,
-            PrefillAgent::Profile {
-                id: "profile-1".to_string()
-            }
-        );
-
-        for existence in [
-            ProfileExistence::Renamed,
-            ProfileExistence::Deleted,
-            ProfileExistence::Unrecognized,
-        ] {
-            let session = Session {
-                source_profile: Some(source(existence)),
-                ..row_specimen("s1")
-            };
-            assert_eq!(
-                prefill_from(&session, 1).agent,
-                PrefillAgent::Command,
-                "{existence:?} does not name a definition this clone may trust"
-            );
-        }
-
-        let no_profile = Session {
-            source_profile: None,
-            ..row_specimen("s1")
-        };
-        assert_eq!(
-            prefill_from(&no_profile, 1).agent,
-            PrefillAgent::Command,
-            "a raw-invocation session clones its invocation, not a profile it never had"
-        );
-    }
-
-    /// The raw invocation is carried on every prefill, REGARDLESS of which
-    /// mode `agent` trusts — including a profile-backed clone, which has no
-    /// use for it until the user switches the mounted form to "custom
-    /// command" (see `CreatePrefill::invocation`'s own doc for why leaving
-    /// it unset there would let a stale, unrelated command surface then).
-    #[farhelm_testtrace::test]
-    fn prefill_from_carries_the_raw_invocation_even_for_a_profile_backed_clone() {
+    fn prefill_from_carries_the_raw_invocation_even_for_a_structured_clone() {
         let session = Session {
             invocation: "claude --resume abc".to_string(),
-            source_profile: Some(source(ProfileExistence::Present)),
+            launch: Some(LaunchSelection {
+                harness: LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+            }),
             ..row_specimen("s1")
         };
         assert_eq!(prefill_from(&session, 1).invocation, "claude --resume abc");
@@ -6081,123 +5628,10 @@ mod tests {
         }
     }
 
-    /// A live helm catalog confirms a clone's profile even while the host
-    /// registry is still delayed. This matters because a later host bind must
-    /// not own or overwrite the agent choice anymore.
-    #[farhelm_testtrace::test]
-    fn clone_agent_seeds_while_host_reconciliation_is_waiting() {
-        let hosts = vec![option(1, "remote", false)];
-        let identity = Some(Some("install-1".to_string()));
-        let (host_state, host_action) = resolve_clone_host(
-            CloneHostState::Waiting,
-            Some(1),
-            &identity,
-            false,
-            &hosts,
-            false,
-        );
-        assert_eq!(host_state, CloneHostState::Waiting);
-        assert_eq!(host_action, CloneHostAction::Hold);
-
-        let catalog = ProfileCatalog {
-            profiles: vec![Profile {
-                id: "p-1".to_string(),
-                builtin: false,
-                name: "profile".to_string(),
-                invocation: "agent".to_string(),
-                agent_kind: "generic".to_string(),
-                resume_template: None,
-            }],
-            default_profile: None,
-        };
-        let (agent_state, action) = resolve_clone_agent(
-            CloneAgentState::Waiting,
-            &PrefillAgent::Profile {
-                id: "p-1".to_string(),
-            },
-            Some(&catalog),
-        );
-        assert_eq!(agent_state, CloneAgentState::Seeded);
-        assert_eq!(action, Some(AgentChoice::Profile("p-1".to_string())));
-    }
-
-    /// An unconfirmable source host changes only the host result. A profile
-    /// confirmed by the helm catalog still seeds because it is valid across
-    /// every host that helm manages.
-    #[farhelm_testtrace::test]
-    fn clone_agent_seeds_when_the_source_host_is_unconfirmable() {
-        let hosts = vec![option(1, "remote", false)];
-        let stale_identity = Some(Some("superseded-install".to_string()));
-        let (host_state, host_action) = resolve_clone_host(
-            CloneHostState::Waiting,
-            Some(1),
-            &stale_identity,
-            true,
-            &hosts,
-            false,
-        );
-        assert_eq!(host_state, CloneHostState::Unconfirmable);
-        assert_eq!(host_action, CloneHostAction::Hold);
-
-        let catalog = ProfileCatalog {
-            profiles: vec![Profile {
-                id: "p-1".to_string(),
-                builtin: false,
-                name: "profile".to_string(),
-                invocation: "agent".to_string(),
-                agent_kind: "generic".to_string(),
-                resume_template: None,
-            }],
-            default_profile: None,
-        };
-        let (_, action) = resolve_clone_agent(
-            CloneAgentState::Waiting,
-            &PrefillAgent::Profile {
-                id: "p-1".to_string(),
-            },
-            Some(&catalog),
-        );
-        assert_eq!(action, Some(AgentChoice::Profile("p-1".to_string())));
-    }
-
-    /// Once a person overrides the seeded agent, later host reconciliation
-    /// cannot produce any agent action. This pins the post-bind race that used
-    /// to replace an explicit command when a delayed host answer landed.
-    #[farhelm_testtrace::test]
-    fn explicit_agent_override_survives_later_host_reconciliation() {
-        let catalog = ProfileCatalog {
-            profiles: Vec::new(),
-            default_profile: None,
-        };
-        let (state, action) = resolve_clone_agent(
-            CloneAgentState::UserTookOver,
-            &PrefillAgent::Command,
-            Some(&catalog),
-        );
-        assert_eq!(state, CloneAgentState::UserTookOver);
-        assert_eq!(action, None);
-
-        let hosts = vec![option(1, "remote", false)];
-        let (host_state, host_action) = resolve_clone_host(
-            CloneHostState::Waiting,
-            Some(1),
-            &Some(Some("install-1".to_string())),
-            true,
-            &hosts,
-            false,
-        );
-        assert_eq!(host_state, CloneHostState::Bound);
-        assert!(matches!(host_action, CloneHostAction::Bind(_)));
-    }
-
     /// item2-review2.md F5's untouched-vs-edited submission rule, exercised
-    /// through THIS file's own reuse of it (a clone's directory, invocation
-    /// and title) rather than only through the profile editor's copy — the
-    /// two must agree because they share one function
-    /// (`profiles::submitted_field`), but only this test pins that this
-    /// file's own field handling is wired to it correctly, with a value a
-    /// clone could plausibly carry: a right-to-left override inside an
-    /// otherwise ordinary invocation.
+    /// through this file's own field handling (a clone's directory,
+    /// invocation and title) with a value a clone could plausibly carry: a
+    /// right-to-left override inside an otherwise ordinary invocation.
     #[farhelm_testtrace::test]
     fn a_cloned_fields_untouched_submission_sends_the_original_bytes_not_the_escaped_display() {
         let raw = "claude --resume \u{202E}reversed-arg";

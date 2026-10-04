@@ -176,10 +176,10 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// (answered by [`ControlMsg::AgentResponse`]), which exists because an
 /// agent inside a session has no route back to the helm's machine; the helm
 /// learns session and terminal state by drain and post-write wake. And
-/// remembered profile defaults never travel here: the helm resolves them
+/// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_37` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_38` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -190,7 +190,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 37;
+pub const PROTOCOL_VERSION: u32 = 38;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -940,10 +940,11 @@ pub struct SessionInfo {
     pub resume_template: Option<Vec<String>>,
     /// Explicit structured choices used to compile this session's invocation.
     ///
-    /// `None` means the session was created through a legacy raw/profile path
-    /// or predates the launch composer. It never asks a reader to infer a
-    /// harness from `invocation`; absent provenance is more honest than a
-    /// plausible-looking guess from a mutable command line.
+    /// `None` means the session was created from a raw command line (or,
+    /// before protocol 38, a profile) or predates the launch composer. It
+    /// never asks a reader to infer a harness from `invocation`; absent
+    /// provenance is more honest than a plausible-looking guess from a
+    /// mutable command line.
     #[serde(default)]
     pub launch: Option<LaunchSelection>,
     /// The integrated agent kind the supervisor recorded for this session,
@@ -1024,17 +1025,6 @@ pub struct SessionInfo {
     /// tabs known.
     #[serde(default)]
     pub tabs: Vec<TabInfo>,
-    /// The profile this session was CREATED from, if it was created from
-    /// one at all (PLAN_M6_75.md item 3). `None` means raw-created — the
-    /// session names an invocation and no profile ever shaped it — which is
-    /// also what a sender predating this field decodes to, and the two
-    /// readings agree: no profile is known for this session either way.
-    ///
-    /// See [`SourceProfile`] for the durability contract this field
-    /// implements (an immutable snapshot plus one derived existence state)
-    /// and for why the profile's CURRENT name is deliberately not here.
-    ///
-    pub source_profile: Option<SourceProfile>,
     /// The repository this session was created from by a fresh GitHub
     /// checkout — provenance, fixed at create time. `None` for every other
     /// kind of session and for any sender predating protocol 24 (the field
@@ -1154,348 +1144,8 @@ impl std::fmt::Debug for SessionAuth {
     }
 }
 
-/// The profile snapshot a session remembers plus its current catalog state.
-///
-/// ## The snapshot rule: immutable identity, derived existence
-///
-/// SPEC.md requires that editing or deleting a profile does not disturb the
-/// sessions already created from it. This type is how that promise is kept
-/// with exactly ONE copy of the truth rather than two that could disagree:
-///
-/// - `id` and `name` are SNAPSHOTTED at creation and never rewritten. They
-///   describe what the user chose at the moment they chose it, so a session
-///   list stays stable — and filterable — under any later edit. Nothing
-///   MUTABLE lives in the snapshot.
-/// - `existence` is DERIVED by the helm, by one catalog lookup on `id` per
-///   supervisor reply. The supervisor sends `Unresolved` because it has no
-///   catalog. Absent from the helm catalog means the profile was deleted;
-///   present under a different name means it was renamed.
-///
-/// The alternative — rewriting every historical session's row on a profile
-/// delete — was rejected: it destroys the record of what the session was
-/// actually created from, it is O(sessions) work on a user action that
-/// should be O(1), and it can half-fail. Deriving on read costs one catalog
-/// read per REPLY and cannot get out of step with the catalog,
-/// because it IS the catalog.
-///
-/// ## Why the CURRENT name is not carried
-///
-/// A renamed profile's new name is knowable at reply-build time, and is
-/// still deliberately absent. Carrying it would put a mutable copy of
-/// catalog state on every session row — precisely the second copy of
-/// existence truth this design exists to avoid — and it is not what a
-/// client should render anyway: a session created from "Claude Code" was
-/// created from "Claude Code", and SPEC.md's snapshot rule is a promise the
-/// list keeps saying so. A surface that genuinely needs today's name (a
-/// profile editor, say) reads the catalog, where it is authoritative.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SourceProfile {
-    /// The profile's immutable identity, as snapshotted at creation. This
-    /// is the key `existence` was derived by, and the key a client filters
-    /// or groups by — never `name`, which two profiles may share over time.
-    pub id: String,
-    /// The profile's name AS SNAPSHOTTED at creation — not its current
-    /// name, and never refreshed. See this type's own docs for why.
-    pub name: String,
-    /// What a catalog lookup on `id` found when this reply was built.
-    pub existence: ProfileExistence,
-}
-
-/// Immutable profile identity attached to a resolved create request.
-///
-/// The helm snapshots only the identity here because the invocation and
-/// integration values beside it are already the resolved launch bundle. The
-/// supervisor persists this value with the session and never consults a
-/// profile catalog: that catalog belongs to the helm.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProfileSnapshot {
-    /// Helm-wide profile identity selected for this launch.
-    pub id: String,
-    /// Profile name as it was when the helm resolved this launch.
-    pub name: String,
-}
-
-/// What became of the profile a session was created from, derived fresh on
-/// every reply that carries a [`SourceProfile`] (PLAN_M6_75.md item 3).
-///
-/// Never persisted anywhere: this is a statement about the catalog AT REPLY
-/// TIME, and a session row that stored it would be wrong the moment the
-/// catalog changed. A client caches it exactly as long as it caches the
-/// `SessionInfo` that carried it, and no longer.
-///
-/// Every variant is a unit variant, so — like [`RestartOffer`] and
-/// [`AgentKind`], and unlike [`SessionStatus`] — this serializes as a bare
-/// snake_case string rather than a tagged object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProfileExistence {
-    /// The supervisor cannot derive profile existence because it deliberately
-    /// has no catalog. A helm must resolve this before serializing browser
-    /// JSON or caching a row.
-    Unresolved,
-    /// The profile still exists under the snapshotted name: what the
-    /// session says it came from is what the catalog still holds.
-    Present,
-    /// The profile still exists, under a DIFFERENT name than the one
-    /// snapshotted here. The session keeps showing its snapshotted name
-    /// (SPEC.md's rule that an edit does not touch existing sessions); this
-    /// variant is what lets a client say so honestly rather than implying
-    /// the snapshot is current.
-    Renamed,
-    /// No profile with this id is in the catalog any more. The session is
-    /// unaffected — it holds its own durable launch and resume snapshot,
-    /// which is what a restart runs — and still filters under its
-    /// snapshotted name; a client renders it as naming a profile that no
-    /// longer exists.
-    Deleted,
-}
-
-/// How many stored profiles one helm catalog may hold, besides built-ins.
-///
-/// Together with [`PROFILE_FIELD_CAP`], the bound keeps the helm's
-/// unpaginated `/api/profiles` JSON response predictably sized. A catalog
-/// too large to list would also be impossible to trim through the same API,
-/// so bounding the response is part of the storage contract.
-///
-/// Release-owned built-ins are additional to this stored-row limit.
-/// 128 is far past an ordinary hand-curated set, which is the point:
-/// a bound nobody legitimately reaches costs nothing and closes the hole
-/// anyway. Pagination was rejected as disproportionate for the same reason
-/// the session list is served whole ([`LIST_SESSIONS_CAP`]): a picker that
-/// must show every option to be usable gains nothing from pages.
-///
-/// The helm store enforces the count transactionally. Keeping the constant
-/// in this shared crate lets profile vocabulary and its HTTP representation
-/// use one limit without putting the catalog back on the supervisor wire.
-pub const MAX_PROFILES: usize = 128;
-
-/// Combined byte cap on one profile's caller-supplied text — [`Profile`]'s
-/// `name` plus `invocation` plus every element of `resume_template`
-/// (PLAN_M6_75.md items 3 and 4).
-///
-/// The per-record half of the bound [`MAX_PROFILES`] completes;
-/// neither alone is enough, since a catalog is oversized either by holding
-/// too many profiles or by holding a few enormous ones.
-///
-/// Deliberately SMALLER than the supervisor's `CREATE_FIELD_CAP` (64 KiB)
-/// for the equivalent per-session fields, and the asymmetry is the whole
-/// design: a session's fields are bounded because ONE reply carries them,
-/// while a profile's are multiplied by the catalog bound before they ever
-/// reach a reply. 8 KiB is still three orders of magnitude beyond a real
-/// profile (`claude --resume {conversation}` is 30 bytes), while keeping the
-/// largest possible catalog near one MiB before JSON escaping and envelope
-/// overhead.
-pub const PROFILE_FIELD_CAP: usize = 8 * 1024;
-
 /// Maximum number of argv elements in a resume template.
 pub const RESUME_TEMPLATE_ELEMENT_CAP: usize = 64;
-
-/// Validate the user-controlled fields shared by every profile store.
-///
-/// This stays in the wire crate so helm and supervisor cannot accept
-/// different definitions. It deliberately performs only pure string and
-/// argv checks; integration execution and filesystem behavior remain outside
-/// the shared vocabulary.
-pub fn validate_profile_fields(
-    name: &str,
-    invocation: &str,
-    agent_kind: AgentKind,
-    resume_template: Option<&[String]>,
-) -> Result<(), String> {
-    let template_bytes: usize = resume_template
-        .iter()
-        .flat_map(|template| template.iter())
-        .map(String::len)
-        .sum();
-    let field_len = name.len() + invocation.len() + template_bytes;
-    if field_len > PROFILE_FIELD_CAP {
-        return Err(format!(
-            "profile name, invocation, and resume template together are {field_len} bytes, \
-             exceeding the {PROFILE_FIELD_CAP}-byte limit"
-        ));
-    }
-    if resume_template.is_some_and(|template| template.len() > RESUME_TEMPLATE_ELEMENT_CAP) {
-        return Err(format!(
-            "resume template has {} elements, exceeding the \
-             {RESUME_TEMPLATE_ELEMENT_CAP}-element limit",
-            resume_template.map_or(0, <[String]>::len)
-        ));
-    }
-    if name.chars().any(char::is_control) {
-        return Err("profile name must not contain control characters".to_string());
-    }
-    if name.trim().is_empty() {
-        return Err(
-            "profile name must not be empty or only whitespace; a profile is a NAMED definition \
-             and a blank label cannot be picked out of a list"
-                .to_string(),
-        );
-    }
-    if let Some(template) = resume_template {
-        validate_resume_template(template)?;
-    }
-    if invocation.contains('\0') {
-        return Err(
-            "profile invocation contains a NUL byte, which cannot survive being passed to a \
-             program"
-                .to_string(),
-        );
-    }
-    let argv = shell_words::split(invocation)
-        .map_err(|e| format!("profile invocation does not parse as a command line: {e}"))?;
-    ensure_executable_argv("profile invocation", &argv)?;
-    ensure_no_cwd_program("profile invocation", &argv)?;
-    if agent_kind != AgentKind::Generic
-        && resume_template
-            .is_some_and(|template| !template.iter().any(|element| element == "{conversation}"))
-    {
-        let kind = match agent_kind {
-            AgentKind::Claude => "claude",
-            AgentKind::Codex => "codex",
-            AgentKind::Goose => "goose",
-            AgentKind::Pi => "pi",
-            AgentKind::Omp => "omp",
-            AgentKind::Grok => "grok",
-            AgentKind::Generic => unreachable!(),
-        };
-        return Err(format!(
-            "an explicit resume template for the integrated agent kind {kind} must contain a \
-             {{conversation}} argv element; a placeholder-free template could only ever discard \
-             the conversation identity this session captures"
-        ));
-    }
-    Ok(())
-}
-
-/// Enforce the argv shape required before a profile can name a command.
-/// Keeping this check pure lets both stores reject empty or NUL-bearing
-/// arguments before any process-launching integration code runs.
-fn ensure_executable_argv(subject: &str, argv: &[String]) -> Result<(), String> {
-    let Some(program) = argv.first() else {
-        return Err(format!("{subject} is empty"));
-    };
-    if program.is_empty() {
-        return Err(format!(
-            "{subject}'s first element is empty, so it names no program to run; only the \
-             ARGUMENTS after it may be empty"
-        ));
-    }
-    if argv.iter().any(|element| element.contains('\0')) {
-        return Err(format!(
-            "{subject} contains a NUL byte, which cannot survive being passed to a program"
-        ));
-    }
-    Ok(())
-}
-
-/// Reject `{cwd}` in argv0 because substitution there would execute a
-/// directory rather than use it as a working-directory argument.
-fn ensure_no_cwd_program(subject: &str, argv: &[String]) -> Result<(), String> {
-    debug_assert!(!argv.is_empty(), "callers validate argv before this check");
-    if argv[0] == "{cwd}" {
-        return Err(format!(
-            "{subject}'s first element is {{cwd}}, so substituting the working directory would \
-             make it the PROGRAM this session tries to run; the placeholder belongs in an \
-             argument slot"
-        ));
-    }
-    Ok(())
-}
-
-/// Validate a stored resume argv without resolving or executing its program.
-/// The shared layer owns only structural rules; the supervisor later applies
-/// its integration-specific snapshot behavior.
-fn validate_resume_template(template: &[String]) -> Result<(), String> {
-    if template.is_empty() {
-        return Err(
-            "resume template is present but empty; omit it entirely to mean \"this kind's \
-             default\" or \"no resume invocation\""
-                .to_string(),
-        );
-    }
-    ensure_executable_argv("resume template", template)?;
-    if template[0] == "{conversation}" {
-        return Err(
-            "resume template's first element is {conversation}, so substituting the captured \
-             conversation identity would make it the PROGRAM this session tries to run; the \
-             placeholder belongs in an argument slot"
-                .to_string(),
-        );
-    }
-    ensure_no_cwd_program("resume template", template)
-}
-
-/// One agent definition in the helm-wide catalog, either stored and editable
-/// or supplied read-only by the release. Both sources resolve launches and
-/// resume behavior through the same fields.
-///
-/// SPEC.md's "a fresh helm is not empty" makes profiles the ordinary
-/// way sessions get created — a user picks a profile rather than typing a
-/// command line — while the raw invocation path stays for the API, the e2e
-/// harness, and anyone who wants to run something a profile does not
-/// describe. Profiles are helm-wide, so one profile id has the same meaning
-/// on every host that helm manages.
-///
-/// Deliberately NOT carrying an initial prompt: automatic prompt delivery is
-/// post-v1 and PLAN_M6_75.md keeps the field out of the schema on purpose,
-/// so that a later decision about how prompts are delivered is not
-/// pre-empted by a field nothing fills.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Profile {
-    /// Helm-minted opaque identity, stable across every rename. A resolved
-    /// create snapshots it in [`ProfileSnapshot`]; clients echo it back and
-    /// never parse it. Distinct from `name` on purpose: a name is the user's
-    /// label and changes, an id is the reference and does not.
-    pub id: String,
-    /// Whether this release supplies the definition rather than the helm's
-    /// durable catalog. Clients use this authoritative source marker to
-    /// present a readable but immutable row without deriving policy from an
-    /// opaque id.
-    #[serde(default)]
-    pub builtin: bool,
-    /// The label for this profile, shown in pickers and in the
-    /// session list. Stored labels are mutable, and every session
-    /// already created from this profile keeps the name it snapshotted.
-    pub name: String,
-    /// The launch invocation, as one shell-parsed command line — the same
-    /// spelling and the same parsing rules as
-    /// [`ControlMsg::CreateSession::invocation`], because that is exactly
-    /// what a profile-backed create resolves this into. A word equal to
-    /// `{cwd}` in full is the session's working directory, filled at
-    /// launch under the same whole-element rule `{conversation}` uses —
-    /// which is what lets one profile serve every directory when the
-    /// agent is started through a launcher that takes the directory as
-    /// an argument.
-    pub invocation: String,
-    /// Which integrated agent this profile IS, or [`AgentKind::Generic`]
-    /// for a profile that names no kind — SPEC.md's "profiles without a
-    /// kind get generic treatment", spelled explicitly.
-    ///
-    /// Required rather than `Option`, unlike
-    /// [`ControlMsg::CreateSession::agent_kind`]'s tri-state, and the
-    /// difference is real: `CreateSession`'s absence means "derive the kind
-    /// from the invocation's basename", which is a guess a raw caller may
-    /// want. A profile is never a guess — a user picked from a list, and
-    /// `Generic` is the wire spelling of "I picked none". Two ways to say
-    /// the same thing (an absent field AND a `Generic` value) would be one
-    /// way too many for a value that decides whether conversation capture
-    /// and per-kind status sharpening run at all.
-    pub agent_kind: AgentKind,
-    /// The resume invocation template, as an argv vector. `None` has TWO
-    /// outcomes, decided by `agent_kind`: for a kind with an integration
-    /// the supervisor derives that integration's default template, while
-    /// for `Generic` there is no integration to derive from and `None`
-    /// simply means no resume template; such a session cannot be restarted
-    /// either way, because Generic captures no conversation. Identical in its
-    /// `{conversation}` placement rule to
-    /// [`ControlMsg::CreateSession::resume_template`] — see that
-    /// field for the exact-equality rule and for which kinds require a
-    /// placeholder. An element equal to `{cwd}` is the session's working
-    /// directory under that same rule, so a resume through a launcher
-    /// that takes the directory as an argument lands in the session's
-    /// directory rather than in one baked into the template.
-    pub resume_template: Option<Vec<String>>,
-}
 
 /// Whether restarting a session can resume its own conversation, and when it
 /// cannot, why — as the supervisor currently understands it from the
@@ -1590,8 +1240,8 @@ impl RestartOffer {
 crate::enum_with_all! {
     /// An agent's integration kind (PLAN_M3.md item 7): the two SPEC.md
     /// requires conversation-identity capture for, plus `Generic` for
-    /// everything else — SPEC.md's own phrase for a profile that names no
-    /// kind ("profiles without a kind get generic treatment").
+    /// everything else: a launch that names no kind gets generic
+    /// treatment.
     ///
     /// This is a genuine three-state override on `CreateSession::agent_kind`,
     /// not two states plus an absent field: `None` means "derive it from
@@ -1776,10 +1426,11 @@ pub const UPLOAD_ABORT_REASON_STALLED: &str = "transfer stopped making progress 
 /// Internally tagged by `verb`, and every variant is a struct variant even
 /// where it currently carries nothing, so that giving a verb an argument
 /// later is an additive edit to that variant rather than a change of shape
-/// on the wire. Protocol 20 carries the three discovery verbs, three
-/// lifecycle verbs, profile resolution for spawn, and the two creating
-/// verbs. The exact-version handshake refuses older peers before they can
-/// interpret the now-required selectors with their former defaults.
+/// on the wire. Protocol 38 carries two discovery verbs, three lifecycle
+/// verbs, and the two creating verbs; the profiles listing and profile
+/// resolution for spawn went with profiles. The exact-version handshake
+/// refuses older peers before they can interpret the now-required selectors
+/// with their former defaults.
 ///
 /// ## The two creating verbs, and why they take a host NAME
 ///
@@ -1824,9 +1475,6 @@ pub enum AgentVerb {
     /// for a page walk, and the honest shape when the fleet outgrows one
     /// answer is a filter on this verb rather than paging state.
     Sessions {},
-    /// The helm-wide profile catalog without launch arguments or provider
-    /// configuration. See [`AgentProfile`].
-    Profiles {},
     /// Change a session's title — SPEC.md's rename verb, reached through
     /// the same routing and recording the REST `/rename` route uses.
     /// Answered with [`AgentReply::Session`], the session's freshly
@@ -1868,28 +1516,13 @@ pub enum AgentVerb {
         /// stopped without it (protocol 34).
         stop_if_running: bool,
     },
-    /// Resolve a spawn-only profile name against the helm catalog. The
-    /// supervisor relays this because it no longer owns that catalog.
-    ResolveProfile {
-        /// Exact name selector. Duplicate names are refused.
-        name: Option<String>,
-        /// Exact opaque id selector. It is never interpreted as a name.
-        id: Option<String>,
-        /// The resolution is for a child create that may start a YOLO launch on the
-        /// requesting host even if it requires confirmation; see
-        /// [`ControlMsg::CreateSession`]'s field of the same name. Without it the helm
-        /// refuses to resolve a YOLO profile for a host that asks before YOLO launches.
-        /// Protocol 32.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        confirm_yolo: bool,
-    },
     /// Create a session on any host in the fleet — SPEC.md's creation verb
     /// reached from inside a session. Answered with [`AgentReply::Created`].
     ///
-    /// The agent selector is EXACTLY ONE of `profile_name`, `profile_id`,
-    /// and `invocation`. Naming several is refused rather than arbitrated,
-    /// and naming none is refused rather than consulting a remembered
-    /// default.
+    /// The agent is the raw `invocation`, which is required: an absent one
+    /// is refused rather than filled from a remembered default. Profiles,
+    /// which this verb once also selected by name or id, are gone
+    /// (protocol 38); the agent CLI refuses their flags itself.
     Create {
         /// The target host's display NAME. `None` is retained only so an old
         /// wire shape can be decoded and refused.
@@ -1898,13 +1531,8 @@ pub enum AgentVerb {
         /// directory, and inheriting the asking session's would make
         /// `create` a silent `clone`.
         cwd: String,
-        /// A profile name resolved exactly against the helm-wide catalog.
-        profile_name: Option<String>,
-        /// An exact profile identity, mutually exclusive with the name and
-        /// raw invocation selectors.
-        profile_id: Option<String>,
-        /// A raw command line, the other half of the mutually exclusive
-        /// selector.
+        /// The command line to launch. Required; `None` is decoded only so
+        /// it can be refused with a message.
         invocation: Option<String>,
         /// Optional display title; absent lets the target host derive one
         /// from the directory exactly as an interactive create does.
@@ -1928,11 +1556,8 @@ pub enum AgentVerb {
     /// AGENT RESOLUTION is the whole substance of this verb, and it has no
     /// silent fallback:
     ///
-    /// - A source created from a profile follows that helm-wide profile ID
-    ///   on every host. A rename does not change the selection; a deleted id
-    ///   is refused before a target call, with no fallback to the old name
-    ///   or raw invocation.
-    /// - A source with no profile: its raw invocation, run on the target.
+    /// - The source's stored launch is copied as stored and run on the
+    ///   target; nothing is re-derived from its command line.
     Clone {
         /// The exact session to copy. It may be the asking session, but is
         /// never inferred from it.
@@ -1974,10 +1599,7 @@ impl AgentVerb {
     /// the whole point of centralizing it.
     pub fn is_mutating(&self) -> bool {
         match self {
-            AgentVerb::Hosts {}
-            | AgentVerb::Sessions {}
-            | AgentVerb::Profiles {}
-            | AgentVerb::ResolveProfile { .. } => false,
+            AgentVerb::Hosts {} | AgentVerb::Sessions {} => false,
             // The creating verbs sit on this side for a stronger reason
             // than the lifecycle four: what they leave behind is a session
             // that did not exist, running an agent process on some host. A
@@ -2048,14 +1670,6 @@ pub enum AgentReply {
         /// not deliver it.
         truncated: bool,
     },
-    Profiles {
-        profiles: Vec<AgentProfile>,
-        /// Profile discovery is all-or-error for the same ambiguity reason
-        /// as host discovery.
-        complete: bool,
-        /// Stable host identity of the authenticated asking session.
-        caller_host_id: String,
-    },
     /// Answers `Rename` with the one freshly recomputed session row.
     Session { session: AgentSession },
     /// Answers `Restart` with the session's post-relaunch row. This is a
@@ -2099,13 +1713,6 @@ pub enum AgentReply {
     /// carried rather than special-cased away: a reply that dropped fields
     /// would be a second, nearly-identical shape to keep true.
     Created { session: AgentSession },
-    /// A launch bundle resolved from the helm-wide profile catalog.
-    ResolvedProfile {
-        invocation: String,
-        agent_kind: AgentKind,
-        resume_template: Option<Vec<String>>,
-        source_profile: ProfileSnapshot,
-    },
 }
 
 /// What a supervisor tells a management request it refuses because every
@@ -2190,18 +1797,6 @@ pub struct AgentHost {
     pub current: bool,
 }
 
-/// The non-secret portion of one helm profile exposed to an agent.
-///
-/// Invocation arguments, resume templates, provider configuration and
-/// credentials are deliberately absent. An agent needs identity and the
-/// accepted name selector; it does not need the private launch bundle.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AgentProfile {
-    pub id: String,
-    pub name: String,
-    pub builtin: bool,
-}
-
 /// One session, as an agent sees it.
 ///
 /// The same narrowing rule [`AgentHost`] follows: what an agent can name,
@@ -2244,9 +1839,8 @@ pub struct AgentSession {
     pub host: Option<String>,
     pub title: String,
     pub cwd: String,
-    /// What is running, as a DELIBERATELY NON-SECRET label: the profile's
-    /// snapshotted name when the session came from one; otherwise the word
-    /// for the integrated agent kind the supervisor recorded (`claude`,
+    /// What is running, as a DELIBERATELY NON-SECRET label: the word for
+    /// the integrated agent kind the supervisor recorded (`claude`,
     /// `codex`, `goose`, `pi`, `omp`, `grok`); otherwise `custom`.
     ///
     /// Nothing derived from the invocation ever appears here, and that is
@@ -2424,32 +2018,22 @@ pub enum ControlMsg {
     /// the M1 CLI flags and any future UI dialog both land here
     /// (PLAN_M1.md: flags bypass the creation UI, never the creation API).
     ///
-    /// ## Resolved launch bundle, or a spawn name
+    /// ## Resolved launch bundle, or inherited spawn
     ///
     /// `invocation` with its accompanying integration values is a resolved
-    /// launch bundle. A profile-backed bundle also carries `source_profile`;
-    /// a raw bundle does not. `profile_name` or `profile_id` is spawn-only
-    /// and asks an attached helm to resolve that exact selector. A
-    /// session-authenticated spawn must instead set `inherit_agent` to copy
-    /// its asking session's stored bundle.
+    /// launch bundle. A session-authenticated spawn may instead set
+    /// `inherit_agent` to copy its asking session's stored bundle.
     ///
-    /// **A request naming more than one selector is refused with
-    /// [`ErrorKind::InvalidRequest`].** Naming none is refused too;
-    /// inheritance is an explicit selector rather than an omitted value. The exclusivity is stated
-    /// here and enforced by the supervisor's create handler rather than
-    /// made structurally impossible by the type, deliberately: a hybrid —
-    /// a profile plus a hand-written override —
-    /// is exactly the request whose meaning nobody can pin down (does the
-    /// override win? does the session's snapshot then still belong to the
-    /// profile it names?), and the honest answer to an ambiguous request is
-    /// a refusal, not a precedence rule invented at the handler. Refusing
-    /// it explicitly also means the refusal has a MESSAGE, which a type
-    /// that simply could not express the request would not.
+    /// **A request naming both, or neither, is refused with
+    /// [`ErrorKind::InvalidRequest`]**: inheritance is an explicit selector
+    /// rather than an omitted value. The exclusivity is enforced by the
+    /// supervisor's create handler rather than made structurally impossible
+    /// by the type, so the refusal has a message.
     ///
     /// The resolved bundle joins the idempotency fingerprint (`intent_key`
-    /// below), as does `parent`: a retry after a profile edit is a changed
-    /// request and is refused as key reuse rather than replaying an outcome
-    /// under different launch settings.
+    /// below), as does `parent`: a retry under the same key with different
+    /// launch settings is refused as key reuse rather than replaying an
+    /// outcome under the old ones.
     CreateSession {
         req_id: u64,
         /// The spawning session, when this create came from `farhelm
@@ -2462,13 +2046,13 @@ pub enum ControlMsg {
         /// reject a non-UTF-8 host path before it ever reaches this
         /// field, not launder it through a lossy conversion.
         ///
-        /// Required under every selector: a profile says what to run,
-        /// never where. SPEC.md's session identity is an agent in a
+        /// Required for every create: the launch says what to run, never
+        /// where. SPEC.md's session identity is an agent in a
         /// directory, and the directory is always the caller's choice.
         cwd: String,
-        /// The resolved agent command line. `None` is valid only for a
-        /// spawn profile lookup or explicit inherited spawn — see this
-        /// variant's own exclusivity contract. A word equal to `{cwd}` in full is
+        /// The resolved agent command line. `None` is valid only for an
+        /// explicit inherited spawn — see this variant's own exclusivity
+        /// contract. A word equal to `{cwd}` in full is
         /// replaced at launch with the directory that launch hands tmux,
         /// under the same whole-element rule `{conversation}` obeys in
         /// `resume_template` below; it is for launchers that take the
@@ -2488,9 +2072,10 @@ pub enum ControlMsg {
         /// them.
         ///
         /// Was a required `String` before `PROTOCOL_VERSION` 10, which is
-        /// part of what forced that bump. A profile-mode request reaches a
-        /// v9 peer as `"invocation": null` — the key is PRESENT, since this
-        /// crate's encoder never omits an `Option` — and a required
+        /// part of what forced that bump. A request without an invocation (an
+        /// inheriting spawn) reaches a v9 peer as `"invocation": null` — the
+        /// key is PRESENT, since this crate's encoder never omits an
+        /// `Option` — and a required
         /// `String` refuses a null outright. (Absence would have been the
         /// lenient case; this is not that case, which is what makes the
         /// refusal dependable.) The other direction is safe: a v9 request
@@ -2498,13 +2083,6 @@ pub enum ControlMsg {
         /// handshake is what keeps the unsafe direction from happening at
         /// all.
         invocation: Option<String>,
-        /// A human-facing profile name selected only by `farhelm spawn`.
-        /// The supervisor relays it to its attached helm; no supervisor
-        /// catalog lookup is permitted.
-        profile_name: Option<String>,
-        /// An exact helm profile identity selected only by `farhelm spawn`.
-        /// It is resolved as an id and never falls back to a name.
-        profile_id: Option<String>,
         /// Explicit opt-in for a restricted spawn to copy the authenticated
         /// parent's stored launch bundle. Omission is not inheritance.
         #[serde(default)]
@@ -2519,19 +2097,18 @@ pub enum ControlMsg {
         /// attachment, not the session) replays the original outcome
         /// instead of launching a second process. The resolved launch bundle
         /// joins the fingerprint, and version 11 adds `parent`; a retry cannot
-        /// change any of them under cover of the same key. Profile selectors
-        /// and explicit inherited spawn are resolved before that fingerprint is
-        /// built. `None` preserves
+        /// change any of them under cover of the same key. An explicit
+        /// inherited spawn is resolved before that fingerprint is built. `None` preserves
         /// pre-M3 behavior exactly: every request is its own create, with
         /// no deduplication — the safe default for raw API callers (curl,
         /// an older UI build) that never learned this field exists, so
         /// its mere addition does not newly expose them to anything.
         intent_key: Option<String>,
-        /// For a session creating a child by profile name or id (`farhelm spawn`): start it
-        /// even if the profile is a YOLO launch and this host asks before YOLO launches.
-        /// Forwarded to the helm with the profile lookup, which is where the check happens;
-        /// ignored for every other create, which the helm checks before sending. Protocol
-        /// 32.
+        /// For a spawned child whose launch the attached helm resolves: start it even if
+        /// it is a YOLO launch and this host asks before YOLO launches. Protocol 32. No
+        /// spawn form resolves through the helm since profiles were removed (protocol 38),
+        /// so it is ignored for now; the agent CLI's launch flags will use it again. Every
+        /// other create is checked by the helm before it is sent.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         confirm_yolo: bool,
         /// Explicit override of the integrated-agent kind PLAN_M3.md item
@@ -2545,17 +2122,13 @@ pub enum ControlMsg {
         /// docs for why that direction needs an explicit value rather
         /// than reusing absence.
         ///
-        /// A helm-resolved profile bundle always carries `Some`, including
-        /// `Some(Generic)` for an explicitly non-integrated profile. This
-        /// field must be absent with `profile_name`, `profile_id`, or inherited spawn,
-        /// because those forms have not been resolved yet.
+        /// This field must be absent with inherited spawn, which copies the
+        /// parent's stored bundle instead.
         agent_kind: Option<AgentKind>,
         /// Explicit override of the resume invocation template PLAN_M3.md
         /// item 7 would otherwise default from `invocation`'s first
-        /// token. A helm-resolved profile bundle carries the profile's value
-        /// here. This field must be absent with `profile_name` or
-        /// inherited spawn, for the same unresolved-selector reason as
-        /// `agent_kind` above.
+        /// token. This field must be absent with inherited spawn, for the
+        /// same reason as `agent_kind` above.
         /// Structured as an argv vector, not a shell string, so a
         /// path containing spaces survives without quoting heroics, and
         /// `{conversation}` substitutes into its own argv slot rather
@@ -2587,11 +2160,8 @@ pub enum ControlMsg {
         /// this exact-equality wording is what keeps that validator from
         /// having to guess which reading was intended.
         resume_template: Option<Vec<String>>,
-        /// Profile identity the helm resolved with this invocation. It is
-        /// absent for raw creates and accompanies an invocation only.
-        source_profile: Option<ProfileSnapshot>,
         /// The explicit structured choices the helm compiled into
-        /// `invocation`. Legacy raw/profile creation leaves this absent.
+        /// `invocation`. A raw create leaves this absent.
         ///
         /// This travels beside the resolved command rather than replacing it:
         /// the supervisor executes and resumes the saved bundle, while the
@@ -4396,7 +3966,6 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -4535,7 +4104,6 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -4596,8 +4164,6 @@ mod tests {
             parent: None,
             cwd: "/checkouts/bar".to_string(),
             invocation: Some("claude".to_string()),
-            profile_name: None,
-            profile_id: None,
             inherit_agent: false,
             title: None,
             cols: 80,
@@ -4606,7 +4172,6 @@ mod tests {
             confirm_yolo: false,
             agent_kind: None,
             resume_template: None,
-            source_profile: None,
             launch: None,
             github_checkout: Some(resolved.clone()),
         };
@@ -4680,8 +4245,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_37() {
-        assert_eq!(PROTOCOL_VERSION, 37);
+    fn protocol_version_is_pinned_at_38() {
+        assert_eq!(PROTOCOL_VERSION, 38);
     }
 
     /// Pins the skew direction the detach-code bump exists to create, in
@@ -5423,7 +4988,6 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -5481,7 +5045,6 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -5501,7 +5064,6 @@ mod tests {
                 "annotation": null,
                 "restart_offer": "not_captured",
                 "tabs": [],
-                "source_profile": null,
                 "github_repo": null,
                 "working_copy": null,
                 "resume_template": null,
@@ -5625,7 +5187,6 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -5668,7 +5229,6 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -5721,7 +5281,6 @@ mod tests {
                     id: "t2".to_string(),
                 },
             ],
-            source_profile: None,
             github_repo: None,
             working_copy: None,
         };
@@ -6030,15 +5589,12 @@ mod tests {
     /// `CreateSession`'s three PLAN_M3.md additions (`intent_key`,
     /// `agent_kind`, `resume_template`) golden-pinned with every one of
     /// them present, matching the treatment every other message shape in
-    /// this file gets — now in the raw resolved-bundle shape with no source
-    /// profile beside the invocation.
+    /// this file gets — in the raw resolved-bundle shape.
     #[farhelm_testtrace::test]
     fn create_session_snapshot_override_fields_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 1,
             parent: None,
-            profile_name: None,
-            profile_id: None,
             inherit_agent: false,
             cwd: "/some/dir".to_string(),
             invocation: Some("/opt/bin/claude".to_string()),
@@ -6053,7 +5609,6 @@ mod tests {
                 "--resume".to_string(),
                 "{conversation}".to_string(),
             ]),
-            source_profile: None,
             launch: None,
             github_checkout: None,
         };
@@ -6063,8 +5618,6 @@ mod tests {
                 "type": "create_session",
                 "req_id": 1,
                 "parent": null,
-                "profile_name": null,
-                "profile_id": null,
                 "inherit_agent": false,
                 "cwd": "/some/dir",
                 "invocation": "/opt/bin/claude",
@@ -6074,28 +5627,21 @@ mod tests {
                 "intent_key": "intent-abc",
                 "agent_kind": "claude",
                 "resume_template": ["/opt/bin/claude", "--resume", "{conversation}"],
-                "source_profile": null,
                 "launch": null,
                 "github_checkout": null,
             })
         );
     }
 
-    /// A profile-backed resolved bundle, golden-pinned as its own shape
-    /// because version 15 replaces the supervisor-side profile selector
-    /// with these launch values and the immutable source snapshot.
-    ///
-    /// Pinned in both directions against the golden value, since a
-    /// profile-mode create is the shape with no legacy sender to have
-    /// established it by precedent: encode must produce exactly this, and
-    /// this must decode back.
+    /// A resolved launch bundle with an explicit agent kind, golden-pinned
+    /// in both directions: encode must produce exactly this, and this must
+    /// decode back. A serde attribute change here would compile and
+    /// round-trip while producing bytes an unmodified peer cannot parse.
     #[farhelm_testtrace::test]
-    fn create_session_profile_mode_json_shape_is_pinned() {
+    fn create_session_resolved_bundle_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 2,
             parent: None,
-            profile_name: None,
-            profile_id: None,
             inherit_agent: false,
             cwd: "/some/dir".to_string(),
             invocation: Some("claude".to_string()),
@@ -6106,10 +5652,6 @@ mod tests {
             confirm_yolo: false,
             agent_kind: Some(AgentKind::Claude),
             resume_template: None,
-            source_profile: Some(ProfileSnapshot {
-                id: "prof-7".to_string(),
-                name: "Claude Code".to_string(),
-            }),
             launch: None,
             github_checkout: None,
         };
@@ -6117,8 +5659,6 @@ mod tests {
             "type": "create_session",
             "req_id": 2,
             "parent": null,
-            "profile_name": null,
-            "profile_id": null,
             "inherit_agent": false,
             "cwd": "/some/dir",
             "invocation": "claude",
@@ -6128,7 +5668,6 @@ mod tests {
             "intent_key": "intent-abc",
             "agent_kind": "claude",
             "resume_template": null,
-            "source_profile": {"id": "prof-7", "name": "Claude Code"},
             "launch": null,
             "github_checkout": null,
         });
@@ -6139,53 +5678,6 @@ mod tests {
             body: expected.to_string().into_bytes(),
         };
         assert_eq!(crate::io::parse_control(&golden_frame).unwrap(), msg);
-    }
-
-    /// PLAN_M7.md item 2's named-spawn selector and parent reference, pinned
-    /// in both directions. The inherited-spawn golden below completes the
-    /// valid protocol-20 create shapes.
-    #[farhelm_testtrace::test]
-    fn create_session_profile_name_and_parent_json_shape_is_pinned() {
-        let msg = ControlMsg::CreateSession {
-            req_id: 3,
-            parent: Some("parent-1".to_string()),
-            cwd: "/some/dir".to_string(),
-            invocation: None,
-            profile_name: Some("Claude Code".to_string()),
-            profile_id: None,
-            inherit_agent: false,
-            title: None,
-            cols: 80,
-            rows: 24,
-            intent_key: Some("spawn-key".to_string()),
-            confirm_yolo: false,
-            agent_kind: None,
-            resume_template: None,
-            source_profile: None,
-            launch: None,
-            github_checkout: None,
-        };
-        let expected = serde_json::json!({
-            "type": "create_session",
-            "req_id": 3,
-            "parent": "parent-1",
-            "cwd": "/some/dir",
-            "invocation": null,
-            "profile_name": "Claude Code",
-            "profile_id": null,
-            "inherit_agent": false,
-            "title": null,
-            "cols": 80,
-            "rows": 24,
-            "intent_key": "spawn-key",
-            "agent_kind": null,
-            "resume_template": null,
-            "source_profile": null,
-            "launch": null,
-            "github_checkout": null,
-        });
-        assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
-        assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
     }
 
     /// Explicit inherited spawn has its own literal wire golden because its
@@ -6201,8 +5693,6 @@ mod tests {
             parent: Some("parent-1".to_string()),
             cwd: "/some/dir".to_string(),
             invocation: None,
-            profile_name: None,
-            profile_id: None,
             inherit_agent: true,
             title: Some("child".to_string()),
             cols: 80,
@@ -6211,7 +5701,6 @@ mod tests {
             confirm_yolo: false,
             agent_kind: None,
             resume_template: None,
-            source_profile: None,
             launch: None,
             github_checkout: None,
         };
@@ -6221,8 +5710,6 @@ mod tests {
             "parent": "parent-1",
             "cwd": "/some/dir",
             "invocation": null,
-            "profile_name": null,
-            "profile_id": null,
             "inherit_agent": true,
             "title": "child",
             "cols": 80,
@@ -6230,7 +5717,6 @@ mod tests {
             "intent_key": "spawn-copy",
             "agent_kind": null,
             "resume_template": null,
-            "source_profile": null,
             "launch": null,
             "github_checkout": null,
         });
@@ -6257,8 +5743,6 @@ mod tests {
             let msg = ControlMsg::CreateSession {
                 req_id: 3,
                 parent: None,
-                profile_name: None,
-                profile_id: None,
                 inherit_agent: false,
                 cwd: "/some/dir".to_string(),
                 invocation,
@@ -6269,7 +5753,6 @@ mod tests {
                 confirm_yolo: false,
                 agent_kind: None,
                 resume_template: None,
-                source_profile: None,
                 launch: None,
                 github_checkout: None,
             };
@@ -6310,7 +5793,6 @@ mod tests {
         let ControlMsg::CreateSession {
             parent,
             invocation,
-            profile_name,
             intent_key,
             agent_kind,
             resume_template,
@@ -6323,7 +5805,6 @@ mod tests {
         assert_eq!(agent_kind, None, "an old sender never had this field");
         assert_eq!(resume_template, None, "an old sender never had this field");
         assert_eq!(parent, None, "a v10 create has no spawn parent");
-        assert_eq!(profile_name, None, "a v10 create cannot select by name");
         // A bare invocation remains a raw create. Version negotiation keeps
         // incompatible peers apart, while serde defaults preserve the old
         // request's meaning inside this decoder.
@@ -6384,7 +5865,6 @@ mod tests {
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
                 tabs: Vec::new(),
-                source_profile: None,
                 github_repo: None,
                 working_copy: None,
             },
@@ -6524,7 +6004,6 @@ mod tests {
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
                 tabs: Vec::new(),
-                source_profile: None,
                 github_repo: None,
                 working_copy: None,
             },
@@ -6548,7 +6027,6 @@ mod tests {
                     "annotation": null,
                     "restart_offer": "resume",
                     "tabs": [],
-                    "source_profile": null,
                     "github_repo": null,
                     "working_copy": null,
                     "resume_template": null,
@@ -6777,7 +6255,6 @@ mod tests {
                         annotation: None,
                         restart_offer: RestartOffer::Resume,
                         tabs: Vec::new(),
-                        source_profile: None,
                         github_repo: None,
                         working_copy: None,
                     },
@@ -6799,7 +6276,6 @@ mod tests {
                         "annotation": null,
                         "restart_offer": "resume",
                         "tabs": [],
-                        "source_profile": null,
                         "github_repo": null,
                         "working_copy": null,
                         "resume_template": null,
@@ -6865,335 +6341,6 @@ mod tests {
                 title: "new title".to_string(),
                 expected_title: None,
             }
-        );
-    }
-
-    /// A profile with every field populated, for the golden tests below.
-    ///
-    /// A helper rather than a repeated literal because several JSON contract
-    /// tests need the same browser-facing shape. `resume_template` is `Some`
-    /// here deliberately: its `None` half is pinned separately, since an
-    /// absent template is what a generic profile normally has.
-    fn a_profile() -> Profile {
-        Profile {
-            id: "prof-7".to_string(),
-            builtin: false,
-            name: "Claude Code".to_string(),
-            invocation: "claude".to_string(),
-            agent_kind: AgentKind::Claude,
-            resume_template: Some(vec!["claude".to_string(), "{conversation}".to_string()]),
-        }
-    }
-
-    /// Profile JSON remains shared vocabulary even though the catalog no
-    /// longer crosses the supervisor wire.
-    ///
-    /// This pins the shape the helm's HTTP API serves so removing the wire
-    /// messages cannot accidentally rename a browser-facing field.
-    #[farhelm_testtrace::test]
-    fn profile_json_shape_is_pinned() {
-        let expected = serde_json::json!({
-            "id": "prof-7",
-            "builtin": false,
-            "name": "Claude Code",
-            "invocation": "claude",
-            "agent_kind": "claude",
-            "resume_template": ["claude", "{conversation}"],
-        });
-        assert_eq!(serde_json::to_value(a_profile()).unwrap(), expected);
-        assert_eq!(
-            serde_json::from_value::<Profile>(expected).unwrap(),
-            a_profile()
-        );
-    }
-
-    /// Older helms sent the profile shape before source metadata existed.
-    ///
-    /// Defaulting this descriptive field keeps those stored fixture and API
-    /// values usable as ordinary stored profiles instead of making rollout
-    /// depend on a coordinated browser and helm update.
-    #[farhelm_testtrace::test]
-    fn a_profile_without_source_metadata_defaults_to_stored() {
-        let mut historical = serde_json::to_value(a_profile()).unwrap();
-        historical.as_object_mut().unwrap().remove("builtin");
-        assert!(
-            !serde_json::from_value::<Profile>(historical)
-                .unwrap()
-                .builtin
-        );
-    }
-
-    /// A generic profile — no integration, no resume-template override — is
-    /// the other half of [`Profile`]'s shape, and the half a fresh
-    /// hand-written profile normally has. Pinned separately because both
-    /// values are easy to get wrong in the same direction: `agent_kind`
-    /// must be the explicit string `"generic"` rather than a null or an
-    /// absent key (a profile always states its kind — see that field's
-    /// docs), while `resume_template` must be a real `null` — which for
-    /// THIS fixture's `Generic` kind means no resume template at all
-    /// (there is no integration to derive a default from; see the field's
-    /// two-outcome rule).
-    #[farhelm_testtrace::test]
-    fn a_generic_profile_states_its_kind_and_omits_no_field() {
-        let profile = Profile {
-            id: "prof-8".to_string(),
-            builtin: false,
-            name: "my script".to_string(),
-            invocation: "./run-agent.sh".to_string(),
-            agent_kind: AgentKind::Generic,
-            resume_template: None,
-        };
-        let expected = serde_json::json!({
-            "id": "prof-8",
-            "builtin": false,
-            "name": "my script",
-            "invocation": "./run-agent.sh",
-            "agent_kind": "generic",
-            "resume_template": null,
-        });
-        assert_eq!(serde_json::to_value(&profile).unwrap(), expected);
-        assert_eq!(
-            serde_json::from_value::<Profile>(expected).unwrap(),
-            profile
-        );
-    }
-
-    /// `SessionInfo::source_profile` and its [`ProfileExistence`] states
-    /// (PLAN_M6_75.md item 3), golden-pinned per state through the arm-IS-
-    /// the-assertion shape `session_status_json_shapes_are_pinned` uses, so
-    /// a fourth existence state cannot be added without pinning its wire
-    /// spelling here.
-    ///
-    /// The nesting is the point: this rides inside every `SessionInfo` on
-    /// every reply, so its exact key (`source_profile`) and its bare
-    /// snake_case existence string are what a client's filter and its
-    /// no-longer-exists rendering both key off.
-    #[farhelm_testtrace::test]
-    fn session_info_source_profile_json_shapes_are_pinned() {
-        for existence in [
-            ProfileExistence::Unresolved,
-            ProfileExistence::Present,
-            ProfileExistence::Renamed,
-            ProfileExistence::Deleted,
-        ] {
-            let expected_existence = match existence {
-                ProfileExistence::Unresolved => "unresolved",
-                ProfileExistence::Present => "present",
-                ProfileExistence::Renamed => "renamed",
-                ProfileExistence::Deleted => "deleted",
-            };
-            let info = SessionInfo {
-                agent_kind: crate::AgentKind::Generic,
-                parent: None,
-                id: "s1".to_string(),
-                title: "demo".to_string(),
-                created_at: 1_700_000_000,
-                last_activity_at: 1_700_000_000,
-                last_work_started_at: 0,
-                creation_seq: None,
-                cwd: "/tmp".to_string(),
-                canonical_cwd: None,
-                invocation: "claude".to_string(),
-                resume_template: None,
-                launch: None,
-                status: SessionStatus::Running,
-                annotation: None,
-                restart_offer: RestartOffer::default(),
-                tabs: Vec::new(),
-                source_profile: Some(SourceProfile {
-                    id: "prof-7".to_string(),
-                    name: "Claude Code".to_string(),
-                    existence,
-                }),
-                github_repo: None,
-                working_copy: None,
-            };
-            let encoded = serde_json::to_value(&info).unwrap();
-            assert_eq!(
-                encoded["source_profile"],
-                serde_json::json!({
-                    "id": "prof-7",
-                    "name": "Claude Code",
-                    "existence": expected_existence,
-                })
-            );
-            // Decode back through the whole `SessionInfo`, not just the
-            // nested value: the field's own key is half of what is being
-            // pinned, and a rename of it would leave the nested shape
-            // perfectly correct and completely unreachable.
-            let decoded: SessionInfo = serde_json::from_value(encoded).unwrap();
-            assert_eq!(decoded, info);
-        }
-    }
-
-    /// [`SourceProfile`] is a nested object on `SessionInfo`, so it needs
-    /// the same both-directions field tolerance every other nesting level
-    /// in this file has been given (`session_list_with_unknown_field_inside_session_decodes_through_parse_control`
-    /// for `SessionInfo`, `attach_with_unknown_field_inside_terminal_selector_decodes_through_parse_control`
-    /// for `TerminalSelector`, `tab_opened_with_unknown_field_inside_tab_info_decodes_through_parse_control`
-    /// for `TabInfo`). Additivity that holds at the outer level and fails
-    /// one object down is not additivity — and this object is the one most
-    /// likely to grow, since every future fact about a session's origin
-    /// belongs in it.
-    ///
-    /// Both directions, in one test because they are one property:
-    ///
-    /// - FUTURE SENDER → today's decoder: an unrecognized field inside
-    ///   `source_profile` must decode, through the REAL `parse_control`
-    ///   path rather than a hand-rolled `from_value::<SourceProfile>`,
-    ///   which would say nothing about whether `deny_unknown_fields` had
-    ///   crept in anywhere along the chain from frame bytes to
-    ///   `SessionInfo`.
-    /// - TODAY'S SENDER → future decoder: a later build that grew an
-    ///   optional field on this record must read today's bytes and default
-    ///   it, rather than refusing a snapshot that predates it.
-    #[farhelm_testtrace::test]
-    fn source_profile_tolerates_unknown_fields_in_both_directions() {
-        let frame = Frame {
-            kind: FrameKind::Control,
-            channel: 0,
-            body: serde_json::json!({
-                "type": "session_list",
-                "req_id": 80,
-                "sessions": [
-                    {
-                        "id": "s1",
-                        "title": "demo",
-                        "cwd": "/tmp",
-                        "invocation": "claude",
-                        "status": { "state": "running" },
-                        "source_profile": {
-                            "id": "prof-7",
-                            "name": "Claude Code",
-                            "existence": "present",
-                            "created_from_host": "value from tomorrow",
-                        },
-                    }
-                ],
-                "truncated": false,
-            })
-            .to_string()
-            .into_bytes(),
-        };
-        let msg = crate::io::parse_control(&frame).expect(
-            "an unknown field nested inside a SourceProfile must decode, not error — an \
-             undecodable session list is a whole host's fleet gone",
-        );
-        let ControlMsg::SessionList { sessions, .. } = msg else {
-            panic!("expected ControlMsg::SessionList, got {msg:?}");
-        };
-        assert_eq!(
-            sessions[0].source_profile,
-            Some(SourceProfile {
-                id: "prof-7".to_string(),
-                name: "Claude Code".to_string(),
-                existence: ProfileExistence::Present,
-            }),
-            "the fields it DOES know must survive alongside the one it ignored"
-        );
-
-        // The other direction: a later build's decoder, modelled by a
-        // shadow struct with an added optional field.
-        #[derive(serde::Deserialize)]
-        struct FutureSourceProfile {
-            id: String,
-            name: String,
-            existence: ProfileExistence,
-            #[serde(default)]
-            deleted_at: Option<i64>,
-        }
-        let today = serde_json::to_value(SourceProfile {
-            id: "prof-7".to_string(),
-            name: "Claude Code".to_string(),
-            existence: ProfileExistence::Deleted,
-        })
-        .unwrap();
-        let decoded: FutureSourceProfile = serde_json::from_value(today).unwrap();
-        assert_eq!(decoded.id, "prof-7");
-        assert_eq!(decoded.name, "Claude Code");
-        assert_eq!(decoded.existence, ProfileExistence::Deleted);
-        assert_eq!(
-            decoded.deleted_at, None,
-            "an absent future field must default, never fail the decode"
-        );
-    }
-
-    /// A raw-created session has no source profile. Two spellings must mean
-    /// the same thing: an explicit `null` (what this crate's encoder
-    /// produces) and a key that never appears at all (what a sender
-    /// predating the field produces).
-    ///
-    /// This is the tolerance case the whole vocabulary-first shape rests
-    /// on: if absence decoded as anything but "raw-created", every session
-    /// in the fleet would acquire a phantom profile the day the field
-    /// shipped.
-    #[farhelm_testtrace::test]
-    fn an_absent_source_profile_decodes_as_raw_created_either_spelling() {
-        let with_null = serde_json::json!({
-            "id": "s1",
-            "title": "demo",
-            "created_at": 1_700_000_000,
-            "last_activity_at": 1_700_000_000,
-            "cwd": "/tmp",
-            "invocation": "agent",
-            "status": { "state": "running" },
-            "annotation": null,
-            "restart_offer": "not_captured",
-            "tabs": [],
-            "source_profile": null,
-            "github_repo": null,
-            "working_copy": null,
-        });
-        let decoded: SessionInfo = serde_json::from_value(with_null).unwrap();
-        assert_eq!(decoded.source_profile, None);
-
-        // Hand-written so the key's ABSENCE is real, not an explicit null
-        // that merely renders the same in this crate's own serializer —
-        // the same reason
-        // `hello_json_decodes_with_host_identity_key_entirely_absent`
-        // exists.
-        let raw = r#"{
-            "id": "s1",
-            "title": "demo",
-            "cwd": "/tmp",
-            "invocation": "agent",
-            "status": {"state": "running"}
-        }"#;
-        let decoded: SessionInfo = serde_json::from_str(raw)
-            .expect("a SessionInfo with no source_profile key at all must still decode");
-        assert_eq!(
-            decoded.source_profile, None,
-            "an absent key must read as raw-created, exactly as an explicit null does"
-        );
-    }
-
-    /// Profile JSON tolerates future fields even though it no longer nests
-    /// inside a supervisor control message.
-    #[farhelm_testtrace::test]
-    fn profile_json_tolerates_unknown_fields_in_both_directions() {
-        let mut future = serde_json::to_value(a_profile()).unwrap();
-        future["initial_prompt"] = serde_json::json!("value from tomorrow");
-        assert_eq!(
-            serde_json::from_value::<Profile>(future).unwrap(),
-            a_profile()
-        );
-
-        // Current sender -> future decoder: a later build that grew an
-        // optional field must accept today's bytes and default it.
-        #[derive(serde::Deserialize)]
-        struct FutureProfile {
-            id: String,
-            name: String,
-            #[serde(default)]
-            shared_with_hosts: Option<Vec<String>>,
-        }
-        let decoded: FutureProfile =
-            serde_json::from_value(serde_json::to_value(a_profile()).unwrap()).unwrap();
-        assert_eq!(decoded.id, "prof-7");
-        assert_eq!(decoded.name, "Claude Code");
-        assert_eq!(
-            decoded.shared_with_hosts, None,
-            "an absent future field must default, never fail the decode"
         );
     }
 
@@ -7736,7 +6883,6 @@ mod tests {
                 annotation: None,
                 restart_offer: RestartOffer::default(),
                 tabs: Vec::new(),
-                source_profile: None,
                 github_repo: None,
                 working_copy: None,
             }],
@@ -7812,61 +6958,6 @@ mod tests {
                 "req_id": 2,
                 "session_id": "s1",
                 "request": { "verb": "hosts" },
-            })
-        );
-
-        let resolve_request = ControlMsg::AgentRequest {
-            req_id: 3,
-            session_id: "s1".to_string(),
-            request: AgentVerb::ResolveProfile {
-                name: Some("Claude Code".to_string()),
-                id: None,
-                confirm_yolo: false,
-            },
-        };
-        assert_eq!(
-            serde_json::to_value(&resolve_request).unwrap(),
-            serde_json::json!({
-                "type": "agent_request",
-                "req_id": 3,
-                "session_id": "s1",
-                "request": { "verb": "resolve_profile", "name": "Claude Code", "id": null },
-            })
-        );
-
-        let resolved_reply = ControlMsg::AgentResponse {
-            req_id: 3,
-            outcome: AgentOutcome::Ok {
-                reply: AgentReply::ResolvedProfile {
-                    invocation: "claude --model opus".to_string(),
-                    agent_kind: AgentKind::Claude,
-                    resume_template: Some(vec![
-                        "claude".to_string(),
-                        "--resume".to_string(),
-                        "{conversation}".to_string(),
-                    ]),
-                    source_profile: ProfileSnapshot {
-                        id: "prof-7".to_string(),
-                        name: "Claude Code".to_string(),
-                    },
-                },
-            },
-        };
-        assert_eq!(
-            serde_json::to_value(&resolved_reply).unwrap(),
-            serde_json::json!({
-                "type": "agent_response",
-                "req_id": 3,
-                "outcome": {
-                    "result": "ok",
-                    "reply": {
-                        "reply": "resolved_profile",
-                        "invocation": "claude --model opus",
-                        "agent_kind": "claude",
-                        "resume_template": ["claude", "--resume", "{conversation}"],
-                        "source_profile": {"id": "prof-7", "name": "Claude Code"},
-                    },
-                },
             })
         );
 
@@ -8220,9 +7311,7 @@ mod tests {
             request: AgentVerb::Create {
                 host: Some("builder".to_string()),
                 cwd: "/srv/work".to_string(),
-                profile_name: Some("Claude Code".to_string()),
-                profile_id: None,
-                invocation: None,
+                invocation: Some("claude".to_string()),
                 title: Some("a title".to_string()),
                 intent_key: Some("key-1".to_string()),
                 confirm_yolo: false,
@@ -8240,9 +7329,7 @@ mod tests {
                     "verb": "create",
                     "host": "builder",
                     "cwd": "/srv/work",
-                    "profile_name": "Claude Code",
-                    "profile_id": null,
-                    "invocation": null,
+                    "invocation": "claude",
                     "title": "a title",
                     "intent_key": "key-1",
                 },
@@ -8257,8 +7344,6 @@ mod tests {
             request: AgentVerb::Create {
                 host: Some("builder".to_string()),
                 cwd: "/srv/work".to_string(),
-                profile_name: None,
-                profile_id: None,
                 invocation: None,
                 title: None,
                 intent_key: None,
@@ -8275,8 +7360,6 @@ mod tests {
                     "verb": "create",
                     "host": "builder",
                     "cwd": "/srv/work",
-                    "profile_name": null,
-                    "profile_id": null,
                     "invocation": null,
                     "title": null,
                     "intent_key": null,
@@ -8555,49 +7638,5 @@ mod tests {
                 ..
             }
         ));
-    }
-
-    /// The shared validator pins the safety rules both stores must enforce:
-    /// invalid labels and invocations are refused before either can persist a
-    /// profile, while a valid integrated definition remains accepted.
-    #[farhelm_testtrace::test]
-    fn profile_field_validation_is_pure_and_shared() {
-        assert!(validate_profile_fields("Claude", "claude", AgentKind::Claude, None).is_ok());
-        assert!(validate_profile_fields(" ", "claude", AgentKind::Claude, None).is_err());
-        assert!(validate_profile_fields("Claude\n", "claude", AgentKind::Claude, None).is_err());
-        assert!(validate_profile_fields("Claude", "", AgentKind::Claude, None).is_err());
-        assert!(
-            validate_profile_fields(
-                "Claude",
-                "claude",
-                AgentKind::Claude,
-                Some(&["claude".to_string()]),
-            )
-            .is_err()
-        );
-        // The integrated-kind placeholder rule covers every integrated kind,
-        // so pin the newest one explicitly: an OMP profile without
-        // `{conversation}` is refused for exactly the reason Claude's is,
-        // and one with it is accepted.
-        assert!(
-            validate_profile_fields("Omp", "omp", AgentKind::Omp, Some(&["omp".to_string()]))
-                .is_err()
-        );
-        assert!(
-            validate_profile_fields(
-                "Omp",
-                "omp",
-                AgentKind::Omp,
-                Some(&[
-                    "omp".to_string(),
-                    "--resume".to_string(),
-                    "{conversation}".to_string()
-                ]),
-            )
-            .is_ok()
-        );
-        assert!(
-            validate_profile_fields("Wrapper", "wrapper {cwd}", AgentKind::Generic, None,).is_ok()
-        );
     }
 }

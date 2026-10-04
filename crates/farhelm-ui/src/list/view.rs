@@ -14,11 +14,10 @@ use crate::api::{
     self, ListSort, Preferences, SessionFilter, SessionListing, delete_session, fetch_hosts,
     fetch_session, fetch_sessions, queue_seen_write, rename_session, replace_session, stop_session,
 };
-use crate::app_bar::{AppBar, ProfilesControl};
+use crate::app_bar::AppBar;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead};
 use crate::ops::{OpLock, ReadGate};
-use crate::profiles::use_catalog_surface;
 use crate::provisioning::ProvisioningTraceShape;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::rows::{
@@ -520,14 +519,6 @@ struct PendingYoloReplace {
 /// terminal is open" is deliberately retired along with the page swap
 /// that implied it.
 ///
-/// ## One more read, shared (PLAN_M6_75.md item 8)
-///
-/// Profiles add one always-active reader under exactly the same discipline
-/// (`profiles::use_catalog_surface`). The list-header popup and create picker
-/// consume its answer together because profiles belong to the helm, not the
-/// selected host. Keeping the reader mounted with this page also means feed
-/// invalidations advance the answer while both consumers are closed.
-///
 /// ## Filtering is a query, not a render pass (PLAN_M6_75.md item 7)
 ///
 /// The filter surface builds `api::SessionFilter` and the helm answers with
@@ -736,10 +727,6 @@ pub(crate) fn ListView(
     // reconciliation is in `commit_listing`, which drops a prompt once its
     // session is no longer in the listing at all.
     let mut row_phases = use_signal(HashMap::<String, RowPhase>::new);
-    // The profiles popup is the remaining page-level transient surface. The
-    // host filter is a native in-flow control, so it has no open state or
-    // focus lifecycle to coordinate with row menus.
-    let mut profiles_open = use_signal(|| false);
     // `pending`'s entry and exit, with the cross-pane bookkeeping attached:
     // every row operation must (a) refuse to start while the SHARED token
     // is held — the session view or a page operation is mid-write, and a
@@ -942,35 +929,8 @@ pub(crate) fn ListView(
             host_menu_open.set(None);
         }
     });
-    // Opening the profile popup takes every other floating surface down. Its
-    // own busy guard is enforced by `ProfilesControl`, so a mutation cannot strand the
-    // form by letting another surface replace it mid-request.
-    use_effect(move || {
-        if profiles_open() {
-            menu_open.set(None);
-            host_menu_open.set(None);
-        }
-    });
-    // Row menus are the remaining entry points into the same mutual-
-    // exclusion set. They can be opened from child components, so an effect
-    // is the single place that also covers keyboard and pointer activation.
-    use_effect(move || {
-        if menu_open().is_some() || host_menu_open().is_some() {
-            if *profiles_open.peek() && ops.busy_now() {
-                // Row menus remain ordinary transient surfaces while the
-                // profile mutation owns the page. Closing the attempted menu
-                // preserves both the one-popover rule and the busy form.
-                menu_open.set(None);
-                host_menu_open.set(None);
-            } else {
-                profiles_open.set(false);
-            }
-        }
-    });
-
-    // The create dialog's explicit host choice is separate from the catalog:
-    // it names the installation used for creation idempotency, while every
-    // host now sees the same helm-owned profiles.
+    // The create dialog's explicit host choice names the installation used
+    // for creation idempotency.
     let mut chosen_host = use_signal(|| None::<HostId>);
     // A "clone" click's seed for the create form (`create_form::
     // CreatePrefill`), or `None` for the ordinary blank-form open. Lives
@@ -983,8 +943,8 @@ pub(crate) fn ListView(
     // clone's fields.
     let mut clone_prefill = use_signal(|| None::<CreatePrefill>);
     // An ordinary New inherits only the selected session's directory. It is
-    // intentionally separate from clone prefill: no title, host, profile,
-    // command, or structured launch choice is implied by this convenience.
+    // intentionally separate from clone prefill: no title, host, command, or
+    // structured launch choice is implied by this convenience.
     let mut ordinary_new_cwd = use_signal(|| None::<String>);
     // The page-local host query carried by listing reads. The selector changes
     // only this field, so every retired API dimension
@@ -1076,19 +1036,13 @@ pub(crate) fn ListView(
     let listing_surface = use_signal(SurfaceReader::default);
     let hosts_surface = use_signal(SurfaceReader::default);
 
-    // One always-active reader feeds both the management popup and the create
-    // picker. Mounting it with the list preserves a last-known catalog across
-    // either surface closing and gives feed/fallback refreshes one door.
-    let profiles = use_catalog_surface();
-
     // Which installation the create request is about. This follows
-    // `effective_create_host`, but changing it deliberately leaves the
-    // helm-wide profile choice untouched.
+    // `effective_create_host`.
     let mut create_target = use_signal(|| None::<CreateTarget>);
     // `use_reactive` because `open_host` is a plain prop, not a signal:
     // without it the effect would capture the value it saw on first run
-    // and an open form would keep offering the OLD session's host and
-    // catalog after the user selected a session on another machine —
+    // and an open form would keep offering the OLD session's host after the
+    // user selected a session on another machine —
     // rerenders alone never rerun a `use_effect`.
     use_effect(use_reactive((&open_host,), move |(open_host,)| {
         let wanted = show_create()
@@ -3031,21 +2985,9 @@ pub(crate) fn ListView(
                 },
                     "new"
                 }
-                // Inside the heading row, immediately after New: the two are
-                // the list's header actions and must read as one pair, and the
-                // popup anchors below this trigger, so a trigger pushed onto a
-                // line of its own would also push the popup down.
-                ProfilesControl {
-                    profiles_open,
-                    profiles,
-                    ops,
-                    layout_epoch,
-                }
             }
-            // Keep the form after both header actions in DOM order: forward
-            // Tab visits the profile control beside New before entering the
-            // draft, and the New control remains above the draft with its
-            // existing cancellation action.
+            // The form follows New in DOM order, so New stays above the draft
+            // with its existing cancellation action.
             if show_create() {
                 CreateSessionForm {
                     hosts: host_options.clone(),
@@ -3053,7 +2995,6 @@ pub(crate) fn ListView(
                     hosts_loaded: hosts.read().hosts().is_some(),
                     chosen_host,
                     create_target,
-                    catalog: profiles,
                     ops,
                     initial_cwd: ordinary_new_cwd(),
                     prefill: clone_prefill(),
@@ -3120,7 +3061,7 @@ pub(crate) fn ListView(
                         // this same create, so there is deliberately no
                         // PUT here, only a local mirror (compare
                         // `remember_selection`/`remember_compact`, which DO
-                        // write through). A legacy/profile launch carries no
+                        // write through). A command launch carries no
                         // `launch` at all and must leave these fields alone,
                         // matching the helm's own write condition. Not
                         // exactly, though: the helm also declines to write
@@ -3464,7 +3405,7 @@ pub(crate) fn ListView(
 /// Takes only the submitted selection, never the created `Session`: the
 /// session's `launch` is the supervisor's reply, which a remote host writes,
 /// and SPEC.md allows only explicit GUI selections to shape GUI defaults.
-/// `None` (a command or profile create) leaves the preferences alone, as the
+/// `None` (a command create) leaves the preferences alone, as the
 /// helm does. A harness that does not offer workspace trust, or a selection
 /// that leaves it unset, keeps the remembered trust choice.
 fn mirror_submitted_launch(
@@ -3608,7 +3549,7 @@ mod tests {
     /// A partial or mutation-local listing cannot prove that an editor's
     /// source left the fleet.
     /// Spec: the local preference mirror after a create follows only the
-    /// launch the form submitted: a command or profile create (no
+    /// launch the form submitted: a command create (no
     /// submission) leaves the remembered choices alone, and a structured
     /// submission sets them from itself.
     ///

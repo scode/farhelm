@@ -20,8 +20,8 @@
 use crate::aggregate::{SessionListBody, SessionRow};
 use crate::hosts::{HostStateView, HostView, RefreshView};
 use farhelm_proto::{
-    GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, ProfileExistence,
-    RestartOffer, SessionInfo, SessionStatus, SourceProfile, TabInfo, WorkingCopyInfo,
+    GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer,
+    SessionInfo, SessionStatus, TabInfo, WorkingCopyInfo,
 };
 
 /// The one session-list fixture shared with `farhelm-ui`'s decoder tests.
@@ -68,11 +68,6 @@ fn session_list_body() -> SessionListBody {
         tabs: vec![TabInfo {
             id: "tab-1".to_string(),
         }],
-        source_profile: Some(SourceProfile {
-            id: "profile-1".to_string(),
-            name: "Codex".to_string(),
-            existence: ProfileExistence::Renamed,
-        }),
         github_repo: Some(repo.clone()),
         working_copy: Some(WorkingCopyInfo {
             id: "wc-1".to_string(),

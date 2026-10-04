@@ -1,22 +1,17 @@
 // Clone's browser contract: the "clone" menu item opens the create form
 // pre-filled from the clicked row (crates/farhelm-ui/src/list/row.rs's
 // `.session-row-clone`, `create_form::CreatePrefill`), the prefill reflects
-// the row's own agent — a profile id when the row was created from one
-// still `Present` in the catalog, the raw invocation otherwise. A selected
-// profile displays its own invocation while the raw value remains the seed
-// for custom mode. Submitting the edited copy creates a SEPARATE session
+// the row's own launch — its structured choices when it has them, its exact
+// command otherwise. Submitting the edited copy creates a SEPARATE session
 // while leaving the cloned row exactly as it was.
 
 import { expect, test } from "./helpers/evidence";
 import { Locator, Page } from "@playwright/test";
 import {
-  cleanupProfile,
   cleanupSession,
-  createProfile,
   createSession,
   FAKE_AGENT,
   hideSeenState,
-  listProfiles,
   localHostId,
   openRowMenu,
   setLocalYoloWithoutAsking,
@@ -72,7 +67,7 @@ async function fillCloneTitle(form: Locator, title: string) {
   await form.getByLabel("name (optional)").fill(title);
 }
 
-/** Switch the shared harness picker to the legacy profile/command controls. */
+/** Switch the shared harness picker to the typed-command controls. */
 async function chooseCommandMode(form: Locator) {
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
   await expect(form).toHaveAttribute("data-composer-mode", "command");
@@ -635,9 +630,8 @@ test("a closed opening's held focus work stays stale when released after reopen"
 /**
  * Hold exactly one reveal for the primary terminal at its real replay
  * marker, release it through the production path, and observe the
- * application's own reveal receipt. Mirrors `profiles.spec.ts`, the
- * origin of this pattern; the trio is repeated here rather than shared
- * for the same reason `row()` is local to each spec that needs it.
+ * application's own reveal receipt. The trio is local to this spec for the
+ * same reason `row()` is local to each spec that needs it.
  */
 async function holdPrimaryTerminalReveal(page: Page) {
   await page.addInitScript(() => {
@@ -733,39 +727,18 @@ test("composer search survives a held terminal reveal", async ({ page, request }
   }
 });
 
-test("clone pre-fills the create form from a profile-backed row, and the edited copy leaves the original untouched", async ({
+test("clone pre-fills the create form from a typed-command row, and the edited copy leaves the original untouched", async ({
   page,
   request,
 }) => {
   const invocationA = FAKE_AGENT;
   const invocationB = FAKE_AGENT.replace("--script basic", "--script altscreen");
-  const profileA = await createProfile(request, {
-    name: `clone-profile-a-${Date.now()}`,
-    invocation: invocationA,
-  });
-  const profileB = await createProfile(request, {
-    name: `clone-profile-b-${Date.now()}`,
-    invocation: invocationB,
-  });
   const title = `clone-source-${Date.now()}`;
   const originalCwd = "/tmp";
   const original = await createSession(request, {
     title,
     cwd: originalCwd,
-    profile_id: profileA.id,
-  });
-  // A THROWAWAY session created from a DIFFERENT profile afterwards, purely
-  // to move the helm's remembered default onto B while the row this test
-  // clones still names A. Without this, "the row's own profile" and "the
-  // helm's remembered default" would be the same id, and a broken
-  // implementation that discards the clone's own choice and seeds only
-  // from the remembered default would select the identical profile — the
-  // exact regression this fixture exists to distinguish from the correct
-  // behavior.
-  const rememberedDefaultShift = await createSession(request, {
-    title: `clone-remembered-default-${Date.now()}`,
-    cwd: "/tmp",
-    profile_id: profileB.id,
+    invocation: invocationA,
   });
   let cloneId: string | undefined;
   try {
@@ -780,26 +753,12 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     await expect(form).toBeVisible();
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue(originalCwd);
     await expect(form.getByLabel("name (optional)")).toHaveValue(title);
-    // The row's OWN profile (A) wins the picker over the helm's remembered
-    // default (B, moved there by the throwaway session above) — see that
-    // fixture's own comment for why the two must differ for this
-    // assertion to mean anything.
-    await expect(form.locator(".create-session-profile")).toHaveValue(profileA.id, {
-      timeout: 20_000,
-    });
-    // Substring match on purpose: this field's accessible name grows a
-    // parenthetical while a profile is selected (asserted via `commandLabel`
-    // below), and both spellings start with "agent command".
+    // A row with no structured launch clones onto the command path, with its
+    // exact command editable.
+    await expect(form).toHaveAttribute("data-composer-mode", "command");
     const command = form.getByLabel("agent command");
-    // The label is located from the input upward: a `has` filter rooted at the
-    // form can never match, because the inner locator would be re-rooted at
-    // each candidate label and the form is not inside its own label.
-    const commandLabel = command.locator("xpath=..");
-    await expect(command).toBeDisabled();
+    await expect(command).toBeEnabled();
     await expect(command).toHaveValue(invocationA);
-    await expect(commandLabel).toContainText(
-      'agent command (the selected profile\'s own; choose "custom command" above to edit)',
-    );
 
     // The destination belongs to the shared shell, while the two launch
     // drafts retain their own values across a round trip through a harness.
@@ -808,22 +767,10 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue(originalCwd);
     await expect(form.getByLabel("name (optional)")).toHaveValue(title);
     await chooseCommandMode(form);
-    await expect(form.locator(".create-session-profile")).toHaveValue(profileA.id);
     await expect(command).toHaveValue(invocationA);
 
-    await form.locator(".create-session-profile").selectOption(profileB.id);
-    await expect(command).toHaveValue(invocationB);
-    await expect(command).toBeDisabled();
-
-    await form.locator(".create-session-profile").selectOption("");
-    await expect(command).toBeEnabled();
-    await expect(command).toHaveValue(invocationA);
-    await expect(commandLabel).toHaveText("agent command");
-
-    // Keep the original profile-backed submit assertion below meaningful after
-    // the custom-mode display assertions above.
-    await form.locator(".create-session-profile").selectOption(profileA.id);
-
+    // The copy is edited before it is submitted.
+    await command.fill(invocationB);
     const newCwd = stackScratchDir("clone-e2e-");
     await form.getByLabel("folder", { exact: true }).fill(newCwd);
     const [response] = await Promise.all([
@@ -832,10 +779,10 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
       ),
       form.locator(".create-session-submit").click(),
     ]);
-    // The wire body itself, not just what the picker showed — the two
-    // could disagree if the reseed effect wrote the picker's display
-    // without also writing what submit actually reads.
-    expect(response.request().postDataJSON().profile_id).toBe(profileA.id);
+    // The wire body itself, not just what the field showed — the two could
+    // disagree if the reseed effect wrote the field's display without also
+    // writing what submit actually reads.
+    expect(response.request().postDataJSON().invocation).toBe(invocationB);
     const body = await response.json();
     cloneId = body.id as string;
 
@@ -851,126 +798,7 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     await expect(source.locator(".session-title")).toHaveText(title);
   } finally {
     if (cloneId) await cleanupSession(request, cloneId);
-    await cleanupSession(request, rememberedDefaultShift.id);
     await cleanupSession(request, original.id);
-    await cleanupProfile(request, profileA.id);
-    await cleanupProfile(request, profileB.id);
-  }
-});
-
-/**
- * A clone whose own profile never got applied asks for an agent; it does not
- * take the helm's remembered last-used profile instead.
- *
- * SPEC.md: New does not silently choose a remembered profile. The dialog
- * used to consume the first catalog's remembered id once, which was
- * invisible for an ordinary New (it starts on the command path) but not for
- * a profile clone opened before the catalog read landed: switching launch
- * mode in that window hands the agent choice to the user, so the clone's
- * own profile is never applied, and the late catalog then selected the
- * remembered profile — a launch nobody chose, under a picker that looked
- * like a deliberate selection.
- */
-test("a clone whose profile was never applied does not take the remembered profile", async ({ page, request }) => {
-  const stamp = Date.now();
-  const cloned = await createProfile(request, { name: `clone-unapplied-a-${stamp}` });
-  const remembered = await createProfile(request, { name: `clone-unapplied-b-${stamp}` });
-  const source = await createSession(request, {
-    title: `clone-unapplied-source-${stamp}`,
-    cwd: "/tmp",
-    profile_id: cloned.id,
-  });
-  // Created second so the helm remembers B, a profile that still exists: a
-  // form still consuming the remembered default would select it.
-  const rememberedShift = await createSession(request, {
-    title: `clone-unapplied-remembered-${stamp}`,
-    cwd: "/tmp",
-    profile_id: remembered.id,
-  });
-  const catalogGate = routeGate();
-  let catalogGets = 0;
-  const catalogMatcher = (url: URL) => url.pathname === "/api/profiles";
-  const catalogHandler = async (route: import("@playwright/test").Route) => {
-    if (route.request().method() === "GET") {
-      catalogGets += 1;
-      await catalogGate.wait();
-    }
-    // Swallowed deliberately: a handler still held at teardown resumes after
-    // the page closes, and its target-closed rejection is not this test's
-    // failure. Nothing else runs here, so there is nothing to drain.
-    await route.continue().catch(() => {});
-  };
-  try {
-    await expect
-      .poll(async () => (await listProfiles(request)).default_profile, { timeout: 20_000 })
-      .toBe(remembered.id);
-    await page.route(catalogMatcher, catalogHandler);
-    await page.goto("/");
-    const sourceRow = row(page, source.id);
-    await expect(sourceRow).toBeVisible({ timeout: 20_000 });
-    await openRowMenu(sourceRow);
-    await sourceRow.locator(".session-row-clone").click();
-
-    const form = page.locator(".create-session-form");
-    const picker = form.locator(".create-session-profile");
-    await expect(form).toBeVisible();
-    // Fixture premise: the catalog read is still held, so the clone's own
-    // profile cannot have been applied yet.
-    await expect.poll(() => catalogGets).toBeGreaterThan(0);
-    await expect(form.locator(".create-session-profile-note")).toContainText("have not been read yet");
-
-    // Choosing the launch mode is the user taking over the agent decision.
-    await chooseCommandMode(form);
-    catalogGate.release();
-
-    // Consumption receipt: the late catalog's options rendered.
-    await expect(picker.locator(`option[value="${remembered.id}"]`)).toHaveCount(1, { timeout: 20_000 });
-    await expect(picker, "the remembered profile must not be chosen for the user").toHaveValue(
-      "__unresolved__",
-    );
-    await expect(form.locator(".create-session-profile-note")).toContainText("no agent is selected");
-    await expect(form.locator(".create-session-submit")).toBeDisabled();
-  } finally {
-    catalogGate.release();
-    await page.unroute(catalogMatcher, catalogHandler);
-    await cleanupSession(request, rememberedShift.id);
-    await cleanupSession(request, source.id);
-    await cleanupProfile(request, cloned.id);
-    await cleanupProfile(request, remembered.id);
-  }
-});
-
-/**
- * A deleted profile is not evidence for substituting another profile. Clone
- * must keep the source invocation exact and surface command mode so a person
- * can review or edit the fallback before a request is sent.
- */
-test("a clone of a missing-profile session opens other command with its exact invocation", async ({ page, request }) => {
-  const invocation = FAKE_AGENT.replace("--script basic", "--script altscreen");
-  const profile = await createProfile(request, {
-    name: `clone-missing-profile-${Date.now()}`,
-    invocation,
-  });
-  const source = await createSession(request, {
-    title: `clone-missing-profile-source-${Date.now()}`,
-    cwd: "/tmp",
-    profile_id: profile.id,
-  });
-  try {
-    await cleanupProfile(request, profile.id);
-    await page.goto("/");
-    const sourceRow = row(page, source.id);
-    await expect(sourceRow).toBeVisible({ timeout: 20_000 });
-    await openRowMenu(sourceRow);
-    await sourceRow.locator(".session-row-clone").click();
-
-    const form = page.locator(".create-session-form");
-    await expect(form).toHaveAttribute("data-composer-mode", "command");
-    await expect(form.locator(".create-session-profile")).toHaveValue("");
-    await expect(form.getByLabel("agent command")).toHaveValue(invocation);
-  } finally {
-    await cleanupSession(request, source.id);
-    await cleanupProfile(request, profile.id);
   }
 });
 
