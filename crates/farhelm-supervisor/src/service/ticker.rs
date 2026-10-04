@@ -720,7 +720,7 @@ impl TickerHandle {
     /// a whole host's sessions offline over best-effort bookkeeping. What
     /// is NOT acceptable is silence — a dead ticker means capture quietly
     /// stops advancing for any session nobody polls, and the first symptom
-    /// would be a restart offering a fresh launch where a resume was
+    /// would be Restart reading as unavailable where a resume was
     /// expected.
     ///
     /// Cancellation-safe: `serve`'s other arm routinely wins the race and

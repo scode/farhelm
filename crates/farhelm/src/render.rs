@@ -149,15 +149,18 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
     }
 }
 
-/// The mode spelling a session row offers to `farhelm agent restart`.
+/// A session row's OFFER cell: `resume` when `farhelm agent restart` can
+/// resume the session's conversation, otherwise why it cannot.
 ///
-/// It is deliberately only the non-secret enum: the command, template, and
-/// captured locator that implement an offer stay on the target supervisor.
-fn restart_offer_cell(offer: farhelm_proto::RestartOffer) -> &'static str {
+/// `resume` keeps the spelling earlier releases printed, so an agent taught
+/// to restart a row whose OFFER reads `resume` keeps reading the column
+/// correctly. It is deliberately only the non-secret enum: the command and
+/// captured locator that implement a resume stay on the target supervisor.
+pub(crate) fn restart_offer_cell(offer: farhelm_proto::RestartOffer) -> &'static str {
     match offer {
-        farhelm_proto::RestartOffer::FreshOnly => "fresh",
         farhelm_proto::RestartOffer::Resume => "resume",
-        farhelm_proto::RestartOffer::FallbackTemplate => "fallback-template",
+        farhelm_proto::RestartOffer::NotCaptured => "not-captured",
+        farhelm_proto::RestartOffer::NoConversationReporting => "no-reporting",
     }
 }
 
@@ -460,8 +463,8 @@ mod tests {
             rendered,
             [
                 " ID HOST TITLE CWD AGENT  STATUS  OFFER",
-                " s1 h    café  /w  claude running fresh",
-                " s2 h    tea   /w  claude running fresh",
+                " s1 h    café  /w  claude running not-captured",
+                " s2 h    tea   /w  claude running not-captured",
                 "",
             ]
             .join("\n")

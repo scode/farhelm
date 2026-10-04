@@ -14,7 +14,7 @@ use crate::harness::*;
 use farhelm_helm::CreateExtras;
 use farhelm_proto::{
     AgentKind, AgentReply, ControlMsg, LaunchEffort, LaunchHarness, LaunchPermission,
-    LaunchSelection, RestartMode,
+    LaunchSelection,
 };
 
 /// An owned named executable plus the working directory it must outlive.
@@ -790,36 +790,35 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             .expect("created session remains stored");
         assert_eq!(stored.launch, Some(selection.clone()));
 
-        // Cursor and the launch-only Grok kind retain launch choices across a
-        // fresh process generation, but neither may invent conversation Resume.
-        if matches!(
-            selection.harness,
-            LaunchHarness::Cursor | LaunchHarness::Grok
-        ) {
-            assert_eq!(live.restart_offer, farhelm_proto::RestartOffer::FreshOnly);
-            let restarted = h
-                .client
-                .restart_session(&created.id, RestartMode::Fresh, true)
-                .await
-                .expect("fresh-restart launch-only fixture");
-            assert_eq!(restarted.launch, Some(selection.clone()));
-            assert_forwarded(&observed_argv(&h, &created.id, 3).await, &selection);
+        // Cursor has no conversation reporting, and the Grok fixture never
+        // reports: neither may invent Resume, so Restart is unavailable
+        // rather than relaunching fresh (SPEC.md, Lifecycle operations).
+        if selection.harness == LaunchHarness::Cursor {
+            assert_eq!(
+                live.restart_offer,
+                farhelm_proto::RestartOffer::NoConversationReporting
+            );
+            assert_restart_refused(&h, &created.id).await;
+        }
+        if selection.harness == LaunchHarness::Grok {
+            assert_eq!(live.restart_offer, farhelm_proto::RestartOffer::NotCaptured);
+            assert_restart_refused(&h, &created.id).await;
         }
 
         if selection.harness == LaunchHarness::Muse {
             explicit_muse_id = Some(created.id.clone());
             assert_eq!(
                 live.restart_offer,
-                farhelm_proto::RestartOffer::FreshOnly,
-                "Muse remains Generic and fresh-only; this fixture must not invent resume support"
+                farhelm_proto::RestartOffer::NoConversationReporting,
+                "Muse remains Generic; this fixture must not invent resume support"
             );
         }
         if selection.harness == LaunchHarness::OpenCode {
             explicit_opencode_id = Some(created.id.clone());
             assert_eq!(
                 live.restart_offer,
-                farhelm_proto::RestartOffer::FreshOnly,
-                "OpenCode remains Generic and fresh-only; this fixture must not invent resume support"
+                farhelm_proto::RestartOffer::NoConversationReporting,
+                "OpenCode remains Generic; this fixture must not invent resume support"
             );
         }
     }
@@ -835,16 +834,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
         .find(|session| session.id == explicit_muse_id)
         .expect("the explicitly created Muse session is listed");
     assert_eq!(muse.id, explicit_muse_id);
-    let restarted = h
-        .client
-        .restart_session(&muse.id, RestartMode::Fresh, true)
-        .await
-        .expect("fresh-restart the ready Muse process");
-    assert_eq!(restarted.launch, muse.launch);
-    assert_forwarded(
-        &observed_argv(&h, &muse.id, 3).await,
-        muse.launch.as_ref().unwrap(),
-    );
+    assert_restart_refused(&h, &muse.id).await;
 
     // OpenCode carries a structured selection through the same persistence
     // path, but it deliberately has no conversation identity to resume.
@@ -858,15 +848,29 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
         .into_iter()
         .find(|session| session.id == opencode_id)
         .expect("the explicitly created OpenCode session is listed");
-    let restarted = h
+    assert_restart_refused(&h, &opencode.id).await;
+}
+
+/// Restart of a session that cannot resume is refused as a `Conflict`, and
+/// launches nothing: the durable generation does not move.
+async fn assert_restart_refused(h: &Harness, id: &str) {
+    let before = snapshot_of(h, id).await.generation;
+    let error = h
         .client
-        .restart_session(&opencode.id, RestartMode::Fresh, true)
+        .restart_session(id, true)
         .await
-        .expect("fresh-restart the ready OpenCode process");
-    assert_eq!(restarted.launch, opencode.launch);
-    assert_forwarded(
-        &observed_argv(&h, &opencode.id, 2).await,
-        opencode.launch.as_ref().unwrap(),
+        .expect_err("a session that cannot resume must not restart");
+    assert_eq!(
+        error
+            .downcast_ref::<SupervisorError>()
+            .expect("the refusal carries its classification")
+            .kind,
+        ErrorKind::Conflict
+    );
+    assert_eq!(
+        snapshot_of(h, id).await.generation,
+        before,
+        "a refused restart opens no relaunch generation"
     );
 }
 

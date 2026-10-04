@@ -4922,7 +4922,7 @@ pub(super) fn CreateSessionForm(
                             }
                         }
                         if cursor_launch {
-                            p { "Cursor session tracking and Resume are not supported. Restart starts a new conversation." }
+                            p { "Cursor session tracking and Resume are not supported." }
                         }
                         if *creation_surface.read() == CreationSurface::Legacy {
             // The agent, offered from the helm catalog. It never defaults to

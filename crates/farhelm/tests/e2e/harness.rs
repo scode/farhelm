@@ -1116,6 +1116,77 @@ pub(crate) async fn basic_session(h: &Harness) -> (SessionInfo, farhelm_teststat
     (session, work)
 }
 
+/// The conversation id [`create_resumable_session`] records.
+pub(crate) const RESUMABLE_TEST_CONVERSATION: &str = "conv-test";
+
+/// Create a session running `invocation` that Restart can resume, and return
+/// the create reply.
+///
+/// Restart only ever resumes a captured conversation (SPEC.md), so tests of
+/// restart mechanics need a session that offers Resume without depending on
+/// a real agent's report. The session declares itself Goose and runs
+/// `invocation` under `sh -c 'exec …'`; its resume command runs the same
+/// line and passes the conversation id as a positional argument the shell
+/// ignores. The conversation is then bound through the supervisor's
+/// `test-seams` recording seam. Goose because it has no screen reader of
+/// its own (status reads exactly as for a plain command), adds nothing to a
+/// launch whose program is not `goose`, and does not verify a resume target
+/// on disk. `invocation` must be a single command `exec` can run, such as a
+/// [`fixture_cmd`] line.
+pub(crate) async fn create_resumable_session(
+    h: &Harness,
+    cwd: &str,
+    invocation: &str,
+    cols: u16,
+    rows: u16,
+) -> SessionInfo {
+    let line = format!("exec {invocation}");
+    let created = h
+        .client
+        .create_session_with_extras(
+            cwd,
+            &format!("sh -c {}", shell_words::quote(&line)),
+            None,
+            cols,
+            rows,
+            farhelm_helm::CreateExtras {
+                agent_kind: Some(farhelm_proto::AgentKind::Goose),
+                resume_template: Some(vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    line,
+                    "farhelm-test-resume".to_string(),
+                    "{conversation}".to_string(),
+                ]),
+                ..farhelm_helm::CreateExtras::default()
+            },
+        )
+        .await
+        .expect("create a resumable session");
+    h.sup
+        .record_conversation_for_test(&created.id, RESUMABLE_TEST_CONVERSATION)
+        .await;
+    created
+}
+
+/// [`basic_session`], but resumable: the same fake agent through
+/// [`create_resumable_session`], for tests that restart it.
+pub(crate) async fn resumable_basic_session(
+    h: &Harness,
+) -> (SessionInfo, farhelm_teststate::TestDir) {
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = create_resumable_session(
+        h,
+        &work.path().to_string_lossy(),
+        &fixture_cmd("fake-agent --script basic"),
+        80,
+        24,
+    )
+    .await;
+    wait_for_agent_ready(&h.state.path().join("tmux.sock"), &session.id).await;
+    (session, work)
+}
+
 /// Poll `list_sessions` until `session_id`'s status is no longer LIVE,
 /// returning the settled `SessionInfo`.
 ///

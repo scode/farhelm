@@ -179,7 +179,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered profile defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_36` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_37` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -190,7 +190,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 36;
+pub const PROTOCOL_VERSION: u32 = 37;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -1002,13 +1002,12 @@ pub struct SessionInfo {
     /// this file; `SessionInfo`'s OWN `title` above is a required
     /// `String`, not a comparable case).
     pub annotation: Option<String>,
-    /// What restarting THIS session would currently do to the agent's
-    /// conversation — see [`RestartOffer`]'s own docs for what it means
-    /// and why it lives here rather than behind a dedicated query message
-    /// (PLAN_M3.md item 9's open design question, resolved in this PR).
-    /// `#[serde(default)]` keeps it additive: an old sender's JSON has no
-    /// `restart_offer` at all and decodes to the safe `FreshOnly` default
-    /// rather than an invented "captured" claim.
+    /// Whether restarting THIS session can currently resume its own
+    /// conversation, and why not when it cannot — see [`RestartOffer`]'s
+    /// own docs for what it means and why it lives here rather than behind
+    /// a dedicated query message. `#[serde(default)]` decodes a missing
+    /// field to the safe `NotCaptured` rather than an invented "captured"
+    /// claim.
     #[serde(default)]
     pub restart_offer: RestartOffer,
     /// The session's terminal tabs, in creation order (PLAN_M4.md item
@@ -1486,9 +1485,10 @@ pub struct Profile {
     /// outcomes, decided by `agent_kind`: for a kind with an integration
     /// the supervisor derives that integration's default template, while
     /// for `Generic` there is no integration to derive from and `None`
-    /// simply means no resume template — restart falls back to a fresh
-    /// launch per SPEC.md. Identical in its `{conversation}` placement
-    /// rule to [`ControlMsg::CreateSession::resume_template`] — see that
+    /// simply means no resume template; such a session cannot be restarted
+    /// either way, because Generic captures no conversation. Identical in its
+    /// `{conversation}` placement rule to
+    /// [`ControlMsg::CreateSession::resume_template`] — see that
     /// field for the exact-equality rule and for which kinds require a
     /// placeholder. An element equal to `{cwd}` is the session's working
     /// directory under that same rule, so a resume through a launcher
@@ -1497,71 +1497,94 @@ pub struct Profile {
     pub resume_template: Option<Vec<String>>,
 }
 
-/// What restarting a session would do to the agent's conversation, as the
-/// supervisor currently understands it from the session's snapshot
-/// (PLAN_M3.md item 7) and its captured conversation identity (item 8) —
-/// never re-derived by a client, which cannot see either.
+/// Whether restarting a session can resume its own conversation, and when it
+/// cannot, why — as the supervisor currently understands it from the
+/// session's snapshot and its captured conversation identity. Never
+/// re-derived by a client, which can see neither.
+///
+/// SPEC.md: "Restart always means the conversation is preserved." Restart is
+/// offered only when the session can resume ([`RestartOffer::Resume`]);
+/// every other variant is a reason Restart and Restart with are
+/// unavailable, which the UI shows in their tooltips and the agent CLI shows
+/// in its listing. There is deliberately no variant for "restart, but
+/// fresh" or "restart into some other command": a restart that silently
+/// loses the conversation is a bug in SPEC.md's terms, so the shape cannot
+/// express one.
 ///
 /// ## Design decision: on `SessionInfo`, not a dedicated query message
 ///
-/// PLAN_M3.md item 9 requires the UI to know, BEFORE it even asks the user
-/// to confirm a restart, what restarting would offer: resume the captured
-/// conversation, fall back to an explicit placeholder-free template, or
-/// offer only a fresh launch. Item 9 itself is silent on HOW that
-/// knowledge reaches the client; "without a second round trip" is this
-/// design's own chosen tradeoff (spelled out in the PR brief that shaped
-/// this vocabulary), not a requirement PLAN_M3.md states. The alternative
-/// shape considered was a dedicated `QueryRestartOffer`/`RestartOfferReply`
-/// request pair, and it was rejected: opening a session (or just having
+/// A client must know BEFORE it asks the user to confirm a restart whether
+/// there is anything to restart into. Opening a session (or just having
 /// listed sessions at all) already means the client holds that session's
-/// `SessionInfo`, so a second round trip would exist ONLY to answer a
-/// question the supervisor could have answered for free while building
-/// the reply it was sending anyway. The cost of embedding is symmetric
-/// and small: every `SessionInfo` in every `ListSessions` reply now
-/// carries a few bytes of enum whether or not the viewer ever opens a
-/// restart dialog for that particular session, which is negligible
-/// next to the round trip it buys back universally.
+/// `SessionInfo`, so a dedicated `QueryRestartOffer` request pair would
+/// exist ONLY to answer a question the supervisor could have answered for
+/// free while building the reply it was sending anyway. The cost of
+/// embedding is a few bytes of enum per listed session.
 ///
-/// The other half of item 9's "know before asking" requirement — whether
-/// to SHOW a confirm-stop dialog because the agent looks busy — needed no
-/// new field here either: since protocol 34 it is exactly "is `status`
-/// [`SessionStatus::Running`]" (the agent is working), already answerable
-/// from this struct. That is deliberately
-/// only ever a UI-flow HINT, never an authorization, precisely because
-/// this same `SessionInfo` can go stale between being cached and a
-/// `RestartSession` actually being sent: the AUTHORIZATION to stop a
-/// session that turns out to be working at handling time is a separate,
-/// explicit field on the request itself
-/// (`ControlMsg::RestartSession::stop_if_running`) that the supervisor
-/// checks against the liveness and activity it reads at that moment — see that field's
-/// docs for why deriving consent from a client-cached status would be a
-/// TOCTOU bug, not just a redundant one.
+/// Whether to SHOW a confirm-stop dialog because the agent looks busy
+/// needs no field here either: it is exactly "is `status`
+/// [`SessionStatus::Running`]". That is only ever a UI-flow HINT, never an
+/// authorization, because this `SessionInfo` can go stale before a
+/// `RestartSession` is sent; the authorization to stop a working agent is
+/// the request's own `stop_if_running`, checked by the supervisor at
+/// handling time.
 ///
-/// Every variant is a unit variant carrying no data, so — like
-/// `ErrorKind` and `AgentKind` above, and unlike `SessionStatus` (which
-/// needs an internal tag because some of ITS variants carry fields) —
-/// this serializes as a bare snake_case string, not a tagged object.
+/// Every variant is a unit variant, so this serializes as a bare
+/// snake_case string. `resume` keeps the spelling earlier releases used, so
+/// an agent taught to restart a session whose `restart_offer` is `resume`
+/// keeps reading the field correctly (SPEC_impl.md, "What running sessions
+/// hold across versions"); the reasons are new spellings that replace the
+/// removed `fresh_only` and `fallback_template`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RestartOffer {
-    /// No captured conversation identity, and no explicit placeholder-free
-    /// resume-template override either: restart can only offer a fresh
-    /// launch. `#[default]` is deliberate, not just convenient — it is the
-    /// safe reading for any session this field does not (yet) describe an
-    /// old sender's session, or one this exact build has not finished
-    /// classifying — because defaulting toward "captured" would risk
-    /// exactly the silently-wrong-conversation resume SPEC.md forbids.
-    #[default]
-    FreshOnly,
-    /// The session's own conversation was captured (item 8): restart fills
-    /// the snapshot's resume template with that identity and resumes it.
+    /// The session's own conversation was captured and can be resumed:
+    /// Restart and Restart with are available, and restart fills the
+    /// session's resume command with that identity.
     Resume,
-    /// No captured identity, but the session's snapshot carries an
-    /// explicit, placeholder-free resume-template override (item 7):
-    /// restart runs that template verbatim. Kept distinct from
-    /// `FreshOnly` because the user deliberately configured this
-    /// fallback; the UI must not describe it as a plain fresh launch.
-    FallbackTemplate,
+    /// The session's agent type reports conversations, but no conversation
+    /// Farhelm can resume has been captured: the report never arrived, the
+    /// harness was not set up to report, or what was captured cannot be
+    /// verified as this session's own (an identity from before ownership
+    /// proofs, or a saved file that no longer matches). `#[default]` because
+    /// it is the safe reading for a session this build has not finished
+    /// classifying: defaulting toward `Resume` would risk exactly the
+    /// wrong-conversation resume SPEC.md forbids.
+    #[default]
+    NotCaptured,
+    /// Farhelm has no conversation reporting for this session's agent: the
+    /// agent type is one Farhelm cannot resume (Cursor, Muse, OpenCode), or
+    /// the session runs a command Farhelm does not know as an agent type.
+    NoConversationReporting,
+}
+
+impl RestartOffer {
+    /// Whether Restart (and Restart with) is available at all.
+    pub fn can_restart(self) -> bool {
+        matches!(self, RestartOffer::Resume)
+    }
+
+    /// Why Restart is unavailable, as one user-facing sentence, or `None`
+    /// when it is available.
+    ///
+    /// The supervisor's refusals of Restart and Restart with use it, so the
+    /// reason a client shows after a refused request is the one the
+    /// supervisor decided. The UI words the same reasons in its own tooltips
+    /// (lowercase, with its own surrounding sentence), and the agent CLI
+    /// prints the variant's spelling.
+    pub fn unavailable_reason(self) -> Option<&'static str> {
+        match self {
+            RestartOffer::Resume => None,
+            RestartOffer::NotCaptured => Some(
+                "Restart needs this session's own conversation, and none that Farhelm can resume \
+                 has been captured; Replace starts the session over",
+            ),
+            RestartOffer::NoConversationReporting => Some(
+                "Restart needs this session's own conversation, and Farhelm has no conversation \
+                 reporting for its agent; Replace starts the session over",
+            ),
+        }
+    }
 }
 
 crate::enum_with_all! {
@@ -1747,48 +1770,6 @@ pub const UPLOAD_WINDOW_BYTES: u64 = 4 * 1024 * 1024;
 /// as a bare cause: one line, user-legible, no leading "aborted:".
 pub const UPLOAD_ABORT_REASON_STALLED: &str = "transfer stopped making progress (stalled)";
 
-/// The user's chosen resolution on a `ControlMsg::RestartSession` request.
-/// Shares its three shapes with [`RestartOffer`] but is the opposite
-/// direction: `RestartOffer` is the SERVER telling the client what is
-/// possible; `RestartMode` is the CLIENT telling the server what to do.
-/// Like [`RestartOffer`], every variant is a unit variant, so this is a
-/// bare snake_case string on the wire, not a tagged object.
-///
-/// ## Must match the CURRENT offer, not a cached one
-///
-/// A well-behaved client only ever sends `Resume` or `FallbackTemplate`
-/// when the session's own `RestartOffer` said that capability exists —
-/// but see `ControlMsg::RestartSession`'s "offer/mode staleness contract"
-/// doc for why the supervisor, not client good behavior, is what actually
-/// enforces this: the offer the client saw can be stale by request time,
-/// so the handler (PLAN_M3.md item 9, not this PR) validates `mode`
-/// against the CURRENT offer and rejects a mismatch with `Conflict`
-/// rather than trusting the request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RestartMode {
-    /// Resume the captured conversation through the snapshot's resume
-    /// template. Only valid when the CURRENT offer is `Resume`.
-    Resume,
-    /// Launch a fresh, unrelated agent process in the same working
-    /// directory. Valid ONLY when the current offer is `FreshOnly` — NOT
-    /// a way to decline an available resume: SPEC.md's restart never
-    /// downgrades a resumable session to a clean conversation ("no
-    /// fresh-restart variant in v1... for a clean conversation, create a
-    /// new session in the same directory"), so a client cannot legally
-    /// choose `Fresh` over `Resume` when `Resume` was offered — there is
-    /// no "user chose not to resume" case, only "there was nothing to
-    /// resume." A `Fresh` sent against a `Resume`/`FallbackTemplate`
-    /// offer is exactly the staleness case above and gets `Conflict`.
-    Fresh,
-    /// Run the snapshot's explicit, placeholder-free resume-template
-    /// override verbatim. Only a valid choice when
-    /// `RestartOffer::FallbackTemplate` was offered; PLAN_M3.md item 9
-    /// reserves this for the case item 7 describes (an explicitly
-    /// overridden template on a non-integrated kind).
-    FallbackTemplate,
-}
-
 /// What an agent inside a session is asking the helm for
 /// ([`ControlMsg::AgentRequest`]).
 ///
@@ -1872,15 +1853,15 @@ pub enum AgentVerb {
         session_id: Option<String>,
     },
     /// Relaunch one session through the owning supervisor's ordinary
-    /// restart lifecycle. The chosen mode must match the CURRENT offered
-    /// capability, and a live target is stopped only when the caller sends
-    /// explicit consent. Answered with [`AgentReply::Restarted`].
+    /// restart lifecycle, resuming its own conversation. The target must
+    /// CURRENTLY offer [`RestartOffer::Resume`] (it revalidates rather than
+    /// trusting the caller's discovery), and a live target is stopped only
+    /// when the caller sends explicit consent. There is no mode: restart
+    /// only ever resumes (protocol 37). Answered with
+    /// [`AgentReply::Restarted`].
     Restart {
         /// The exact target id, including for an intentional self action.
         session_id: Option<String>,
-        /// The restart behavior the caller chose from discovery. The target
-        /// revalidates it rather than trusting a cached offer.
-        mode: RestartMode,
         /// Permission to stop a target found working at handling time. False
         /// is a refusal for a working target, not a request to wait or
         /// retry; a live target that is idle, waiting, or unknown is
@@ -2226,7 +2207,7 @@ pub struct AgentProfile {
 /// The same narrowing rule [`AgentHost`] follows: what an agent can name,
 /// reason about, or act on later, and nothing else. Timestamps, parentage,
 /// and tabs remain private; `restart_offer` is included because an agent
-/// must deliberately choose the only legal restart mode without learning a
+/// must know whether a restart can resume, and why not, without learning a
 /// resume template, conversation locator, or launch command.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentSession {
@@ -2291,15 +2272,11 @@ pub struct AgentSession {
     /// never on the id alone (see [`AgentHost::current`] for who computes
     /// this and how).
     pub current: bool,
-    /// The currently advertised non-secret restart capability. It tells a
-    /// caller which mode may be requested, but not the command or captured
-    /// conversation that would implement it; the target still revalidates
-    /// the offer immediately before it mutates anything.
-    ///
-    /// `FreshOnly` names the discovery offer, while `fresh` is the CLI
-    /// spelling of [`RestartMode::Fresh`]. That mode is valid only while
-    /// the current offer remains `FreshOnly`; it cannot decline or replace
-    /// an available `Resume` or `FallbackTemplate` offer.
+    /// The currently advertised non-secret restart capability: `resume`
+    /// when a restart is possible, otherwise the reason it is not. It names
+    /// neither the command nor the captured conversation that would
+    /// implement a resume; the target still revalidates the offer
+    /// immediately before it mutates anything.
     pub restart_offer: RestartOffer,
     /// True when this row is last-known knowledge rather than a live
     /// report — the host it belongs to is not currently connected.
@@ -2601,15 +2578,13 @@ pub enum ControlMsg {
         /// exact-equality rule — `{cwd}` does not satisfy it, since a
         /// template that cannot name the conversation could only discard
         /// the identity the session captured. A template with no
-        /// `{conversation}` is valid only on a non-integrated kind, where
-        /// it is the fallback resume invocation run verbatim apart from
-        /// placeholder substitution: `{cwd}` is still filled in it, like
-        /// in every other launch (SPEC.md's "falls back to the profile's
-        /// resume invocation verbatim apart from placeholder
-        /// substitution"). This crate does not enforce that invariant itself
-        /// (it is vocabulary, not validation); the supervisor's create
-        /// handler is where it will be checked once item 7 lands, and this
-        /// exact-equality wording is what keeps that future validator from
+        /// `{conversation}` is still accepted on a non-integrated kind and
+        /// stored, but never run: restart only ever resumes a captured
+        /// conversation, and a non-integrated kind captures none (protocol
+        /// 37 removed the fallback restart that once ran it verbatim). This
+        /// crate does not enforce the invariant itself (it is vocabulary,
+        /// not validation); the supervisor's create handler checks it, and
+        /// this exact-equality wording is what keeps that validator from
         /// having to guess which reading was intended.
         resume_template: Option<Vec<String>>,
         /// Profile identity the helm resolved with this invocation. It is
@@ -2937,34 +2912,30 @@ pub enum ControlMsg {
     /// lets the supervisor tell "the user agreed to stop a working agent"
     /// apart from "the client forgot to ask."
     ///
-    /// ## Offer/mode staleness contract
+    /// ## Offer staleness contract
     ///
     /// `SessionInfo::restart_offer` is a snapshot the client cached from
-    /// its last `ListSessions` or `SessionCreated`/`SessionRestarted`
-    /// reply; conversation capture (PLAN_M3.md item 8) can upgrade a
-    /// session's real offer — `FreshOnly` to `Resume` — asynchronously,
-    /// after that snapshot was taken and before this request arrives.
-    /// The handler (item 9, not this PR) must therefore validate `mode`
-    /// against the supervisor's CURRENT offer at handling time, not trust
-    /// the client's stale copy: a mismatch is rejected with `Conflict`,
-    /// and the client is expected to refresh its `SessionInfo` (polling
-    /// already exists for this) and re-present the (possibly changed)
-    /// offer to the user rather than retry blindly. This contract is
-    /// written here, at the vocabulary level, specifically so the item 9
-    /// handler cannot be implemented against a softer reading — see
-    /// [`RestartMode::Fresh`]'s own docs for the one-directional
-    /// consequence this has for that variant.
+    /// its last listing; conversation capture can make a session resumable
+    /// asynchronously, and a withdrawn report or a failed file check can
+    /// make it unresumable, after that snapshot was taken and before this
+    /// request arrives. The handler therefore checks the supervisor's
+    /// CURRENT offer at handling time rather than trusting the client's
+    /// copy: anything but [`RestartOffer::Resume`] is refused with
+    /// `Conflict` naming the reason, and the client is expected to refresh
+    /// its `SessionInfo` and re-present the changed state rather than retry
+    /// blindly. Nothing else is ever launched under this request: there is
+    /// no fresh restart and no fallback command (protocol 37 removed the
+    /// `mode` field that once chose between them).
     ///
-    /// The handler (PLAN_M3.md item 9) is live: it stops a still-running
-    /// agent when this request carries consent, reaps the prior run's
-    /// descendants, relaunches into the session's own terminal when it
-    /// survived, and replies `SessionRestarted`. Every refusal it can
-    /// make — a stale mode, a working agent without consent, a vanished or
+    /// The handler stops a still-running agent when this request carries
+    /// consent, reaps the prior run's descendants, relaunches into the
+    /// session's own terminal when it survived, and replies
+    /// `SessionRestarted`. Every refusal it can make — no resumable
+    /// conversation, a working agent without consent, a vanished or
     /// repointed working directory — leaves the session untouched.
     RestartSession {
         req_id: u64,
         session_id: String,
-        mode: RestartMode,
         /// Explicit consent to stop a working agent before relaunching
         /// (`#[serde(default)]` false — the safe direction: an old-shaped
         /// or naive request never kills a working process by accident).
@@ -4709,8 +4680,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_36() {
-        assert_eq!(PROTOCOL_VERSION, 36);
+    fn protocol_version_is_pinned_at_37() {
+        assert_eq!(PROTOCOL_VERSION, 37);
     }
 
     /// Pins the skew direction the detach-code bump exists to create, in
@@ -5528,7 +5499,7 @@ mod tests {
                 "invocation": "agent",
                 "status": { "state": "unknown" },
                 "annotation": null,
-                "restart_offer": "fresh_only",
+                "restart_offer": "not_captured",
                 "tabs": [],
                 "source_profile": null,
                 "github_repo": null,
@@ -5603,7 +5574,7 @@ mod tests {
         assert_eq!(decoded.annotation, None);
         assert_eq!(decoded.parent, None);
         assert_eq!(decoded.creation_seq, None);
-        assert_eq!(decoded.restart_offer, RestartOffer::FreshOnly);
+        assert_eq!(decoded.restart_offer, RestartOffer::NotCaptured);
         assert_eq!(
             decoded.tabs,
             Vec::new(),
@@ -5972,7 +5943,7 @@ mod tests {
         );
     }
 
-    /// `AgentKind`, `RestartOffer`, and `RestartMode` are bare snake_case
+    /// `AgentKind` and `RestartOffer` are bare snake_case
     /// strings (see their doc comments for why, unlike `SessionStatus`);
     /// `TerminalSelector` (PLAN_M4.md item 1) is internally tagged instead
     /// (see its own doc comment for why — `Tab` carries an id) but is
@@ -6019,35 +5990,26 @@ mod tests {
             );
         }
 
+        // `resume` keeps its earlier spelling on purpose: agents in running
+        // sessions were taught to read it (see `RestartOffer`'s docs).
         for offer in [
-            RestartOffer::FreshOnly,
             RestartOffer::Resume,
-            RestartOffer::FallbackTemplate,
+            RestartOffer::NotCaptured,
+            RestartOffer::NoConversationReporting,
         ] {
             let expected = match offer {
-                RestartOffer::FreshOnly => "fresh_only",
                 RestartOffer::Resume => "resume",
-                RestartOffer::FallbackTemplate => "fallback_template",
+                RestartOffer::NotCaptured => "not_captured",
+                RestartOffer::NoConversationReporting => "no_conversation_reporting",
             };
             assert_eq!(
                 serde_json::to_value(offer).unwrap(),
                 serde_json::json!(expected)
             );
-        }
-
-        for mode in [
-            RestartMode::Resume,
-            RestartMode::Fresh,
-            RestartMode::FallbackTemplate,
-        ] {
-            let expected = match mode {
-                RestartMode::Resume => "resume",
-                RestartMode::Fresh => "fresh",
-                RestartMode::FallbackTemplate => "fallback_template",
-            };
             assert_eq!(
-                serde_json::to_value(mode).unwrap(),
-                serde_json::json!(expected)
+                offer.can_restart(),
+                offer.unavailable_reason().is_none(),
+                "{offer:?}: an offer either restarts or says why it cannot"
             );
         }
 
@@ -6380,17 +6342,14 @@ mod tests {
     /// above is exercised at the JSON layer only, like `Attach`'s golden
     /// test, since those are simpler unnested shapes).
     ///
-    /// One mode suffices here (PLAN_M3 review batch item 9): each mode's
-    /// own serialized string is already golden-pinned individually by
-    /// `agent_kind_and_restart_vocabulary_json_shapes_are_pinned`, so this
-    /// test's only remaining job is proving the codec/serde frame path
-    /// itself does not drift, which does not depend on which mode is used.
+    /// This test's only job is proving the codec/serde frame path itself
+    /// does not drift; the JSON shape is pinned by
+    /// `restart_session_json_shape_is_pinned`.
     #[farhelm_testtrace::test]
     fn restart_session_roundtrips_through_frames() {
         let msg = ControlMsg::RestartSession {
             req_id: 42,
             session_id: "s1".to_string(),
-            mode: RestartMode::Resume,
             stop_if_running: true,
             invocation: None,
             launch: None,
@@ -6452,7 +6411,6 @@ mod tests {
         let msg = ControlMsg::RestartSession {
             req_id: 7,
             session_id: "s1".to_string(),
-            mode: RestartMode::Resume,
             stop_if_running: true,
             invocation: None,
             launch: None,
@@ -6464,7 +6422,6 @@ mod tests {
                 "type": "restart_session",
                 "req_id": 7,
                 "session_id": "s1",
-                "mode": "resume",
                 "stop_if_running": true,
             })
         );
@@ -6483,7 +6440,6 @@ mod tests {
             "type": "restart_session",
             "req_id": 1,
             "session_id": "s1",
-            "mode": "resume",
         });
         let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
         let ControlMsg::RestartSession {
@@ -6505,8 +6461,7 @@ mod tests {
         let absent = serde_json::json!({
             "type": "restart_session",
             "req_id": 1,
-            "session_id": "s1",
-            "mode": "resume"
+            "session_id": "s1"
         });
         let decoded: ControlMsg = serde_json::from_value(absent).unwrap();
         let ControlMsg::RestartSession {
@@ -6523,7 +6478,6 @@ mod tests {
         let msg = ControlMsg::RestartSession {
             req_id: 2,
             session_id: "s1".into(),
-            mode: RestartMode::Resume,
             stop_if_running: false,
             invocation: Some("claude --dangerously-skip-permissions".into()),
             launch: Some(LaunchSelection {
@@ -6736,7 +6690,7 @@ mod tests {
         let frame = Frame {
             kind: FrameKind::Control,
             channel: 0,
-            body: br#"{"type":"restart_session","req_id":9,"session_id":"s1","mode":"fresh","stop_if_running":false,"priority":"high"}"#
+            body: br#"{"type":"restart_session","req_id":9,"session_id":"s1","stop_if_running":false,"priority":"high"}"#
                 .to_vec(),
         };
         let msg = crate::io::parse_control(&frame)
@@ -6746,7 +6700,6 @@ mod tests {
             ControlMsg::RestartSession {
                 req_id: 9,
                 session_id: "s1".to_string(),
-                mode: RestartMode::Fresh,
                 stop_if_running: false,
                 invocation: None,
                 launch: None,
@@ -7185,7 +7138,7 @@ mod tests {
             "invocation": "agent",
             "status": { "state": "running" },
             "annotation": null,
-            "restart_offer": "fresh_only",
+            "restart_offer": "not_captured",
             "tabs": [],
             "source_profile": null,
             "github_repo": null,
@@ -8000,7 +7953,7 @@ mod tests {
                             "agent": "claude",
                             "status": "running",
                             "current": true,
-                            "restart_offer": "fresh_only",
+                            "restart_offer": "not_captured",
                             "stale": true,
                         }],
                     },
@@ -8136,14 +8089,13 @@ mod tests {
         );
 
         // Restart is a new tagged mutation, not a stop/create composition:
-        // the mode and live-stop consent must cross the relay together so
-        // the target can revalidate them under its lifecycle claim.
+        // the live-stop consent must cross the relay so the target can
+        // revalidate it, and the resume offer, under its lifecycle claim.
         let restart = ControlMsg::AgentRequest {
             req_id: 9,
             session_id: "s1".to_string(),
             request: AgentVerb::Restart {
                 session_id: Some("s2".to_string()),
-                mode: RestartMode::Resume,
                 stop_if_running: true,
             },
         };
@@ -8162,7 +8114,6 @@ mod tests {
                 "request": {
                     "verb": "restart",
                     "session_id": "s2",
-                    "mode": "resume",
                     "stop_if_running": true,
                 },
             })
@@ -8207,7 +8158,7 @@ mod tests {
                             "agent": "claude",
                             "status": "running",
                             "current": true,
-                            "restart_offer": "fresh_only",
+                            "restart_offer": "not_captured",
                             "stale": false,
                         },
                     },
@@ -8409,7 +8360,7 @@ mod tests {
                             "agent": "Claude Code",
                             "status": "running",
                             "current": false,
-                            "restart_offer": "fresh_only",
+                            "restart_offer": "not_captured",
                             "stale": false,
                         },
                     },

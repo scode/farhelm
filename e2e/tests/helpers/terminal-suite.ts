@@ -8,6 +8,7 @@ import { expect, test } from "./evidence";
 import fs from "node:fs";
 import path from "node:path";
 import { requireHelmBuild } from "./helm-build";
+import { createResumableSession } from "./fleet";
 import { stackScratchDir } from "./scratch";
 import { attachSession, waitForTermText } from "./term";
 import { waitForSessionRevealed } from "./terminal-readiness";
@@ -390,9 +391,15 @@ const tabSessionDirs: string[] = [];
 export async function createTabSession(
   request: APIRequestContext,
   title: string,
+  options: { resumable?: boolean } = {},
 ): Promise<{ id: string; cwd: string }> {
   const cwd = stackScratchDir("fh-tabs-");
   tabSessionDirs.push(cwd);
+  // `resumable` for a test that restarts the agent: Restart only resumes,
+  // so the session has to report a conversation (see `createResumableSession`).
+  if (options.resumable) {
+    return { id: (await createResumableSession(request, { cwd, title })).id, cwd };
+  }
   const created = await request.post("/api/sessions", {
     data: { cwd, invocation: FAKE_AGENT_INVOCATION, title },
   });

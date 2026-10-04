@@ -66,8 +66,8 @@ use crate::tmux::{
 };
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, ProfileExistence, RestartMode,
-    RestartOffer, SessionInfo, SessionStatus, SourceProfile, TabInfo,
+    AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, ProfileExistence, RestartOffer,
+    SessionInfo, SessionStatus, SourceProfile, TabInfo,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -2867,9 +2867,9 @@ fn republished_terminal(
 /// previous entry keeps describing the previous run, and its durable
 /// writes are rejected rather than silently landing on this one.
 ///
-/// `reset_capture` mirrors [`SessionStore::begin_relaunch`]: a fresh launch
-/// loses the old identity, while Resume keeps the conversation it will enter.
-/// The first-input diagnostic anchor resets on every launch, including Resume.
+/// The capture state carries over, mirroring [`SessionStore::begin_relaunch`]:
+/// every restart resumes, and keeps the conversation it will enter. The
+/// first-input diagnostic anchor resets on every launch.
 ///
 /// Every RUN-SCOPED mutable cell is fresh here — new `Arc`s, never the
 /// previous entry's — even where the VALUE is carried over. That isolation
@@ -2892,18 +2892,13 @@ fn relaunched_entry(
     generation: i64,
     scope: Option<String>,
     outcome: LastOutcome,
-    reset_capture: bool,
 ) -> Arc<SessionEntry> {
-    let capture = if reset_capture {
-        CaptureState::Unclaimed
-    } else {
-        entry
-            .run
-            .capture
-            .lock()
-            .expect("capture mutex poisoned")
-            .clone()
-    };
+    let capture = entry
+        .run
+        .capture
+        .lock()
+        .expect("capture mutex poisoned")
+        .clone();
     Arc::new(SessionEntry {
         info,
         terminal,
@@ -2911,18 +2906,18 @@ fn relaunched_entry(
             outcome: Arc::new(std::sync::Mutex::new(outcome)),
             first_input: Arc::new(std::sync::Mutex::new(None)),
             capture: Arc::new(std::sync::Mutex::new(capture)),
-            // Fresh cells with fresh VALUES, on every relaunch and whatever
-            // `reset_capture` says. Both describe a LAUNCH's hook injection and the
-            // diagnostic spent on it, not the conversation: a launch this
-            // process has not spawned yet is not hooked until `with_hook_argv`
-            // says so, and `publish_relaunched` is what raises the flag when it
-            // did. Carrying them over a Resume would state something about the
+            // Fresh cells with fresh VALUES, on every relaunch. Both describe a
+            // LAUNCH's hook injection and the diagnostic spent on it, not the
+            // conversation: a launch this process has not spawned yet is not
+            // hooked until `with_hook_argv` says so, and `publish_relaunched`
+            // is what raises the flag when it did. Carrying them over would
+            // state something about the
             // new launch that only the old one had established, and would carry
             // a warning already spent — so a second broken launch of the same
             // session would trip the wire silently.
             hooked: hook_flag(false),
             hook_warned: hook_flag(false),
-            // Classification is never carried over, whatever `reset_capture` says: the stored
+            // Classification is never carried over, though the conversation is: the stored
             // reading and the unchanged-sample streak beside it both describe a
             // process that no longer exists. Inheriting them would classify the
             // replacement launch from its predecessor's screen — quiet because
@@ -3111,114 +3106,56 @@ fn restart_with_bundle_argv(
     Ok(argv)
 }
 
-/// The command a restart runs, and the validation of `mode` against the
-/// session's CURRENT offer that decides whether there is one at all
-/// (PLAN_M3.md item 9; `ControlMsg::RestartSession`'s staleness contract).
+/// The command a restart runs: the session's resume command filled with its
+/// captured conversation, or a refusal when the session's CURRENT offer is
+/// not [`RestartOffer::Resume`] (`ControlMsg::RestartSession`'s staleness
+/// contract).
+///
+/// SPEC.md: Restart always preserves the conversation, and when Farhelm
+/// knows it cannot resume, Restart is unavailable "rather than starting
+/// fresh or running some other command". So there is exactly one argv this
+/// can return. The refusal is a `Conflict` naming the offer's reason,
+/// because the client's next move is to refresh and show that reason
+/// rather than to retry.
 ///
 /// One function for both halves deliberately: the offer and the argv are
-/// two statements of the same fact, and computing them apart is how a
-/// build ends up validating against one answer and running the other. A
-/// pure function of the durable snapshot plus the launch invocation, so the
-/// whole mode/offer matrix is unit-testable without a supervisor.
+/// two statements of the same fact, and computing them apart is how a build
+/// ends up validating against one answer and running the other. A pure
+/// function of the durable snapshot, so it is unit-testable without a
+/// supervisor.
 ///
-/// The mode/offer pairing is exact in both directions — there is no
-/// "mode the user is allowed to downgrade to". `Fresh` against a `Resume`
-/// offer is refused for the reason SPEC.md gives ("no fresh-restart variant
-/// in v1 — for a clean conversation, create a new session in the same
-/// directory"), and `Resume` against a `FreshOnly` offer is refused because
-/// there is nothing to fill the template with — the case that would
-/// otherwise run a `{conversation}` placeholder unfilled, which SPEC.md
-/// forbids outright.
-///
-/// The `Conflict` names the CURRENT offer, because the client's next move
-/// is to re-present that offer to the user rather than to retry.
-///
-/// Whatever the mode, the vector that comes back has been through the
-/// shared executable-argv rule (`agent_kind::ensure_executable_argv`): all
-/// three sources are durable columns, and a restart is the moment a stored
-/// argv stops being data and becomes an exec.
-fn relaunch_argv(
-    mode: RestartMode,
-    snapshot: &SessionSnapshot,
-    invocation: &str,
-) -> anyhow::Result<Vec<String>> {
-    let expected = match snapshot.restart_offer {
-        RestartOffer::FreshOnly => RestartMode::Fresh,
-        RestartOffer::Resume => RestartMode::Resume,
-        RestartOffer::FallbackTemplate => RestartMode::FallbackTemplate,
-    };
-    if mode != expected {
+/// The vector that comes back has been through the shared executable-argv
+/// rule (`agent_kind::ensure_executable_argv`): it is built from durable
+/// columns, and a restart is the moment a stored argv stops being data and
+/// becomes an exec.
+fn relaunch_argv(snapshot: &SessionSnapshot) -> anyhow::Result<Vec<String>> {
+    if let Some(reason) = snapshot.restart_offer.unavailable_reason() {
         return Err(RequestError::new(
             ErrorKind::Conflict,
             format!(
-                "this session's restart offer is {}, not {}; refresh the session and \
-                 re-present the offer rather than retrying",
-                offer_wording(snapshot.restart_offer),
-                mode_wording(mode)
+                "this session cannot be restarted: {reason}. Refresh the session rather than \
+                 retrying"
             ),
         )
         .into());
     }
-    let argv = match mode {
-        // Already substituted, slot by slot, from the DURABLE identity
-        // (`IntegrationSnapshot::filled_resume_argv`) — never spliced into
-        // a command string, so an id cannot become a different command.
-        RestartMode::Resume => snapshot.resume_argv.clone().ok_or_else(|| {
-            anyhow::Error::new(RequestError::new(
-                ErrorKind::Internal,
-                "this session offers a resume but has no filled resume command; refusing to \
-                 relaunch rather than guessing one",
-            ))
-        }),
-        RestartMode::FallbackTemplate => snapshot.resume_template.clone().ok_or_else(|| {
-            anyhow::Error::new(RequestError::new(
-                ErrorKind::Internal,
-                "this session offers a fallback resume command but has no template; refusing \
-                 to relaunch rather than guessing one",
-            ))
-        }),
-        // The session's own launch invocation, parsed exactly as the
-        // create parsed it. A parse failure here means the stored
-        // invocation is not a command line any more, which is the caller's
-        // to fix (by creating a new session), not this build's to guess at.
-        RestartMode::Fresh => shell_words::split(invocation).map_err(|e| {
-            anyhow::Error::new(RequestError::new(
-                ErrorKind::InvalidRequest,
-                format!("this session's launch invocation no longer parses: {e}"),
-            ))
-        }),
-    }?;
-    // The last gate before an argv becomes a real exec, whichever of the
-    // three modes produced it. All three read from DURABLE columns — the
-    // launch invocation, the stored template, the substituted identity —
-    // and a row written by an older build (or edited by hand) can carry a
-    // vector that names no program or hides a NUL. The same rule profile
-    // writes enforce, applied where the vector is about to be run rather
-    // than only where it was accepted.
+    // Already substituted, slot by slot, from the DURABLE identity
+    // (`IntegrationSnapshot::filled_resume_argv`) — never spliced into a
+    // command string, so an id cannot become a different command.
+    let argv = snapshot.resume_argv.clone().ok_or_else(|| {
+        anyhow::Error::new(RequestError::new(
+            ErrorKind::Internal,
+            "this session offers a resume but has no filled resume command; refusing to \
+             relaunch rather than guessing one",
+        ))
+    })?;
+    // The last gate before an argv becomes a real exec. A row written by an
+    // older build (or edited by hand) can carry a vector that names no
+    // program or hides a NUL.
     crate::agent_kind::ensure_executable_argv("this session's restart command", &argv).map_err(
         |message| anyhow::Error::new(RequestError::new(ErrorKind::InvalidRequest, message)),
     )?;
     Ok(argv)
-}
-
-/// How an offer reads in a refusal aimed at a user. Deliberately prose
-/// rather than the wire spelling: this text lands in an HTTP body and a UI
-/// line, not in anything a client branches on (`ErrorKind` carries that).
-fn offer_wording(offer: RestartOffer) -> &'static str {
-    match offer {
-        RestartOffer::FreshOnly => "a fresh launch (no conversation was captured for it)",
-        RestartOffer::Resume => "resuming its captured conversation",
-        RestartOffer::FallbackTemplate => "its configured fallback resume command",
-    }
-}
-
-/// The requested mode's half of the same sentence; see [`offer_wording`].
-fn mode_wording(mode: RestartMode) -> &'static str {
-    match mode {
-        RestartMode::Fresh => "a fresh launch",
-        RestartMode::Resume => "resuming its captured conversation",
-        RestartMode::FallbackTemplate => "its configured fallback resume command",
-    }
 }
 
 /// What a successful [`Supervisor::spawn_agent`] produced: the pane the
@@ -3511,9 +3448,9 @@ pub(crate) fn truncate_for_error(id: &str) -> std::borrow::Cow<'_, str> {
 /// needs it.
 ///
 /// A struct rather than five more parameters because they describe ONE
-/// thing — the state this relaunch arrived at — and because three of them
-/// (`outcome`, `reset_capture`, `tabs`) are easy to transpose at a call
-/// site while still type-checking.
+/// thing — the state this relaunch arrived at — and because two of them
+/// (`outcome`, `tabs`) are easy to transpose at a call site while still
+/// type-checking.
 struct Relaunched {
     terminal: Terminal,
     /// The cgroup scope the NEW generation launched into.
@@ -3521,8 +3458,6 @@ struct Relaunched {
     /// The outcome that actually committed, which is not always the one
     /// the relaunch intended — see the call sites.
     outcome: LastOutcome,
-    /// Whether the new run starts conversation capture from scratch.
-    reset_capture: bool,
     /// Whether THIS relaunch's argv carried the conversation hook, as
     /// [`Supervisor::with_hook_argv`] decided and [`Spawned::hooked`]
     /// reported back.
@@ -3562,7 +3497,6 @@ struct RestartWithBundle {
 /// lifecycle claim; the spawned task owns the rest of the restart even if its
 /// client disconnects.
 struct RelaunchPlan {
-    mode: RestartMode,
     argv: Vec<String>,
     launch_cwd: String,
     terminal_survives: bool,
@@ -6063,7 +5997,7 @@ impl Supervisor {
                         // whatever identity was stored, but — like
                         // `status` — recomputed by `ListSessions` on
                         // every reply (`session_restart_offer`): capture
-                        // can upgrade a session from `FreshOnly` to
+                        // can upgrade a session from `NotCaptured` to
                         // `Resume` at any moment, and a value frozen at
                         // reload would go stale the first time it did.
                         restart_offer,
@@ -6364,7 +6298,7 @@ impl Supervisor {
     /// shape, and a locator reported under one vendor's prefix is never decoded
     /// by another's rules. A failed check replaces only the exact locator and
     /// generation read by the caller with a non-resumable token. The request
-    /// then conflicts, and a refresh exposes `FreshOnly`; a concurrent newer
+    /// then conflicts, and a refresh exposes `NotCaptured`; a concurrent newer
     #[warn(clippy::wildcard_enum_match_arm)]
     /// report fails the comparison and remains the durable answer.
     async fn verify_report_only_resume(
@@ -6615,8 +6549,8 @@ impl Supervisor {
                 // handle is held), and a silently absent ticker is the
                 // worst shape this feature has: capture would quietly stop
                 // advancing for any session nobody happens to poll, with
-                // no symptom until a restart offered a fresh launch where
-                // a resume was expected. `watch` reports it loudly and
+                // no symptom until Restart read as unavailable where a
+                // resume was expected. `watch` reports it loudly and
                 // then parks forever, so this arm fires at most once.
                 // Deliberately NOT fatal and deliberately not restarted:
                 // status and capture are both best-effort, and taking a
@@ -9288,11 +9222,11 @@ impl Supervisor {
             // No run has ended yet, so there is no stop annotation to
             // carry (PLAN_M3.md item 4).
             annotation: None,
-            // Computed honestly rather than defaulted, even though nothing
-            // can be captured at create time: a session created with an
-            // explicit placeholder-free template already has a real
-            // fallback to offer, and reporting `FreshOnly` for it would
-            // understate what restart could do from the very first reply.
+            // Computed rather than defaulted, even though nothing can be
+            // captured at create time: the snapshot alone already decides
+            // WHICH reason Restart is unavailable (no reporting for this
+            // agent type, or nothing captured yet), and the UI shows it
+            // from the very first reply.
             restart_offer: snapshot.restart_offer(None, 0),
             // A brand-new session has no tabs; real tab creation lands in
             // PLAN_M4.md step 4.
@@ -9964,11 +9898,11 @@ impl Supervisor {
     /// annotation promise is kept there by restoring the previous outcome
     /// (`SessionStore::abort_relaunch`), not by nothing having happened.
     ///
-    /// - **`mode` against the CURRENT offer**, recomputed here rather than
-    ///   trusted from the client's cached `SessionInfo`: capture can
-    ///   upgrade a session from `FreshOnly` to `Resume` asynchronously
-    ///   (item 8), so the offer the user was shown may already be stale.
-    ///   A mismatch is a `Conflict` naming what the offer is NOW, which is
+    /// - **The CURRENT offer**, recomputed here rather than trusted from
+    ///   the client's cached `SessionInfo`: capture can make a session
+    ///   resumable, or a failed check unresumable, asynchronously, so the
+    ///   offer the user was shown may already be stale. Anything but
+    ///   `Resume` is a `Conflict` naming the reason NOW, which is
     ///   what lets a client refresh and re-present rather than retry blindly
     ///   (`ControlMsg::RestartSession`'s staleness contract). The check is
     ///   made ATOMIC with the relaunch by the capture pass being awaited —
@@ -10009,18 +9943,17 @@ impl Supervisor {
     ///    republication, the span must not be cancellable by the connection
     ///    that asked for it (see that method's docs).
     ///
-    /// The captured conversation identity is RETAINED across a `Resume`
-    /// relaunch and cleared for the others, along with the rest of the
-    /// per-launch capture state; [`SessionStore::begin_relaunch`] carries
-    /// the argument for that split.
+    /// Restart only ever resumes: a session whose CURRENT offer is not
+    /// `Resume` is refused before anything is stopped (see
+    /// [`relaunch_argv`]). The captured conversation identity is RETAINED
+    /// across the relaunch; [`SessionStore::begin_relaunch`] says why.
     ///
-    /// An optional compiled invocation and selection change only a Resume
-    /// relaunch. Validation uses the current durable offer and builds the
+    /// An optional compiled invocation and selection make this Restart
+    /// with. Validation uses the current durable offer and builds the
     /// replacement snapshot before this operation stops the old process.
     pub(crate) async fn restart_session(
         self: &Arc<Self>,
         session_id: &str,
-        mode: RestartMode,
         stop_if_running: bool,
         override_invocation: Option<String>,
         override_launch: Option<farhelm_proto::LaunchSelection>,
@@ -10043,13 +9976,6 @@ impl Supervisor {
                 .into());
             }
         };
-        if restart_with.is_some() && mode != RestartMode::Resume {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "restart-with only supports the Resume mode",
-            )
-            .into());
-        }
         // The bundle's argv rides with it from here, parsed and checked
         // before the session is looked up (`restart_with_bundle_argv`).
         let restart_with = restart_with
@@ -10136,7 +10062,7 @@ impl Supervisor {
             .into());
         }
         // A `Reply` pass, exactly like the list path's: this is about to
-        // validate the requested mode against the session's offer, and a
+        // validate the session's offer, and a
         // pass that began before this request cannot answer for it — a
         // sweep still in flight may be one commit away from changing that
         // offer, and validating against the pre-commit answer is the
@@ -10166,8 +10092,7 @@ impl Supervisor {
             )
             .into());
         };
-        if mode == RestartMode::Resume
-            && let Some(refusal) = crate::agent_kind::unverified_resume_refusal(snapshot.kind)
+        if let Some(refusal) = crate::agent_kind::unverified_resume_refusal(snapshot.kind)
             && snapshot.restart_offer != RestartOffer::Resume
         {
             return Err(RequestError::new(ErrorKind::Conflict, refusal).into());
@@ -10187,10 +10112,12 @@ impl Supervisor {
                 )
                 .into());
             }
-            if snapshot.restart_offer != RestartOffer::Resume {
+            // The same reason a plain restart's refusal gives
+            // (`relaunch_argv`), so Restart with's dialog can show it.
+            if let Some(reason) = snapshot.restart_offer.unavailable_reason() {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
-                    "restart-with requires the session's current restart offer to be Resume",
+                    format!("this session cannot be restarted: {reason}"),
                 )
                 .into());
             }
@@ -10224,12 +10151,9 @@ impl Supervisor {
                 }),
             )
         } else {
-            (
-                relaunch_argv(mode, &snapshot, &entry.info.invocation)?,
-                None,
-            )
+            (relaunch_argv(&snapshot)?, None)
         };
-        if mode == RestartMode::Resume && crate::agent_kind::verifies_resume_target(snapshot.kind) {
+        if crate::agent_kind::verifies_resume_target(snapshot.kind) {
             self.verify_report_only_resume(session_id, &snapshot)
                 .await?;
         }
@@ -10415,7 +10339,6 @@ impl Supervisor {
                 &entry_for_task,
                 &snapshot,
                 RelaunchPlan {
-                    mode,
                     argv,
                     launch_cwd,
                     terminal_survives,
@@ -10477,16 +10400,14 @@ impl Supervisor {
         plan: RelaunchPlan,
     ) -> anyhow::Result<SessionInfo> {
         let RelaunchPlan {
-            mode,
             argv,
             launch_cwd,
             terminal_survives,
             restart_with,
         } = plan;
         let id = entry.info.id.clone();
-        // Resume keeps the exact conversation it enters; every other mode
-        // starts without an identity until its own agent reports one.
-        let reset_capture = mode != RestartMode::Resume;
+        // The relaunch resumes, so it keeps the exact conversation it enters
+        // (`begin_relaunch` leaves the capture columns alone).
         let claim = self
             .store
             .begin_relaunch(
@@ -10495,7 +10416,6 @@ impl Supervisor {
                     captured_conversation: snapshot.captured_conversation.clone(),
                     capture_ownership_version: snapshot.capture_ownership_version,
                 },
-                reset_capture,
                 // Re-evaluated here rather than inherited from the run
                 // being replaced (PLAN_M3.md item 10): the selection is a
                 // fact about a LAUNCH, and a restart is a new launch — on a
@@ -10586,7 +10506,6 @@ impl Supervisor {
                     argv,
                     launch_cwd,
                     terminal_survives,
-                    reset_capture,
                 )
                 .await
             }
@@ -10767,7 +10686,6 @@ impl Supervisor {
                                 .lock()
                                 .expect("outcome mutex poisoned")
                                 .clone(),
-                            reset_capture,
                         ),
                     );
                 }
@@ -10811,7 +10729,6 @@ impl Supervisor {
         argv: Vec<String>,
         launch_cwd: String,
         terminal_survives: bool,
-        reset_capture: bool,
     ) -> Result<SessionInfo, RelaunchFailure> {
         let id = entry.info.id.clone();
         let terminal = entry.terminal.as_ref();
@@ -11055,7 +10972,6 @@ impl Supervisor {
                         },
                         scope: scope.clone(),
                         outcome: LastOutcome::Launching,
-                        reset_capture,
                         hooked,
                         tabs: tabs.clone(),
                     },
@@ -11166,7 +11082,6 @@ impl Supervisor {
                             },
                             scope,
                             outcome: other,
-                            reset_capture,
                             hooked,
                             tabs,
                         },
@@ -11216,7 +11131,6 @@ impl Supervisor {
                             },
                             scope,
                             outcome: LastOutcome::Running,
-                            reset_capture,
                             hooked,
                             tabs: Vec::new(),
                         },
@@ -11244,7 +11158,6 @@ impl Supervisor {
                     terminal: Terminal { tmux_name, pane },
                     scope,
                     outcome: LastOutcome::Running,
-                    reset_capture,
                     hooked,
                     tabs,
                 },
@@ -11473,19 +11386,10 @@ impl Supervisor {
             terminal,
             scope,
             outcome,
-            reset_capture,
             hooked,
             tabs,
         } = result;
-        let restart_offer = if reset_capture {
-            // The new window has captured nothing yet, so the only offer
-            // this session can honestly make is what its snapshot alone
-            // supports — which is also how a stale ambiguity stops being
-            // reported the moment the relaunch clears it. The reset also
-            // cleared the provenance column back to 0, so 0 is the honest
-            // version here, not a placeholder.
-            entry.snapshot.restart_offer(None, 0)
-        } else {
+        let restart_offer = {
             let capture = entry.run.capture.lock().expect("capture mutex poisoned");
             entry.snapshot.restart_offer(
                 capture.committed_conversation(),
@@ -11559,7 +11463,6 @@ impl Supervisor {
             generation,
             scope,
             outcome,
-            reset_capture,
         );
         // Raised on the NEW entry, whose cell `relaunched_entry` has just
         // minted `false` — this launch's own injection is the ONLY thing
@@ -14051,7 +13954,7 @@ impl Supervisor {
     ///   A reload restores the stored identity directly.
     ///
     /// What the divergence costs is one thing only: `session_restart_offer`
-    /// reads the ENTRY, so `ListSessions` advertises `FreshOnly` for the
+    /// reads the ENTRY, so `ListSessions` advertises `NotCaptured` for the
     /// interval. That is an understatement of what the session can do, and
     /// an understatement is the safe direction — it never offers a resume of
     /// a conversation the agent is not in. Nothing is lost by not advancing
@@ -14358,6 +14261,44 @@ impl Supervisor {
             entry,
             row.capture_ownership_version,
         )
+    }
+
+    /// Commit `conversation` as this session's reported identity, durably and
+    /// in its live entry, exactly as an accepted report would — without a
+    /// hook process to attribute it to.
+    ///
+    /// Restart only resumes, so every test of restart MECHANICS (consent,
+    /// tab preservation, scope reaping, terminal reuse) needs a session with
+    /// a captured conversation. Those tests are not about report admission,
+    /// whose corridor tests own the attribution proof; this seam skips that
+    /// proof and keeps everything after it (the generation-fenced write and
+    /// the in-memory mirror) on the production path. Compiled only for
+    /// tests and the `test-seams` feature (which the e2e tests enable), so
+    /// it cannot become a production way to bind a conversation.
+    #[cfg(any(test, feature = "test-seams"))]
+    pub async fn record_conversation_for_test(&self, id: &str, conversation: &str) {
+        let _capture_claim = self.claim_capture_for_report(id).await;
+        let row = self
+            .store
+            .session(id)
+            .await
+            .expect("read the session to record a conversation for")
+            .expect("the session exists");
+        let written = self
+            .store
+            .record_reported_conversation(id, row.generation, conversation)
+            .await;
+        let entry = self.sessions.lock().await.get(id).cloned();
+        self.finish_reported_admission(
+            id,
+            written,
+            conversation,
+            "hook",
+            row.generation,
+            entry,
+            row.capture_ownership_version,
+        )
+        .expect("the test conversation is recorded");
     }
 
     /// Step 4b (write-result handling) and step 5 (the current-generation
@@ -15001,13 +14942,12 @@ pub(crate) mod tests {
     }
 
     /// A snapshot shaped exactly as `session_snapshot` would build one for
-    /// a session with `offer` — used by the mode/offer matrix below, which
-    /// is about the PAIRING rules rather than about how an offer is
-    /// derived (`IntegrationSnapshot::restart_offer` owns that, and its own
-    /// tests cover it).
+    /// a session with `offer` — used by the relaunch tests below, which are
+    /// about what a restart runs or refuses rather than about how an offer
+    /// is derived (`IntegrationSnapshot::restart_offer` owns that, and its
+    /// own tests cover it).
     fn snapshot_offering(offer: RestartOffer) -> SessionSnapshot {
         let (kind, resume_template, captured_conversation, resume_argv) = match offer {
-            RestartOffer::FreshOnly => (AgentKind::Generic, None, None, None),
             RestartOffer::Resume => (
                 AgentKind::Claude,
                 Some(vec![
@@ -15022,7 +14962,17 @@ pub(crate) mod tests {
                     "conv-1".to_string(),
                 ]),
             ),
-            RestartOffer::FallbackTemplate => (
+            RestartOffer::NotCaptured => (
+                AgentKind::Claude,
+                Some(vec![
+                    "claude".to_string(),
+                    "--resume".to_string(),
+                    "{conversation}".to_string(),
+                ]),
+                None,
+                None,
+            ),
+            RestartOffer::NoConversationReporting => (
                 AgentKind::Generic,
                 Some(vec!["agent".to_string(), "--continue".to_string()]),
                 None,
@@ -15041,120 +14991,51 @@ pub(crate) mod tests {
         }
     }
 
-    /// The whole mode/offer matrix, in one place: exactly one mode is legal
-    /// per offer, and every other pairing is a `Conflict` rather than a
-    /// best-effort substitution.
+    /// Every offer but Resume refuses the restart as a `Conflict` that
+    /// names its reason, and runs nothing.
     ///
-    /// The diagonal matters as much as the off-diagonal. `Fresh` against a
-    /// `Resume` offer is the one a well-meaning client is most likely to
-    /// send ("the user just wants a restart"), and SPEC.md is explicit that
-    /// v1 has no such downgrade — for a clean conversation you create a new
-    /// session. `Resume` against `FreshOnly` is the mirror image and the
-    /// more dangerous one: honoring it could only mean running a
-    /// `{conversation}` template with nothing to fill it.
+    /// Why: SPEC.md says Restart always preserves the conversation, and
+    /// when Farhelm knows it cannot resume, Restart is unavailable "rather
+    /// than starting fresh or running some other command". The two
+    /// commands this once ran instead — the session's launch invocation,
+    /// and a placeholder-free fallback template (kept in the
+    /// `NoConversationReporting` fixture to prove it stays unused) — must
+    /// never come back. A `Conflict` rather than a bad request, because an
+    /// offer can change under a client between listing and restarting,
+    /// and the reason is what the client shows after refreshing.
     #[farhelm_testtrace::test]
-    fn each_restart_offer_accepts_exactly_one_mode() {
+    fn only_a_resume_offer_relaunches() {
         for offer in [
-            RestartOffer::FreshOnly,
             RestartOffer::Resume,
-            RestartOffer::FallbackTemplate,
+            RestartOffer::NotCaptured,
+            RestartOffer::NoConversationReporting,
         ] {
-            let snapshot = snapshot_offering(offer);
-            for mode in [
-                RestartMode::Fresh,
-                RestartMode::Resume,
-                RestartMode::FallbackTemplate,
-            ] {
-                let result = relaunch_argv(mode, &snapshot, "agent --flag");
-                let legal = matches!(
-                    (offer, mode),
-                    (RestartOffer::FreshOnly, RestartMode::Fresh)
-                        | (RestartOffer::Resume, RestartMode::Resume)
-                        | (
-                            RestartOffer::FallbackTemplate,
-                            RestartMode::FallbackTemplate
-                        )
-                );
-                match result {
-                    Ok(argv) => assert!(
-                        legal,
-                        "mode {mode:?} must not be accepted for offer {offer:?}, got {argv:?}"
-                    ),
-                    Err(e) => {
-                        assert!(
-                            !legal,
-                            "mode {mode:?} must be accepted for offer {offer:?}: {e:#}"
-                        );
-                        assert_eq!(
-                            error_kind(&e),
-                            ErrorKind::Conflict,
-                            "a mismatched mode is a staleness conflict, not a bad request"
-                        );
-                    }
+            let result = relaunch_argv(&snapshot_offering(offer));
+            match offer.unavailable_reason() {
+                None => assert!(result.is_ok(), "{offer:?}: {result:?}"),
+                Some(reason) => {
+                    let error = result.expect_err("an unavailable offer must not relaunch");
+                    assert_eq!(error_kind(&error), ErrorKind::Conflict, "{offer:?}");
+                    assert!(
+                        format!("{error:#}").contains(reason),
+                        "{offer:?}: the refusal must name the reason: {error:#}"
+                    );
                 }
             }
         }
     }
 
-    /// The refusal has to NAME the current offer, because the client's
-    /// prescribed response is to refresh and re-present it (the wire
-    /// vocabulary's staleness contract) — an unqualified "conflict" would
-    /// leave it with nothing to show the user.
+    /// The property the whole resume promise rests on: the conversation id
+    /// arrives in its OWN argv element, substituted rather than spliced,
+    /// and no placeholder ever survives into something that gets executed.
     #[farhelm_testtrace::test]
-    fn a_mismatched_mode_names_the_current_offer() {
-        let err = relaunch_argv(
-            RestartMode::Fresh,
-            &snapshot_offering(RestartOffer::Resume),
-            "agent",
-        )
-        .expect_err("fresh is not legal against a resume offer");
-        let message = format!("{err:#}");
-        assert!(
-            message.contains("resum"),
-            "the refusal must name the current offer: {message}"
-        );
-    }
-
-    /// Command construction per mode, including the property the whole
-    /// resume promise rests on: the conversation id arrives in its OWN argv
-    /// element, substituted rather than spliced, and no placeholder ever
-    /// survives into something that gets executed.
-    #[farhelm_testtrace::test]
-    fn each_mode_builds_its_own_command() {
-        let resumed = relaunch_argv(
-            RestartMode::Resume,
-            &snapshot_offering(RestartOffer::Resume),
-            "claude --dangerously-skip-permissions",
-        )
-        .expect("resume is legal against a resume offer");
+    fn a_restart_runs_the_filled_resume_command() {
+        let resumed = relaunch_argv(&snapshot_offering(RestartOffer::Resume))
+            .expect("resume is legal against a resume offer");
         assert_eq!(resumed, vec!["claude", "--resume", "conv-1"]);
         assert!(
             !resumed.iter().any(|e| e.contains("{conversation}")),
             "a placeholder must never reach a command line: {resumed:?}"
-        );
-
-        let fallback = relaunch_argv(
-            RestartMode::FallbackTemplate,
-            &snapshot_offering(RestartOffer::FallbackTemplate),
-            "agent --launch-only",
-        )
-        .expect("the fallback template is legal against its own offer");
-        assert_eq!(
-            fallback,
-            vec!["agent", "--continue"],
-            "the configured template runs verbatim, never the launch invocation"
-        );
-
-        let fresh = relaunch_argv(
-            RestartMode::Fresh,
-            &snapshot_offering(RestartOffer::FreshOnly),
-            "agent 'one arg' --flag",
-        )
-        .expect("fresh is legal against a fresh-only offer");
-        assert_eq!(
-            fresh,
-            vec!["agent", "one arg", "--flag"],
-            "a fresh relaunch re-parses the session's own invocation, quoting included"
         );
     }
 
@@ -15361,6 +15242,58 @@ pub(crate) mod tests {
         );
     }
 
+    /// The conversation id [`create_resumable_session`] records.
+    pub(crate) const TEST_CONVERSATION: &str = "conv-test";
+
+    /// Create a live session running `script` under `sh -c` that Restart can
+    /// resume, and return it as created.
+    ///
+    /// Restart only ever resumes a captured conversation (SPEC.md), so the
+    /// tests of restart mechanics that used to restart a plain `sleep`
+    /// "fresh" need a session that offers Resume. This one declares itself
+    /// Goose, with a resume command that runs the same script and passes
+    /// the conversation id as a positional argument the script ignores, and
+    /// then records [`TEST_CONVERSATION`] for it. Goose because, unlike
+    /// Claude, it has no screen reader of its own, adds nothing to a launch
+    /// whose program is not `goose`, and does not verify a resume target on
+    /// disk: the session behaves exactly like the plain `sh -c` it runs.
+    pub(crate) async fn create_resumable_session(
+        sup: &Arc<Supervisor>,
+        cwd: &str,
+        script: &str,
+    ) -> SessionInfo {
+        let created = sup
+            .create_session(
+                CreateInputs {
+                    cwd,
+                    parent: None,
+                    github_checkout: None,
+                    mode: CreateMode::Raw {
+                        invocation: format!("sh -c {}", shell_words::quote(script)),
+                        agent_kind: Some(AgentKind::Goose),
+                        resume_template: Some(vec![
+                            "sh".to_string(),
+                            "-c".to_string(),
+                            script.to_string(),
+                            "farhelm-test-resume".to_string(),
+                            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                        ]),
+                        source_profile: None,
+                        launch: None,
+                    },
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
+            .await
+            .expect("create a resumable session");
+        sup.record_conversation_for_test(&created.id, TEST_CONVERSATION)
+            .await;
+        created
+    }
+
     /// A dummy launch-shim path for tests that never create a session:
     /// `Supervisor::new_with_exe` never touches this path itself (only
     /// `create_session` does, via `window_command`), so a nonexistent
@@ -15384,7 +15317,6 @@ pub(crate) mod tests {
         let error = sup
             .restart_session(
                 "missing",
-                RestartMode::Resume,
                 false,
                 None,
                 None,
@@ -15449,7 +15381,6 @@ pub(crate) mod tests {
             let error = sup
                 .restart_session(
                     "missing",
-                    RestartMode::Resume,
                     true,
                     Some(invocation.clone()),
                     Some(launch.clone()),
@@ -15532,7 +15463,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
-                    conversation_source: None,
+                    conversation_source: Some("hook".to_string()),
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
@@ -15549,10 +15480,16 @@ pub(crate) mod tests {
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
+                    // Restart only resumes, so the row carries a captured
+                    // conversation and the resume command to enter it.
+                    agent_kind: farhelm_proto::AgentKind::Claude,
+                    resume_template: Some(vec![
+                        "agent".to_string(),
+                        "--resume".to_string(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    ]),
                     canonical_cwd: Some(canonical.clone()),
-                    captured_conversation: None,
+                    captured_conversation: Some(TEST_CONVERSATION.to_string()),
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -15576,7 +15513,7 @@ pub(crate) mod tests {
             .await
             .insert(id.to_string(), Arc::new(entry));
 
-        sup.restart_session(id, RestartMode::Fresh, false, None, None, None)
+        sup.restart_session(id, false, None, None, None)
             .await
             .expect("an unknown-status row restarts without stop consent");
         let entry = sup
@@ -15626,7 +15563,7 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
-                    conversation_source: None,
+                    conversation_source: Some("hook".to_string()),
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
@@ -15646,10 +15583,16 @@ pub(crate) mod tests {
                         exit_code: Some(0),
                         annotation: None,
                     },
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
+                    // Restart only resumes, so the row carries a captured
+                    // conversation and the resume command to enter it.
+                    agent_kind: farhelm_proto::AgentKind::Claude,
+                    resume_template: Some(vec![
+                        "agent".to_string(),
+                        "--resume".to_string(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    ]),
                     canonical_cwd: Some(canonical.clone()),
-                    captured_conversation: None,
+                    captured_conversation: Some(TEST_CONVERSATION.to_string()),
                     generation: 0,
                     launch_scoped: true,
                     source_profile: None,
@@ -15675,7 +15618,7 @@ pub(crate) mod tests {
             .insert(id.to_string(), Arc::new(entry));
 
         let error = sup
-            .restart_session(id, RestartMode::Fresh, false, None, None, None)
+            .restart_session(id, false, None, None, None)
             .await
             .expect_err("an unconfirmed prior scope must block the relaunch");
         assert!(
@@ -17147,7 +17090,6 @@ pub(crate) mod tests {
             old.generation + 1,
             None,
             LastOutcome::Launching,
-            false,
         );
         assert_eq!(
             relaunched
@@ -17259,7 +17201,6 @@ pub(crate) mod tests {
             old.generation + 1,
             None,
             LastOutcome::Launching,
-            false,
         );
         assert!(
             matches!(
@@ -17275,11 +17216,15 @@ pub(crate) mod tests {
         );
     }
 
-    /// Fresh restart discards the old identity and diagnostic deadline together.
-    /// Retaining either would associate the new process with the old conversation
-    /// or warn before the replacement had received its first input.
+    /// A relaunch keeps the identity it resumes but resets the first-input
+    /// diagnostic deadline.
+    ///
+    /// Why: every restart resumes, so dropping the identity would leave the
+    /// resumed process unattributed; but the deadline describes when the
+    /// PREVIOUS process last got input, and carrying it over would warn
+    /// before the replacement had received its first.
     #[test]
-    fn a_fresh_relaunch_clears_identity_and_input_deadline() {
+    fn a_relaunch_keeps_its_identity_and_resets_the_input_deadline() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         *old.run.first_input.lock().unwrap() = Some(std::time::Instant::now());
         *old.run.capture.lock().unwrap() = CaptureState::Reported {
@@ -17293,25 +17238,20 @@ pub(crate) mod tests {
             old.generation + 1,
             None,
             LastOutcome::Launching,
-            true,
         );
-        assert!(matches!(
-            *new.run.capture.lock().unwrap(),
-            CaptureState::Unclaimed
-        ));
-        assert_eq!(*new.run.first_input.lock().unwrap(), None);
         assert_eq!(
-            old.run.capture.lock().unwrap().committed_conversation(),
+            new.run.capture.lock().unwrap().committed_conversation(),
             Some("previous-conversation")
         );
+        assert_eq!(*new.run.first_input.lock().unwrap(), None);
     }
 
-    /// The hook tripwire cells are minted fresh on EVERY relaunch, a
-    /// Resume included. The identity may carry over, but injection and its
-    /// diagnostic latch describe only the new launch.
+    /// The hook tripwire cells are minted fresh on EVERY relaunch. The
+    /// identity carries over, but injection and its diagnostic latch
+    /// describe only the new launch.
     ///
     /// The distinction is subtle enough to be worth a test of its own,
-    /// because the neighbouring rule is so nearly right: a Resume keeps its
+    /// because the neighbouring rule is so nearly right: a relaunch keeps its
     /// capture state, so keeping the "hooked" flag beside it looks
     /// consistent. It is not. `hooked` answers "was THIS launch's argv
     /// injected", and two launches of one session can genuinely differ — a
@@ -17327,38 +17267,34 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test]
     fn a_relaunch_mints_fresh_hook_cells_even_when_it_keeps_the_identity() {
         let ordering = std::sync::atomic::Ordering::Relaxed;
-        for reset_capture in [true, false] {
-            let old = entry_with(Some(a_terminal()), LastOutcome::Running);
-            old.run.hooked.store(true, ordering);
-            old.run.hook_warned.store(true, ordering);
+        let old = entry_with(Some(a_terminal()), LastOutcome::Running);
+        old.run.hooked.store(true, ordering);
+        old.run.hook_warned.store(true, ordering);
 
-            let relaunched = relaunched_entry(
-                &old,
-                old.info.clone(),
-                old.terminal.clone(),
-                old.generation + 1,
-                None,
-                LastOutcome::Launching,
-                reset_capture,
-            );
-            assert!(
-                !relaunched.run.hooked.load(ordering),
-                "a relaunch this process has not injected yet is not hooked \
-                 (reset_capture = {reset_capture})"
-            );
-            assert!(
-                !relaunched.run.hook_warned.load(ordering),
-                "and the previous launch's warning must not silence this one's \
-                 (reset_capture = {reset_capture})"
-            );
-            assert!(
-                !Arc::ptr_eq(&old.run.hooked, &relaunched.run.hooked),
-                "fresh CELLS too, so a late writer cannot reach across the generation"
-            );
-        }
+        let relaunched = relaunched_entry(
+            &old,
+            old.info.clone(),
+            old.terminal.clone(),
+            old.generation + 1,
+            None,
+            LastOutcome::Launching,
+        );
+        assert!(
+            !relaunched.run.hooked.load(ordering),
+            "a relaunch this process has not injected yet is not hooked"
+        );
+        assert!(
+            !relaunched.run.hook_warned.load(ordering),
+            "and the previous launch's warning must not silence this one's"
+        );
+        assert!(
+            !Arc::ptr_eq(&old.run.hooked, &relaunched.run.hooked),
+            "fresh CELLS too, so a late writer cannot reach across the generation"
+        );
     }
 
-    /// Activity classification resets on every relaunch, even Resume.
+    /// Activity classification resets on every relaunch, though the
+    /// conversation carries over.
     /// The old screen and quiet-sample streak describe a process that no
     /// longer exists; inheriting them would classify the replacement from
     /// its predecessor's output. This is independent of carrying its identity.
@@ -17378,10 +17314,6 @@ pub(crate) mod tests {
             old.generation + 1,
             None,
             LastOutcome::Launching,
-            // `false` deliberately: even a relaunch that KEEPS its capture
-            // window — the case that carries the anchor over — must still
-            // start from an unsampled screen.
-            false,
         );
         {
             let fresh = relaunched.run.activity.lock().unwrap();
@@ -17533,10 +17465,7 @@ pub(crate) mod tests {
             let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
                 .await
                 .expect("supervisor");
-            let created = sup
-                .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
-                .await
-                .expect("agent session");
+            let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
             let entry = sup
                 .sessions
                 .lock()
@@ -17566,7 +17495,7 @@ pub(crate) mod tests {
             );
 
             let error = sup
-                .restart_session(&created.id, RestartMode::Fresh, false, None, None, None)
+                .restart_session(&created.id, false, None, None, None)
                 .await
                 .expect_err("a working agent needs stop consent");
             assert_eq!(error_kind(&error), ErrorKind::Conflict);
@@ -17589,7 +17518,7 @@ pub(crate) mod tests {
                 SessionStatus::Running,
                 "fixture premise: the agent no longer reads working"
             );
-            sup.restart_session(&created.id, RestartMode::Fresh, false, None, None, None)
+            sup.restart_session(&created.id, false, None, None, None)
                 .await
                 .unwrap_or_else(|error| {
                     panic!("an agent reading {quiet:?} restarts without consent: {error:#}")
@@ -17645,10 +17574,7 @@ pub(crate) mod tests {
         )
         .await
         .expect("supervisor");
-        let created = sup
-            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
-            .await
-            .expect("agent session");
+        let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
         let before = crate::service::listing::list_all(&sup)
             .await
             .expect("list before the restart")
@@ -17660,10 +17586,7 @@ pub(crate) mod tests {
         let restart = tokio::spawn({
             let sup = Arc::clone(&sup);
             let id = created.id.clone();
-            async move {
-                sup.restart_session(&id, RestartMode::Fresh, true, None, None, None)
-                    .await
-            }
+            async move { sup.restart_session(&id, true, None, None, None).await }
         });
         let mut restart = restart;
         // A restart that fails before the window never reaches the gate, so
@@ -17727,10 +17650,7 @@ pub(crate) mod tests {
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let created = sup
-            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
-            .await
-            .expect("agent session");
+        let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
         let tab = sup.open_tab(&created.id).await.expect("terminal tab");
         let entry = sup
             .sessions
@@ -17777,7 +17697,7 @@ pub(crate) mod tests {
         );
 
         let restarted = sup
-            .restart_session(&created.id, RestartMode::Fresh, true, None, None, None)
+            .restart_session(&created.id, true, None, None, None)
             .await
             .expect("restart with a surviving tab");
         assert_eq!(
@@ -17888,10 +17808,7 @@ pub(crate) mod tests {
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let created = sup
-            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
-            .await
-            .expect("agent session");
+        let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
         let tab = sup.open_tab(&created.id).await.expect("terminal tab");
         let entry = sup
             .sessions
@@ -17917,7 +17834,7 @@ pub(crate) mod tests {
         };
 
         let restarted = sup
-            .restart_session(&created.id, RestartMode::Fresh, true, None, None, None)
+            .restart_session(&created.id, true, None, None, None)
             .await
             .expect("restart with a live agent pane");
         assert_eq!(restarted.tabs, vec![TabInfo { id: tab.id.clone() }]);
@@ -17942,10 +17859,7 @@ pub(crate) mod tests {
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let created = sup
-            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
-            .await
-            .expect("agent session");
+        let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
         let tab = sup.open_tab(&created.id).await.expect("terminal tab");
         let entry = sup
             .sessions
@@ -17993,7 +17907,7 @@ pub(crate) mod tests {
             .await
             .expect("forge the agent marker on the tab");
 
-        sup.restart_session(&created.id, RestartMode::Fresh, true, None, None, None)
+        sup.restart_session(&created.id, true, None, None, None)
             .await
             .expect_err("ambiguous old-window identity must be reported");
         let entry = sup
@@ -18064,10 +17978,7 @@ pub(crate) mod tests {
             )
             .await
             .expect("supervisor");
-            let created = sup
-                .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
-                .await
-                .expect("agent session");
+            let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
             let tab = sup.open_tab(&created.id).await.expect("terminal tab");
             let entry = sup
                 .sessions
@@ -18109,7 +18020,7 @@ pub(crate) mod tests {
                 "fixture premise: the tab kept the session alive"
             );
 
-            sup.restart_session(&created.id, RestartMode::Fresh, true, None, None, None)
+            sup.restart_session(&created.id, true, None, None, None)
                 .await
                 .expect_err("the injected replacement stage must fail");
             if stage == ReplacementStage::BeforeCreation {
@@ -19383,7 +19294,7 @@ pub(crate) mod tests {
                 None
             )
             .restart_offer,
-            RestartOffer::FreshOnly,
+            RestartOffer::NotCaptured,
             "losing either exact file must withdraw the public offer"
         );
         let pending = sup
@@ -19391,7 +19302,7 @@ pub(crate) mod tests {
             .await
             .expect("read pending Grok snapshot")
             .expect("row survives");
-        assert_eq!(pending.restart_offer, RestartOffer::FreshOnly);
+        assert_eq!(pending.restart_offer, RestartOffer::NotCaptured);
         let persisted = pending
             .captured_conversation
             .as_deref()
@@ -19439,7 +19350,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             snapshot.restart_offer,
-            farhelm_proto::RestartOffer::FreshOnly,
+            farhelm_proto::RestartOffer::NotCaptured,
             "a bare historical id offers no exact Resume"
         );
         assert_eq!(
@@ -19501,7 +19412,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             snapshot.restart_offer,
-            farhelm_proto::RestartOffer::FreshOnly,
+            farhelm_proto::RestartOffer::NotCaptured,
             "an unknown version offers no exact Resume"
         );
         assert_eq!(
@@ -19774,10 +19685,16 @@ pub(crate) mod tests {
                 None
             )
             .restart_offer,
-            RestartOffer::FreshOnly
+            RestartOffer::NotCaptured
         );
-        let fresh = sup.session_snapshot(&id).await.unwrap().unwrap();
-        assert!(relaunch_argv(RestartMode::Fresh, &fresh, "pi").is_ok());
+        let withdrawn = sup.session_snapshot(&id).await.unwrap().unwrap();
+        assert_eq!(
+            error_kind(
+                &relaunch_argv(&withdrawn).expect_err("a withdrawn resume relaunches nothing")
+            ),
+            ErrorKind::Conflict,
+            "a failed file check makes Restart unavailable rather than starting Pi fresh"
+        );
     }
 
     /// The OMP proven-admission fixture: a supervisor whose tmux answers
@@ -20466,7 +20383,7 @@ exit 0
     /// A session launched under the old gateless asset fails closed: its
     /// row names no reporter asset, so the report is refused with a
     /// launch-provenance diagnostic and the session stays runnable with
-    /// no capture — version 0, no token, a `FreshOnly` offer.
+    /// no capture — version 0, no token, a `NotCaptured` offer.
     ///
     /// Why this test matters: it is the upgrade cutover. The wire cannot
     /// distinguish the old asset's reports from the gated one's, so this
@@ -20513,7 +20430,7 @@ exit 0
         assert_eq!(fixture.binding(&id).await, (None, 0));
         assert_eq!(
             fixture.offer(&id).await,
-            farhelm_proto::RestartOffer::FreshOnly
+            farhelm_proto::RestartOffer::NotCaptured
         );
     }
 
@@ -20630,8 +20547,7 @@ exit 0
             .await
             .unwrap()
             .unwrap();
-        let argv = relaunch_argv(RestartMode::Resume, &snapshot, "omp --provider test")
-            .expect("a proven capture restarts by resuming");
+        let argv = relaunch_argv(&snapshot).expect("a proven capture restarts by resuming");
         assert!(
             argv.iter().any(|element| element == file.to_str().unwrap()),
             "the verified file substitutes into the resume command: {argv:?}"
@@ -20748,7 +20664,7 @@ exit 0
         assert_eq!(fixture.binding(&id).await, (None, 0));
         assert_eq!(
             fixture.offer(&id).await,
-            farhelm_proto::RestartOffer::FreshOnly
+            farhelm_proto::RestartOffer::NotCaptured
         );
     }
 
@@ -20802,14 +20718,14 @@ exit 0
     /// The parent's own fileless report withdraws through the proof: it
     /// admits (a foreground withdrawal is legitimate evidence), the
     /// binding keeps version 1 with the fileless token, the public offer
-    /// collapses to `FreshOnly`, and resuming is refused as a staleness
+    /// collapses to `NotCaptured`, and resuming is refused as a staleness
     /// conflict rather than best-effort substituted.
     ///
     /// Why this test matters: it re-homes the legacy fileless-transition
     /// coverage under the proof — the withdraw/restore behavior stays,
     /// the trust does not.
     #[farhelm_testtrace::test]
-    async fn omp_proven_fileless_parent_withdraws_to_fresh_only() {
+    async fn omp_proven_fileless_parent_withdraws_the_resume_offer() {
         let mut fixture = OmpAdmission::launch().await;
         let id = uuid::Uuid::new_v4().to_string();
         fixture
@@ -20846,7 +20762,7 @@ exit 0
         assert_eq!(fixture.binding(&id).await, (Some(fileless), 1));
         assert_eq!(
             fixture.offer(&id).await,
-            farhelm_proto::RestartOffer::FreshOnly
+            farhelm_proto::RestartOffer::NotCaptured
         );
         let snapshot = fixture
             .sup
@@ -20856,15 +20772,15 @@ exit 0
             .await
             .unwrap()
             .unwrap();
-        let error = relaunch_argv(RestartMode::Resume, &snapshot, "omp --provider test")
-            .expect_err("resume is refused against a withdrawn offer");
+        let error =
+            relaunch_argv(&snapshot).expect_err("resume is refused against a withdrawn offer");
         assert_eq!(error_kind(&error), ErrorKind::Conflict);
     }
 
     /// A separately launched interactive child's persistent report —
     /// which passes the asset gate on its own context — establishes
     /// nothing when it arrives first: process attribution refuses it,
-    /// and the session keeps no token, version 0, and a `FreshOnly`
+    /// and the session keeps no token, version 0, and a `NotCaptured`
     /// offer.
     ///
     /// Why this test matters: the child-first race is the attack the
@@ -20923,7 +20839,7 @@ exit 0
         assert_eq!(fixture.binding(&id).await, (None, 0));
         assert_eq!(
             fixture.offer(&id).await,
-            farhelm_proto::RestartOffer::FreshOnly
+            farhelm_proto::RestartOffer::NotCaptured
         );
     }
 
@@ -23857,7 +23773,7 @@ exit 0
         };
         assert_eq!(
             created.as_ref().unwrap().restart_offer,
-            RestartOffer::FreshOnly,
+            RestartOffer::NotCaptured,
             "nothing can be captured at create time, and the derived template needs an id"
         );
         let snapshot = sup
@@ -24127,7 +24043,7 @@ exit 0
                 Some(expected_template.iter().map(|s| (*s).to_string()).collect())
             );
             assert_eq!(snapshot.captured_conversation, None);
-            assert_eq!(snapshot.restart_offer, RestartOffer::FreshOnly);
+            assert_eq!(snapshot.restart_offer, RestartOffer::NotCaptured);
 
             // The resume-argv contract needs a durable identity, not a running
             // reporter. Admission itself is covered by the hook tests.
@@ -24155,8 +24071,7 @@ exit 0
             );
             assert_eq!(snapshot.restart_offer, RestartOffer::Resume);
             assert_eq!(
-                relaunch_argv(RestartMode::Resume, &snapshot, invocation)
-                    .expect("the captured conversation can be relaunched"),
+                relaunch_argv(&snapshot).expect("the captured conversation can be relaunched"),
                 expected_resume
                     .iter()
                     .map(|s| (*s).to_string())
@@ -25644,10 +25559,16 @@ exit 0
                     github_checkout: None,
                     cwd: &cwd,
                     parent: None,
+                    // A reporting agent type with a resume command: restart
+                    // only resumes, and the conversation is recorded below.
                     mode: CreateMode::Raw {
                         invocation: "agent".to_string(),
-                        agent_kind: Some(AgentKind::Generic),
-                        resume_template: None,
+                        agent_kind: Some(AgentKind::Claude),
+                        resume_template: Some(vec![
+                            "agent".to_string(),
+                            "--resume".to_string(),
+                            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                        ]),
                         source_profile: None,
                         launch: None,
                     },
@@ -25659,6 +25580,8 @@ exit 0
             )
             .await
             .expect("create");
+        sup.record_conversation_for_test(&created.id, TEST_CONVERSATION)
+            .await;
 
         // The handle a sampling pass would be holding across its await.
         let sampled = sup
@@ -25684,7 +25607,7 @@ exit 0
             })
         };
 
-        sup.restart_session(&created.id, RestartMode::Fresh, true, None, None, None)
+        sup.restart_session(&created.id, true, None, None, None)
             .await
             .expect("restart");
         released.wait().await;
@@ -26119,24 +26042,19 @@ exit 0
         );
 
         // The restart path, at the point its argv is built from durable
-        // columns. Both the fresh-launch invocation and a stored fallback
-        // template can carry the shape.
-        let fresh = relaunch_argv(
-            RestartMode::Fresh,
-            &snapshot_offering(RestartOffer::FreshOnly),
-            "''",
-        )
-        .expect_err("a stored invocation that names no program is not a restart command");
-        assert_eq!(error_kind(&fresh), ErrorKind::InvalidRequest);
-        assert!(format!("{fresh:#}").contains("names no program"));
-
-        let empty_template = SessionSnapshot {
-            resume_template: Some(vec![String::new(), "--continue".to_string()]),
-            ..snapshot_offering(RestartOffer::FallbackTemplate)
+        // columns: a stored resume command can carry the shape too.
+        let empty_program = SessionSnapshot {
+            resume_argv: Some(vec![
+                String::new(),
+                "--resume".to_string(),
+                "conv-1".to_string(),
+            ]),
+            ..snapshot_offering(RestartOffer::Resume)
         };
-        let fallback = relaunch_argv(RestartMode::FallbackTemplate, &empty_template, "agent")
-            .expect_err("nor is a stored fallback template whose program slot is empty");
-        assert!(format!("{fallback:#}").contains("names no program"));
+        let refused = relaunch_argv(&empty_program)
+            .expect_err("a stored resume command that names no program is not a restart command");
+        assert_eq!(error_kind(&refused), ErrorKind::InvalidRequest);
+        assert!(format!("{refused:#}").contains("names no program"));
     }
 
     /// A relaunch whose directory identity cannot be CHECKED is refused, and
@@ -30684,9 +30602,36 @@ exit 0
         )
         .await
         .unwrap();
-        let origin = fresh_create(&sup, &checkout_fixture(&root), None)
+        // Restart only resumes, so the origin declares a reporting agent
+        // type and gets a captured conversation; the checkout rules under
+        // test are independent of which conversation is resumed.
+        let origin = sup
+            .create_session(
+                CreateInputs {
+                    cwd: "",
+                    parent: None,
+                    github_checkout: Some(checkout_fixture(&root)),
+                    mode: CreateMode::Raw {
+                        invocation: "agent".to_string(),
+                        agent_kind: Some(AgentKind::Claude),
+                        resume_template: Some(vec![
+                            "agent".to_string(),
+                            "--resume".to_string(),
+                            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                        ]),
+                        source_profile: None,
+                        launch: None,
+                    },
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
             .await
             .unwrap();
+        sup.record_conversation_for_test(&origin.id, TEST_CONVERSATION)
+            .await;
         let plan = sup
             .store
             .origin_working_copy(&origin.id)
@@ -30723,7 +30668,7 @@ exit 0
                     .state,
                 incomplete
             );
-            sup.restart_session(&origin.id, RestartMode::Fresh, true, None, None, None)
+            sup.restart_session(&origin.id, true, None, None, None)
                 .await
                 .expect_err("origin setup must finish first");
             assert_eq!(
@@ -30736,10 +30681,7 @@ exit 0
                 generation
             );
         }
-        let borrower = sup
-            .create_session_without_overrides(&origin.cwd, "agent", None, 80, 24, None)
-            .await
-            .unwrap();
+        let borrower = create_resumable_session(&sup, &origin.cwd, "agent").await;
         assert!(
             sup.store
                 .origin_working_copy(&borrower.id)
@@ -30747,7 +30689,7 @@ exit 0
                 .unwrap()
                 .is_none()
         );
-        sup.restart_session(&borrower.id, RestartMode::Fresh, true, None, None, None)
+        sup.restart_session(&borrower.id, true, None, None, None)
             .await
             .expect("borrower does not inherit incomplete setup");
         let borrower_row = sup.store.session(&borrower.id).await.unwrap().unwrap();
@@ -30770,7 +30712,7 @@ exit 0
         )
         .unwrap();
         let ready_bytes = std::fs::read(&path).unwrap();
-        sup.restart_session(&origin.id, RestartMode::Fresh, true, None, None, None)
+        sup.restart_session(&origin.id, true, None, None, None)
             .await
             .expect("Ready permits ordinary restart");
         let restarted = sup.store.session(&origin.id).await.unwrap().unwrap();
@@ -30805,7 +30747,7 @@ exit 0
                 .state,
             PreparationState::Ready,
         );
-        sup.restart_session(&origin.id, RestartMode::Fresh, true, None, None, None)
+        sup.restart_session(&origin.id, true, None, None, None)
             .await
             .expect("Ready permits restart after supervisor reopen");
         let restarted = sup.store.session(&origin.id).await.unwrap().unwrap();
@@ -30835,7 +30777,7 @@ exit 0
             crate::working_copies::IdentityStatus::DifferentObject
         );
         let refusal = sup
-            .restart_session(&origin.id, RestartMode::Fresh, true, None, None, None)
+            .restart_session(&origin.id, true, None, None, None)
             .await
             .expect_err("Ready cannot authorize a foreign path");
         assert!(format!("{refusal:#}").contains("identity"));

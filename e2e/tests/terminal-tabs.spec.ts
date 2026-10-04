@@ -526,8 +526,9 @@ async function openSessionWithTabs(
   request: APIRequestContext,
   title: string,
   count: number,
+  options: { resumable?: boolean } = {},
 ): Promise<{ id: string; cwd: string; tabs: string[] }> {
-  const session = await createTabSession(request, title);
+  const session = await createTabSession(request, title, options);
   await page.goto("/");
   await attachSession(page, session.id);
   const tabs: string[] = [];
@@ -843,7 +844,8 @@ test("restarting the agent rebuilds only the agent island; a tab keeps its socke
   const title = `tab-restart-${Date.now()}`;
   let id: string | undefined;
   try {
-    const session = await openSessionWithTabs(page, request, title, 1);
+    // Resumable: Restart only resumes a captured conversation.
+    const session = await openSessionWithTabs(page, request, title, 1, { resumable: true });
     id = session.id;
     const [tabId] = session.tabs;
     const before = shellMarker("RESTART-TAB-BEFORE");

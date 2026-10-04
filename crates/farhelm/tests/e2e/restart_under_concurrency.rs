@@ -108,17 +108,14 @@ async fn wait_for_restart_delete_cleanup(session_id: &str) {
 async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
-    let session = h
-        .client
-        .create_session(
-            &work.path().to_string_lossy(),
-            &fixture_cmd("fake-agent --script spawner-stubborn"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create");
+    let session = create_resumable_session(
+        &h,
+        &work.path().to_string_lossy(),
+        &fixture_cmd("fake-agent --script spawner-stubborn"),
+        80,
+        24,
+    )
+    .await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     let (_chan, initial_replay, mut rx) = h
@@ -136,16 +133,9 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
     // The first restart, with consent: it will spend seconds in the sweep.
     let first_client = Arc::clone(&h.client);
     let first_id = session.id.clone();
-    let first = tokio::spawn(async move {
-        first_client
-            .restart_session(&first_id, farhelm_proto::RestartMode::Fresh, true)
-            .await
-    });
+    let first = tokio::spawn(async move { first_client.restart_session(&first_id, true).await });
     wait_for_restart_sweep(&store, &h.state.path().join("tmux.sock"), &session.id).await;
-    let second = h
-        .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
-        .await;
+    let second = h.client.restart_session(&session.id, false).await;
 
     first
         .await
@@ -178,17 +168,14 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
 async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
-    let session = h
-        .client
-        .create_session(
-            &work.path().to_string_lossy(),
-            &fixture_cmd("fake-agent --script spawner-stubborn"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create");
+    let session = create_resumable_session(
+        &h,
+        &work.path().to_string_lossy(),
+        &fixture_cmd("fake-agent --script spawner-stubborn"),
+        80,
+        24,
+    )
+    .await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     let (_chan, initial_replay, mut rx) = h
@@ -205,11 +192,8 @@ async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
         .expect("open the durable restart observer");
     let restart_client = Arc::clone(&h.client);
     let restart_id = session.id.clone();
-    let restart = tokio::spawn(async move {
-        restart_client
-            .restart_session(&restart_id, farhelm_proto::RestartMode::Fresh, true)
-            .await
-    });
+    let restart =
+        tokio::spawn(async move { restart_client.restart_session(&restart_id, true).await });
     wait_for_restart_sweep(&store, &h.state.path().join("tmux.sock"), &session.id).await;
     h.client
         .delete_session(&session.id)
@@ -247,7 +231,7 @@ async fn a_delete_racing_a_restart_leaves_no_session_and_no_survivors() {
 #[farhelm_testtrace::test]
 async fn a_failed_restart_restores_the_stop_annotation_it_had_cleared() {
     let h = harness().await;
-    let (session, _work) = basic_session(&h).await;
+    let (session, _work) = resumable_basic_session(&h).await;
 
     h.client.stop_session(&session.id).await.expect("stop");
     let stopped = listed(&h.client, &session.id).await;
@@ -264,10 +248,7 @@ async fn a_failed_restart_restores_the_stop_annotation_it_had_cleared() {
         std::fs::set_permissions(&launch_dir, std::fs::Permissions::from_mode(0o500))
             .expect("make the launch dir read-only");
     }
-    let refused = h
-        .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
-        .await;
+    let refused = h.client.restart_session(&session.id, false).await;
     std::fs::set_permissions(&launch_dir, original).expect("restore the launch dir");
     refused.expect_err("a launch spec that cannot be written fails the restart");
 
@@ -286,7 +267,7 @@ async fn a_failed_restart_restores_the_stop_annotation_it_had_cleared() {
     // ...and the session is still restartable afterwards, which is what
     // makes the restore a recovery rather than a tidier failure.
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .restart_session(&session.id, false)
         .await
         .expect("restart once the directory is writable again");
     wait_for_live_status(&h.client, &session.id, 30).await;
@@ -309,17 +290,14 @@ async fn a_repointed_working_directory_refuses_the_restart() {
     let link = link.path().join("cwd");
     std::os::unix::fs::symlink(real.path(), &link).expect("symlink");
 
-    let session = h
-        .client
-        .create_session(
-            &link.to_string_lossy(),
-            &fixture_cmd("fake-agent --script basic"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create through the symlink");
+    let session = create_resumable_session(
+        &h,
+        &link.to_string_lossy(),
+        &fixture_cmd("fake-agent --script basic"),
+        80,
+        24,
+    )
+    .await;
     h.client.stop_session(&session.id).await.expect("stop");
 
     // The repoint.
@@ -328,7 +306,7 @@ async fn a_repointed_working_directory_refuses_the_restart() {
 
     let err = h
         .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .restart_session(&session.id, false)
         .await
         .expect_err("the session's directory is no longer the one it was created in");
     let err = err
@@ -362,8 +340,8 @@ async fn a_repointed_working_directory_refuses_the_restart() {
 async fn a_restart_respawns_only_its_own_pane() {
     let h = harness().await;
     let sock = h.state.path().join("tmux.sock");
-    let (restarted, _work_a) = basic_session(&h).await;
-    let (bystander, _work_b) = basic_session(&h).await;
+    let (restarted, _work_a) = resumable_basic_session(&h).await;
+    let (bystander, _work_b) = resumable_basic_session(&h).await;
 
     let (chan, initial_replay, mut rx) = h
         .client
@@ -379,7 +357,7 @@ async fn a_restart_respawns_only_its_own_pane() {
     let bystander_pane = pane_id_of(&sock, &format!("fh-{}", bystander.id)).await;
 
     h.client
-        .restart_session(&restarted.id, farhelm_proto::RestartMode::Fresh, true)
+        .restart_session(&restarted.id, true)
         .await
         .expect("restart");
     wait_for_live_status(&h.client, &restarted.id, 30).await;
@@ -448,14 +426,14 @@ async fn a_restart_respawns_only_its_own_pane() {
 #[farhelm_testtrace::test]
 async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
     let h = harness().await;
-    let (session, _work) = basic_session(&h).await;
+    let (session, _work) = resumable_basic_session(&h).await;
     assert!(
         listed(&h.client, &session.id).await.status.is_live(),
         "the session must start out genuinely healthy"
     );
 
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .restart_session(&session.id, true)
         .await
         .expect("restart onto generation 1");
     wait_for_live_status(&h.client, &session.id, 30).await;
@@ -566,9 +544,9 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
 /// that let that happen would pass every other test here and only show up
 /// in exactly this sequence.
 ///
-/// The same invocation is used for both generations — `RestartMode::Fresh`
-/// replays the session's original argv verbatim, so there is no
-/// per-restart override to give the second run a different command. A
+/// The same command line runs in both generations — the resumable fixture's
+/// resume command repeats the launch, so there is no per-restart override
+/// to give the second run a different command. A
 /// fixed sleep duration would race under load (generation 0 could exit
 /// naturally before the stop lands, or generation 1 could exit before
 /// `wait_for_live_status` observes it), so both generations instead loop
@@ -582,17 +560,14 @@ async fn stop_then_restart_then_natural_exit_carries_no_stale_annotation() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let marker = work.path().join("released");
-    let session = h
-        .client
-        .create_session(
-            &work.path().to_string_lossy(),
-            "sh -c 'until [ -e released ]; do sleep 0.2; done'",
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create");
+    let session = create_resumable_session(
+        &h,
+        &work.path().to_string_lossy(),
+        "sh -c 'until [ -e released ]; do sleep 0.2; done'",
+        80,
+        24,
+    )
+    .await;
     wait_for_live_status(&h.client, &session.id, 30).await;
 
     h.client
@@ -620,7 +595,7 @@ async fn stop_then_restart_then_natural_exit_carries_no_stale_annotation() {
     // it first.
     let restarted = h
         .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .restart_session(&session.id, false)
         .await
         .expect("restart the already-exited session");
     assert_eq!(

@@ -34,7 +34,7 @@ impl Supervisor {
         // deliberately — the v1-token exception keeps pre-column tokens
         // resumable through the existing verifier — and 1 is the version
         // admission writes. Anything else returns before any verify or
-        // write; the offer gate independently serves these rows FreshOnly.
+        // write; the offer gate independently serves these rows NotCaptured.
         if !matches!(row.capture_ownership_version, 0 | 1) {
             return Ok(true);
         }

@@ -366,7 +366,7 @@ pub(crate) fn live_status(entry: &SessionEntry) -> SessionStatus {
 /// now.
 ///
 /// Recomputed on every reply for the same reason `status` is: a capture
-/// pass can upgrade a session from `FreshOnly` to `Resume` at any moment,
+/// pass can upgrade a session from `NotCaptured` to `Resume` at any moment,
 /// so the value stored in `SessionEntry::info` at create or reload is a
 /// starting point rather than an answer. Reads only the COMMITTED identity
 /// ([`super::capture::CaptureState::committed_conversation`]), which keeps

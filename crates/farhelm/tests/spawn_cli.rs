@@ -87,7 +87,7 @@ fn child_session(cwd: String) -> SessionInfo {
         launch: None,
         status: SessionStatus::Running,
         annotation: None,
-        restart_offer: RestartOffer::FreshOnly,
+        restart_offer: RestartOffer::NoConversationReporting,
         tabs: Vec::<TabInfo>::new(),
         source_profile: Some(SourceProfile {
             id: "profile-1".to_string(),

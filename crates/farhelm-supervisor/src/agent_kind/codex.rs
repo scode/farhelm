@@ -396,17 +396,17 @@ mod tests {
         );
         assert_eq!(
             snapshot.restart_offer(Some(stored), 2),
-            RestartOffer::FreshOnly,
+            RestartOffer::NotCaptured,
             "an unknown provenance version refuses exact Resume"
         );
         assert_eq!(
             snapshot.restart_offer(Some(stored), -1),
-            RestartOffer::FreshOnly,
+            RestartOffer::NotCaptured,
             "a negative provenance version refuses exact Resume"
         );
         assert_eq!(
             snapshot.restart_offer(Some("historical-thread"), 1),
-            RestartOffer::FreshOnly,
+            RestartOffer::NotCaptured,
             "version 1 never blesses a bare id the verifier rejects"
         );
     }
@@ -420,7 +420,7 @@ mod tests {
             .expect("Codex integration");
         assert_eq!(
             snapshot.restart_offer(Some("historical-thread"), 0),
-            RestartOffer::FreshOnly
+            RestartOffer::NotCaptured
         );
         assert_eq!(snapshot.filled_resume_argv("historical-thread"), None);
     }

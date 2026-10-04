@@ -9,12 +9,18 @@
 // ---------------------------------------------------------------------
 
 import { expect, test } from "./helpers/evidence";
-import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { hideSeenState, localHostId, openRowMenu, SESSION_LISTING, stopSession } from "./helpers/fleet";
-import { cleanupSession, fillCreateForm, restartIdleAgent, termText, waitForTermText } from "./helpers/term";
+import { type APIRequestContext, type Page } from "@playwright/test";
+import {
+  createResumableSession,
+  hideSeenState,
+  localHostId,
+  openRowMenu,
+  SESSION_LISTING,
+  stopSession,
+} from "./helpers/fleet";
+import { cleanupSession, restartIdleAgent, termText, waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import {
-  FAKE_AGENT_INVOCATION,
   findSessionIdByTitle,
   fulfillAsHelm,
   installTerminalSuiteHooks,
@@ -23,19 +29,6 @@ import {
   rowByTitle,
   sharedSessionRow,
 } from "./helpers/terminal-suite";
-
-/**
- * Read a visible fixture row's session id for a readiness oracle.
- *
- * The bounded locator observation ties the id to the row this test chose;
- * cleanup's best-effort title lookup is deliberately not a setup oracle.
- * Give row publication its attachment allowance rather than the shorter
- * default assertion timeout; attachment readiness is observed afterward.
- */
-async function sessionIdFor(row: Locator, timeout = 20_000): Promise<string> {
-  await expect(row).toHaveAttribute("data-session-id", /.+/, { timeout });
-  return (await row.getAttribute("data-session-id"))!;
-}
 
 installTerminalSuiteHooks();
 
@@ -61,7 +54,7 @@ installTerminalSuiteHooks();
  * "nothing respawns unattended" is a claim about requests, and only a
  * count can show that a decline sent none and a click sent exactly one.
  */
-async function injectInterruptedSession(page: Page, sessionId: string, title: string) {
+async function injectInterruptedSession(page: Page, sessionId: string, title: string, offer = "resume") {
   // The replacement a successful Replace answers with. Like the real helm,
   // the listing reports it from then on: the sidebar re-selects when the
   // selected session drops out of a listing, and the helm's change hints
@@ -95,7 +88,7 @@ async function injectInterruptedSession(page: Page, sessionId: string, title: st
       cwd: "/tmp",
       invocation: "claude",
       status: { state: "interrupted" },
-      restart_offer: "resume",
+      restart_offer: offer,
     });
     listing.total += 1;
     if (replaced) {
@@ -217,6 +210,51 @@ test("an interrupted session's view leads with the resume offer, and declining c
   await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
   const row = rowByTitle(page, title);
   await expect(row.locator(".status-badge")).toHaveText("interrupted");
+  expect(counter.restartRequests).toBe(0);
+});
+
+/**
+ * Why this matters: Restart only ever resumes the session's own conversation
+ * (SPEC.md), so a session that cannot resume must not offer a Restart that
+ * would start it fresh, and the user must learn why from the control itself.
+ * Spec: for a `not_captured` interrupted session, the header Restart stays
+ * visible but greyed out (`aria-disabled`, not natively disabled, so its
+ * tooltip stays readable), its accessible name says Restart is unavailable,
+ * its tooltip and description give the reason and point at Replace, a click
+ * sends nothing, and the interrupted card offers only Replace.
+ */
+test("an interrupted session that cannot resume greys out Restart and offers only Replace", async ({ page }) => {
+  const sessionId = "11111111-2222-3333-4444-888888888888";
+  const title = `interrupted-unresumable-${Date.now()}`;
+  const counter = await injectInterruptedSession(page, sessionId, title, "not_captured");
+
+  await page.goto("/");
+  await rowByTitle(page, title).locator(".session-row-open").click();
+  await expect(page.locator(".titlebar .status-badge")).toHaveText("interrupted");
+
+  const restart = page.locator(".restart-primary");
+  await expect(restart).toBeVisible();
+  await expect(restart).toHaveAttribute("aria-disabled", "true");
+  await expect(restart).toHaveAttribute("aria-label", "restart unavailable");
+  await expect(restart).toHaveAttribute("title", /no conversation Farhelm can resume was captured.*replace/);
+  await expect(page.locator("#restart-offer-description")).toContainText("no conversation Farhelm can resume");
+  await expect(page.locator(".restart-with-trigger")).toHaveAttribute("aria-disabled", "true");
+
+  const notice = page.locator(".interrupted-card");
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText("choose Replace");
+  await expect(notice.locator(".restart-from-notice")).toHaveCount(0);
+  await expect(notice.locator(".replace-from-notice")).toBeVisible();
+
+  // A greyed-out control that still sent the request would be the fresh
+  // restart SPEC.md rules out; nothing may open a confirmation either.
+  // `force`, because Playwright treats `aria-disabled` as disabled and would
+  // otherwise wait for the control to become enabled; a user's click still
+  // reaches it, which is exactly what is under test.
+  await restart.click({ force: true });
+  await expect(page.locator(".restart-confirm")).toHaveCount(0);
+  // sleep-ok: give a wrongly sent restart time to reach the counting route before asserting none did.
+  await page.waitForTimeout(500);
   expect(counter.restartRequests).toBe(0);
 });
 
@@ -565,11 +603,8 @@ test("restart-keeps-a-badge-on-screen-throughout", async ({ page, request }) => 
   const title = `restart-badge-${Date.now()}`;
   let id: string | undefined;
   try {
-    const created = await request.post("/api/sessions", {
-      data: { cwd: "/tmp", invocation: FAKE_AGENT_INVOCATION, title },
-    });
-    expect(created.ok(), "creating the session under test").toBe(true);
-    id = (await created.json()).id;
+    // Restart only resumes, so the session reports a conversation.
+    id = (await createResumableSession(request, { cwd: "/tmp", title })).id;
 
     await hideSeenState(page);
     await page.goto("/");
@@ -608,7 +643,7 @@ test("restart-keeps-a-badge-on-screen-throughout", async ({ page, request }) => 
     // the first classification of the new run — opens after the request
     // returns, not during it.
     const restarted = await request.post(`/api/sessions/${id}/restart`, {
-      data: { mode: "fresh", stop_if_running: true },
+      data: { stop_if_running: true },
     });
     expect(restarted.ok(), `restarting ${id}`).toBe(true);
     // sleep-ok: retain the finite restart/reclassification observation window, with mutation evidence captured in-page.
@@ -644,13 +679,12 @@ test("restarting a working agent confirms first, and only then sends the request
 
   try {
     await page.goto("/");
-    const form = await fillCreateForm(page, {
-      cwd: "/tmp",
-      invocation: FAKE_AGENT_INVOCATION,
-      title,
-    });
-    await form.locator('button[type="submit"]').click();
-    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
+    // Restart only resumes, so the session reports a conversation as it
+    // starts; the create form cannot declare a command's agent type, so the
+    // API creates it and the page opens it.
+    const created = await createResumableSession(request, { cwd: "/tmp", title });
+    await rowByTitle(page, title).locator(".session-row-open").click();
+    await waitForSessionRevealed(page, created.id);
     await waitForTermText(page, "FAKE-AGENT READY");
 
     // The >= 2 banner count at the end needs the FIRST run's banner to
@@ -712,10 +746,9 @@ test("restarting a working agent confirms first, and only then sends the request
     await page.locator(".restart-confirm").click();
     await expect.poll(() => bodies.length).toBe(1);
     expect(bodies[0].stop_if_running).toBe(true);
-    // The mode is the one the session's own offer authorizes — a
-    // fake-agent session captures no conversation, so a fresh launch is
-    // the only honest thing restart can offer it.
-    expect(bodies[0].mode).toBe("fresh");
+    // There is no mode: a restart always resumes the session's own
+    // conversation.
+    expect(bodies[0].mode).toBeUndefined();
 
     // And the relaunch actually comes up. Counted rather than merely
     // matched: the spam above pushed the FIRST run's banner into the
@@ -764,13 +797,12 @@ test("a restart prompt that drifted to an exited agent no longer consents to a s
 
   try {
     await page.goto("/");
-    const form = await fillCreateForm(page, {
-      cwd: "/tmp",
-      invocation: FAKE_AGENT_INVOCATION,
-      title,
-    });
-    await form.locator('button[type="submit"]').click();
-    const id = await sessionIdFor(rowByTitle(page, title));
+    // Restart only resumes, so the session reports a conversation as it
+    // starts; the create form cannot declare a command's agent type, so the
+    // API creates it and the page opens it.
+    const created = await createResumableSession(request, { cwd: "/tmp", title });
+    await rowByTitle(page, title).locator(".session-row-open").click();
+    const id = created.id;
     await waitForSessionRevealed(page, id);
     await waitForTermText(page, "FAKE-AGENT READY");
     // `busy` keeps the agent reading working, the one status that opens
@@ -823,13 +855,12 @@ test("restarting an idle agent restarts at once, without asking", async ({ page,
 
   try {
     await page.goto("/");
-    const form = await fillCreateForm(page, {
-      cwd: "/tmp",
-      invocation: FAKE_AGENT_INVOCATION,
-      title,
-    });
-    await form.locator('button[type="submit"]').click();
-    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
+    // Restart only resumes, so the session reports a conversation as it
+    // starts; the create form cannot declare a command's agent type, so the
+    // API creates it and the page opens it.
+    const created = await createResumableSession(request, { cwd: "/tmp", title });
+    await rowByTitle(page, title).locator(".session-row-open").click();
+    await waitForSessionRevealed(page, created.id);
     await waitForTermText(page, "FAKE-AGENT READY");
 
     const replied = page.waitForResponse((response) =>
@@ -874,13 +905,12 @@ test("a restarted session's terminal still shows the previous run's scrollback a
   const title = `restart-scrollback-${Date.now()}`;
   try {
     await page.goto("/");
-    const form = await fillCreateForm(page, {
-      cwd: "/tmp",
-      invocation: FAKE_AGENT_INVOCATION,
-      title,
-    });
-    await form.locator('button[type="submit"]').click();
-    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
+    // Restart only resumes, so the session reports a conversation as it
+    // starts; the create form cannot declare a command's agent type, so the
+    // API creates it and the page opens it.
+    const created = await createResumableSession(request, { cwd: "/tmp", title });
+    await rowByTitle(page, title).locator(".session-row-open").click();
+    await waitForSessionRevealed(page, created.id);
     await waitForTermText(page, "FAKE-AGENT READY");
 
     await page.locator("#terminal").click();
@@ -959,13 +989,12 @@ test("a restart whose response is lost still recovers the terminal", async ({
 
   try {
     await page.goto("/");
-    const form = await fillCreateForm(page, {
-      cwd: "/tmp",
-      invocation: FAKE_AGENT_INVOCATION,
-      title,
-    });
-    await form.locator('button[type="submit"]').click();
-    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
+    // Restart only resumes, so the session reports a conversation as it
+    // starts; the create form cannot declare a command's agent type, so the
+    // API creates it and the page opens it.
+    const created = await createResumableSession(request, { cwd: "/tmp", title });
+    await rowByTitle(page, title).locator(".session-row-open").click();
+    await waitForSessionRevealed(page, created.id);
     await waitForTermText(page, "FAKE-AGENT READY");
 
     await page.locator("#terminal").click();
@@ -1078,14 +1107,13 @@ test("a restarted session's banner clears once the new attachment is live", asyn
       };
     });
     await page.goto("/");
-    const form = await fillCreateForm(page, {
-      cwd: "/tmp",
-      invocation: FAKE_AGENT_INVOCATION,
-      title,
-    });
-    await form.locator('button[type="submit"]').click();
+    // Restart only resumes, so the session reports a conversation as it
+    // starts; the create form cannot declare a command's agent type, so the
+    // API creates it and the page opens it.
+    const created = await createResumableSession(request, { cwd: "/tmp", title });
+    await rowByTitle(page, title).locator(".session-row-open").click();
     await expect(page.locator(".titlebar .title")).toHaveText(title, { timeout: 15_000 });
-    await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
+    await waitForSessionRevealed(page, created.id);
     await waitForTermText(page, "FAKE-AGENT READY");
 
     // The count-of-two anchor at the end needs the FIRST run's banner in

@@ -777,11 +777,11 @@ pub enum RetryClaim {
 }
 
 /// The mutable inputs to a session's restart offer, as the caller read
-/// them when it validated the requested mode — the condition
+/// them when it validated that the session can resume — the condition
 /// [`SessionStore::begin_relaunch`] claims under.
 ///
 /// The offer check covers identity and ownership evidence, since either can
-/// change which restart modes are available. The
+/// change whether, and into which conversation, a restart resumes. The
 /// integration kind stays fixed, while restart-with may replace the template
 /// only as part of a relaunch. Conditioning on capture evidence keeps an
 /// unrelated row write from rejecting the relaunch.
@@ -1072,7 +1072,7 @@ fn resume_template_column(template: Option<&[String]>) -> Option<String> {
 /// The inverse of [`resume_template_column`]; a value that is present but
 /// not a JSON string array is refused rather than dropped, since a session
 /// silently losing its resume template would turn a `Resume` offer into a
-/// `FreshOnly` one with no explanation anywhere.
+/// `NotCaptured` one with no explanation anywhere.
 fn resume_template_from_column(text: Option<String>) -> anyhow::Result<Option<Vec<String>>> {
     text.map(|text| {
         serde_json::from_str::<Vec<String>>(&text).context("decoding a stored resume template")
@@ -1293,8 +1293,8 @@ pub struct StoredSession {
     /// Provenance of the stored identity: `hook` for accepted reports, absent
     /// for historical identities or an empty binding. Resume does not reject an
     /// identity because its source is absent. This column also serves as launch
-    /// evidence: only a launched process can supply an accepted report. Fresh
-    /// restart clears it with the identity; Resume preserves both.
+    /// evidence: only a launched process can supply an accepted report. A
+    /// restart preserves it with the identity it resumes.
     pub conversation_source: Option<String>,
     /// Ownership provenance of the current capture binding: 0 means the
     /// binding was NOT established under the foreground-ownership
@@ -1342,7 +1342,7 @@ pub struct StoredSession {
     /// The value is
     /// [`OmpLaunchProgram`](crate::agent_kind::omp::OmpLaunchProgram)'s
     /// column spelling, classified from the argv this generation
-    /// actually started — after Fresh/Resume selection — and written
+    /// actually started (a restart's resume argv, or the create's) and written
     /// beside the asset marker by the same fenced provenance write.
     /// The resume template is a future resume's command, not this
     /// launch's, and says nothing about what runs now; admission reads
@@ -1711,7 +1711,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         // never fill (no first-input time was ever recorded for it either,
         // so capture could not run for it in any case). `generic` with no
         // template is the honest reading: this session predates the
-        // snapshot, so restart can only ever offer it a fresh launch.
+        // snapshot, so it has nothing to resume and Restart is unavailable.
         conn.execute_batch(
             "BEGIN;
              ALTER TABLE sessions ADD COLUMN agent_kind TEXT NOT NULL DEFAULT 'generic';
@@ -2575,17 +2575,14 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
     }
     // The stored INVOCATION gets the same trust-boundary treatment as the
     // template above, but only when it still parses as a command line: a
-    // hand-edited row with `{cwd}` in argv[0] would otherwise exec a
-    // program literally named `{cwd}` on the next Fresh restart — the only
-    // mode that splits and execs the stored invocation; resume and
-    // fallback modes work from the template instead. A string that
-    // does NOT parse is deliberately left alone here — refusing it is
-    // already `relaunch_argv`'s `Fresh` arm's job (service/core.rs), and
-    // refusing it at LOAD instead would turn a row this build has always
-    // tolerated (an unparsable invocation, which every restart mode other
-    // than `Fresh` never even splits) into a load failure for a reason
-    // that has nothing to do with the `{cwd}` placeholder this check
-    // exists for.
+    // hand-edited row with `{cwd}` in argv[0] is refused here rather than
+    // carried into a Replace or inherited spawn that recreates the session
+    // from it. Restart never execs the stored invocation (it runs the
+    // resume command). A string that does NOT parse is deliberately left
+    // alone: refusing it at LOAD would turn a row this build has always
+    // tolerated into a load failure for a reason that has nothing to do
+    // with the `{cwd}` placeholder this check exists for, and the create
+    // that copies it refuses it at that point.
     if let Ok(argv) = shell_words::split(&row.invocation)
         && let Err(message) = crate::agent_kind::ensure_no_cwd_program("session invocation", &argv)
     {
@@ -3901,16 +3898,16 @@ impl SessionStore {
     ///
     /// ## The offer condition
     ///
-    /// `basis` is what the caller's mode validation was decided against:
+    /// `basis` is what the caller's offer validation was decided against:
     /// the captured identity and its ownership provenance. These can change
     /// as report evidence arrives; a template replacement belongs to a relaunch
     /// instead. The claim is CONDITIONAL
     /// on that evidence still holding, which makes "validate the offer, then relaunch"
-    /// atomic rather than merely sequential: a capture pass that commits
-    /// `Resume` in between turns this into [`RelaunchDecision::OfferChanged`]
-    /// and the caller refuses with a conflict, instead of launching the
-    /// fresh agent the user chose against a session that has meanwhile
-    /// become resumable.
+    /// atomic rather than merely sequential: a report that replaces or
+    /// withdraws the identity in between turns this into
+    /// [`RelaunchDecision::OfferChanged`] and the caller refuses with a
+    /// conflict, instead of resuming a conversation other than the one the
+    /// user was shown.
     ///
     /// ## What the new generation clears, and why each
     ///
@@ -3932,11 +3929,11 @@ impl SessionStore {
     /// - the exit code and the error detail go for the same reason;
     /// - the pane is emptied, because the relaunch has not confirmed one
     ///   yet.
-    /// - `reset_capture` clears the identity and its ownership and source.
-    ///   A fresh launch starts a new conversation; Resume preserves the
-    ///   exact identity it will enter, whether historical or reported.
-    /// - `omp_reporter_asset` and `omp_launch_program` clear UNCONDITIONALLY
-    ///   — on a `Resume` relaunch as much as a fresh one. They describe the
+    /// - the captured identity, its ownership and its source are KEPT: every
+    ///   restart resumes, and preserves the exact identity it will enter,
+    ///   whether historical or reported.
+    /// - `omp_reporter_asset` and `omp_launch_program` clear, even though
+    ///   the conversation is kept. They describe the
     ///   LAUNCH (which argv started, which reporter it installed), not the
     ///   conversation being resumed, so preserving them would lend the
     ///   previous run's capture authority to this one. The pre-spawn
@@ -3955,7 +3952,6 @@ impl SessionStore {
         &self,
         id: &str,
         basis: OfferBasis,
-        reset_capture: bool,
         scope_available: bool,
     ) -> anyhow::Result<RelaunchDecision> {
         let id = id.to_string();
@@ -4016,23 +4012,14 @@ impl SessionStore {
                     let generation = generation + 1;
                     let (state, exit_code, annotation, error_detail) =
                         LastOutcome::Launching.columns();
-                    // One statement rather than two near-identical ones: the capture
-                    // columns are cleared by an expression that is a no-op when the
-                    // relaunch is resuming, so the SQL cannot drift between the two
-                    // cases the way two copies of it could. The OMP launch-provenance
-                    // columns beside them clear unconditionally — they describe the
-                    // launch, not the conversation, so even a Resume must not inherit
-                    // them.
+                    // The capture columns are left alone: the relaunch resumes the
+                    // conversation they name. The OMP launch-provenance columns
+                    // clear — they describe the launch, not the conversation, so a
+                    // resume must not inherit them.
                     tx.execute(
                         "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
-                 omp_reporter_asset = NULL, omp_launch_program = NULL, \
-                 captured_conversation = \
-                     CASE WHEN ?8 THEN NULL ELSE captured_conversation END, \
-                 conversation_source = \
-                     CASE WHEN ?8 THEN NULL ELSE conversation_source END, \
-                 capture_ownership_version = \
-                     CASE WHEN ?8 THEN 0 ELSE capture_ownership_version END \
+                 omp_reporter_asset = NULL, omp_launch_program = NULL \
                  WHERE id = ?1",
                         rusqlite::params![
                             id,
@@ -4042,7 +4029,6 @@ impl SessionStore {
                             error_detail,
                             generation,
                             i64::from(scope_available),
-                            i64::from(reset_capture),
                         ],
                     )
                     .context("opening a new launch generation for a restart")?;
@@ -4078,8 +4064,7 @@ impl SessionStore {
     /// by the time this loses that race, the newer generation's own outcome
     /// is the truth and this one's prior run is ancient history.
     ///
-    /// Identity is not restored: Resume never clears its identity, and a
-    /// validated non-Resume restart has no usable Resume target to restore.
+    /// Identity is not restored: a relaunch never clears it.
     /// The OMP reporter asset and launch program also stay cleared: they
     /// authorize one launch, not the conversation, so a later launch must
     /// establish its own pair. The outcome, pane, and scope selection describe
@@ -6629,7 +6614,7 @@ mod tests {
         for (id, identity, offer) in [
             ("reported", Some("reported-id"), RestartOffer::Resume),
             ("historical", Some("historical-id"), RestartOffer::Resume),
-            ("ambiguous", None, RestartOffer::FreshOnly),
+            ("ambiguous", None, RestartOffer::NotCaptured),
         ] {
             let row = migrated.session(id).await.unwrap().expect("row survives");
             assert_eq!(row.captured_conversation.as_deref(), identity);
@@ -6840,60 +6825,48 @@ mod tests {
         );
     }
 
-    /// Relaunch clears provenance exactly when it clears the capture it
-    /// belongs to, and preserves both together on a Resume.
+    /// A relaunch preserves the captured identity together with its
+    /// ownership provenance, and refuses when the provenance it was offered
+    /// against has moved.
     ///
-    /// Why this test matters: version 1 is per-LAUNCH correlation state
-    /// like the identity itself. Preserving it across Fresh would bless
-    /// the new window's reports before they arrive; clearing it on a
-    /// clean-owner-exit Resume would strand a proven binding its own
-    /// restart could no longer offer.
+    /// Why this test matters: every restart resumes, so version 1 must
+    /// survive the relaunch with the conversation it proves — clearing it
+    /// would strand a proven binding its own restart could no longer offer.
+    /// And a restart claim read at an older version must not resume a
+    /// binding whose provenance changed underneath it.
     #[farhelm_testtrace::test]
-    async fn relaunch_resets_provenance_only_when_resetting_capture() {
+    async fn relaunch_preserves_capture_and_provenance_together() {
         let (_dir, store) = fresh_store().await;
-        for id in ["proven-fresh", "proven-resume"] {
-            let mut row = launching_row(id);
-            row.captured_conversation = Some("conv-proven".to_string());
-            row.conversation_source = Some("hook".to_string());
-            row.capture_ownership_version = 1;
-            store
-                .insert_session(row, None)
-                .await
-                .expect("insert proven fixture");
-        }
+        let mut row = launching_row("proven-resume");
+        row.captured_conversation = Some("conv-proven".to_string());
+        row.conversation_source = Some("hook".to_string());
+        row.capture_ownership_version = 1;
+        store
+            .insert_session(row, None)
+            .await
+            .expect("insert proven fixture");
 
         let basis = OfferBasis {
             captured_conversation: Some("conv-proven".to_string()),
             capture_ownership_version: 1,
         };
         store
-            .begin_relaunch("proven-fresh", basis.clone(), true, true)
-            .await
-            .expect("fresh relaunch");
-        assert_eq!(
-            store
-                .session("proven-fresh")
-                .await
-                .expect("read reset row")
-                .expect("row survives")
-                .capture_ownership_version,
-            0,
-            "a Fresh relaunch clears provenance with the capture"
-        );
-
-        store
-            .begin_relaunch("proven-resume", basis, false, true)
+            .begin_relaunch("proven-resume", basis, true)
             .await
             .expect("resume relaunch");
+        let preserved = store
+            .session("proven-resume")
+            .await
+            .expect("read preserved row")
+            .expect("row survives");
         assert_eq!(
-            store
-                .session("proven-resume")
-                .await
-                .expect("read preserved row")
-                .expect("row survives")
-                .capture_ownership_version,
-            1,
-            "a Resume relaunch preserves provenance with the capture"
+            preserved.captured_conversation.as_deref(),
+            Some("conv-proven"),
+            "a relaunch resumes, so it keeps the conversation"
+        );
+        assert_eq!(
+            preserved.capture_ownership_version, 1,
+            "a relaunch preserves provenance with the capture"
         );
 
         // A version difference under an unchanged conversation still moves
@@ -6906,7 +6879,7 @@ mod tests {
         assert!(
             matches!(
                 store
-                    .begin_relaunch("proven-resume", stale, false, true)
+                    .begin_relaunch("proven-resume", stale, true)
                     .await
                     .expect("relaunch against a changed version"),
                 RelaunchDecision::OfferChanged
@@ -6929,9 +6902,8 @@ mod tests {
     /// anyway. Starting from non-NULL old provenance is what makes the
     /// test discriminate: without the atomic clear, the failed publish
     /// would leave the preceding generation's pair on the new
-    /// generation's row. Both relaunch arms are covered because the
-    /// clear is unconditional: the Resume arm keeps its conversation
-    /// while losing its provenance.
+    /// generation's row. The relaunch keeps its conversation while losing
+    /// its launch provenance.
     ///
     /// What stands in for the failed write: a provenance write through
     /// the real function against a superseded generation, which the
@@ -6943,94 +6915,89 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn relaunch_clears_omp_provenance_when_the_publish_lands_nothing() {
         let (_dir, store) = fresh_store().await;
-        for id in ["omp-fresh", "omp-resume"] {
-            let mut row = launching_row(id);
-            row.captured_conversation = Some("conv-old".to_string());
-            row.conversation_source = Some("hook".to_string());
-            row.omp_reporter_asset = Some("farhelm-conversation-v2.ts".to_string());
-            row.omp_launch_program = Some("omp".to_string());
-            store
-                .insert_session(row, None)
-                .await
-                .expect("insert stale-provenance fixture");
-        }
+        let id = "omp-resume";
+        let mut row = launching_row(id);
+        row.captured_conversation = Some("conv-old".to_string());
+        row.conversation_source = Some("hook".to_string());
+        row.omp_reporter_asset = Some("farhelm-conversation-v2.ts".to_string());
+        row.omp_launch_program = Some("omp".to_string());
+        store
+            .insert_session(row, None)
+            .await
+            .expect("insert stale-provenance fixture");
         let basis = OfferBasis {
             captured_conversation: Some("conv-old".to_string()),
             capture_ownership_version: 0,
         };
-        for (id, reset_capture, kept_conversation) in [
-            ("omp-fresh", true, None),
-            ("omp-resume", false, Some("conv-old")),
-        ] {
-            let claim = claimed(
-                store
-                    .begin_relaunch(id, basis.clone(), reset_capture, false)
-                    .await
-                    .expect("relaunch"),
-            );
-            let row = store
-                .session(id)
-                .await
-                .expect("read reopened row")
-                .expect("row survives");
-            assert_eq!(
-                row.omp_reporter_asset, None,
-                "{id}: the new generation must not inherit the previous run's asset marker"
-            );
-            assert_eq!(
-                row.omp_launch_program, None,
-                "{id}: the new generation must not inherit the previous run's program"
-            );
-            assert_eq!(
-                row.captured_conversation.as_deref(),
-                kept_conversation,
-                "{id}: the clear must not disturb the capture-preservation arm it rides with"
-            );
-            // The failed publish: a write through the real function that
-            // lands nothing — the fence drops a superseded generation.
+        let kept_conversation = Some("conv-old");
+        let claim = claimed(
             store
-                .record_omp_launch_provenance(
-                    id,
-                    claim.generation - 1,
-                    Some("farhelm-conversation-v2.ts"),
-                    "shell",
-                )
+                .begin_relaunch(id, basis.clone(), false)
                 .await
-                .expect("a fenced-out write is still a successful call");
-            let row = store
-                .session(id)
-                .await
-                .expect("read after the failed publish")
-                .expect("row survives");
-            assert_eq!(
-                (
-                    row.omp_reporter_asset.as_deref(),
-                    row.omp_launch_program.as_deref()
-                ),
-                (None, None),
-                "{id}: a publish that lands nothing must leave unknown provenance, not stale authority"
-            );
-            // And the new generation's own publish lands on the cleared
-            // columns — here the finding's resumed-shell shape, whose
-            // authority differs from the direct-`omp` launch it replaces.
-            store
-                .record_omp_launch_provenance(id, claim.generation, None, "shell")
-                .await
-                .expect("the new generation publishes");
-            let row = store
-                .session(id)
-                .await
-                .expect("read after the new publish")
-                .expect("row survives");
-            assert_eq!(
-                (
-                    row.omp_reporter_asset.as_deref(),
-                    row.omp_launch_program.as_deref()
-                ),
-                (None, Some("shell")),
-                "{id}: the new generation's pair must publish onto the cleared columns"
-            );
-        }
+                .expect("relaunch"),
+        );
+        let row = store
+            .session(id)
+            .await
+            .expect("read reopened row")
+            .expect("row survives");
+        assert_eq!(
+            row.omp_reporter_asset, None,
+            "{id}: the new generation must not inherit the previous run's asset marker"
+        );
+        assert_eq!(
+            row.omp_launch_program, None,
+            "{id}: the new generation must not inherit the previous run's program"
+        );
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            kept_conversation,
+            "{id}: the clear must not disturb the capture-preservation arm it rides with"
+        );
+        // The failed publish: a write through the real function that
+        // lands nothing — the fence drops a superseded generation.
+        store
+            .record_omp_launch_provenance(
+                id,
+                claim.generation - 1,
+                Some("farhelm-conversation-v2.ts"),
+                "shell",
+            )
+            .await
+            .expect("a fenced-out write is still a successful call");
+        let row = store
+            .session(id)
+            .await
+            .expect("read after the failed publish")
+            .expect("row survives");
+        assert_eq!(
+            (
+                row.omp_reporter_asset.as_deref(),
+                row.omp_launch_program.as_deref()
+            ),
+            (None, None),
+            "{id}: a publish that lands nothing must leave unknown provenance, not stale authority"
+        );
+        // And the new generation's own publish lands on the cleared
+        // columns — here the finding's resumed-shell shape, whose
+        // authority differs from the direct-`omp` launch it replaces.
+        store
+            .record_omp_launch_provenance(id, claim.generation, None, "shell")
+            .await
+            .expect("the new generation publishes");
+        let row = store
+            .session(id)
+            .await
+            .expect("read after the new publish")
+            .expect("row survives");
+        assert_eq!(
+            (
+                row.omp_reporter_asset.as_deref(),
+                row.omp_launch_program.as_deref()
+            ),
+            (None, Some("shell")),
+            "{id}: the new generation's pair must publish onto the cleared columns"
+        );
     }
 
     /// Every outcome shape must survive the on-disk round trip — the stop
@@ -10127,7 +10094,7 @@ mod tests {
         insert_running(&store, "s1").await;
         claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true, false)
+                .begin_relaunch("s1", uncaptured_basis(), false)
                 .await
                 .expect("begin relaunch"),
         );
@@ -10237,9 +10204,8 @@ mod tests {
     /// The two `{cwd}` cases (invocation, template) cover the same hazard
     /// [`decode_session_row`]'s new invocation check exists for: a
     /// hand-edited row with the placeholder in the program slot would
-    /// otherwise exec a program literally named `{cwd}` on the next Fresh
-    /// restart (the only mode that execs the stored invocation directly),
-    /// rather than running a "run in this directory" wrapper.
+    /// otherwise be carried into a Replace or inherited spawn that
+    /// recreates the session from it.
     #[farhelm_testtrace::test]
     async fn a_semantically_impossible_session_row_is_refused_at_load() {
         let cases = [
@@ -10303,12 +10269,10 @@ mod tests {
     /// That check only fires when `shell_words::split` succeeds AND the
     /// first element is the placeholder — a string that fails to parse at
     /// all (an unterminated quote, here) is left alone at decode time on
-    /// purpose, because refusing it is already `relaunch_argv`'s `Fresh`
-    /// arm's job at the point a restart actually needs to split it. A row
-    /// this build has always tolerated at load (every restart mode other
-    /// than `Fresh` never even splits the stored invocation) must keep
-    /// loading; regressing that would turn an unrelated hand-edit into a
-    /// session nobody can even list.
+    /// purpose: restart never splits the stored invocation, and a create
+    /// that copies it refuses it then. A row this build has always
+    /// tolerated at load must keep loading; regressing that would turn an
+    /// unrelated hand-edit into a session nobody can even list.
     #[farhelm_testtrace::test]
     async fn an_unparsable_stored_invocation_still_loads() {
         let (dir, store) = fresh_store().await;
@@ -10435,8 +10399,8 @@ mod tests {
     }
 
     /// A basis that matches a session with nothing captured — what
-    /// `begin_relaunch`'s offer condition is checked against for the
-    /// ordinary fresh relaunch.
+    /// `begin_relaunch`'s offer condition is checked against when a test
+    /// exercises the generation mechanics rather than the conversation.
     fn uncaptured_basis() -> OfferBasis {
         OfferBasis {
             captured_conversation: None,
@@ -10874,7 +10838,7 @@ mod tests {
 
         let claim = claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true, false)
+                .begin_relaunch("s1", uncaptured_basis(), false)
                 .await
                 .expect("begin relaunch"),
         );
@@ -10917,7 +10881,7 @@ mod tests {
 
         let claim = claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true, false)
+                .begin_relaunch("s1", uncaptured_basis(), false)
                 .await
                 .expect("begin relaunch"),
         );
@@ -10946,13 +10910,13 @@ mod tests {
         insert_running(&store, "s1").await;
         let first = claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true, false)
+                .begin_relaunch("s1", uncaptured_basis(), false)
                 .await
                 .expect("first"),
         );
         let second = claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true, false)
+                .begin_relaunch("s1", uncaptured_basis(), false)
                 .await
                 .expect("second"),
         );
@@ -11028,7 +10992,7 @@ mod tests {
             insert_running_with_scope(&store, id, prior_scoped).await;
             let claim = claimed(
                 store
-                    .begin_relaunch(id, uncaptured_basis(), true, probe_scoped)
+                    .begin_relaunch(id, uncaptured_basis(), probe_scoped)
                     .await
                     .expect("begin relaunch"),
             );
@@ -11070,7 +11034,7 @@ mod tests {
             insert_running_with_scope(&store, id, prior_scoped).await;
             let claim = claimed(
                 store
-                    .begin_relaunch(id, uncaptured_basis(), true, attempted_scoped)
+                    .begin_relaunch(id, uncaptured_basis(), attempted_scoped)
                     .await
                     .expect("begin relaunch"),
             );
@@ -11104,7 +11068,7 @@ mod tests {
         insert_running(&store, "s1").await;
         let claim = claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true, false)
+                .begin_relaunch("s1", uncaptured_basis(), false)
                 .await
                 .expect("begin relaunch"),
         );
@@ -11134,10 +11098,15 @@ mod tests {
         assert_eq!(row.pane, "%7");
     }
 
-    /// A `Resume` relaunch keeps the stored identity because the replacement
-    /// process re-enters exactly that conversation.
+    /// A relaunch keeps the stored identity and its source, because every
+    /// restart's replacement process re-enters exactly that conversation.
+    ///
+    /// Why: a restart that cleared the identity would leave the resumed
+    /// process unattributed until it reported again, and Restart would read
+    /// as unavailable for a session that is running the very conversation
+    /// it captured.
     #[farhelm_testtrace::test]
-    async fn a_resuming_relaunch_keeps_the_captured_identity() {
+    async fn a_relaunch_keeps_the_captured_identity_and_its_source() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
         store
@@ -11154,93 +11123,23 @@ mod tests {
                         capture_ownership_version: 0,
                     },
                     false,
-                    false,
                 )
                 .await
                 .expect("begin relaunch"),
         );
         let row = store.session("s1").await.expect("read").expect("present");
         assert_eq!(row.captured_conversation.as_deref(), Some("conv-1"));
-    }
-
-    /// Fresh restart must clear provenance with the identity so the old report
-    /// cannot count as evidence for the new launch. Resume preserves both: the
-    /// stored conversation remains the one that the new process enters.
-    #[farhelm_testtrace::test]
-    async fn begin_relaunch_clears_conversation_source_only_when_resetting_capture() {
-        let (_dir, store) = fresh_store().await;
-        insert_running(&store, "s1").await;
-        store
-            .record_reported_conversation("s1", 0, "conv-1")
-            .await
-            .expect("report");
-        assert_eq!(
-            store
-                .session("s1")
-                .await
-                .unwrap()
-                .unwrap()
-                .conversation_source
-                .as_deref(),
-            Some("hook"),
-            "the report must actually land before begin_relaunch is expected to touch it"
-        );
-
-        // A fresh relaunch (`reset_capture = true`) clears it, along with
-        // the rest of the per-launch capture state.
-        claimed(
-            store
-                .begin_relaunch(
-                    "s1",
-                    OfferBasis {
-                        captured_conversation: Some("conv-1".to_string()),
-                        capture_ownership_version: 0,
-                    },
-                    true,
-                    false,
-                )
-                .await
-                .expect("fresh relaunch"),
-        );
-        let row = store.session("s1").await.expect("read").expect("present");
-        assert_eq!(row.conversation_source, None);
-        assert_eq!(row.captured_conversation, None);
-
-        // Re-report against the new generation, then take a `Resume`
-        // relaunch (`reset_capture = false`): the column must survive.
-        let generation = row.generation;
-        store
-            .record_reported_conversation("s1", generation, "conv-2")
-            .await
-            .expect("report against the fresh generation");
-        claimed(
-            store
-                .begin_relaunch(
-                    "s1",
-                    OfferBasis {
-                        captured_conversation: Some("conv-2".to_string()),
-                        capture_ownership_version: 0,
-                    },
-                    false,
-                    false,
-                )
-                .await
-                .expect("resuming relaunch"),
-        );
-        let row = store.session("s1").await.expect("read").expect("present");
         assert_eq!(
             row.conversation_source.as_deref(),
             Some("hook"),
-            "a Resume relaunch must not disturb the source of the identity it is resuming"
+            "a relaunch must not disturb the source of the identity it is resuming"
         );
-        assert_eq!(row.captured_conversation.as_deref(), Some("conv-2"));
     }
 
-    /// The offer condition, which is what makes "validate the mode, then
+    /// The offer condition, which is what makes "validate the offer, then
     /// relaunch" atomic rather than merely sequential: a capture that
     /// commits between the two turns the claim into a refusal instead of
-    /// launching the fresh agent the user chose against a session that has
-    /// meanwhile become resumable.
+    /// relaunching against an identity the caller never validated.
     #[farhelm_testtrace::test]
     async fn a_capture_landing_mid_restart_refuses_the_generation() {
         let (_dir, store) = fresh_store().await;
@@ -11255,7 +11154,7 @@ mod tests {
 
         assert_eq!(
             store
-                .begin_relaunch("s1", basis, true, false)
+                .begin_relaunch("s1", basis, false)
                 .await
                 .expect("begin relaunch"),
             RelaunchDecision::OfferChanged
@@ -11287,7 +11186,7 @@ mod tests {
 
         claimed(
             store
-                .begin_relaunch("s1", uncaptured_basis(), true, false)
+                .begin_relaunch("s1", uncaptured_basis(), false)
                 .await
                 .expect("begin relaunch"),
         );
@@ -11304,7 +11203,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         assert_eq!(
             store
-                .begin_relaunch("gone", uncaptured_basis(), true, false)
+                .begin_relaunch("gone", uncaptured_basis(), false)
                 .await
                 .expect("begin relaunch"),
             RelaunchDecision::Gone

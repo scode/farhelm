@@ -32,6 +32,10 @@ export async function restartIdleAgent(page: Page, options: { afterInput?: boole
   }
   await expect(badge).toHaveClass(/\bidle\b/, { timeout: 30_000 });
   const restartButton = page.locator(".restart-primary");
+  // Premise: Restart is available. It only ever resumes, and a page whose
+  // copy says the session cannot resume turns the click into a silent no-op
+  // that would only surface later as an unexplained timeout.
+  await expect(restartButton).not.toHaveAttribute("aria-disabled", "true");
   await expect(restartButton).toHaveAttribute("data-confirms", "false");
   await restartButton.click();
 }

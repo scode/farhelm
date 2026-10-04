@@ -17,15 +17,14 @@
 //! fresh-create retry policy consumes its typed outcome separately from the
 //! display text.
 //!
-//! `SessionListBody`/`SessionListing`, `SessionFilter`, `POLL_INTERVAL_MS`,
-//! and `restart_mode_for` live here too, even though none of them performs
-//! I/O directly: the first pair is this module's own decoded response shape
-//! and the listing it assembles from it, `SessionFilter` is the query surface's
-//! half of the helm's server-side filtering (PLAN_M6_75.md item 7),
-//! `POLL_INTERVAL_MS` is the cadence the FALLBACK polls run at, and the last
-//! documents the wire-level pairing `restart_session` enforces from the
-//! caller's side — all of them are part of the HTTP contract this module
-//! owns, not the view code that consumes it.
+//! `SessionListBody`/`SessionListing`, `SessionFilter`, and `POLL_INTERVAL_MS`
+//! live here too, even though none of them performs I/O directly: the first
+//! pair is this module's own decoded response shape and the listing it
+//! assembles from it, `SessionFilter` is the query surface's half of the
+//! helm's server-side filtering (PLAN_M6_75.md item 7), and
+//! `POLL_INTERVAL_MS` is the cadence the FALLBACK polls run at — all of them
+//! are part of the HTTP contract this module owns, not the view code that
+//! consumes it.
 //!
 //! The URL-building helpers (`encode_query_value`, `encode_path_segment`)
 //! are `pub(crate)` rather than private: every endpoint below that embeds
@@ -60,9 +59,7 @@ use crate::github_checkout::{
     FreshCreateError, GithubCheckoutRequest, GithubPreview, GithubRepositories,
 };
 use crate::skew;
-use crate::{
-    Host, HostId, LaunchEffort, LaunchHarness, LaunchSelection, Profile, RestartOffer, Session, Tab,
-};
+use crate::{Host, HostId, LaunchEffort, LaunchHarness, LaunchSelection, Profile, Session, Tab};
 use serde::{Deserialize, Serialize};
 
 /// Mirror of the helm's whole `GET /api/sessions` reply (farhelm-helm's
@@ -2127,11 +2124,11 @@ pub(crate) async fn fetch_session(base: &str, id: &str) -> Result<Option<Session
 /// POST the restart endpoint for one session, returning the session's
 /// freshly recomputed state (SPEC.md's restart; PLAN_M3.md item 9).
 ///
-/// `mode` is not this caller's choice to make freely — it is whatever the
-/// session's CURRENT offer authorizes (`restart_mode_for`). The supervisor
-/// re-derives that offer at handling time and refuses a mismatch with a
-/// 409, which is the staleness case the caller handles by refreshing the
-/// session rather than retrying (see `session_view::SessionView`).
+/// A restart always resumes the session's own conversation, so there is no
+/// mode to choose. The supervisor re-derives the session's offer at
+/// handling time and refuses with a 409 when it cannot resume, which is the
+/// staleness case the caller handles by refreshing the session rather than
+/// retrying (see `session_view::SessionView`).
 ///
 /// `stop_if_running` carries the user's explicit consent to stop a working
 /// agent first; Restart sets it only after its inline confirmation, Restart
@@ -2145,13 +2142,12 @@ pub(crate) async fn fetch_session(base: &str, id: &str) -> Result<Option<Session
 pub(crate) async fn restart_session(
     base: &str,
     id: &str,
-    mode: &str,
     stop_if_running: bool,
     with: Option<&LaunchSelection>,
     allow_yolo: bool,
 ) -> Result<Session, ActionRefusal> {
     let url = format!("{base}/api/sessions/{}/restart", encode_path_segment(id));
-    let mut body = restart_request_body(mode, stop_if_running, with);
+    let mut body = restart_request_body(stop_if_running, with);
     if allow_yolo {
         confirm_yolo(&mut body);
     }
@@ -2166,11 +2162,10 @@ pub(crate) async fn restart_session(
 
 /// Preserve the absent-versus-present override distinction on the restart wire.
 fn restart_request_body(
-    mode: &str,
     stop_if_running: bool,
     with: Option<&LaunchSelection>,
 ) -> serde_json::Value {
-    let mut body = serde_json::json!({ "mode": mode, "stop_if_running": stop_if_running });
+    let mut body = serde_json::json!({ "stop_if_running": stop_if_running });
     if let Some(with) = with {
         body["with"] = serde_json::to_value(with).expect("LaunchSelection is serializable");
     }
@@ -3621,29 +3616,6 @@ pub(crate) async fn delete_profile(base: &str, profile_id: &str) -> Result<(), S
     Ok(())
 }
 
-/// The wire spelling of the restart mode this offer authorizes, and the
-/// ONLY mode the supervisor will accept for it.
-///
-/// The pairing is exact in both directions, which is why this is a function
-/// of the offer rather than a user choice: SPEC.md has no fresh-restart
-/// variant in v1 ("for a clean conversation, create a new session in the
-/// same directory"), so a session that CAN resume has no legal "restart
-/// fresh instead" — and a session that cannot has nothing to resume. The
-/// supervisor rejects any other pairing with a conflict naming the current
-/// offer, which is exactly the staleness case `restart_session`'s caller
-/// handles by refreshing (see `session_view::SessionView`).
-///
-/// `pub(crate)`, not private: this module owns the wire contract, but the
-/// only call site is `SessionView`'s restart closure in `session_view`, on
-/// the other side of the module split.
-pub(crate) fn restart_mode_for(offer: RestartOffer) -> &'static str {
-    match offer {
-        RestartOffer::FreshOnly => "fresh",
-        RestartOffer::Resume => "resume",
-        RestartOffer::FallbackTemplate => "fallback_template",
-    }
-}
-
 /// Decodes the helm's golden HTTP fixtures with this module's envelopes.
 #[cfg(test)]
 mod http_contract_tests;
@@ -3766,15 +3738,11 @@ mod tests {
             permissions: Some(crate::LaunchPermission::Yolo),
             workspace_trust: None,
         };
-        let plain = restart_request_body("resume", false, None);
-        assert_eq!(
-            plain,
-            serde_json::json!({"mode": "resume", "stop_if_running": false})
-        );
+        let plain = restart_request_body(false, None);
+        assert_eq!(plain, serde_json::json!({"stop_if_running": false}));
         assert!(plain.get("with").is_none());
 
-        let edited = restart_request_body("resume", true, Some(&selection));
-        assert_eq!(edited["mode"], "resume");
+        let edited = restart_request_body(true, Some(&selection));
         assert_eq!(edited["stop_if_running"], true);
         assert_eq!(edited["with"], serde_json::to_value(selection).unwrap());
     }
@@ -4113,7 +4081,7 @@ mod tests {
         );
         assert!(asks_yolo_confirmation(&headers));
 
-        let mut body = restart_request_body("fresh", false, None);
+        let mut body = restart_request_body(false, None);
         confirm_yolo(&mut body);
         assert_eq!(body["confirm_yolo"], serde_json::json!(true));
     }
@@ -4184,20 +4152,6 @@ mod tests {
         .unwrap();
         assert_eq!(stale.default_profile.as_deref(), Some("p-gone"));
         assert_eq!(stale.profiles.len(), 1);
-    }
-
-    /// Each offer authorizes exactly one mode, and the wire spellings must
-    /// be the ones farhelm-proto's `RestartMode` decodes — a typo here
-    /// would turn every restart into a 400 nothing in this crate could
-    /// explain.
-    #[farhelm_testtrace::test]
-    fn each_offer_maps_to_its_one_legal_mode() {
-        assert_eq!(restart_mode_for(RestartOffer::FreshOnly), "fresh");
-        assert_eq!(restart_mode_for(RestartOffer::Resume), "resume");
-        assert_eq!(
-            restart_mode_for(RestartOffer::FallbackTemplate),
-            "fallback_template"
-        );
     }
 
     /// The other half of `SessionListBody`'s missing-field tolerance

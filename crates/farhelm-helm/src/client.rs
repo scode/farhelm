@@ -12,8 +12,8 @@ use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake, parse_control, write_frame_before_stall,
 };
 use farhelm_proto::{
-    AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, ProfileSnapshot, RestartMode, SessionInfo,
-    TabInfo, TerminalSelector, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES,
+    AgentKind, ControlMsg, ErrorKind, Frame, FrameKind, ProfileSnapshot, SessionInfo, TabInfo,
+    TerminalSelector, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -2920,13 +2920,13 @@ impl SupervisorClient {
     /// Relaunch a session's agent (SPEC.md's restart, PLAN_M3.md item 9),
     /// returning the session's freshly recomputed state.
     ///
-    /// `mode` must match the session's CURRENT `restart_offer`, which the
-    /// supervisor recomputes at handling time rather than trusting the
-    /// caller's cached copy: a mismatch comes back as a
-    /// [`SupervisorError`] with `ErrorKind::Conflict` naming what the offer
-    /// is now, and the caller's correct response is to refresh the session
-    /// and re-present that offer — never to retry the same request (see
-    /// `ControlMsg::RestartSession`'s staleness contract).
+    /// A restart always resumes the session's own conversation. The
+    /// supervisor recomputes the session's `restart_offer` at handling time
+    /// rather than trusting the caller's cached copy: anything but `Resume`
+    /// comes back as a [`SupervisorError`] with `ErrorKind::Conflict` naming
+    /// why Restart is unavailable, and the caller's correct response is to
+    /// refresh the session and show that reason — never to retry the same
+    /// request (see `ControlMsg::RestartSession`'s staleness contract).
     ///
     /// `stop_if_running` carries the user's explicit consent to stop a
     /// working agent first. Without it, a restart against an agent the
@@ -2937,11 +2937,9 @@ impl SupervisorClient {
     pub async fn restart_session(
         &self,
         id: &str,
-        mode: RestartMode,
         stop_if_running: bool,
     ) -> anyhow::Result<SessionInfo> {
-        self.restart_session_with(id, mode, stop_if_running, None)
-            .await
+        self.restart_session_with(id, stop_if_running, None).await
     }
 
     /// Restart with an optional structured selection compiled by this helm.
@@ -2951,7 +2949,6 @@ impl SupervisorClient {
     pub async fn restart_session_with(
         &self,
         id: &str,
-        mode: RestartMode,
         stop_if_running: bool,
         selection: Option<farhelm_proto::LaunchSelection>,
     ) -> anyhow::Result<SessionInfo> {
@@ -2984,7 +2981,6 @@ impl SupervisorClient {
                 ControlMsg::RestartSession {
                     req_id,
                     session_id: id.to_string(),
-                    mode,
                     stop_if_running,
                     invocation,
                     launch,
@@ -5813,7 +5809,7 @@ mod tests {
             "{renamed:#}"
         );
         let restarted = client
-            .restart_session_with("sess-1", RestartMode::Fresh, false, None)
+            .restart_session_with("sess-1", false, None)
             .await
             .expect_err("a restart reply for another session must be refused");
         assert!(
@@ -6130,7 +6126,6 @@ mod tests {
                 ControlMsg::RestartSession {
                     req_id: 7,
                     session_id: "restarted".to_string(),
-                    mode: farhelm_proto::RestartMode::Resume,
                     stop_if_running: false,
                     invocation: None,
                     launch: None,

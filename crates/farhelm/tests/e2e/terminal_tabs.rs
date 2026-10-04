@@ -1160,17 +1160,14 @@ async fn stopping_the_agent_leaves_a_tabs_shell_and_its_daemonized_child_running
 async fn restarting_the_agent_leaves_a_tab_attached_running_and_unswept() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
-    let session = h
-        .client
-        .create_session(
-            &work.path().to_string_lossy(),
-            &fixture_cmd("fake-agent --script basic"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create");
+    let session = create_resumable_session(
+        &h,
+        &work.path().to_string_lossy(),
+        &fixture_cmd("fake-agent --script basic"),
+        80,
+        24,
+    )
+    .await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     let (agent_chan, initial_replay, mut agent_rx) = h
@@ -1213,7 +1210,7 @@ async fn restarting_the_agent_leaves_a_tab_attached_running_and_unswept() {
 
     let restarted = h
         .client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .restart_session(&session.id, true)
         .await
         .expect("restart");
     assert_eq!(
@@ -1278,7 +1275,7 @@ async fn restart_restores_and_notifies_while_output_cleanup_is_pending() {
         },
     )
     .await;
-    let (session, _work) = basic_session(&h).await;
+    let (session, _work) = resumable_basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
     let (channel, initial_replay, mut rx) = h
         .client
@@ -1289,7 +1286,7 @@ async fn restart_restores_and_notifies_while_output_cleanup_is_pending() {
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
 
     h.client
-        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, true)
+        .restart_session(&session.id, true)
         .await
         .expect_err("pending terminal cleanup must fail this restart definitively");
     tokio::time::timeout(Duration::from_secs(10), cleanup_entered.notified())

@@ -1172,6 +1172,24 @@ fn product_farhelm() -> anyhow::Result<std::path::PathBuf> {
     Ok(farhelm)
 }
 
+/// Report `conversation` through the real Claude hook before any script runs
+/// (`fake-agent --report-conversation`), so a session launched with it has a
+/// captured conversation as soon as the fixture is up.
+///
+/// Restart only ever resumes a captured conversation, and the browser specs
+/// that restart a real session cannot easily type `report <id>` into it, so
+/// this reports at start instead. It goes through [`hook_report`], the same
+/// genuine hook, socket and inherited credential the typed form uses, with
+/// this process as the hook's parent — which is what Claude's positional
+/// attribution admits, provided the launch `exec`ed the fixture. The
+/// markers [`hook_report`] prints land above the script's own output.
+pub fn report_conversation_at_start(conversation: &str) -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    hook_report(RecordShape::Claude, conversation, &mut out)?;
+    out.flush()?;
+    Ok(())
+}
+
 /// Fire the real `farhelm internal hook` for `conversation`, as the vendor
 /// would at `SessionStart`, and report what came back.
 ///

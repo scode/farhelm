@@ -90,8 +90,7 @@ use anyhow::Context;
 use farhelm_proto::{
     AgentKind, AgentOutcome, AgentReply, AgentVerb, ControlMsg, DetachCode, ErrorKind, Frame,
     LaunchSelection, MAX_SESSION_ID_BYTES, ProfileSnapshot as WireProfileSnapshot,
-    ResolvedGithubCheckout, RestartMode, SessionInfo, TerminalSelector,
-    github_checkout::GithubPreviewRequest,
+    ResolvedGithubCheckout, SessionInfo, TerminalSelector, github_checkout::GithubPreviewRequest,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -939,7 +938,7 @@ async fn handle_create_session(
 /// **error** through the sentinel path alone, so a reply that skipped
 /// it would report `Exited` for a session every list reply calls
 /// `Error`, and a rename issued moments after a conversation became
-/// capturable would report `FreshOnly` where the list says `Resume`.
+/// capturable would report `NotCaptured` where the list says `Resume`.
 /// `SessionRenamed`'s protocol contract is that its `SessionInfo` is
 /// built the way `ListSessions` builds one; this is that promise
 /// being kept rather than approximated.
@@ -2379,7 +2378,6 @@ async fn handle_resize(
 struct RestartSessionRequest {
     req_id: u64,
     session_id: String,
-    mode: RestartMode,
     stop_if_running: bool,
     invocation: Option<String>,
     launch: Option<farhelm_proto::LaunchSelection>,
@@ -2433,7 +2431,6 @@ async fn handle_restart_session(
         let RestartSessionRequest {
             req_id,
             session_id,
-            mode,
             stop_if_running,
             invocation,
             launch,
@@ -2442,7 +2439,6 @@ async fn handle_restart_session(
         match sup
             .restart_session(
                 &session_id,
-                mode,
                 stop_if_running,
                 invocation,
                 launch,
@@ -3155,7 +3151,6 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         ControlMsg::RestartSession {
             req_id,
             session_id,
-            mode,
             stop_if_running,
             invocation,
             launch,
@@ -3168,7 +3163,6 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 RestartSessionRequest {
                     req_id,
                     session_id,
-                    mode,
                     stop_if_running,
                     invocation,
                     launch,
@@ -4287,7 +4281,6 @@ mod tests {
             ControlMsg::RestartSession {
                 req_id: 72,
                 session_id,
-                mode: farhelm_proto::RestartMode::Fresh,
                 stop_if_running: false,
                 invocation: None,
                 launch: None,
@@ -5460,7 +5453,7 @@ mod tests {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
-                    conversation_source: None,
+                    conversation_source: Some("hook".to_string()),
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
@@ -5477,10 +5470,16 @@ mod tests {
                     tmux_name: format!("fh-{session_id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
-                    agent_kind: AgentKind::Generic,
-                    resume_template: None,
+                    // Restart only resumes, so the row can resume: a reported
+                    // conversation and a resume command to enter it.
+                    agent_kind: AgentKind::Goose,
+                    resume_template: Some(vec![
+                        "agent".to_string(),
+                        "--resume".to_string(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    ]),
                     canonical_cwd: None,
-                    captured_conversation: None,
+                    captured_conversation: Some("conv-test".to_string()),
                     generation: 0,
                     launch_scoped: false,
                     source_profile: None,
@@ -5502,7 +5501,6 @@ mod tests {
             ControlMsg::RestartSession {
                 req_id: 53,
                 session_id: session_id.to_string(),
-                mode: RestartMode::Fresh,
                 stop_if_running: true,
                 invocation: None,
                 launch: None,
@@ -6348,7 +6346,6 @@ mod tests {
         assert!(
             validate_agent_verb(&AgentVerb::Restart {
                 session_id: None,
-                mode: RestartMode::Fresh,
                 stop_if_running: false,
             })
             .unwrap_err()
@@ -7595,6 +7592,11 @@ mod tests {
                 .await
                 .unwrap()
         );
+        if restart {
+            // Restart only resumes, so the parent needs a conversation.
+            sup.record_conversation_for_test(&auth.session_id, "conv-parent")
+                .await;
+        }
         let parent_guard = sup.lifecycle_locks.claim(&auth.session_id).await;
         let (mut mutation_tasks, mut mutation_rx) = dispatch_for_test(
             &sup,
@@ -7602,7 +7604,6 @@ mod tests {
                 ControlMsg::RestartSession {
                     req_id: 45,
                     session_id: auth.session_id.clone(),
-                    mode: RestartMode::Fresh,
                     stop_if_running: true,
                     invocation: None,
                     launch: None,
@@ -7752,7 +7753,7 @@ mod tests {
     /// Goose-kind with a placeholder-carrying resume template, so an
     /// accepted report can actually turn into `RestartOffer::Resume`: a
     /// Generic session has no integration, and its offer would stay
-    /// `FreshOnly` no matter what was reported — an assertion that passed
+    /// `NotCaptured` no matter what was reported — an assertion that passed
     /// for the wrong reason.
     ///
     /// Goose rather than Claude because these tests pin the legacy
@@ -8219,7 +8220,7 @@ mod tests {
         );
         assert_eq!(
             snapshot.restart_offer,
-            RestartOffer::FreshOnly,
+            RestartOffer::NotCaptured,
             "no refused report may conjure an offer"
         );
     }
@@ -8871,7 +8872,6 @@ mod tests {
                     captured_conversation: None,
                     capture_ownership_version: 0,
                 },
-                true,
                 false,
             )
             .await
@@ -9163,7 +9163,6 @@ mod tests {
             ControlMsg::RestartSession {
                 req_id: 5,
                 session_id: "no-such-session".to_string(),
-                mode: farhelm_proto::RestartMode::Fresh,
                 stop_if_running: false,
                 invocation: None,
                 launch: None,
@@ -10583,7 +10582,6 @@ mod tests {
         host.send(ControlMsg::RestartSession {
             req_id: 2,
             session_id: "another-session".to_string(),
-            mode: RestartMode::Fresh,
             stop_if_running: true,
             invocation: None,
             launch: None,

@@ -22,6 +22,7 @@ import { expect, test } from "./helpers/evidence";
 import { APIRequestContext, Page, Route } from "@playwright/test";
 import {
   cleanupSession,
+  createResumableSession,
   createSession,
   holdMutation,
   holdReads,
@@ -226,7 +227,8 @@ test.describe("the M6.5 test debts", () => {
     // own schedule: past the 60-second default by construction.
     test.setTimeout(120_000);
     const original = `restart-epoch-${Date.now()}`;
-    const session = await createSession(request, { title: original });
+    // Restart only resumes, so the session reports a conversation.
+    const session = await createResumableSession(request, { title: original });
     created.push(session.id);
     // Stopped first, so the restart click acts outright rather than opening
     // the live-agent confirmation — the confirmation is a different feature
@@ -253,6 +255,9 @@ test.describe("the M6.5 test debts", () => {
     });
     await row(page, session.id).locator(".session-row-open").click();
     await expect(page.locator(".titlebar .title")).toHaveText(original, { timeout: 20_000 });
+    // Premise: Restart is available (the session reported its
+    // conversation), or the click below would silently do nothing.
+    await expect(page.locator(".restart-primary")).not.toHaveAttribute("aria-disabled", "true");
     await expect(page.locator(".restart-primary")).toHaveAttribute("data-confirms", "false");
     await expect(page.locator(".refresh-stale")).toHaveCount(0);
 
@@ -341,7 +346,8 @@ test.describe("the M6.5 test debts", () => {
   }) => {
     test.setTimeout(120_000);
     const original = `restart-inflight-${Date.now()}`;
-    const session = await createSession(request, { title: original });
+    // Restart only resumes, so the session reports a conversation.
+    const session = await createResumableSession(request, { title: original });
     created.push(session.id);
     await stopSession(request, session.id);
     await expect
@@ -358,6 +364,9 @@ test.describe("the M6.5 test debts", () => {
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
     await row(page, session.id).locator(".session-row-open").click();
     await expect(page.locator(".titlebar .title")).toHaveText(original, { timeout: 20_000 });
+    // Premise: Restart is available (the session reported its
+    // conversation), or the click below would silently do nothing.
+    await expect(page.locator(".restart-primary")).not.toHaveAttribute("aria-disabled", "true");
     await expect(page.locator(".restart-primary")).toHaveAttribute("data-confirms", "false");
 
     const reads = await holdReads(page, (url) => url.pathname === `/api/sessions/${session.id}`);

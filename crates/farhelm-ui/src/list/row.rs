@@ -2398,7 +2398,7 @@ pub(super) fn row_specimen(id: &str) -> Session {
         launch: None,
         status: SessionStatus::Exited { exit_code: Some(0) },
         annotation: None,
-        restart_offer: crate::RestartOffer::FreshOnly,
+        restart_offer: crate::RestartOffer::NotCaptured,
         created_at: 0,
         last_activity_at: 0,
         tabs: Vec::new(),

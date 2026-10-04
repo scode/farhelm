@@ -1102,13 +1102,17 @@ samp {
   white-space: nowrap;
 }
 
-/* Keep the unavailable restart-with control hoverable for its explanation.
-   Native disabled buttons do not expose `title` consistently in webviews. */
+/* Keep the unavailable Restart and Restart with controls hoverable for their
+   explanation. Native disabled buttons do not expose `title` consistently in
+   webviews. */
+.titlebar-actions .restart-primary[aria-disabled="true"],
 .titlebar-actions .restart-with-trigger[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
+.titlebar-actions .restart-primary[aria-disabled="true"]:hover,
+.titlebar-actions .restart-primary[aria-disabled="true"]:focus-visible,
 .titlebar-actions .restart-with-trigger[aria-disabled="true"]:hover,
 .titlebar-actions .restart-with-trigger[aria-disabled="true"]:focus-visible {
   background: var(--accent-fill);

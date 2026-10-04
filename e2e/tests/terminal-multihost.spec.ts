@@ -35,6 +35,7 @@ import { Page, APIRequestContext, Locator, Route } from "@playwright/test";
 import {
   cleanupProfile,
   createProfile,
+  createResumableSession,
   createSession,
   hostRowByName,
   openHostMenu,
@@ -2591,14 +2592,15 @@ test.describe("multi-host", () => {
     const closedTitle = `closed-through-reboot-${Date.now()}`;
     const ids: string[] = [];
 
-    /** Create a fake-agent session on the remote and wait until the helm has seen it live. */
+    /**
+     * Create a fake-agent session on the remote and wait until the helm has
+     * seen it live. Resumable, because the reboot-restart test restarts it
+     * from the interrupted surface, which offers Restart only to a session
+     * that can resume its conversation.
+     */
     async function createLiveRemoteSession(request: APIRequestContext, title: string) {
       const remote = await apiRemoteHost(request);
-      const created = await request.post("/api/sessions", {
-        data: { cwd: "/tmp", invocation: FAKE_AGENT_INVOCATION, title, host: remote.id },
-      });
-      expect(created.ok(), `creating ${title} on the remote host: ${await created.text()}`).toBe(true);
-      const id: string = (await created.json()).id;
+      const id = (await createResumableSession(request, { cwd: "/tmp", title, host: remote.id })).id;
       ids.push(id);
       // Live as OBSERVED by the helm before the reboot: only a session last
       // known running is interrupted by a boot, and the create reply's
@@ -2747,9 +2749,8 @@ test.describe("multi-host", () => {
 
     // The one way forward: restart from the surface relaunches the agent in
     // a new terminal, which the view then attaches like any other. What this
-    // proves is relaunch-and-attach, not resume: the fake agent has no
-    // conversation identity, so its offer is a fresh launch, and the resume
-    // template's own behavior is the Rust restart suite's to pin.
+    // proves is relaunch-and-attach; the resume command's own behavior is the
+    // Rust restart suite's to pin.
     test("reboot-restart: restart from the interrupted surface attaches the new terminal", async ({
       page,
     }) => {
