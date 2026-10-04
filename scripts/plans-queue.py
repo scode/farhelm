@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Own the plans queue's format and move its states with compare-and-swap commits on main.
 
-Several executors can work through `plans/` at once (plans/AGENTS.md). What keeps them from building the same plan
-twice is that each plan's state lives on its line in `plans/queue/INDEX.md` on main, and every state change is a
-commit made directly on main by this script, never by hand. A commit is built on top of the main the script just read
-and published with a non-forced ref update, which GitHub refuses unless it is a fast-forward. So if anyone else moved
-main in between, the update fails, the script reads main again and re-checks its precondition. That makes the commit
-itself the lock: of two executors claiming the same plan at the same moment, exactly one commit lands, and the other
-sees the line already claimed and exits 10.
+Several executors can work through `plans/` at once, and one monitor lands what they finish (plans/AGENTS.md). What
+keeps them from building or landing the same plan twice is that each plan's state lives on its line in
+`plans/queue/INDEX.md` on main, and every state change is a commit made directly on main by this script, never by
+hand. A landed plan leaves INDEX.md for `plans/REPORTS.md`, where it waits for the maintainer to read its report.
+
+A commit is built on top of the main the script just read and published with a non-forced ref update, which GitHub
+refuses unless it is a fast-forward. So if anyone else moved main in between, the update fails, the script reads main
+again and re-checks its precondition. That makes the commit itself the lock: of two executors claiming the same plan at
+the same moment, exactly one commit lands, and the other sees the line already claimed and exits 10.
 
 NOTE: This script deliberately does very little. It knows the line grammar, the legal transitions, the invariants
 between a state and the files it requires, and how to publish a commit safely. Everything that needs judgment (which
@@ -15,7 +17,8 @@ plan to pick, what a report says, whether a resumed plan is consistent) stays wi
 plans/AGENTS.md. It never touches the local checkout or jj state: it reads and writes the remote through `gh api`,
 using the existing `gh` login, so it behaves the same from a colocated checkout or a jj workspace.
 
-It only ever writes paths under `plans/queue/` and `plans/reports/`, and it never force-updates a ref.
+It only ever writes `plans/REPORTS.md` and paths under `plans/queue/` and `plans/reports/`, and it never
+force-updates a ref.
 
 Exit status:
   0   done (for `check` and `check-slug`: no violations)
@@ -50,7 +53,17 @@ from typing import Callable, Iterable, Protocol
 QUEUE_DIR = "plans/queue"
 REPORTS_DIR = "plans/reports"
 INDEX_PATH = f"{QUEUE_DIR}/INDEX.md"
-WRITABLE_PREFIXES = (f"{QUEUE_DIR}/", f"{REPORTS_DIR}/")
+REPORTS_PATH = "plans/REPORTS.md"
+
+
+def queue_owned(path: str) -> bool:
+    """Whether the script owns `path`: the only files it reads into a snapshot and the only ones it may write."""
+    return path == REPORTS_PATH or path.startswith((f"{QUEUE_DIR}/", f"{REPORTS_DIR}/"))
+
+
+# The executors' and the monitor's own logs live beside the checkouts, never in the repository; `status` reads their
+# modification times to tell a quiet claim from a working one.
+MONITOR_LOG = "farhelm-plans-monitor-log.md"
 
 EXIT_OK = 0
 EXIT_VIOLATIONS = 1
@@ -70,7 +83,22 @@ LINE_RE = re.compile(r"^- \[(?P<state>[^\]]+)\] `(?P<slug>[^`]+)\.md` — (?P<re
 DEPS_RE = re.compile(r"^(?P<summary>.*?) \(after (?P<deps>`[^`]+\.md`(?:, `[^`]+\.md`)*)\)$")
 DEP_ITEM_RE = re.compile(r"`([^`]+)\.md`")
 
-SIMPLE_STATES = ("pending", "blocked", "in review", "approved")
+# `in-flight` is an executor's claim on a plan it builds; `landing` is the monitor's claim on a complete plan it merges.
+# Both carry the claim id of whoever holds them, and only that holder may move the plan on.
+SIMPLE_STATES = ("pending", "blocked", "complete")
+CLAIM_STATES = ("in-flight", "landing")
+
+# A landed plan's line in REPORTS.md. The link makes the file browsable on GitHub; it must name the plan's own report.
+REPORT_LINE_RE = re.compile(
+    r"^- \[`(?P<slug>[^`]+)`\]\(reports/(?P<link>[^)]+)\.report\.md\) landed (?P<date>\d{4}-\d{2}-\d{2}) "
+    r"in (?P<prs>#\d+(?:, #\d+)*): (?P<summary>.+)$"
+)
+REPORTS_HEADER = (
+    "# Plan reports to review\n\n"
+    "One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` "
+    "describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is "
+    "never rewrapped.\n\n"
+)
 
 
 class Usage(Exception):
@@ -92,8 +120,8 @@ class Failure(Exception):
 class Entry:
     """One plan's line in INDEX.md.
 
-    `state` is one of SIMPLE_STATES or "in-flight"; `claim` is the six-hex claim id and is set only when in flight.
-    `deps` lists the slugs from a trailing `(after ...)` clause, in written order.
+    `state` is one of SIMPLE_STATES or CLAIM_STATES; `claim` is the six-hex claim id and is set exactly when the state
+    is a claim state. `deps` lists the slugs from a trailing `(after ...)` clause, in written order.
     """
 
     state: str
@@ -103,7 +131,7 @@ class Entry:
     claim: str | None = None
 
     def state_text(self) -> str:
-        return f"in-flight {self.claim}" if self.state == "in-flight" else self.state
+        return f"{self.state} {self.claim}" if self.claim else self.state
 
     def render(self) -> str:
         line = f"- [{self.state_text()}] `{self.slug}.md` — {self.summary}"
@@ -113,34 +141,60 @@ class Entry:
 
 
 @dataclasses.dataclass
-class Index:
-    """INDEX.md split into its free-text header and its lines, in order.
+class Landed:
+    """One landed plan's line in REPORTS.md: when it landed, the PRs that landed it, and the summary it had in INDEX.md.
+
+    The summary travels with the plan so that a follow-up can put the plan back into INDEX.md as it was described.
+    The `(after ...)` clause does not travel: once a plan has landed, what it waited for is on main.
+    """
+
+    slug: str
+    date: str
+    prs: list[int]
+    summary: str
+
+    def render(self) -> str:
+        prs = ", ".join(f"#{n}" for n in self.prs)
+        return f"- [`{self.slug}`](reports/{self.slug}.report.md) landed {self.date} in {prs}: {self.summary}"
+
+
+@dataclasses.dataclass
+class LineFile:
+    """A one-line-per-plan file (INDEX.md or REPORTS.md) split into its free-text header and its lines, in order.
 
     Everything before the first `- [` line is the header and is preserved byte for byte. After that, every non-blank
-    line must be a plan line. A line that is not is reported by `parse_index` and kept verbatim, in place, as a string
-    among the parsed entries, so that moving some other plan never silently deletes or reorders it: the problem stays
-    visible until a person fixes it, and the line may be a plan someone mistyped.
+    line must be a well-formed line of the file's grammar. A line that is not is reported by its parser and kept
+    verbatim, in place, as a string among the parsed entries, so that moving some other plan never silently deletes or
+    reorders it: the problem stays visible until a person fixes it, and the line may be a plan someone mistyped.
     """
 
     header: str
-    items: list[Entry | str]
+    items: list
 
     @property
-    def entries(self) -> list[Entry]:
-        return [item for item in self.items if isinstance(item, Entry)]
+    def entries(self) -> list:
+        return [item for item in self.items if not isinstance(item, str)]
 
-    def find(self, slug: str) -> Entry | None:
+    def find(self, slug: str):
         for entry in self.entries:
             if entry.slug == slug:
                 return entry
         return None
 
     def remove(self, slug: str) -> None:
-        self.items = [item for item in self.items if not (isinstance(item, Entry) and item.slug == slug)]
+        self.items = [item for item in self.items if isinstance(item, str) or item.slug != slug]
 
     def render(self) -> str:
-        lines = [item.render() if isinstance(item, Entry) else item for item in self.items]
+        lines = [item if isinstance(item, str) else item.render() for item in self.items]
         return self.header + "".join(line + "\n" for line in lines)
+
+
+class Index(LineFile):
+    """INDEX.md: every plan that has not landed (or been abandoned), with its state. `items` holds Entry lines."""
+
+
+class Reports(LineFile):
+    """REPORTS.md: every landed plan whose report the maintainer has not reviewed yet. `items` holds Landed lines."""
 
 
 def parse_state(text: str) -> tuple[str, str | None]:
@@ -148,9 +202,50 @@ def parse_state(text: str) -> tuple[str, str | None]:
     if text in SIMPLE_STATES:
         return text, None
     parts = text.split(" ")
-    if len(parts) == 2 and parts[0] == "in-flight" and CLAIM_RE.match(parts[1]):
-        return "in-flight", parts[1]
+    if len(parts) == 2 and parts[0] in CLAIM_STATES and CLAIM_RE.match(parts[1]):
+        return parts[0], parts[1]
     raise ValueError(f"unknown state [{text}]")
+
+
+def _split_header(text: str) -> tuple[str, list[str], int]:
+    """Split a line file into its header and the raw lines after it, with the line number of the first of those."""
+    lines = text.splitlines(keepends=True)
+    header_end = len(lines)
+    for i, line in enumerate(lines):
+        if line.startswith("- ["):
+            header_end = i
+            break
+    return "".join(lines[:header_end]), lines[header_end:], header_end + 1
+
+
+def parse_reports(text: str) -> tuple[Reports, list[str]]:
+    """Parse REPORTS.md as `parse_index` parses INDEX.md: well-formed lines become entries, others stay verbatim."""
+    header, lines, first = _split_header(text)
+    items: list[Landed | str] = []
+    problems: list[str] = []
+    for number, raw in enumerate(lines, start=first):
+        line = raw.rstrip("\n")
+        if not line.strip():
+            continue
+        match = REPORT_LINE_RE.match(line)
+        if not match or not SLUG_RE.match(match["slug"]):
+            problems.append(f"REPORTS.md line {number}: not a landed-plan line: {line[:80]}")
+            items.append(line)
+            continue
+        if match["link"] != match["slug"]:
+            problems.append(f"REPORTS.md line {number}: {match['slug']} links another plan's report")
+            items.append(line)
+            continue
+        prs = [int(n) for n in re.findall(r"#(\d+)", match["prs"])]
+        items.append(Landed(slug=match["slug"], date=match["date"], prs=prs, summary=match["summary"]))
+    return Reports(header=header, items=items), problems
+
+
+def read_reports(snap: "Snapshot") -> tuple[Reports, list[str]]:
+    """REPORTS.md from a snapshot. A tree without one (one from before the file existed) reads as an empty file."""
+    if REPORTS_PATH not in snap.files:
+        return Reports(header=REPORTS_HEADER, items=[]), []
+    return parse_reports(snap.read(REPORTS_PATH))
 
 
 def parse_index(text: str) -> tuple[Index, list[str]]:
@@ -160,18 +255,12 @@ def parse_index(text: str) -> tuple[Index, list[str]]:
     well-formed lines while rendering keeps the malformed one. The mutating verbs refuse to publish a tree whose index
     has problems that the tree they started from did not already have; see `new_violations`.
     """
-    lines = text.splitlines(keepends=True)
-    header_end = len(lines)
-    for i, line in enumerate(lines):
-        if line.startswith("- ["):
-            header_end = i
-            break
-    header = "".join(lines[:header_end])
+    header, lines, first = _split_header(text)
     items: list[Entry | str] = []
     problems: list[str] = []
     keep = items.append
 
-    for number, raw in enumerate(lines[header_end:], start=header_end + 1):
+    for number, raw in enumerate(lines, start=first):
         line = raw.rstrip("\n")
         if not line.strip():
             continue
@@ -277,8 +366,10 @@ def remove_blocked(text: str) -> tuple[str, str]:
     return remaining, body.strip("\n")
 
 
-def append_section(text: str, heading: str, body: str) -> str:
-    return text.rstrip("\n") + f"\n\n## {heading}\n\n" + body.strip("\n") + "\n"
+def append_section(text: str, heading: str, body: str, level: int = 2) -> str:
+    """Append a section with the given heading at the end of `text`. Plan files use level two (`## Blocked`); reports
+    keep their own sections at level three, so the Landing section a lander adds is `### Landing`."""
+    return text.rstrip("\n") + f"\n\n{'#' * level} {heading}\n\n" + body.strip("\n") + "\n"
 
 
 def append_decision(text: str, entry: str) -> str:
@@ -298,19 +389,23 @@ def append_decision(text: str, entry: str) -> str:
     return head + ("\n" + tail if tail else "")
 
 
-def splice_problems(text: str) -> list[str]:
-    """Why text cannot be spliced into a plan file as a section body: headings of level one or two, or an open fence.
+def splice_problems(text: str, section_level: int = 2) -> list[str]:
+    """Why text cannot be spliced in as the body of a section at `section_level`: a heading at that level or higher,
+    or an open fence.
 
-    Text the script splices into a plan file (a blocked question, a decision) must not contain them: a `## Options`
+    Text the script splices into a plan file (a blocked question, a decision) goes under a `##` heading: a `## Options`
     heading inside a question would end the `## Blocked` section early, and answering it would then remove only half
-    the question and leave the rest stranded in the plan body. An unclosed fence hides every later heading the same
-    way, so the next `block` could not find its own section.
+    the question and leave the rest stranded in the plan body. Landing notes go under a report's `### Landing`, so
+    there `###` is refused too: it would split the Landing section into siblings. An unclosed fence hides every later
+    heading the same way, so the next `block` could not find its own section.
     """
     lines, open_fence = _scan_fences(text)
+    forbidden = tuple("#" * level + " " for level in range(1, section_level + 1))
+    deeper = "#" * (section_level + 1)
     found = [
-        f"heading too high for a spliced section (use ### or deeper): {line.strip()}"
+        f"heading too high for a spliced section (use {deeper} or deeper): {line.strip()}"
         for line, fenced in lines
-        if not fenced and (line.startswith("# ") or line.startswith("## "))
+        if not fenced and line.startswith(forbidden)
     ]
     if open_fence:
         # An unclosed fence would swallow every heading after it once spliced, including a later ## Blocked.
@@ -359,9 +454,9 @@ def local_hostnames() -> list[str]:
 class Snapshot:
     """The queue's files at one point: a local tree, or a commit on the remote.
 
-    `files` maps every path under plans/queue/ and plans/reports/ to an opaque version token (the blob id for a remote
-    snapshot, the content hash for a local one); `read` returns a file's text. Reads are lazy because a remote read is
-    one API call per file and most checks need only the index.
+    `files` maps plans/REPORTS.md and every path under plans/queue/ and plans/reports/ to an opaque version token (the
+    blob id for a remote snapshot, the content hash for a local one); `read` returns a file's text. Reads are lazy
+    because a remote read is one API call per file and most checks need only the index.
     """
 
     files: dict[str, str]
@@ -383,15 +478,17 @@ def violations(snapshot: Snapshot, content_for: set[str] | None = None) -> list[
     The mutating verbs pass only the plans they touch, since every other plan file was checked when it was written and
     reading them all would cost one request each.
 
-    Invariants: the index parses; no duplicate slugs; every line has a plan file and every plan file has a line; a
-    report exists for `in review` and `approved` plans and for no plan that is not listed; a plan has a `## Blocked`
-    section exactly when it is blocked (never more than one); dependencies name neither the plan itself nor form a
-    cycle among listed plans. A dependency on an unlisted slug is allowed: that is how a satisfied dependency looks.
+    Invariants: both line files parse; no slug is listed twice, in one file or across both; every line has a plan file
+    and every plan file has a line in one of them; a report exists for `complete` and `landing` plans and for every
+    landed plan, and for no plan that is not listed; a plan has a `## Blocked` section exactly when it is blocked
+    (never more than one, and never once landed); dependencies name neither the plan itself nor form a cycle among
+    listed plans. A dependency on a slug not in INDEX.md is allowed: that is how a satisfied dependency looks.
     """
     if INDEX_PATH not in snapshot.files:
         return [f"{INDEX_PATH} is missing"]
     index, problems = parse_index(snapshot.read(INDEX_PATH))
-    found = list(problems)
+    reports, report_problems = read_reports(snapshot)
+    found = list(problems) + report_problems
     seen: set[str] = set()
     for entry in index.entries:
         if entry.slug in seen:
@@ -399,7 +496,7 @@ def violations(snapshot: Snapshot, content_for: set[str] | None = None) -> list[
         seen.add(entry.slug)
         if plan_path(entry.slug) not in snapshot.files:
             found.append(f"{entry.slug}: listed, but {plan_path(entry.slug)} does not exist")
-        if entry.state in ("in review", "approved") and report_path(entry.slug) not in snapshot.files:
+        if entry.state in ("complete", "landing") and report_path(entry.slug) not in snapshot.files:
             found.append(f"{entry.slug}: [{entry.state}] needs {report_path(entry.slug)}")
         if entry.slug in entry.deps:
             found.append(f"{entry.slug}: depends on itself")
@@ -409,20 +506,35 @@ def violations(snapshot: Snapshot, content_for: set[str] | None = None) -> list[
                 found.append(f"{entry.slug}: [blocked] needs exactly one ## Blocked section, found {count}")
             if entry.state != "blocked" and count:
                 found.append(f"{entry.slug}: has a ## Blocked section but is [{entry.state}]")
+    landed: set[str] = set()
+    for item in reports.entries:
+        if item.slug in seen:
+            found.append(f"{item.slug}: listed in both INDEX.md and REPORTS.md")
+        elif item.slug in landed:
+            found.append(f"{item.slug}: listed more than once in REPORTS.md")
+        landed.add(item.slug)
+        if plan_path(item.slug) not in snapshot.files:
+            found.append(f"{item.slug}: landed, but {plan_path(item.slug)} does not exist")
+        if report_path(item.slug) not in snapshot.files:
+            found.append(f"{item.slug}: landed, but {report_path(item.slug)} does not exist")
+        if (content_for is None or item.slug in content_for) and plan_path(item.slug) in snapshot.files:
+            if blocked_sections(snapshot.read(plan_path(item.slug))):
+                found.append(f"{item.slug}: has a ## Blocked section but has landed")
+    listed = seen | landed
     for path in snapshot.files:
-        if path == INDEX_PATH:
+        if path in (INDEX_PATH, REPORTS_PATH):
             continue
         if path.startswith(f"{QUEUE_DIR}/"):
             name = path[len(QUEUE_DIR) + 1 :]
             if "/" in name or not name.endswith(".md"):
                 found.append(f"{path}: unexpected file in {QUEUE_DIR}/")
-            elif name[:-3] not in seen:
-                found.append(f"{path}: plan file without an INDEX.md line")
+            elif name[:-3] not in listed:
+                found.append(f"{path}: plan file without a line in INDEX.md or REPORTS.md")
         elif path.startswith(f"{REPORTS_DIR}/"):
             name = path[len(REPORTS_DIR) + 1 :]
             if "/" in name or not name.endswith(".report.md"):
                 found.append(f"{path}: unexpected file in {REPORTS_DIR}/")
-            elif name[: -len(".report.md")] not in seen:
+            elif name[: -len(".report.md")] not in listed:
                 found.append(f"{path}: report for a plan that is not listed")
     found.extend(_cycles(index))
     return found
@@ -457,7 +569,7 @@ def new_violations(before: Snapshot, after: Snapshot, touched: set[str]) -> tupl
     """
     # Parse problems carry line numbers, which shift when a transition removes a line; compare without them.
     def key(problem: str) -> str:
-        return re.sub(r"^INDEX\.md line \d+: ", "INDEX.md: ", problem)
+        return re.sub(r"^(INDEX|REPORTS)\.md line \d+: ", r"\1.md: ", problem)
 
     old = {key(v) for v in violations(before, touched)}
     new = violations(after, touched)
@@ -469,9 +581,9 @@ def base_violations(base: Snapshot, tree: Snapshot) -> list[str]:
 
     A planning PR may add plan files with new `[pending]` lines, reorder lines, reword a summary, and revise the plan
     file of a plan that is pending or blocked on main. It must not change any line's state or dependencies, drop a
-    line, add a line in any other state, or touch a report or the file of a plan in any other state. Without this a
-    planning agent resolving a textual conflict by taking its own side could turn a claim back into `[pending]`, and a
-    second executor would build the same plan.
+    line, add a line in any other state, or touch a report, REPORTS.md, or the file of a plan in any other state
+    (including a landed one). Without this a planning agent resolving a textual conflict by taking its own side could
+    turn a claim back into `[pending]`, and a second executor would build the same plan.
     """
     # A base without a queue (before the queue existed) constrains nothing.
     base_index, _ = parse_index(base.read(INDEX_PATH)) if INDEX_PATH in base.files else (Index("", []), [])
@@ -494,9 +606,14 @@ def base_violations(base: Snapshot, tree: Snapshot) -> list[str]:
     for new in tree_index.entries:
         if base_index.find(new.slug) is None and new.state != "pending":
             found.append(f"{new.slug}: new line must be [pending]")
+    base_landed, _ = read_reports(base)
+    for old in base_landed.entries:
+        path = plan_path(old.slug)
+        if path in base.files and (path not in tree.files or base.read(path) != tree.read(path)):
+            found.append(f"{old.slug}: plan file changed after it landed")
     report_paths = {p for p in set(base.files) | set(tree.files) if p.startswith(f"{REPORTS_DIR}/")}
-    for path in sorted(report_paths):
-        if path not in base.files or path not in tree.files or base.read(path) != tree.read(path):
+    for path in sorted(report_paths | {REPORTS_PATH}):
+        if (path in base.files) != (path in tree.files) or (path in base.files and base.read(path) != tree.read(path)):
             found.append(f"{path}: reports are written only by the queue script")
     return found
 
@@ -511,6 +628,8 @@ def local_snapshot(root: pathlib.Path) -> Snapshot:
             if path.is_file():
                 rel = path.relative_to(root).as_posix()
                 files[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+    if (root / REPORTS_PATH).is_file():
+        files[REPORTS_PATH] = hashlib.sha256((root / REPORTS_PATH).read_bytes()).hexdigest()
     return Snapshot(files=files, read=lambda rel: (root / rel).read_text(encoding="utf-8"))
 
 
@@ -647,7 +766,7 @@ class GhApi:
 
     def merged_pulls(self, prefix: str) -> list[dict]:
         # Search matches head branches by prefix but is approximate and can lag a fresh merge by a minute or so, so
-        # this is only used for hints in `status`; `remove` verifies the PR numbers its caller names one by one.
+        # this is only used for hints in `status`; `landed` verifies the PR numbers its caller names one by one.
         query = f"q=repo:{self.repo} is:pr is:merged head:{prefix}"
         data = json.loads(self._call("search/issues", extra=["-X", "GET", "-f", query], scoped=False))
         numbers = [item["number"] for item in data.get("items", [])]
@@ -665,7 +784,7 @@ def remote_snapshot(gh: GitHub, commit_sha: str, cache: dict[str, str]) -> tuple
     if plans:
         for item in gh.tree(plans[0]["sha"], recursive=True):
             full = f"plans/{item['path']}"
-            if item["type"] == "blob" and full.startswith(WRITABLE_PREFIXES):
+            if item["type"] == "blob" and queue_owned(full):
                 files[full] = item["sha"]
 
     def read(path: str) -> str:
@@ -749,18 +868,75 @@ def _require(entry: Entry, states: tuple[str, ...], claim: str | None = None) ->
         raise Precondition(f"lost: {entry.slug} carries claim {entry.claim}, not {claim}")
 
 
+def _require_merged(req: Request, gh: GitHub) -> None:
+    """Refuse to record a plan as landed unless its PRs are all closed and every named one merged.
+
+    "No open PRs" alone would also describe PRs closed without merging, and recording the plan as landed then would
+    tell its dependents and the maintainer that work is on main which never reached it. So the caller names the PRs
+    that landed, and each is checked.
+    """
+    open_prs = [p for p in gh.open_pulls() if p["ref"].startswith(f"plan/{req.slug}/")]
+    if open_prs:
+        numbers = ", ".join(f"#{p['number']}" for p in open_prs)
+        raise Precondition(f"{req.slug} still has open PRs ({numbers}); land or close them first")
+    if not req.merged:
+        raise Usage(f"{req.verb} needs --merged with the numbers of the plan's PRs that landed")
+    for number in req.merged:
+        pull = gh.pull(number)
+        if not pull["ref"].startswith(f"plan/{req.slug}/"):
+            raise Usage(f"#{number} is not one of {req.slug}'s PRs (head {pull['ref']})")
+        if not pull["merged"]:
+            raise Precondition(f"#{number} has not merged")
+
+
 def plan_transition(req: Request, snap: Snapshot, gh: GitHub) -> Change:
     """Compute what `req` changes, given the queue at the commit being built on.
 
     Raises Precondition when the queue does not allow it now (exit 10) and Usage when it never could. `gh` is consulted
-    only by `remove` and `abandon`, which must know about the plan's PRs.
+    only by `landed` and `abandon`, which must know about the plan's PRs.
+
+    Most verbs move a line within INDEX.md. Three cross between the two line files: `landed` moves a plan from INDEX.md
+    to REPORTS.md, `approve` takes it out of REPORTS.md for good, and `follow-up` moves it back to the top of INDEX.md
+    as pending, dropping it from the `(after ...)` clauses of the plans that waited on it. Only the files a verb
+    changes are written, so an approval never rewrites INDEX.md.
     """
     index, _ = parse_index(snap.read(INDEX_PATH))
-    entry = _entry(index, req.slug)
+    reports, _ = read_reports(snap)
     writes: dict[str, str | None] = {}
     plan = plan_path(req.slug)
     touched = {req.slug}
 
+    # --- Verbs on a landed plan, which lives in REPORTS.md ---------------------------------------------------------
+    if req.verb in ("approve", "follow-up"):
+        landed = reports.find(req.slug)
+        if landed is None:
+            entry = _entry(index, req.slug)
+            raise Precondition(f"lost: {req.slug} is [{entry.state_text()}] and has not landed")
+        reports.remove(req.slug)
+        writes[REPORTS_PATH] = reports.render()
+        if req.verb == "approve":
+            writes[plan] = None
+            writes[report_path(req.slug)] = None
+            message = f"chore(plans): approve {req.slug}\n"
+        else:
+            assert req.text is not None
+            decision = f"### {req.today}: follow-up after review\n\n{req.text.strip()}"
+            writes[plan] = append_decision(snap.read(plan), decision)
+            # A follow-up asks for more on work already on main, so it goes ahead of everything waiting to be picked.
+            index.items.insert(0, Entry(state="pending", slug=req.slug, summary=landed.summary, deps=[]))
+            # Plans that run after this one waited for its work to be on main, and it is. Putting the line back must not
+            # hold them up again until the follow-up lands: by the maintainer's choice, changes keep flowing, and a
+            # follow-up that would break a dependent is theirs to handle by hand.
+            for other in index.entries[1:]:
+                if req.slug in other.deps:
+                    other.deps = [d for d in other.deps if d != req.slug]
+                    touched.add(other.slug)
+            writes[INDEX_PATH] = index.render()
+            message = f"chore(plans): request a follow-up on {req.slug}\n"
+        return Change(writes=writes, message=message, touched=touched)
+
+    # --- Verbs on a plan in INDEX.md -------------------------------------------------------------------------------
+    entry = _entry(index, req.slug)
     if req.verb == "claim":
         _require(entry, ("pending",))
         waiting = [d for d in entry.deps if index.find(d) is not None]
@@ -773,13 +949,15 @@ def plan_transition(req: Request, snap: Snapshot, gh: GitHub) -> Change:
         entry.state, entry.claim = "pending", None
         message = f"chore(plans): give back {req.slug}\n\nClaim {req.claim}.\n"
     elif req.verb == "release":
-        _require(entry, ("in-flight",))
+        _require(entry, CLAIM_STATES)
         message = f"chore(plans): release {req.slug}\n\nThe maintainer released claim {entry.claim}.\n"
-        entry.state, entry.claim = "pending", None
+        # A released landing goes back to waiting for a lander, not for an executor: the plan's work is finished.
+        entry.state, entry.claim = ("pending" if entry.state == "in-flight" else "complete"), None
     elif req.verb == "block":
-        _require(entry, ("in-flight",), req.claim)
+        _require(entry, CLAIM_STATES, req.claim)
         assert req.text is not None
-        body = f"Blocked on {req.today} (claim {req.claim}).\n\n{req.text.strip()}"
+        during = " while landing" if entry.state == "landing" else ""
+        body = f"Blocked{during} on {req.today} (claim {req.claim}).\n\n{req.text.strip()}"
         writes[plan] = append_section(snap.read(plan), "Blocked", body)
         entry.state, entry.claim = "blocked", None
         message = f"chore(plans): block {req.slug}\n\nClaim {req.claim}.\n"
@@ -787,8 +965,27 @@ def plan_transition(req: Request, snap: Snapshot, gh: GitHub) -> Change:
         _require(entry, ("in-flight",), req.claim)
         assert req.text is not None
         writes[report_path(req.slug)] = req.text
-        entry.state, entry.claim = "in review", None
+        entry.state, entry.claim = "complete", None
         message = f"chore(plans): deliver the report for {req.slug}\n\nClaim {req.claim}.\n"
+    elif req.verb == "start-landing":
+        _require(entry, ("complete",))
+        entry.state, entry.claim = "landing", req.claim
+        message = f"chore(plans): start landing {req.slug}\n\nClaim {req.claim}.\n"
+    elif req.verb == "stop-landing":
+        _require(entry, ("landing",), req.claim)
+        entry.state, entry.claim = "complete", None
+        message = f"chore(plans): stop landing {req.slug}\n\nClaim {req.claim}.\n"
+    elif req.verb == "landed":
+        _require(entry, ("landing",), req.claim)
+        assert req.text is not None
+        _require_merged(req, gh)
+        # Taking the line out of INDEX.md is what satisfies every `(after ...)` naming this plan, so dependents become
+        # eligible the moment the work is on main, without waiting for the maintainer to read the report.
+        index.remove(req.slug)
+        reports.items.append(Landed(slug=req.slug, date=req.today, prs=req.merged, summary=entry.summary))
+        writes[REPORTS_PATH] = reports.render()
+        writes[report_path(req.slug)] = append_section(snap.read(report_path(req.slug)), "Landing", req.text, level=3)
+        message = f"chore(plans): record the landing of {req.slug}\n\nClaim {req.claim}.\n"
     elif req.verb == "answer":
         _require(entry, ("blocked",))
         assert req.text is not None
@@ -800,45 +997,21 @@ def plan_transition(req: Request, snap: Snapshot, gh: GitHub) -> Change:
         writes[plan] = append_decision(remaining, decision)
         entry.state = "pending"
         message = f"chore(plans): answer {req.slug}\n"
-    elif req.verb == "follow-up":
-        _require(entry, ("in review",))
-        assert req.text is not None
-        decision = f"### {req.today}: follow-up after review\n\n{req.text.strip()}"
-        writes[plan] = append_decision(snap.read(plan), decision)
-        entry.state = "pending"
-        message = f"chore(plans): request a follow-up on {req.slug}\n"
-    elif req.verb == "approve":
-        _require(entry, ("in review",))
-        entry.state = "approved"
-        message = f"chore(plans): approve {req.slug}\n"
-    elif req.verb in ("remove", "abandon"):
-        _require(entry, ("approved",) if req.verb == "remove" else ("pending", "blocked", "in review", "approved"))
+    elif req.verb == "abandon":
+        # A claimed plan has a holder who would keep working on it; that claim is released first, on purpose.
+        _require(entry, ("pending", "blocked", "complete"))
         open_prs = [p for p in gh.open_pulls() if p["ref"].startswith(f"plan/{req.slug}/")]
         if open_prs:
             numbers = ", ".join(f"#{p['number']}" for p in open_prs)
-            raise Precondition(f"{req.slug} still has open PRs ({numbers}); land or close them first")
-        if req.verb == "remove":
-            # "No open PRs" alone would also describe an interrupted abandon or PRs the maintainer closed unmerged,
-            # and removing the plan then would record work as landed that never reached main.
-            if not req.merged:
-                raise Usage("remove needs --merged with the numbers of the plan's PRs that landed")
-            for number in req.merged:
-                pull = gh.pull(number)
-                if not pull["ref"].startswith(f"plan/{req.slug}/"):
-                    raise Usage(f"#{number} is not one of {req.slug}'s PRs (head {pull['ref']})")
-                if not pull["merged"]:
-                    raise Precondition(f"#{number} has not merged")
+            raise Precondition(f"{req.slug} still has open PRs ({numbers}); close them first")
         dependents = [e for e in index.entries if req.slug in e.deps]
-        if dependents and req.verb == "abandon":
+        if dependents:
             touched |= _settle_dependents(req, snap, dependents, writes)
         index.remove(req.slug)
         writes[plan] = None
         if report_path(req.slug) in snap.files:
             writes[report_path(req.slug)] = None
-        if req.verb == "remove":
-            message = f"chore(plans): remove the landed plan {req.slug}\n"
-        else:
-            message = f"chore(plans): abandon {req.slug}\n"
+        message = f"chore(plans): abandon {req.slug}\n"
     else:
         raise Usage(f"unknown verb {req.verb}")
 
@@ -912,11 +1085,12 @@ def apply(
             change = plan_transition(req, snap, gh)
         config = _read_root_file(gh, root_tree, "dprint.json")
         for path, content in list(change.writes.items()):
-            if content is not None and path != INDEX_PATH:
+            # The two line files are excluded from dprint: a rewrap would split a plan's line in two.
+            if content is not None and path not in (INDEX_PATH, REPORTS_PATH):
                 change.writes[path] = formatter(content, path, config)
         for path in change.writes:
-            if not path.startswith(WRITABLE_PREFIXES):
-                raise Failure(f"refusing to write {path}: outside {QUEUE_DIR}/ and {REPORTS_DIR}/")
+            if not queue_owned(path):
+                raise Failure(f"refusing to write {path}: outside {REPORTS_PATH}, {QUEUE_DIR}/ and {REPORTS_DIR}/")
         after_files = dict(snap.files)
         for path, content in change.writes.items():
             if content is None:
@@ -971,52 +1145,88 @@ def _read_root_file(gh: GitHub, root_tree: str, name: str) -> str:
 # --- Read-only verbs ------------------------------------------------------------------------------------------------
 
 
-def wake_check(gh: GitHub, baseline: str, ref: str) -> bool:
-    """Whether `ref` holds anything an idle executor should wake for, compared with the baseline commit.
+WAKE_ROLES = ("executor", "lander")
 
-    The plans watcher (scripts/plans-watch.sh) calls this when the plans/ tree hash changes. Claims are the most
-    frequent commits on main and can never give an idle executor work, so a difference made only of `[pending]` lines
-    becoming `[in-flight …]`, or of one claim replacing another, is ignored. Everything else wakes: a new or removed
-    line, any other state change (including a claim given back, which makes a plan pending again), changed
-    dependencies, and any change to a plan file or report. This is a comparison with the baseline commit rather than a
-    digest of one commit, because a claim and the release of a claim look the same to any function of a single state.
+
+def _eligible(snap: Snapshot, index: Index) -> list[tuple[str, str | None]]:
+    """The plans an executor could pick, in queue order, each with its plan file's version token.
+
+    Pairing each slug with its file's version means a revision of an eligible plan reads as a different item, which is
+    what lets `wake_check` treat a revised plan as new work.
     """
+    listed = {e.slug for e in index.entries}
+    return [
+        (e.slug, snap.files.get(plan_path(e.slug)))
+        for e in index.entries
+        if e.state == "pending" and not any(d in listed for d in e.deps)
+    ]
+
+
+def _is_subsequence(short: list, long: list) -> bool:
+    remaining = iter(long)
+    return all(item in remaining for item in short)
+
+
+def wake_check(gh: GitHub, baseline: str, ref: str, role: str = "executor") -> bool:
+    """Whether `ref` holds anything the idle agent of `role` should wake for, compared with the baseline commit.
+
+    The plans watcher (scripts/plans-watch.sh) calls this when the plans/ tree hash changes, and a model wake-up costs
+    a full re-read of the agent's conversation, so each role wakes only for what can give it work. This compares with
+    the baseline commit rather than digesting one commit, because a claim and the release of a claim look the same to
+    any function of a single state.
+
+    An executor wakes when a plan becomes eligible that was not (new, answered, followed up, given back, a dependency
+    dropped), when an eligible plan is revised or the eligible plans are reordered, when a plan leaves INDEX.md (it
+    landed or was abandoned, which can satisfy a dependency or end a conflict that made an executor skip a plan), or
+    when an in-flight plan blocks. That last one is conservative: a plan that blocks before opening any PR stops being
+    unlanded work, so a plan skipped for conflicting with it may now be picked; the filter cannot see PRs and wakes for
+    every block, which are rare. Plans merely leaving eligibility, which is what a claim does, never wake it, and
+    neither do deliveries, landing claims, or anything that only touches REPORTS.md or the reports.
+
+    A lander wakes when a plan is complete now with a report it was not complete with at the baseline. Comparing the
+    report, not just the state, matters when the baseline is older than the last delivery: a plan that was complete at
+    the baseline, landed, came back through a follow-up and was delivered again is complete in both snapshots, but its
+    report is new, and nothing else would wake the monitor for it.
+    """
+    if role not in WAKE_ROLES:
+        raise Usage(f"unknown wake role {role!r}")
     if not OBJECT_ID_RE.match(ref):
         ref = gh.head(ref)
     cache: dict[str, str] = {}
     before, _ = remote_snapshot(gh, baseline, cache)
     after, _ = remote_snapshot(gh, ref, cache)
-    if {p: s for p, s in before.files.items() if p != INDEX_PATH} != {
-        p: s for p, s in after.files.items() if p != INDEX_PATH
-    }:
-        return True
     if INDEX_PATH not in before.files or INDEX_PATH not in after.files:
+        if role == "lander" and INDEX_PATH not in after.files:
+            return False
         return (INDEX_PATH in before.files) != (INDEX_PATH in after.files)
-    if before.files[INDEX_PATH] == after.files[INDEX_PATH]:
-        return False
     old, old_problems = parse_index(before.read(INDEX_PATH))
     new, new_problems = parse_index(after.read(INDEX_PATH))
-    if old_problems != new_problems or [e.slug for e in old.entries] != [e.slug for e in new.entries]:
+    if role == "lander":
+        was_complete = {(e.slug, before.files.get(report_path(e.slug))) for e in old.entries if e.state == "complete"}
+        return any(
+            e.state == "complete" and (e.slug, after.files.get(report_path(e.slug))) not in was_complete
+            for e in new.entries
+        )
+    if old_problems != new_problems:
         return True
-    for a, b in zip(old.entries, new.entries):
-        if (a.deps, a.summary) != (b.deps, b.summary):
-            return True
-        if a.state == b.state and a.claim == b.claim:
-            continue
-        if a.state in ("pending", "in-flight") and b.state == "in-flight":
-            continue
+    if {e.slug for e in old.entries} - {e.slug for e in new.entries}:
         return True
-    return False
+    was_in_flight = {e.slug for e in old.entries if e.state == "in-flight"}
+    if any(e.state == "blocked" and e.slug in was_in_flight for e in new.entries):
+        return True
+    return not _is_subsequence(_eligible(after, new), _eligible(before, old))
 
 
 def history(gh: GitHub, branch: str, slug: str, limit: int) -> list[str]:
-    """One line per queue commit about `slug` among the last `limit` commits to INDEX.md: date, subject, claim id.
+    """One line per queue commit about `slug` among the last `limit` commits under plans/: date, subject, claim id.
 
-    This is how an executor that crashed mid-verb finds out whether its own `claim`, `block`, `deliver` or `unclaim`
-    landed: every commit a claim holder makes carries `Claim <id>.` in its message.
+    This is how an executor or the monitor, after crashing mid-verb, finds out whether its own `claim`, `block`,
+    `deliver`, `unclaim`, `start-landing`, `stop-landing` or `landed` landed: every commit a claim holder makes carries
+    `Claim <id>.` in its message. It reads all of plans/ rather than INDEX.md alone because the review verbs change only
+    REPORTS.md and the plan's files.
     """
     out = []
-    for item in gh.path_history(branch, INDEX_PATH, limit):
+    for item in gh.path_history(branch, "plans", limit):
         message = item["commit"]["message"]
         subject = message.split("\n", 1)[0]
         if not subject.startswith("chore(plans): ") or not subject.endswith(f" {slug}"):
@@ -1026,25 +1236,40 @@ def history(gh: GitHub, branch: str, slug: str, limit: int) -> list[str]:
     return out
 
 
-def claim_age(gh: GitHub, branch: str, slug: str, claim: str) -> str | None:
-    """The time the claim commit landed, from main's history of INDEX.md, or None if it is not among recent commits."""
+# The commit subject that takes each kind of claim, so its age can be found in main's history.
+_CLAIM_SUBJECTS = {"in-flight": "claim", "landing": "start landing"}
+
+
+def claim_age(gh: GitHub, branch: str, entry: Entry) -> str | None:
+    """The time the entry's claim commit landed, from main's history of INDEX.md, or None if it is not recent."""
+    taken = f"chore(plans): {_CLAIM_SUBJECTS[entry.state]} {entry.slug}\n"
     for item in gh.path_history(branch, INDEX_PATH, 100):
         message = item["commit"]["message"]
-        if message.startswith(f"chore(plans): claim {slug}\n") and f"Claim {claim}." in message:
+        if message.startswith(taken) and f"Claim {entry.claim}." in message:
             return item["commit"]["committer"]["date"]
     return None
 
 
-def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.datetime) -> dict:
-    """The queue as executors and review sessions start from it: one snapshot instead of each agent deriving its own.
+def _hours_since(path: pathlib.Path, now: datetime.datetime) -> float | None:
+    return (now.timestamp() - path.stat().st_mtime) / 3600 if path.exists() else None
 
-    Also flags what a person should look at: a claim that is old and whose working log has gone quiet (possibly an
-    executor that died), an approved plan with no open PRs (a landing that stopped before `remove`), and a pending plan
-    that still has open PRs (unlanded work from an earlier round, which conflict judgments must count).
+
+def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.datetime) -> dict:
+    """The queue as executors, the monitor and review sessions start from it: one snapshot instead of each agent
+    deriving its own.
+
+    Also flags what a person or the monitor should look at: a claim that is old and whose log has gone quiet (possibly
+    an executor or a monitor that died; a landing claim is judged by the monitor's log, an executor's by the plan's
+    working log), a landing plan with no open PRs (a landing that stopped before `landed`), a complete plan with no
+    open PRs (merged ones mean a landing that was released after its last merge and only needs `landed`; none merged
+    means its PRs were closed and the maintainer must decide), and a pending plan that still has open PRs (unlanded
+    work from an earlier round, which conflict judgments must count). Landed plans awaiting review are listed after
+    the queue.
     """
     head = gh.head(branch)
     snap, _ = remote_snapshot(gh, head, {})
     index, problems = parse_index(snap.read(INDEX_PATH)) if INDEX_PATH in snap.files else (Index("", []), [])
+    reports, report_problems = read_reports(snap)
     pulls = gh.open_pulls()
     plans = []
     for entry in index.entries:
@@ -1052,10 +1277,9 @@ def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.dateti
             ({"number": p["number"], "ref": p["ref"]} for p in pulls if p["ref"].startswith(f"plan/{entry.slug}/")),
             key=lambda p: p["ref"],
         )
-        log = logs_dir / f"farhelm-plan-{entry.slug}-log.md"
-        log_age = None
-        if log.exists():
-            log_age = (now.timestamp() - log.stat().st_mtime) / 3600
+        # A landing claim is the monitor's; the plan's working log belongs to executors and says nothing about it.
+        log_name = MONITOR_LOG if entry.state == "landing" else f"farhelm-plan-{entry.slug}-log.md"
+        log_age = _hours_since(logs_dir / log_name, now)
         item = {
             "slug": entry.slug,
             "state": entry.state,
@@ -1065,28 +1289,48 @@ def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.dateti
             "log_quiet_hours": None if log_age is None else round(log_age, 1),
             "flags": [],
         }
-        if entry.state == "in-flight" and entry.claim:
-            since = claim_age(gh, branch, entry.slug, entry.claim)
+        if entry.claim:
+            since = claim_age(gh, branch, entry)
             item["claimed_at"] = since
+            quiet = log_age
             if since is None:
-                item["flags"].append("claim commit not in recent history: an old claim; check whether it is abandoned")
+                # Too old for the history status reads to date. The log still tells a working holder from a dead one,
+                # and a dead one gets the same flag as any other, since the monitor notifies on exactly that flag.
+                if quiet is None or quiet > 6:
+                    item["flags"].append("possibly abandoned: claim commit not in recent history and its log is quiet")
+                else:
+                    item["flags"].append("claim commit not in recent history: an old claim, but its log is active")
             else:
                 hours = (now - datetime.datetime.fromisoformat(since.replace("Z", "+00:00"))).total_seconds() / 3600
-                if hours > 24 and (log_age is None or log_age > 6):
-                    item["flags"].append("possibly abandoned: claimed over 24 h ago and its working log is quiet")
-        if entry.state == "approved" and not prs:
+                if hours > 24 and (quiet is None or quiet > 6):
+                    item["flags"].append("possibly abandoned: claimed over 24 h ago and its log is quiet")
+        if entry.state == "landing" and not prs:
             merged = gh.merged_pulls(f"plan/{entry.slug}/")
             if merged:
                 numbers = ",".join(str(p["number"]) for p in merged)
-                item["flags"].append(f"approved, no open PRs, merged {numbers}: finish landing with remove --merged")
+                item["flags"].append(f"landing, no open PRs, merged {numbers}: finish with landed --merged")
             else:
                 item["flags"].append(
-                    "approved, no open PRs and none found merged (search can lag a minute): ask the maintainer"
+                    "landing, no open PRs and none found merged (search can lag a minute): ask the maintainer"
+                )
+        if entry.state == "complete" and not prs:
+            # Either a landing merged everything and died before `landed` (and was released), or the PRs were closed.
+            # Only the first can be finished without the maintainer.
+            merged = gh.merged_pulls(f"plan/{entry.slug}/")
+            if merged:
+                numbers = ",".join(str(p["number"]) for p in merged)
+                item["flags"].append(
+                    f"complete, no open PRs, merged {numbers}: claim with start-landing, finish with landed --merged"
+                )
+            else:
+                item["flags"].append(
+                    "complete, but no open PRs and none found merged (search can lag a minute): ask the maintainer"
                 )
         if entry.state == "pending" and prs:
             item["flags"].append("unlanded work from an earlier round")
         plans.append(item)
-    return {"head": head, "problems": problems, "plans": plans}
+    landed = [{"slug": r.slug, "landed": r.date, "prs": r.prs} for r in reports.entries]
+    return {"head": head, "problems": problems + report_problems, "plans": plans, "landed": landed}
 
 
 def render_status(data: dict) -> str:
@@ -1107,6 +1351,9 @@ def render_status(data: dict) -> str:
         lines.append(" | ".join(parts))
         for flag in plan["flags"]:
             lines.append(f"    ! {flag}")
+    for item in data["landed"]:
+        prs = ", ".join(f"#{n}" for n in item["prs"])
+        lines.append(f"[landed {item['landed']}] {item['slug']} | PRs {prs} | report awaiting review")
     return "\n".join(lines)
 
 
@@ -1153,33 +1400,38 @@ def build_parser() -> argparse.ArgumentParser:
 
     hs = sub.add_parser("history", help="list the recent queue commits for one plan, newest first")
     hs.add_argument("slug")
-    hs.add_argument("--limit", type=int, default=100, help="how many INDEX.md commits to look through")
+    hs.add_argument("--limit", type=int, default=100, help="how many commits under plans/ to look through")
 
     wk = sub.add_parser("wake-check", help="print wake or ignore (the watcher's change filter)")
     wk.add_argument("--baseline", required=True)
     wk.add_argument("--ref", required=True)
+    wk.add_argument("--for", dest="role", choices=WAKE_ROLES, default="executor", help="whose wake-ups to filter")
 
     for verb, needs_claim, text_flag in (
         ("claim", True, None),
         ("unclaim", True, None),
         ("block", True, "--question"),
         ("deliver", True, "--report"),
+        ("start-landing", True, None),
+        ("stop-landing", True, None),
+        ("landed", True, "--notes"),
         ("release", False, None),
         ("answer", False, "--decision"),
         ("follow-up", False, "--decision"),
         ("approve", False, None),
-        ("remove", False, None),
         ("abandon", False, None),
     ):
         p = sub.add_parser(verb)
         p.add_argument("slug")
         if needs_claim:
-            p.add_argument("--claim", required=True, help="six lowercase hex characters, chosen by the executor")
+            p.add_argument(
+                "--claim", required=True, help="six lowercase hex characters, chosen by the executor or the monitor"
+            )
         if text_flag:
             p.add_argument(text_flag, dest="text_file", required=True, metavar="FILE")
         if verb == "abandon":
             p.add_argument("--dependents", choices=("block", "drop-dep"))
-        if verb == "remove":
+        if verb == "landed":
             p.add_argument(
                 "--merged",
                 required=True,
@@ -1240,7 +1492,7 @@ def main(
         if args.verb == "wake-check":
             if not OBJECT_ID_RE.match(args.baseline):
                 raise Usage("--baseline must be a commit id")
-            print("wake" if wake_check(gh, args.baseline, args.ref) else "ignore")
+            print("wake" if wake_check(gh, args.baseline, args.ref, args.role) else "ignore")
             return EXIT_OK
         if args.verb == "history":
             if not SLUG_RE.match(args.slug):
@@ -1263,7 +1515,11 @@ def main(
         if getattr(args, "text_file", None) is not None:
             text = _read_input(args.text_file, "the input file")
             problems = hygiene_problems(text, local_hostnames())
-            if args.verb != "deliver":
+            # A report is a whole file of its own. Everything else is spliced into a plan file under a `##` heading,
+            # or under a report's `### Landing`, where a heading as high as its own would end the section.
+            if args.verb == "landed":
+                problems += splice_problems(text, section_level=3)
+            elif args.verb != "deliver":
                 problems += splice_problems(text)
             if problems:
                 raise Usage("the text cannot be committed as it is; fix and call again:\n  " + "\n  ".join(problems))

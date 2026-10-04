@@ -378,12 +378,14 @@ instructions is validated with the end-to-end procedure in `deflake/EVAL.md`, a 
 # plans/
 
 `plans/` holds a queue of planned work: one goal file per planned TODO entry or triaged outcome, executed unattended by
-any number of concurrent executors, each claiming one plan at a time through `scripts/plans-queue.py`.
-`plans/queue/INDEX.md` is the queue, with each plan's state. "Plan to implement <TODO items>", "use the planning system
-to schedule these" (for triage outcomes), "pick a plan to execute" and "execute the next plan" (with "in order" or a
-named plan as variants), "drain the plans" (optionally "and keep monitoring"), "review the plans", "show blocked plans",
-"land the approved plans", "release plan X", and "plan help" are defined in `plans/AGENTS.md`; read it before any of
-those, or before changing anything in the directory.
+any number of concurrent executors, each claiming one plan at a time through `scripts/plans-queue.py`. One monitor lands
+what they finish without waiting for the maintainer, who reviews each landed plan's report afterwards.
+`plans/queue/INDEX.md` is the queue, with each plan's state, and `plans/REPORTS.md` lists the landed plans whose reports
+await review. "Plan to implement <TODO items>", "use the planning system to schedule these" (for triage outcomes), "pick
+a plan to execute" and "execute the next plan" (with "in order" or a named plan as variants), "drain the plans"
+(optionally "and keep monitoring"), "monitor for complete plans", "land the complete plans", "review the plans", "show
+blocked plans" (or "check for blocked plans"), "release plan X", and "plan help" are defined in `plans/AGENTS.md`; read
+it before any of those, or before changing anything in the directory.
 
 Every planning-system flow starts on a clean working copy of the latest `main`, and a dirty working copy aborts the flow
 with a report to the maintainer. A drain returns to clean `main` between plans; `plans/AGENTS.md` defines the exact jj

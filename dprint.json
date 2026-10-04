@@ -10,6 +10,7 @@
     "target/**",
     "lore/**",
     "plans/queue/INDEX.md",
+    "plans/REPORTS.md",
     "CHANGELOG.md",
     "releasing/changelog.d/*.md",
     "releasing/drafts/**"

@@ -1,6 +1,6 @@
 # Plans queue
 
-One line per plan, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. This file is excluded from dprint so a line is never rewrapped.
+One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
 - [pending] `hover-help.md` — every icon and clickable control gets hover text in a fast, themed tooltip of Farhelm's own (300 ms, above the control), replacing the browser's slow native tooltips, with a browser test that fails on any control without one (after `launch-representation.md`)
 - [pending] `hook-report-files.md` — conversation hooks write their latest report into fixed slot files in a per-session drop directory that the supervisor applies on its reconciliation pass, replacing the socket round trip and its retries and timeouts, so tracking survives the supervisor being down (the Mac app closed); attribution runs on the hook's recorded process chain; the spec states that agents' `farhelm` commands fail while the supervisor is down (after `launch-representation.md`)

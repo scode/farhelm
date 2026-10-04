@@ -3,8 +3,9 @@
 This directory holds a queue of planned work. A plan is a goal file written by the `scode-build-goal` skill, for one
 TODO.md entry or one triaged review outcome (occasionally a few very closely related ones), and executing a plan means
 running it the way `/goal` would. Any number of executors work through the queue at once, each in its own checkout and
-each holding one plan at a time. A finished plan's PRs stay open until the maintainer has been walked through its report
-and approved it; only then does it land.
+each holding one plan at a time. A finished plan lands without waiting for the maintainer: one monitor merges what the
+executors finish, and the maintainer reads each landed plan's report afterwards, then approves it or asks for a
+follow-up. Only a blocked plan waits on the maintainer before anything moves.
 
 NOTE: A plan is not a design document or a spec. It is the instructions for an unattended run that builds the work as a
 stack of PRs. SPEC.md and SPEC_impl.md stay authoritative over anything a plan says.
@@ -15,8 +16,12 @@ stack of PRs. SPEC.md and SPEC_impl.md stay authoritative over anything a plan s
   a plan elsewhere), with its state. The file is excluded from dprint, so a line is never rewrapped. Queue order is a
   picking preference, not a sequence (see the note under Planning).
 - `queue/<slug>.md` is one plan, named briefly after the work (`create-off-read-loop.md`, `font-size-shortcuts.md`),
-  never a number or a date, and with no project prefix. Every `.md` file in `queue/` other than `INDEX.md` is a plan.
-- `reports/<slug>.report.md` is the report a finished plan delivered for review.
+  never a number or a date, and with no project prefix. Every `.md` file in `queue/` other than `INDEX.md` is a plan. A
+  landed plan's file stays there until the maintainer approves the plan.
+- `reports/<slug>.report.md` is the report a finished plan delivered, with a Landing section the monitor adds when it
+  lands the plan.
+- `REPORTS.md` lists every landed plan whose report the maintainer has not reviewed yet, one physical line each, oldest
+  first. Like `INDEX.md`, it is excluded from dprint.
 
 Every plan has a source that references it, so nobody plans or executes the same work twice: a TODO.md entry ends with
 ``Plan: `plans/queue/<slug>.md`.``, or a `TRIAGE_OUTCOMES.md` entry's Execution field reads
@@ -31,16 +36,29 @@ has nothing to do with the `Planned` bucket, which means something else (see TOD
 - [<state>] `<slug>.md` — <summary>[ (after `<other>.md`[, `<other2>.md`])]
 ```
 
-| State               | Meaning                                                              | Held by               |
-| ------------------- | -------------------------------------------------------------------- | --------------------- |
-| `pending`           | waiting for an executor: new, answered, or sent back for a follow-up | nobody                |
-| `in-flight <claim>` | an executor is working on it                                         | that claim's executor |
-| `blocked`           | waiting on the maintainer; the plan file has a `## Blocked` section  | nobody                |
-| `in review`         | every PR built and gated; `reports/<slug>.report.md` delivered       | nobody                |
-| `approved`          | the maintainer approved it; waiting to land                          | nobody                |
+| State               | Meaning                                                                       | Held by               |
+| ------------------- | ----------------------------------------------------------------------------- | --------------------- |
+| `pending`           | waiting for an executor: new, answered, or sent back for a follow-up          | nobody                |
+| `in-flight <claim>` | an executor is working on it                                                  | that claim's executor |
+| `blocked`           | waiting on the maintainer; the plan file has a `## Blocked` section           | nobody                |
+| `complete`          | every PR built and gated; `reports/<slug>.report.md` delivered; ready to land | nobody                |
+| `landing <claim>`   | the monitor is landing it                                                     | that claim's monitor  |
+
+A plan that has landed is not in `INDEX.md` at all. Landing moves its line to `REPORTS.md`, which has this grammar:
+
+```
+- [`<slug>`](reports/<slug>.report.md) landed <YYYY-MM-DD> in #<n>[, #<n>...]: <summary>
+```
+
+It stays there until the maintainer approves it, which ends its tracking, or asks for a follow-up, which puts it back at
+the top of `INDEX.md` as `[pending]`.
 
 `(after x.md)` means the plan may only start once `x.md`'s work is on main. That is the case once `x.md` is no longer
-listed at all: only landing (`remove`) and abandoning take a line out, and abandoning settles its dependents explicitly.
+listed in `INDEX.md`: only landing (`landed`) and abandoning take a line out, and abandoning settles its dependents
+explicitly. A plan can therefore start as soon as what it waits for has landed, whether or not the maintainer has read
+that plan's report yet. A follow-up does not take that back: when it puts `x.md` back into `INDEX.md`, the script drops
+`x.md` from every `(after ...)` clause, because its first round is already on main. The maintainer chose that changes
+keep flowing by default; if a follow-up would break a dependent, they deal with it by hand.
 
 Every state change is made by `scripts/plans-queue.py`, which commits it directly to main. Below, `queue <verb>` is
 short for `scripts/plans-queue.py --repo <OWNER/NAME> <verb>`, where `<OWNER/NAME>` is the GitHub repository of the
@@ -56,30 +74,35 @@ with your own claim id where the state has one; `queue history <slug>` lists the
 each carried), the verb landed. If it still shows the starting state, run the verb again. Anything else is someone
 else's change: handle it as exit 10.
 
-| Verb                                            | From → to                | Used by                                    |
-| ----------------------------------------------- | ------------------------ | ------------------------------------------ |
-| `claim <slug> --claim ID`                       | pending → in-flight      | an executor that picked the plan           |
-| `unclaim <slug> --claim ID`                     | in-flight → pending      | the claim holder, giving the plan back     |
-| `block <slug> --claim ID --question FILE`       | in-flight → blocked      | the claim holder                           |
-| `deliver <slug> --claim ID --report FILE`       | in-flight → in review    | the claim holder                           |
-| `release <slug>`                                | in-flight → pending      | only when the maintainer asks              |
-| `answer <slug> --decision FILE`                 | blocked → pending        | a review session                           |
-| `follow-up <slug> --decision FILE`              | in review → pending      | a review session                           |
-| `approve <slug>`                                | in review → approved     | a review session                           |
-| `remove <slug> --merged N[,N...]`               | approved → gone          | a landing session, once the PRs landed     |
-| `abandon <slug> [--dependents block\|drop-dep]` | any but in-flight → gone | a review session, on the maintainer's word |
+| Verb                                                      | From → to                               | Used by                                    |
+| --------------------------------------------------------- | --------------------------------------- | ------------------------------------------ |
+| `claim <slug> --claim ID`                                 | pending → in-flight                     | an executor that picked the plan           |
+| `unclaim <slug> --claim ID`                               | in-flight → pending                     | the claim holder, giving the plan back     |
+| `block <slug> --claim ID --question FILE`                 | in-flight or landing → blocked          | the claim holder                           |
+| `deliver <slug> --claim ID --report FILE`                 | in-flight → complete                    | the claim holder                           |
+| `start-landing <slug> --claim ID`                         | complete → landing                      | the monitor                                |
+| `stop-landing <slug> --claim ID`                          | landing → complete                      | the claim holder, giving the landing back  |
+| `landed <slug> --claim ID --merged N[,N...] --notes FILE` | landing → `REPORTS.md`                  | the claim holder, once every PR merged     |
+| `release <slug>`                                          | in-flight → pending, landing → complete | only when the maintainer asks              |
+| `answer <slug> --decision FILE`                           | blocked → pending                       | a review session                           |
+| `follow-up <slug> --decision FILE`                        | `REPORTS.md` → pending, first in line   | a review session                           |
+| `approve <slug>`                                          | `REPORTS.md` → gone                     | a review session                           |
+| `abandon <slug> [--dependents block\|drop-dep]`           | pending, blocked or complete → gone     | a review session, on the maintainer's word |
 
 The read-only verbs: `status` (the queue with claims, claim times, open PRs, waiting dependencies, and flags for what a
-person should look at; it prints main's commit id first), `check` (the invariants of a local tree, or of a remote ref
-with `--ref`; with `--base <branch>`, also what a planning PR may not change), `check-slug <slug>`, `history <slug>`
-(the plan's recent queue commits, each with the claim id it carried), and `wake-check` (used by the watcher).
+person or the monitor should look at, then the landed plans awaiting review; it prints main's commit id first), `check`
+(the invariants of a local tree, or of a remote ref with `--ref`; with `--base <branch>`, also what a planning PR may
+not change), `check-slug <slug>`, `history <slug>` (the plan's recent commits under `plans/`, each with the claim id it
+carried), and `wake-check` (used by the watcher, with `--for executor` or `--for lander`).
 
 The rules that follow from this:
 
-- Never hand-edit a state, a `## Blocked` section, a `## Decisions` entry, or a report, and never force push main.
+- Never hand-edit a state, a `## Blocked` section, a `## Decisions` entry, a report, or `REPORTS.md`, and never force
+  push main.
 - Planning PRs are the only other writers of `plans/`. They may add plan files with new `[pending]` lines, reorder
-  lines, reword a summary, and revise the file of a plan that is `pending` or `blocked`; nothing else.
-  `queue check --base main` enforces that before a planning PR lands.
+  lines, reword a summary, and revise the file of a plan that is `pending` or `blocked`; nothing else, and in particular
+  never `REPORTS.md`, a report, or a landed plan's file. `queue check --base main` enforces that before a planning PR
+  lands.
 - Code PRs never touch `plans/`.
 - `## Decisions` entries are part of the plan's goal: an entry wins over anything in the plan body it contradicts.
 
@@ -101,18 +124,54 @@ work, since plan bookmarks never collide across plans, but they share bookmark s
   claim writes it; a later claimer reads all of it. Besides the goal's own entries it records the executing checkout's
   absolute path and, after each push, the commit pushed for each bookmark. Slugs are never reused, so an old log can
   never be mistaken for a new plan's.
+- `farhelm-plans-monitor-log.md`: the monitor's own state, read first after any start, compaction or resume (Landing
+  below). There is one, because one monitor runs at a time. It starts with a `## Status` section holding one line,
+  `running, last checked <UTC time>` or `stopped <UTC time>: <reason>`, which the monitor rewrites on every wake and
+  which a review session reads. Below that it records the landing claim in progress (slug, claim id, and the verb it is
+  about to run or last ran: `starting`, `blocking`, `stopping`, `recording`), the PRs of that plan merged so far, the
+  watcher's task handle and baseline commit, whether the maintainer chose to run without notifications, and the claim
+  ids and plans it has already notified about. Only the monitor writes it.
 
 These files are never committed, so absolute paths in them are fine. Nothing else about a plan lives outside the
 repository.
 
 ## Public-repo hygiene
 
-Blocked sections, decisions and reports land on main directly, with no PR review, in a repository that is or may become
-public. Never put absolute paths, host names, user names, scratch directories, or raw log excerpts in them. Name a
-plan's working log by its rule (`farhelm-plan-<slug>-log.md` beside the checkouts), never by path. Report checks as
-redacted commands and recorder run ids, per root `AGENTS.md`. The script refuses text containing a home, temp or
-`/private/` path or the host name, and names the line; rephrase and run it again. When that text is the maintainer's own
-words, agree the rephrasing with them.
+Blocked sections, decisions, reports, landing notes and `REPORTS.md` land on main directly, with no PR review, in a
+repository that is or may become public. Never put absolute paths, host names, user names, scratch directories, or raw
+log excerpts in them. Name a plan's working log by its rule (`farhelm-plan-<slug>-log.md` beside the checkouts), never
+by path. Report checks as redacted commands and recorder run ids, per root `AGENTS.md`. The script refuses text
+containing a home, temp or `/private/` path or the host name, and names the line; rephrase and run it again. When that
+text is the maintainer's own words, agree the rephrasing with them.
+
+## Notifications
+
+Notifications go through [ntfy.sh](https://ntfy.sh/), to a topic the maintainer keeps in `~/.farhelm-ntfy-topic` on the
+machine the agents run on. Anyone who knows an ntfy.sh topic can read what is sent to it, so the topic name is the only
+thing keeping these notifications private. That is why it never goes into the repository, a log, a report, or the
+conversation: never read, print, quote or log that file, not even to check its contents. Assume it holds a correct topic
+name.
+
+A notification means one thing: progress may be stopped until the maintainer acts. Send one for that and nothing else;
+never for something the maintainer did themselves (releasing a claim, stopping a flow), for a delivery or a landing that
+went through, for an error that is still being retried, or for anything else that is only for their information. The
+agent that discovers the condition sends it: an executor for a plan it blocks or a problem that stops it (Executing one
+plan and Draining below), the monitor for a landing it blocks or cannot finish, a problem that stops it, and what it
+sees in `queue status` (Landing below). Each place below that says to notify is such a condition.
+
+When an executor's flow or the monitor starts, check that the file exists without reading it, with
+`test -f ~/.farhelm-ntfy-topic`. If it does not, tell the maintainer the file name and ask whether to carry on without
+notifications, and record the answer in the agent's own log so that a resume does not ask again. To send one, put the
+message in a shell variable and let the shell read the topic:
+
+```
+curl -fsS -o /dev/null -H "Title: farhelm plans" --data-raw "$msg" "https://ntfy.sh/$(tr -d '[:space:]' < ~/.farhelm-ntfy-topic)"
+```
+
+The `-o /dev/null` matters: ntfy answers with JSON that names the topic. `--data-raw` rather than `-d` keeps a message
+that starts with `@` from being read as the name of a local file to send. A message is one line in product terms that
+names the plan's slug, and never report text, paths or log excerpts, because ntfy.sh is a third-party service. A send
+that fails is recorded in the agent's log and does not stop the flow.
 
 ## Clean-main boundary
 
@@ -173,7 +232,8 @@ not a reason to skip the reset.
 Three checks below run as fresh-context, read-only native sub-agents of the executing harness, on the executing
 session's own model, writing their findings to a file in the executor's scratch directory: the resume check, and the
 cold reads of a Blocked question and of a report. Every plan needs them, so they are exempt from a plan file's own rule
-against delegating its work, and they are not routed through galaxy-brain.
+against delegating its work, and they are not routed through galaxy-brain. The monitor uses sub-agents the same way for
+its independent review of what is about to land and for the cold read of a Blocked question it writes.
 
 ## Planning: "plan to implement <TODO items>"
 
@@ -220,12 +280,13 @@ New plans go at the end of `INDEX.md` unless the maintainer places them elsewher
 NOTE: Queue order is not execution order. Several executors drain the queue at once, so any eligible plan may run at the
 same time as any other, and a plan listed later can start, deliver and land before one listed earlier (Picking prefers
 the oldest eligible plan, but skips it when it would conflict with unlanded work). Listing one plan below another orders
-nothing. The only ordering between plans is `(after x.md)`, and that holds the dependent plan back until `x.md` has been
-reviewed, approved and landed, so it waits on the maintainer. When pieces of work must be built in a particular order,
-or one of them touches much of what the others touch (a broad rename that every other change would rebase across, say),
-keep them in one plan whose goal builds them as one stack in that order; for separate TODO entries that is a merge to
-propose, as above. Do not split such work into separate plans on the assumption that a later plan runs after an earlier
-one: without a dependency they may run concurrently and conflict, and with one the later work idles behind review.
+nothing. The only ordering between plans is `(after x.md)`, and that holds the dependent plan back until the monitor has
+landed `x.md`, which waits on the maintainer only if `x.md` or its landing blocks. When pieces of work must be built in
+a particular order, or one of them touches much of what the others touch (a broad rename that every other change would
+rebase across, say), keep them in one plan whose goal builds them as one stack in that order; for separate TODO entries
+that is a merge to propose, as above. Do not split such work into separate plans on the assumption that a later plan
+runs after an earlier one: without a dependency they may run concurrently and conflict, and with one the later work
+idles until the earlier work lands.
 
 When every plan in the request is written, land them as one commit and one PR per the `jjstack` skill, on top of the
 latest `main@origin`: the plan files, their `INDEX.md` lines, and the TODO.md references, all together. Validate with
@@ -292,11 +353,13 @@ its open PRs. Record the pick and its reasoning in the executor log.
      the close it was part of: step 12 if the plan is still unclaimed, or, if another executor has claimed it since, the
      reset for a released claim (Clean-main boundary), recorded in the executor log only.
    - `blocking` or `delivering`: if `history` shows that commit with your claim id, it landed, whatever the line says
-     now (review may already have moved on); finish closing (step 12). If not and your id is still on the line, run the
-     verb again. Otherwise the claim was released.
+     now (the monitor or a review may already have moved on); finish closing (step 12). For `blocking`, also notify: the
+     crash may have come between the block and its notification, and a second notification costs less than none. If not
+     and your id is still on the line, run the verb again. Otherwise the claim was released.
 
    A released claim means: drop it from the executor log, push nothing more for that plan and write nothing more to its
-   working log, run the reset for a released claim (Clean-main boundary), notify, and continue with a fresh pick.
+   working log, run the reset for a released claim (Clean-main boundary), and continue with a fresh pick. A release is
+   the maintainer's own doing, so it is not worth a notification.
 2. Apply the clean-main boundary, then run `queue status` and pick (Picking above). Nothing picked: the round is over.
 3. Claim. Generate a claim id (`python3 -c 'import secrets; print(secrets.token_hex(3))'`), write slug, id and
    `claiming` to the executor log, then `queue claim <slug> --claim <id>`. Exit 10 means someone else got there first:
@@ -334,34 +397,39 @@ its open PRs. Record the pick and its reasoning in the executor log.
     fallback), push everything that is consistent, then write the question for the Blocked section (Writing for the
     maintainer below). Have a sub-agent cold-read it, asking whether the maintainer could decide from this text alone
     and whether it breaks public-repo hygiene, and revise until it passes. Write `blocking` to the executor log, run
-    `queue block <slug> --claim <id> --question <file>`, notify, and close (step 12).
+    `queue block <slug> --claim <id> --question <file>`, notify (Notifications above), and close (step 12).
 11. Finishing: when the done criterion holds, rebase the stack onto `main@origin` as a careful rebase if main has moved
     in a way that touches it, so the report describes what would actually land. Then write the report (Writing for the
     maintainer below) and have a sub-agent cold-read it, asking whether the maintainer could approve or ask for a
     follow-up from it alone and whether it breaks public-repo hygiene. Revise until it passes, write `delivering` to the
-    executor log, run `queue deliver <slug> --claim <id> --report <file>`, and notify.
+    executor log, and run `queue deliver <slug> --claim <id> --report <file>`. The plan is now `[complete]`, and the
+    monitor lands it from there.
 12. Close: return to clean `main` with the reset under Clean-main boundary, write a closing entry in the plan's working
     log that names any paths the reset discarded, stop its resource watchdog, and clear the claim from the executor log.
     Closing ends the plan's resume-log protocol and its review demands, as an express stop; the next plan starts its
     own.
 
 `block` or `deliver` exiting 10 means the claim was released while you worked: push nothing more, record it in both
-logs, run the reset for a released claim (Clean-main boundary), and notify. To give a claim back for any other reason
-(the maintainer stops the flow mid-plan, a `gh` login that expired, a disk alert that cannot be cleared), push what is
-consistent, write the working log, write `unclaiming` to the executor log, run `queue unclaim`, close (step 12), and
-notify. If pushing the consistent work failed (the expired login, say), close with the reset for a released claim
-instead of the full one, so that work stays in the checkout for the next claimer to find (step 7), and say so in the
-working log and the notification.
+logs, and run the reset for a released claim (Clean-main boundary). To give a claim back for any other reason (the
+maintainer stops the flow mid-plan, a `gh` login that expired, a disk alert that cannot be cleared), push what is
+consistent, write the working log, write `unclaiming` to the executor log, run `queue unclaim`, and close (step 12).
+Notify unless the maintainer asked for the stop: an expired login or a full disk stops every plan on the machine until
+someone fixes it, and a plan that could not be reconciled (step 7) will stop the next executor the same way. If pushing
+the consistent work failed (the expired login, say), close with the reset for a released claim instead of the full one,
+so that work stays in the checkout for the next claimer to find (step 7), and say so in the working log and the
+notification.
 
-To notify, use the harness's own notification facility (in Claude Code, the push notification tool). If there is none,
-say so in the flow's final report instead.
+To notify, follow Notifications above. Delivering does not notify: the monitor lands the plan, and its report reaches
+the maintainer through `REPORTS.md`. An executor that dies cannot notify at all; its claim shows up in `queue status` as
+possibly abandoned, and the monitor notifies about that (Landing below).
 
 ### Writing for the maintainer
 
 The maintainer reads Blocked questions and reports without opening the code, without remembering what a PR number stands
-for, and without remembering the review finding or triage decision behind the plan. Every decision a report records and
-every question it asks must be one the maintainer can take a position on straight away. In product terms, per root
-`AGENTS.md` "Talking to the user", state:
+for, and without remembering the review finding or triage decision behind the plan. A report is read after its work has
+landed, so it is the maintainer's only account of what reached main and what they should know about it. Every decision a
+report records and every question it asks must be one the maintainer can take a position on straight away. In product
+terms, per root `AGENTS.md` "Talking to the user", state:
 
 - the feature or operation involved and the original problem: what went wrong for a user, under what trigger, and what
   they saw or lost;
@@ -394,9 +462,11 @@ Any number of executors may drain at once, each in its own checkout; claims keep
 drain again, and keep going until the maintainer says stop. The waiting is done by `scripts/plans-watch.sh`, not by the
 model. A model wake-up re-reads the agent's whole conversation, uncached after any long wait, so waking hourly just to
 find nothing would cost a full model round each time. The watcher polls GitHub cheaply and exits only when `plans/` on
-main changes in a way that can give an idle executor work: with `--wake-check`, claims alone do not count. An idle
-executor still wakes when the watcher reaches its maximum wait, about every 110 minutes by default, but that wake-up
-only restarts the watcher. Run it like this:
+main changes in a way that can give an idle executor work: with `--wake-check`, only a plan becoming pickable (new,
+answered, followed up, given back, revised, reordered, or freed by a dropped dependency), a plan leaving the queue, or
+an in-flight plan blocking (which can end a conflict a pick skipped for) counts, and claims, deliveries, landings in
+progress and report reviews do not. An idle executor still wakes when the watcher reaches its maximum wait, about every
+110 minutes by default, but that wake-up only restarts the watcher. Run it like this:
 
 - Start
   `scripts/plans-watch.sh --repo <OWNER/NAME> --baseline-from <commit> --wake-check <checkout>/scripts/plans-queue.py`
@@ -414,8 +484,9 @@ only restarts the watcher. Run it like this:
   - `changed` (status 0): drain again.
   - `idle` (status 10): nothing changed; start it again with the same commit, without fetching or draining.
   - `error:` (status 3): if the line mentions HTTP 401 or 403, the GitHub login needs the maintainer; notify and stop
-    monitoring. Otherwise notify once, then keep restarting it with `--interval 1800` until a watcher exits `changed` or
-    `idle`, which also restores the default interval. Do not notify again for the same run of errors.
+    monitoring. Otherwise keep restarting it with `--interval 1800` until a watcher exits `changed` or `idle`, which
+    also restores the default interval. An outage that is still being retried does not need the maintainer, so it is
+    recorded in the executor log, not notified.
   - `usage:` (status 2) or anything else: the invocation is wrong, so restarting cannot help. Notify and stop
     monitoring.
 - A harness that cannot wake a session when a background command exits runs the watcher in the foreground instead, with
@@ -424,62 +495,155 @@ only restarts the watcher. Run it like this:
 A batch of new plans wakes every monitoring executor at once, and they will race for the same first pick. That is fine:
 the losers get exit 10 and move to their next candidate.
 
-"Check for plans", or similar, said to a monitoring agent (typically by interrupting it while it waits) means: do not
-wait for the watcher. Stop it, drain now, and then start a new watcher from that drain's last pick, so only one watcher
-ever runs.
-
 ## Reviewing the plans: "review the plans"
 
-Run this in its own checkout, never in an executor's. It works through every plan waiting on the maintainer: first
-`[in review]` plans in queue order, since landing finished work reduces how much is in flight at once, then `[blocked]`
-ones. "Show blocked plans" is the same flow limited to blocked ones.
+NOTE: This is review after the fact. By the time a plan reaches this flow its work is already on main; approving it ends
+its tracking, and it does not gate anything. The one exception is a blocked plan, which waits for an answer.
 
-For each plan, start with plain-language context (root `AGENTS.md` "Talking to the user"): what the work is about, in
-product terms. Then present the report or the Blocked question, and ask for a decision:
+Run this in its own checkout, never in an executor's or the monitor's. It starts with the monitor's status, then works
+through every landed plan in `REPORTS.md`, oldest first, then every `[blocked]` plan in queue order. "Show blocked
+plans" and "check for blocked plans" are the same flow limited to blocked plans, still starting with the monitor's
+status.
 
-- In review:
-  - approve: `queue approve`;
-  - follow-up: the plan is not done; write the maintainer's words verbatim (plus any agreed restatement) to a file and
-    run `queue follow-up --decision <file>`, which puts it back to `[pending]` with the follow-up in its Decisions;
-  - abandon (below).
-- Blocked:
-  - answer: the maintainer's words verbatim (plus any agreed restatement) to `queue answer --decision <file>`, which
-    moves the question and the answer into Decisions and puts the plan back to `[pending]`;
-  - abandon (below).
-- Either: leave it for later, which changes nothing.
+The monitor's status is one line, taken from the `## Status` section of `farhelm-plans-monitor-log.md` beside the
+checkouts: when it last checked, or when and why it stopped. An idle monitor checks in at least every 110 minutes, so a
+`running` line whose last check is more than about two and a half hours old means it has probably died; say so. A
+missing log means no monitor has run on this machine, and nothing is landing. Add any flags `queue status` raises.
+
+For each landed plan, start with plain-language context (root `AGENTS.md` "Talking to the user"): what the work was
+about, in product terms. Then walk the maintainer through the report rather than pasting it: what landed, the things
+they should know, the open questions and possible follow-ups, anything the Landing section adds (what it landed
+alongside, fixes made while landing), and a link to the full report on GitHub,
+`https://github.com/<OWNER/NAME>/blob/main/plans/reports/<slug>.report.md`. Then ask for a decision:
+
+- approve: `queue approve`, which removes the plan's `REPORTS.md` line, its plan file and its report. The work stays on
+  main; only its tracking ends.
+- follow-up: the plan needs another round on top of what landed (a fix, a missing piece, a revert). Write the
+  maintainer's words verbatim (plus any agreed restatement) to a file and run `queue follow-up --decision <file>`, which
+  puts the plan back at the top of `INDEX.md` as `[pending]` with the follow-up in its Decisions. Its report stays, for
+  the next round's "since the last review" section. Plans that ran after it no longer wait on it (States above).
+- something that deserves its own plan or a TODO.md entry: that is a separate request handled the usual way (planning,
+  or a TODO edit as root `AGENTS.md` describes), after which this plan can be approved.
+- leave it for later, which changes nothing.
+
+For each blocked plan, start with the same context, then present the Blocked question, and ask for a decision:
+
+- answer: the maintainer's words verbatim (plus any agreed restatement) to `queue answer --decision <file>`, which moves
+  the question and the answer into Decisions and puts the plan back to `[pending]`;
+- abandon (below);
+- leave it for later.
+
+A plan the monitor blocked while landing may already have some of its PRs on main; its question says which. Answering
+sends it back to an executor, which builds on what landed.
 
 Record each decision as it is made, so executors can pick up answered and followed-up plans while the review goes on.
-End by listing the approved plans waiting to land; landing them is a separate request, usually at the end of the same
-session.
+End by summarizing what was approved, sent back and answered.
 
-Abandoning a plan: close its open PRs, then run `queue abandon`. If other plans run after it, ask the maintainer whether
+Abandoning a plan: only a plan still in `INDEX.md` can be abandoned (pending, blocked, or complete; a claimed one is
+released first). Close its open PRs, then run `queue abandon`. If other plans run after it, ask the maintainer whether
 they block (`--dependents block`, which gives each one a Blocked question about it) or drop the dependency
 (`--dependents drop-dep`). Ask what happens to the plan's source (the TODO entry goes back to unplanned, or the triage
-outcome's Execution back to `pending`, or something else), and land that as its own PR per `jjstack`.
+outcome's Execution back to `pending`, or something else), and land that as its own PR per `jjstack`. Abandoning leaves
+whatever already reached main in place, so for a plan with merged PRs, ask whether a revert is wanted. A landed plan
+cannot be abandoned: its work is on main, and undoing it is a follow-up.
 
-## Landing the approved plans: "land the approved plans"
+## Landing: "monitor for complete plans", "land the complete plans"
 
-Run this in its own checkout. Landing is never "merge, and see whether version control reports a conflict". Before
-anything merges, review on purpose what has landed on main since each approved plan's stack was based, and what is about
-to land together: the diffs, not the titles, read against each other. Look for interactions that produce no textual
-conflict: something one change renamed or repurposed that another relies on, a contract a new caller assumes that
-another change altered, a new caller of changed code, a changed invariant, lock or ordering, a SPEC.md or SPEC_impl.md
-amendment that another change now contradicts. Root `AGENTS.md` "Careful rebase" lists the kinds; apply them across the
-whole set, not one stack at a time. Have a fresh-context sub-agent do the same review independently and reconcile any
-disagreement. Fix what is obvious as part of the landing; a conflict that needs a design decision stops the landing and
-goes to the maintainer, and the plans stay approved.
+NOTE: Landing does not wait for the maintainer. Executors deliver finished plans as `[complete]`, the monitor lands
+them, and the maintainer reads the reports afterwards (Reviewing the plans above). That makes the monitor's own review
+of what it lands the last check before main, so it is done on purpose, not by letting version control report conflicts.
 
-Then, for each `[approved]` plan in queue order:
+"Monitor for complete plans" runs landing rounds until the maintainer says stop, waiting in between. "Land the complete
+plans" is one round, then stop. Run either in its own checkout, and only one at a time: landing claims keep two monitors
+from landing the same plan, but each would review what it is about to land without seeing what the other lands.
 
-1. Fetch, and rebase its stack onto `main@origin` as a careful rebase. Conflicts in the shared bookkeeping files listed
+### Starting and resuming
+
+Read the monitor log first (Files outside the repository). Check for the ntfy topic file (Notifications above), unless
+the log already records the maintainer's choice to run without notifications. If the log records a landing claim,
+`jj git fetch` and run `queue status` and `queue history <slug>`, then go by the verb the log says you were running:
+
+- Nothing pending (you were landing it): if the line carries your claim id, carry on with that plan from step 2 of the
+  round below, after the cross-plan review that opens the round (main may have moved while the monitor was down). Read
+  which of its PRs GitHub shows merged rather than trusting the log's list, since a merge may have happened after the
+  log was last written. If the line no longer carries your id, the maintainer released the claim: clear it and leave the
+  plan to the next round.
+- `starting`: your id on the line means the claim landed; carry on as above. Otherwise it never landed: clear it.
+- `blocking`, `stopping` or `recording`: if `history` shows that commit with your claim id, it landed; clear the claim
+  from the log, and for `blocking` or `stopping` notify, since the crash may have come before the notification went out.
+  If not and your id is still on the line, run the verb again. Otherwise the maintainer released the claim: clear it and
+  leave the plan alone.
+
+A dirty working copy found here belongs to the recorded landing (a rebase or a fix in progress): carry on with it when
+the landing carries on, and reset it the way an executor's close does (Clean-main boundary) when the claim was cleared.
+Only a dirty working copy with no recorded claim aborts the start, as the clean-main boundary says.
+
+Then write `running` to the Status section and start a round.
+
+### A landing round
+
+Apply the clean-main boundary, then run `queue status` and record the main commit id it prints. Look at its flags:
+
+- `possibly abandoned` on an executor's claim: the plan stays stuck until the maintainer releases it, and a dead
+  executor cannot notify for itself, so notify.
+- `complete, no open PRs, merged ...`: a landing merged the whole stack and stopped before `landed`, and its claim was
+  released. Finish it in this round: claim it with `start-landing`, confirm from GitHub that the merged PRs are the
+  plan's whole stack (the report's PR list), and run `landed` with those numbers and notes that say the landing was
+  finished after a released claim. Nothing else about it needs doing, and its dependents wait until it is recorded.
+- `complete, but no open PRs and none found merged`: the plan's PRs were closed, and nothing moves until the maintainer
+  decides what happens to it; notify, and leave it. Search can lag a fresh merge by a minute, so look again on the next
+  round before believing it.
+- `landing, no open PRs` on a landing claim that is not yours: another monitor or an interrupted one, which only the
+  maintainer can sort out; notify and leave it.
+
+These flags stay up across rounds, so notify for each once (per claim id, or per plan for the second), and keep what has
+been notified in the monitor log.
+
+If no plan is `[complete]`, the round is over.
+
+Before anything merges, review on purpose what has landed on main since each complete plan's stack was based, and what
+is about to land together: the diffs, not the titles, read against each other. Look for interactions that produce no
+textual conflict: something one change renamed or repurposed that another relies on, a contract a new caller assumes
+that another change altered, a new caller of changed code, a changed invariant, lock or ordering, a SPEC.md or
+SPEC_impl.md amendment that another change now contradicts. Root `AGENTS.md` "Careful rebase" lists the kinds; apply
+them across the whole set, not one stack at a time. Have a fresh-context sub-agent do the same review independently and
+reconcile any disagreement. Fix what is obvious as part of the landing; a conflict that needs a design decision blocks
+the plan it concerns (below), and the round goes on with the others.
+
+Then, for each `[complete]` plan in queue order:
+
+1. Claim it. Generate a claim id (`python3 -c 'import secrets; print(secrets.token_hex(3))'`), write slug, id and
+   `starting` to the monitor log, then `queue start-landing <slug> --claim <id>`. Exit 10 means it is no longer complete
+   (the maintainer abandoned or released it): skip it. Exit 3 follows the rule under States.
+2. Fetch, and rebase its stack onto `main@origin` as a careful rebase. Conflicts in the shared bookkeeping files listed
    under Picking are mechanical: keep both sides. Main has moved since the review above if an earlier plan just landed;
    check what that plan changed against this one again.
-2. Confirm no PR in the stack touches `plans/`.
-3. Run the checks the rebase calls for, per root `AGENTS.md` "Finishing work".
-4. Land the stack bottom-up per `jjstack`, marking each PR ready as it lands. Bookkeeping commits make main move often,
-   so a merge refused because the base branch changed means re-read and retry, not stop.
-5. `queue remove <slug> --merged <the PR numbers just landed>`, which refuses while any of the plan's PRs is still open
-   and checks that each named PR merged.
+3. Confirm no PR in the stack touches `plans/`.
+4. Run the checks the rebase calls for, per root `AGENTS.md` "Finishing work".
+5. Land the stack bottom-up per `jjstack`, marking each PR ready as it lands, and record each merged PR in the monitor
+   log. Before each merge, run `queue status` and confirm the line still carries your claim id; if it does not, the
+   maintainer released it, so stop landing that plan and treat it as released (Starting and resuming). Bookkeeping
+   commits make main move often, so a merge refused because the base branch changed means re-read and retry, not stop.
+6. Write the landing notes. They become the report's `### Landing` section, which the maintainer reads after the fact,
+   so follow Writing for the maintainer and public-repo hygiene, and use `####` or deeper headings if any. Say what else
+   landed in the same round or since the stack was based and whether any of it interacted with this plan, which fixes
+   the landing made and why, the checks run, reused and skipped (as redacted commands and recorder run ids, per root
+   `AGENTS.md`), and anything in the executor's report that the landing made untrue.
+7. Write `recording` to the monitor log, then
+   `queue landed <slug> --claim <id> --merged <every PR number that landed> --notes <file>`, which refuses while any of
+   the plan's PRs is still open and checks that each named PR merged. Clear the claim from the monitor log, and return
+   to a clean `main` (`jj new main@origin`).
+
+When a landing needs a decision only the maintainer can make (a conflict that needs a design choice, checks that fail
+without an obvious fix, a PR closed without merging), push nothing that is not consistent, then write the question per
+Writing for the maintainer, naming which of the plan's PRs already merged and what main now holds of the plan. Have a
+sub-agent cold-read it as in Executing one plan step 10, write `blocking` to the monitor log, run
+`queue block <slug> --claim <id> --question <file>`, notify, return to a clean `main`, and go on with the next plan.
+
+A failure that is not a decision (an expired GitHub login, a disk that is full) is the monitor's own problem: write
+`stopping`, run `queue stop-landing <slug> --claim <id>` if it can still reach GitHub, notify with the reason, write
+`stopped` with the reason to the Status section, and stop. A plan left in `[landing]` because even that failed shows up
+in `queue status` for whoever looks next, and `release plan X` returns it to `[complete]`.
 
 Validation during a landing never ends on a clock. Do not pass the recorder's `--timeout`, wrap a command in `timeout`,
 or give any other hard-coded deadline the power to kill a test run or a build. A deadline picked before the run starts
@@ -493,22 +657,51 @@ as Playwright's per-test timeout or the nextest configuration's slow-test settin
 caps how long a background command may live, use the longest cap it allows and wake well before it, so the cap is never
 what ends the run.
 
-`queue status` flags an approved plan with no open PRs, with the merged PR numbers it can find, so a landing that
-stopped between the last merge and `remove` is finished by the next one. When it finds none merged (an interrupted
-abandon, or PRs the maintainer closed), it says to ask the maintainer: never `remove` a plan whose work did not land. An
-approved plan can only leave the queue by landing or by being abandoned; if the maintainer changes their mind before it
-lands, abandon it and plan again.
+### Waiting between rounds
+
+"Monitor for complete plans" waits the way a monitoring executor does (Draining above), with the same watcher run the
+same way, except for its role and what its exits mean:
+
+- Start
+  `scripts/plans-watch.sh --repo <OWNER/NAME> --baseline-from <commit> --wake-check <checkout>/scripts/plans-queue.py --wake-for lander`,
+  where `<commit>` is the main commit id printed by a `queue status` run when the round has finished, not the one from
+  its start. If that status still shows a `[complete]` plan with open PRs (one whose landing claim was released during
+  the round, or one delivered while it ran), run another round instead of waiting: the watcher only wakes for what
+  changes after its baseline, so anything already complete there would wait for an unrelated change. With
+  `--wake-for lander` it exits only when a plan is `[complete]` with a report it did not have at that commit: newly
+  delivered, delivered again after a follow-up, or given back to `[complete]` by a release. Record its task handle and
+  the commit in the monitor log.
+- `changed` (status 0): run a round.
+- `idle` (status 10): run `queue status`. If it shows a `[complete]` plan with open PRs, run a round: the watcher should
+  have woken for it, and this catches any way it did not. Otherwise act on its flags only (as at the start of a round),
+  then start the watcher again with the same commit. This idle wake, about every 110 minutes, is also how a claim that
+  went quiet gets noticed.
+- `error:` (status 3): if the line mentions HTTP 401 or 403, the GitHub login needs the maintainer; notify, write
+  `stopped` with the reason, and stop. Otherwise keep restarting the watcher with `--interval 1800` until one exits
+  `changed` or `idle`, which also restores the default interval; an outage still being retried is not notified.
+- `usage:` (status 2) or anything else: notify, write `stopped` with the reason, and stop.
+
+Rewrite the Status section on every wake, at the end of every round, when stopping, and whenever you check on a long
+validation run, so a landing that takes hours does not look like a dead monitor; when the maintainer says stop, write
+`stopped <time>: stopped by the maintainer`. "Land the complete plans" writes `stopped <time>: one round finished` when
+its round ends, since no watcher follows it. The monitor notifies only for the conditions this section names (a landing
+it blocked, a landing it could not finish, the three `queue status` flags, and monitoring that stopped for any reason
+other than the maintainer), each of which can stop progress until the maintainer acts. A landing that went through is
+not worth a notification; it shows up in `REPORTS.md` for the next review.
 
 ## Releasing: "release plan X"
 
-Only on the maintainer's request, for a plan whose executor died or is stuck: `queue release <slug>`. It goes back to
-`[pending]`, and whoever claims it next resumes it from its working log and open PRs (Executing one plan, step 7). If
-the old executor is in fact still alive, its next push check or `block`/`deliver` finds the claim gone and it stops.
+Only on the maintainer's request, for a plan whose executor or monitor died or is stuck: `queue release <slug>`. A plan
+that was in flight goes back to `[pending]`, and whoever claims it next resumes it from its working log and open PRs
+(Executing one plan, step 7). A plan that was landing goes back to `[complete]`, and the next landing round lands it,
+starting from whichever of its PRs have not merged yet; if all of them had merged, that round only records the landing
+(the `complete, no open PRs, merged ...` flag above). If the old executor or monitor is in fact still alive, its next
+claim check or claim-holder verb finds the claim gone and it stops.
 
 ## Help: "plan help"
 
 "Plan help", "help on plans", or similar means: summarize each flow in this file in one to three lines, then stop.
 Change nothing. The flows: plan to implement TODO items; schedule triage outcomes through the planning system; pick a
-plan to execute (and the in-order and named variants); drain the plans; drain and keep monitoring, including check for
-plans; review the plans, including show blocked plans; land the approved plans; release plan X; and abandoning, which
-happens inside review.
+plan to execute (and the in-order and named variants); drain the plans; drain and keep monitoring; monitor for complete
+plans, and its one-round form, land the complete plans; review the plans, including show (or check for) blocked plans;
+release plan X; abandoning, which happens inside review; and how notifications reach the maintainer through ntfy.

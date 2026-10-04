@@ -260,10 +260,23 @@ make_check "$d" ignore wake
 run_case "$d" --baseline-from "$C" --interval 1 --max-wait 60 --wake-check "$d/bin/wake-check"
 if expect "wake check ignores, then wakes" "$d" 0 "changed $A $SHA256"; then
 	if [ "$(check_count "$d")" -eq 2 ] &&
-		[ "$(head -n 1 "$d/checks")" = "--repo owner/name wake-check --baseline $C --ref main" ]; then
+		[ "$(head -n 1 "$d/checks")" = "--repo owner/name wake-check --baseline $C --ref main --for executor" ]; then
 		pass "wake check ignores, then wakes"
 	else
 		fail "wake check ignores, then wakes" "checks: $(tr '\n' ';' <"$d/checks")"
+	fi
+fi
+
+# The monitor's watcher asks the check about its own role: a check run as an executor's would wake it for work it
+# never does and sleep through the plans it should land.
+d=$(case_dir wake-lander "tree $A" "tree $B")
+make_check "$d" wake
+run_case "$d" --baseline-from "$C" --interval 1 --max-wait 60 --wake-check "$d/bin/wake-check" --wake-for lander
+if expect "wake check gets the lander role" "$d" 0 "changed $A $B"; then
+	if [ "$(head -n 1 "$d/checks")" = "--repo owner/name wake-check --baseline $C --ref main --for lander" ]; then
+		pass "wake check gets the lander role"
+	else
+		fail "wake check gets the lander role" "checks: $(tr '\n' ';' <"$d/checks")"
 	fi
 fi
 
@@ -413,10 +426,12 @@ usage_case "unknown argument" --repo owner/name --baseline "$A" --bogus
 usage_case "missing value" --repo owner/name --baseline
 usage_case "wake check without baseline-from" --repo owner/name --baseline "$A" --wake-check /bin/true
 usage_case "wake check not executable" --repo owner/name --baseline-from "$C" --wake-check /nonexistent
+usage_case "unknown wake role" --repo owner/name --baseline-from "$C" --wake-check /bin/true --wake-for maintainer
+usage_case "wake role without a check" --repo owner/name --baseline-from "$C" --wake-for lander
 
 # --- Stopping ----------------------------------------------------------------------------------------------------
 
-# "Check for plans" stops the watcher. It must exit promptly on SIGTERM whether it is sleeping between polls or waiting
+# An agent stops its watcher when the maintainer stops the flow. It must exit promptly on SIGTERM whether it is sleeping between polls or waiting
 # on a request, and leave nothing behind. The watcher runs in its own process group so the leftover check cannot match
 # anything else on the machine, and the TERM goes to the watcher alone: signalling the group would kill the children
 # directly and hide a watcher that orphans them.

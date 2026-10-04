@@ -59,6 +59,16 @@ def line(state: str, slug: str, summary: str = "does a thing", deps: tuple[str, 
     return text
 
 
+def reports(*lines: str) -> str:
+    return pq.REPORTS_HEADER + "".join(line + "\n" for line in lines)
+
+
+def landed(slug: str, prs: tuple[int, ...] = (1,), summary: str = "does a thing", date: str = "2026-10-04") -> str:
+    """A REPORTS.md line, written out by hand so the tests pin the grammar rather than echo the script's renderer."""
+    numbers = ", ".join(f"#{n}" for n in prs)
+    return f"- [`{slug}`](reports/{slug}.report.md) landed {date} in {numbers}: {summary}"
+
+
 # --- A fake GitHub -------------------------------------------------------------------------------------------------
 
 
@@ -209,13 +219,18 @@ class FakeGitHub:
         ]
 
     def path_history(self, branch: str, path: str, limit: int) -> list[dict]:
+        """Commits that changed `path`, newest first. Like GitHub's, a directory path matches any file under it."""
+
+        def under(files: dict[str, str]) -> dict[str, str]:
+            return {p: c for p, c in files.items() if p == path or p.startswith(path + "/")}
+
         out = []
         node = self.refs[branch]
         while node is not None and len(out) < limit:
             commit = self.commits[node]
             parent = commit["parent"]
-            before = self.commits[parent]["files"].get(path) if parent else None
-            if commit["files"].get(path) != before:
+            before = under(self.commits[parent]["files"]) if parent else {}
+            if under(commit["files"]) != before:
                 out.append({"commit": {"message": commit["message"], "committer": {"date": commit["date"]}}})
             node = parent
         return out
@@ -252,6 +267,11 @@ class Harness:
         path.write_text(text, encoding="utf-8")
         return str(path)
 
+    @property
+    def today(self) -> str:
+        """The date the script stamps on what it writes: UTC, like the script."""
+        return datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+
     def state(self, slug: str) -> str:
         parsed, problems = pq.parse_index(self.fake.files()[pq.INDEX_PATH])
         assert not problems, problems
@@ -285,22 +305,54 @@ class GrammarTest(QueueTestCase):
             line("pending", "a"),
             line("in-flight 0a1b2c", "b", deps=("a",)),
             line("blocked", "c", "has (parentheses) inside", deps=("a", "b")),
-            line("in review", "d"),
-            line("approved", "e"),
+            line("complete", "d"),
+            line("landing 3d4e5f", "e"),
         )
         parsed, problems = pq.parse_index(text)
         self.assertEqual(problems, [])
         self.assertEqual(parsed.render(), text)
         self.assertEqual(parsed.find("b").claim, "0a1b2c")
+        self.assertEqual((parsed.find("e").state, parsed.find("e").claim), ("landing", "3d4e5f"))
         self.assertEqual(parsed.find("c").deps, ["a", "b"])
         self.assertEqual(parsed.find("c").summary, "has (parentheses) inside")
 
     def test_malformed_lines_are_reported_not_carried(self):
         """A stray line, an unknown state, or a bad claim id is a grammar problem `check` reports."""
-        text = index(line("pending", "a"), "stray text", line("done", "b"), line("in-flight XYZ", "c"))
+        text = index(
+            line("pending", "a"),
+            "stray text",
+            line("done", "b"),
+            line("in-flight XYZ", "c"),
+            line("in review", "d"),
+            line("landing", "e"),
+        )
         parsed, problems = pq.parse_index(text)
         self.assertEqual([e.slug for e in parsed.entries], ["a"])
+        self.assertEqual(len(problems), 5)
+        self.assertEqual(parsed.render(), text)
+
+    def test_reports_round_trip(self):
+        """REPORTS.md is rewritten on every landing and review; a lossy round trip would corrupt other plans' lines.
+        The summary may hold anything a plan summary holds, including colons and backticks."""
+        text = reports(landed("a", (12,)), landed("b", (3, 40, 41), "has: colons and `code` (after `x.md`)"))
+        parsed, problems = pq.parse_reports(text)
+        self.assertEqual(problems, [])
+        self.assertEqual(parsed.render(), text)
+        self.assertEqual(parsed.find("b").prs, [3, 40, 41])
+        self.assertEqual(parsed.find("b").summary, "has: colons and `code` (after `x.md`)")
+
+    def test_malformed_report_lines_are_kept_and_reported(self):
+        """A stray line, a missing PR list, or a link to another plan's report is a problem that stays visible."""
+        text = reports(
+            landed("a"),
+            "stray",
+            "- [`b`](reports/b.report.md) landed 2026-10-04 in : nothing",
+            "- [`c`](reports/a.report.md) landed 2026-10-04 in #1: points at a's report",
+        )
+        parsed, problems = pq.parse_reports(text)
+        self.assertEqual([e.slug for e in parsed.entries], ["a"])
         self.assertEqual(len(problems), 3)
+        self.assertIn("links another plan's report", problems[2])
         self.assertEqual(parsed.render(), text)
 
     def test_a_mistyped_dependency_clause_is_a_problem(self):
@@ -325,10 +377,13 @@ def snapshot(files: dict[str, str]) -> pq.Snapshot:
 class InvariantTest(QueueTestCase):
     def test_a_consistent_queue_has_no_violations(self):
         files = {
-            pq.INDEX_PATH: index(line("pending", "a"), line("in review", "b", deps=("gone",))),
+            pq.INDEX_PATH: index(line("pending", "a"), line("complete", "b", deps=("done",))),
+            pq.REPORTS_PATH: reports(landed("done")),
             pq.plan_path("a"): plan(),
             pq.plan_path("b"): plan(),
+            pq.plan_path("done"): plan(),
             pq.report_path("b"): "# Report\n",
+            pq.report_path("done"): "# Report\n",
         }
         self.assertEqual(pq.violations(snapshot(files)), [])
 
@@ -339,7 +394,7 @@ class InvariantTest(QueueTestCase):
             pq.INDEX_PATH: index(
                 line("pending", "a"),
                 line("blocked", "b"),
-                line("in review", "c"),
+                line("complete", "c"),
                 line("pending", "d", deps=("d",)),
                 line("pending", "e", deps=("f",)),
                 line("pending", "f", deps=("e",)),
@@ -360,14 +415,37 @@ class InvariantTest(QueueTestCase):
         for expected in (
             "a: has a ## Blocked section but is [pending]",
             "b: [blocked] needs exactly one ## Blocked section, found 0",
-            "c: [in review] needs plans/reports/c.report.md",
+            "c: [complete] needs plans/reports/c.report.md",
             "d: depends on itself",
             "dependency cycle",
             "a: listed more than once",
             "missing: listed, but plans/queue/missing.md does not exist",
-            "plans/queue/orphan.md: plan file without an INDEX.md line",
+            "plans/queue/orphan.md: plan file without a line in INDEX.md or REPORTS.md",
             "plans/reports/nobody.report.md: report for a plan that is not listed",
             "plans/queue/notes.txt: unexpected file",
+        ):
+            self.assertIn(expected, found)
+
+    def test_landed_plan_invariants_fire(self):
+        """A landed plan keeps its plan file and report until the maintainer approves it, is never also in the queue,
+        and never carries a Blocked section, which nothing could ever answer."""
+        files = {
+            pq.INDEX_PATH: index(line("pending", "a")),
+            pq.REPORTS_PATH: reports(landed("a"), landed("b"), landed("c"), landed("d"), landed("d")),
+            pq.plan_path("a"): plan(),
+            pq.plan_path("b"): plan() + "\n## Blocked\n\nWhy.\n",
+            pq.report_path("b"): "# R\n",
+            pq.report_path("c"): "# R\n",
+            pq.plan_path("d"): plan(),
+            pq.report_path("d"): "# R\n",
+        }
+        found = "\n".join(pq.violations(snapshot(files)))
+        for expected in (
+            "a: listed in both INDEX.md and REPORTS.md",
+            "a: landed, but plans/reports/a.report.md does not exist",
+            "b: has a ## Blocked section but has landed",
+            "c: landed, but plans/queue/c.md does not exist",
+            "d: listed more than once in REPORTS.md",
         ):
             self.assertIn(expected, found)
 
@@ -378,15 +456,20 @@ class InvariantTest(QueueTestCase):
         undoing a claim, which would let a second executor build the same plan.
         """
         base = {
-            pq.INDEX_PATH: index(line("in-flight 0a1b2c", "a"), line("pending", "b"), line("in review", "c")),
+            pq.INDEX_PATH: index(line("in-flight 0a1b2c", "a"), line("pending", "b"), line("complete", "c")),
+            pq.REPORTS_PATH: reports(landed("l")),
             pq.plan_path("a"): plan(),
             pq.plan_path("b"): plan(),
             pq.plan_path("c"): plan(),
+            pq.plan_path("l"): plan(),
             pq.report_path("c"): "# Report\n",
+            pq.report_path("l"): "# Report\n",
         }
         bad = dict(base)
         bad[pq.INDEX_PATH] = index(line("pending", "a"), line("blocked", "new"))
+        bad[pq.REPORTS_PATH] = reports()
         bad[pq.plan_path("a")] = plan("Revised")
+        bad[pq.plan_path("l")] = plan("Revised")
         bad[pq.report_path("c")] = "# Edited\n"
         found = "\n".join(pq.base_violations(snapshot(base), snapshot(bad)))
         for expected in (
@@ -396,6 +479,8 @@ class InvariantTest(QueueTestCase):
             "new: new line must be [pending]",
             "a: plan file changed while [in-flight] on main",
             "plans/reports/c.report.md: reports are written only by the queue script",
+            "plans/REPORTS.md: reports are written only by the queue script",
+            "l: plan file changed after it landed",
         ):
             self.assertIn(expected, found)
 
@@ -426,7 +511,7 @@ class InvariantTest(QueueTestCase):
         out = io.StringIO()
         with redirect_stdout(out):
             self.assertEqual(pq.main(["check", "--tree", str(root)]), pq.EXIT_VIOLATIONS)
-        self.assertIn("plan file without an INDEX.md line", out.getvalue())
+        self.assertIn("plan file without a line in INDEX.md or REPORTS.md", out.getvalue())
 
 
 # --- Transitions -----------------------------------------------------------------------------------------------------
@@ -434,9 +519,10 @@ class InvariantTest(QueueTestCase):
 
 class TransitionTest(QueueTestCase):
     def test_full_lifecycle(self):
-        """A plan goes pending, in flight, blocked, answered, in flight again, in review, follow-up, in review,
-        approved, removed, with every artifact the state table requires along the way."""
-        h = self.harness(index(line("pending", "a"), line("pending", "b", deps=("a",))), a=plan())
+        """A plan goes pending, in flight, blocked, answered, in flight again, complete, landing, landed; a follow-up
+        sends it back for a second round, which lands again and is approved, with every artifact the state table
+        requires along the way. Landing alone is what lets the dependent plan start."""
+        h = self.harness(index(line("pending", "a"), line("pending", "b", deps=("a",))), a=plan(), b=plan())
         self.assertEqual(h.run("claim", "a", "--claim", "0a1b2c")[0], 0)
         self.assertEqual(h.state("a"), "in-flight 0a1b2c")
 
@@ -457,26 +543,47 @@ class TransitionTest(QueueTestCase):
         self.assertEqual(h.run("claim", "a", "--claim", "dddddd")[0], 0)
         report = h.text_file("r.md", "# Report\n\nDone.\n")
         self.assertEqual(h.run("deliver", "a", "--claim", "dddddd", "--report", report)[0], 0)
-        self.assertEqual(h.state("a"), "in review")
+        self.assertEqual(h.state("a"), "complete")
         self.assertIn(pq.report_path("a"), h.fake.files())
+
+        self.assertEqual(h.run("start-landing", "a", "--claim", "111111")[0], 0)
+        self.assertEqual(h.state("a"), "landing 111111")
+        h.fake.closed[5] = {"ref": "plan/a/01-thing", "merged": True}
+        notes = h.text_file("n.md", "Landed alone; ran the unit tests again after the rebase.\n")
+        self.assertEqual(h.run("landed", "a", "--claim", "111111", "--merged", "5", "--notes", notes)[0], 0)
+        self.assertEqual(h.state("a"), "gone")
+        files = h.fake.files()
+        self.assertEqual(files[pq.REPORTS_PATH], reports(landed("a", (5,), date=h.today)))
+        self.assertTrue(
+            files[pq.report_path("a")].endswith(
+                "### Landing\n\nLanded alone; ran the unit tests again after the rebase.\n"
+            )
+        )
+        self.assertIn(pq.plan_path("a"), files)
+        # Taking the landed plan out of the queue is what satisfies its dependent; review has not happened yet.
+        self.assertEqual(h.run("claim", "b", "--claim", "222222")[0], 0)
 
         follow = h.text_file("f.md", "Also handle the empty case.\n")
         self.assertEqual(h.run("follow-up", "a", "--decision", follow)[0], 0)
+        self.assertEqual(h.state("a"), "pending")
+        parsed, _ = pq.parse_index(h.fake.files()[pq.INDEX_PATH])
+        self.assertEqual([e.slug for e in parsed.entries], ["a", "b"])
+        self.assertEqual(parsed.find("a").summary, "does a thing")
+        self.assertEqual(pq.parse_reports(h.fake.files()[pq.REPORTS_PATH])[0].entries, [])
         text = h.fake.files()[pq.plan_path("a")]
         self.assertEqual(text.count("## Decisions"), 1)
         self.assertLess(text.index("Go left."), text.index("Also handle the empty case."))
 
         self.assertEqual(h.run("claim", "a", "--claim", "eeeeee")[0], 0)
         self.assertEqual(h.run("deliver", "a", "--claim", "eeeeee", "--report", report)[0], 0)
+        self.assertEqual(h.run("start-landing", "a", "--claim", "333333")[0], 0)
+        h.fake.closed[6] = {"ref": "plan/a/02-empty", "merged": True}
+        self.assertEqual(h.run("landed", "a", "--claim", "333333", "--merged", "6", "--notes", notes)[0], 0)
         self.assertEqual(h.run("approve", "a")[0], 0)
-        self.assertEqual(h.state("a"), "approved")
-        h.fake.closed[5] = {"ref": "plan/a/01-thing", "merged": True}
-        self.assertEqual(h.run("remove", "a", "--merged", "5")[0], 0)
-        self.assertEqual(h.state("a"), "gone")
-        self.assertNotIn(pq.plan_path("a"), h.fake.files())
-        self.assertNotIn(pq.report_path("a"), h.fake.files())
-        # Removing the landed plan is what satisfies its dependent.
-        self.assertEqual(h.run("claim", "b", "--claim", "0a1b2c")[0], 0)
+        files = h.fake.files()
+        self.assertNotIn(pq.plan_path("a"), files)
+        self.assertNotIn(pq.report_path("a"), files)
+        self.assertEqual(files[pq.REPORTS_PATH], reports())
 
     def test_commit_messages_are_the_fixed_templates(self):
         """Bookkeeping commits skip PR review and the commit-message review, so their wording is pinned here."""
@@ -485,84 +592,161 @@ class TransitionTest(QueueTestCase):
         self.assertEqual(h.fake.commits[h.fake.refs["main"]]["message"], "chore(plans): claim a\n\nClaim 0a1b2c.\n")
 
     def test_illegal_transitions_exit_10(self):
-        """Every verb refuses a line in the wrong state, so a stale caller can never move a plan it does not hold."""
+        """Every verb refuses a plan in the wrong state, so a stale caller can never move a plan it does not hold."""
         h = self.harness(
-            index(line("pending", "p"), line("in-flight 0a1b2c", "f"), line("in review", "r"), line("approved", "x")),
+            index(
+                line("pending", "p"),
+                line("in-flight 0a1b2c", "f"),
+                line("complete", "c"),
+                line("landing 3d4e5f", "l"),
+            ),
             p=plan(),
             f=plan(),
-            r=plan(),
-            x=plan(),
+            c=plan(),
+            l=plan(),
+            d=plan(),
         )
-        h.fake.land("main", {pq.report_path("r"): "# R\n", pq.report_path("x"): "# X\n"})
+        h.fake.land(
+            "main",
+            {
+                pq.report_path("c"): "# C\n",
+                pq.report_path("l"): "# L\n",
+                pq.report_path("d"): "# D\n",
+                pq.REPORTS_PATH: reports(landed("d")),
+            },
+        )
         text = h.text_file("t.md", "text\n")
         for argv in (
             ("claim", "f", "--claim", "aaaaaa"),
-            ("claim", "r", "--claim", "aaaaaa"),
+            ("claim", "c", "--claim", "aaaaaa"),
+            ("claim", "d", "--claim", "aaaaaa"),
             ("unclaim", "p", "--claim", "aaaaaa"),
+            ("unclaim", "l", "--claim", "3d4e5f"),
             ("block", "p", "--claim", "aaaaaa", "--question", text),
-            ("deliver", "r", "--claim", "aaaaaa", "--report", text),
+            ("deliver", "c", "--claim", "aaaaaa", "--report", text),
+            ("start-landing", "f", "--claim", "aaaaaa"),
+            ("start-landing", "l", "--claim", "aaaaaa"),
+            ("stop-landing", "c", "--claim", "aaaaaa"),
+            ("landed", "c", "--claim", "aaaaaa", "--merged", "1", "--notes", text),
             ("release", "p"),
+            ("release", "c"),
             ("answer", "p", "--decision", text),
-            ("follow-up", "f", "--decision", text),
+            ("follow-up", "c", "--decision", text),
+            ("approve", "c"),
             ("approve", "p"),
-            ("remove", "r", "--merged", "1"),
             ("abandon", "f"),
+            ("abandon", "l"),
+            ("abandon", "d"),
             ("claim", "nope", "--claim", "aaaaaa"),
+            ("approve", "nope"),
         ):
             with self.subTest(argv=argv):
                 self.assertEqual(h.run(*argv)[0], pq.EXIT_PRECONDITION)
 
     def test_another_claim_id_cannot_act_on_a_claim(self):
-        """`block`, `deliver` and `unclaim` prove ownership by claim id; a released executor's late call is refused."""
-        h = self.harness(index(line("in-flight 0a1b2c", "a")), a=plan())
+        """Claim holders prove ownership by claim id; a released executor's or monitor's late call is refused."""
+        h = self.harness(index(line("in-flight 0a1b2c", "a"), line("landing 3d4e5f", "b")), a=plan(), b=plan())
+        h.fake.land("main", {pq.report_path("b"): "# R\n"})
+        h.fake.closed[1] = {"ref": "plan/b/01-x", "merged": True}
         text = h.text_file("t.md", "text\n")
         for argv in (
             ("unclaim", "a", "--claim", "ffffff"),
             ("block", "a", "--claim", "ffffff", "--question", text),
             ("deliver", "a", "--claim", "ffffff", "--report", text),
+            ("block", "b", "--claim", "ffffff", "--question", text),
+            ("stop-landing", "b", "--claim", "ffffff"),
+            ("landed", "b", "--claim", "ffffff", "--merged", "1", "--notes", text),
         ):
-            code, _, err = h.run(*argv)
-            self.assertEqual(code, pq.EXIT_PRECONDITION)
-            self.assertIn("carries claim 0a1b2c", err)
+            with self.subTest(argv=argv):
+                code, _, err = h.run(*argv)
+                self.assertEqual(code, pq.EXIT_PRECONDITION)
+                self.assertIn("carries claim", err)
         self.assertEqual(h.run("unclaim", "a", "--claim", "0a1b2c")[0], 0)
         self.assertEqual(h.state("a"), "pending")
+        self.assertEqual(h.run("stop-landing", "b", "--claim", "3d4e5f")[0], 0)
+        self.assertEqual(h.state("b"), "complete")
+
+    def test_a_landing_can_block(self):
+        """A landing that needs a design decision blocks the plan with a question, as an executor would; the plan's
+        report stays, since the answer sends it back to an executor that will deliver a new one."""
+        h = self.harness(index(line("landing 3d4e5f", "a")), a=plan())
+        h.fake.land("main", {pq.report_path("a"): "# R\n"})
+        question = h.text_file("q.md", "The rebase conflicts with the new resume path.\n")
+        self.assertEqual(h.run("block", "a", "--claim", "3d4e5f", "--question", question)[0], 0)
+        self.assertEqual(h.state("a"), "blocked")
+        self.assertIn("Blocked while landing on", h.fake.files()[pq.plan_path("a")])
+        self.assertIn(pq.report_path("a"), h.fake.files())
+
+    def test_release_returns_each_claim_to_where_it_came_from(self):
+        """A stuck executor's plan goes back to pending; a stuck monitor's goes back to complete, because its work is
+        finished and only the landing needs redoing."""
+        h = self.harness(index(line("in-flight 0a1b2c", "a"), line("landing 3d4e5f", "b")), a=plan(), b=plan())
+        h.fake.land("main", {pq.report_path("b"): "# R\n"})
+        self.assertEqual(h.run("release", "a")[0], 0)
+        self.assertEqual(h.run("release", "b")[0], 0)
+        self.assertEqual((h.state("a"), h.state("b")), ("pending", "complete"))
 
     def test_claim_refuses_an_unlanded_dependency(self):
-        """A dependency is satisfied only once its line is gone; an approved but unlanded one does not count."""
-        h = self.harness(index(line("approved", "a"), line("pending", "b", deps=("a",))), a=plan(), b=plan())
-        h.fake.land("main", {pq.report_path("a"): "# R\n"})
-        code, _, err = h.run("claim", "b", "--claim", "0a1b2c")
-        self.assertEqual(code, pq.EXIT_PRECONDITION)
-        self.assertIn("waits on a", err)
+        """A dependency is satisfied only once its line is gone; a complete or landing, unlanded one does not count."""
+        for state in ("complete", "landing 3d4e5f"):
+            with self.subTest(state=state):
+                h = self.harness(index(line(state, "a"), line("pending", "b", deps=("a",))), a=plan(), b=plan())
+                h.fake.land("main", {pq.report_path("a"): "# R\n"})
+                code, _, err = h.run("claim", "b", "--claim", "0a1b2c")
+                self.assertEqual(code, pq.EXIT_PRECONDITION)
+                self.assertIn("waits on a", err)
 
-    def test_remove_and_abandon_refuse_while_plan_prs_are_open(self):
-        """Removing a plan whose PRs are still open would lose track of unlanded work. A PR of a plan whose slug merely
-        starts the same way (`ab` against `a`) does not count."""
-        h = self.harness(index(line("approved", "a")), a=plan())
-        h.fake.land("main", {pq.report_path("a"): "# R\n"})
+    def test_landed_and_abandon_refuse_while_plan_prs_are_open(self):
+        """Recording a landing or abandoning a plan whose PRs are still open would lose track of unlanded work. A PR
+        of a plan whose slug merely starts the same way (`ab` against `a`) does not count."""
+        h = self.harness(index(line("landing 3d4e5f", "a"), line("complete", "c")), a=plan(), c=plan())
+        h.fake.land("main", {pq.report_path("a"): "# R\n", pq.report_path("c"): "# R\n"})
+        notes = h.text_file("n.md", "Landed.\n")
         h.fake.closed[6] = {"ref": "plan/a/01-thing", "merged": True}
-        h.fake.pulls = [{"number": 7, "ref": "plan/a/02-more"}, {"number": 8, "ref": "plan/ab/01-other"}]
-        code, _, err = h.run("remove", "a", "--merged", "6")
+        h.fake.pulls = [
+            {"number": 7, "ref": "plan/a/02-more"},
+            {"number": 8, "ref": "plan/ab/01-other"},
+            {"number": 9, "ref": "plan/c/01-x"},
+        ]
+        code, _, err = h.run("landed", "a", "--claim", "3d4e5f", "--merged", "6", "--notes", notes)
         self.assertEqual(code, pq.EXIT_PRECONDITION)
         self.assertIn("#7", err)
         self.assertNotIn("#8", err)
-        self.assertEqual(h.run("abandon", "a")[0], pq.EXIT_PRECONDITION)
+        self.assertEqual(h.run("abandon", "c")[0], pq.EXIT_PRECONDITION)
         h.fake.pulls = [{"number": 8, "ref": "plan/ab/01-other"}]
-        self.assertEqual(h.run("remove", "a", "--merged", "6")[0], 0)
+        self.assertEqual(h.run("landed", "a", "--claim", "3d4e5f", "--merged", "6", "--notes", notes)[0], 0)
+        self.assertEqual(h.run("abandon", "c")[0], 0)
+        self.assertNotIn(pq.report_path("c"), h.fake.files())
 
-    def test_remove_requires_a_merged_pr_of_this_plan(self):
-        """`remove` records the plan's work as landed, so "no open PRs" is not enough: an interrupted abandon or PRs
-        the maintainer closed unmerged look the same. The caller names the PRs that landed and each is verified."""
-        h = self.harness(index(line("approved", "a")), a=plan())
+    def test_landed_requires_a_merged_pr_of_this_plan(self):
+        """`landed` records the plan's work as on main, so "no open PRs" is not enough: PRs the maintainer closed
+        unmerged look the same. The caller names the PRs that landed and each is verified."""
+        h = self.harness(index(line("landing 3d4e5f", "a")), a=plan())
         h.fake.land("main", {pq.report_path("a"): "# R\n"})
+        notes = h.text_file("n.md", "Landed.\n")
         h.fake.closed[6] = {"ref": "plan/a/01-thing", "merged": False}
         h.fake.closed[9] = {"ref": "plan/other/01-x", "merged": True}
-        self.assertEqual(h.run("remove", "a", "--merged", "6")[0], pq.EXIT_PRECONDITION)
-        self.assertEqual(h.run("remove", "a", "--merged", "9")[0], pq.EXIT_USAGE)
-        self.assertEqual(h.run("remove", "a", "--merged", "")[0], pq.EXIT_USAGE)
-        self.assertEqual(h.state("a"), "approved")
+        base = ("landed", "a", "--claim", "3d4e5f", "--notes", notes, "--merged")
+        self.assertEqual(h.run(*base, "6")[0], pq.EXIT_PRECONDITION)
+        self.assertEqual(h.run(*base, "9")[0], pq.EXIT_USAGE)
+        self.assertEqual(h.run(*base, "")[0], pq.EXIT_USAGE)
+        self.assertEqual(h.state("a"), "landing 3d4e5f")
         h.fake.closed[6]["merged"] = True
-        self.assertEqual(h.run("remove", "a", "--merged", "#6")[0], 0)
+        self.assertEqual(h.run(*base, "#6")[0], 0)
+
+    def test_landing_notes_are_checked_like_spliced_text(self):
+        """The notes land under the report's `### Landing` heading on main without review, so a `##` or `###` heading
+        (either would end or split that section) and local paths are refused, while `####` is fine."""
+        h = self.harness(index(line("landing 3d4e5f", "a")), a=plan())
+        h.fake.land("main", {pq.report_path("a"): "# R\n"})
+        h.fake.closed[6] = {"ref": "plan/a/01-thing", "merged": True}
+        for body in ("Fine.\n\n## Checks\n\nAll.\n", "Fine.\n\n### Checks\n\nAll.\n", "Built in /tmp/x\n"):
+            with self.subTest(body=body):
+                notes = h.text_file("n.md", body)
+                code = h.run("landed", "a", "--claim", "3d4e5f", "--merged", "6", "--notes", notes)[0]
+                self.assertEqual(code, pq.EXIT_USAGE)
+        notes = h.text_file("n.md", "Fine.\n\n#### Checks\n\nAll.\n")
+        self.assertEqual(h.run("landed", "a", "--claim", "3d4e5f", "--merged", "6", "--notes", notes)[0], 0)
 
     def test_abandon_settles_dependents_explicitly(self):
         """Abandoning must not silently satisfy a dependent's `(after ...)`: the caller says block or drop-dep."""
@@ -619,19 +803,42 @@ class TransitionTest(QueueTestCase):
         same, already-present problems, or one malformed line would stop every landing; and the stray line must stay
         between the neighbors it had."""
         h = self.harness(
-            index(line("approved", "a"), line("pending", "b"), "stray mid", line("pending", "c"), "stray end"),
+            index(line("landing 3d4e5f", "a"), line("pending", "b"), "stray mid", line("pending", "c"), "stray end"),
             a=plan(),
             b=plan(),
             c=plan(),
         )
         h.fake.land("main", {pq.report_path("a"): "# R\n"})
         h.fake.closed[1] = {"ref": "plan/a/01-x", "merged": True}
-        code, _, err = h.run("remove", "a", "--merged", "1")
+        notes = h.text_file("n.md", "Landed.\n")
+        code, _, err = h.run("landed", "a", "--claim", "3d4e5f", "--merged", "1", "--notes", notes)
         self.assertEqual(code, 0, err)
         self.assertEqual(
             h.fake.files()[pq.INDEX_PATH],
             index(line("pending", "b"), "stray mid", line("pending", "c"), "stray end"),
         )
+
+    def test_a_follow_up_does_not_hold_back_dependents(self):
+        """A plan that waits on another waited for its work to reach main. A follow-up puts that other plan back in
+        the queue, but its first round is still on main, so the maintainer chose to let dependents proceed rather than
+        wait for the follow-up to land too. Other dependencies are kept."""
+        h = self.harness(
+            index(line("pending", "y", deps=("x", "z")), line("pending", "z")), x=plan(), y=plan(), z=plan()
+        )
+        h.fake.land("main", {pq.report_path("x"): "# R\n", pq.REPORTS_PATH: reports(landed("x"))})
+        self.assertEqual(h.run("follow-up", "x", "--decision", h.text_file("d.md", "More.\n"))[0], 0)
+        parsed, _ = pq.parse_index(h.fake.files()[pq.INDEX_PATH])
+        self.assertEqual([e.slug for e in parsed.entries], ["x", "y", "z"])
+        self.assertEqual(parsed.find("y").deps, ["z"])
+
+    def test_review_verbs_leave_index_untouched(self):
+        """Approving a landed plan changes REPORTS.md and deletes the plan's files, nothing else. Rewriting INDEX.md
+        would put every review commit in textual conflict with whatever planning PR is open."""
+        h = self.harness(index(line("pending", "b"), "", line("pending", "c")), a=plan(), b=plan(), c=plan())
+        h.fake.land("main", {pq.report_path("a"): "# R\n", pq.REPORTS_PATH: reports(landed("a"))})
+        before = h.fake.files()[pq.INDEX_PATH]
+        self.assertEqual(h.run("approve", "a")[0], 0)
+        self.assertEqual(h.fake.files()[pq.INDEX_PATH], before)
 
     def test_existing_violations_warn_but_new_ones_refuse(self):
         """One malformed line merged by a planning PR must not stop every executor from blocking or delivering."""
@@ -824,64 +1031,177 @@ class GhApiErrorTest(QueueTestCase):
 
 
 class WakeCheckTest(QueueTestCase):
-    """The watcher's filter: claims alone never wake idle executors, everything that can make work does."""
+    """The watcher's filter: an idle executor wakes only for work it could pick, the monitor only for finished plans."""
 
     def setUp(self):
         super().setUp()
         self.fake = FakeGitHub(
-            base_files(index(line("pending", "a"), line("in-flight 0a1b2c", "b")), a=plan(), b=plan())
+            base_files(
+                index(line("pending", "a"), line("in-flight 0a1b2c", "b"), line("pending", "w", deps=("b",))),
+                a=plan(),
+                b=plan(),
+                w=plan(),
+            )
         )
         self.baseline = self.fake.refs["main"]
 
     def set_index(self, *lines):
         self.fake.land("main", {pq.INDEX_PATH: index(*lines)})
 
-    def wakes(self):
-        return pq.wake_check(self.fake, self.baseline, "main")
+    def wakes(self, role="executor"):
+        return pq.wake_check(self.fake, self.baseline, "main", role)
 
     def test_claims_are_ignored(self):
         """Claims are the most frequent commits and never create work for an idle executor."""
-        self.set_index(line("in-flight 111111", "a"), line("in-flight 0a1b2c", "b"))
+        self.set_index(line("in-flight 111111", "a"), line("in-flight 0a1b2c", "b"), line("pending", "w", deps=("b",)))
         self.assertFalse(self.wakes())
 
     def test_a_claim_replaced_by_another_is_ignored(self):
         """A release followed by a new claim nets out to no new work."""
-        self.set_index(line("pending", "a"), line("in-flight 222222", "b"))
+        self.set_index(line("pending", "a"), line("in-flight 222222", "b"), line("pending", "w", deps=("b",)))
         self.assertFalse(self.wakes())
 
     def test_a_claim_given_back_wakes(self):
         """A claim given back makes a plan pending again, which is work; a digest of one state could not see it."""
-        self.set_index(line("pending", "a"), line("pending", "b"))
+        self.set_index(line("pending", "a"), line("pending", "b"), line("pending", "w", deps=("b",)))
         self.assertTrue(self.wakes())
 
     def test_claim_then_release_nets_to_nothing(self):
         """A plan claimed and given back between two polls is where it started."""
-        self.set_index(line("in-flight 111111", "a"), line("in-flight 0a1b2c", "b"))
-        self.set_index(line("pending", "a"), line("in-flight 0a1b2c", "b"))
+        self.set_index(line("in-flight 111111", "a"), line("in-flight 0a1b2c", "b"), line("pending", "w", deps=("b",)))
+        self.set_index(line("pending", "a"), line("in-flight 0a1b2c", "b"), line("pending", "w", deps=("b",)))
         self.assertFalse(self.wakes())
 
-    def test_other_changes_wake(self):
-        """Every other kind of queue change can make work eligible."""
+    def test_delivering_or_landing_does_not_wake_executors(self):
+        """Deliveries and landing claims leave a plan with open PRs, so it still counts as unlanded work and frees
+        nothing an idle executor could pick. Before the monitor existed every state change woke every executor, which
+        wasted a model round each time."""
+        for changed in (line("complete", "b"), line("landing 3d4e5f", "b")):
+            with self.subTest(changed):
+                self.fake.refs["main"] = self.baseline
+                files = {pq.report_path("b"): "# R\n"}
+                files[pq.INDEX_PATH] = index(line("pending", "a"), changed, line("pending", "w", deps=("b",)))
+                self.fake.land("main", files)
+                self.assertFalse(self.wakes())
+
+    def test_a_block_wakes_executors(self):
+        """A plan that blocks before opening any PR stops being unlanded work, so a plan an executor skipped for
+        conflicting with it may now be picked. The filter cannot see PRs, so every block wakes. Found in review: the
+        first version ignored blocks, and the skipped plan sat until something unrelated changed."""
+        self.fake.land(
+            "main",
+            {
+                pq.plan_path("b"): plan() + "\n## Blocked\n\nWhy?\n",
+                pq.INDEX_PATH: index(line("pending", "a"), line("blocked", "b"), line("pending", "w", deps=("b",))),
+            },
+        )
+        self.assertTrue(self.wakes())
+
+    def test_work_that_becomes_pickable_wakes(self):
+        """A new plan, an answered or followed-up one, and a dropped dependency all make a plan eligible."""
         cases = {
-            "new line": (line("pending", "a"), line("in-flight 0a1b2c", "b"), line("pending", "c")),
-            "state": (line("pending", "a"), line("blocked", "b")),
-            "deps": (line("pending", "a", deps=("x",)), line("in-flight 0a1b2c", "b")),
+            "new line": (
+                line("pending", "a"),
+                line("in-flight 0a1b2c", "b"),
+                line("pending", "w", deps=("b",)),
+                line("pending", "c"),
+            ),
+            "dependency dropped": (line("pending", "a"), line("in-flight 0a1b2c", "b"), line("pending", "w")),
         }
         for name, lines in cases.items():
             with self.subTest(name):
                 self.fake.refs["main"] = self.baseline
-                self.set_index(*lines)
+                self.fake.land("main", {pq.INDEX_PATH: index(*lines), pq.plan_path("c"): plan()})
                 self.assertTrue(self.wakes())
 
-    def test_a_plan_file_edit_wakes(self):
-        """Answers, follow-ups and plan revisions change plan files."""
+    def test_reordering_eligible_plans_wakes(self):
+        """Picking prefers the oldest eligible plan, so swapping two eligible plans can change what an idle executor
+        would take. The same plans with the same files in a new order must wake it."""
+        self.fake.land(
+            "main",
+            {pq.INDEX_PATH: index(line("pending", "a"), line("pending", "c")), pq.plan_path("c"): plan()},
+        )
+        self.baseline = self.fake.refs["main"]
+        self.set_index(line("pending", "c"), line("pending", "a"))
+        self.assertTrue(self.wakes())
+
+    def test_a_plan_leaving_the_queue_wakes(self):
+        """A plan that landed or was abandoned can satisfy a dependency or end a conflict an executor skipped for."""
+        self.fake.land(
+            "main",
+            {
+                pq.INDEX_PATH: index(line("pending", "a"), line("pending", "w", deps=("b",))),
+                pq.REPORTS_PATH: reports(landed("b")),
+                pq.report_path("b"): "# R\n",
+            },
+        )
+        self.assertTrue(self.wakes())
+
+    def test_a_revision_wakes_only_when_the_plan_is_eligible(self):
+        """Revising a plan an executor could pick changes what it would do; revising one still waiting does not."""
+        self.fake.land("main", {pq.plan_path("w"): plan("Revised")})
+        self.assertFalse(self.wakes())
         self.fake.land("main", {pq.plan_path("a"): plan("Revised")})
         self.assertTrue(self.wakes())
 
-    def test_files_outside_the_queue_are_ignored(self):
-        """Edits to the rules file and other non-queue files under plans/ give an executor no work."""
-        self.fake.land("main", {"plans/AGENTS.md": "new rules\n"})
+    def test_review_bookkeeping_is_ignored(self):
+        """Approving a landed plan touches only REPORTS.md and its own files, none of which give an executor work."""
+        self.fake.land("main", {pq.REPORTS_PATH: reports(), "plans/AGENTS.md": "new rules\n"})
         self.assertFalse(self.wakes())
+
+    def test_the_lander_wakes_only_for_newly_complete_plans(self):
+        """The monitor acts on nothing else, so it sleeps through claims, blocks, answers and its own landing claims."""
+        self.set_index(line("pending", "a"), line("blocked", "b"), line("pending", "w"))
+        self.assertFalse(self.wakes("lander"))
+        self.fake.land(
+            "main",
+            {
+                pq.INDEX_PATH: index(line("pending", "a"), line("complete", "b"), line("pending", "w")),
+                pq.report_path("b"): "# R\n",
+            },
+        )
+        self.assertTrue(self.wakes("lander"))
+        self.baseline = self.fake.refs["main"]
+        self.set_index(line("pending", "a"), line("landing 3d4e5f", "b"), line("pending", "w"))
+        self.assertFalse(self.wakes("lander"))
+        self.set_index(line("pending", "a"), line("complete", "b"), line("pending", "w"))
+        self.assertFalse(self.wakes("lander"), "complete at the baseline already, so nothing new to land")
+
+    def test_the_lander_wakes_for_a_redelivery_complete_at_the_baseline(self):
+        """The monitor's baseline can predate the last delivery: a plan complete at the baseline is landed, comes back
+        through a follow-up, and is delivered again. It is complete in both snapshots, but with a new report, and
+        nothing else would wake the monitor for it. Found in review, reproduced with the real transitions."""
+        h = Harness(self.fake, self.scratch)
+        self.fake.land(
+            "main",
+            {
+                pq.INDEX_PATH: index(line("complete", "a"), line("in-flight 0a1b2c", "b"), line("pending", "w")),
+                pq.report_path("a"): "# Report\n",
+            },
+        )
+        self.baseline = self.fake.refs["main"]
+        self.fake.closed[1] = {"ref": "plan/a/01-x", "merged": True}
+        notes = h.text_file("n.md", "Landed.\n")
+        decision = h.text_file("d.md", "More, please.\n")
+        report = h.text_file("r.md", "# Report, second round\n")
+        for argv in (
+            ("start-landing", "a", "--claim", "3d4e5f"),
+            ("landed", "a", "--claim", "3d4e5f", "--merged", "1", "--notes", notes),
+            ("follow-up", "a", "--decision", decision),
+            ("claim", "a", "--claim", "111111"),
+        ):
+            self.assertEqual(h.run(*argv)[0], 0, argv)
+        self.assertFalse(self.wakes("lander"), "in flight again: nothing to land yet")
+        self.assertEqual(h.run("deliver", "a", "--claim", "111111", "--report", report)[0], 0)
+        self.assertTrue(self.wakes("lander"))
+
+    def test_the_role_is_passed_through_the_command_line(self):
+        """The watcher selects the filter with `--for`; an unknown role is a usage error, not a silent executor."""
+        h = Harness(self.fake, self.scratch)
+        argv = ("wake-check", "--baseline", self.baseline, "--ref", "main", "--for", "lander")
+        self.assertEqual(h.run(*argv)[1], "ignore\n")
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            h.run("wake-check", "--baseline", self.baseline, "--ref", "main", "--for", "nobody")
 
 
 # --- Status ----------------------------------------------------------------------------------------------------------
@@ -889,14 +1209,16 @@ class WakeCheckTest(QueueTestCase):
 
 class StatusTest(QueueTestCase):
     def test_flags(self):
-        """status names the situations a person must act on: a landing that stopped before `remove` (with the merged
-        PRs to pass it), approved work whose PRs closed without merging, unlanded work from an earlier round, and a
-        pending plan's unmet dependency."""
+        """status names the situations someone must act on: a landing that stopped before `landed` (with the merged
+        PRs to pass it), a landing whose PRs closed without merging, a complete plan with nothing left to land,
+        unlanded work from an earlier round, and a pending plan's unmet dependency. Landed plans awaiting review are
+        listed after the queue."""
         fake = FakeGitHub(
             base_files(
                 index(
-                    line("approved", "a"),
-                    line("approved", "d"),
+                    line("landing 3d4e5f", "a"),
+                    line("landing 3d4e5f", "d"),
+                    line("complete", "e"),
                     line("pending", "b"),
                     line("pending", "c", deps=("a",)),
                 ),
@@ -904,46 +1226,115 @@ class StatusTest(QueueTestCase):
                 b=plan(),
                 c=plan(),
                 d=plan(),
+                e=plan(),
+                r=plan(),
             )
         )
-        fake.land("main", {pq.report_path("a"): "# R\n", pq.report_path("d"): "# R\n"})
+        fake.land(
+            "main",
+            {
+                pq.report_path("a"): "# R\n",
+                pq.report_path("d"): "# R\n",
+                pq.report_path("e"): "# R\n",
+                pq.report_path("r"): "# R\n",
+                pq.REPORTS_PATH: reports(landed("r", (2, 3))),
+            },
+        )
         fake.pulls = [{"number": 3, "ref": "plan/b/01-x"}]
         fake.closed = {4: {"ref": "plan/a/01-x", "merged": True}, 5: {"ref": "plan/d/01-x", "merged": False}}
         data = pq.status(fake, "main", self.scratch, datetime.datetime(2026, 10, 3, tzinfo=datetime.timezone.utc))
         by_slug = {p["slug"]: p for p in data["plans"]}
-        self.assertIn("approved, no open PRs, merged 4: finish landing with remove --merged", by_slug["a"]["flags"])
+        self.assertIn("landing, no open PRs, merged 4: finish with landed --merged", by_slug["a"]["flags"])
         self.assertTrue(any("ask the maintainer" in f for f in by_slug["d"]["flags"]))
+        self.assertTrue(any("none found merged" in f and "ask the maintainer" in f for f in by_slug["e"]["flags"]))
         self.assertIn("unlanded work from an earlier round", by_slug["b"]["flags"])
         self.assertEqual(by_slug["c"]["deps_waiting"], ["a"])
-        self.assertIn("[approved] a", pq.render_status(data))
+        self.assertEqual(data["landed"], [{"slug": "r", "landed": "2026-10-04", "prs": [2, 3]}])
+        rendered = pq.render_status(data)
+        self.assertIn("[landing 3d4e5f] a", rendered)
+        self.assertIn("[landed 2026-10-04] r | PRs #2, #3 | report awaiting review", rendered)
+
+    def test_a_released_landing_whose_prs_all_merged_can_be_finished(self):
+        """A monitor that merged every PR and died before `landed` leaves, once released, a complete plan with no open
+        PRs. That is not the same as PRs closed unmerged: status names the merged PRs so the next landing round can
+        record it, instead of leaving it, and every plan waiting on it, for the maintainer. Found in review."""
+        fake = FakeGitHub(base_files(index(line("complete", "a")), a=plan()))
+        fake.land("main", {pq.report_path("a"): "# R\n"})
+        fake.closed = {7: {"ref": "plan/a/01-x", "merged": True}, 8: {"ref": "plan/a/02-y", "merged": True}}
+        data = pq.status(fake, "main", self.scratch, datetime.datetime(2026, 10, 3, tzinfo=datetime.timezone.utc))
+        self.assertIn(
+            "complete, no open PRs, merged 7,8: claim with start-landing, finish with landed --merged",
+            data["plans"][0]["flags"],
+        )
 
     def test_claim_missing_from_history_is_flagged(self):
         """A claim older than the history status reads would otherwise get no age and no flag at all."""
         fake = FakeGitHub(base_files(index(line("in-flight 0a1b2c", "a")), a=plan()))
         data = pq.status(fake, "main", self.scratch, datetime.datetime(2026, 10, 3, tzinfo=datetime.timezone.utc))
         self.assertIsNone(data["plans"][0]["claimed_at"])
+        # With no working log at all, the claim is as good as abandoned, and gets the flag the monitor notifies on.
+        # Found in review: this case used to get a flag nothing acted on.
+        self.assertTrue(any(f.startswith("possibly abandoned") for f in data["plans"][0]["flags"]))
+        (self.scratch / "farhelm-plan-a-log.md").write_text("working\n", encoding="utf-8")
+        data = pq.status(fake, "main", self.scratch, datetime.datetime.now(datetime.timezone.utc))
+        self.assertFalse(any(f.startswith("possibly abandoned") for f in data["plans"][0]["flags"]))
         self.assertTrue(any("not in recent history" in f for f in data["plans"][0]["flags"]))
 
     def test_history_shows_each_claim_holders_commits(self):
-        """An executor that crashed mid-verb uses history to see whether its own commit landed, so every commit a
-        claim holder makes must name its claim id."""
+        """An executor or monitor that crashed mid-verb uses history to see whether its own commit landed, so every
+        commit a claim holder makes must name its claim id. Review commits touch only REPORTS.md and the plan's own
+        files, and must show up too."""
         h = self.harness(index(line("pending", "a"), line("pending", "ab")), a=plan(), ab=plan())
         h.run("claim", "a", "--claim", "0a1b2c")
         h.run("claim", "ab", "--claim", "111111")
         h.run("deliver", "a", "--claim", "0a1b2c", "--report", h.text_file("r.md", "# R\n"))
+        h.run("start-landing", "a", "--claim", "3d4e5f")
+        h.run("stop-landing", "a", "--claim", "3d4e5f")
+        h.run("start-landing", "a", "--claim", "444444")
+        h.run("block", "a", "--claim", "444444", "--question", h.text_file("q.md", "Which way?\n"))
+        h.run("answer", "a", "--decision", h.text_file("d.md", "Left.\n"))
+        h.run("claim", "a", "--claim", "555555")
+        h.run("deliver", "a", "--claim", "555555", "--report", h.text_file("r.md", "# R2\n"))
+        h.run("start-landing", "a", "--claim", "3d4e5f")
+        h.fake.closed[1] = {"ref": "plan/a/01-x", "merged": True}
+        h.run("landed", "a", "--claim", "3d4e5f", "--merged", "1", "--notes", h.text_file("n.md", "Landed.\n"))
+        h.run("approve", "a")
         lines = pq.history(h.fake, "main", "a", 100)
-        self.assertEqual(len(lines), 2)
-        self.assertIn("chore(plans): deliver the report for a (claim 0a1b2c)", lines[0])
-        self.assertIn("chore(plans): claim a (claim 0a1b2c)", lines[1])
+        expected = [
+            "chore(plans): approve a",
+            "chore(plans): record the landing of a (claim 3d4e5f)",
+            "chore(plans): start landing a (claim 3d4e5f)",
+            "chore(plans): deliver the report for a (claim 555555)",
+            "chore(plans): claim a (claim 555555)",
+            "chore(plans): answer a",
+            "chore(plans): block a (claim 444444)",
+            "chore(plans): start landing a (claim 444444)",
+            "chore(plans): stop landing a (claim 3d4e5f)",
+            "chore(plans): start landing a (claim 3d4e5f)",
+            "chore(plans): deliver the report for a (claim 0a1b2c)",
+            "chore(plans): claim a (claim 0a1b2c)",
+        ]
+        self.assertEqual([entry.split(" ", 1)[1] for entry in lines], expected)
 
     def test_old_quiet_claim_is_flagged(self):
-        """A claim over a day old whose working log is missing or quiet is how a dead executor shows up."""
-        fake = FakeGitHub(base_files(index(line("pending", "a")), a=plan()))
-        req = pq.Request(verb="claim", slug="a", claim="0a1b2c")
-        pq.apply(fake, req, "main", lambda t, p, c: t, sleep=lambda s: None, log=lambda s: None)
-        data = pq.status(fake, "main", self.scratch, datetime.datetime(2026, 10, 5, tzinfo=datetime.timezone.utc))
-        self.assertEqual(data["plans"][0]["claimed_at"], "2026-10-02T10:00:00Z")
-        self.assertTrue(any("possibly abandoned" in f for f in data["plans"][0]["flags"]))
+        """A claim over a day old whose log is missing or quiet is how a dead executor or monitor shows up. A landing
+        claim is judged by the monitor's log, since the plan's working log belongs to the executors."""
+        fake = FakeGitHub(base_files(index(line("pending", "a"), line("complete", "b")), a=plan(), b=plan()))
+        fake.land("main", {pq.report_path("b"): "# R\n"})
+        for verb, slug, claim in (("claim", "a", "0a1b2c"), ("start-landing", "b", "3d4e5f")):
+            req = pq.Request(verb=verb, slug=slug, claim=claim)
+            pq.apply(fake, req, "main", lambda t, p, c: t, sleep=lambda s: None, log=lambda s: None)
+        now = datetime.datetime(2026, 10, 5, tzinfo=datetime.timezone.utc)
+        data = pq.status(fake, "main", self.scratch, now)
+        for item in data["plans"]:
+            self.assertEqual(item["claimed_at"], "2026-10-02T10:00:00Z")
+            self.assertTrue(any("possibly abandoned" in f for f in item["flags"]), item)
+        # A monitor log written recently means the monitor is alive, whatever the plan's working log says.
+        (self.scratch / pq.MONITOR_LOG).write_text("alive\n", encoding="utf-8")
+        data = pq.status(fake, "main", self.scratch, datetime.datetime.now(datetime.timezone.utc))
+        by_slug = {p["slug"]: p for p in data["plans"]}
+        self.assertFalse(any("possibly abandoned" in f for f in by_slug["b"]["flags"]))
+        self.assertTrue(any("possibly abandoned" in f for f in by_slug["a"]["flags"]))
 
 
 # --- Real dprint ----------------------------------------------------------------------------------------------------
