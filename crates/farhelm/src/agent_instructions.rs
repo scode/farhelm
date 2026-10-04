@@ -132,24 +132,29 @@ fn render(agent: &Command) -> String {
          repeat it to apply several in order. Templates apply first and the other flags then\n\
          change their result; a template may supply the cwd, host and title. A choice nothing\n\
          set is the agent type's default, never the user's remembered GUI choice; pass default\n\
-         to reset one a template set. You can apply templates but not create or change them.\n\
+         to reset one a template set.\n\
+         template create NAME and template edit NAME write templates from create's flags plus\n\
+         --cwd, --title and --host (never --template); edit sets only the fields you give and\n\
+         cannot unset one or change a template between agent and command launches, so delete\n\
+         and recreate a template to do either. --command always needs --yolo or --no-yolo. The\n\
+         templates listing hides command text, so you cannot copy a template you did not write.\n\
          Clone requires an exact source session id and destination host; cwd, title, and the\n\
          source's launch inherit. Spawn creates on this host only, from --inherit-agent (this\n\
          session's own launch) or from the same launch flags as create, never both; a template\n\
          that sets a host is refused there. Clone and --inherit-agent refuse a session created\n\
          before launch kinds; use create instead.\n\
          \n\
-         The user approves every acting verb. spawn, create, clone, rename, stop and restart\n\
-         each wait while Farhelm shows the user a card for it, for up to 9 minutes, unless\n\
-         the user told Farhelm not to ask for this host; listings and instructions never wait.\n\
-         Run acting verbs with a tool timeout of at least 10 minutes, and give create, clone\n\
-         and spawn an --idempotency-key, so that a retry after your tool gave up returns the\n\
-         session the user approved instead of starting another. The refusals mean: the user\n\
-         declined (do not retry unless the user asks you to), nobody answered in time (retry\n\
-         when the user is back), and no Farhelm window is open (ask the user to open Farhelm,\n\
-         then retry). A change requested while an earlier one from this session still waits is\n\
-         refused within about half a minute; wait for the first. Nothing was done after any\n\
-         refusal.\n\
+         The user approves every acting verb. spawn, create, clone, rename, stop, restart and\n\
+         the template writes each wait while Farhelm shows the user a card, for up to 9\n\
+         minutes, unless the user told Farhelm not to ask for this host; listings and\n\
+         instructions never wait. Run acting verbs with a tool timeout of at least 10 minutes,\n\
+         and give create, clone and spawn an --idempotency-key, so that a retry after your tool\n\
+         gave up returns the session the user approved instead of starting another. The\n\
+         refusals mean: the user declined (do not retry unless the user asks you to), nobody\n\
+         answered in time (retry when the user is back), and no Farhelm window is open (ask the\n\
+         user to open Farhelm, then retry). A change requested while an earlier one from this\n\
+         session still waits is refused within about half a minute; wait for the first. Nothing\n\
+         was done after any refusal.\n\
          \n\
          On a host that asks before YOLO launches, an agent may not start a YOLO launch (one\n\
          that skips approval prompts) or any command launch, and nothing you pass changes that:\n\
@@ -207,14 +212,29 @@ const MAX_USAGE_WIDTH: usize = 52;
 /// kept hidden only so that using it earns a refusal naming its
 /// replacement; listing it here would teach agents to use it.
 fn verb_lines(agent: &Command) -> Vec<String> {
-    let verbs: Vec<&Command> = agent
+    // A verb with verbs of its own (`template create`, `template edit`, ...)
+    // is listed as its subverbs, each under its full name: the group itself
+    // takes no arguments and does nothing alone.
+    let verbs: Vec<(String, &Command)> = agent
         .get_subcommands()
         .filter(|verb| !verb.is_hide_set())
+        .flat_map(|verb| {
+            let nested: Vec<(String, &Command)> = verb
+                .get_subcommands()
+                .filter(|sub| !sub.is_hide_set() && sub.get_name() != "help")
+                .map(|sub| (format!("{} {}", verb.get_name(), sub.get_name()), sub))
+                .collect();
+            if nested.is_empty() {
+                vec![(verb.get_name().to_string(), verb)]
+            } else {
+                nested
+            }
+        })
         .collect();
     let usages: Vec<String> = verbs
         .iter()
-        .map(|verb| {
-            let mut usage = format!("farhelm agent {}", verb.get_name());
+        .map(|(name, verb)| {
+            let mut usage = format!("farhelm agent {name}");
             // A required choice between flags (create's `--yolo` or
             // `--no-yolo`) is one required token, rendered at its first
             // member as `(--yolo | --no-yolo)`: each member alone is
@@ -267,7 +287,7 @@ fn verb_lines(agent: &Command) -> Vec<String> {
     verbs
         .into_iter()
         .zip(usages)
-        .map(|(verb, usage)| {
+        .map(|((_, verb), usage)| {
             // An `about` is the variant's own doc comment. A variant
             // without one renders as a bare usage line rather than a
             // dangling separator — ugly enough to notice in review, which
@@ -449,16 +469,19 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_instructions_explain_the_approval_prompts() {
         let text = text();
+        // Compared with line breaks collapsed, so rewrapping the prose does
+        // not fail a test about what it says.
+        let flowing = text.split_whitespace().collect::<Vec<_>>().join(" ");
         for needed in [
             "The user approves every acting verb",
             "up to 9 minutes",
             "--idempotency-key",
-            "the user\ndeclined",
+            "the user declined",
             "no Farhelm window is open",
             "there is no override",
             "start YOLO sessions here without asking",
         ] {
-            assert!(text.contains(needed), "missing {needed:?} in:\n{text}");
+            assert!(flowing.contains(needed), "missing {needed:?} in:\n{text}");
         }
         assert!(!text.contains("--confirm-yolo"), "{text}");
         assert!(!text.contains("allow-yolo-on-sensitive-host"), "{text}");

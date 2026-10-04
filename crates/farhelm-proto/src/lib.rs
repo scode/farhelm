@@ -194,7 +194,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_41` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_42` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -205,7 +205,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 41;
+pub const PROTOCOL_VERSION: u32 = 42;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -1597,6 +1597,36 @@ pub enum AgentVerb {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         confirm_yolo: bool,
     },
+    /// `farhelm agent template create`: a new launch template named `name`
+    /// setting `fields`, refused if one of that name exists (protocol 42).
+    /// Answered with [`AgentReply::TemplateWritten`].
+    ///
+    /// `fields.host` is never set by the CLI; `host` names a host by the
+    /// display name the hosts listing reports, and the helm writes that host's
+    /// install identity into the template, as the GUI's editor does.
+    TemplateCreate {
+        name: String,
+        #[serde(default)]
+        fields: crate::launcher::TemplateFields,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host: Option<String>,
+    },
+    /// `farhelm agent template edit`: set `fields` (and `host`, as for
+    /// [`Self::TemplateCreate`]) on the existing template `name`, leaving
+    /// every field not given as it is. There is no way to unset a field: the
+    /// listing withholds command text, so an agent cannot reproduce a
+    /// template it did not write, and a whole replacement would drop that
+    /// text silently (SPEC.md). Answered with [`AgentReply::TemplateWritten`].
+    TemplateEdit {
+        name: String,
+        #[serde(default)]
+        fields: crate::launcher::TemplateFields,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host: Option<String>,
+    },
+    /// `farhelm agent template delete`. Answered with
+    /// [`AgentReply::TemplateDeleted`].
+    TemplateDelete { name: String },
 }
 
 impl AgentVerb {
@@ -1630,7 +1660,13 @@ impl AgentVerb {
             | AgentVerb::Stop { .. }
             | AgentVerb::Restart { .. }
             | AgentVerb::Create { .. }
-            | AgentVerb::Clone { .. } => true,
+            | AgentVerb::Clone { .. }
+            // A template write changes helm state that every later launch
+            // from the template reads, so a lost answer is an unknown
+            // outcome, not a free retry.
+            | AgentVerb::TemplateCreate { .. }
+            | AgentVerb::TemplateEdit { .. }
+            | AgentVerb::TemplateDelete { .. } => true,
         }
     }
 
@@ -1654,7 +1690,10 @@ impl AgentVerb {
             | AgentVerb::Stop { .. }
             | AgentVerb::Restart { .. }
             | AgentVerb::Create { .. }
-            | AgentVerb::Clone { .. } => true,
+            | AgentVerb::Clone { .. }
+            | AgentVerb::TemplateCreate { .. }
+            | AgentVerb::TemplateEdit { .. }
+            | AgentVerb::TemplateDelete { .. } => true,
         }
     }
 }
@@ -1826,6 +1865,11 @@ pub enum AgentReply {
     /// carried rather than special-cased away: a reply that dropped fields
     /// would be a second, nearly-identical shape to keep true.
     Created { session: AgentSession },
+    /// A template write's result: the template as stored, in the listing's
+    /// form (command text withheld, as [`AgentTemplate::listed`] makes it).
+    TemplateWritten { template: AgentTemplate },
+    /// A template delete's confirmation, carrying nothing beyond success.
+    TemplateDeleted {},
 }
 
 /// What a supervisor tells a management request it refuses because every
@@ -4187,8 +4231,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_41() {
-        assert_eq!(PROTOCOL_VERSION, 41);
+    fn protocol_version_is_pinned_at_42() {
+        assert_eq!(PROTOCOL_VERSION, 42);
     }
 
     /// Spec: a listed template carries every field it sets except the text

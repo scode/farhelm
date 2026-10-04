@@ -6,10 +6,12 @@
 //! helm checks only a template's shape when storing it (a usable name,
 //! fields of a bounded size, no unknown field); whether its fields apply is
 //! decided when it is applied, against the launcher as it is then
-//! (`farhelm_proto::launcher::apply_template`). Writes come only from these
-//! routes: no agent verb writes a template, because a template can carry a
-//! command line every host the helm manages may later run (SPEC.md defers
-//! agent template writes to the CLI permission prompts).
+//! (`farhelm_proto::launcher::apply_template`). Writes come from these routes
+//! and from an agent's `farhelm agent template` verbs, which share
+//! [`store_template`] and [`remove_template`] with them; an agent's write
+//! waits for the user's approval first, because a template can carry a
+//! command line every host the helm manages may later run (SPEC.md,
+//! Agent-spawned sessions).
 
 use std::sync::Arc;
 
@@ -25,15 +27,6 @@ pub(crate) struct TemplatesView {
     pub(crate) templates: Vec<LaunchTemplate>,
 }
 
-/// A refusal the caller can fix, as the API's typed 400.
-fn invalid(message: String) -> axum::response::Response {
-    http_error(anyhow::Error::new(crate::SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-        kind: farhelm_proto::ErrorKind::InvalidRequest,
-        message,
-    }))
-}
-
 /// `GET /api/templates` — every template, by name.
 pub(crate) async fn list_templates(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.store.launch_templates().await {
@@ -47,9 +40,8 @@ pub(crate) async fn list_templates(State(state): State<Arc<AppState>>) -> impl I
 ///
 /// The URL is the name's only authority, so a body cannot redirect a write
 /// to another template; the body is the fields alone. Last write wins
-/// (SPEC.md wants no concurrency check). The write and its change hint run
-/// in a detached task, so a request dropped after the commit still bumps
-/// the hint, like every other helm write. Clients read templates when their
+/// (SPEC.md wants no concurrency check for the GUI's writes; only an
+/// agent's write carries a [`Precondition`]). Clients read templates when their
 /// launcher or Templates panel opens; nothing pushes a template change into
 /// a launcher already open in another client.
 pub(crate) async fn put_template(
@@ -58,49 +50,116 @@ pub(crate) async fn put_template(
     axum::Json(fields): axum::Json<TemplateFields>,
 ) -> impl IntoResponse {
     let template = LaunchTemplate { name, fields };
-    if let Err(message) = check_template_shape(&template) {
-        return invalid(message);
-    }
-    let task_state = Arc::clone(&state);
-    let stored = template.clone();
-    let mutation = tokio::spawn(async move {
-        task_state.store.put_launch_template(stored).await?;
-        task_state.manager.events().bump();
-        Ok::<_, anyhow::Error>(())
-    });
-    match mutation.await {
-        Err(error) => http_error(anyhow::Error::new(error).context("template write task panicked")),
-        Ok(Err(error)) => http_error(error),
-        Ok(Ok(())) => axum::Json(template).into_response(),
+    match store_template(&state, template.clone(), Precondition::None).await {
+        Ok(_) => axum::Json(template).into_response(),
+        Err(error) => http_error(error),
     }
 }
 
+/// What a template write or delete requires of the template it replaces.
+pub(crate) enum Precondition {
+    /// Nothing: last write wins. The GUI's editor and its delete button,
+    /// which SPEC.md wants without a concurrency check.
+    None,
+    /// The template of that name must still be exactly this (`None`: no
+    /// template has the name). An agent's write verbs, which the user
+    /// approved against what the card showed; checked in the same store
+    /// transaction as the write, so another writer cannot land in between.
+    Unchanged(Option<TemplateFields>),
+}
+
+/// Store `template`, creating or replacing it, and announce the change: the
+/// one write path for templates, shared by the GUI's editor (`PUT`) and an
+/// agent's `farhelm agent template create`/`edit` (SPEC.md: "These writes go
+/// through the same path as the GUI's template editor"). Reports whether it
+/// wrote, which is `false` only when `precondition` no longer held.
+///
+/// The shape is checked first, and a bad one is the API's typed 400. The write
+/// and its change hint run in a detached task, so a request dropped after the
+/// commit still bumps the hint, like every other helm write.
+pub(crate) async fn store_template(
+    state: &Arc<AppState>,
+    template: LaunchTemplate,
+    precondition: Precondition,
+) -> anyhow::Result<bool> {
+    check_template_shape(&template).map_err(|message| {
+        anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: farhelm_proto::ErrorKind::InvalidRequest,
+            message,
+        })
+    })?;
+    let task_state = Arc::clone(state);
+    tokio::spawn(async move {
+        let wrote = match precondition {
+            Precondition::None => {
+                task_state.store.put_launch_template(template).await?;
+                true
+            }
+            Precondition::Unchanged(expected) => {
+                task_state
+                    .store
+                    .put_launch_template_if(template, expected)
+                    .await?
+            }
+        };
+        if wrote {
+            task_state.manager.events().bump();
+        }
+        Ok::<_, anyhow::Error>(wrote)
+    })
+    .await
+    .map_err(|error| anyhow::Error::new(error).context("template write task panicked"))?
+}
+
 /// `DELETE /api/templates/{name}` — remove a template. No session records
-/// which templates made it (SPEC.md), so nothing else changes.
+/// which templates made it (SPEC.md), so nothing else changes. A template
+/// that does not exist is the helm's not-found refusal.
 pub(crate) async fn delete_template(
     State(state): State<Arc<AppState>>,
     AxPath(name): AxPath<String>,
 ) -> impl IntoResponse {
-    let task_state = Arc::clone(&state);
-    let mutation = tokio::spawn(async move {
-        let deleted = task_state.store.delete_launch_template(name).await?;
-        if deleted {
-            task_state.manager.events().bump();
-        }
-        Ok::<_, anyhow::Error>(deleted)
-    });
-    match mutation.await {
-        Err(error) => {
-            http_error(anyhow::Error::new(error).context("template delete task panicked"))
-        }
-        Ok(Err(error)) => http_error(error),
-        Ok(Ok(true)) => axum::Json(serde_json::json!({})).into_response(),
-        Ok(Ok(false)) => http_error(anyhow::Error::new(crate::SupervisorError {
+    match remove_template(&state, name, Precondition::None).await {
+        Ok(true) => axum::Json(serde_json::json!({})).into_response(),
+        Ok(false) => http_error(anyhow::Error::new(crate::SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
             kind: farhelm_proto::ErrorKind::NotFound,
             message: "no template has that name".to_string(),
         })),
+        Err(error) => http_error(error),
     }
+}
+
+/// Remove the template named `name` and announce it; the shared delete path
+/// for the GUI and `farhelm agent template delete`. Reports whether it
+/// deleted, which is `false` when no template has the name or (under
+/// [`Precondition::Unchanged`]) it is no longer the one expected; each
+/// caller words its own refusal.
+pub(crate) async fn remove_template(
+    state: &Arc<AppState>,
+    name: String,
+    precondition: Precondition,
+) -> anyhow::Result<bool> {
+    let task_state = Arc::clone(state);
+    tokio::spawn(async move {
+        let deleted = match precondition {
+            Precondition::None => task_state.store.delete_launch_template(name).await?,
+            // An expectation of "absent" has nothing to delete.
+            Precondition::Unchanged(None) => false,
+            Precondition::Unchanged(Some(expected)) => {
+                task_state
+                    .store
+                    .delete_launch_template_if(name, expected)
+                    .await?
+            }
+        };
+        if deleted {
+            task_state.manager.events().bump();
+        }
+        Ok::<_, anyhow::Error>(deleted)
+    })
+    .await
+    .map_err(|error| anyhow::Error::new(error).context("template delete task panicked"))?
 }
 
 #[cfg(test)]

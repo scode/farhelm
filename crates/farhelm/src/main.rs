@@ -372,10 +372,83 @@ enum AgentCmd {
         )]
         confirm_yolo: Option<String>,
     },
+    /// Write launch templates; each waits for the user's approval.
+    #[command(subcommand)]
+    Template(TemplateCmd),
     /// Print how to use these verbs, for an agent that was told to.
     Instructions,
     /// The same as instructions; both spellings print it.
     Help,
+}
+
+/// `farhelm agent template`'s verbs: an agent's template writes, each shown to
+/// the user on an approval card with the whole resulting template, command
+/// text included (SPEC.md, Agent-spawned sessions).
+///
+/// The fields are `farhelm agent create`'s flags, minus `--template`: a
+/// template built from other templates would copy their withheld command text
+/// into one the agent wrote, so the CLI refuses it rather than resolving it.
+#[derive(Subcommand)]
+enum TemplateCmd {
+    /// Create a launch template; refused if the name is taken.
+    // `--template` is refused on both writes (`TemplateFieldFlags::fields`)
+    // but comes with the flattened launch flags; hiding it keeps `--help`
+    // and the instructions' usage lines from teaching a spelling that only
+    // earns a refusal, as `verb_lines` does for every refused flag.
+    #[command(mut_arg("templates", |arg| arg.hide(true)))]
+    Create {
+        /// The new template's name.
+        #[arg(allow_hyphen_values = true)]
+        name: String,
+        #[command(flatten)]
+        fields: TemplateFieldFlags,
+    },
+    /// Set the given fields on an existing template; others stay as they are.
+    #[command(mut_arg("templates", |arg| arg.hide(true)))]
+    Edit {
+        /// The template to change.
+        #[arg(allow_hyphen_values = true)]
+        name: String,
+        #[command(flatten)]
+        fields: TemplateFieldFlags,
+    },
+    /// Delete a launch template.
+    Delete {
+        /// The template to delete.
+        #[arg(allow_hyphen_values = true)]
+        name: String,
+    },
+}
+
+/// The fields a template write sets: a create's folder, title and host, and
+/// its launch flags.
+#[derive(clap::Args)]
+struct TemplateFieldFlags {
+    /// Folder sessions launched from the template start in, on their host.
+    #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+    cwd: Option<String>,
+    /// Session name sessions launched from the template get.
+    #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
+    title: Option<String>,
+    /// Host the template launches on, by the name `farhelm agent hosts` shows.
+    #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+    host: Option<String>,
+    #[command(flatten)]
+    launch: LaunchFlags,
+}
+
+impl TemplateFieldFlags {
+    /// The fields as the helm's template verbs carry them, or the refusal of
+    /// a `--template` (see [`TemplateCmd`]).
+    fn fields(&self) -> anyhow::Result<farhelm_proto::launcher::TemplateFields> {
+        if !self.launch.templates.is_empty() {
+            anyhow::bail!(
+                "a template write takes no --template: give the fields themselves, so the \
+                 template holds only what you wrote"
+            );
+        }
+        Ok(self.launch.edits(self.cwd.clone(), self.title.clone()))
+    }
 }
 
 impl AgentCmd {
@@ -447,6 +520,9 @@ impl AgentCmd {
                 intent_key: idempotency_key.clone(),
                 confirm_yolo: false,
             }),
+            // Built in `run_agent`, where a `--template` can be refused
+            // with a message; see `TemplateFieldFlags::fields`.
+            AgentCmd::Template(_) => None,
             AgentCmd::Instructions | AgentCmd::Help => None,
         }
     }
@@ -1332,6 +1408,46 @@ async fn run_supervisor(
     farhelm_supervisor::service::run(state_dir, startup, tether).await
 }
 
+/// `farhelm agent template create|edit|delete`: one relayed request, which
+/// waits for the user's approval, and one confirmation line on stdout naming
+/// the template, as the lifecycle verbs confirm on stdout.
+fn run_template_write(command: &TemplateCmd) -> anyhow::Result<()> {
+    let (verb, done) = match command {
+        TemplateCmd::Create { name, fields } => (
+            farhelm_proto::AgentVerb::TemplateCreate {
+                name: name.clone(),
+                fields: fields.fields()?,
+                host: fields.host.clone(),
+            },
+            "created",
+        ),
+        TemplateCmd::Edit { name, fields } => (
+            farhelm_proto::AgentVerb::TemplateEdit {
+                name: name.clone(),
+                fields: fields.fields()?,
+                host: fields.host.clone(),
+            },
+            "changed",
+        ),
+        TemplateCmd::Delete { name } => (
+            farhelm_proto::AgentVerb::TemplateDelete { name: name.clone() },
+            "deleted",
+        ),
+    };
+    let (_asking, reply) = runtime()?.block_on(agent_request(&SessionEnv::from_env(), verb))?;
+    let name = match reply {
+        AgentReply::TemplateWritten { template } => template.name,
+        AgentReply::TemplateDeleted {} => match command {
+            TemplateCmd::Delete { name } => name.clone(),
+            _ => anyhow::bail!("the helm answered a template write with a delete confirmation"),
+        },
+        // `agent_request` already checked the reply's tag against the verb.
+        _ => anyhow::bail!("the helm answered a template write with something unexpected"),
+    };
+    println!("{done} template {}", quoted(&name));
+    Ok(())
+}
+
 /// Run one `farhelm agent` subcommand and print its answer.
 ///
 /// `AgentCmd::verb` answers "what goes on the wire, if anything" —
@@ -1341,6 +1457,9 @@ async fn run_supervisor(
 fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
     if let AgentCmd::Profiles { .. } = command {
         anyhow::bail!(AGENT_PROFILES_REMOVED);
+    }
+    if let AgentCmd::Template(template) = &command {
+        return run_template_write(template);
     }
     let Some(verb) = command.verb() else {
         print!("{}", agent_instructions::text());
@@ -1483,6 +1602,7 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
         | AgentCmd::Sessions { .. }
         | AgentCmd::Templates { .. }
         | AgentCmd::Profiles { .. }
+        | AgentCmd::Template(_)
         | AgentCmd::Instructions
         | AgentCmd::Help => {
             unreachable!("handled above before this match is reached")

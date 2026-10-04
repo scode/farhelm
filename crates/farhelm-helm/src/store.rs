@@ -3164,6 +3164,34 @@ fn claimant_of(
     .context("looking up the current claimant of a host identity")
 }
 
+/// Whether the template named `name` is exactly `expected` (`None`: no
+/// template has the name). Called inside the conditional template writes'
+/// own transaction, for the same reason as [`claimant_of`]. Fields are
+/// compared decoded, not as stored JSON, so a re-encoding that changes only
+/// the text's layout is not a change; a row that does not decode is.
+fn template_row_is(
+    tx: &rusqlite::Transaction<'_>,
+    name: &str,
+    expected: Option<&farhelm_proto::launcher::TemplateFields>,
+) -> anyhow::Result<bool> {
+    let stored: Option<String> = tx
+        .query_row(
+            "SELECT fields_json FROM launch_templates WHERE name = ?1",
+            [name],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("reading a launch template")?;
+    Ok(match (stored, expected) {
+        (None, None) => true,
+        (Some(json), Some(expected)) => {
+            serde_json::from_str::<farhelm_proto::launcher::TemplateFields>(&json)
+                .is_ok_and(|fields| &fields == expected)
+        }
+        _ => false,
+    })
+}
+
 impl HelmStore {
     /// Access the real connection to gate store work or inject database
     /// failures in tests. Release the mutex before awaiting store work:
@@ -3441,6 +3469,83 @@ impl HelmStore {
                     )
                     .context("storing a launch template")?;
                     Ok(())
+                },
+            )
+            .await
+    }
+
+    /// Store `template` only if the template of its name is still `expected`
+    /// (`None`: no template has the name), reporting whether it wrote.
+    ///
+    /// This is the agent write verbs' path, not the GUI's: an agent's create
+    /// or edit was approved against what its card showed, so a write that
+    /// lands on anything else (another agent's create of the same name, a GUI
+    /// edit made while the card waited) must refuse rather than overwrite.
+    /// The read and the write share one immediate transaction, which is what
+    /// makes the comparison mean anything; a check in a separate job leaves a
+    /// window another writer can land in. A stored row that no longer decodes
+    /// counts as changed.
+    pub(crate) async fn put_launch_template_if(
+        &self,
+        template: farhelm_proto::launcher::LaunchTemplate,
+        expected: Option<farhelm_proto::launcher::TemplateFields>,
+    ) -> anyhow::Result<bool> {
+        let json = serde_json::to_string(&template.fields).context("encoding template fields")?;
+        // Informational only, as in `put_launch_template`.
+        let updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        self.conn
+            .call(
+                "launch template write task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .context("starting the conditional template write")?;
+                    if !template_row_is(&tx, &template.name, expected.as_ref())? {
+                        return Ok(false);
+                    }
+                    tx.execute(
+                        "INSERT INTO launch_templates (name, fields_json, updated_at)
+                         VALUES (?1, ?2, ?3)
+                         ON CONFLICT (name) DO UPDATE SET
+                             fields_json = excluded.fields_json,
+                             updated_at = excluded.updated_at",
+                        rusqlite::params![template.name, json, updated_at],
+                    )
+                    .context("storing a launch template")?;
+                    tx.commit()
+                        .context("committing the conditional template write")?;
+                    Ok(true)
+                },
+            )
+            .await
+    }
+
+    /// Delete the template named `name` only if it is still `expected`,
+    /// reporting whether it deleted; the delete counterpart of
+    /// [`Self::put_launch_template_if`], so an approved delete never removes
+    /// a definition other than the one its card showed.
+    pub(crate) async fn delete_launch_template_if(
+        &self,
+        name: String,
+        expected: farhelm_proto::launcher::TemplateFields,
+    ) -> anyhow::Result<bool> {
+        self.conn
+            .call(
+                "launch template delete task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .context("starting the conditional template delete")?;
+                    if !template_row_is(&tx, &name, Some(&expected))? {
+                        return Ok(false);
+                    }
+                    tx.execute("DELETE FROM launch_templates WHERE name = ?1", [&name])
+                        .context("deleting a launch template")?;
+                    tx.commit()
+                        .context("committing the conditional template delete")?;
+                    Ok(true)
                 },
             )
             .await
@@ -14676,5 +14781,85 @@ mod tests {
             ids(&store.cached_rows(&[host]).await.unwrap()),
             vec!["b".to_string()]
         );
+    }
+
+    /// Spec: `put_launch_template_if` writes only when the named template is
+    /// still the one expected (absent, for a create) and
+    /// `delete_launch_template_if` deletes only the expected definition;
+    /// either reports `false` and leaves the row as it is otherwise.
+    ///
+    /// Why: these are what keep an agent's approved template write from
+    /// landing on a template other than the one its card showed (SPEC.md,
+    /// Agent-spawned sessions). This pins the comparison's semantics, one
+    /// operation at a time. It does not force a competing write between the
+    /// comparison and the write: that the two share one immediate
+    /// transaction is visible in the methods themselves.
+    #[farhelm_testtrace::test]
+    async fn conditional_template_writes_refuse_any_other_template() {
+        use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
+        let (_dir, store) = fresh_store().await;
+        let fields = |command: &str| TemplateFields {
+            command: Some(command.to_string()),
+            ..Default::default()
+        };
+        let template = |command: &str| LaunchTemplate {
+            name: "t".to_string(),
+            fields: fields(command),
+        };
+        let stored = |store: &HelmStore| {
+            let store = store.clone();
+            async move { store.launch_templates().await.unwrap() }
+        };
+
+        assert!(
+            store
+                .put_launch_template_if(template("a"), None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .put_launch_template_if(template("b"), None)
+                .await
+                .unwrap(),
+            "a create refuses a taken name"
+        );
+        assert!(
+            !store
+                .put_launch_template_if(template("b"), Some(fields("other")))
+                .await
+                .unwrap(),
+            "an edit refuses a template that is not the one expected"
+        );
+        assert_eq!(stored(&store).await, vec![template("a")]);
+        assert!(
+            store
+                .put_launch_template_if(template("b"), Some(fields("a")))
+                .await
+                .unwrap()
+        );
+        assert_eq!(stored(&store).await, vec![template("b")]);
+
+        assert!(
+            !store
+                .delete_launch_template_if("t".to_string(), fields("a"))
+                .await
+                .unwrap(),
+            "a delete refuses a definition that is not the one expected"
+        );
+        assert!(
+            !store
+                .delete_launch_template_if("missing".to_string(), fields("b"))
+                .await
+                .unwrap()
+        );
+        assert_eq!(stored(&store).await, vec![template("b")]);
+        assert!(
+            store
+                .delete_launch_template_if("t".to_string(), fields("b"))
+                .await
+                .unwrap()
+        );
+        assert!(stored(&store).await.is_empty());
     }
 }

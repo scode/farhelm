@@ -2075,3 +2075,205 @@ fn a_session_reply_to_a_creating_verb_is_refused() {
          same whichever pair they describe: {stderr}"
     );
 }
+
+/// Spec: `farhelm agent template create NAME` sends one `TemplateCreate`
+/// carrying create's flags as the template's fields, `--host` by name
+/// rather than as a field, and prints one confirmation line naming the
+/// template; `--template` is refused before anything is sent.
+///
+/// Why: SPEC.md gives template writes `farhelm agent create`'s flags plus
+/// `--cwd`, `--title` and `--host`, never `--template`: a template built
+/// from other templates would copy command text the agent never saw into
+/// one it wrote. The host travels by name so the helm, not the agent,
+/// decides which install it pins.
+#[farhelm_testtrace::test]
+fn a_template_create_sends_its_fields_and_refuses_template() {
+    use farhelm_proto::AgentTemplate;
+    use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        let fields = TemplateFields {
+            kind: Some(LauncherKind::Command),
+            command: Some("my-agent --go".to_string()),
+            yolo: Some(false),
+            destination: Some(TemplateDestination::Folder("/srv/work".to_string())),
+            name: Some("worker".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            request,
+            AgentVerb::TemplateCreate {
+                name: "my-template".to_string(),
+                fields: fields.clone(),
+                host: Some("builder".to_string()),
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::TemplateWritten {
+                    template: AgentTemplate::listed(
+                        &farhelm_proto::launcher::LaunchTemplate {
+                            name: "my-template".to_string(),
+                            fields,
+                        },
+                        Some("builder".to_string()),
+                    ),
+                },
+            },
+        })
+    });
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &[
+            "template",
+            "create",
+            "my-template",
+            "--command",
+            "my-agent --go",
+            "--no-yolo",
+            "--cwd",
+            "/srv/work",
+            "--title",
+            "worker",
+            "--host",
+            "builder",
+        ],
+    ));
+    finish_server(done, thread);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "created template \"my-template\"\n"
+    );
+
+    let refused = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["template", "create", "t", "--template", "other"],
+    ));
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(
+        String::from_utf8(refused.stderr)
+            .unwrap()
+            .contains("takes no --template")
+    );
+}
+
+/// Spec: `farhelm agent template edit NAME` sends one `TemplateEdit`
+/// carrying only the fields its flags give, and `template delete NAME` one
+/// `TemplateDelete`; each prints one confirmation line naming the template.
+///
+/// Why: an edit sets only what it is given (SPEC.md), so a flag the CLI
+/// filled in on its own would overwrite a field the agent never meant to
+/// touch, possibly one whose text the listing withholds. The create test
+/// covers the shared field flags; this pins the other two verbs' wiring.
+#[farhelm_testtrace::test]
+fn template_edit_and_delete_send_their_verbs() {
+    use farhelm_proto::launcher::TemplateFields;
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        let fields = TemplateFields {
+            name: Some("renamed".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            request,
+            AgentVerb::TemplateEdit {
+                name: "my-template".to_string(),
+                fields: fields.clone(),
+                host: None,
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::TemplateWritten {
+                    template: farhelm_proto::AgentTemplate::listed(
+                        &farhelm_proto::launcher::LaunchTemplate {
+                            name: "my-template".to_string(),
+                            fields,
+                        },
+                        None,
+                    ),
+                },
+            },
+        })
+    });
+    let edited = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["template", "edit", "my-template", "--title", "renamed"],
+    ));
+    finish_server(done, thread);
+    assert_eq!(
+        edited.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&edited.stderr)
+    );
+    assert!(
+        String::from_utf8(edited.stdout)
+            .unwrap()
+            .contains("\"my-template\""),
+        "the confirmation names the template"
+    );
+
+    // A fresh path: the first mock's socket file is still bound.
+    let socket = temp.path().join("supervisor-delete.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::TemplateDelete {
+                name: "my-template".to_string(),
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::TemplateDeleted {},
+            },
+        })
+    });
+    let deleted = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["template", "delete", "my-template"],
+    ));
+    finish_server(done, thread);
+    assert_eq!(
+        deleted.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&deleted.stderr)
+    );
+    assert!(
+        String::from_utf8(deleted.stdout)
+            .unwrap()
+            .contains("\"my-template\""),
+        "the confirmation names the template"
+    );
+}

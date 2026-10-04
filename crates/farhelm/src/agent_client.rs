@@ -638,6 +638,8 @@ enum ReplyKind {
     Restarted,
     Stopped,
     Created,
+    TemplateWritten,
+    TemplateDeleted,
 }
 
 impl ReplyKind {
@@ -658,6 +660,9 @@ impl ReplyKind {
             farhelm_proto::AgentVerb::Create { .. } | farhelm_proto::AgentVerb::Clone { .. } => {
                 ReplyKind::Created
             }
+            farhelm_proto::AgentVerb::TemplateCreate { .. }
+            | farhelm_proto::AgentVerb::TemplateEdit { .. } => ReplyKind::TemplateWritten,
+            farhelm_proto::AgentVerb::TemplateDelete { .. } => ReplyKind::TemplateDeleted,
         }
     }
 
@@ -670,6 +675,8 @@ impl ReplyKind {
             AgentReply::Restarted { .. } => ReplyKind::Restarted,
             AgentReply::Stopped {} => ReplyKind::Stopped,
             AgentReply::Created { .. } => ReplyKind::Created,
+            AgentReply::TemplateWritten { .. } => ReplyKind::TemplateWritten,
+            AgentReply::TemplateDeleted {} => ReplyKind::TemplateDeleted,
         }
     }
 
@@ -692,6 +699,8 @@ impl ReplyKind {
             // both, and a reader who sees "session row" against "created
             // session row" can tell which end of the mismatch is which.
             ReplyKind::Created => "created session row",
+            ReplyKind::TemplateWritten => "written template",
+            ReplyKind::TemplateDeleted => "template delete confirmation",
         }
     }
 }
