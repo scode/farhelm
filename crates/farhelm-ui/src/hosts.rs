@@ -60,7 +60,7 @@ use dioxus::prelude::*;
 use crate::api::{
     Commit, PreferenceValue, ProbeResponse, ProvisioningOperation, ProvisioningSubmission,
     adopt_host, probe_ssh_host, provision_host, remove_host, retry_host, set_alias,
-    set_host_destination, set_yolo_without_asking, store_preference,
+    set_commands_without_asking, set_host_destination, set_yolo_without_asking, store_preference,
 };
 use crate::icons::{LocalHostIcon, RemoteHostIcon};
 use crate::menu_panel::{
@@ -1312,7 +1312,27 @@ pub(crate) fn HostsPanel(
                 .write()
                 .insert(host, SettingsField::YoloWithoutAsking);
         } else {
-            settings_dialog::reset_yolo_checkbox();
+            settings_dialog::reset_checkboxes();
+        }
+    };
+
+    // The same for whether the host's sessions run `farhelm` commands
+    // without the user's approval (SPEC.md, Agent-spawned sessions).
+    let commands_base = base.clone();
+    let on_commands_without_asking = move |(host, commands_without_asking): (HostId, bool)| {
+        let base = commands_base.clone();
+        let started = run(
+            host,
+            Box::pin(async move {
+                set_commands_without_asking(&base, host, commands_without_asking).await
+            }),
+        );
+        if started {
+            dialog_write
+                .write()
+                .insert(host, SettingsField::CommandsWithoutAsking);
+        } else {
+            settings_dialog::reset_checkboxes();
         }
     };
 
@@ -1773,6 +1793,7 @@ pub(crate) fn HostsPanel(
                     on_edit_submit: on_edit_submit.clone(),
                     on_edit_cancel,
                     on_yolo_without_asking: on_yolo_without_asking.clone(),
+                    on_commands_without_asking: on_commands_without_asking.clone(),
                     on_close: on_settings_close,
                     host,
                 }
@@ -3941,6 +3962,7 @@ mod tests {
             state,
             incarnation: 1,
             yolo_without_asking: false,
+            commands_without_asking: false,
         }
     }
 
@@ -5073,6 +5095,7 @@ mod tests {
             },
             incarnation: 1,
             yolo_without_asking: false,
+            commands_without_asking: false,
         }
     }
 

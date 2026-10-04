@@ -1212,7 +1212,11 @@ samp {
         notice, same scope, in the opposite corner
      20 `.session-row-menu-panel` — a sidebar row's action menu
      30 `.header-confirm` (this rule) — must outrank the row menu above
-     50 `.farhelm-tooltip` — hover help, above every panel and modal backdrop
+     45 `.approval-cards` — an agent's request waiting for the user, above
+        every modal dialog's backdrop (40) because an agent that asked while a
+        dialog was open is waiting on this answer, not on the dialog
+     50 `.farhelm-tooltip` — hover help, above every panel and modal backdrop,
+        the approval cards included, so a card's buttons can show theirs
    Right-aligned to the anchor, which is at the row's trailing edge, so the
    panel opens inward rather than off the window. */
 .header-confirm {
@@ -2497,14 +2501,16 @@ samp {
   margin: 0;
   padding: 0;
 }
-.host-settings-yolo {
+.host-settings-yolo,
+.host-settings-commands {
   border-top: 1px solid var(--border-dim);
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding-top: 14px;
 }
-.host-yolo-without-asking {
+.host-yolo-without-asking,
+.host-commands-without-asking {
   align-items: center;
   color: var(--fg-0);
   display: flex;
@@ -2516,7 +2522,8 @@ samp {
   font-size: 12px;
   margin: 0 0 0 24px;
 }
-.host-settings-yolo .host-settings-outcome {
+.host-settings-yolo .host-settings-outcome,
+.host-settings-commands .host-settings-outcome {
   margin-left: 24px;
 }
 .host-settings-actions {
@@ -5774,6 +5781,99 @@ samp {
 .status.error {
   color: var(--danger);
 }
+/* Cards asking the user to approve an agent's `farhelm` command
+   (`approvals`). Non-modal and stacked in the bottom-right corner, oldest at
+   the top, so the rest of the app stays usable while they wait. Loud enough to
+   be noticed (the amber border), but not the YOLO confirmation's red: most
+   requests are ordinary. Every value on a card is the asking agent's text and
+   renders through `.peer-value`; the labels are this UI's. The column scrolls
+   rather than growing past the window, since a misbehaving host can keep a
+   few cards up at once. */
+.approval-cards {
+  position: fixed;
+  z-index: 45;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+.approval-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 2px solid var(--warn);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+}
+.approval-card-heading {
+  margin: 0;
+  color: var(--warn);
+  font-size: 1em;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.approval-card-what {
+  margin: 0;
+  font-weight: 600;
+}
+.approval-card-rows {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 10px;
+  margin: 0;
+}
+.approval-card-row {
+  display: contents;
+}
+.approval-card-row dt {
+  color: var(--fg-dim);
+}
+.approval-card-row dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Command text in full, wrapped rather than clipped: the user is approving
+   exactly this text, so none of it may sit out of sight in a scroll box. The
+   card column itself scrolls when cards outgrow the window. */
+.approval-card-block {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* The notice that an answer arrived after its request stopped waiting. */
+.approval-late {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+}
+.approval-late p {
+  margin: 0;
+}
+.approval-card-note {
+  font-style: italic;
+}
+.approval-card-error {
+  margin: 0;
+  color: var(--danger);
+}
+.approval-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* The confirmation required before starting a YOLO launch
    (`yolo_confirm`). Deliberately loud: accidental YOLO launches on the wrong
    machine are what it exists to stop, and a prompt that looks like every

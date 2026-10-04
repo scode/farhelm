@@ -31,6 +31,16 @@
 //!   the exception that still does its job, by clicking the dialog's own
 //!   cancel control (so a cancel that is disabled while busy does nothing).
 //!
+//! One kind of element is deliberately left live: anything marked
+//! `data-modal-exempt` (today, only the agent approval cards in
+//! `approvals`). An agent that asks while a dialog is open is waiting on the
+//! card's answer, not on the dialog, and a card the user can see but not click
+//! would hold that agent for its whole wait. Only an exempt element that is
+//! itself a sibling of the dialog's ancestor chain is left live, which is
+//! where the cards are mounted; one nested deeper inside an element this
+//! inerts is inerted with it. Keys typed while focus is in an exempt element
+//! reach it.
+//!
 //! Ownership is exact. Only elements that did NOT already carry `inert` are
 //! marked and recorded, and release removes the attribute from exactly those,
 //! so a page that inerts something for its own reasons keeps it.
@@ -110,6 +120,7 @@ const ISOLATE_TEMPLATE: &str = r#"(() => {
     const owned = new Set();
     const claim = (node) => {
         if (!(node instanceof Element) || onPath.has(node) || node.hasAttribute('inert')) return;
+        if (node.matches('[data-modal-exempt]')) return;
         node.setAttribute('inert', '');
         owned.add(node);
     };
@@ -124,7 +135,7 @@ const ISOLATE_TEMPLATE: &str = r#"(() => {
             return;
         }
         const active = document.activeElement;
-        if (active && dialog.contains(active)) return;
+        if (active && (dialog.contains(active) || active.closest('[data-modal-exempt]'))) return;
         event.preventDefault();
         event.stopPropagation();
         dialog.focus({ preventScroll: true });

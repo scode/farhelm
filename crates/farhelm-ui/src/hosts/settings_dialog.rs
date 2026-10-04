@@ -54,13 +54,14 @@ const ADD_DIALOG_SELECTOR: &str = r#".host-add-dialog[role="dialog"]"#;
 const UNINSTALL_DIALOG_SELECTOR: &str = r#".host-uninstall-dialog[role="dialog"]"#;
 
 /// One setting the dialog can change, as the key its last write's outcome is
-/// filed under. A superset of [`EditField`]: the YOLO checkbox writes through
-/// the same `run` path but has no text editor.
+/// filed under. A superset of [`EditField`]: the two checkboxes write through
+/// the same `run` path but have no text editor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SettingsField {
     Destination,
     Alias,
     YoloWithoutAsking,
+    CommandsWithoutAsking,
 }
 
 impl From<EditField> for SettingsField {
@@ -227,15 +228,15 @@ pub(crate) fn install_dialog_with_selector(
 /// closed on success, gets there first; if focus is already on one of the
 /// dialog's controls by then, this leaves it alone.
 ///
-/// `reset_checkbox` is set after a refused YOLO toggle. That leaves the box
-/// showing the user's click while the setting never changed, and since the
-/// rendered value did not change either, nothing would redraw it; the reset
-/// puts the box back to the setting the page currently renders (see
-/// [`reset_yolo_checkbox_js`]).
+/// `reset_checkbox` is set after a refused checkbox toggle. That leaves the
+/// box showing the user's click while the setting never changed, and since
+/// the rendered value did not change either, nothing would redraw it; the
+/// reset puts both boxes back to the settings the page currently renders (see
+/// [`reset_checkboxes_js`]).
 fn refocus_after_write(reset_checkbox: bool) {
     let dialog = serde_json::to_string(DIALOG_SELECTOR).expect("a string always serializes");
     let reset = if reset_checkbox {
-        reset_yolo_checkbox_js()
+        reset_checkboxes_js()
     } else {
         String::new()
     };
@@ -276,30 +277,33 @@ fn focus_edit_button(field: EditField) {
     ));
 }
 
-/// JavaScript, run with `dialog` in scope, that sets the YOLO checkbox's
-/// shown state back to the setting the page currently renders.
+/// JavaScript, run with `dialog` in scope, that sets both checkboxes' shown
+/// state back to the settings the page currently renders.
 ///
-/// The value is read from the input's `data-yolo-without-asking` attribute when the
-/// script runs, not baked in when it is built: a host-list refresh landing
-/// in between (another client toggling the same host) must win over a reset
-/// that was queued against the older value.
-fn reset_yolo_checkbox_js() -> String {
-    "const toggle = dialog.querySelector('.host-yolo-without-asking-toggle'); \
-     if (toggle) toggle.checked = toggle.dataset.yoloWithoutAsking === 'true';"
+/// Each value is read from its input's `data-` attribute when the script
+/// runs, not baked in when it is built: a host-list refresh landing in
+/// between (another client toggling the same host) must win over a reset that
+/// was queued against the older value. Both boxes are reset whichever one was
+/// refused, because resetting one that already shows its setting is a no-op.
+fn reset_checkboxes_js() -> String {
+    "const yolo = dialog.querySelector('.host-yolo-without-asking-toggle'); \
+     if (yolo) yolo.checked = yolo.dataset.yoloWithoutAsking === 'true'; \
+     const commands = dialog.querySelector('.host-commands-without-asking-toggle'); \
+     if (commands) commands.checked = commands.dataset.commandsWithoutAsking === 'true';"
         .to_string()
 }
 
-/// Undo a YOLO checkbox click whose write never started.
+/// Undo a checkbox click whose write never started.
 ///
 /// The hosts panel refuses to start a write while another operation holds
 /// the page's lock; the click has already flipped the box by then, and with
 /// no write there is no end of one to trigger the reset in
 /// `refocus_after_write`.
-pub(super) fn reset_yolo_checkbox() {
+pub(super) fn reset_checkboxes() {
     let dialog = serde_json::to_string(DIALOG_SELECTOR).expect("a string always serializes");
     document::eval(&format!(
         "(() => {{ const dialog = document.querySelector({dialog}); if (!dialog) return; {} }})()",
-        reset_yolo_checkbox_js()
+        reset_checkboxes_js()
     ));
 }
 
@@ -314,6 +318,22 @@ fn yolo_help(yolo_without_asking: bool) -> &'static str {
     } else {
         "YOLO means an agent runs with no approval prompts: any command, any file, without asking you. \
          Farhelm asks you to confirm each YOLO launch on this host."
+    }
+}
+
+/// The explanation under the "run farhelm commands" checkbox, for its current
+/// state.
+///
+/// Says what the commands do (an agent in one of this host's sessions acting on
+/// the fleet) because the label alone does not, and the "on" text names what
+/// turning it on gives away.
+fn commands_help(commands_without_asking: bool) -> &'static str {
+    if commands_without_asking {
+        "Agents in this host's sessions start, stop, restart, rename and clone sessions on any host, \
+         and edit launch templates, without asking you."
+    } else {
+        "When an agent in one of this host's sessions asks Farhelm to start, stop, restart, rename or \
+         clone a session, or to edit a launch template, Farhelm asks you first."
     }
 }
 
@@ -336,6 +356,7 @@ pub(super) fn HostSettingsDialog(
     on_edit_submit: EventHandler<(HostId, EditField, String)>,
     on_edit_cancel: EventHandler<()>,
     on_yolo_without_asking: EventHandler<(HostId, bool)>,
+    on_commands_without_asking: EventHandler<(HostId, bool)>,
     on_close: EventHandler<()>,
 ) -> Element {
     let id = host.id;
@@ -351,10 +372,10 @@ pub(super) fn HostSettingsDialog(
     // Recover focus a write's disabled control dropped; see
     // `refocus_after_write`.
     let mut last_busy = use_signal(|| busy);
-    let yolo_refused = matches!(
+    let checkbox_refused = matches!(
         &outcome,
         Some((
-            Some(SettingsField::YoloWithoutAsking),
+            Some(SettingsField::YoloWithoutAsking | SettingsField::CommandsWithoutAsking),
             FieldOutcome::Error(_)
         ))
     );
@@ -362,7 +383,7 @@ pub(super) fn HostSettingsDialog(
         let previous = *last_busy.peek();
         last_busy.set(busy);
         if previous && !busy {
-            refocus_after_write(yolo_refused);
+            refocus_after_write(checkbox_refused);
         }
     }));
 
@@ -510,6 +531,23 @@ pub(super) fn HostSettingsDialog(
                     }
                     p { class: "host-settings-help", "{yolo_help(host.yolo_without_asking)}" }
                     {outcome_for(Some(SettingsField::YoloWithoutAsking))}
+                }
+                div { class: "host-settings-commands",
+                    label { class: "host-commands-without-asking",
+                        "data-tooltip": "let agents in this host's sessions start, stop and change sessions and templates without asking first",
+                        input {
+                            r#type: "checkbox",
+                            class: "host-commands-without-asking-toggle",
+                            checked: host.commands_without_asking,
+                            "data-commands-without-asking": "{host.commands_without_asking}",
+                            // One setting at a time, as for the YOLO box above.
+                            disabled: busy || editing.is_some(),
+                            onchange: move |event| on_commands_without_asking.call((id, event.checked())),
+                        }
+                        span { "run farhelm commands from this host without asking" }
+                    }
+                    p { class: "host-settings-help", "{commands_help(host.commands_without_asking)}" }
+                    {outcome_for(Some(SettingsField::CommandsWithoutAsking))}
                 }
                 div { class: "host-settings-actions",
                     button {
