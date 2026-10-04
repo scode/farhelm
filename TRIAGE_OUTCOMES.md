@@ -6486,3 +6486,18 @@
 - Execution: complete — change `ntqlspozlulspqxstoszrpvkqumkvkor`, bookmark
   `plan/triage-crash-replies-and-locks/04-cache-lock-respawn`, PR
   [#1515](https://github.com/scode/farhelm/pull/1515/changes).
+
+## build-metadata-false-old-version.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main by commit `7e13867506d2c39980062e2abcd3ef50aab90407` in
+  [#1418](https://github.com/scode/farhelm/pull/1418/changes). The old-version advisory in
+  `crates/farhelm-helm/src/hosts.rs` now uses `release_order`, which compares versions with `cmp_precedence` instead of
+  `<`. Build metadata therefore cannot mark an equally recent supervisor as old, including when only the helm has
+  metadata or both sides have different metadata. This path remains in use at `14c6b8b8`.
+- Decision: already fixed. The user (2026-10-04) requested removal only when a concrete code change clearly mooted the
+  finding; this commit replaced the exact comparison the finding reported.
+- Completion criteria: remove the feedback file and its index entry; preserve the fixing commit and PR here.
+- Execution: complete: feedback file and index entry removed during the queue cleanup. No code change was needed. Change
+  `qnulmtzkpxkkltutzlsswxwkronpltxt`, bookmark `pr/review-queue-resolved-findings`, PR
+  [#1580](https://github.com/scode/farhelm/pull/1580/changes).
