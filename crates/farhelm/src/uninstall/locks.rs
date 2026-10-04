@@ -27,7 +27,11 @@
 //! - [`RuntimeLocks`] (macOS): the supervisor's and helm's state-directory
 //!   flocks. The desktop app's managed supervisor and embedded helm hold
 //!   them, so an open app refuses the uninstall, and an app started during
-//!   it cannot serve, which also rules out creating a session. On Linux
+//!   it cannot serve, which also rules out creating a session. A starting
+//!   supervisor waits a while for a held lock (a Farhelm that was just quit
+//!   may still be shutting down), so it can outlast the removal; it then
+//!   refuses because its own program is gone, and the app still does not
+//!   open. On Linux
 //!   uninstall stops setup's services itself, after which only a process
 //!   the user started by hand could hold these locks, and stopping those is
 //!   already the operator's job (SPEC.md, "Operator prerequisites").
