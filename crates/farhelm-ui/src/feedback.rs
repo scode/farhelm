@@ -276,6 +276,7 @@ pub(crate) fn FeedbackDialog(
                         button {
                             r#type: "button",
                             class: "btn btn-primary feedback-send",
+                            "data-tooltip": "send: deliver this message privately to the maintainer",
                             disabled: !can_send,
                             onclick: send,
                             if sending { "sending…" } else { "send" }
@@ -284,6 +285,7 @@ pub(crate) fn FeedbackDialog(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral feedback-cancel",
+                        "data-tooltip": if state() == SendState::Sent { "close: your message was sent" } else { "cancel: close without sending" },
                         disabled: sending,
                         onclick: move |_| on_close.call(()),
                         if state() == SendState::Sent { "close" } else { "cancel" }

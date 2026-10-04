@@ -761,6 +761,7 @@ pub(crate) fn PlanConfirmation(
                 button {
                     r#type: "button",
                     class: "btn btn-primary provisioning-confirm",
+                    "data-tooltip": "{confirm_label}: carry out the plan shown above",
                     disabled: busy,
                     onclick: move |_| on_confirm.call(()),
                     "{confirm_label}"
@@ -768,6 +769,7 @@ pub(crate) fn PlanConfirmation(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral provisioning-cancel",
+                    "data-tooltip": "cancel: change nothing on this host",
                     disabled: busy,
                     onclick: move |_| on_cancel.call(()),
                     "cancel"
@@ -800,6 +802,7 @@ pub(crate) fn SetupPlanConfirmation(
             button {
                 r#type: "button",
                 class: "btn btn-primary provisioning-confirm",
+                "data-tooltip": "yes: set up this host as the plan above describes",
                 disabled: busy,
                 onclick: move |_| on_confirm.call(false),
                 "yes"
@@ -808,6 +811,7 @@ pub(crate) fn SetupPlanConfirmation(
                 button {
                     r#type: "button",
                     class: "btn btn-primary btn-outline",
+                    "data-tooltip": "yes, and set up new hosts from now on without asking",
                     aria_describedby: "host-setup-permanent-hint",
                     disabled: busy,
                     onclick: move |_| on_confirm.call(true),
@@ -820,6 +824,7 @@ pub(crate) fn SetupPlanConfirmation(
             button {
                 r#type: "button",
                 class: "btn btn-neutral add-host-cancel",
+                "data-tooltip": "cancel: change nothing on this host",
                 autofocus: true,
                 onclick: move |_| on_cancel.call(()),
                 "cancel"
@@ -848,6 +853,7 @@ pub(crate) fn UninstallConfirmation(
             button {
                 r#type: "button",
                 class: "btn btn-danger provisioning-confirm uninstall-confirm",
+                "data-tooltip": "uninstall: remove Farhelm from this host as described above",
                 disabled: busy,
                 onclick: move |_| on_confirm.call(()),
                 "uninstall"
@@ -855,6 +861,7 @@ pub(crate) fn UninstallConfirmation(
             button {
                 r#type: "button",
                 class: "btn btn-neutral provisioning-cancel uninstall-cancel",
+                "data-tooltip": "cancel: leave Farhelm installed on this host",
                 autofocus: true,
                 onclick: move |_| on_cancel.call(()),
                 "cancel"

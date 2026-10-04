@@ -68,6 +68,21 @@ impl HelpAction {
         }
     }
 
+    /// The item's hover text. The maintainer's exemption from hover text
+    /// covers described items in the session and host rows' `⋯` menus only,
+    /// so the help menu's items carry one, saying a little more than their
+    /// description line.
+    fn tooltip(self) -> &'static str {
+        match self {
+            HelpAction::SendFeedback => {
+                "send feedback: a private message to Farhelm's maintainer, not a public issue"
+            }
+            HelpAction::Documentation => {
+                "documentation: open the Farhelm documentation at farhelm.io/docs in your browser"
+            }
+        }
+    }
+
     /// The description line under the label.
     fn description(self) -> &'static str {
         match self {
@@ -275,6 +290,7 @@ fn HelpMenu(layout_epoch: ReadSignal<u64>, on_send_feedback: EventHandler<()>) -
                                     r#type: "button",
                                     class: "btn session-row-menu-item host-row-menu-item help-menu-item",
                                     "data-help-action": action.label(),
+                                    "data-tooltip": action.tooltip(),
                                     role: "menuitem",
                                     tabindex: if tab_stop == Some(action) { "0" } else { "-1" },
                                     onmounted: move |element| remember_menu_item(wiring, action, element.data()),

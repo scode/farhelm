@@ -449,6 +449,7 @@ pub(super) fn HostSettingsDialog(
                                 r#type: "button",
                                 class: "btn btn-neutral host-edit",
                                 aria_label: "edit destination",
+                                "data-tooltip": "edit: change the ssh destination Farhelm uses for this host",
                                 disabled: busy || editing.is_some(),
                                 onclick: {
                                     let destination = destination.clone();
@@ -479,6 +480,7 @@ pub(super) fn HostSettingsDialog(
                                 r#type: "button",
                                 class: "btn btn-neutral host-alias",
                                 aria_label: "edit alias",
+                                "data-tooltip": "edit: change the name this host is shown under",
                                 disabled: busy || editing.is_some(),
                                 onclick: {
                                     let alias = alias.clone().unwrap_or_default();
@@ -492,6 +494,7 @@ pub(super) fn HostSettingsDialog(
                 }
                 div { class: "host-settings-yolo",
                     label { class: "host-yolo-without-asking",
+                        "data-tooltip": "start YOLO sessions on this host without asking first",
                         input {
                             r#type: "checkbox",
                             class: "host-yolo-without-asking-toggle",
@@ -512,6 +515,7 @@ pub(super) fn HostSettingsDialog(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral host-settings-close",
+                        "data-tooltip": "close: done with this host's settings",
                         onclick: move |_| on_close.call(()),
                         "close"
                     }
@@ -558,6 +562,7 @@ pub(super) fn HostRemoveDialog(
                     button {
                         r#type: "button",
                         class: "btn btn-danger",
+                        "data-tooltip": "remove: forget this host; its supervisor and sessions keep running",
                         disabled: busy,
                         onclick: move |_| on_remove.call(false),
                         "remove"
@@ -566,6 +571,7 @@ pub(super) fn HostRemoveDialog(
                         button {
                             r#type: "button",
                             class: "btn btn-danger btn-outline",
+                            "data-tooltip": "remove it, and remove hosts without asking from now on",
                             aria_describedby: "host-remove-permanent-hint",
                             disabled: busy,
                             onclick: move |_| on_remove.call(true),
@@ -578,6 +584,7 @@ pub(super) fn HostRemoveDialog(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral host-settings-close",
+                        "data-tooltip": "cancel: keep this host",
                         autofocus: true,
                         onclick: move |_| {
                             return_focus_to_row(host.id);

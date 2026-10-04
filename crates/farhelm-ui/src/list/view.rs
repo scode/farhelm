@@ -2917,6 +2917,7 @@ pub(crate) fn ListView(
                     }
                 }
                 label { class: "compact-toggle",
+                    "data-tooltip": "compact: one line per session, with the folder shown on hover",
                     input {
                         r#type: "checkbox",
                         checked: compact,
@@ -2933,6 +2934,7 @@ pub(crate) fn ListView(
                 button {
                 r#type: "button",
                 class: "btn btn-primary new-session-button",
+                "data-tooltip": "new session: start an agent or a command on any host",
                 // The heading keeps the short visible word "new" while the
                 // accessible name preserves the object named by the former
                 // full-width label.
@@ -2995,6 +2997,7 @@ pub(crate) fn ListView(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral templates-button",
+                    "data-tooltip": "templates: saved session setups to start from",
                     aria_haspopup: "dialog",
                     disabled: busy,
                     onclick: move |_| templates_open.set(true),
@@ -3129,6 +3132,7 @@ pub(crate) fn ListView(
                 select {
                     class: "filter-host",
                     aria_label: "filter by host",
+                    "data-tooltip": "show only the sessions on one host",
                     value: filter.read().host.map(|id| id.to_string()).unwrap_or_default(),
                     onchange: move |evt| {
                         // Only the empty ALL value clears the query. The
@@ -3165,6 +3169,7 @@ pub(crate) fn ListView(
                 select {
                     class: "sort-select",
                     aria_label: "sort",
+                    "data-tooltip": "sort: the order of the session list, shared by every client",
                     value: sort().key(),
                     onchange: move |evt| {
                         // A word this build does not know is ignored rather
@@ -3196,6 +3201,7 @@ pub(crate) fn ListView(
                 button {
                     class: "btn",
                     r#type: "button",
+                    "data-tooltip": "dismiss: hide this notice",
                     onclick: move |_| {
                         let mut slot = delete_notice.0;
                         slot.set(None);

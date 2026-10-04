@@ -1443,6 +1443,7 @@ pub(crate) fn HostsPanel(
                     }
                 }
                 label { class: "host-details-control",
+                    "data-tooltip": "details: show every host's version, identity, sessions and diagnostics",
                     input {
                     r#type: "checkbox",
                     class: "host-details-toggle",
@@ -1464,6 +1465,7 @@ pub(crate) fn HostsPanel(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral update-all-button",
+                    "data-tooltip": "update all: update every remote host that has an update available",
                     disabled: !update_all_available,
                     onclick: move |_| {
                         // Read the latest snapshot at activation, since the
@@ -1491,6 +1493,7 @@ pub(crate) fn HostsPanel(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral add-host-button",
+                    "data-tooltip": "add host: connect a machine over ssh",
                     // The compact heading spends only the visible word
                     // "add"; assistive technology keeps the object that
                     // action adds, matching the form and existing callers.
@@ -1564,6 +1567,7 @@ pub(crate) fn HostsPanel(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral uninstall-notice-dismiss",
+                        "data-tooltip": "dismiss: hide this notice",
                         onclick: move |_| uninstall_notice.set(None),
                         "dismiss"
                     }
@@ -2960,6 +2964,7 @@ fn HostRow(
                         r#type: "button",
                         class: "btn host-row-menu",
                         aria_label: host_menu_label(&host.name),
+                        "data-tooltip": "host actions: settings, update, retry, remove and more",
                         aria_expanded: menu_open,
                         aria_haspopup: "menu",
                         onkeydown: move |evt| {
@@ -3498,12 +3503,14 @@ fn HostDestinationForm(
             button {
                 r#type: "submit",
                 class: "btn btn-primary host-save-destination",
+                "data-tooltip": if alias { "save the new alias" } else { "save the new ssh destination" },
                 disabled: busy,
                 "save"
             }
             button {
                 r#type: "button",
                 class: "btn btn-neutral host-cancel-edit",
+                "data-tooltip": "cancel: keep the current value",
                 disabled: busy,
                 onclick: move |_| {
                     if busy {
@@ -3758,6 +3765,7 @@ fn AddHostForm(
                 button {
                     r#type: "submit",
                     class: "btn btn-primary add-host-submit",
+                    "data-tooltip": "add: check the ssh destination, then add the host",
                     disabled: busy,
                     if *probing.read() { "probing…" } else { "add" }
                 }
@@ -3774,6 +3782,7 @@ fn AddHostForm(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral add-host-cancel",
+                        "data-tooltip": "cancel: close without adding a host",
                         onclick: move |_| on_cancel.call(()),
                         "cancel"
                     }

@@ -626,26 +626,31 @@ belongs to the engine and cannot be shortened by any attribute, style or script,
 embeds, also ignores the macOS tooltip-delay default; at a second or more, nobody discovered the hover texts that
 existed. So no element keeps a `title` as hover help, because one would bring the slow native box back on top. Elements
 opt in with a `data-tooltip` attribute, set like any other attribute by components, and by scripts on elements they
-create; one delegated listener set on `document` and one body-level `role="tooltip"` element serve the whole page,
-keeping the mechanism out of every component's props. The tooltip appears 300 ms after the pointer comes to rest on a
-target (each movement inside it restarts the wait) or keyboard focus (`:focus-visible`) reaches one, and at once when
-another target is entered while one is showing or within 300 ms of the pointer or focus leaving one (a press, Escape, a
-scroll or window blur does not open that window, so the next tooltip after a dismissal waits the full delay). It hides
-on leaving, any press (which keeps that element's tooltip down until the pointer leaves it or it loses focus), Escape,
-losing focus, window blur, the target leaving the document (checked on a short timer rather than with a DOM observer,
-which would run on every live status update), and a scroll of the document or of a container holding the target, but not
-a scroll elsewhere such as the terminal under live output. Touch never shows it. It is placed above the target with a 6
-px gap and, only without room there, below with a 28 px gap: a page cannot know the cursor's size, and standard cursors
-extend downward from their hot spot, so space above a control is never under the cursor while a box just below a small
-icon would be. It is `position: fixed` from the target's measured rectangle so no scroll container clips it, wears the
-row menu panels' background, border and shadow, wraps at about 280 px and clamps to eight lines. Peer text still goes
-through `display_peer` before it becomes tooltip text, which the script sets with `textContent`. The tooltip element is
-a visual aid kept out of the accessibility tree (`aria-hidden`); icon-only controls and status marks keep accessible
-text of their own (an `aria-label` or a `.visually-hidden` copy), and the hover texts that carry information a
-screen-reader user needs (the header copy buttons' full values, a host's update urgency, a too-new host's remedy) are
-also exposed as accessible descriptions. Plain timestamps and the client build string are hover-only. Two hover displays
-keep their own shape and carry no `data-tooltip`, so two popups never stack: a host's update-progress popup and the
-terminal's link-target display.
+create (terminal.js does for its reconnect and take-control buttons); one delegated listener set on `document` and one
+body-level `role="tooltip"` element serve the whole page, keeping the mechanism out of every component's props. The
+tooltip appears 300 ms after the pointer comes to rest on a target (each movement inside it restarts the wait) or
+keyboard focus (`:focus-visible`) reaches one, and at once when another target is entered while one is showing or within
+300 ms of the pointer or focus leaving one (a press, Escape, a scroll or window blur does not open that window, so the
+next tooltip after a dismissal waits the full delay). It hides on leaving, any press (which keeps that element's tooltip
+down until the pointer leaves it or it loses focus), Escape, losing focus, window blur, the target leaving the document
+(checked on a short timer rather than with a DOM observer, which would run on every live status update), and a scroll of
+the document or of a container holding the target, but not a scroll elsewhere such as the terminal under live output.
+Touch never shows it. It is placed above the target with a 6 px gap and, only without room there, below with a 28 px
+gap: a page cannot know the cursor's size, and standard cursors extend downward from their hot spot, so space above a
+control is never under the cursor while a box just below a small icon would be. It is `position: fixed` from the
+target's measured rectangle so no scroll container clips it, wears the row menu panels' background, border and shadow,
+wraps at about 280 px and clamps to eight lines. Peer text still goes through `display_peer` before it becomes tooltip
+text, which the script sets with `textContent`. The tooltip element is a visual aid kept out of the accessibility tree
+(`aria-hidden`); icon-only controls and status marks keep accessible text of their own (an `aria-label` or a
+`.visually-hidden` copy), and the hover texts that carry information a screen-reader user needs (the header copy
+buttons' full values, a host's update urgency, a too-new host's remedy) are also exposed as accessible descriptions.
+Plain timestamps and the client build string are hover-only. Two hover displays keep their own shape and carry no
+`data-tooltip`, so two popups never stack: a host's update-progress popup and the terminal's link-target display.
+Coverage is guarded by a browser sweep (`e2e/tests/tooltip-coverage.spec.ts`) that visits the states the suite's
+fixtures reach and fails on any visible `button`, `[role=button]`, `[role=tab]`, `[role=menuitem]`, `a[href]`, `select`,
+`summary`, checkbox or radio button without hover text (for the last two, on the `label` that wraps them), exempting
+only described items in the session and host rows' menus. The local and remote host marks carry their hover text inside
+the icon component itself, so the session rows and the host rows both get it without either row's layout changing.
 
 Known risks, accepted deliberately:
 

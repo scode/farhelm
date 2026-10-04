@@ -2686,7 +2686,7 @@ test("compact hides the second line and persists across client seeds", async ({
     await expect(compact).toBeChecked();
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(target.locator(".session-row-meta")).toHaveCount(0);
-    await expect(target.locator(".session-row-open")).toHaveAttribute("data-tooltip", session.cwd);
+    await expect(target.locator(".session-row-open")).toHaveAttribute("data-tooltip", `${session.cwd} — click to open`);
     // Compact mode keeps the first-line local-execution cue visible.
     await expect(target.locator(".host-kind-icon[data-glyph='local']")).toBeVisible();
     await expect(target.locator(".host-kind-icon[data-glyph='local']")).toHaveCSS("color", "rgb(224, 128, 128)");

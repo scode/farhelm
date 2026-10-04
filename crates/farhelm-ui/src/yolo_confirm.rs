@@ -248,6 +248,7 @@ pub(crate) fn YoloConfirmation(
                 button {
                     r#type: start_type,
                     class: "btn btn-danger yolo-confirm",
+                    "data-tooltip": "start the session in YOLO mode, where the agent acts without asking",
                     disabled: busy,
                     onclick: move |_| on_confirm.call(()),
                     "start YOLO session anyway"
@@ -256,6 +257,7 @@ pub(crate) fn YoloConfirmation(
                     button {
                         r#type: start_type,
                         class: "btn yolo-confirm-stop-asking",
+                        "data-tooltip": "start it, and start YOLO sessions on this host without asking from now on",
                         disabled: busy,
                         onclick: move |_| on_confirm_and_stop_asking.call(()),
                         "start, and don't ask again on this host"
@@ -264,6 +266,7 @@ pub(crate) fn YoloConfirmation(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral yolo-cancel",
+                    "data-tooltip": "cancel: go back without starting anything",
                     disabled: busy,
                     onclick: move |_| on_cancel.call(()),
                     "cancel"

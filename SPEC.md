@@ -902,7 +902,9 @@ than here.
 
 In the web and desktop clients, hover text appears about 300 ms after the pointer rests on a control or icon that has
 it, or keyboard focus reaches one, and at once when moving on to another while one is showing; it sits above the control
-so the pointer does not cover it.
+so the pointer does not cover it. Every clickable control and every icon that carries meaning has hover text saying what
+it is or does, plain-word buttons included, saying more than the label where it can. The one exception is an item in a
+row's actions menu that already shows a description line under its label.
 
 Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
 it. A compatible supervisor whose build is older than the helm's is still connected and usable, but its row says

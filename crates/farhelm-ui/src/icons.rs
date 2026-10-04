@@ -332,12 +332,19 @@ pub(crate) fn QualifierIcon(glyph: QualifierGlyph) -> Element {
 /// parsing detail. The outline stays quiet beside the status dot, permission mark,
 /// and title, and it carries the red local caution color without becoming
 /// a solid red patch the way a filled screen would.
+///
+/// The hover text is part of the mark rather than of each caller: the
+/// session rows and the host rows both draw it, and the maintainer asked for
+/// both to explain themselves on hover. It is the same sentence in both
+/// places because the mark means the same thing in both, and the SVG itself
+/// is the hover target, which keeps the rows' flex layout untouched.
 #[component]
 pub(crate) fn LocalHostIcon() -> Element {
     rsx! {
         svg {
             class: "host-kind-icon",
             "data-glyph": "local",
+            "data-tooltip": "local: on this machine, where the helm runs",
             view_box: "0 0 16 16",
             fill: "none",
             stroke: "currentColor",
@@ -360,13 +367,15 @@ pub(crate) fn LocalHostIcon() -> Element {
 /// heavier or filled mark would compete with the live status dot. A cloud
 /// can suggest internet hosting rather than an ordinary remote machine, so
 /// the caller's locality label stays authoritative and the glyph never
-/// stands alone.
+/// stands alone. Its hover text says what it means for the same reason
+/// [`LocalHostIcon`]'s does.
 #[component]
 pub(crate) fn RemoteHostIcon() -> Element {
     rsx! {
         svg {
             class: "host-kind-icon",
             "data-glyph": "remote",
+            "data-tooltip": "remote: on another machine, reached over ssh",
             view_box: "0 0 16 16",
             fill: "none",
             stroke: "currentColor",
