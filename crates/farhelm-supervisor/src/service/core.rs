@@ -3615,7 +3615,11 @@ async fn sweep_legacy_snapshots_dir(state_dir: &Path) {
 /// debris). Same placement and reasoning as [`sweep_launch_dir`]: after
 /// the exclusivity bind, best-effort and log-only.
 ///
-/// Scoped specifically to names starting with `.tmux.conf` (not a bare
+/// Also sweeps the Running record's staging files, which share the
+/// convention.
+///
+/// Scoped specifically to names starting with `.tmux.conf` and
+/// `.running-version` (not a bare
 /// [`crate::files::is_staged_temp_name`] check against the whole state
 /// dir) because the state-dir root also holds `supervisor.db`,
 /// `supervisor.sock`, and `supervisor.lock` — none of which stage temp
@@ -3623,7 +3627,10 @@ async fn sweep_legacy_snapshots_dir(state_dir: &Path) {
 /// this sweep from ever needing to reason about entries that are not its
 /// concern at all.
 async fn sweep_tmux_config_temp_files(state_dir: &Path) {
-    const CONFIG_TEMP_PREFIX: &str = ".tmux.conf.tmp-";
+    // The Running record goes through the same staged write as the tmux
+    // config (`crate::files::overwrite_private_file_sync`), so a crash
+    // mid-write leaves the same kind of orphan beside it.
+    const TEMP_PREFIXES: [&str; 2] = [".tmux.conf.tmp-", ".running-version.tmp-"];
     let mut entries = match tokio::fs::read_dir(state_dir).await {
         Ok(entries) => entries,
         Err(e) => {
@@ -3635,10 +3642,9 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
         match entries.next_entry().await {
             Ok(None) => break,
             Ok(Some(entry)) => {
-                let is_temp_file = entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| name.starts_with(CONFIG_TEMP_PREFIX));
+                let is_temp_file = entry.file_name().to_str().is_some_and(|name| {
+                    TEMP_PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+                });
                 if is_temp_file && let Err(e) = tokio::fs::remove_file(entry.path()).await {
                     warn!(path = %entry.path().display(), error = %e,
                         "could not remove orphaned tmux-config temp file");
@@ -4212,8 +4218,24 @@ pub struct Supervisor {
     pub(crate) next_transfer: AtomicU64,
     /// This binary's own path: the launch shim is a subcommand of it.
     farhelm_exe: PathBuf,
-    /// [`Self::farhelm_exe`] as a `str`, resolved ONCE at construction
-    /// rather than per launch.
+    /// Where [`Self::farhelm_exe`] sits in the Mac app bundle's versioned
+    /// layout, when it does (see [`crate::app_bundle`]). `None` everywhere
+    /// else, which is every Linux install, development build and test.
+    versioned_program: Option<crate::app_bundle::VersionedProgram>,
+    /// The `farhelm` a session keeps beyond this supervisor's life: the
+    /// program in its hook command lines and reporter variables, and the
+    /// directory put first on its `PATH`.
+    ///
+    /// The bundle's forwarder when this supervisor runs from the versioned
+    /// layout, [`Self::farhelm_exe`] otherwise. Not the launch shim: the
+    /// shim reads a launch description only this supervisor's own version
+    /// writes, so it stays [`Self::farhelm_exe`]. Everything here, by
+    /// contrast, can be run again after Farhelm restarts on a newer
+    /// version, and the forwarder is what sends it to the right one
+    /// (SPEC_impl.md, "Side-by-side versions inside Farhelm.app").
+    session_farhelm_exe: PathBuf,
+    /// [`Self::session_farhelm_exe`] as a `str`, resolved ONCE at
+    /// construction rather than per launch.
     ///
     /// It exists because of what the conversation hook has to do with the
     /// path: every [`crate::agent_kind::AgentIntegration::hook_argv`]
@@ -4221,13 +4243,12 @@ pub struct Supervisor {
     /// `shell_words::quote`, which takes `&str` and nothing else.
     ///
     /// Always present: construction refuses a farhelm path that is not
-    /// valid UTF-8 (SPEC.md "Paths that are not valid UTF-8"). An earlier
-    /// version kept `None` here as a supposedly harmless degradation, on the
-    /// belief that only the hooks needed the path as text, but the launch
-    /// shim is run through a shell command line too
-    /// ([`crate::launch::window_command`]), so such a path broke every
-    /// launch.
-    farhelm_exe_str: String,
+    /// valid UTF-8 (SPEC.md "Paths that are not valid UTF-8"), because the
+    /// launch shim is run through a shell command line built from
+    /// [`Self::farhelm_exe`] ([`crate::launch::window_command`]) and the
+    /// hooks embed this one; this is either that path or one derived from it
+    /// by replacing ASCII components, so it is valid UTF-8 too.
+    session_farhelm_exe_str: String,
     /// Admission control for the management requests spawned by
     /// `handle_control` (`StopSession`/`DeleteSession` and the rest — see
     /// `HANDLER_ADMISSION_PERMITS`'s own docs, including why a full cap
@@ -5098,19 +5119,29 @@ impl Supervisor {
                 .join(farhelm_exe)
         };
         // Derived from the ABSOLUTE spelling above, never from the
-        // caller's, so the string the hook flags carry is the same path
-        // the shim is launched through. Every launch runs the shim through a
-        // shell command line built from this path, so one that is not valid
-        // UTF-8 cannot launch anything; see `Supervisor::farhelm_exe_str`.
-        // Checked before the state directory is created, so a refused start
-        // leaves nothing behind.
-        let Some(farhelm_exe_str) = farhelm_exe.to_str().map(str::to_string) else {
+        // caller's, so the hook flags and the shim name absolute paths
+        // (outside the Mac app's versioned layout, the same one). Every launch
+        // runs the shim through a shell command line built from this path, so
+        // one that is not valid UTF-8 cannot launch anything; see
+        // `Supervisor::session_farhelm_exe_str`. Checked before the state
+        // directory is created, so a refused start leaves nothing behind.
+        if farhelm_exe.to_str().is_none() {
             anyhow::bail!(
                 "this farhelm program's path, {}, is not valid UTF-8; Farhelm does not \
                  support such paths, and no agent could be launched through it",
                 farhelm_exe.display()
             );
-        };
+        }
+        // Decided once, from the path this supervisor runs from; see
+        // `session_farhelm_exe` for what each half is used for.
+        let versioned_program = crate::app_bundle::versioned_program(&farhelm_exe);
+        let session_farhelm_exe = versioned_program
+            .as_ref()
+            .map_or_else(|| farhelm_exe.clone(), |program| program.forwarder.clone());
+        let session_farhelm_exe_str = session_farhelm_exe
+            .to_str()
+            .expect("derived from a UTF-8 path by replacing ASCII components")
+            .to_string();
         if state_dir.to_str().is_none() {
             anyhow::bail!(
                 "the supervisor state directory, {}, is not valid UTF-8; Farhelm does not \
@@ -5297,7 +5328,9 @@ impl Supervisor {
             uploads: Mutex::new(HashMap::new()),
             next_transfer: AtomicU64::new(1),
             farhelm_exe,
-            farhelm_exe_str,
+            versioned_program,
+            session_farhelm_exe,
+            session_farhelm_exe_str,
             admission: Arc::new(tokio::sync::Semaphore::new(HANDLER_ADMISSION_PERMITS)),
             list_admission: Arc::new(tokio::sync::Semaphore::new(LIST_ADMISSION_PERMITS)),
             directory_browse_workers: Arc::new(tokio::sync::Semaphore::new(
@@ -6427,6 +6460,32 @@ impl Supervisor {
         state_dir.join("supervisor.sock")
     }
 
+    /// The tmux window command that runs this supervisor's launch shim on
+    /// `spec_path`.
+    ///
+    /// Always [`Self::farhelm_exe`], never the session program: the shim
+    /// reads a launch description only this supervisor's own version
+    /// writes, and the tmux window carries no `FARHELM_SUPERVISOR_SOCK` for
+    /// the forwarder to find the Running record by, so through the forwarder
+    /// a mid-update launch would run the newly installed shim against this
+    /// version's description.
+    pub(crate) fn shim_window_command(
+        &self,
+        shell: &str,
+        spec_path: &Path,
+        scope_prefix: Vec<String>,
+    ) -> Vec<String> {
+        window_command(shell, &self.farhelm_exe, spec_path, scope_prefix)
+    }
+
+    /// The directory a launch puts first on the session's `PATH`, so that
+    /// `farhelm` there is [`Self::session_farhelm_exe`].
+    pub(crate) fn session_bin_dir(&self) -> &Path {
+        self.session_farhelm_exe
+            .parent()
+            .expect("an absolute farhelm executable has a parent directory")
+    }
+
     /// Accept connections forever on this supervisor's own state dir.
     /// The directory is not a parameter: a caller passing a different one
     /// would bind the socket in one place while launch specs land in
@@ -6455,6 +6514,18 @@ impl Supervisor {
                 self.state_dir.display()
             );
         }
+        // The Running record next, as soon as the right to serve is held and
+        // well before the socket exists: until it names this version, the
+        // forwarder in every running session still sends hooks and
+        // `farhelm` commands to the predecessor's version, which may not
+        // speak this one's protocol. See
+        // `crate::app_bundle::publish_running_record`.
+        crate::app_bundle::publish_running_record(
+            &self.state_dir,
+            self.versioned_program.as_ref(),
+            self.ownership.clone(),
+        )
+        .await?;
         // Reload the session map now that the right to serve is actually
         // held. The load the constructor already did can be stale: this
         // process's construction can overlap a still-running predecessor
@@ -13111,7 +13182,7 @@ impl Supervisor {
             snapshot,
             &self.seams.agent_hooks,
             self.seams.agent_instructions,
-            Some(self.farhelm_exe_str.as_str()),
+            Some(self.session_farhelm_exe_str.as_str()),
             vendor_extension,
             session,
         )
@@ -13238,11 +13309,7 @@ impl Supervisor {
             session_id: id.to_string(),
             session_token: session_token.to_string(),
             supervisor_sock: Self::socket_path(&self.state_dir),
-            farhelm_bin_dir: self
-                .farhelm_exe
-                .parent()
-                .expect("an absolute farhelm executable has a parent directory")
-                .to_path_buf(),
+            farhelm_bin_dir: self.session_bin_dir().to_path_buf(),
             // The session-terminal checkout preparation for a fresh GitHub
             // checkout (Design D): the shim clones, runs the post-clone
             // hook, and only then execs the agent — all inside this
@@ -13334,7 +13401,7 @@ impl Supervisor {
             },
             None => Vec::new(),
         };
-        let cmd = window_command(&shell, &self.farhelm_exe, &spec_path, scope_prefix);
+        let cmd = self.shim_window_command(&shell, &spec_path, scope_prefix);
         let fresh_target = !matches!(&target, SpawnTarget::Reuse(_));
         let existing_session = match &target {
             SpawnTarget::ExistingSession(session) => Some((*session).to_string()),
@@ -15156,8 +15223,19 @@ pub(crate) mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("tmux.conf"), b"set -g exit-empty off\n").unwrap();
         std::fs::write(tmp.path().join(".tmux.conf.tmp-deadbeef"), b"partial").unwrap();
+        std::fs::write(tmp.path().join("running-version"), b"9.9.9\n").unwrap();
+        std::fs::write(tmp.path().join(".running-version.tmp-deadbeef"), b"9.9").unwrap();
 
         sweep_tmux_config_temp_files(tmp.path()).await;
+
+        assert!(
+            tmp.path().join("running-version").exists(),
+            "the published Running record must never be removed by this sweep"
+        );
+        assert!(
+            !tmp.path().join(".running-version.tmp-deadbeef").exists(),
+            "an orphaned Running-record temp file must be removed"
+        );
 
         assert!(
             tmp.path().join("tmux.conf").exists(),
@@ -22576,6 +22654,125 @@ exit 0
             err.to_string().contains("already running"),
             "the refusal must say why: {err:#}"
         );
+    }
+
+    /// Serve `sup` in an abandoned task and wait until its socket answers,
+    /// the point by which [`Supervisor::serve`] has published the Running
+    /// record. The task is returned so the caller can abort it; `StateDir`'s
+    /// drop reaps the tmux server.
+    async fn serve_until_answering(
+        sup: &Arc<Supervisor>,
+    ) -> tokio::task::JoinHandle<anyhow::Result<()>> {
+        let serving = Arc::clone(sup);
+        let served = tokio::spawn(async move { serving.serve().await });
+        let socket = Supervisor::socket_path(&sup.state_dir);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        while UnixStream::connect(&socket).await.is_err() {
+            assert!(
+                !served.is_finished(),
+                "serve ended early: {:?}",
+                served.await
+            );
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "serve never answered"
+            );
+            // sleep-ok: poll the socket, the readiness oracle for a served supervisor, until the deadline.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        served
+    }
+
+    /// A supervisor running from the Mac app's versioned layout must hand
+    /// sessions the bundle's forwarder for everything they keep, and keep
+    /// its own versioned program only for the launch shim. Sessions outlive
+    /// it: after an update and a restart their hooks and `farhelm` commands
+    /// must reach the version that is running, which only the forwarder can
+    /// pick, while the shim reads a description only this version writes.
+    /// Pinned on the values sessions actually receive: the hook command
+    /// line, a reporter variable, the `PATH` entry and the shim's window
+    /// command, and the Running record naming the version once it serves.
+    #[farhelm_testtrace::test]
+    async fn a_supervisor_in_the_versioned_layout_hands_sessions_the_forwarder() {
+        let state = StateDir::new();
+        let contents = state.path().join("Farhelm.app").join("Contents");
+        let program = contents.join("Versions").join("9.9.9").join("farhelm");
+        let forwarder = contents.join("MacOS").join("farhelm");
+        let sup = Supervisor::new_with_exe(state.path(), program.clone())
+            .await
+            .expect("supervisor");
+        let window = sup
+            .shim_window_command("/bin/sh", Path::new("/state/launch/s.json"), Vec::new())
+            .join(" ");
+        assert!(window.contains(program.to_str().unwrap()), "{window}");
+        assert!(!window.contains(forwarder.to_str().unwrap()), "{window}");
+        assert_eq!(sup.session_bin_dir(), contents.join("MacOS"));
+        let (goose_argv, goose_hooked) = sup.with_hook_argv(
+            vec!["goose".to_string()],
+            &hook_snapshot(AgentKind::Goose),
+            None,
+            "session-1",
+        );
+        assert!(goose_hooked, "fixture: the Goose launch must be hooked");
+        let reporter = format!(
+            "{}={}",
+            crate::launch::GOOSE_REPORTER_EXE_ENV_VAR,
+            forwarder.display()
+        );
+        assert!(goose_argv.contains(&reporter), "{goose_argv:?}");
+        let (argv, hooked) = sup.with_hook_argv(
+            vec!["claude".to_string()],
+            &hook_snapshot(AgentKind::Claude),
+            None,
+            "session-1",
+        );
+        assert!(hooked, "fixture: the Claude launch must be hooked");
+        let joined = argv.join(" ");
+        assert!(joined.contains(forwarder.to_str().unwrap()), "{joined}");
+        assert!(!joined.contains(program.to_str().unwrap()), "{joined}");
+
+        let served = serve_until_answering(&sup).await;
+        assert_eq!(
+            std::fs::read_to_string(state.path().join(crate::app_bundle::RUNNING_RECORD))
+                .expect("the Running record"),
+            "9.9.9\n"
+        );
+        served.abort();
+    }
+
+    /// Outside the layout nothing changes: sessions get the supervisor's
+    /// own program, as before. A Running record left by an earlier
+    /// supervisor from the layout is removed when this one serves, so the
+    /// forwarder in an older session sends its commands to the Installed
+    /// version rather than to one that is no longer running.
+    #[farhelm_testtrace::test]
+    async fn a_supervisor_outside_the_layout_keeps_its_program_and_clears_the_record() {
+        let state = StateDir::new();
+        let record = state.path().join(crate::app_bundle::RUNNING_RECORD);
+        std::fs::write(&record, "9.9.8\n").expect("fixture: a leftover record");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let own = sup.farhelm_exe.to_str().unwrap().to_string();
+        let window = sup
+            .shim_window_command("/bin/sh", Path::new("/state/launch/s.json"), Vec::new())
+            .join(" ");
+        assert!(window.contains(&own), "{window}");
+        let (argv, hooked) = sup.with_hook_argv(
+            vec!["claude".to_string()],
+            &hook_snapshot(AgentKind::Claude),
+            None,
+            "session-1",
+        );
+        assert!(hooked, "fixture: the Claude launch must be hooked");
+        assert!(argv.join(" ").contains(&own), "{argv:?}");
+        assert_eq!(sup.session_bin_dir(), sup.farhelm_exe.parent().unwrap());
+        let served = serve_until_answering(&sup).await;
+        assert!(
+            !record.exists(),
+            "the leftover record must be gone once serving"
+        );
+        served.abort();
     }
 
     /// Item 9: a launch spec that fails to publish must mean the tmux

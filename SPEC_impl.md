@@ -2790,8 +2790,9 @@ proxy. (An underscore prefix like `_stdio` was considered; it is not a recognize
 `internal` namespace is self-describing and gives future internal commands a home.)
 
 Motivation: one binary is one provisioning artifact and guarantees the spawn CLI exists inside every session (the
-supervisor puts its own binary on the session PATH). clap-derive because it is the standard and keeps the grammar
-declared next to the types.
+supervisor puts its own binary on the session PATH, or in the Mac app's versioned layout the forwarder that reaches the
+running version; see "Side-by-side versions inside Farhelm.app"). clap-derive because it is the standard and keeps the
+grammar declared next to the types.
 
 ## Native app packaging
 
@@ -2810,18 +2811,19 @@ would make an executable named `Farhelm` the same directory entry as its require
 for LAUNCHER IDENTITY only: Spotlight/Alfred launchability, a Dock icon, a Cmd-Tab name, and Launch Services'
 single-instance activation (relaunching activates the running app instead of racing it for the embedded helm's state).
 It is a derived artifact rebuilt wholesale by every install run — the flat pair stays the source of truth and the only
-state the installer's transaction journal covers — and nothing in the app reads it: asset serving stays the embedded
-tree below, and the sibling contract is satisfied inside `Contents/MacOS/` exactly as it is in `~/.local/bin`. The
-installer is macOS-only and always assembles the app; an archive without its icon is refused before replacement. An
-existing `Farhelm.app` is replaced only when its ownership record (`Contents/.farhelm-installation`) names this
-installation's directory, names a directory that now resolves to it or no longer holds a Farhelm installation (a legacy
-custom installation moved, a directory was replaced by a symlink, or the home was renamed), or when it is the recordless
-layout the installer built before records existed. A record naming a directory that still holds an installation belongs
-to that installation; the installer refuses it and says which directory it names. Only one run assembles the bundle at a
-time, including older installers using another directory: a run that finds `~/Applications/.farhelm-app.lock` held, or
-left by an interrupted run, refuses the bundle step. The new bundle is built in a private directory beside the old one
-and the old one is moved aside rather than deleted in place, so an interrupted run leaves the old bundle, the new one,
-or none under the public name, never a partial bundle whose record is gone.
+state the installer's transaction journal covers — and nothing in the app reads it, apart from finding its own version's
+`farhelm` in the side-by-side layout below: asset serving stays the embedded tree below, and outside that layout the
+sibling contract is satisfied inside `Contents/MacOS/` exactly as it is in `~/.local/bin`. The installer is macOS-only
+and always assembles the app; an archive without its icon is refused before replacement. An existing `Farhelm.app` is
+replaced only when its ownership record (`Contents/.farhelm-installation`) names this installation's directory, names a
+directory that now resolves to it or no longer holds a Farhelm installation (a legacy custom installation moved, a
+directory was replaced by a symlink, or the home was renamed), or when it is the recordless layout the installer built
+before records existed. A record naming a directory that still holds an installation belongs to that installation; the
+installer refuses it and says which directory it names. Only one run assembles the bundle at a time, including older
+installers using another directory: a run that finds `~/Applications/.farhelm-app.lock` held, or left by an interrupted
+run, refuses the bundle step. The new bundle is built in a private directory beside the old one and the old one is moved
+aside rather than deleted in place, so an interrupted run leaves the old bundle, the new one, or none under the public
+name, never a partial bundle whose record is gone.
 
 The dx-produced bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's
 `asset!()` files were the only thing that needed one. They are served instead from the UI tree compiled into
@@ -2851,6 +2853,47 @@ the generic package and the Mac loses its window; delete the `dist = false` and 
 
 Native glue (dock/menu integration, plus whatever proves genuinely necessary — see the clipboard note in the Dioxus
 risks) lives behind a feature flag in farhelm-ui, kept deliberately thin.
+
+### Side-by-side versions inside Farhelm.app
+
+On the Mac the app bundle holds every kept version of the command-line program side by side, so that an update never
+replaces a program a running Farhelm still starts. The layout, with `<v>` a release version such as `0.21.0`:
+
+- `Contents/MacOS/farhelm-desktop`, the app's main program, replaced by rename when an update switches versions.
+- `Contents/Versions/<v>/farhelm`, one folder per kept version, written completely before anything points at it.
+- `Contents/Versions/installed`, the Installed record: one line naming the version the next start of Farhelm uses.
+- `Contents/MacOS/farhelm`, the forwarder: a short `sh` script that runs one of the versioned programs.
+
+Two records decide which version runs. Installed belongs to the installer, which may change it while an older Farhelm is
+running; this record, the version folders and the forwarder are all written by `install.sh`. Running belongs to Farhelm:
+a supervisor whose own program is `…/Contents/Versions/<v>/farhelm` writes `<v>` to `running-version` in its state
+directory, beside `supervisor.sock`: one line holding `<v>`, written to a temporary file and renamed into place, once it
+holds the right to serve and before it binds its socket. The version comes from the program's path rather than from the
+version compiled into it, because the path is what the forwarder and the installer's cleanup can see. A supervisor that
+serves from anywhere else (a development build, a Linux install) removes a `running-version` it finds, since it is not
+the version that record would name. Recognizing the layout is by path alone
+(`crates/farhelm-supervisor/src/app_bundle.rs`) and works the same on every platform; only the Mac installer ever builds
+the shape, so elsewhere nothing changes.
+
+Inside that layout the supervisor hands sessions two different programs. Its own launch shim (`internal launch`, run in
+each session's tmux window) is its own versioned program, because the launch description it writes is read only by its
+own version. Everything a session keeps beyond its supervisor's life names the forwarder instead: the hook command
+lines, the reporter variables, and the directory put first on the session's `PATH`. Desktop-managed supervisors before
+this layout ran from `Contents/MacOS/farhelm`, so sessions they started already hold that path, and putting the
+forwarder exactly there is what keeps them working without migration; it must never move. Outside the layout the
+supervisor uses its own program for all of these, as it always has.
+
+The forwarder's contract, which a later installer may only replace by rename and only with a script that forwards every
+older invocation the same way: it resolves its own real path (it is reached through `~/.local/bin/farhelm` from a
+terminal) to find the bundle; when `FARHELM_SUPERVISOR_SOCK` is set and a `running-version` exists beside that socket,
+it runs that version, and otherwise the Installed one; it `exec`s `Contents/Versions/<version>/farhelm` with the
+arguments, environment and standard streams unchanged, and prints one line and exits non-zero if that version's folder
+is missing. It never takes or tests `supervisor.lock`.
+
+The desktop app starts its managed supervisor from `Contents/Versions/<its own compiled version>/farhelm` when its
+bundle has a `Contents/Versions/` folder, and refuses with an error naming the missing folder rather than falling back
+to its sibling, which in that layout is the forwarder. `FARHELM_DESKTOP_FARHELM` still overrides the choice, and an app
+without the folder still uses its sibling.
 
 ## Provisioning
 
@@ -3142,6 +3185,10 @@ wire format:
   agent's own session or host, the bare session id that spawn, create and clone print, and the flags a refusal tells
   them to add). The instructions pointer and `farhelm agent instructions` put that text in the agent's context, and in a
   resumed conversation's, so the agent keeps typing and parsing what it was told after the binary behind it has changed.
+- In the Mac app's side-by-side layout (see "Side-by-side versions inside Farhelm.app"): the forwarder at
+  `Contents/MacOS/farhelm`, which every session's paths above lead to, and the Running record `running-version` beside
+  the supervisor socket, one line naming the running version. A forwarder written by a newer installer reads records
+  written by older supervisors that are still running, so the record's name, place and format stay as they are.
 
 Every path among those values (the hook's program, the reporter variables, the `PATH` entry, the `-e` asset, the
 supervisor socket) must keep naming a working `farhelm` or file after an update. An installer, a change of layout, or a
@@ -3154,7 +3201,12 @@ it reaches, such as a launcher that picks which installed version to run, passes
 stderr and exit status through unchanged, prints nothing of its own when it succeeds, and replaces itself with that
 binary (`exec`) rather than running it as a child: hook attribution walks the reporter's process ancestry to the
 session's pane, and an extra process in that chain is an unclassified intermediary that gets the report refused.
-Reviewers check every change that touches any of the above against this section.
+Reviewers check every change that touches any of the above against this section. The launch description a supervisor
+writes for its launch shim (the `LaunchSpec` JSON under `launch/` and its status file) is outside this surface: in the
+Mac app's versioned layout the shim is the supervisor's own versioned program, which an update never removes while that
+supervisor runs (see "Side-by-side versions inside Farhelm.app"). On a Linux host, provisioning renames a new binary
+over the running one before it restarts the supervisor, and a session launched in between runs the new shim against the
+old supervisor's description; this section does not cover that window.
 
 SPEC.md (Durability and resume) has compatibility decided with the maintainer feature by feature; this section is that
 decision for what sessions hold, and it applies from here on. Breaks already decided stay as they were: hooks that

@@ -389,8 +389,7 @@ impl DesktopBootstrap {
                     // server") — the `FARHELM_TMUX` below is what names the
                     // substrate — and
                     // the supervisor is launched by absolute path while the
-                    // launch shim prepends its own directory for the spawn
-                    // CLI inside sessions, so nothing else needed it.
+                    // launch shim prepends the directory the supervisor names\n\1// for the spawn CLI inside sessions, so nothing else needed it.
                     //
                     // Retaining the write end tethers only the child this app
                     // owns, including GUI exits that skip Rust destructors.
@@ -402,7 +401,7 @@ impl DesktopBootstrap {
                 }
                 command.spawn().with_context(|| {
                     format!(
-                        "starting the managed supervisor child through the sibling farhelm at {}",
+                        "starting the managed supervisor child through the farhelm at {}",
                         farhelm.display()
                     )
                 })?

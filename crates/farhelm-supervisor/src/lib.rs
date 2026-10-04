@@ -39,6 +39,7 @@
 //! the sweep that decides what to kill is shared verbatim.
 
 pub mod agent_kind;
+pub mod app_bundle;
 pub mod attachments;
 /// Running a helper program with a deadline, output caps, and a
 /// process-group kill.
