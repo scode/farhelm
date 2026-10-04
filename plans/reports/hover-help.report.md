@@ -119,3 +119,51 @@ you asked.
   mode understating that the old session is deleted, "reset choices" restoring remembered permissions rather than
   clearing them, the settings checkboxes, and making the coverage test check each screen's own controls and reach the
   new-session form after an agent is picked.
+
+### Landing
+
+Landed on 2026-10-04 as #1589 (the tooltip itself) and then #1590 (hover text on every control), each as its own squash
+commit on main.
+
+#### What else was on main
+
+Nothing that could interact. Reading every change that reached main between the commit the stack was built on and the
+landing showed only the planning queue's own bookkeeping (this plan's delivery and landing claim), which touches no
+code, spec or test. No other plan landed in the same round. An independent review by a fresh-context sub-agent, done
+before anything merged, reached the same conclusion.
+
+#### A fix made while landing
+
+That independent review also found a problem inside the stack itself, which the report did not mention. In #1589, the
+hover text on the new-session form's recent-setup buttons moved from the browser's tooltip to Farhelm's own tooltip. Two
+existing browser tests still found those buttons by their browser-tooltip text, which no longer exists, so they would
+have failed. That was worked out from the code (the lookup they used only sees the browser's tooltip), not seen in a
+run:
+
+- the sidebar test that walks the new-session form's reset notices through every restored choice (on both Chromium and
+  WebKit);
+- the new-session form's screenshot matrix, a browser test that captures the form in many states for visual review and
+  picks recent-setup buttons the same way (Chromium only).
+
+The executor's reruns of "every existing test that checked a hover text" covered tests that assert on the hover text
+itself, but not these two, which only use it to find a button. Each of those buttons carries the same full description
+as its accessible name, so the fix looks them up by name instead. It went into #1589's commit, the one that made the
+change, before anything merged; no product code changed. A search of all browser tests in the final stack (both PRs)
+found no other lookups by browser-tooltip text.
+
+#### Checks
+
+- Run now: the two affected browser tests through the test-run recorder on the final stack, on Chromium and WebKit
+  (`npx playwright test 'sidebar\.spec\.ts' 'f20_visual_capture\.spec\.ts' -g 'composer reset notices follow every
+  restored-choice transition|F20 visual capture matrix'`):
+  run `3e74f3e9`, 3 passed and 1 skipped (the screenshot matrix is Chromium-only by design).
+  `python -B scripts/check-test-sleeps.py` on the landed main: no unannotated delays.
+- Skipped: `dprint check` on the two edited test files, because dprint does not format TypeScript in this repository.
+  The full browser suite and the Rust suites, because nothing new reached main besides queue bookkeeping and the fix
+  touched only two test lookups, which the run above exercised.
+- Reused: the rest of the report's Checks section. The landing fix changed only how two tests find their buttons, and
+  main brought no code, so that evidence still applies to what landed.
+
+The landing made two things in the report's Checks section untrue. It says its checks ran on "the final code of both
+PRs", but the final code now includes the landing fix, which only the checks above saw. And "every existing browser test
+that checked a hover text … passed" did not include the two tests above, which would have failed.
