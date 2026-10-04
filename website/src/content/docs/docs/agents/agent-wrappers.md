@@ -88,16 +88,17 @@ accepts a Claude report from the session's own process or that process's direct 
 the session starts through its shell (a shelled-out sub-agent) from replacing the conversation you are in. A resident
 wrapper that runs Claude itself is exactly one level, so it keeps reporting. A chain of two resident launchers — a
 wrapper that runs a script, which in turn runs Claude without `exec` — puts Claude too far below: its reports are
-refused, the hook log records a `refused conflict` line, and the session cannot be restarted. A launcher that `exec`s
-(as `env` does, and as a script ending in `exec claude "$@"` does) replaces itself rather than staying in the chain, so
-it adds no level.
+refused, the hook log records a `refused conflict` line from the supervisor, and the session cannot be restarted. A
+launcher that `exec`s (as `env` does, and as a script ending in `exec claude "$@"` does) replaces itself rather than
+staying in the chain, so it adds no level.
 
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —
 no sweep will claim a process that does not carry it), `FARHELM_AGENT_ID` (the same session id again, under a name that
 says this process belongs to the session's AGENT rather than to one of its terminal tabs; that is the marker a stop
 selects on), `FARHELM_SESSION_TOKEN` (the bearer credential proving a spawn request came from this session), and
-`FARHELM_SUPERVISOR_SOCK` (the supervisor socket to dial). A wrapper inherits all four and passes them to its child by
-default, so this needs no thought unless your wrapper deliberately scrubs the environment.
+`FARHELM_SUPERVISOR_SOCK` (the supervisor socket, whose directory is also where conversation reports are saved). A
+wrapper inherits all four and passes them to its child by default, so this needs no thought unless your wrapper
+deliberately scrubs the environment.
 
 ## What happens on stop
 

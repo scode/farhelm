@@ -41,9 +41,14 @@ and it updates as the agents work.
 ## Close Farhelm and come back
 
 Quit Farhelm while the agent is working, then open it again: the session is still there, still running, and its terminal
-shows everything that happened while Farhelm was closed. Sessions keep running until you stop them or your Mac reboots.
-After a reboot they show as interrupted, ready to start again; [What survives
-what](/docs/how-it-works/what-survives-what/) has the details, and [Stop, restart, and
-resume](/docs/using/stop-restart-resume/) covers starting them again.
+shows everything that happened while Farhelm was closed. Farhelm also keeps track of what the agent tells it about its
+conversation while it is closed, so restarting the session later resumes the conversation the agent was really in.
+Sessions keep running until you stop them or your Mac reboots. After a reboot they show as interrupted, ready to start
+again; [What survives what](/docs/how-it-works/what-survives-what/) has the details, and
+[Stop, restart, and resume](/docs/using/stop-restart-resume/) covers starting them again.
+
+One thing does not work while Farhelm is closed: an agent asking Farhelm for something. Its `farhelm spawn` and
+`farhelm agent` commands fail until you open Farhelm again, because on your Mac the
+[supervisor](/docs/how-it-works/the-pieces/), the part of Farhelm that answers them, runs inside the app.
 
 Next: [Add a remote host](/docs/get-started/add-a-remote-host/).

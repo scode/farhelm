@@ -126,14 +126,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   when restart offers a fresh launch instead of Resume. Design settled 2026-10-03 in the plan:
   `plans/queue/session-notifications.md`.
 
-- **Verify that agents keep running while Farhelm is closed on the Mac.** The docs' "Your first session" page says you
-  can quit Farhelm while an agent works, reopen it, and find the session still running. Check that claim, and fix
-  Farhelm or the page. Reminder for the maintainer: this is about how the agents' session hooks might block while the
-  helm is not available. Decided 2026-10-04: the conversation hooks stop reporting over the supervisor's socket and
-  instead write each report to a file the supervisor picks up, so tracking keeps working while the app (and with it the
-  Mac's supervisor) is closed and the hooks lose their retry and timeout machinery; the agents' `farhelm` commands not
-  working while the app is closed is accepted for now and stated in the spec. Plan: `plans/queue/hook-report-files.md`.
-
 - **Pick up hook report files immediately.** Once conversation hooks write their reports as files
   (`plans/queue/hook-report-files.md`), the supervisor reads them on its periodic reconciliation pass, every two
   seconds. Make pickup immediate with an inotify-style watch (or the macOS equivalent) on the report directories, so a

@@ -46,8 +46,8 @@ rides on the identity report.
 Goose exposes the same fact as `AGENT_SESSION_ID` to its MCP extensions. Pi exposes it to extensions together with its
 optional persisted session file. OMP exposes it to extensions through separate session events — `session_start`,
 `session_switch` (which carries the reason: a new, resumed, or forked conversation), `session_branch`, and `agent_end` —
-and reports each conversation's exact id and, when one exists, its session file. Their reporters feed the same
-authenticated supervisor message as the hooks, but they never inspect or search the vendors' own state directories.
+and reports each conversation's exact id and, when one exists, its session file. Their reporters hand their reports to
+Farhelm the same way the hooks do, and they never inspect or search the vendors' own state directories.
 
 OMP's reporter is loaded the way Pi's is: Farhelm materializes a private extension under its own state directory
 (`integrations/omp/`, written with exact-bytes verification and private permissions) and loads it with `-e <path>` where
@@ -63,14 +63,15 @@ comes from the session events it subscribes to.
 
 The reporter must never be something you notice. The Claude, Codex, and manually configured Grok hooks, Goose's
 reporter, and the Pi and OMP reporting subprocesses print nothing to your terminal, always exit successfully, and do no
-identity reporting outside a Farhelm session. The hooks and Goose's reporter allow up to 30 seconds for reading the
-vendor's payload and reporting it. If no supervisor is running, the hook keeps trying for about four seconds; if one is
-running but busy, the hook waits up to the full 30 seconds. Pi and OMP keep their published 2-second child timers, so
-their reporters can still be cut short while the hook is retrying; with no supervisor running, each report can now run
-until that timer ends it. If the vendor kills that child, its final hook-log line may be absent; writing the line
-afterwards is best-effort and unbounded, but by then the agent already has its answer. Goose is different because its
-credential-free reporter declaration persists in conversation metadata: outside Farhelm it still starts as a valid empty
-MCP server, but without Farhelm launch credentials it reports nothing and exposes no tools.
+identity reporting outside a Farhelm session. A report never waits for Farhelm: the reporter saves it in Farhelm's state
+directory and is done in a moment, whether or not the host's supervisor is running. The supervisor picks saved reports
+up within about two seconds, or when it next starts, so a report the agent makes while the host's supervisor is not
+running (on your Mac, while Farhelm is closed) still decides what a restart resumes (see
+[Your first session](/docs/get-started/first-session/#close-farhelm-and-come-back)). The one wait left is reading what
+the agent hands the reporter, which is allowed up to 30 seconds in case the agent never closes it. Pi and OMP keep their
+published 2-second child timers; a reporter that only saves a file finishes well inside them. Goose is different because
+its credential-free reporter declaration persists in conversation metadata: outside Farhelm it still starts as a valid
+empty MCP server, but without Farhelm launch credentials it reports nothing and exposes no tools.
 
 If a reporter fails, the session itself is unaffected. Farhelm gains no new conversation to resume. A new session whose
 agent has not reported cannot be restarted until it does. The one visible thing is the Codex warning line, and that is
@@ -107,18 +108,24 @@ path for injected hooks — the announce flag is present by default; see "Turnin
 removes it. Grok's manual command is `farhelm internal hook --vendor grok` without `--announce`. The `--vendor` flag
 names which adapter this hook invocation is (Claude, Codex, Pi, or OMP from an injected command and Grok from its manual
 configuration; the Goose helper supplies its own internally), so the supervisor can refuse a report addressed to a
-session of another kind before consulting any vendor state. It reads one callback payload from stdin and forwards the
-conversation id, the vendor's `source`, and any transcript path, event name, and subagent identity. Claude uses the
-source for diagnostics. Codex requires `SessionStart` with source `startup`, `resume`, `clear`, or `compact`, plus
-foreground attribution and exact-record validation. Grok requires `SessionStart`, `UserPromptSubmit`, or `Stop`; its
-selecting event also carries source `new` or `load` and a timestamp used to reject delayed replacement reports. These
-fields go over `supervisor.sock` in the supervisor's state directory, authenticated with the per-session credential
-already in the launch environment. There is no per-session socket. The hook always exits 0 — including on a panic — and
-uses one 30-second budget for stdin and the round trip. A live connection can use that budget while the supervisor is
-briefly busy; a restart gap gets a separate short reconnect window before the hook gives up quietly. Outside a farhelm
-session there is no credential, so identity reporting exits immediately and touches no socket — though if `--announce`
-was passed on the command line, the pointer line described below still prints regardless, since it needs no credential
-at all.
+session of another kind before consulting any vendor state. It reads one callback payload from stdin and saves the
+conversation id, the vendor's `source`, and any transcript path and event name (a report naming a sub-agent is dropped
+instead; see below). Claude uses the source for diagnostics. Codex requires `SessionStart` with source `startup`,
+`resume`, `clear`, or `compact`, plus foreground attribution and exact-record validation. Grok requires `SessionStart`,
+`UserPromptSubmit`, or `Stop`; its selecting event also carries source `new` or `load` and a timestamp used to reject
+delayed replacement reports.
+
+The hook does not talk to the supervisor. It saves the report as a small file under `hook-reports/<session id>/` in the
+supervisor's state directory, together with a record of which processes it was started by, and exits 0 — always,
+including on a panic. The supervisor applies saved reports on its regular pass every two seconds, and when it starts. It
+uses the record of processes to check that the report came from your session's terminal, under the launch Farhelm made
+there last, so a report left over from before a restart is refused. For Claude, Codex, Grok, and OMP it also checks that
+the report came from that agent itself rather than from something the agent started, such as a sub-agent; see
+[What you will see](#what-you-will-see). Each session keeps only its newest report (Grok keeps its selecting
+`SessionStart` and its newest later event apart, because a later event only counts once a conversation is selected), so
+the directory stays tiny however long the supervisor is away. Outside a farhelm session there is no session environment,
+so identity reporting exits immediately and saves nothing — though if `--announce` was passed on the command line, the
+pointer line described below still prints regardless, since it needs no credential at all.
 
 It never prints a diagnostic, on either descriptor. It does print one deliberate line, on stdout, unless you have turned
 that off: the pointer telling the agent that `$farhelm ...` in your message means the `farhelm agent` CLI and that
@@ -129,11 +136,11 @@ See the "Talking to Farhelm from inside a session" in
 
 ## What you will see
 
-Claude: nothing new. The session row offers "resume conversation" within seconds of launch, before you have typed
+Claude: nothing new. The session row offers "resume conversation" within a few seconds of launch, before you have typed
 anything, because Claude fires the hook at process start. Only a hook run by the session's own foreground Claude counts:
 the pane process, or its direct child under a one-level wrapper. A `claude` that the session starts through its shell (a
 shelled-out sub-agent) inherits the session's credential, but if it reports a conversation Farhelm refuses it, and the
-hook log records a `refused conflict` line. A nested invocation cannot replace its parent's target.
+hook log records a `refused conflict` line from the supervisor. A nested invocation cannot replace its parent's target.
 
 Codex: on the launches that get the flags, the `⚠ --dangerously-bypass-hook-trust is enabled` line above the composer,
 and the resume offer only after your first prompt — Codex fires `SessionStart` at first prompt submission, not at
@@ -202,41 +209,54 @@ The symptom is a session that should offer "resume conversation" and does not, o
 order.
 
 **1. The per-session hook log**, `<state dir>/hook-log/<session id>.log`, where `<state dir>` is the supervisor's state
-directory (`$XDG_STATE_HOME/farhelm`, or `~/.local/state/farhelm` by default). One line per hook run, shaped
-`<unix-seconds> <outcome> [<detail> ]<conversation-id> <source>`; the trailing id and source appear only once the
-payload has parsed — before that there is no id to name — and `<source>` is `-` when the vendor sent none or sent
-something that is not a string. The outcome word is the whole diagnosis:
+directory (`$XDG_STATE_HOME/farhelm`, or `~/.local/state/farhelm` by default). Two things write lines there, each shaped
+`<unix-seconds> <outcome> [<detail> ]<conversation-id> <source>`; the trailing id and source appear only once there is
+an id to name, and `<source>` is `-` when the vendor sent none or sent something that is not a string.
 
-- `acked` — the report landed and the supervisor accepted it. The healthy case.
-- `refused` — the supervisor said no; the detail carries its error kind and message. Some refusals appear nowhere else,
-  so read this detail before the supervisor log.
+The hook writes one line each time it runs, saying what it did:
+
+- `written` — the report is saved and waiting for the supervisor. The healthy case. A `no-ancestry: <error>` detail
+  means the hook could not record which processes started it; the supervisor will refuse that report, because it cannot
+  tell which launch it came from.
+- `write-failed` — the report could not be saved; the detail is the error. Usually a state directory that does not
+  exist, which means no supervisor ever ran for this session there.
 - `no-credential` — the agent was not launched by farhelm: the flags were there, the session environment was not.
 - `bad-payload` — nothing usable came out of stdin. The detail says where it went wrong: `oversized` or `unreadable` for
   the read itself, `no-reader: <error>` when the reader thread could not even be started, and `unparsable`,
   `missing-session-id`, `session-id-not-a-string`, `empty-session-id`, or `oversized-session-id` for the JSON. A vendor
   renaming the field shows up as `missing-session-id`. Grok adds precise reasons for conflicting dual spellings and
-  malformed event, source, timestamp, path, or child fields.
-- `connect-failed` — the round trip never completed; the detail is `<phase>: <error>`. A missing or refused socket is
-  retried for about four seconds before this line; a long-lived connection that drops gets a fresh short reconnect
-  window, while repeated immediate drops remain within the current window. `connect:` is the common one and usually
-  means a supervisor that stayed down; `handshake:` covers a protocol-version mismatch between the hook binary and the
-  supervisor; `runtime:` is this process failing to build its own async runtime.
-- `timeout` — the 30-second budget ran out in the named phase (`stdin`, `connect`, `handshake`, `send`, `reply`).
-  Claude's, Goose's, and Pi's report may still be applied after the hook gives up; Codex's, Grok's, and OMP's is lost,
-  but a later subscribed event may report again. For Claude and Codex that is a later `SessionStart`; Grok may also
-  retry the selected UUID through `UserPromptSubmit` or `Stop`.
-- `refused` — the supervisor answered and deliberately rejected the report. The admission failure is final and is not
-  queued for a later write, but a later subscribed event may report again.
+  malformed event, source, timestamp, path, or child fields. `subagent-report` is not a failure: the callback came from
+  one of the agent's own sub-agents, which never count, and the hook drops it rather than let it replace the session's
+  own report. (`agent-id-not-a-string` is the same check meeting a marker of the wrong type.)
+- `timeout stdin` — the agent never finished handing the hook its payload within 30 seconds.
 - `panic` — a bug in the hook. Worth reporting, and harmless to the session.
+
+The supervisor adds one line for each saved report once it has decided about it, usually within two seconds, or when it
+next starts if it was not running:
+
+- `acked` — the report was accepted, and the session now tracks that conversation. Whether Restart can resume it yet
+  depends on the agent: Codex and Grok wait for the conversation's saved files, and Pi for its session file (see each
+  agent's guide).
+- `refused` — the report was turned down; the detail carries the error kind and the reason, or `unreadable` and why when
+  the saved file itself could not be read (that line names no conversation). A `conflict` about the session's foreground
+  means the report came from something other than the agent in your terminal (a separately started or shelled-out agent)
+  or from before the session's last restart, and was meant to be refused. The refusal is final; a later event from the
+  agent may report again.
+
+Not every `written` line gets an answer. The supervisor keeps only a session's newest saved report, so a report that a
+newer one replaced before the supervisor looked is never judged, which is normal. Only when the newest `written` line
+has no `acked` or `refused` after it has the supervisor not looked yet: it is not running, it could not read its own
+records, the session's terminal, or the saved file and will try again on its next pass, or the session is in the middle
+of a restart.
 
 No file at all usually means the vendor never ran the hook: check that injected flags reached the process (step 3), or
 that Grok loaded all three manual entries, and for Codex check whether you have typed a prompt yet. Two other things
-also leave no file. The path is derived from the session id and the socket's directory, so a run missing either of those
-from its environment has nowhere to write and cannot even leave its `no-credential` line. (A run missing only the token
-still writes one, which is deliberate: that is exactly the half-configured case someone comes to this file for.) And
-logging is best-effort by contract — an uncreatable directory, an unwritable path, or a full disk is ignored rather than
-turned into a failure. Pi and OMP can also lose the line when the supervisor is down: their published two-second child
-timer can kill the reporter while the hook is still retrying.
+also leave no file. The path is derived from the session id and the supervisor's socket path, so a run missing either of
+those from its environment has nowhere to write and cannot even leave its `no-credential` line. (A run missing only the
+token still writes one, which is deliberate: that is exactly the half-configured case someone comes to this file for.)
+And logging is best-effort by contract — an uncreatable directory, an unwritable path, or a full disk is ignored rather
+than turned into a failure. Pi and OMP can also lose the hook's line when the agent's own two-second timer stops the
+reporter first.
 
 **2. The supervisor log.** Every line here carries the session id.
 
@@ -250,18 +270,13 @@ timer can kill the reporter while the hook is still retrying.
   resume from that launch.
 - `recorded the conversation identity this session's agent reported` — an accepted report, with the conversation and the
   vendor's `source` word. When it displaced a claim naming a DIFFERENT id, a second line says so:
-  `this session's
-  agent reported a conversation identity that replaces the one previously claimed for it`. A report
-  that beats its own session's in-memory entry into existence is accepted too, and says so differently:
-  `this session's agent reported a
-  conversation identity before its entry was published; the durable row carries it until the entry appears`.
-- Refusals are warn-level, and only some of them reach this log. Three shapes do: one starting
-  `refused a reported conversation identity` (an id this build will not store), one starting
-  `could not record the conversation identity` (the durable write failed, and the supervisor queues no speculative
-  retry), and two ending `the report is discarded` — one for a report about a launch that has since been replaced, one
-  for a session row that could not be read at all. The rest are answered on the wire and logged nowhere here: a
-  credential the store rejects or cannot validate, and a supervisor that is no longer recording. For those, the hook
-  log's `refused` detail is the only record there is.
+  `this session's agent reported a conversation identity that replaces the one previously claimed for it`.
+- `refused a conversation report`, with the reason — every refused report, the same reason the hook log's `refused` line
+  carries. `could not apply a conversation report yet; will retry`,
+  `could not read a conversation report yet; will retry`, and
+  `could not read the session a conversation report is for; will retry` mean the supervisor could not read its own
+  records, the session's terminal, or the saved file, and kept the report for its next pass.
+  `discarded a conversation report that could not be read` means the saved file itself was damaged.
 - `this session was launched with a conversation hook but holds no conversation identity` — the tripwire, once per
   launch, 65 seconds after the first input if no conversation is saved. A resumed session with a saved conversation does
   not warn.

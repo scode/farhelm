@@ -90,11 +90,11 @@ Restart Grok after adding the file. Use Grok's `/hooks` view to confirm all thre
 integration, remove these three matcher groups (or delete `farhelm.json` when it contains nothing else) and restart
 Grok. Farhelm does not remove them for you.
 
-The reporter is silent, exits zero, and gives up its Farhelm round trip after 30 seconds. Set each hook timeout to at
-least 60 seconds, including in existing configurations, so Grok does not kill the reporter before that budget ends. It
-does no reporting when the Grok process was not launched by Farhelm. The hook still adds a short synchronous call at
-each subscribed event; `UserPromptSubmit` is on the prompt path, so this is not zero-overhead integration. When no
-supervisor is running, each call waits about four seconds before giving up. Grok does not receive Farhelm's
+The reporter is silent and exits zero. It saves each report for Farhelm and is done in a moment, without waiting for
+Farhelm, so it adds only a short call at each subscribed event, including `UserPromptSubmit` on the prompt path; a
+report made while the host's supervisor is not running (on your Mac, while Farhelm is closed) is applied when the
+supervisor starts again. The 60-second hook timeout above leaves room for the one wait it still has, reading the event
+Grok hands it. It does no reporting when the Grok process was not launched by Farhelm. Grok does not receive Farhelm's
 agent-instructions announcement from these manual hooks.
 
 ## What capture and Resume mean
@@ -125,17 +125,19 @@ There is one accepted delivery race. If you run `/new` and Grok exits or crashes
 the previous conversation can remain the last known identity. There is no acknowledgement queue or history scan to
 repair a callback that never arrived.
 
-Native subagent callbacks carry a child marker and are rejected by the shared report doorway, so they do not replace the
-top-level UUID. Compaction does not change the selection. A separately launched nested Grok runtime is also refused by
-process attribution.
+Native subagent callbacks carry a child marker and are always refused (the hook does not even save them), so they do not
+replace the top-level UUID. Compaction does not change the selection. A separately launched nested Grok runtime is also
+refused by process attribution.
 
 ## Diagnose capture
 
 After the first prompt, the session should become restartable. If it does not, inspect
 `<state dir>/hook-log/<session id>.log`, where `<state dir>` is `$XDG_STATE_HOME/farhelm` or `~/.local/state/farhelm`.
-An `acked` line means the supervisor accepted the callback. `bad-payload`, `refused`, `connect-failed`, and `timeout`
-name the common failure classes; [Agent hook injection](/docs/agents/agent-hook-injection/) documents the complete log
-format.
+Each callback leaves a `written` line when the hook saved it, and the supervisor answers the reports it takes up with an
+`acked` or a `refused` line with the reason; a later callback can replace a saved one before the supervisor looks, and
+the replaced one gets no answer. `bad-payload` and `write-failed` mean the hook could not save the callback at all,
+except `bad-payload subagent-report`, which is a subagent's callback being ignored, as intended.
+[Agent hook injection](/docs/agents/agent-hook-injection/#when-something-goes-wrong) documents the complete log format.
 
 No log usually means Grok did not load or run the hook, or the command path is wrong. An `acked` line on a session that
 still cannot be restarted usually means the selected conversation does not yet have both exact files, or later
