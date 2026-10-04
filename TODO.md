@@ -119,6 +119,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   while and no identity report has arrived, which today is only a supervisor log line; the user finds out only later,
   when restart offers a fresh launch instead of Resume. Design TBD.
 
+- **Hover help on icons and buttons.** Hovering any of these should show a short text saying what it is or does: the
+  icons that show a session's agent kind, the YOLO / not-YOLO / unknown (question mark) icons, and every clickable
+  button. Today a user has to guess what an unlabeled icon means or what a terse button will do before clicking it.
+  Native `title` tooltips are the cheap way to get there; the Maybe later entry on custom hover tooltips covers the
+  faster, themed alternative if the browser's built-in delay proves too slow.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
