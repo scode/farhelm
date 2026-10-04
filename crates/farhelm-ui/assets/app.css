@@ -2306,6 +2306,80 @@ samp {
   margin: 0;
   color: var(--fg-0);
 }
+
+/* The Templates dialog (SPEC.md, Launch templates): the settings dialog's
+   frame, wider for a form that offers every launcher field. The list sits
+   above the form so a template can be picked for editing without
+   scrolling past it. */
+.templates-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(640px, 100%);
+  box-sizing: border-box;
+  max-height: calc(100vh - 40px);
+  padding: 20px 24px;
+  overflow: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border-dialog);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-dialog);
+}
+
+.templates-dialog > .host-settings-help,
+.templates-form-title {
+  margin: 0;
+}
+
+.templates-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Name, what it sets, then its two actions; the summary takes the slack and
+   ellipsizes, the name and buttons never do. */
+.templates-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.templates-row-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.templates-row-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-1);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Two columns of labelled fields, one per row at phone width. */
+.templates-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px 16px;
+}
+
+.templates-field {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.templates-error {
+  margin: 0;
+  color: var(--warn);
+  font-size: 12px;
+}
 .app-settings-choice {
   display: flex;
   align-items: center;
@@ -4426,6 +4500,14 @@ samp {
 .launch-composer-choice {
   display: grid;
   gap: 8px;
+}
+
+/* Why a template accepted from search was not applied. Amber, like the other
+   launcher notices: the launcher is unchanged and nothing failed. */
+.launch-composer-template-error {
+  margin: 0;
+  color: var(--warn);
+  font-size: 12px;
 }
 
 .launch-composer-choice-help {

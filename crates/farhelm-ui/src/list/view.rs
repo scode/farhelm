@@ -835,6 +835,11 @@ pub(crate) fn ListView(
     // would leave two vocabularies for one number.
     let mut poll_sequence = use_signal(|| 0_u64);
     let mut show_create = use_signal(|| false);
+    // The Templates dialog, opened from the button beside New.
+    let mut templates_open = use_signal(|| false);
+    // Bumped when the dialog closes; the launcher re-reads templates on it.
+    let mut templates_revision = use_signal(|| 0_u64);
+    use_context_provider(|| super::templates::TemplatesRevision(templates_revision));
     let provisioning_trace_shapes = use_signal(HashMap::<HostId, ProvisioningTraceShape>::new);
     let provisioning_auto_details = use_signal(HashSet::<HostId>::new);
     // A shape signature for the always-mounted host list. A memo prevents
@@ -2984,6 +2989,26 @@ pub(crate) fn ListView(
                     show_create.set(opening);
                 },
                     "new"
+                }
+                // Beside New, the action it feeds (SPEC.md: "The Templates
+                // control sits beside New in the session list header").
+                button {
+                    r#type: "button",
+                    class: "btn btn-neutral templates-button",
+                    aria_haspopup: "dialog",
+                    disabled: busy,
+                    onclick: move |_| templates_open.set(true),
+                    "templates"
+                }
+            }
+            if templates_open() {
+                super::templates::TemplatesDialog {
+                    hosts: host_options.clone(),
+                    on_close: move |_| {
+                        super::templates::return_focus_to_templates_button();
+                        templates_open.set(false);
+                        templates_revision += 1;
+                    },
                 }
             }
             // The form follows New in DOM order, so New stays above the draft

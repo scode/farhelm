@@ -122,6 +122,9 @@ pub mod text;
 /// UTC calendar arithmetic shared by the crates that print dates.
 pub mod time;
 pub use launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
+/// The launcher's shared rules: the model catalog, agent-type
+/// reconciliation and launch templates.
+pub mod launcher;
 /// What a session runs, resolved: the launch kinds of SPEC.md's Concepts.
 pub mod session_launch;
 pub use session_launch::{CommandLaunch, LaunchKind, LaunchRequest, SessionLaunch};

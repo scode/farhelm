@@ -277,6 +277,9 @@ export interface HostRow {
   /** Whether the host is set to start YOLO launches without asking; every host starts
    * asking first (`false`). Read back by `setLocalYoloWithoutAsking` to prove its write. */
   yolo_without_asking: boolean;
+  /** The registry's recorded install identity, which a launch template
+   * names its host by; absent until the host's first contact. */
+  identity?: string | null;
 }
 
 /** Fail loudly rather than returning a half-decoded body: every caller here

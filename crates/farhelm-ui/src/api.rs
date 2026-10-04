@@ -54,13 +54,13 @@
 //! `encode_bytes`, `install_field`, `eval_minted_id`, and the two
 //! failure-text builders) stay private to this module.
 
+#[cfg(test)]
+use crate::LaunchHarness;
 use crate::github_checkout::{
     FreshCreateError, GithubCheckoutRequest, GithubPreview, GithubRepositories,
 };
 use crate::skew;
-use crate::{
-    CommandLaunch, Host, HostId, LaunchEffort, LaunchHarness, LaunchSelection, Session, Tab,
-};
+use crate::{CommandLaunch, Host, HostId, LaunchSelection, Session, Tab};
 use serde::Deserialize;
 
 /// Mirror of the helm's whole `GET /api/sessions` reply (farhelm-helm's
@@ -147,17 +147,14 @@ pub(crate) struct LaunchHistory {
     pub(crate) checkout_config_revision: i64,
 }
 
-/// One known model the helm accepts for the named structured harness.
+/// One known model the helm accepts for the named agent type, the wire
+/// crate's row type, so a template the helm applies and one this page
+/// applies read the catalog alike.
 ///
 /// This is metadata for rendering and compatibility affordances only. The
 /// helm validates again when a create arrives, because catalog data can be
 /// stale by the time a person clicks Launch.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub(crate) struct LaunchCatalogModel {
-    pub(crate) id: String,
-    pub(crate) harness: LaunchHarness,
-    pub(crate) efforts: Vec<LaunchEffort>,
-}
+pub(crate) use farhelm_proto::launcher::LaunchCatalogModel;
 
 /// One bounded response from the selected host's directory browser.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -2907,6 +2904,53 @@ pub(crate) async fn fetch_launch_catalog(base: &str) -> Result<Vec<LaunchCatalog
     resp.json::<Vec<LaunchCatalogModel>>()
         .await
         .map_err(|error| error.to_string())
+}
+
+/// Fetch the helm's launch templates, by name (SPEC.md, Launch templates).
+///
+/// Read when the launcher or the Templates panel opens; a failure leaves the
+/// caller with no templates to offer rather than an error in the launcher.
+pub(crate) async fn fetch_templates(
+    base: &str,
+) -> Result<Vec<farhelm_proto::launcher::LaunchTemplate>, String> {
+    #[derive(Deserialize)]
+    struct TemplatesBody {
+        templates: Vec<farhelm_proto::launcher::LaunchTemplate>,
+    }
+    let url = format!("{base}/api/templates");
+    let resp = send_read(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    resp.json::<TemplatesBody>()
+        .await
+        .map(|body| body.templates)
+        .map_err(|error| error.to_string())
+}
+
+/// Create or replace the template named `name` with `fields`; the helm's
+/// refusal text (a bad name, an oversized field) comes back as the error.
+pub(crate) async fn put_template(
+    base: &str,
+    name: &str,
+    fields: &farhelm_proto::launcher::TemplateFields,
+) -> Result<(), String> {
+    let url = format!("{base}/api/templates/{}", encode_path_segment(name));
+    let resp = send(client().put(&url).json(fields)).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("PUT", &url, resp).await);
+    }
+    Ok(())
+}
+
+/// Delete the template named `name`.
+pub(crate) async fn delete_template(base: &str, name: &str) -> Result<(), String> {
+    let url = format!("{base}/api/templates/{}", encode_path_segment(name));
+    let resp = send(client().delete(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("DELETE", &url, resp).await);
+    }
+    Ok(())
 }
 
 /// Fetch reusable launch and folder suggestions for the explicitly selected

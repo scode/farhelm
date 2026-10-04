@@ -189,6 +189,9 @@ pub mod session_cache;
 /// The session REST surface — the list, the owner-lookup routing behind
 /// every operation on one session, and the handlers themselves.
 mod sessions;
+/// The launch templates API: the helm-owned catalog of named, partial
+/// launcher edits (SPEC.md, Launch templates).
+mod templates;
 /// The refusal of a YOLO launch on a host that asks before YOLO launches (see its own docs).
 mod yolo_guard;
 
@@ -591,6 +594,11 @@ fn api_router(state: Arc<AppState>) -> Router {
             get(sessions::list_sessions).post(sessions::create_session),
         )
         .route("/api/launch-catalog", get(sessions::launch_catalog))
+        .route("/api/templates", get(templates::list_templates))
+        .route(
+            "/api/templates/{name}",
+            axum::routing::put(templates::put_template).delete(templates::delete_template),
+        )
         .route("/api/launch-history", get(sessions::launch_history))
         .route(
             "/api/browse-directory",
