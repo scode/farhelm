@@ -12,7 +12,7 @@
 // because Playwright always runs a selected project's dependencies.
 import { defineConfig, devices } from "@playwright/test";
 import { STACK_INFO_ENV } from "./global-setup";
-import { loadScenario, remoteDestinations, REMOTES_ENV } from "./readme-hero/scenario";
+import { ADD_HOST_ENV, addHostConfig, loadScenario, remoteDestinations, REMOTES_ENV } from "./readme-hero/scenario";
 import { DOCS_SHOTS_DIR, DOCS_STACK_INFO_PATH } from "./docs-shots/paths";
 import { harnessStackPort, STACK_PORT_ENV } from "./stack-port";
 import { AUTH_STORAGE_STATE_PATH, harnessAuthorizationHeaders } from "./tests/helpers/device-auth";
@@ -56,6 +56,7 @@ export default defineConfig({
       [STACK_PORT_ENV]: String(stackPort),
       [REMOTES_ENV]: JSON.stringify(remoteDestinations(scenario)),
       [STACK_INFO_ENV]: DOCS_STACK_INFO_PATH,
+      [ADD_HOST_ENV]: addHostConfig(scenario),
     },
     url: `${stackBaseURL}/`,
     reuseExistingServer: false,

@@ -1,0 +1,66 @@
+---
+title: Add a remote host
+description: Run sessions on a Linux machine you reach over ssh.
+sidebar:
+  order: 4
+---
+
+import Screenshot from '../../../../components/Screenshot.astro';
+
+A remote host is a Linux machine your Mac reaches over ssh. Once it is added, sessions can run there just as they do on
+your Mac, and they keep running on the host while your Mac sleeps or Farhelm is closed.
+
+## What the host needs
+
+- Linux on an x86_64 or ARM (aarch64) machine, with systemd's services for your user account, which most distributions
+  have. Farhelm needs no root or sudo there: everything it installs goes in your home directory.
+- Passwordless ssh from your Mac: `ssh <destination> true` has to work in a terminal without asking for a password.
+  Farhelm uses your own ssh setup, so keys, the agent, and the aliases in `~/.ssh/config` all apply.
+- Your Mac downloads Farhelm for the host from GitHub and copies it over ssh, so your Mac needs to reach GitHub. The
+  host does not: it never needs access to GitHub.
+
+## Add it
+
+<Screenshot
+  name="add-a-remote-host/add-button"
+  alt="The add button at the top of the host list."
+/>
+
+<Screenshot
+  name="add-a-remote-host/add-dialog"
+  alt="The add host dialog with dev@new-box typed as the ssh destination, and its fields explained."
+/>
+
+If Farhelm is already running on the host (you set it up before, say), the host is added as it is and the dialog
+closes. Otherwise Farhelm shows what it would set up there and asks first:
+
+<Screenshot
+  name="add-a-remote-host/setup-plan"
+  alt="What setup will create on the host, with its yes and yes, and don't ask in the future buttons explained."
+/>
+
+When the host has no new enough tmux, Farhelm brings its own copy, as the list shows. After you choose **yes**, the
+dialog closes and the host's row in the host list follows the setup until it is done:
+
+<Screenshot
+  name="add-a-remote-host/connected-host"
+  alt="A remote host in the host list with its green connected dot explained."
+/>
+
+The host now appears in the session launcher's host menu; see [Start a
+session](/docs/using/start-a-session/#choose-where-it-runs). On the host, Farhelm runs as a service of your user
+account, so it and its sessions keep running after you disconnect. It starts again when the machine boots where the
+system allows that, and at your next login where it does not.
+
+To have Farhelm ask again before setting up a host, untick **set up new hosts without asking** in the settings behind
+the gear at the top of the sidebar; [Manage hosts](/docs/using/manage-hosts/) has the rest of a host's settings.
+
+## If something goes wrong
+
+- When Farhelm cannot reach the host, the dialog shows ssh's own error. Check that `ssh <destination> true` works in
+  a terminal without a password.
+- A host without systemd's services for your user account cannot be set up automatically, and the dialog says so.
+- When setup fails partway, open the host's `⋯` menu and choose **re-run** to try again.
+
+Next: [Start a session](/docs/using/start-a-session/), or, to remove Farhelm later,
+[Uninstall Farhelm](/docs/get-started/uninstall/).

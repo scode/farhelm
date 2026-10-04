@@ -83,6 +83,12 @@
     { host: "local", cwd: "~/src/api", harness: "claude", age: 172800 },
   ],
 
+  // An invented host for the add-host dialog to check. The helm answers that
+  // check for this destination from Farhelm's test stand-in, as a reachable
+  // Ubuntu machine with nothing set up, so the setup confirmation shows the
+  // real plan with this invented home directory. No shot confirms the setup.
+  add_host: { ssh: "dev@new-box", home: "/home/dev", needs_tmux: true },
+
   // The folders the launcher offers under its folder field, from the same
   // rewritten reply.
   folders: [

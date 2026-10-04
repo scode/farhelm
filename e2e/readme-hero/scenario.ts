@@ -62,6 +62,20 @@ export interface ScenarioLaunch {
   age: number;
 }
 
+/**
+ * An invented host for the add-host dialog to check (docs screenshots only).
+ * The helm's add-host check answers for this destination from Farhelm's test
+ * stand-in instead of over ssh, as a reachable Linux host with nothing set
+ * up, so the setup confirmation shows the real plan for an invented home
+ * directory; see docs/docs-shots/SPEC.md.
+ */
+export interface ScenarioAddHost {
+  ssh: string;
+  home: string;
+  /** Whether the invented host lacks a new enough tmux, so the plan includes placing one. */
+  needs_tmux?: boolean;
+}
+
 /** One remembered folder, offered under the launcher's folder field (docs screenshots only). */
 export interface ScenarioFolder {
   host: string;
@@ -99,6 +113,7 @@ export interface Scenario {
   sessions: ScenarioSession[];
   launch_history?: ScenarioLaunch[];
   folders?: ScenarioFolder[];
+  add_host?: ScenarioAddHost;
 }
 
 const STATUSES: TargetStatus[] = ["running", "waiting", "idle", "exited"];
@@ -207,7 +222,40 @@ export function loadScenario(dir: string = SCENARIO_DIR): Scenario {
     if (!Number.isInteger(folder.age) || folder.age < 0) fail(`${name}: age must be a non-negative integer`);
   }
 
-  return { viewport, hosts, sessions, launch_history: launchHistory, folders };
+  const addHost = raw.add_host as ScenarioAddHost | undefined;
+  if (addHost !== undefined) {
+    if (!addHost.ssh || addHost.ssh.includes("$USER") || destinations.has(addHost.ssh)) {
+      fail("add_host.ssh must be a literal destination that no staged host uses");
+    }
+    if (!addHost.home || !addHost.home.startsWith("/")) fail("add_host.home must be an absolute path");
+    if (addHost.needs_tmux !== undefined && typeof addHost.needs_tmux !== "boolean") fail("add_host.needs_tmux must be a boolean");
+  }
+
+  return { viewport, hosts, sessions, launch_history: launchHistory, folders, add_host: addHost };
+}
+
+/** The env var handing the add-host stand-in's configuration (JSON) to the stack script. */
+export const ADD_HOST_ENV = "FARHELM_HERO_ADD_HOST";
+
+/**
+ * The test stand-in's configuration for the scenario's add_host, or an empty
+ * string when the scenario has none (the README captures never do), which
+ * leaves the stand-in off.
+ */
+export function addHostConfig(scenario: Scenario): string {
+  const host = scenario.add_host;
+  if (!host) return "";
+  return JSON.stringify({
+    targets: {
+      [`ssh:${host.ssh}`]: {
+        probe: "absent",
+        inspect: "supported",
+        home: host.home,
+        user_unit_dir: `${host.home}/.config/systemd/user`,
+        needs_tmux: host.needs_tmux ?? false,
+      },
+    },
+  });
 }
 
 /** The ssh destinations of the remote hosts, in scenario order. */

@@ -11,30 +11,12 @@
  * Nothing here launches a session or changes a setting: every shot stops at
  * the state it photographs, so shots cannot affect each other or the fleet.
  */
-import { expect, test, type Page } from "@playwright/test";
-import { Director } from "../readme-video/overlay";
-import { loadScenario } from "../readme-hero/scenario";
+import { expect, test } from "@playwright/test";
 import { hostRowByName, openHostMenu } from "../tests/helpers/fleet";
-import { DOCS_SHOTS_DIR } from "./paths";
+import { open, openLauncher } from "./open";
 import { shot } from "./shot";
-import { DOCS_THEME, openDocsFleet } from "./stage-docs";
 
 const PAGE = "start-a-session";
-
-/** Open the staged fleet with the docs overlay installed. */
-async function open(page: Page, request: import("@playwright/test").APIRequestContext) {
-  const scenario = loadScenario(DOCS_SHOTS_DIR);
-  await openDocsFleet(page, request, scenario);
-  return { scenario, director: await Director.install(page, DOCS_THEME) };
-}
-
-/** Open the session launcher from the session list and wait for it to show. */
-async function openLauncher(page: Page) {
-  await page.locator(".new-session-button").click();
-  const form = page.locator("form.create-session-form");
-  await expect(form).toBeVisible();
-  return form;
-}
 
 test("new button", async ({ page, request }) => {
   const { director } = await open(page, request);
