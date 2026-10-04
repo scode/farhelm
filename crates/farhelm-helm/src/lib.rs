@@ -136,6 +136,10 @@ mod ensure;
 /// polling loops (PLAN_M6_75.md item 5).
 mod events;
 
+/// `POST /api/feedback` — sends the UI's feedback submission to the project's
+/// feedback endpoint; the helm's one outbound connection carrying user text.
+mod feedback;
+
 /// The changed-only fleet invalidation feed shared by the manager and REST edge.
 mod feed;
 
@@ -483,6 +487,11 @@ struct AppState {
     /// `clipboard::ClipboardAdmission`). Per helm rather than process-wide,
     /// so tests running many helms in one process cannot starve each other.
     clipboard_admission: clipboard::ClipboardAdmission,
+    /// Where `POST /api/feedback` sends the user's feedback, and with which
+    /// client. Always the production endpoint outside tests; a field rather
+    /// than a constant so a test helm can point it at a stand-in server it
+    /// started itself (see `feedback.rs`).
+    feedback: feedback::FeedbackForwarder,
 }
 
 /// The two serving surfaces share their handlers, but the desktop's embedded
@@ -552,6 +561,12 @@ impl AppState {
             )),
             clipboard_sink: None,
             clipboard_admission: clipboard::ClipboardAdmission::new(),
+            // Test-built helms never reach the production endpoint; a
+            // feedback test injects its own stand-in instead.
+            #[cfg(not(test))]
+            feedback: feedback::FeedbackForwarder::production(),
+            #[cfg(test)]
+            feedback: feedback::FeedbackForwarder::offline(),
         }
     }
 }
@@ -708,6 +723,16 @@ fn api_router(state: Arc<AppState>) -> Router {
         // with nothing else in common: it names no session, carries no data,
         // and holds no attachment.
         .route("/api/events", get(events::events_ws))
+        // Feedback to the maintainer (SPEC.md, Feedback): the helm's one
+        // outbound connection carrying user-written text, made only when the
+        // user presses Send in the dialog. A UI route on purpose, inside the
+        // protected group, with no agent request verb behind it.
+        .route(
+            "/api/feedback",
+            axum::routing::post(feedback::send_feedback).layer(
+                axum::extract::DefaultBodyLimit::max(feedback::MAX_BODY_BYTES),
+            ),
+        )
         // API paths are reserved before the public SPA fallback is installed.
         // Without this catch-all, an extensionless GET typo receives
         // index.html and looks successful until JSON decoding fails; other

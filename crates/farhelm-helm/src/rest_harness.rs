@@ -766,6 +766,7 @@ impl Harness {
         );
         state.event_subscriber_cap = old_state.event_subscriber_cap;
         state.clipboard_sink = old_state.clipboard_sink.clone();
+        state.feedback = old_state.feedback.clone();
         let state = Arc::new(state);
         let device_secret = state
             .auth
@@ -904,7 +905,10 @@ impl Harness {
         } = self;
         // Everything the old helm owned goes first, in order: its servers,
         // its router state, then its actors. Only the temp directory (and
-        // therefore helm.db) survives into the new one.
+        // therefore helm.db) survives into the new one, plus the feedback
+        // forwarder, so a restarted test helm still never posts feedback to
+        // the production endpoint.
+        let feedback = state.feedback.clone();
         drop(served);
         drop(state);
         manager.shutdown();
@@ -924,8 +928,9 @@ impl Harness {
         Harness {
             served: Vec::new(),
             store: store.clone(),
-            state: Arc::new(
-                AppState::new(
+            state: Arc::new(AppState {
+                feedback,
+                ..AppState::new(
                     Arc::clone(&manager),
                     store,
                     _dir.path().to_path_buf(),
@@ -933,8 +938,8 @@ impl Harness {
                     cfg!(farhelm_release_build),
                     crate::ServingMode::Standalone,
                 )
-                .expect("build restarted app state"),
-            ),
+                .expect("build restarted app state")
+            }),
             device_secret,
             manager,
             fleet,
@@ -1044,6 +1049,10 @@ pub(crate) struct FleetBuilder {
     /// 404; clipboard.rs's tests inject one to observe what the handler
     /// forwards.
     clipboard_sink: Option<crate::ClipboardSink>,
+    /// Where `POST /api/feedback` sends, when a test points it at a
+    /// stand-in endpoint; `None` gives the helm an offline forwarder whose
+    /// every send fails, never the production one.
+    feedback: Option<crate::feedback::FeedbackForwarder>,
 }
 
 impl FleetBuilder {
@@ -1088,7 +1097,19 @@ impl FleetBuilder {
             refresh: None,
             event_subscriber_cap: None,
             clipboard_sink: None,
+            feedback: None,
         }
+    }
+
+    /// Send `POST /api/feedback` through this forwarder instead of the
+    /// production endpoint, so feedback tests reach a stand-in server they
+    /// started themselves and nothing leaves the machine.
+    pub(crate) fn feedback(
+        mut self,
+        forwarder: crate::feedback::FeedbackForwarder,
+    ) -> FleetBuilder {
+        self.feedback = Some(forwarder);
+        self
     }
 
     /// Register a clipboard sink the way the desktop's embedded helm does,
@@ -1201,6 +1222,11 @@ impl FleetBuilder {
                 .event_subscriber_cap
                 .unwrap_or(crate::events::MAX_SUBSCRIBERS),
             clipboard_sink: self.clipboard_sink,
+            // Offline unless a test injected a stand-in, like every
+            // test-built helm (`AppState::with_provisioning`).
+            feedback: self
+                .feedback
+                .unwrap_or_else(crate::feedback::FeedbackForwarder::offline),
             ..AppState::new(
                 Arc::clone(&manager),
                 self.store,
