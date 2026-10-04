@@ -7,19 +7,10 @@
 //! the agent's parent for the agent's whole life (the real ones hold a
 //! kernel `flock` on the directory while they are up). Farhelm could
 //! already launch such a thing, but only with the directory baked into
-//! the invocation string — one profile per directory, and a profile whose
-//! baked directory disagreed with the session's own cwd silently lost the
-//! RECORD-SCAN capture path, because the agent's records then report the
-//! wrapper's directory while that scan correlates on the session's. Not
-//! every wrapper session loses its identity that way: one whose kind is
-//! declared and whose wrapper forwards the injected hook flags is told its
-//! conversation id outright, and the hook correlates on nothing.
-//! `{cwd}` is the whole-element placeholder that fixes the directory mismatch,
-//! and `Supervisor::spawn_agent` is the one place it is substituted.
-//!
-//! The report-driven tests use the `hook-report` fixture; the other cases keep
-//! `claude-record` as a plain argv-echoing fixture, with the generic profile
-//! case also exercising the scanner path.
+//! the invocation string. `{cwd}` lets one profile follow the session's
+//! working directory; `Supervisor::spawn_agent` substitutes it once at launch.
+//! The report-driven tests use `hook-report`; other cases keep `claude-record`
+//! as a plain argv-echoing fixture. Identity always comes from an explicit report.
 //!
 //! `sh -c` stands in for the real wrapper, and it is the closest honest
 //! stand-in available: it takes the directory as a positional argument,
@@ -68,7 +59,6 @@
 //! `FallbackTemplate` in
 //! [`a_generic_wrapper_with_a_template_falls_back_through_the_wrapper`].
 
-use crate::conversation_identity_capture::{capture_harness, provoke_record, settle_past_horizon};
 use crate::harness::*;
 use crate::hook_identity::{attach_ready, hook_harness, hook_log, report as report_conversation};
 
@@ -160,8 +150,8 @@ fn wrapper_invocation(agent: &std::path::Path, agent_tail: &[&str]) -> String {
 }
 
 /// The record-writing fixture's own flags, as the wrapper's trailing agent
-/// command. Scanner-focused tests use this path; report-focused tests use
-/// [`hook_tail`] instead.
+/// command. Tests that only need a live agent use this path; identity
+/// consumers use [`hook_tail`] to report their chosen conversation.
 fn record_tail(fixtures: &CaptureFixtures) -> Vec<String> {
     fixture_tail(fixtures, "claude-record")
 }
@@ -177,8 +167,8 @@ fn fixture_tail(fixtures: &CaptureFixtures, script: &str) -> Vec<String> {
     ]
 }
 
-/// The explicit-report fixture's own flags, used by tests whose identity setup
-/// must be independent of the record scanner.
+/// The explicit-report fixture's own flags, used by tests whose identity comes from an
+/// explicit report.
 fn hook_tail(fixtures: &CaptureFixtures) -> Vec<String> {
     fixture_tail(fixtures, "hook-report")
 }
@@ -752,7 +742,7 @@ async fn a_generic_wrapper_with_a_template_falls_back_through_the_wrapper() {
 /// working directory, never a second opinion computed alongside it. So
 /// the wrapper's directory and the pane's directory are the same string
 /// on every path, and the agent's `getcwd()` still equals the session's
-/// canonical cwd for capture to correlate on. A create has no prior
+/// canonical cwd for later relaunch identity checks. A create has no prior
 /// identity to check the path against, so the user's spelling is what
 /// tmux gets. A restart does have one: `ensure_cwd_identity` confirms the
 /// path still resolves to the identity recorded at create and hands back
@@ -924,7 +914,7 @@ async fn stopping_a_wrapper_session_reaps_the_wrapper_and_the_agent() {
 /// correct answer here and the profile has to say otherwise itself.
 #[farhelm_testtrace::test]
 async fn a_generic_wrapper_profile_gets_no_resume_offer() {
-    let (h, fixtures) = capture_harness().await;
+    let (h, fixtures) = fixture_harness_with_seams(|_| {}).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let (invocation, _template) = wrapper_profile(&fixtures);
 
@@ -941,15 +931,13 @@ async fn a_generic_wrapper_profile_gets_no_resume_offer() {
         .await
         .expect("create a wrapper session with no kind and no template");
 
-    let (_chan, _rx, _seen, _reported) = provoke_record(&h, &session).await;
+    let (_chan, _rx, _seen) = attach_ready(&h, &session).await;
     assert_wrapper_got(&session.id, work.path());
-    settle_past_horizon(&h).await;
 
     let snapshot = snapshot_of(&h, &session.id).await;
     assert_eq!(
         snapshot.captured_conversation, None,
-        "a generic session has no integration to parse records with, so there is nothing to \
-         capture"
+        "a generic session has no identity integration"
     );
     assert_eq!(
         snapshot.restart_offer,

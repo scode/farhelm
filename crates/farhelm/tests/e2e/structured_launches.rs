@@ -31,11 +31,6 @@ pub(crate) struct FakeHarness {
 }
 
 impl FakeHarness {
-    /// Private record root used by both the fake process and capture scanner.
-    pub(crate) fn home(&self) -> &std::path::Path {
-        self.home.path()
-    }
-
     /// Working directory retained for every process generation in this fixture.
     pub(crate) fn work(&self) -> &std::path::Path {
         self.work.path()

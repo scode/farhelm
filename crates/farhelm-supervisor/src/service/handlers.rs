@@ -944,12 +944,9 @@ async fn handle_create_session(
 /// built the way `ListSessions` builds one; this is that promise
 /// being kept rather than approximated.
 ///
-/// The capture pass runs first for the same reason the list runs it
-/// there: an identity claimed on this very pass belongs in the
-/// `restart_offer` this reply carries, not only in the next poll's.
-/// Like the list path it is a `CaptureReason::Reply` pass — so it can
-/// never be answered by a sweep older than this request — and cheap in the
-/// steady state (see `Supervisor::capture_pass_for`).
+/// Report reconciliation runs before building the reply so an accepted
+/// identity and any exact-file readiness change are reflected immediately.
+/// Each session claim serializes that refresh with incoming reports.
 ///
 /// The tmux round trip is skipped for a terminal-less entry (the
 /// restart gap): its status comes entirely from its recorded outcome
@@ -3517,7 +3514,7 @@ pub(crate) async fn handle_restricted_control(
                 return;
             }
             // The length bound is this handler's own, not one inherited
-            // from the scan's parser: a post-handshake frame is capped
+            // from the record parser: a post-handshake frame is capped
             // only by `MAX_FRAME_LEN`, and the hello-only caps in
             // `farhelm_proto::io` never applied here. Same job
             // `MAX_LEASE_BYTES` does for a lease name.
@@ -4134,7 +4131,7 @@ const AGENT_HOST_NAME_CAP: usize = MAX_SESSION_ID_BYTES;
 
 #[cfg(test)]
 mod tests {
-    use super::super::capture::{CaptureState, FirstInput};
+    use super::super::capture::CaptureState;
     use super::super::connection::CONNECTION_WRITER_QUEUE;
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
     use super::super::core::{HANDLER_ADMISSION_PERMITS, LIST_ADMISSION_PERMITS};
@@ -8523,9 +8520,8 @@ mod tests {
     ///
     /// The hook may retry a dropped transport, but this is an explicit
     /// supervisor refusal after authentication and is therefore final. No
-    /// vendor event or supervisor task replays it; the scan remains the
-    /// fallback for that session precisely because this refusal left the
-    /// state unsettled.
+    /// supervisor task replays it; the session keeps its previous identity,
+    /// if any, until a later accepted report replaces it.
     #[farhelm_testtrace::test]
     async fn a_report_is_refused_and_dropped_while_the_supervisor_is_not_recording() {
         let state = StateDir::new();
@@ -8565,7 +8561,7 @@ mod tests {
             .clone();
         assert!(
             matches!(capture, CaptureState::Unclaimed),
-            "and the session must stay under the scan's authority: {capture:?}"
+            "and the session must hold no identity: {capture:?}"
         );
     }
 
@@ -8576,8 +8572,8 @@ mod tests {
     /// DURABLE write decides what is claimed, so an in-memory `Reported`
     /// installed after a failed write would advertise `RestartOffer::Resume`
     /// — a promise that a restart has a stored id to substitute — with
-    /// nothing behind it. The session must instead stay under the scan's
-    /// authority, which is precisely what not advancing achieves.
+    /// nothing behind it. The session must instead keep its existing
+    /// identity, which is precisely what not advancing achieves.
     ///
     /// Driven through the capture store-fault seam rather than a genuinely
     /// broken database, because what is under test is this handler's
@@ -8928,7 +8924,7 @@ mod tests {
     /// growing that cap must not change what this plain-id fixture submits. The
     /// direction matters: a cap that refused at exactly 128 would not fail
     /// loudly anywhere — the session would simply stop being resumable the
-    /// day a vendor's id format grew, and the scan fallback would cover for
+    /// day a vendor's id format grew, and an existing identity could conceal
     /// it convincingly enough that nobody would look here.
     #[farhelm_testtrace::test]
     async fn ordinary_report_ids_keep_their_own_byte_cap() {
@@ -9801,10 +9797,7 @@ mod tests {
                 }),
                 run: RunCells {
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
-                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                        at: None,
-                        durable: true,
-                    })),
+                    first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
                     hooked: crate::service::core::hook_flag(false),
                     hook_warned: crate::service::core::hook_flag(false),
@@ -9986,10 +9979,7 @@ mod tests {
             terminal: None,
             run: RunCells {
                 outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
-                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                    at: None,
-                    durable: true,
-                })),
+                first_input: Arc::new(std::sync::Mutex::new(None)),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
                 hooked: crate::service::core::hook_flag(false),
                 hook_warned: crate::service::core::hook_flag(false),
@@ -10183,10 +10173,7 @@ mod tests {
                 terminal: None,
                 run: RunCells {
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
-                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                        at: None,
-                        durable: true,
-                    })),
+                    first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
                     hooked: crate::service::core::hook_flag(false),
                     hook_warned: crate::service::core::hook_flag(false),

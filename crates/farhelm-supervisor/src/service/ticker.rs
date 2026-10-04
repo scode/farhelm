@@ -22,40 +22,14 @@
 //! A supervisor responsible for its own state has to be able to make
 //! progress with nobody watching, which is what this task is.
 //!
-//! # Two cadences for capture, and what they actually cost
+//! # Report refresh on the ticker and reply paths
 //!
-//! The conversation-capture sweep runs from BOTH here and the list path,
-//! and keeping the list-path call is a decision rather than an oversight.
-//! They answer different questions:
-//!
-//! - The TICKER guarantees PROGRESS. Capture advances on a schedule this
-//!   process owns, whether or not anything ever calls `ListSessions`.
-//! - The LIST PATH guarantees FRESHNESS-ON-REPLY. The supervisor edge
-//!   pushes no session data (since proto 33 only a content-free change
-//!   hint, see `super::hints`, which makes a client drain sooner), so a
-//!   drain's reply is the only way a client ever learns what changed; a reply whose `restart_offer` came from a sweep
-//!   that predates the request would describe the world before the write
-//!   the caller is racing, which is exactly what the helm's post-write
-//!   wake exists to avoid.
-//!
-//! An earlier version of this doc claimed running both "costs nothing"
-//! because the pass single-flights. That was false in two ways worth
-//! recording, because both shaped the design that replaced it. Skipping on
-//! a busy lock only ever collapses passes that OVERLAP — a 2-second ticker
-//! beside a 3-second drain mostly does not overlap, so the steady cost was
-//! additive. And the skip was actively wrong for the list path: a
-//! caller that gave up because somebody else's pass was in flight could
-//! reply from a pre-commit `restart_offer`.
-//!
-//! [`Supervisor::capture_pass_for`] replaces both behaviors with one
-//! scheduling rule per caller ([`super::capture::CaptureReason`]): a
-//! reply-producing caller WAITS and then runs unless the pass it joined
-//! began after its own request; a tick SKIPS a pass in flight and
-//! SUPPRESSES itself when a REPLY-driven pass completed within the tick
-//! interval. Its own previous passes pointedly do not suppress it — that
-//! would halve the unattended cadence this task exists to guarantee. The
-//! resulting envelope is roughly "one sweep per interval, whoever pays for
-//! it" rather than one per cadence.
+//! The ticker guarantees progress without a polling helm; reply paths refresh
+//! before answering so their restart offers reflect current durable reports.
+//! Each pass uses the session's capture claim, shared with report admission,
+//! then verifies any exact reported file and updates its in-memory mirror.
+//! There is no global pass lock or coalescing: a row read per integrated
+//! session and bounded exact-file checks are the remaining cost.
 //!
 //! # The sampling rule
 //!
@@ -93,12 +67,9 @@
 //! advances it, immediately and independently of the activity-age quantum.
 //! Pending writes retain their exact key so retry timing cannot reorder work.
 //!
-//! The capture half is a `may_record` question in the same PARTIAL way: a
-//! supervisor that may not record still scans the agents' record trees and
-//! still advances its in-memory capture state, because reading and
-//! concluding are not the thing it lacks standing for. What `may_record`
-//! gates is the durable write, inside the pass, where the conclusion would
-//! become a claim.
+//! Report refresh applies the store's write-standing and generation checks
+//! before changing durable readiness. Its per-session claim keeps a refresh
+//! from overwriting a newer report while the ticker and replies overlap.
 //!
 //! # What the samples are for
 //!
@@ -165,7 +136,6 @@
 //! `TickerHandle::watch` is what turns the same information into a loud
 //! log line — see `serve`.
 
-use super::capture::CaptureReason;
 use super::core::{SampleRead, SessionEntry, Supervisor};
 use super::launch_artifacts::cleanup_launch_artifacts;
 use super::status::observe_entry;
@@ -911,11 +881,8 @@ fn next_deadline(
 ///
 /// Called by `serve` once initialization is complete — the session map is
 /// final, the socket is bound, the startup reconciliation has run — so
-/// that no tick can observe a half-built supervisor. (It is NOT ordered
-/// after the startup sweeps to avoid a file race: the capture pass reads
-/// the agents' record roots under `agent_home` while those sweeps unlink
-/// launch, snapshot, and tmux-config files under the state dir, which are
-/// disjoint sets. `serve`'s own comment carries the correction.)
+/// that no tick can observe a half-built supervisor. Report refresh reads only
+/// durable identities and their exact reported files, not vendor directories.
 ///
 /// The task holds a `Weak`, so this does NOT extend the supervisor's
 /// lifetime; a failed upgrade is a normal, silent end to the loop.
@@ -1165,10 +1132,7 @@ async fn tick(
         // a ticker that has been asked to stop.
         return;
     }
-    sup.capture_pass_for(CaptureReason::Tick {
-        suppress_within: sup.seams.ticker_interval,
-    })
-    .await;
+    sup.capture_now().await;
 }
 
 /// Forget `entry`'s last screen after a failed capture, hinting connected
@@ -1872,16 +1836,15 @@ async fn reap_dead_tabs(
 
 #[cfg(test)]
 mod tests {
-    use super::super::capture::note_first_input;
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::core::RunCells;
     use super::super::core::tests::{StateDir, a_terminal, dummy_exe, entry_with, no_uploads};
-    use super::super::core::{CreateInputs, CreateMode, SupervisorSeams, SupervisorTimeouts};
+    use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::super::handlers::handle_control;
     use super::super::status::live_status;
     use super::super::status::session_status;
     use super::*;
-    use crate::agent_kind::{CaptureWindowBounds, IntegrationSnapshot};
+    use crate::agent_kind::IntegrationSnapshot;
     use crate::store::{LastOutcome, StoredSession, now_unix};
     use farhelm_proto::{AgentKind, ControlMsg, SessionStatus};
     use std::collections::HashMap;
@@ -3320,162 +3283,6 @@ mod tests {
         );
     }
 
-    /// The whole point of PLAN_M6_75.md item 1: conversation capture
-    /// advances because the SUPERVISOR decided to, not because somebody
-    /// polled it.
-    ///
-    /// This test never calls `ListSessions`, `list_all`, or `capture_now`
-    /// — the three carriers capture used to ride — so a passing run is
-    /// positive evidence that the ticker is what claimed the identity. It
-    /// runs against a real planted record rather than a stubbed pass
-    /// because the regression worth catching is a ticker that fires on
-    /// schedule and does nothing.
-    #[farhelm_testtrace::test]
-    async fn capture_advances_on_the_ticker_with_nobody_polling() {
-        let state = StateDir::new();
-        let home = tempfile::tempdir().expect("agent home");
-        let work = tempfile::tempdir().expect("workdir");
-        let cwd = work.path().to_string_lossy().to_string();
-        let sup = supervisor_with(
-            &state,
-            SupervisorSeams {
-                agent_home: Some(home.path().to_path_buf()),
-                // A horizon a couple of seconds out: no claim is durable
-                // until the capture window has closed, so this is the
-                // floor on how long this test can possibly take.
-                capture_window: CaptureWindowBounds::new(
-                    Duration::from_secs(1),
-                    Duration::from_secs(1),
-                    Duration::from_secs(1),
-                ),
-                ..SupervisorSeams::default()
-            },
-        )
-        .await;
-
-        // A Claude-kind session — derived from the invocation's basename —
-        // whose launch is expected to fail: capture correlates a RECORD
-        // tree against a first-input anchor, and neither needs a living
-        // agent.
-        let created = sup
-            .create_session(
-                CreateInputs {
-                    github_checkout: None,
-                    cwd: &cwd,
-                    parent: None,
-                    mode: CreateMode::Raw {
-                        invocation: "/opt/bin/claude".to_string(),
-                        agent_kind: None,
-                        resume_template: None,
-                        source_profile: None,
-                        launch: None,
-                    },
-                    title: Some("ticker".to_string()),
-                    cols: 80,
-                    rows: 24,
-                },
-                None,
-            )
-            .await
-            .expect("the create reaches a launch");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("the created session is in the map");
-        note_first_input(&sup, &entry);
-        let at = wait_for_first_input(&sup, &created.id).await;
-
-        // The record the agent would have written, planted directly: the
-        // subject here is the ticker, not the agent.
-        let canonical = std::fs::canonicalize(work.path()).expect("canonicalize");
-        let canonical = canonical.to_string_lossy().to_string();
-        let project = home
-            .path()
-            .join(".claude")
-            .join("projects")
-            .join(crate::agent_kind::munge_cwd(&canonical));
-        std::fs::create_dir_all(&project).expect("record directory");
-        let line = serde_json::json!({
-            "type": "user",
-            "sessionId": "ticker-captured-conversation",
-            "cwd": canonical,
-            "timestamp": crate::agent_kind::format_rfc3339(at),
-        });
-        std::fs::write(project.join("ticker.jsonl"), format!("{line}\n"))
-            .expect("plant the record");
-        assert_eq!(
-            sup.session_snapshot(&created.id)
-                .await
-                .expect("snapshot")
-                .expect("present")
-                .captured_conversation,
-            None,
-            "premise: nothing has captured this yet, so the ticker below is the only candidate"
-        );
-
-        let ticker = start_ticker(&sup);
-        let captured = wait_for_captured_conversation(&sup, &created.id).await;
-        ticker.shutdown().await;
-        assert_eq!(
-            captured.as_deref(),
-            Some("ticker-captured-conversation"),
-            "no list, no poll, no manual pass — the ticker is what captured this"
-        );
-    }
-
-    /// Observe ticker-driven conversation capture without making a list
-    /// request that could itself advance capture.
-    ///
-    /// `None` means the original deadline elapsed. Callers still shut down
-    /// their ticker before asserting that result, because leaving it alive
-    /// would let a late pass race the final observation and leak into the
-    /// next test's fixture cleanup.
-    async fn wait_for_captured_conversation(sup: &Arc<Supervisor>, id: &str) -> Option<String> {
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        while tokio::time::Instant::now() < deadline {
-            let captured = sup
-                .session_snapshot(id)
-                .await
-                .expect("snapshot")
-                .expect("present")
-                .captured_conversation;
-            if captured.is_some() {
-                return captured;
-            }
-            // sleep-ok: wait for ticker-owned capture at the original bounded tmux observation cadence.
-            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
-        }
-        None
-    }
-
-    /// Poll until the first-input anchor has reached the database, which
-    /// is what fixes the capture window the planted record has to fall
-    /// inside. The write is spawned off the input path by design, so
-    /// reading the anchor synchronously would race it.
-    async fn wait_for_first_input(sup: &Arc<Supervisor>, id: &str) -> i64 {
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            if let Some(at) = sup
-                .session_snapshot(id)
-                .await
-                .expect("snapshot")
-                .expect("present")
-                .first_input_at
-            {
-                return at;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the first-input anchor never landed"
-            );
-            // sleep-ok: the spawned first-input write races this read, so retry at the original bounded cadence.
-            tokio::time::sleep(TEST_READY_POLL_INTERVAL).await;
-        }
-    }
-
     /// The sampling half, against real panes: one that keeps printing
     /// accumulates observed CHANGE, one that prints nothing does not, and
     /// both are sampled.
@@ -3587,6 +3394,53 @@ mod tests {
             sample.lock().expect("activity mutex").samples,
             settled,
             "a stopped ticker must not still be sampling several intervals later"
+        );
+    }
+
+    /// Shutdown waits for report reconciliation already inside a tick.
+    /// The per-session claim is a real admission boundary: observing its
+    /// waiter proves the ticker reached the refresh before requesting stop.
+    /// The warning latch afterwards proves the rest of that pass completed.
+    #[farhelm_testtrace::test]
+    async fn shutdown_waits_out_a_report_refresh_already_in_flight() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let mut entry = entry_with(None, crate::store::LastOutcome::Running);
+        entry.info.id = "silent-hook".into();
+        entry.snapshot.kind = farhelm_proto::AgentKind::Claude;
+        entry.run.hooked.store(true, Ordering::Relaxed);
+        *entry.run.first_input.lock().unwrap() =
+            Some(std::time::Instant::now() - Duration::from_secs(3600));
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(entry.info.id.clone(), Arc::clone(&entry));
+        let claim = sup.capture_locks.claim(&entry.info.id).await;
+        let ticker = start_ticker(&sup);
+        tokio::time::timeout(
+            TEST_DEADLINE,
+            sup.capture_locks.claims_reached_for_test(&entry.info.id, 2),
+        )
+        .await
+        .expect("ticker must reach report refresh's held claim");
+        let shutdown = ticker.shutdown();
+        tokio::pin!(shutdown);
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(
+                std::future::Future::poll(shutdown.as_mut(), cx).is_pending()
+            ))
+            .await,
+            "shutdown must wait for the refresh already in flight"
+        );
+        assert!(!entry.run.hook_warned.load(Ordering::Relaxed));
+        drop(claim);
+        tokio::time::timeout(TEST_DEADLINE, shutdown)
+            .await
+            .expect("shutdown after claim release");
+        assert!(
+            entry.run.hook_warned.load(Ordering::Relaxed),
+            "the in-flight pass must finish before shutdown returns"
         );
     }
 
@@ -4742,8 +4596,8 @@ mod tests {
     /// a pass that saw nothing.
     ///
     /// The capture half is asserted separately because the two halves of a
-    /// tick are independent: conversation capture reads the filesystem and
-    /// has no business stopping because tmux is unreachable.
+    /// tick are independent: report refresh and its diagnostic timer must
+    /// keep running when tmux is unreachable.
     ///
     /// Scope note: killing the server exercises `pane_states`'
     /// DEFINITIVELY-EMPTY path (tmux answers "no server running", which the
@@ -4778,13 +4632,18 @@ mod tests {
             "the premise of this test is that the server really is gone; a kill that \
                      silently failed would leave the pass below succeeding for the wrong reason",
         );
-        // Past the tick's own suppression window, so the capture half
-        // below is skipped only if the probe failure stopped it — the
-        // thing this asserts — rather than because the supervisor's
-        // construction-time pass was still recent (`CaptureReason::Tick`).
-        // sleep-ok: this ages the construction-time capture past the tick suppression window before the test drives its own tick.
-        tokio::time::sleep(TEST_INTERVAL * 3).await;
-        let baseline = sup.capture_passes_completed();
+        let warning_entry = {
+            let mut entry = entry_with(None, crate::store::LastOutcome::Running);
+            entry.run.hooked.store(true, Ordering::Relaxed);
+            *entry.run.first_input.lock().unwrap() =
+                Some(std::time::Instant::now() - Duration::from_secs(3600));
+            entry.info.id = "silent-hook".to_string();
+            Arc::new(entry)
+        };
+        sup.sessions
+            .lock()
+            .await
+            .insert("silent-hook".to_string(), Arc::clone(&warning_entry));
         tick(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
 
         {
@@ -4804,8 +4663,8 @@ mod tests {
             );
         }
         assert!(
-            sup.capture_passes_completed() > baseline,
-            "the capture half of a tick does not depend on tmux at all"
+            warning_entry.run.hook_warned.load(Ordering::Relaxed),
+            "report diagnostics still run when tmux has no live panes"
         );
     }
 
@@ -5412,88 +5271,6 @@ mod tests {
             .expect("insert the row that claims that tmux session");
     }
 
-    /// A [`super::super::capture::CaptureGate`] that parks ONE capture pass —
-    /// the first after it is armed — until the test releases it.
-    ///
-    /// The barrier both scheduling tests need, since the window they are
-    /// about (what a second caller does while a first pass is in flight)
-    /// is far too short to observe in a real pass over a fixture tree.
-    ///
-    /// # Why arming is a separate step
-    ///
-    /// `Supervisor::new_with_seams` runs a capture pass of its OWN, inside
-    /// the constructor, before it ever returns the supervisor. A barrier
-    /// that armed itself on creation would therefore trap CONSTRUCTION:
-    /// `supervisor_with` would never return, the test would hang rather
-    /// than fail, and nothing in the assertion text would point at why.
-    /// (It did, which is how this note came to be written.) Arming after
-    /// the supervisor exists is what aims the barrier at the pass the test
-    /// actually means.
-    ///
-    /// One-shot on purpose: later passes fall straight through, because
-    /// every test here releases the barrier and then asserts on what
-    /// happens NEXT.
-    struct PassBarrier {
-        gate: super::super::capture::CaptureGate,
-        entered: Arc<AtomicBool>,
-        /// Where an armed barrier parks the pass. Empty until `arm`.
-        slot: Arc<std::sync::Mutex<Option<oneshot::Receiver<()>>>>,
-        receiver: Option<oneshot::Receiver<()>>,
-        release: Option<oneshot::Sender<()>>,
-    }
-
-    impl PassBarrier {
-        fn new() -> PassBarrier {
-            let (release, receiver) = oneshot::channel::<()>();
-            let entered = Arc::new(AtomicBool::new(false));
-            let slot: Arc<std::sync::Mutex<Option<oneshot::Receiver<()>>>> =
-                Arc::new(std::sync::Mutex::new(None));
-            let gate_entered = Arc::clone(&entered);
-            let gate_slot = Arc::clone(&slot);
-            let gate: super::super::capture::CaptureGate = Arc::new(move || {
-                // Taken, not peeked: the seam is an `Fn` that may run many
-                // times while the receiver can only be awaited once.
-                let waiting = gate_slot.lock().expect("barrier slot poisoned").take();
-                let entered = Arc::clone(&gate_entered);
-                Box::pin(async move {
-                    if let Some(waiting) = waiting {
-                        entered.store(true, Ordering::SeqCst);
-                        let _ = waiting.await;
-                    }
-                })
-            });
-            PassBarrier {
-                gate,
-                entered,
-                slot,
-                receiver: Some(receiver),
-                release: Some(release),
-            }
-        }
-
-        /// The seam to hand to `SupervisorSeams`. Inert until [`Self::arm`].
-        fn gate(&self) -> super::super::capture::CaptureGate {
-            Arc::clone(&self.gate)
-        }
-
-        /// Aim the barrier at the next capture pass to begin.
-        fn arm(&mut self) {
-            *self.slot.lock().expect("barrier slot poisoned") = self.receiver.take();
-        }
-
-        /// Whether a pass is parked in the barrier right now. Polled by
-        /// the tests rather than slept on, so they are not timing guesses.
-        fn entered(&self) -> bool {
-            self.entered.load(Ordering::SeqCst)
-        }
-
-        fn release(&mut self) {
-            if let Some(release) = self.release.take() {
-                let _ = release.send(());
-            }
-        }
-    }
-
     /// SPEC.md's status rule, at the one place it can actually be
     /// violated: a saturated SAMPLER must not delay a request.
     ///
@@ -5569,221 +5346,6 @@ mod tests {
             "the request must be answered normally, got {decoded:?}"
         );
         drop(held);
-    }
-
-    /// The capture coordinator's whole point: a tick that lands on top of
-    /// a reply-producing pass yields ONE sweep, not two.
-    ///
-    /// Driven through the capture gate rather than by racing two real
-    /// passes, because the window under test is exactly the one a real
-    /// pass over a small fixture tree closes too fast to observe. The
-    /// counter is the only witness available — two passes over identical
-    /// evidence leave identical capture state behind, so nothing about a
-    /// session could tell the difference.
-    ///
-    /// A regression that removed the coalescing (a tick that waited for
-    /// the lock instead of skipping) fails this on the timeout rather than
-    /// on the count, which is why the tick is driven under one.
-    #[farhelm_testtrace::test]
-    async fn a_tick_landing_on_an_in_flight_pass_adds_no_second_sweep() {
-        let state = StateDir::new();
-        let home = tempfile::tempdir().expect("agent home");
-        let mut barrier = PassBarrier::new();
-        let sup = supervisor_with(
-            &state,
-            SupervisorSeams {
-                agent_home: Some(home.path().to_path_buf()),
-                faults: crate::service::FaultHooks {
-                    capture_gate: Some(barrier.gate()),
-                    ..crate::service::FaultHooks::default()
-                },
-                ..SupervisorSeams::default()
-            },
-        )
-        .await;
-        // Armed only now: the constructor has already run a pass of its
-        // own, and an earlier arming would have trapped that one.
-        barrier.arm();
-        let baseline = sup.capture_passes_completed();
-
-        let blocked = {
-            let sup = Arc::clone(&sup);
-            tokio::spawn(async move { sup.capture_now().await })
-        };
-        // Wait until a pass is genuinely parked rather than sleeping on an
-        // assumption about scheduling.
-        wait_until("a capture pass is parked in the gate", || barrier.entered()).await;
-
-        let (_stop, mut stop) = never_stopped();
-        let mut cursor: SampleCursor = None;
-        tokio::time::timeout(
-            Duration::from_secs(10),
-            tick(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop),
-        )
-        .await
-        .expect("a tick must SKIP a pass in flight, never queue behind it");
-        assert_eq!(
-            sup.capture_passes_completed(),
-            baseline,
-            "the tick must not have completed a sweep of its own"
-        );
-
-        barrier.release();
-        blocked.await.expect("the blocked pass must finish");
-        assert_eq!(
-            sup.capture_passes_completed(),
-            baseline + 1,
-            "exactly one sweep total: the one the reply-producing caller ran"
-        );
-    }
-
-    /// The two halves of the scheduling rule, stated as counts.
-    ///
-    /// A reply-producing caller ALWAYS gets a pass that began after it
-    /// asked — that is what the helm's post-write wake rests on, since
-    /// proto v10 gives the supervisor edge no push and a drain replying
-    /// off an older sweep would describe the world before the write it is
-    /// racing. A tick, by contrast, has nothing to add when a pass
-    /// finished within its interval, and must say so by not sweeping.
-    #[farhelm_testtrace::test]
-    async fn replies_always_sweep_while_a_tick_suppresses_itself_after_a_recent_pass() {
-        let state = StateDir::new();
-        let home = tempfile::tempdir().expect("agent home");
-        let sup = supervisor_with(
-            &state,
-            SupervisorSeams {
-                agent_home: Some(home.path().to_path_buf()),
-                ..SupervisorSeams::default()
-            },
-        )
-        .await;
-
-        let baseline = sup.capture_passes_completed();
-        sup.capture_now().await;
-        sup.capture_now().await;
-        assert_eq!(
-            sup.capture_passes_completed(),
-            baseline + 2,
-            "back-to-back reply-producing callers each need their OWN pass; reusing the \
-             previous one would answer a request from evidence older than itself"
-        );
-
-        let after_replies = sup.capture_passes_completed();
-        sup.capture_pass_for(CaptureReason::Tick {
-            suppress_within: Duration::from_secs(3600),
-        })
-        .await;
-        assert_eq!(
-            sup.capture_passes_completed(),
-            after_replies,
-            "a tick has nothing to add right after a pass completed"
-        );
-
-        sup.capture_pass_for(CaptureReason::Tick {
-            suppress_within: Duration::ZERO,
-        })
-        .await;
-        assert_eq!(
-            sup.capture_passes_completed(),
-            after_replies + 1,
-            "and it sweeps once that window has elapsed"
-        );
-
-        // A tick must NOT be suppressed by its OWN previous pass. This is
-        // the bug the `reply_completed`/`started` split exists to prevent:
-        // with nothing else sweeping, the previous tick's pass is always
-        // about one interval old when the next tick fires, so counting it
-        // would have the ticker skip every other tick and quietly halve
-        // the unattended capture cadence the whole task exists to
-        // guarantee.
-        //
-        // Discriminating between the two designs needs a real time gap:
-        // the reply-driven passes above must age OUT of the window while
-        // the tick under test stays well inside it. Then a tick that
-        // counted its own predecessor would suppress and one that does not
-        // will sweep.
-        let window = Duration::from_millis(200);
-        // sleep-ok: reply-driven passes must age out while the tick under test remains inside its own suppression window.
-        tokio::time::sleep(window * 2).await;
-        let aged = sup.capture_passes_completed();
-        sup.capture_pass_for(CaptureReason::Tick {
-            suppress_within: window,
-        })
-        .await;
-        assert_eq!(
-            sup.capture_passes_completed(),
-            aged + 1,
-            "test premise: with no recent reply-driven pass, a tick sweeps"
-        );
-        sup.capture_pass_for(CaptureReason::Tick {
-            suppress_within: window,
-        })
-        .await;
-        assert_eq!(
-            sup.capture_passes_completed(),
-            aged + 2,
-            "a tick immediately after ANOTHER TICK must still sweep — only a reply-driven \
-             pass makes a tick redundant, or the unattended cadence silently halves"
-        );
-    }
-
-    /// Shutdown SHIELDS a capture pass that has already begun.
-    ///
-    /// The rule the module doc states and the reason the stop is
-    /// cooperative rather than an abort: a pass writes durable state and
-    /// then mirrors it in memory, and a shutdown that tore it in half
-    /// would leave the two disagreeing until something re-derived them.
-    /// So `shutdown` must PEND while a pass is in flight and complete
-    /// after it, with the pass counted as having finished.
-    #[farhelm_testtrace::test]
-    async fn shutdown_waits_out_a_capture_pass_already_in_flight() {
-        let state = StateDir::new();
-        let home = tempfile::tempdir().expect("agent home");
-        let mut barrier = PassBarrier::new();
-        let sup = supervisor_with(
-            &state,
-            SupervisorSeams {
-                agent_home: Some(home.path().to_path_buf()),
-                faults: crate::service::FaultHooks {
-                    capture_gate: Some(barrier.gate()),
-                    ..crate::service::FaultHooks::default()
-                },
-                ..SupervisorSeams::default()
-            },
-        )
-        .await;
-        // After construction, whose own capture pass would otherwise be
-        // the one that got trapped — see `PassBarrier`.
-        barrier.arm();
-        let baseline = sup.capture_passes_completed();
-
-        let ticker = start_ticker(&sup);
-        // The ticker's first tick parks in the gate mid-capture. Polled,
-        // not slept on: a sleep that guessed short would assert against a
-        // ticker that had not started its pass yet and "prove" the
-        // shielding for the wrong reason.
-        wait_until("the ticker's capture pass reached the gate", || {
-            barrier.entered()
-        })
-        .await;
-
-        let mut shutting_down = Box::pin(ticker.shutdown());
-        assert!(
-            tokio::time::timeout(TEST_INTERVAL * 4, &mut shutting_down)
-                .await
-                .is_err(),
-            "shutdown must not return while a capture pass is still in flight"
-        );
-        barrier.release();
-        tokio::time::timeout(Duration::from_secs(30), shutting_down)
-            .await
-            .expect("shutdown must complete once the pass it was shielding finishes");
-        assert_eq!(
-            sup.capture_passes_completed(),
-            baseline + 1,
-            "the shielded pass must have run to COMPLETION rather than being torn in half by \
-             the shutdown that was waiting on it"
-        );
     }
 
     /// `serve` really does start the ticker.

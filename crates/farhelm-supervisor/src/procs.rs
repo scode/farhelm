@@ -3189,7 +3189,7 @@ mod tests {
     ///
     /// Why this test matters: this is the shape every ordinary Claude
     /// session reports through, so refusing it would silently cost every
-    /// session its hook-reported identity and drop it to the scan.
+    /// session its hook-reported identity and leave it offering a fresh launch.
     #[farhelm_testtrace::test]
     fn claude_admits_a_hook_run_by_the_pane_process_through_a_trampoline() {
         let chain = vec![
@@ -3284,7 +3284,7 @@ mod tests {
 
     /// A wrapper chain two levels deep refuses. This is the accepted cost
     /// of a rule that recognizes no executable: such a session falls back
-    /// to the record scan rather than widening the rule.
+    /// to a fresh launch rather than widening the rule.
     #[farhelm_testtrace::test]
     fn claude_refuses_a_hook_under_a_two_level_wrapper() {
         let chain = vec![

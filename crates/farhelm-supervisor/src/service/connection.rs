@@ -484,12 +484,9 @@ where
                         // lets the failure arm below still mutate
                         // `attachments` (`.remove`) under the SAME lock
                         // hold — no gap where a takeover could interleave.
-                        // The delivery flag is read under the SAME lock hold
-                        // as the send, and is what PLAN_M3.md item 8's
-                        // correlator anchors on: an empty frame delivers
-                        // nothing, and a send that failed part-way still
-                        // delivered what it confirmed — see
-                        // `InputClient::delivered_any_bytes`.
+                        // Read confirmed delivery under the same lock as the
+                        // send. Empty frames do not start the diagnostic clock;
+                        // a partial send counts if some bytes reached the pane.
                         let (send_result, delivered) = match attachments.get_mut(&route.key) {
                             Some(a) if a.channel == frame.channel && a.notify.same_channel(&tx) => {
                                 let result = a.input.send(&frame.body).await;
@@ -497,15 +494,11 @@ where
                             }
                             _ => (None, false),
                         };
-                        // Only the agent's own terminal starts the capture
-                        // clock: the correlator anchors on the first input
-                        // that could have prompted the AGENT to write its
-                        // record. Keystrokes in a tab reach a different pane
-                        // (possibly running another copy of the same agent
-                        // CLI), so anchoring on them could miss the agent's
-                        // record or claim the tab's conversation instead.
+                        // Only input delivered to the agent starts its hook
+                        // warning timer. A tab's keystrokes say nothing about
+                        // whether the agent had a prompt it could report.
                         if delivered && route.key.terminal == TerminalId::Agent {
-                            note_first_input(&sup, entry);
+                            note_first_input(entry);
                         }
                         match send_result {
                             Some(Ok(())) => false,

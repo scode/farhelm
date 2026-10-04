@@ -24,7 +24,7 @@ pub(crate) const PREFIX: &str = "grok:";
 ///
 /// Fractions stay decimal rather than being rounded to nanoseconds. Grok's
 /// event order must not collapse two valid timestamps merely because they
-/// carry more precision than Farhelm otherwise needs for capture windows.
+/// carry more precision than Farhelm otherwise needs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EventTime {

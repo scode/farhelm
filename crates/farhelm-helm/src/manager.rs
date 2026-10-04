@@ -5307,7 +5307,7 @@ mod tests {
         /// Recorded because one of the drain's contracts is entirely about
         /// what is SENT: a refresh is exactly one request (the supervisor's
         /// conversation-capture sweep rides its `ListSessions` handler, so
-        /// every extra request is another whole-host scan — see
+        /// every extra request refreshes reported identities across the host — see
         /// [`drain_sessions`]). The message carries nothing but its
         /// `req_id`, so the host is all there is to record, beside when the
         /// peer received it (for pacing tests).
@@ -9581,7 +9581,7 @@ mod tests {
     /// A contract about what goes OUT, which no state assertion can see,
     /// and one that matters beyond tidiness: the supervisor's
     /// conversation-capture sweep rides its `ListSessions` handler, so
-    /// every request is a whole-host scan on the far side (see
+    /// every request refreshes reported identities across the host (see
     /// [`drain_sessions`]). A drain that asked twice — to confirm a count,
     /// say — would double that cost on every host on every refresh.
     #[farhelm_testtrace::test(start_paused = true)]

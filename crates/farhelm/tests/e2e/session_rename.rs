@@ -9,7 +9,6 @@
 
 use crate::harness::*;
 
-use crate::conversation_identity_capture::{capture_harness, record_session, wait_for_capture};
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::hook_identity::{
     attach_ready, hook_harness, hook_log, hook_session, report as report_conversation,
@@ -331,48 +330,6 @@ async fn a_rename_reply_reflects_a_reported_identity_without_a_list_first() {
             .as_deref(),
         Some(conversation),
         "the rename reply must preserve the reported identity"
-    );
-}
-
-/// Renaming an ATTACHED session before its first input must not cost it
-/// its conversation capture.
-///
-/// The regression this pins is invisible everywhere else and permanent
-/// when it happens. A rename publishes a rebuilt entry, while the input
-/// path writes the first-input anchor through the entry its `InputRoute`
-/// pinned at attach time — an entry the rename has already replaced. If
-/// the rebuild COPIED that cell instead of sharing it, the anchor would
-/// land in the abandoned copy, the capture pass would go on reading the
-/// published entry's empty one, and this session would never become
-/// resumable: SPEC.md's resume promise silently broken by renaming a
-/// session at the wrong moment, with nothing anywhere reporting it.
-///
-/// The ordering is therefore load-bearing: attach first (so a route pins
-/// the pre-rename entry), rename second, and only then type.
-#[farhelm_testtrace::test]
-async fn a_rename_before_first_input_still_captures_the_conversation() {
-    let (h, fixtures) = capture_harness().await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = record_session(&h, &fixtures, work.path(), "claude").await;
-
-    let (chan, initial_replay, mut rx) = h
-        .client
-        .attach_live(&session.id, 80, 24)
-        .await
-        .expect("attach");
-    let mut seen = initial_replay;
-    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-
-    renamed(rename(&h.sup, &session.id, "renamed-before-typing").await);
-
-    h.client.send_input(chan, b"first prompt\r".to_vec()).await;
-    wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
-    let conversation = marker_value(&seen, "RECORD-WRITTEN:");
-
-    assert_eq!(
-        wait_for_capture(&h, &session.id, 30).await,
-        conversation,
-        "a rename must not strand the first-input anchor the capture window is measured from"
     );
 }
 

@@ -4,9 +4,6 @@
 use crate::harness::*;
 
 use crate::boot_id_durable_outcome::{listed, wait_for_dead_pane};
-use crate::conversation_identity_capture::{
-    capture_harness, provoke_record, record_session, settle_past_horizon,
-};
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::restart_with_resume::pane_capture;
 
@@ -350,93 +347,6 @@ async fn a_repointed_working_directory_refuses_the_restart() {
         Some("stopped by user"),
         "a refusal this early cannot have touched the session's durable state"
     );
-}
-
-/// A relaunch that is not resuming a captured identity opens a FRESH
-/// capture window (fix-batch items 5 and 15): the previous run's ambiguity
-/// verdict and first-input anchor are per-LAUNCH state, and carrying them
-/// forward would deny the new run any capture at all.
-///
-/// Two fixture sessions in one directory make the first run's correlation
-/// ambiguous — the durable refusal SPEC.md's no-wrong-conversation rule
-/// depends on. Restarting one of them fresh must then let it capture its
-/// OWN conversation on the new run, which is only possible if the verdict
-/// and the anchor were both cleared.
-#[farhelm_testtrace::test]
-async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
-    let (h, fixtures) = capture_harness().await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let first = record_session(&h, &fixtures, work.path(), "claude").await;
-    let second = record_session(&h, &fixtures, work.path(), "claude").await;
-    let (_c1, _r1, _s1, _id1) = provoke_record(&h, &first).await;
-    let (_c2, _r2, _s2, _id2) = provoke_record(&h, &second).await;
-    settle_past_horizon(&h).await;
-    let ambiguous = snapshot_of(&h, &first.id).await;
-    assert!(ambiguous.capture_ambiguous, "the setup must be ambiguous");
-    assert_eq!(
-        ambiguous.restart_offer,
-        farhelm_proto::RestartOffer::FreshOnly
-    );
-
-    // The rival is stopped first, so the new run's window has the
-    // directory to itself — otherwise the ambiguity rule would (correctly)
-    // refuse again and this test could not tell a cleared verdict from an
-    // inherited one.
-    h.client.stop_session(&second.id).await.expect("stop rival");
-    h.client
-        .restart_session(&first.id, farhelm_proto::RestartMode::Fresh, true)
-        .await
-        .expect("fresh restart");
-    wait_for_live_status(&h.client, &first.id, 30).await;
-
-    let after = snapshot_of(&h, &first.id).await;
-    assert!(
-        !after.capture_ambiguous,
-        "the previous run's verdict describes a run this session no longer has"
-    );
-    assert_eq!(
-        after.first_input_at, None,
-        "and its first-input anchor points at a window that closed long ago"
-    );
-
-    // The new run captures its own conversation, which an inherited
-    // ambiguity would have made impossible forever.
-    let (chan, initial_replay, mut rx) = h
-        .client
-        .attach_live(&first.id, 80, 24)
-        .await
-        .expect("attach");
-    let mut seen = initial_replay;
-    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-    // Waited for by the ECHO of a prompt only this run has seen, and read
-    // as the LAST marker: this attachment replays the reused terminal's
-    // scrollback, which still holds the pre-restart run's own
-    // `RECORD-WRITTEN:` line — waiting on the marker itself would return
-    // on the OLD one, before the new run had written anything at all.
-    h.client
-        .send_input(chan, b"prompt-after-restart\r".to_vec())
-        .await;
-    // Anchored on the typed line's own echo, and read as the LAST marker:
-    // this attachment replays the reused terminal's scrollback, so both an
-    // earlier `RECORD-WRITTEN:` and an earlier `echo:` are already in the
-    // transcript before the new run has produced anything at all.
-    wait_for_after(
-        &mut rx,
-        &mut seen,
-        "prompt-after-restart",
-        "RECORD-WRITTEN:",
-        20,
-    )
-    .await;
-    let conversation = last_marker_value(&seen, "RECORD-WRITTEN:");
-    settle_past_horizon(&h).await;
-    let captured = snapshot_of(&h, &first.id).await;
-    assert_eq!(
-        captured.captured_conversation.as_deref(),
-        Some(conversation.as_str()),
-        "the fresh window captured the new run's own conversation"
-    );
-    assert_eq!(captured.restart_offer, farhelm_proto::RestartOffer::Resume);
 }
 
 /// Pane ids are assigned by a server-wide counter that restarts at `%0`

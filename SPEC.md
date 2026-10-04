@@ -1180,16 +1180,14 @@ that carried it. It is not invisible in the absolute: the report it delivers lan
 run leaves a line in farhelm's own hook log. Vendor-owned state is the boundary the no-agent-configuration rule from
 Status is protecting, and that rule's own example — hooks written into the agent's configuration — still stands. Grok is
 the documented opt-in exception: the user installs its hook entries, and Farhelm itself never writes, edits, or removes
-them. Claude's record scan, which still claims an identity from Claude's on-disk records when no report has been
-accepted, is existing behavior pending removal (TODO.md, "Remove heuristic conversation-identity fallbacks"), not
-supported behavior; an accepted report always wins over it. Codex, Goose, Pi, OMP, and Grok are report-only
-integrations: Farhelm never selects their conversation by scanning vendor state. A reporting credential alone does not
-establish which Codex conversation is in the foreground. Goose persists a credential-free named MCP reporter with the
-conversation and reuses it on resume; Pi loads a private static extension from Farhelm's state directory on every
-launch. A Pi report without a session file withdraws the old resume target. Before a Pi resume, Farhelm reads the
-bounded first record of that exact file without following symlinks and requires its session ID to match. A failed check
-changes the durable offer to fresh and rejects the stale Resume request so the user can refresh; it never silently
-launches fresh under that request.
+them. Every integrated kind identifies conversations only through accepted reports; Farhelm never selects a conversation
+by scanning vendor state. Historical stored identities remain usable under the same per-kind Resume rules, regardless of
+their source. A reporting credential alone does not establish which Codex conversation is in the foreground. Goose
+persists a credential-free named MCP reporter with the conversation and reuses it on resume; Pi loads a private static
+extension from Farhelm's state directory on every launch. A Pi report without a session file withdraws the old resume
+target. Before a Pi resume, Farhelm reads the bounded first record of that exact file without following symlinks and
+requires its session ID to match. A failed check changes the durable offer to fresh and rejects the stale Resume request
+so the user can refresh; it never silently launches fresh under that request.
 
 Codex reports must come from the foreground native Codex process under the session's owned pane, not a nested Codex
 process that inherited its credential. Farhelm also verifies the exact reported transcript's root-session metadata;
@@ -1208,9 +1206,9 @@ reporting hook from its own settings — cannot replace or withdraw the foregrou
 Farhelm does not recognize Claude's executable and does not read the injected hook out of anyone's command line, because
 both are vendor details that change independently of Farhelm. A plain launch makes the pane process Claude itself and a
 one-level wrapper profile makes Claude its direct child, so both keep reporting; a wrapper chain deeper than that loses
-hook capture, and with it a supported identity (until its removal, the record scan may still claim one). Native
-sub-agents never report: Claude fires no `SessionStart` for them, and any report naming a sub-agent is refused for every
-kind. Claude takes no versioned ownership proof, so its existing captures stay resumable across the change.
+hook capture, and without an accepted report gets the uncaptured-identity fallback. Native sub-agents never report:
+Claude fires no `SessionStart` for them, and any report naming a sub-agent is refused for every kind. Claude takes no
+versioned ownership proof, so its existing captures stay resumable across the change.
 
 Grok reports must come from one native `grok` process under the owned pane, launched with `--no-leader` before any real
 end-of-options boundary. The only admitted descendants are the documented reporter command and its narrow shell
@@ -1247,8 +1245,8 @@ resume additionally requires versioned proof that the binding was admitted under
 exception described in SPEC_impl.md. Claude admission requires the positional check above but no versioned proof, so its
 resume rules are unchanged. Goose and Pi retain their existing admission and resume rules; for them the discriminator
 alone adds no foreground protection. Old senders that predate the discriminator fail closed rather than reporting
-untagged. A refused report changes nothing: no stored identity, no offer, no ambiguity verdict, no pending state. Resume
-is never silently turned into fresh, and historical captures are never rewritten to look proven.
+untagged. A refused report changes nothing: no stored identity, no offer, no pending state. Resume is never silently
+turned into fresh, and historical captures are never rewritten to look proven.
 
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. A launch
 whose program is `omp` gets Farhelm's private extension when the invocation is an interactive-shaped launch; utility

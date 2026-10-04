@@ -1629,17 +1629,15 @@ evidence, but cannot authorize another directory move.
   until an authoritative refresh arrives.
 - Agent-kind integrations live in the supervisor as a small trait (`AgentIntegration`; `AgentKind` is the wire enum
   naming the kind itself) for conversation-identity capture; status reading is the separate `ScreenReader` above, so a
-  kind can have either without the other. Claude Code's record scan, described here as it exists, is pending removal
-  (SPEC.md "Durability and resume": identity comes only from an explicit report; TODO.md "Remove heuristic
-  conversation-identity fallbacks"), so nothing new should build on it. It watches `~/.claude/projects/<munged-cwd>/`
-  for the session record. Audited specifics that shape this: the record appears at first prompt submission, not at
-  launch, so correlation keys on first-input time and tolerates an unbounded launch-to-first-input gap; the cwd munging
-  is non-injective (`/`, `.`, `_` all become `-`); and per-line JSON fields (sessionId, cwd, timestamps) are the
-  reliable correlators — file birth times can postdate content after rewrites. An identity is claimed only when
-  correlation is unambiguous — two near-simultaneous launches in one cwd stay uncaptured rather than choosing a record
-  arbitrarily. A scan-derived Claude identity retains its exact record locator for append/restart re-verification; a
-  Claude hook report instead remains the agent's direct answer. Codex no longer uses this fallback: even a single
-  matching rollout may belong to a nested invocation rather than the foreground.
+  kind can have either without the other. New identities come only from accepted reports. Shared bounded readers in
+  `agent_kind/records.rs` verify exact reported files; they never discover a conversation. The in-memory state holds
+  either no identity or one stored identity with its ownership version. Reload preserves historical identities
+  regardless of source, without re-verifying old scan locators. Each refresh takes the per-session capture claim before
+  reloading and verifying a reported row. Reply paths and the ticker both run this reconciliation, without a global pass
+  lock or coalescing. An injected launch holding no identity warns once after 65 seconds from first confirmed agent
+  input. Its anchor is an in-memory monotonic instant, reset with the diagnostic latch on every relaunch. A Resume
+  carries its identity and therefore stays silent even if its new hook never reports. The warning changes no offer or
+  admission rule.
 
   **Codex attribution and exact-record validation.** The Unix accept loop captures the kernel peer PID and its process
   start token before scheduling the connection handler. For a Codex report, a bounded, revalidated ancestry walk must
@@ -1719,15 +1717,14 @@ evidence, but cannot authorize another directory move.
   session-keyed `capture_locks` registry for report admission and readiness refresh, never the lifecycle claim; slow
   waits are logged for diagnostics) and a reload comparing kind, generation, and the complete prior binding; the
   mutation-free runtime and vendor-root proofs with repeat attribution around the evidence; the atomic
-  generation-plus-complete-binding CAS committing identity, locator, provenance, source, readiness, and the ambiguity
-  reset together; and the mirror of only the committed result into the matching current-generation entry under the same
-  claim. Rejection at any pre-write step changes nothing durable, in memory, ambiguous, pending, or offered. Refresh and
-  report-only reconciliation passes take the same claim and reload before mirroring, carrying the row's version beside
-  the identity, so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a
-  rejected report never triggers a readiness withdrawal through them. Scan writes, restart verification and lifecycle
-  resets retain their durable generation/binding fences; they do not all acquire this capture claim. The report claim
-  has no time limit because every operation under it is local; a slow wait is logged for diagnostics, and the hook's own
-  budget bounds the caller.
+  generation-plus-complete-binding CAS committing identity, locator, provenance, source, and readiness reset together;
+  and the mirror of only the committed result into the matching current-generation entry under the same claim. Rejection
+  at any pre-write step changes nothing durable, in memory, pending, or offered. Refresh and report-only reconciliation
+  passes take the same claim and reload before mirroring, carrying the row's version beside the identity, so
+  memory-derived offers apply the same gate as row-derived ones without a second lookup — and a rejected report never
+  triggers a readiness withdrawal through them. Restart verification and lifecycle resets retain their durable
+  generation/binding fences; they do not all acquire this capture claim. The report claim has no time limit because
+  every operation under it is local; a slow wait is logged for diagnostics, and the hook's own budget bounds the caller.
 
   **Ownership provenance and the offer gate.** Migration 20 adds `capture_ownership_version`
   (`INTEGER NOT NULL
@@ -1761,31 +1758,30 @@ evidence, but cannot authorize another directory move.
   have to track install layouts, and the injected `--settings` hook is a vendor detail that may change on its own; the
   closed attempt in PR #830 shows where following either leads. A shelled-out child is always at least two links below
   the pane, because the foreground's Bash tool runs it through a shell that does not `exec` it. Accepted costs: a
-  wrapper chain deeper than one level loses hook capture and falls back to the scan (pending removal), and a child the
-  foreground Claude spawned with no shell between them in a wrapperless launch would be admitted (not observed; the Bash
-  tool always interposes a shell). Because this check runs before the capture claim, two nearby Claude reports may
-  attribute concurrently and a slower one may commit second within one generation. That race is accepted because two
-  session starts that close together are not a realistic sequence; the generation fence only keeps a check made before a
-  relaunch from committing into the new launch. The lifecycle does not justify another coordination layer. The check
-  writes no provenance and does not flip Claude's predicate, because flipping it would make every existing Claude
-  capture fresh-only until its next proven report, and stopping replacement needs no version. The offer gate has its
-  final shape but flips per kind: Codex, Grok, and OMP require version 1, while the other kinds keep today's offer
-  behavior until their proof lands, writes 1, and flips the single per-kind predicate every surface consults. There is
-  no general report epoch. Grok's locator carries only its vendor-specific selection timestamp; no other kind inherits
-  that ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology. Old processes and assets fail
-  closed after the upgrade; nothing is grandfathered.
+  wrapper chain deeper than one level loses hook capture and takes the uncaptured-identity fallback without a report,
+  and a child the foreground Claude spawned with no shell between them in a wrapperless launch would be admitted (not
+  observed; the Bash tool always interposes a shell). Because this check runs before the capture claim, two nearby
+  Claude reports may attribute concurrently and a slower one may commit second within one generation. That race is
+  accepted because two session starts that close together are not a realistic sequence; the generation fence only keeps
+  a check made before a relaunch from committing into the new launch. The lifecycle does not justify another
+  coordination layer. The check writes no provenance and does not flip Claude's predicate, because flipping it would
+  make every existing Claude capture fresh-only until its next proven report, and stopping replacement needs no version.
+  The offer gate has its final shape but flips per kind: Codex, Grok, and OMP require version 1, while the other kinds
+  keep today's offer behavior until their proof lands, writes 1, and flips the single per-kind predicate every surface
+  consults. There is no general report epoch. Grok's locator carries only its vendor-specific selection timestamp; no
+  other kind inherits that ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology. Old
+  processes and assets fail closed after the upgrade; nothing is grandfathered.
 
-  **The per-launch identity hook.** Scanning cannot see a conversation being replaced inside a live process: Claude
-  Code's `/clear` and Codex's `/new` both mint a new conversation id with nothing on disk pointing back at the record
-  they replaced, so a scan-derived identity keeps resuming the conversation the user just threw away. Both vendors fire
-  a `SessionStart` hook whose payload carries that id, and both accept a hook supplied on the command line for a single
-  launch, so farhelm appends itself as that hook (`farhelm internal hook --vendor <adapter>`, reporting over the
-  supervisor's one shared `supervisor.sock` and authenticating with the per-session credential the launch already
-  carries) and lets the agent state its own identity. The `--vendor` flag is the report envelope's discriminator,
-  sourced from the installed entry point rather than inferred from the payload; the Goose helper supplies its own value
-  internally so the persisted declaration keeps invoking the same command, while the Pi/OMP assets pass theirs on the
-  spawned command line and keep their JSON `vendor` field purely as a consistency check. Claude takes it as
-  `--settings <json>`; Codex takes `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=…`.
+  **The per-launch identity hook.** Claude Code's `/clear` and Codex's `/new` can replace the conversation inside a live
+  process. Farhelm needs the agent's explicit report so Resume does not return to the discarded conversation. Both
+  vendors fire a `SessionStart` hook whose payload carries that id, and both accept a hook supplied on the command line
+  for a single launch, so farhelm appends itself as that hook (`farhelm internal hook --vendor <adapter>`, reporting
+  over the supervisor's one shared `supervisor.sock` and authenticating with the per-session credential the launch
+  already carries) and lets the agent state its own identity. The `--vendor` flag is the report envelope's
+  discriminator, sourced from the installed entry point rather than inferred from the payload; the Goose helper supplies
+  its own value internally so the persisted declaration keeps invoking the same command, while the Pi/OMP assets pass
+  theirs on the spawned command line and keep their JSON `vendor` field purely as a consistency check. Claude takes it
+  as `--settings <json>`; Codex takes `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=…`.
   Per-launch is the whole point: nothing is written to `~/.claude` or to Codex's active configuration home
   (`$CODEX_HOME` when set, `~/.codex` otherwise), no trust state is left behind, and flags cannot outlive the process
   they were passed to — which is what keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The
@@ -1806,9 +1802,8 @@ evidence, but cannot authorize another directory move.
   risks a rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and —
   for either vendor — an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the
   supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read
-  once at supervisor start and carried as a seam value. Claude's scan, pending removal, still runs when no report has
-  been accepted; Codex requires attributed reporting and does not infer ownership from nearby rollout files. An accepted
-  report dominates scan-derived state, including ambiguity.
+  once at supervisor start and carried as a seam value. Without an accepted report, a new session keeps the
+  uncaptured-identity fallback; no nearby record can supply a substitute identity.
   `website/src/content/docs/docs/agents/agent-hook-injection.md` is the user-facing account of the same mechanism. The
   hook has one 30 s budget covering stdin and the round trip under 60 s outer timers where Farhelm sets or documents
   them; it retries a refused or missing socket for about 4 s. A connection that lived for at least about a second before
@@ -2352,15 +2347,16 @@ beside its installation snapshot from AppBody, independently of the filtered sid
 - A connected host's cache refresh is one request and one replacement: a single `ListSessions`, whose reply carries the
   host's whole list, then that host's whole cache slice replaced in one identity-bound write. One request per refresh
   matters beyond round-trip count, because the supervisor's conversation-capture sweep rides the `ListSessions` handler,
-  so every request is a whole-host scan on the far side. A failed refresh records the failure and keeps the previous
-  cache, never wiping it: the cache's whole job is to answer "what did this host have, last we knew" while the host is
-  unavailable, so clearing it on failure would destroy the answer exactly when it becomes the only one available, and
-  would make a transient failure look identical to "this host genuinely has no sessions". A host whose supervisor
-  reports no identity at all connects and serves live but writes no cache, since the identity binding has nothing to
-  bind to. The reply is checked at ingress and refused whole — an ordinary failed refresh that keeps the previous cache
-  — when it is longer than `LIST_SESSIONS_CAP` (a peer ignoring the one bound on what this side retains), when a session
-  id exceeds the id length cap, or when an id appears twice; a reply cut AT the cap is accepted and remembered as
-  truncated, which is what the served list's own `truncated` flag carries forward.
+  so every request refreshes reported identities across the host, including bounded exact-file checks where required. A
+  failed refresh records the failure and keeps the previous cache, never wiping it: the cache's whole job is to answer
+  "what did this host have, last we knew" while the host is unavailable, so clearing it on failure would destroy the
+  answer exactly when it becomes the only one available, and would make a transient failure look identical to "this host
+  genuinely has no sessions". A host whose supervisor reports no identity at all connects and serves live but writes no
+  cache, since the identity binding has nothing to bind to. The reply is checked at ingress and refused whole — an
+  ordinary failed refresh that keeps the previous cache — when it is longer than `LIST_SESSIONS_CAP` (a peer ignoring
+  the one bound on what this side retains), when a session id exceeds the id length cap, or when an id appears twice; a
+  reply cut AT the cap is accepted and remembered as truncated, which is what the served list's own `truncated` flag
+  carries forward.
 - The served session list is a MERGE, and it is served from what the helm has already recorded rather than from the
   hosts. Every connected host's actor records its supervisor's whole list into helm.db; the list endpoint then merges
   what is there — live hosts' latest refresh and down hosts' last-known entries alike — into one order, tagging each row

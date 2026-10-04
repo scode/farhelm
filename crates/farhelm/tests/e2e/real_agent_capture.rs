@@ -1,14 +1,9 @@
-//! `#[ignore]`-marked tests against real vendor agents; they audit the
-//! facts the fixture tests elsewhere cannot, since they need credentials
-//! and network access CI does not have.
+//! Opt-in checks of the real vendors' conversation reporting hooks.
 //!
-//! Two sections, auditing the two identity sources. The CAPTURE tests pin
-//! what the record scan reads off disk — that a record really appears at
-//! first prompt submission, and that its correlator fields are named what
-//! this build reads. The HOOK tests pin what the injected `SessionStart`
-//! hook reports from inside the agent's own process, including the
-//! mid-process `/clear` and `/new` the scan is structurally blind to. Each
-//! section's own banner lists the facts it pins.
+//! Fixture tests exercise the supervisor without credentials; these ignored
+//! tests establish that the vendor still runs the installed hook and reports
+//! changes such as `/clear` or `/new`. They require vendor authentication and
+//! network access, and are never part of ordinary CI.
 
 use crate::harness::*;
 use crate::hook_identity::ServeTask;
@@ -49,29 +44,6 @@ async fn pane_within(
     }
 }
 
-// ---------------------------------------------------------------------
-// Real-agent capture (PLAN_M3.md acceptance 8's second half)
-//
-// `#[ignore]`-marked, because they need vendor credentials and network
-// access CI does not have and must never depend on. The fixture tests
-// in `conversation_identity_capture` are what keep the LOGIC honest in
-// CI; these are what keep the
-// AUDITED FACTS honest — that the record really does appear at first
-// prompt submission, that its correlator fields really are named what
-// this build reads, and that the resume template really does fill into a
-// command the vendor accepts. Nothing but a real agent can tell us that a
-// version bump changed one of them, and the failure mode if one did is
-// silent: capture would simply stop happening.
-//
-// Run them individually and deliberately:
-//
-//     cargo test -p farhelm --test e2e -- --ignored --test-threads 1 \
-//         real_claude_session_captures_its_conversation_identity
-//
-// Record the run and its result with the milestone; a green fixture suite
-// is not a substitute.
-// ---------------------------------------------------------------------
-
 /// Wait until the real agent's TUI is up and accepting input, answering
 /// any folder-trust dialog it puts up on the way.
 ///
@@ -93,8 +65,7 @@ async fn pane_within(
 ///    was ever started and capture correctly found nothing. Hence "Claude
 ///    Code v", which only the banner carries.
 /// 2. Nothing slow may sit between accepting the dialog and whatever the
-///    caller does next: for the capture tests that next thing is the first
-///    input byte, which anchors the capture window.
+///    caller does next: the prompt must reach the ready agent.
 ///
 /// Matching is against the RENDERED pane, not the raw stream: a TUI's first
 /// paint arrives as cursor-positioned fragments that the raw transcript
@@ -148,211 +119,6 @@ async fn wait_for_agent_ready(
     }
 }
 
-/// The shared body of the two real-agent tests: launch `agent` for real in
-/// a scratch directory, submit one prompt, and require the supervisor to
-/// have captured a conversation identity that fills the resume template.
-///
-/// Observes the user's REAL home rather than a fixture tree — that is the
-/// point, since the whole question is where the vendor actually writes and
-/// what it writes there — and therefore uses the production capture window
-/// and publication grace: a shortened one would make a slow first response
-/// look like a missing record and turn a real regression into a flake, or
-/// vice versa. The poll deadline is correspondingly generous, since nothing
-/// may be committed until a full minute past first input.
-///
-/// The prompt is chosen to be answerable without tools and cheap to serve;
-/// nothing asserts anything about the ANSWER, only that submitting one
-/// caused a record this build can correlate.
-///
-/// Both agents were run for real on 2026-07-31 and both passed; the run
-/// records, and codex's upstream trust-dialog limitation, are in
-/// PLAN_M3.md's testing-decisions section.
-async fn real_agent_captures_its_conversation(
-    ready_marker: &str,
-    trust_dialog_markers: &[&str],
-    // Given the scratch working directory, produce the home the supervisor
-    // should observe, the agent command to launch, and any tempdir that must
-    // outlive the run. Claude observes the user's real home directly; codex
-    // needs a synthesized one (see its test for why), and this seam is what
-    // lets one helper serve both without either knowing the other's needs.
-    prepare: impl FnOnce(
-        &std::path::Path,
-    ) -> (
-        std::path::PathBuf,
-        String,
-        Option<farhelm_teststate::TestDir>,
-    ),
-) {
-    let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = farhelm_teststate::tempdir().expect("tempdir");
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let (agent_home, agent, _agent_home_guard) = prepare(work.path());
-    let agent = agent.as_str();
-    // Codex's hook is a child process, so this audit needs the real Unix
-    // socket rather than only the client's in-process connection. Otherwise
-    // Codex could pass only through the removed record-scan fallback.
-    let (sup, client, accepting) = serving_supervisor(state.path(), agent_home).await;
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
-
-    let session = client
-        .create_session(&work.path().to_string_lossy(), agent, None, 100, 30)
-        .await
-        .unwrap_or_else(|e| panic!("launching the real {agent}: {e:#}"));
-
-    let (chan, mut seen, mut rx) = client
-        .attach_live(&session.id, 100, 30)
-        .await
-        .expect("attach");
-    // See [`wait_for_agent_ready`] for the dialog handling and the two
-    // orderings inside it. What matters HERE is that the capture window is
-    // anchored on the FIRST input byte this session ever takes — the
-    // trust dialog's Enter when one appeared, and otherwise the first byte
-    // of the prompt text below, never the submitting Enter that follows
-    // it. So the window may already be open before the prompt is typed,
-    // and nothing slow may sit between accepting a dialog and prompting.
-    wait_for_agent_ready(
-        &client,
-        &state.path().join("tmux.sock"),
-        &session.id,
-        chan,
-        ready_marker,
-        trust_dialog_markers,
-    )
-    .await;
-    // Drain whatever the attach streamed so far; nothing below asserts on it.
-    while let Ok(TermEvent::Data(bytes)) = rx.try_recv() {
-        seen.extend_from_slice(&bytes);
-    }
-    let _ = &seen;
-
-    client
-        // Deliberately digit-free: a numbered modal (the trust dialogs
-        // above offer "1."/"2.") treats a stray digit as an option
-        // selection, so a prompt containing one could pick an answer
-        // rather than be typed if a dialog ever races this send.
-        .send_input(chan, b"Reply with the single word ok.".to_vec())
-        .await;
-    // The submitting Enter is a SEPARATE keystroke, as a human's is. Sent
-    // in the same burst as the text, codex intermittently reads the whole
-    // thing as a paste and inserts the carriage return into the composer
-    // instead of submitting — observed live as the prompt sitting unsent
-    // on the "›" line until the poll deadline, on roughly half of runs,
-    // while claude submitted the same burst every time. Splitting it costs
-    // nothing (the capture window is anchored on the first input byte and
-    // is a minute wide) and removes the whole class of flake.
-    // sleep-ok: separate prompt text from Enter to avoid the vendor's paste heuristic.
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    client.send_input(chan, b"\r".to_vec()).await;
-
-    // Codex emits its hook at first prompt submission. Poll the durable
-    // snapshot because a completed report, rather than an on-disk scan, is
-    // the boundary that makes its resume target available.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
-    let conversation = loop {
-        client.list_sessions().await.expect("list drives capture");
-        let snapshot = sup
-            .session_snapshot(&session.id)
-            .await
-            .expect("snapshot")
-            .expect("present");
-        if let Some(conversation) = snapshot.captured_conversation {
-            break conversation;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the real {agent} never produced a record this build could correlate; \
-             transcript so far:\n{}",
-            String::from_utf8_lossy(&seen)
-        );
-        // sleep-ok: poll published capture identity; list passes drive capture each round.
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    };
-
-    let snapshot = sup
-        .session_snapshot(&session.id)
-        .await
-        .expect("snapshot")
-        .expect("present");
-    assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
-    let resume = snapshot
-        .resume_argv
-        .expect("a Resume offer has a filled argv");
-    let expected = resume_identity(&conversation);
-    assert!(
-        resume.iter().any(|element| element == &expected),
-        "the captured identity's resumable target must land in the resume argv: {resume:?}"
-    );
-    assert!(
-        !resume.iter().any(|element| element == "{conversation}"),
-        "no placeholder may survive substitution: {resume:?}"
-    );
-    accepting.stop().await;
-    drop(slot);
-}
-
-/// Claude Code for real. Requires a working `claude` on PATH, already
-/// authenticated (`claude` run once interactively, or a vendor credential
-/// in the environment the login shell sources) and able to reach the API.
-/// The prompt costs one short completion.
-#[farhelm_testtrace::test]
-#[ignore = "needs real Claude Code credentials and network; run deliberately"]
-async fn real_claude_session_captures_its_conversation_identity() {
-    // No flags and the user's real home: the plain invocation is the one
-    // users type, and the one basename derivation must recognize. The
-    // marker is "Claude Code v" (only the banner carries the version), not
-    // "Claude Code" — the trust dialog's own body says "Claude Code'll be
-    // able to read...", and matching that broke this test's first real run.
-    real_agent_captures_its_conversation(
-        "Claude Code v",
-        &["Accessing workspace", "Do you trust"],
-        |_work| {
-            let home = std::env::var_os("HOME").expect("a real-agent run needs a real HOME");
-            (std::path::PathBuf::from(home), "claude".to_string(), None)
-        },
-    )
-    .await;
-}
-
-/// Codex for real. Requires an authenticated `codex` on PATH (its
-/// `auth.json` is copied into the synthetic home [`synthetic_codex_home`]
-/// builds; this docstring is where that helper's reasoning lives, since
-/// this is the test that discovered the need for it).
-///
-/// Unlike the claude test, this one runs codex against a SYNTHESIZED
-/// `CODEX_HOME` rather than the user's real one, and that is not a
-/// convenience — it is the only path that works. Codex v0.146.0's
-/// folder-trust modal is input-dead under tmux: verified with strace, the
-/// pane's `\r` reaches codex as a completed `read(0, "\r", 1024) = 1` and
-/// is discarded, and the dialog never advances for ANY input tried (CR,
-/// numeric option, arrows, kitty-protocol encodings, with and without a
-/// rendering client attached). Codex's main TUI accepts input normally in
-/// the same pane, so this is an upstream onboarding bug, not a farhelm
-/// input-path problem — and it means a human sitting at the terminal is
-/// equally stuck, so "have a person accept it" is not a fallback either.
-///
-/// The synthetic home sidesteps the modal the way codex itself intends:
-/// trust is a recorded fact in its config, so a config that already trusts
-/// the working directory means the modal never appears. Nothing here
-/// configures the AGENT on the user's behalf in production terms — the
-/// seam is `SupervisorSeams::agent_home`, which exists for exactly this,
-/// and the user's real `~/.codex` is never written to. A `codex`-named
-/// shim carries `CODEX_HOME` into the launch, which also keeps basename
-/// derivation honest and makes the filled resume argv genuinely runnable.
-///
-/// No dialog markers are passed: with trust seeded the modal must not
-/// appear, and pressing enter at a modal that ignores enter would only
-/// burn the deadline two seconds at a time. If it ever does appear, the
-/// wait fails with the rendered pane printed, which diagnoses itself.
-#[farhelm_testtrace::test]
-#[ignore = "needs real Codex credentials and network; run deliberately"]
-async fn real_codex_session_captures_its_conversation_identity() {
-    real_agent_captures_its_conversation("OpenAI Codex (v", &[], |work| {
-        let (synth, agent) = synthetic_codex_home(work);
-        (synth.path().to_path_buf(), agent, Some(synth))
-    })
-    .await;
-}
-
 // ---------------------------------------------------------------------
 // Real-agent HOOK audit (plan §4.4)
 //
@@ -360,7 +126,7 @@ async fn real_codex_session_captures_its_conversation_identity() {
 // `SessionStart` hook rests on. Every one of them was verified by hand
 // once; none of them is guaranteed by anything but the vendors' goodwill,
 // and if one changes the symptom is SILENT — identity capture quietly
-// degrades to the record scan, which cannot see a mid-process `/clear` or
+// loses reports about a mid-process `/clear` or
 // `/new` at all.
 //
 // What they pin, fact by fact:
@@ -408,20 +174,16 @@ async fn real_codex_session_captures_its_conversation_identity() {
 /// aborts on drop and its [`ServeTask::stop`] reports a `serve()` that
 /// ended any other way.
 ///
-/// Default seams apart from `agent_home`, and that is the point — hooks are
+/// Default seams, and that is the point — hooks are
 /// on by default, so this exercises the configuration a user gets.
 async fn serving_supervisor(
     state: &std::path::Path,
-    agent_home: std::path::PathBuf,
 ) -> (Arc<Supervisor>, Arc<SupervisorClient>, ServeTask) {
     let sup = Supervisor::new_with_seams(
         state,
         farhelm_bin().into(),
         suite_timeouts(),
-        SupervisorSeams {
-            agent_home: Some(agent_home),
-            ..SupervisorSeams::default()
-        },
+        SupervisorSeams::default(),
     )
     .await
     .expect("supervisor");
@@ -445,7 +207,7 @@ async fn serving_supervisor(
 /// round trip) sits inside it.
 ///
 /// The identity is not accepted until the hook's own log ACKNOWLEDGES it.
-/// Claude can still write a scan-visible record, but Codex is report-only;
+/// Records alone do not supply an identity;
 /// requiring the acknowledgement keeps either vendor from passing this audit
 /// after its hook stopped firing. An `acked` line names the runtime id the
 /// supervisor answered for, and only a hook process can have put it there.
@@ -645,10 +407,7 @@ async fn real_claude_session_reports_its_identity_across_clear() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("state dir");
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let home = std::path::PathBuf::from(
-        std::env::var_os("HOME").expect("a real-agent run needs a real HOME"),
-    );
-    let (sup, client, accepting) = serving_supervisor(state.path(), home).await;
+    let (sup, client, accepting) = serving_supervisor(state.path()).await;
     let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let sock = state.path().join("tmux.sock");
 
@@ -820,10 +579,7 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("state dir");
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let home = std::path::PathBuf::from(
-        std::env::var_os("HOME").expect("a real-agent run needs a real HOME"),
-    );
-    let (sup, client, accepting) = serving_supervisor(state.path(), home).await;
+    let (sup, client, accepting) = serving_supervisor(state.path()).await;
     let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let sock = state.path().join("tmux.sock");
 
@@ -959,9 +715,8 @@ async fn real_codex_session_reports_its_identity_across_new() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("state dir");
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let (synth, agent) = synthetic_codex_home(work.path());
-    let (sup, client, accepting) =
-        serving_supervisor(state.path(), synth.path().to_path_buf()).await;
+    let (_synth, agent) = synthetic_codex_home(work.path());
+    let (sup, client, accepting) = serving_supervisor(state.path()).await;
     let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     let session = client
